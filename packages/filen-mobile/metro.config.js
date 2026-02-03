@@ -13,7 +13,8 @@ const config = {
 		extraNodeModules: {
 			buffer: require.resolve("@craftzdog/react-native-buffer"),
 			crypto: require.resolve("react-native-quick-crypto"),
-			stream: require.resolve("readable-stream")
+			stream: require.resolve("readable-stream"),
+			path: require.resolve("path-browserify")
 		},
 		unstable_enablePackageExports: true,
 		enableGlobalPackages: true,

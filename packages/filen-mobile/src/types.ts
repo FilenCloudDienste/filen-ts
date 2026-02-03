@@ -23,7 +23,6 @@ export type DriveItemFileShared = SharedFile &
 export type DriveItemDirectoryShared = SharedDir &
 	ExtraData & {
 		decryptedMeta: DecryptedDirMeta | null
-		inner: Dir
 		uuid: string
 	}
 

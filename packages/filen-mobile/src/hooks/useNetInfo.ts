@@ -1,5 +1,6 @@
 import NetInfo, { useNetInfo as useNetInfoNative } from "@react-native-community/netinfo"
 import { useMemo } from "@/lib/memo"
+import { NETINFO_CONFIG } from "@/constants"
 
 export async function getNetInfoState() {
 	const { isConnected, isInternetReachable, isWifiEnabled } = await NetInfo.fetch()
@@ -13,7 +14,7 @@ export async function getNetInfoState() {
 }
 
 export default function useNetInfo() {
-	const { isConnected, isInternetReachable, isWifiEnabled } = useNetInfoNative()
+	const { isConnected, isInternetReachable, isWifiEnabled } = useNetInfoNative(NETINFO_CONFIG)
 
 	const state = useMemo(() => {
 		return {

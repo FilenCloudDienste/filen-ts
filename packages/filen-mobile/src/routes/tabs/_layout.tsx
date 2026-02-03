@@ -29,7 +29,7 @@ export const TabsLayout = memo(() => {
 			tintColor={textForeground.color}
 		>
 			<NativeTabs.Trigger name="drive">
-				<Label>tbd</Label>
+				<Label>tbd_drive</Label>
 				{Platform.select({
 					ios: <Icon sf="folder.fill" />,
 					default: (
@@ -45,7 +45,7 @@ export const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="photos">
-				<Label>tbd</Label>
+				<Label>tbd_photos</Label>
 				{Platform.select({
 					ios: <Icon sf="photo.fill" />,
 					default: (
@@ -61,7 +61,7 @@ export const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="notes">
-				<Label>tbd</Label>
+				<Label>tbd_notes</Label>
 				{Platform.select({
 					ios: <Icon sf="note.text" />,
 					default: (
@@ -77,7 +77,7 @@ export const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="chats">
-				<Label>tbd</Label>
+				<Label>tbd_chats</Label>
 				{chatsUnreadCount > 0 && <Badge>{chatsUnreadCount.toString()}</Badge>}
 				{Platform.select({
 					ios: <Icon sf="message.fill" />,
@@ -93,8 +93,8 @@ export const TabsLayout = memo(() => {
 					)
 				})}
 			</NativeTabs.Trigger>
-			<NativeTabs.Trigger name="settings">
-				<Label>tbd</Label>
+			<NativeTabs.Trigger name="more">
+				<Label>tbd_more</Label>
 				{Platform.select({
 					ios: <Icon sf="ellipsis" />,
 					default: (

@@ -221,16 +221,16 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev =>
-				prev
-					.filter(i => {
-						if (i.data.uuid === item.data.uuid && i.type === item.type) {
-							return false
-						}
+			updater: prev => [
+				...prev.filter(i => {
+					if (i.data.uuid === item.data.uuid && i.type === item.type) {
+						return false
+					}
 
-						return true
-					})
-					.concat([item])
+					return true
+				}),
+				item
+			]
 		})
 
 		return item

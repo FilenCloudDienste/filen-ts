@@ -198,7 +198,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 					enforceNavigationBarContrast: false
 				}
 			}
-		]
+		],
+		"@config-plugins/react-native-blob-util"
 	],
 	experiments: {
 		typedRoutes: true,

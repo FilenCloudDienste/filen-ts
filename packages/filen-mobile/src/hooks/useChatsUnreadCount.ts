@@ -52,7 +52,7 @@ export function useChatsUnreadCount() {
 
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
-			const appStateSubscription = AppState.addEventListener("change", async nextAppState => {
+			const appStateSubscription = AppState.addEventListener("change", nextAppState => {
 				if (nextAppState === "active") {
 					chats.refetchChatsAndMessages().catch(console.error)
 				}

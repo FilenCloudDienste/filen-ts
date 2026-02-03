@@ -20,6 +20,7 @@ import * as FileSystem from "expo-file-system"
 import useTransfersStore from "@/stores/useTransfers.store"
 import { FilenSdkError, DirEnum, AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
 import { router } from "expo-router"
+import offline from "@/lib/offline"
 
 const Header = memo(() => {
 	const drivePath = useDrivePath()
@@ -113,6 +114,15 @@ const Header = memo(() => {
 								title: "tbd_transfers",
 								onPress: () => {
 									router.push("/transfers")
+								}
+							},
+							{
+								id: "listofflinedirs",
+								title: "listofflinedirstest",
+								onPress: async () => {
+									console.log("sync")
+									console.log(await offline.sync())
+									console.log("done")
 								}
 							}
 						]

@@ -43,7 +43,7 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 			return []
 		}
 
-		return chatMessagesQuery.data.concat(fetchedMessages).sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
+		return [...chatMessagesQuery.data, ...fetchedMessages].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
 	}, [chatMessagesQuery.data, chatMessagesQuery.status, fetchedMessages])
 
 	const headerStyle = useAnimatedStyle(() => {

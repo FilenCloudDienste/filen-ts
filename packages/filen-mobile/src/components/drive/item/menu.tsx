@@ -11,8 +11,13 @@ import { SharingRole_Tags, type AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
+import { Platform } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import offline from "@/lib/offline"
+import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil } from "@/lib/utils"
+import * as ReactNativeBlobUtil from "react-native-blob-util"
+import mimeTypes from "mime-types"
+import * as Sharing from "expo-sharing"
 
 export type DriveItemMenuOrigin = "drive" | "preview" | "trash" | "sharedIn" | "sharedOut" | "favorites" | "recents" | "links"
 
@@ -26,6 +31,7 @@ export function createMenuButtons({
 	parent?: AnyDirEnumWithShareInfo
 }): MenuButton[] {
 	const menuButtons: MenuButton[] = []
+	const previewType = item.type === "file" || item.type === "sharedFile" ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
 
 	if (
 		(item.type === "directory" || item.type === "sharedDirectory") &&
@@ -52,24 +58,43 @@ export function createMenuButtons({
 
 	const downloadSubButtons: MenuButton[] = []
 
-	if (item.type === "file" || item.type === "directory" || item.type === "sharedFile" || item.type === "sharedDirectory") {
+	if (
+		(item.type === "file" || item.type === "directory" || item.type === "sharedFile" || item.type === "sharedDirectory") &&
+		item.data.decryptedMeta
+	) {
 		downloadSubButtons.push({
 			id: "downloadToDevice",
 			title: "tbd_download_to_device",
 			onPress: async () => {
-				const result = await run(async () => {
-					const destination =
-						item.type === "file" || item.type === "sharedFile"
-							? new FileSystem.File(
-									FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta?.name ?? "file")
-								)
-							: new FileSystem.Directory(
-									FileSystem.Paths.join(
-										FileSystem.Paths.document,
-										"Downloads",
-										item.data.decryptedMeta?.name ?? "directory"
+				const result = await run(async defer => {
+					if (!item.data.decryptedMeta) {
+						throw new Error("Missing decrypted metadata")
+					}
+
+					const destination = Platform.select({
+						ios:
+							item.type === "file" || item.type === "sharedFile"
+								? new FileSystem.File(
+										FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name)
 									)
-								)
+								: new FileSystem.Directory(
+										FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name)
+									),
+						default:
+							item.type === "file" || item.type === "sharedFile"
+								? new FileSystem.File(
+										FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
+									)
+								: new FileSystem.Directory(
+										FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
+									)
+					})
+
+					defer(() => {
+						if (Platform.OS === "android" && destination.parentDirectory.exists) {
+							destination.parentDirectory.delete()
+						}
+					})
 
 					if (!destination.parentDirectory.exists) {
 						destination.parentDirectory.create({
@@ -82,11 +107,59 @@ export function createMenuButtons({
 						destination.delete()
 					}
 
-					return await transfers.download({
+					await transfers.download({
 						item,
 						itemUuid: item.data.uuid,
 						destination
 					})
+
+					if (Platform.OS === "android") {
+						if ((item.type === "file" || item.type === "sharedFile") && destination instanceof FileSystem.File) {
+							await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
+								{
+									name: item.data.decryptedMeta.name,
+									parentFolder: "Filen",
+									mimeType: item.data.decryptedMeta.mime
+								},
+								"Download",
+								destination.uri
+							)
+						}
+
+						if ((item.type === "directory" || item.type === "sharedDirectory") && destination instanceof FileSystem.Directory) {
+							const entries = await listLocalDirectoryRecursive(destination)
+
+							await Promise.all(
+								entries.map(async entry => {
+									if (entry instanceof FileSystem.Directory) {
+										return
+									}
+
+									const normalizedEntryPath = normalizeFilePathForBlobUtil(entry.uri)
+									const destinationUriNormalized = normalizeFilePathForBlobUtil(destination.uri)
+
+									const parentFolder = FileSystem.Paths.join(
+										"Filen",
+										item.data.decryptedMeta?.name ?? item.data.uuid,
+										FileSystem.Paths.dirname(normalizedEntryPath.slice(destinationUriNormalized.length))
+									)
+										.split("/")
+										.map(segment => (segment.length > 0 ? decodeURIComponent(segment) : segment))
+										.join("/")
+
+									await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
+										{
+											name: decodeURIComponent(entry.name),
+											parentFolder: parentFolder.startsWith("/") ? parentFolder.slice(1) : parentFolder,
+											mimeType: mimeTypes.lookup(decodeURIComponent(entry.name)) || "application/octet-stream"
+										},
+										"Download",
+										normalizedEntryPath
+									)
+								})
+							)
+						}
+					}
 				})
 
 				if (!result.success) {
@@ -118,22 +191,41 @@ export function createMenuButtons({
 
 						return
 					}
+				} else {
+					const result = await run(async () => {
+						return await offline.storeDirectory({
+							directory: item,
+							parent
+						})
+					})
 
-					console.log(await offline.listFiles())
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
 				}
 			}
 		})
 	}
 
-	// TODO: Check if file is an image or video before showing "Save to Photos" option
-	if (item.type === "file" || item.type === "sharedFile") {
+	if (
+		(item.type === "file" || item.type === "sharedFile") &&
+		(previewType === "image" || previewType === "video") &&
+		item.data.decryptedMeta
+	) {
 		downloadSubButtons.push({
 			id: "saveToPhotos",
 			title: "tbd_save_to_photos",
 			onPress: async () => {
 				const result = await runWithLoading(async defer => {
+					if (!item.data.decryptedMeta) {
+						throw new Error("Missing decrypted metadata")
+					}
+
 					const destination = new FileSystem.File(
-						FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta?.name ?? "file")
+						FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
 					)
 
 					defer(() => {
@@ -159,8 +251,6 @@ export function createMenuButtons({
 						destination
 					})
 
-					console.log(destination)
-
 					// TODO: Add NSPhotoLibraryAddUsageDescription to Info.plist and ask for permissions on both iOS and Android
 					await MediaLibrary.saveToLibraryAsync(destination.uri)
 				})
@@ -168,6 +258,77 @@ export function createMenuButtons({
 				if (!result.success) {
 					console.error(result.error)
 					alerts.error(result.error)
+
+					return
+				}
+			}
+		})
+	}
+
+	if ((item.type === "file" || item.type === "sharedFile") && item.data.decryptedMeta) {
+		downloadSubButtons.push({
+			id: "export",
+			title: "tbd_export",
+			onPress: async () => {
+				const result = await runWithLoading(async () => {
+					if (!item.data.decryptedMeta) {
+						throw new Error("Missing decrypted metadata")
+					}
+
+					const destination = new FileSystem.File(
+						FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
+					)
+
+					if (!destination.parentDirectory.exists) {
+						destination.parentDirectory.create({
+							intermediates: true,
+							idempotent: true
+						})
+					}
+
+					if (destination.exists) {
+						destination.delete()
+					}
+
+					const res = await transfers.download({
+						item,
+						itemUuid: item.data.uuid,
+						destination
+					})
+
+					if (res.files.length === 0 || res.directories.length > 0 || !res.files[0] || !destination.exists) {
+						throw new Error("Downloaded item is not a file")
+					}
+
+					return destination
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+
+				const shareResult = await run(async defer => {
+					defer(() => {
+						if (result.data.parentDirectory.exists) {
+							result.data.parentDirectory.delete()
+						}
+					})
+
+					// Small delay to ensure file is fully written before sharing
+					await new Promise<void>(resolve => setTimeout(resolve, 100))
+
+					await Sharing.shareAsync(result.data.uri, {
+						mimeType: "text/plain",
+						dialogTitle: result.data.name
+					})
+				})
+
+				if (!shareResult.success) {
+					console.error(shareResult.error)
+					alerts.error(shareResult.error)
 
 					return
 				}

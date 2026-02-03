@@ -15,8 +15,13 @@ import {
 	type ManagedAbortSignal,
 	PauseSignal as SdkPauseSignal,
 	ParentUuid_Tags,
-	type ParentUuid
+	type ParentUuid,
+	FilenSdkError
 } from "@filen/sdk-rs"
+import * as FileSystem from "expo-file-system"
+import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
+import mimeTypes from "mime-types"
+import pathModule from "path"
 
 export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
 	const abortController = new ManagedAbortController()
@@ -139,6 +144,16 @@ export function createCompositePauseSignal(...signals: PauseSignal[]): PauseSign
 	return controller
 }
 
+export function unwrapSdkError(error: unknown): FilenSdkError | null {
+	if (FilenSdkError.hasInner(error)) {
+		const inner = FilenSdkError.getInner(error)
+
+		return inner
+	}
+
+	return null
+}
+
 export function unwrapParentUuid(parent: ParentUuid) {
 	switch (parent.tag) {
 		case ParentUuid_Tags.Uuid: {
@@ -157,14 +172,12 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 			shared: false
 			dir: Dir
 			uuid: string | null
-			inner: Dir | null
 	  }
 	| {
 			meta: DecryptedDirMeta | null
 			shared: true
 			dir: SharedDir
 			uuid: string | null
-			inner: Dir | null
 	  } {
 	if ("uuid" in dir) {
 		switch (dir.meta.tag) {
@@ -175,8 +188,7 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 					meta: decoded,
 					shared: false,
 					dir,
-					uuid: dir.uuid,
-					inner: dir
+					uuid: dir.uuid
 				}
 			}
 
@@ -185,8 +197,7 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 					meta: null,
 					shared: false,
 					dir,
-					uuid: dir.uuid,
-					inner: dir
+					uuid: dir.uuid
 				}
 			}
 		}
@@ -204,8 +215,7 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 						meta: decoded,
 						shared: true,
 						dir,
-						uuid: inner.uuid,
-						inner
+						uuid: inner.uuid
 					}
 				}
 
@@ -214,8 +224,7 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 						meta: null,
 						shared: true,
 						dir,
-						uuid: inner.uuid,
-						inner
+						uuid: inner.uuid
 					}
 				}
 			}
@@ -226,8 +235,7 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 				meta: null,
 				shared: true,
 				dir,
-				uuid: null,
-				inner: null
+				uuid: null
 			}
 		}
 	}
@@ -351,17 +359,178 @@ export function sanitizeFileName(filename: string, replacement: string = "_"): s
 }
 
 export function normalizeFilePathForSdk(filePath: string): string {
-	const normalizedPath = filePath.trim().replace(/^file:\/+/, "/")
-
-	return (normalizedPath.startsWith("/") ? normalizedPath : "/" + normalizedPath)
+	let normalizedPath = filePath
+		.trim()
+		.replace(/^file:\/+/, "/")
 		.split("/")
 		.map(segment => (segment.length > 0 ? decodeURIComponent(segment) : segment))
 		.join("/")
+
+	if (!normalizedPath.startsWith("/")) {
+		normalizedPath = "/" + normalizedPath
+	}
+
+	if (normalizedPath.endsWith("/") && normalizedPath !== "/") {
+		normalizedPath = normalizedPath.slice(0, -1)
+	}
+
+	return pathModule.posix.normalize(normalizedPath)
 }
 
 export function normalizeFilePathForExpo(filePath: string): string {
-	return `file://${normalizeFilePathForSdk(filePath)}`
+	let normalizedPath = FileSystem.Paths.normalize(
+		normalizeFilePathForSdk(filePath)
+			.split("/")
+			.map(segment => (segment.length > 0 ? encodeURIComponent(segment) : segment))
+			.join("/")
+	)
+
+	if (!normalizedPath.startsWith("/")) {
+		normalizedPath = "/" + normalizedPath
+	}
+
+	if (normalizedPath.endsWith("/") && normalizedPath !== "/") {
+		normalizedPath = normalizedPath.slice(0, -1)
+	}
+
+	return `file://${normalizedPath}`
+}
+
+export function normalizeFilePathForBlobUtil(filePath: string): string {
+	let normalizedPath = normalizeFilePathForSdk(filePath)
 		.split("/")
-		.map(segment => (segment.length > 0 ? encodeURIComponent(segment) : segment))
+		.map(segment => (segment.length > 0 ? decodeURIComponent(segment) : segment))
 		.join("/")
+
+	if (!normalizedPath.startsWith("/")) {
+		normalizedPath = "/" + normalizedPath
+	}
+
+	if (normalizedPath.endsWith("/") && normalizedPath !== "/") {
+		normalizedPath = normalizedPath.slice(0, -1)
+	}
+
+	return `file://${normalizedPath}`
+}
+
+export type PreviewType = "image" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"
+
+export function getPreviewType(name: string): PreviewType {
+	const extname = FileSystem.Paths.extname(name.trim().toLowerCase())
+
+	if (EXPO_IMAGE_SUPPORTED_EXTENSIONS.includes(extname)) {
+		return "image"
+	}
+
+	if (EXPO_VIDEO_SUPPORTED_EXTENSIONS.includes(extname)) {
+		return "video"
+	}
+
+	if (EXPO_AUDIO_SUPPORTED_EXTENSIONS.includes(extname)) {
+		return "audio"
+	}
+
+	switch (extname) {
+		case ".pdf": {
+			return "pdf"
+		}
+
+		case ".txt": {
+			return "text"
+		}
+
+		case ".js":
+		case ".cjs":
+		case ".mjs":
+		case ".jsx":
+		case ".tsx":
+		case ".ts":
+		case ".md":
+		case ".cpp":
+		case ".c":
+		case ".php":
+		case ".htm":
+		case ".html5":
+		case ".html":
+		case ".css":
+		case ".css3":
+		case ".coffee":
+		case ".litcoffee":
+		case ".sass":
+		case ".xml":
+		case ".json":
+		case ".sql":
+		case ".java":
+		case ".kt":
+		case ".swift":
+		case ".py3":
+		case ".py":
+		case ".cmake":
+		case ".cs":
+		case ".dart":
+		case ".dockerfile":
+		case ".go":
+		case ".less":
+		case ".yaml":
+		case ".vue":
+		case ".svelte":
+		case ".vbs":
+		case ".cobol":
+		case ".toml":
+		case ".conf":
+		case ".ini":
+		case ".log":
+		case ".makefile":
+		case ".mk":
+		case ".gradle":
+		case ".lua":
+		case ".h":
+		case ".hpp":
+		case ".rs":
+		case ".sh":
+		case ".rb":
+		case ".ps1":
+		case ".bat":
+		case ".ps":
+		case ".protobuf":
+		case ".proto": {
+			return "code"
+		}
+
+		case ".docx": {
+			return "docx"
+		}
+
+		default: {
+			return "unknown"
+		}
+	}
+}
+
+export function getPreviewTypeFromMime(mimeType: string): PreviewType {
+	const normalizedMimeType = mimeType.toLowerCase().trim()
+	const extname = mimeTypes.extension(normalizedMimeType)
+
+	if (!extname) {
+		return "unknown"
+	}
+
+	return getPreviewType(`file.${extname}`)
+}
+
+export async function listLocalDirectoryRecursive(directory: FileSystem.Directory): Promise<(FileSystem.File | FileSystem.Directory)[]> {
+	const entries = directory.list()
+	const allEntries: (FileSystem.File | FileSystem.Directory)[] = []
+
+	for (const entry of entries) {
+		allEntries.push(entry)
+
+		if (entry instanceof FileSystem.Directory) {
+			const subEntries = await listLocalDirectoryRecursive(entry)
+
+			allEntries.push(...subEntries)
+		}
+	}
+
+	return allEntries
 }

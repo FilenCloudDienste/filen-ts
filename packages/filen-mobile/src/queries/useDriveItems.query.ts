@@ -4,7 +4,16 @@ import auth from "@/lib/auth"
 import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import cache from "@/lib/cache"
 import { sortParams } from "@filen/utils"
-import { DirEnum, DirWithMetaEnum, AnyDirEnumWithShareInfo, NonRootItemTagged, type File, type Dir } from "@filen/sdk-rs"
+import {
+	DirEnum,
+	DirWithMetaEnum,
+	AnyDirEnumWithShareInfo,
+	NonRootItemTagged,
+	type File,
+	type Dir,
+	type SharedDir,
+	type SharedFile
+} from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { unwrapFileMeta, unwrapDirMeta } from "@/lib/utils"
 import type { DriveItem } from "@/types"
@@ -104,16 +113,74 @@ export async function fetchData(
 			}
 
 			case "offline": {
-				const offlineFiles = await offline.listFiles()
-				const dirs: Dir[] = []
-				const files: File[] = []
-
-				for (const { file } of offlineFiles) {
-					if (file.type !== "file") {
-						continue
+				const dir = (() => {
+					if (!params.path.uuid || params.path.uuid.length === 0) {
+						return null
 					}
 
-					files.push(new NonRootItemTagged.File(file.data).inner[0])
+					const cachedDir = cache.directoryUuidToAnyDirWithShareInfo.get(params.path.uuid)
+
+					if (cachedDir) {
+						return cachedDir
+					}
+
+					return null
+				})()
+
+				const [offlineFiles, offlineDirectories] = await Promise.all([
+					!dir ? offline.listFiles() : Promise.resolve([]),
+					offline.listDirectories(dir ?? undefined)
+				])
+
+				const dirs: (Dir | SharedDir)[] = []
+				const files: (File | SharedFile)[] = []
+
+				if (offlineDirectories.directories.length > 0) {
+					for (const { directory } of offlineDirectories.directories) {
+						if (directory.type !== "directory" && directory.type !== "sharedDirectory") {
+							continue
+						}
+
+						if (directory.type === "directory") {
+							dirs.push(new NonRootItemTagged.Dir(directory.data).inner[0])
+
+							continue
+						}
+
+						dirs.push(new AnyDirEnumWithShareInfo.SharedDir(directory.data).inner[0])
+					}
+				}
+
+				if (dir && offlineDirectories.files.length > 0) {
+					for (const { file } of offlineDirectories.files) {
+						if (file.type !== "file" && file.type !== "sharedFile") {
+							continue
+						}
+
+						if (file.type === "file") {
+							files.push(new NonRootItemTagged.File(file.data).inner[0])
+
+							continue
+						}
+
+						files.push(file.data)
+					}
+				}
+
+				if (!dir && offlineFiles.length > 0) {
+					for (const { file } of offlineFiles) {
+						if (file.type !== "file" && file.type !== "sharedFile") {
+							continue
+						}
+
+						if (file.type === "file") {
+							files.push(new NonRootItemTagged.File(file.data).inner[0])
+
+							continue
+						}
+
+						files.push(file.data)
+					}
 				}
 
 				return {
@@ -135,9 +202,9 @@ export async function fetchData(
 	const items: DriveItem[] = []
 
 	for (const resultDir of result.dirs) {
-		const { meta, shared, dir, uuid, inner } = unwrapDirMeta(resultDir)
+		const { meta, shared, dir, uuid } = unwrapDirMeta(resultDir)
 
-		if (!uuid || !inner) {
+		if (!uuid) {
 			continue
 		}
 
@@ -161,7 +228,6 @@ export async function fetchData(
 					...dir,
 					size: 0n,
 					decryptedMeta: meta,
-					inner,
 					uuid
 				}
 			})

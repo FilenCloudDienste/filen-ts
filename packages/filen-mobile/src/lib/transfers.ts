@@ -78,8 +78,9 @@ class Transfers {
 				throw new Error("Local file does not exist or is empty.")
 			}
 
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.concat({
+			useTransfersStore.getState().setTransfers(prev => [
+				...prev,
+				{
 					id,
 					localFileOrDir,
 					parent,
@@ -106,15 +107,16 @@ class Transfers {
 					resume: () => {
 						transferPauseSignal.resume()
 					}
-				})
-			)
+				}
+			])
 		} else {
 			if (!localFileOrDir.exists) {
 				throw new Error("Local directory does not exist or is empty.")
 			}
 
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.concat({
+			useTransfersStore.getState().setTransfers(prev => [
+				...prev,
+				{
 					id,
 					localFileOrDir,
 					parent,
@@ -143,8 +145,8 @@ class Transfers {
 					resume: () => {
 						transferPauseSignal.resume()
 					}
-				})
-			)
+				}
+			])
 		}
 
 		if (localFileOrDir instanceof FileSystem.Directory) {
@@ -199,7 +201,7 @@ class Transfers {
 												...t,
 												errors: {
 													...t.errors,
-													scan: t.errors.scan.concat(errors)
+													scan: [...t.errors.scan, ...errors]
 												}
 											}
 										: t
@@ -228,7 +230,7 @@ class Transfers {
 												...t,
 												errors: {
 													...t.errors,
-													upload: t.errors.upload.concat(errors)
+													upload: [...t.errors.upload, ...errors]
 												}
 											}
 										: t
@@ -260,19 +262,17 @@ class Transfers {
 												uuid: parent.inner[0].uuid
 											}
 										},
-										updater: prev =>
-											prev
-												.filter(item => item.data.uuid !== uploadedDir.uuid)
-												.concat([
-													{
-														type: "directory",
-														data: {
-															...dir,
-															size: 0n,
-															decryptedMeta: meta
-														}
-													}
-												])
+										updater: prev => [
+											...prev.filter(item => item.data.uuid !== uploadedDir.uuid),
+											{
+												type: "directory",
+												data: {
+													...dir,
+													size: 0n,
+													decryptedMeta: meta
+												}
+											}
+										]
 									})
 								}
 							}
@@ -290,18 +290,16 @@ class Transfers {
 												uuid: parent.inner[0].uuid
 											}
 										},
-										updater: prev =>
-											prev
-												.filter(item => item.data.uuid !== uploadedFile.uuid)
-												.concat([
-													{
-														type: "file",
-														data: {
-															...file,
-															decryptedMeta: meta
-														}
-													}
-												])
+										updater: prev => [
+											...prev.filter(item => item.data.uuid !== uploadedFile.uuid),
+											{
+												type: "file",
+												data: {
+													...file,
+													decryptedMeta: meta
+												}
+											}
+										]
 									})
 								}
 							}
@@ -330,17 +328,19 @@ class Transfers {
 										...t.errors,
 										...(FilenSdkError.hasInner(result.error)
 											? {
-													upload: t.errors.upload.concat([
+													upload: [
+														...t.errors.upload,
 														{
 															error: FilenSdkError.getInner(result.error),
 															path: normalizeFilePathForSdk(localFileOrDir.uri)
 														}
-													])
+													]
 												}
 											: {
-													unknown: t.errors.unknown.concat([
+													unknown: [
+														...t.errors.unknown,
 														result.error instanceof Error ? result.error : new Error(String(result.error))
-													])
+													]
 												})
 									}
 								}
@@ -369,7 +369,7 @@ class Transfers {
 				)
 			})
 
-			return await sdkClient.uploadFile(
+			const transferred = await sdkClient.uploadFile(
 				parent,
 				normalizeFilePathForSdk(localFileOrDir.uri),
 				{
@@ -394,6 +394,8 @@ class Transfers {
 					signal: compositeAbortSignal
 				}
 			)
+
+			return transferred
 		})
 
 		if (!result.success) {
@@ -406,17 +408,19 @@ class Transfers {
 									...t.errors,
 									...(FilenSdkError.hasInner(result.error)
 										? {
-												upload: t.errors.upload.concat([
+												upload: [
+													...t.errors.upload,
 													{
 														error: FilenSdkError.getInner(result.error),
 														path: normalizeFilePathForSdk(localFileOrDir.uri)
 													}
-												])
+												]
 											}
 										: {
-												unknown: t.errors.unknown.concat([
+												unknown: [
+													...t.errors.unknown,
 													result.error instanceof Error ? result.error : new Error(String(result.error))
-												])
+												]
 											})
 								}
 							}
@@ -437,18 +441,16 @@ class Transfers {
 						uuid: parent.inner[0].uuid
 					}
 				},
-				updater: prev =>
-					prev
-						.filter(item => item.data.uuid !== result.data.uuid)
-						.concat([
-							{
-								type: "file",
-								data: {
-									...file,
-									decryptedMeta: meta
-								}
-							}
-						])
+				updater: prev => [
+					...prev.filter(item => item.data.uuid !== result.data.uuid),
+					{
+						type: "file",
+						data: {
+							...file,
+							decryptedMeta: meta
+						}
+					}
+				]
 			})
 		}
 
@@ -474,8 +476,15 @@ class Transfers {
 			.getState()
 			.transfers.filter(t => !t.finishedAt && (t.type === "downloadFile" || t.type === "downloadDirectory"))
 
-		if (currentTransfers.find(t => t.id === itemUuid)) {
-			throw new Error("Already downloading an item with the same ID.")
+		if (
+			currentTransfers.find(
+				t =>
+					(t.type === "downloadFile" || t.type === "downloadDirectory") &&
+					t.id === itemUuid &&
+					t.destination.uri === destination.uri
+			)
+		) {
+			throw new Error("A transfer with the same ID and destination URI is already in progress.")
 		}
 
 		const sdkClient = await auth.getSdkClient()
@@ -489,8 +498,9 @@ class Transfers {
 				throw new Error("Destination must be a file for file downloads.")
 			}
 
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.concat({
+			useTransfersStore.getState().setTransfers(prev => [
+				...prev,
+				{
 					id: itemUuid,
 					item: item.data,
 					type: "downloadFile",
@@ -517,15 +527,16 @@ class Transfers {
 					resume: () => {
 						transferPauseSignal.resume()
 					}
-				})
-			)
+				}
+			])
 		} else {
 			if (destination instanceof FileSystem.File) {
 				throw new Error("Destination must be a directory for directory downloads.")
 			}
 
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.concat({
+			useTransfersStore.getState().setTransfers(prev => [
+				...prev,
+				{
 					id: itemUuid,
 					item: item.data,
 					type: "downloadDirectory",
@@ -558,12 +569,8 @@ class Transfers {
 					resume: () => {
 						transferPauseSignal.resume()
 					}
-				})
-			)
-		}
-
-		if (destination.exists) {
-			throw new Error("Destination already exists.")
+				}
+			])
 		}
 
 		if (item.type === "directory" || item.type === "sharedDirectory") {
@@ -600,7 +607,7 @@ class Transfers {
 												...t,
 												errors: {
 													...t.errors,
-													download: t.errors.download.concat(errors)
+													download: [...t.errors.download, ...errors]
 												}
 											}
 										: t
@@ -664,7 +671,7 @@ class Transfers {
 												...t,
 												errors: {
 													...t.errors,
-													scan: t.errors.scan.concat(errors)
+													scan: [...t.errors.scan, ...errors]
 												}
 											}
 										: t
@@ -711,17 +718,19 @@ class Transfers {
 										...t.errors,
 										...(FilenSdkError.hasInner(result.error)
 											? {
-													download: t.errors.download.concat([
+													download: [
+														...t.errors.download,
 														{
 															path: normalizeFilePathForSdk(destination.uri),
 															error: FilenSdkError.getInner(result.error)
 														}
-													])
+													]
 												}
 											: {
-													unknown: t.errors.unknown.concat([
+													unknown: [
+														...t.errors.unknown,
 														result.error instanceof Error ? result.error : new Error(String(result.error))
-													])
+													]
 												})
 									}
 								}
@@ -787,7 +796,7 @@ class Transfers {
 				}
 			)
 
-			return {
+			const transferred = {
 				files: [
 					{
 						path: normalizeFilePathForSdk(destination.uri),
@@ -796,6 +805,8 @@ class Transfers {
 				],
 				directories: []
 			}
+
+			return transferred
 		})
 
 		if (!result.success) {
@@ -808,18 +819,20 @@ class Transfers {
 									...t.errors,
 									...(FilenSdkError.hasInner(result.error)
 										? {
-												download: t.errors.download.concat([
+												download: [
+													...t.errors.download,
 													{
 														path: normalizeFilePathForSdk(destination.uri),
 														error: FilenSdkError.getInner(result.error),
 														item: new NonRootItemTagged.File(file)
 													}
-												])
+												]
 											}
 										: {
-												unknown: t.errors.unknown.concat([
+												unknown: [
+													...t.errors.unknown,
 													result.error instanceof Error ? result.error : new Error(String(result.error))
-												])
+												]
 											})
 								}
 							}
