@@ -124,6 +124,13 @@ const Header = memo(() => {
 									console.log(await offline.sync())
 									console.log("done")
 								}
+							},
+							{
+								id: "viewoffline",
+								title: "viewoffline",
+								onPress: async () => {
+									router.push("/offline")
+								}
 							}
 						]
 					},
@@ -181,6 +188,7 @@ export const Drive = memo(() => {
 							parent
 						}
 					}}
+					origin="drive"
 				/>
 			)
 		},

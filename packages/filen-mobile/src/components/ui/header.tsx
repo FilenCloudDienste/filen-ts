@@ -168,7 +168,8 @@ export const Header = memo(
 		blurEffect,
 		searchBarOptions,
 		leftItems,
-		rightItems
+		rightItems,
+		backgroundColor
 	}: {
 		title:
 			| string
@@ -186,6 +187,7 @@ export const Header = memo(
 		searchBarOptions?: SearchBarProps
 		leftItems?: HeaderItem[] | (() => HeaderItem[] | null | undefined | void)
 		rightItems?: HeaderItem[] | (() => HeaderItem[] | null | undefined | void)
+		backgroundColor?: string
 	}) => {
 		const bgBackground = useResolveClassNames("bg-background")
 		const textForeground = useResolveClassNames("text-foreground")
@@ -223,11 +225,13 @@ export const Header = memo(
 					headerBackTitle: backTitle,
 					headerLargeTitle: largeTitle,
 					headerTitleAlign: "left",
-					headerStyle: transparent
-						? undefined
-						: {
-								backgroundColor: bgBackground.backgroundColor as string
-							},
+					headerStyle: backgroundColor
+						? { backgroundColor }
+						: transparent
+							? undefined
+							: {
+									backgroundColor: bgBackground.backgroundColor as string
+								},
 					headerTitleStyle: {
 						color: textForeground.color as string
 					},

@@ -22,6 +22,7 @@ import * as FileSystem from "expo-file-system"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import mimeTypes from "mime-types"
 import pathModule from "path"
+import type { DriveItem } from "@/types"
 
 export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
 	const abortController = new ManagedAbortController()
@@ -171,13 +172,13 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 			meta: DecryptedDirMeta | null
 			shared: false
 			dir: Dir
-			uuid: string | null
+			uuid: string
 	  }
 	| {
 			meta: DecryptedDirMeta | null
 			shared: true
 			dir: SharedDir
-			uuid: string | null
+			uuid: string
 	  } {
 	if ("uuid" in dir) {
 		switch (dir.meta.tag) {
@@ -230,15 +231,55 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 			}
 		}
 
-		default: {
-			return {
-				meta: null,
-				shared: true,
-				dir,
-				uuid: null
+		case DirWithMetaEnum_Tags.Root: {
+			const [inner] = dir.dir.inner
+
+			switch (inner.meta.tag) {
+				case DirMeta_Tags.Decoded: {
+					const [decoded] = inner.meta.inner
+
+					return {
+						meta: decoded,
+						shared: true,
+						dir,
+						uuid: inner.uuid
+					}
+				}
+
+				default: {
+					return {
+						meta: null,
+						shared: true,
+						dir,
+						uuid: inner.uuid
+					}
+				}
 			}
 		}
 	}
+}
+
+export function unwrappedDirIntoDriveItem(unwrappedDir: ReturnType<typeof unwrapDirMeta>): DriveItem {
+	return (
+		unwrappedDir.shared
+			? {
+					type: "sharedDirectory",
+					data: {
+						...unwrappedDir.dir,
+						size: 0n,
+						decryptedMeta: unwrappedDir.meta,
+						uuid: unwrappedDir.uuid
+					}
+				}
+			: {
+					type: "directory",
+					data: {
+						...unwrappedDir.dir,
+						size: 0n,
+						decryptedMeta: unwrappedDir.meta
+					}
+				}
+	) satisfies DriveItem
 }
 
 export function unwrapFileMeta(file: File | SharedFile):
@@ -293,6 +334,28 @@ export function unwrapFileMeta(file: File | SharedFile):
 			}
 		}
 	}
+}
+
+export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwrapFileMeta>): DriveItem {
+	return (
+		unwrappedFile.shared
+			? {
+					type: "sharedFile",
+					data: {
+						...unwrappedFile.file,
+						size: unwrappedFile.meta?.size ?? 0n,
+						decryptedMeta: unwrappedFile.meta,
+						uuid: unwrappedFile.file.file.uuid
+					}
+				}
+			: {
+					type: "file",
+					data: {
+						...unwrappedFile.file,
+						decryptedMeta: unwrappedFile.meta
+					}
+				}
+	) satisfies DriveItem
 }
 
 export function contactDisplayName(contact: Contact | NoteParticipant | ChatParticipant): string {
@@ -518,19 +581,33 @@ export function getPreviewTypeFromMime(mimeType: string): PreviewType {
 	return getPreviewType(`file.${extname}`)
 }
 
-export async function listLocalDirectoryRecursive(directory: FileSystem.Directory): Promise<(FileSystem.File | FileSystem.Directory)[]> {
-	const entries = directory.list()
+export function listLocalDirectoryRecursive(directory: FileSystem.Directory): (FileSystem.File | FileSystem.Directory)[] {
+	const visited = new Set<string>()
 	const allEntries: (FileSystem.File | FileSystem.Directory)[] = []
 
-	for (const entry of entries) {
-		allEntries.push(entry)
+	function traverse(dir: FileSystem.Directory) {
+		if (visited.has(dir.uri)) {
+			return
+		}
 
-		if (entry instanceof FileSystem.Directory) {
-			const subEntries = await listLocalDirectoryRecursive(entry)
+		visited.add(dir.uri)
 
-			allEntries.push(...subEntries)
+		try {
+			const entries = dir.list()
+
+			for (const entry of entries) {
+				allEntries.push(entry)
+
+				if (entry instanceof FileSystem.Directory) {
+					traverse(entry)
+				}
+			}
+		} catch {
+			return
 		}
 	}
+
+	traverse(directory)
 
 	return allEntries
 }

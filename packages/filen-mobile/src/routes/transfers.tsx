@@ -1,6 +1,5 @@
 import { memo, useCallback } from "@/lib/memo"
 import Text from "@/components/ui/text"
-import { Fragment } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
@@ -33,24 +32,22 @@ const Transfers = memo(() => {
 	}, [])
 
 	return (
-		<Fragment>
-			<SafeAreaView
+		<SafeAreaView
+			className="flex-1 bg-background-secondary"
+			edges={Platform.select({
+				ios: ["left", "right"],
+				default: ["left", "right", "top"]
+			})}
+		>
+			<VirtualList
 				className="flex-1 bg-background-secondary"
-				edges={Platform.select({
-					ios: ["left", "right"],
-					default: ["left", "right", "top"]
-				})}
-			>
-				<VirtualList
-					className="flex-1 bg-background-secondary"
-					contentInsetAdjustmentBehavior="automatic"
-					contentContainerClassName="pb-40"
-					keyExtractor={keyExtractor}
-					data={transfers}
-					renderItem={renderItem}
-				/>
-			</SafeAreaView>
-		</Fragment>
+				contentInsetAdjustmentBehavior="automatic"
+				contentContainerClassName="pb-40"
+				keyExtractor={keyExtractor}
+				data={transfers}
+				renderItem={renderItem}
+			/>
+		</SafeAreaView>
 	)
 })
 

@@ -12,7 +12,8 @@ import {
 	type File,
 	type Dir,
 	type SharedDir,
-	type SharedFile
+	type SharedFile,
+	DirWithMetaEnum_Tags
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { unwrapFileMeta, unwrapDirMeta } from "@/lib/utils"
@@ -136,50 +137,50 @@ export async function fetchData(
 				const files: (File | SharedFile)[] = []
 
 				if (offlineDirectories.directories.length > 0) {
-					for (const { directory } of offlineDirectories.directories) {
-						if (directory.type !== "directory" && directory.type !== "sharedDirectory") {
+					for (const { item } of offlineDirectories.directories) {
+						if (item.type !== "directory" && item.type !== "sharedDirectory") {
 							continue
 						}
 
-						if (directory.type === "directory") {
-							dirs.push(new NonRootItemTagged.Dir(directory.data).inner[0])
+						if (item.type === "directory") {
+							dirs.push(new NonRootItemTagged.Dir(item.data).inner[0])
 
 							continue
 						}
 
-						dirs.push(new AnyDirEnumWithShareInfo.SharedDir(directory.data).inner[0])
+						dirs.push(new AnyDirEnumWithShareInfo.SharedDir(item.data).inner[0])
 					}
 				}
 
 				if (dir && offlineDirectories.files.length > 0) {
-					for (const { file } of offlineDirectories.files) {
-						if (file.type !== "file" && file.type !== "sharedFile") {
+					for (const { item } of offlineDirectories.files) {
+						if (item.type !== "file" && item.type !== "sharedFile") {
 							continue
 						}
 
-						if (file.type === "file") {
-							files.push(new NonRootItemTagged.File(file.data).inner[0])
+						if (item.type === "file") {
+							files.push(new NonRootItemTagged.File(item.data).inner[0])
 
 							continue
 						}
 
-						files.push(file.data)
+						files.push(item.data)
 					}
 				}
 
 				if (!dir && offlineFiles.length > 0) {
-					for (const { file } of offlineFiles) {
-						if (file.type !== "file" && file.type !== "sharedFile") {
+					for (const { item } of offlineFiles) {
+						if (item.type !== "file" && item.type !== "sharedFile") {
 							continue
 						}
 
-						if (file.type === "file") {
-							files.push(new NonRootItemTagged.File(file.data).inner[0])
+						if (item.type === "file") {
+							files.push(new NonRootItemTagged.File(item.data).inner[0])
 
 							continue
 						}
 
-						files.push(file.data)
+						files.push(item.data)
 					}
 				}
 
@@ -234,7 +235,20 @@ export async function fetchData(
 
 			cache.sharedDirUuidToDir.set(uuid, dir)
 			cache.sharedDirectoryUuidToName.set(uuid, meta?.name ?? uuid)
-			cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.SharedDir(dir))
+
+			switch (dir.dir.tag) {
+				case DirWithMetaEnum_Tags.Dir: {
+					cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.SharedDir(dir))
+
+					break
+				}
+
+				case DirWithMetaEnum_Tags.Root: {
+					cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.Root(dir.dir.inner[0]))
+
+					break
+				}
+			}
 		}
 	}
 

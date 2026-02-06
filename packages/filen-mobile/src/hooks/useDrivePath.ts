@@ -27,16 +27,20 @@ export default function useDrivePath(): DrivePath {
 	const navigation = useNavigation()
 
 	const drivePath = useMemo((): DrivePath => {
-		if (navigation.getId()?.startsWith("/tabs/drive")) {
+		const navigationId = navigation.getId() || ""
+		const isInDriveTab = navigationId.startsWith("/tabs/drive")
+		const isInOfflineTab = navigationId.startsWith("/offline")
+
+		if (isInDriveTab || isInOfflineTab) {
 			if (localSearchParams && localSearchParams.uuid && validateUuid(localSearchParams.uuid)) {
 				return {
-					type: "drive",
+					type: isInDriveTab ? "drive" : "offline",
 					uuid: localSearchParams.uuid
 				}
 			}
 
 			return {
-				type: "drive",
+				type: isInDriveTab ? "drive" : "offline",
 				uuid: null
 			}
 		}

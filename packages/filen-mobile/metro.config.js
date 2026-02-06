@@ -15,10 +15,7 @@ const config = {
 			crypto: require.resolve("react-native-quick-crypto"),
 			stream: require.resolve("readable-stream"),
 			path: require.resolve("path-browserify")
-		},
-		unstable_enablePackageExports: true,
-		enableGlobalPackages: true,
-		unstable_conditionNames: ["browser", "require", "react-native", "default"]
+		}
 	}
 }
 

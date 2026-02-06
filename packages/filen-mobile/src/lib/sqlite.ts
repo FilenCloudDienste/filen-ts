@@ -82,34 +82,6 @@ const INIT_QUERIES: {
 		pragma: false
 	},
 	{
-		query: "CREATE TABLE IF NOT EXISTS thumbnails (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, uuid TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL)",
-		pragma: false
-	},
-	{
-		query: "CREATE INDEX IF NOT EXISTS thumbnails_uuid ON thumbnails (uuid)",
-		pragma: false
-	},
-	{
-		query: "CREATE INDEX IF NOT EXISTS thumbnails_path ON thumbnails (path)",
-		pragma: false
-	},
-	{
-		query: "CREATE UNIQUE INDEX IF NOT EXISTS thumbnails_uuid_unique ON thumbnails (uuid)",
-		pragma: false
-	},
-	{
-		query: "CREATE TABLE IF NOT EXISTS offline_files (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, uuid TEXT NOT NULL, item TEXT NOT NULL)",
-		pragma: false
-	},
-	{
-		query: "CREATE INDEX IF NOT EXISTS offline_files_uuid ON offline_files (uuid)",
-		pragma: false
-	},
-	{
-		query: "CREATE UNIQUE INDEX IF NOT EXISTS offline_files_uuid_unique ON offline_files (uuid)",
-		pragma: false
-	},
-	{
 		query: "PRAGMA optimize", // Run at the end after schema is created
 		pragma: true
 	}
@@ -183,8 +155,6 @@ class Sqlite {
 		const db = await this.openDb()
 
 		await db.execAsync("DELETE FROM kv")
-		await db.execAsync("DELETE FROM thumbnails")
-		await db.execAsync("DELETE FROM offline_files")
 	}
 
 	public kvAsync = {

@@ -1,7 +1,7 @@
 import { memo, useCallback } from "@/lib/memo"
 import View from "@/components/ui/view"
 import { PressableScale } from "@/components/ui/pressables"
-import Menu from "@/components/drive/item/menu"
+import Menu, { type DriveItemMenuOrigin } from "@/components/drive/item/menu"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import Text from "@/components/ui/text"
 import { router } from "expo-router"
@@ -13,20 +13,36 @@ import { useResolveClassNames } from "uniwind"
 import Date from "@/components/drive/item/date"
 import { Platform } from "react-native"
 import { type AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
+import { useState } from "react"
+import { cn } from "@filen/utils"
 
-export const Item = memo(
+const Item = memo(
 	({
-		info
+		info,
+		origin
 	}: {
 		info: ListRenderItemInfo<{
 			item: DriveItem
 			parent?: AnyDirEnumWithShareInfo
 		}>
+		origin: DriveItemMenuOrigin
 	}) => {
 		const textForeground = useResolveClassNames("text-foreground")
+		const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
 
 		const onPress = useCallback(() => {
 			if (info.item.item.type === "directory") {
+				if (origin === "offline") {
+					router.push({
+						pathname: "/offline/[uuid]",
+						params: {
+							uuid: info.item.item.data.uuid
+						}
+					})
+
+					return
+				}
+
 				router.push({
 					pathname: "/tabs/drive/[uuid]",
 					params: {
@@ -36,17 +52,24 @@ export const Item = memo(
 
 				return
 			}
-		}, [info.item])
+		}, [info.item, origin])
 
 		return (
-			<View className="w-full h-auto flex-col">
+			<View
+				className={cn(
+					"w-full h-auto flex-col",
+					isMenuOpen ? (origin === "offline" ? "bg-background-tertiary" : "bg-background-secondary") : "bg-transparent"
+				)}
+			>
 				<Menu
 					className="flex-row w-full h-auto"
 					type="context"
 					isAnchoredToRight={true}
 					item={info.item.item}
 					parent={info.item.parent}
-					origin="drive"
+					origin={origin}
+					onCloseMenu={() => setIsMenuOpen(false)}
+					onOpenMenu={() => setIsMenuOpen(true)}
 				>
 					<PressableScale
 						className="w-full h-auto flex-row"
@@ -92,7 +115,7 @@ export const Item = memo(
 											isAnchoredToRight={true}
 											item={info.item.item}
 											parent={info.item.parent}
-											origin="drive"
+											origin={origin}
 										>
 											<Ionicons
 												name="ellipsis-horizontal"

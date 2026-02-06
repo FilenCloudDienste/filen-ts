@@ -19,7 +19,17 @@ import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
 
-export type DriveItemMenuOrigin = "drive" | "preview" | "trash" | "sharedIn" | "sharedOut" | "favorites" | "recents" | "links"
+export type DriveItemMenuOrigin =
+	| "drive"
+	| "preview"
+	| "trash"
+	| "sharedIn"
+	| "sharedOut"
+	| "favorites"
+	| "recents"
+	| "links"
+	| "offline"
+	| "search"
 
 export function createMenuButtons({
 	item,
@@ -127,7 +137,7 @@ export function createMenuButtons({
 						}
 
 						if ((item.type === "directory" || item.type === "sharedDirectory") && destination instanceof FileSystem.Directory) {
-							const entries = await listLocalDirectoryRecursive(destination)
+							const entries = listLocalDirectoryRecursive(destination)
 
 							await Promise.all(
 								entries.map(async entry => {
@@ -516,7 +526,9 @@ const Menu = memo(
 		type,
 		className,
 		isAnchoredToRight,
-		parent
+		parent,
+		onOpenMenu,
+		onCloseMenu
 	}: {
 		item: DriveItem
 		children: React.ReactNode
@@ -525,6 +537,8 @@ const Menu = memo(
 		className?: string
 		isAnchoredToRight?: boolean
 		parent?: AnyDirEnumWithShareInfo
+		onOpenMenu?: () => void
+		onCloseMenu?: () => void
 	}) => {
 		const menuButtons = useMemo(() => {
 			return createMenuButtons({
@@ -541,6 +555,8 @@ const Menu = memo(
 				isAnchoredToRight={isAnchoredToRight}
 				buttons={menuButtons}
 				title={item.data.decryptedMeta?.name}
+				onCloseMenu={onCloseMenu}
+				onOpenMenu={onOpenMenu}
 			>
 				{children}
 			</MenuComponent>

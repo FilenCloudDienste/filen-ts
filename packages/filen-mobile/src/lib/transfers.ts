@@ -47,11 +47,15 @@ class Transfers {
 	public async upload({
 		id,
 		localFileOrDir,
-		parent
+		parent,
+		hideProgress,
+		awaitExternalCompletionBeforeMarkingAsFinished
 	}: {
 		id: string
 		localFileOrDir: FileSystem.File | FileSystem.Directory
 		parent: DirEnum
+		hideProgress?: boolean
+		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 	}): Promise<{
 		files: File[]
 		directories: Dir[]
@@ -73,99 +77,67 @@ class Transfers {
 		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
 		const compositeAbortSignal = createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
-		if (localFileOrDir instanceof FileSystem.File) {
-			if (!localFileOrDir.exists || !localFileOrDir.size) {
-				throw new Error("Local file does not exist or is empty.")
-			}
-
-			useTransfersStore.getState().setTransfers(prev => [
-				...prev,
-				{
-					id,
-					localFileOrDir,
-					parent,
-					type: "uploadFile",
-					size: localFileOrDir.size,
-					bytesTransferred: 0,
-					startedAt: Date.now(),
-					abortController: transferAbortController,
-					errors: {
-						unknown: [],
-						scan: [],
-						upload: []
-					},
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
-					}
-				}
-			])
-		} else {
-			if (!localFileOrDir.exists) {
-				throw new Error("Local directory does not exist or is empty.")
-			}
-
-			useTransfersStore.getState().setTransfers(prev => [
-				...prev,
-				{
-					id,
-					localFileOrDir,
-					parent,
-					type: "uploadDirectory",
-					size: 0,
-					knownDirectories: 0,
-					knownFiles: 0,
-					bytesTransferred: 0,
-					startedAt: Date.now(),
-					abortController: transferAbortController,
-					errors: {
-						unknown: [],
-						scan: [],
-						upload: []
-					},
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
-					}
-				}
-			])
-		}
-
 		if (localFileOrDir instanceof FileSystem.Directory) {
 			const result = await run(async defer => {
 				if (parent.tag === DirEnum_Tags.Root) {
 					throw new Error("Cannot upload to root directory.")
 				}
 
+				if (!localFileOrDir.exists) {
+					throw new Error("Local directory does not exist or is empty.")
+				}
+
+				if (!hideProgress) {
+					useTransfersStore.getState().setTransfers(prev => [
+						...prev,
+						{
+							id,
+							localFileOrDir,
+							parent,
+							type: "uploadDirectory",
+							size: 0,
+							knownDirectories: 0,
+							knownFiles: 0,
+							bytesTransferred: 0,
+							startedAt: Date.now(),
+							abortController: transferAbortController,
+							errors: {
+								unknown: [],
+								scan: [],
+								upload: []
+							},
+							abort: () => {
+								if (transferAbortController.signal.aborted) {
+									return
+								}
+
+								transferAbortController.abort()
+							},
+							pause: () => {
+								transferPauseSignal.pause()
+							},
+							resume: () => {
+								transferPauseSignal.resume()
+							}
+						}
+					])
+				}
+
 				defer(() => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id
-								? {
-										...t,
-										finishedAt: Date.now()
-									}
-								: t
-						)
-					)
+					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
+						.then(() => {
+							useTransfersStore.getState().setTransfers(prev =>
+								prev.map(t =>
+									t.id === id
+										? {
+												...t,
+												finishedAt: Date.now()
+											}
+										: t
+								)
+							)
+						})
+						.catch(console.error)
 				})
 
 				const transferred: {
@@ -356,17 +328,59 @@ class Transfers {
 
 		// TODO: Add metadata timestamps before upload to copied file
 		const result = await run(async defer => {
+			if (!localFileOrDir.exists || !localFileOrDir.size) {
+				throw new Error("Local file does not exist or is empty.")
+			}
+
+			if (!hideProgress) {
+				useTransfersStore.getState().setTransfers(prev => [
+					...prev,
+					{
+						id,
+						localFileOrDir,
+						parent,
+						type: "uploadFile",
+						size: localFileOrDir.size,
+						bytesTransferred: 0,
+						startedAt: Date.now(),
+						abortController: transferAbortController,
+						errors: {
+							unknown: [],
+							scan: [],
+							upload: []
+						},
+						abort: () => {
+							if (transferAbortController.signal.aborted) {
+								return
+							}
+
+							transferAbortController.abort()
+						},
+						pause: () => {
+							transferPauseSignal.pause()
+						},
+						resume: () => {
+							transferPauseSignal.resume()
+						}
+					}
+				])
+			}
+
 			defer(() => {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id
-							? {
-									...t,
-									finishedAt: Date.now()
-								}
-							: t
-					)
-				)
+				;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
+					.then(() => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === id
+									? {
+											...t,
+											finishedAt: Date.now()
+										}
+									: t
+							)
+						)
+					})
+					.catch(console.error)
 			})
 
 			const transferred = await sdkClient.uploadFile(
@@ -463,11 +477,15 @@ class Transfers {
 	public async download({
 		itemUuid,
 		item,
-		destination
+		destination,
+		hideProgress,
+		awaitExternalCompletionBeforeMarkingAsFinished
 	}: {
 		itemUuid: string
 		item: DriveItem
 		destination: FileSystem.File | FileSystem.Directory
+		hideProgress?: boolean
+		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 	}): Promise<{
 		files: FileWithPath[]
 		directories: DirWithPath[]
@@ -493,99 +511,67 @@ class Transfers {
 		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
 		const compositeAbortSignal = createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
-		if (item.type === "file" || item.type === "sharedFile") {
-			if (!(destination instanceof FileSystem.File)) {
-				throw new Error("Destination must be a file for file downloads.")
-			}
-
-			useTransfersStore.getState().setTransfers(prev => [
-				...prev,
-				{
-					id: itemUuid,
-					item: item.data,
-					type: "downloadFile",
-					size: Number(item.data.size),
-					bytesTransferred: 0,
-					startedAt: Date.now(),
-					abortController: transferAbortController,
-					errors: {
-						unknown: [],
-						scan: [],
-						download: []
-					},
-					destination,
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
-					}
-				}
-			])
-		} else {
-			if (destination instanceof FileSystem.File) {
-				throw new Error("Destination must be a directory for directory downloads.")
-			}
-
-			useTransfersStore.getState().setTransfers(prev => [
-				...prev,
-				{
-					id: itemUuid,
-					item: item.data,
-					type: "downloadDirectory",
-					size: 0,
-					knownDirectories: 0,
-					knownFiles: 0,
-					bytesTransferred: 0,
-					startedAt: Date.now(),
-					abortController: transferAbortController,
-					directoryQueryProgress: {
-						totalBytes: 0,
-						bytesTransferred: 0
-					},
-					errors: {
-						unknown: [],
-						scan: [],
-						download: []
-					},
-					destination,
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
-					}
-				}
-			])
-		}
-
 		if (item.type === "directory" || item.type === "sharedDirectory") {
 			const result = await run(async defer => {
+				if (destination instanceof FileSystem.File) {
+					throw new Error("Destination must be a directory for directory downloads.")
+				}
+
+				if (!hideProgress) {
+					useTransfersStore.getState().setTransfers(prev => [
+						...prev,
+						{
+							id: itemUuid,
+							item: item.data,
+							type: "downloadDirectory",
+							size: 0,
+							knownDirectories: 0,
+							knownFiles: 0,
+							bytesTransferred: 0,
+							startedAt: Date.now(),
+							abortController: transferAbortController,
+							directoryQueryProgress: {
+								totalBytes: 0,
+								bytesTransferred: 0
+							},
+							errors: {
+								unknown: [],
+								scan: [],
+								download: []
+							},
+							destination,
+							abort: () => {
+								if (transferAbortController.signal.aborted) {
+									return
+								}
+
+								transferAbortController.abort()
+							},
+							pause: () => {
+								transferPauseSignal.pause()
+							},
+							resume: () => {
+								transferPauseSignal.resume()
+							}
+						}
+					])
+				}
+
 				defer(() => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === itemUuid
-								? {
-										...t,
-										finishedAt: Date.now()
-									}
-								: t
-						)
-					)
+					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
+						.then(() => {
+							useTransfersStore.getState().setTransfers(prev =>
+								prev.map(t =>
+									t.id === itemUuid
+										? {
+												...t,
+												finishedAt: Date.now()
+											}
+										: t
+								)
+							)
+						})
+						.catch(console.error)
 				})
 
 				const transferred: {
@@ -757,17 +743,59 @@ class Transfers {
 					}).inner[0]
 
 		const result = await run(async defer => {
+			if (!(destination instanceof FileSystem.File)) {
+				throw new Error("Destination must be a file for file downloads.")
+			}
+
+			if (!hideProgress) {
+				useTransfersStore.getState().setTransfers(prev => [
+					...prev,
+					{
+						id: itemUuid,
+						item: item.data,
+						type: "downloadFile",
+						size: Number(item.data.size),
+						bytesTransferred: 0,
+						startedAt: Date.now(),
+						abortController: transferAbortController,
+						errors: {
+							unknown: [],
+							scan: [],
+							download: []
+						},
+						destination,
+						abort: () => {
+							if (transferAbortController.signal.aborted) {
+								return
+							}
+
+							transferAbortController.abort()
+						},
+						pause: () => {
+							transferPauseSignal.pause()
+						},
+						resume: () => {
+							transferPauseSignal.resume()
+						}
+					}
+				])
+			}
+
 			defer(() => {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === itemUuid
-							? {
-									...t,
-									finishedAt: Date.now()
-								}
-							: t
-					)
-				)
+				;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
+					.then(() => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === itemUuid
+									? {
+											...t,
+											finishedAt: Date.now()
+										}
+									: t
+							)
+						)
+					})
+					.catch(console.error)
 			})
 
 			await sdkClient.downloadFile(

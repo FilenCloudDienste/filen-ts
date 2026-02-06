@@ -107,6 +107,12 @@ export const RootLayout = memo(() => {
 															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
 														}}
 													/>
+													<Stack.Screen
+														name="offline"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
 												</Stack>
 												{isAuthed && (
 													<Fragment>

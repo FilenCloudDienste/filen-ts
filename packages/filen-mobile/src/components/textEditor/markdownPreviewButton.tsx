@@ -1,8 +1,8 @@
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
-import { BlurView } from "@/components/ui/view"
+import { CrossGlassContainerView } from "@/components/ui/view"
 import { useKeyboardState } from "react-native-keyboard-controller"
-import { useUniwind, useResolveClassNames } from "uniwind"
+import { useResolveClassNames } from "uniwind"
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useSecureStore } from "@/lib/secureStore"
@@ -13,7 +13,6 @@ import { memo, useCallback, useMemo } from "@/lib/memo"
 
 export const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
 	const keyboardState = useKeyboardState()
-	const { theme } = useUniwind()
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const [textEditorMarkdownPreviewActive, setTextEditorMarkdownPreviewActive] = useSecureStore<Record<string, boolean>>(
@@ -55,18 +54,13 @@ export const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
 				rippleColor="transparent"
 				onPress={onPress}
 			>
-				<BlurView
-					intensity={100}
-					experimentalBlurMethod="dimezisBlurView"
-					tint={theme === "dark" ? "dark" : "light"}
-					className="flex-row items-center justify-center rounded-full overflow-hidden border border-border size-12"
-				>
+				<CrossGlassContainerView className="flex-row items-center justify-center rounded-full overflow-hidden border border-border size-12">
 					<FontAwesome6
 						name={active ? "eye-slash" : "eye"}
 						size={18}
 						color={textForeground.color}
 					/>
-				</BlurView>
+				</CrossGlassContainerView>
 			</PressableScale>
 		</AnimatedView>
 	)
