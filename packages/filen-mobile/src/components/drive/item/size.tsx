@@ -4,19 +4,23 @@ import type { DriveItem } from "@/types"
 import useDirectorySizeQuery from "@/queries/useDirectorySize.query"
 import { formatBytes } from "@filen/utils"
 import { type AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
+import type { DriveItemMenuOrigin } from "@/components/drive/item/menu"
 
 export const Size = memo(
 	({
-		info
+		info,
+		origin
 	}: {
 		info: ListRenderItemInfo<{
 			item: DriveItem
 			parent?: AnyDirEnumWithShareInfo
 		}>
+		origin: DriveItemMenuOrigin
 	}) => {
 		const directorySizeQuery = useDirectorySizeQuery(
 			{
-				uuid: info.item.item.data.uuid
+				uuid: info.item.item.data.uuid,
+				offline: origin === "offline"
 			},
 			{
 				enabled: info.item.item.type === "directory"
@@ -31,7 +35,7 @@ export const Size = memo(
 			return null
 		}
 
-		return formatBytes(Number(directorySizeQuery.data.size))
+		return formatBytes(Number(directorySizeQuery.data))
 	},
 	{
 		propsAreEqual(prevProps, nextProps) {

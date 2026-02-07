@@ -4,11 +4,15 @@ import auth from "@/lib/auth"
 import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
+import { AnyDirEnumWithShareInfo_Tags } from "@filen/sdk-rs"
+import offline from "@/lib/offline"
+import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
 
 export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 
 export type UseDirectorySizeQueryParams = {
 	uuid: string
+	offline: boolean
 }
 
 export async function fetchData(
@@ -16,14 +20,23 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	const sdkClient = await auth.getSdkClient()
 	const dir = cache.directoryUuidToAnyDirWithShareInfo.get(params.uuid)
 
 	if (!dir) {
 		throw new Error("Directory not found in cache")
 	}
 
-	return await sdkClient.getDirSize(
+	if (params.offline) {
+		if (dir.tag === AnyDirEnumWithShareInfo_Tags.Root) {
+			return BigInt(0)
+		}
+
+		return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner[0])))
+	}
+
+	const sdkClient = await auth.getSdkClient()
+
+	const { size } = await sdkClient.getDirSize(
 		dir,
 		params?.signal
 			? {
@@ -31,6 +44,8 @@ export async function fetchData(
 				}
 			: undefined
 	)
+
+	return Number(size)
 }
 
 export function useDirectorySizeQuery(

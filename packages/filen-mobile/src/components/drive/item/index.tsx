@@ -105,7 +105,11 @@ const Item = memo(
 										numberOfLines={1}
 										ellipsizeMode="middle"
 									>
-										<Date info={info} /> • <Size info={info} />
+										<Date info={info} /> •{" "}
+										<Size
+											info={info}
+											origin={origin}
+										/>
 									</Text>
 								</View>
 								{Platform.OS === "android" && (
