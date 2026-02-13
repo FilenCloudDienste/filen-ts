@@ -84,7 +84,7 @@ export const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteT
 							<View className="gap-2 shrink-0 h-auto w-auto bg-transparent flex-row items-center">
 								{areTagsSelected ? (
 									<AnimatedView
-										className="flex-row h-full items-center justify-center bg-transparent"
+										className="flex-row h-full items-center justify-center bg-transparent shrink-0"
 										entering={FadeIn}
 										exiting={FadeOut}
 									>

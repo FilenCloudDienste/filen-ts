@@ -2,6 +2,7 @@ import { type File, type Dir, type DecryptedFileMeta, type DecryptedDirMeta, typ
 
 export type ExtraData = {
 	size: bigint
+	uuid: string
 }
 
 export type DriveItemFile = File &
@@ -17,13 +18,11 @@ export type DriveItemDirectory = Dir &
 export type DriveItemFileShared = SharedFile &
 	ExtraData & {
 		decryptedMeta: DecryptedFileMeta | null
-		uuid: string
 	}
 
 export type DriveItemDirectoryShared = SharedDir &
 	ExtraData & {
 		decryptedMeta: DecryptedDirMeta | null
-		uuid: string
 	}
 
 export type DriveItem =

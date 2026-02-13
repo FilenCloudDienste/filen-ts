@@ -68,10 +68,12 @@ export const HeaderLeftRightWrapper = memo(
 					switch (item.type) {
 						case "text": {
 							return (
-								<Text
+								<View
+									className="bg-transparent min-h-9 min-w-9"
 									key={index}
-									{...item.props}
-								/>
+								>
+									<Text {...item.props} />
+								</View>
 							)
 						}
 
@@ -80,11 +82,12 @@ export const HeaderLeftRightWrapper = memo(
 								<PressableScale
 									key={index}
 									{...item.props}
-									className={
+									className={cn(
+										"size-9 items-center justify-center rounded-full",
 										!item.icon && Platform.OS === "ios" && liquidGlassAvailable
 											? cn("px-2", item.props?.className)
 											: item.props?.className
-									}
+									)}
 								>
 									{item.icon ? (
 										<Ionicons
@@ -107,11 +110,12 @@ export const HeaderLeftRightWrapper = memo(
 								>
 									<PressableScale
 										{...item.triggerProps}
-										className={
+										className={cn(
+											"size-9 items-center justify-center rounded-full",
 											!item.icon && Platform.OS === "ios" && liquidGlassAvailable
 												? cn("px-2", item.props?.className)
 												: item.props?.className
-										}
+										)}
 									>
 										{item.icon ? (
 											<Ionicons
@@ -129,7 +133,7 @@ export const HeaderLeftRightWrapper = memo(
 						case "custom": {
 							return (
 								<View
-									className="bg-transparent"
+									className="bg-transparent min-h-9 min-w-9"
 									key={index}
 								>
 									{item.children}
@@ -139,10 +143,12 @@ export const HeaderLeftRightWrapper = memo(
 
 						case "loader": {
 							return (
-								<ActivityIndicator
+								<View
+									className="min-h-9 min-w-9 size-9 items-center justify-center rounded-full"
 									key={index}
-									{...item.props}
-								/>
+								>
+									<ActivityIndicator {...item.props} />
+								</View>
 							)
 						}
 
@@ -226,7 +232,9 @@ export const Header = memo(
 					headerLargeTitle: largeTitle,
 					headerTitleAlign: "left",
 					headerStyle: backgroundColor
-						? { backgroundColor }
+						? {
+								backgroundColor
+							}
 						: transparent
 							? undefined
 							: {

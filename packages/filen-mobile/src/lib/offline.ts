@@ -10,17 +10,26 @@ import {
 	AnyDirEnum,
 	AnyDirEnumWithShareInfo,
 	AnyDirEnumWithShareInfo_Tags,
-	File,
-	Dir,
+	type File,
+	type Dir,
 	SharingRole_Tags,
 	DirEnum,
-	SharedFile,
+	type SharedFile,
 	DirWithMetaEnum_Tags,
-	SharedDir
+	type SharedDir,
+	ErrorKind
 } from "@filen/sdk-rs"
-import { unwrapFileMeta, normalizeFilePathForSdk, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import {
+	unwrapFileMeta,
+	normalizeFilePathForSdk,
+	unwrapDirMeta,
+	unwrappedDirIntoDriveItem,
+	unwrappedFileIntoDriveItem,
+	unwrapSdkError
+} from "@/lib/utils"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
+import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
 
 export type FileOrDirectoryOfflineMeta = {
 	item: DriveItem
@@ -78,7 +87,17 @@ class Offline {
 	private listDirectoriesCache: Awaited<ReturnType<Offline["listDirectories"]>> | null = null
 	private listFilesCache: Awaited<ReturnType<Offline["listFiles"]>> | null = null
 	private listDirectoriesRecursiveCache: Awaited<ReturnType<Offline["listDirectoriesRecursive"]>> | null = null
-	private itemSizeCache: Record<string, number> = {}
+	private itemSizeCache: Record<
+		string,
+		{
+			size: number
+			files: number
+			dirs: number
+		}
+	> = {}
+	private isItemStoredCache: Record<string, boolean> = {}
+	private getLocalFileCache: Record<string, FileSystem.File> = {}
+	private getLocalDirectoryCache: Record<string, FileSystem.Directory> = {}
 
 	public constructor() {
 		this.ensureDirectories()
@@ -127,6 +146,14 @@ class Offline {
 						item,
 						parent
 					}
+
+					driveItemStoredOfflineQueryUpdate({
+						updater: true,
+						params: {
+							uuid: item.data.uuid,
+							type: item.type
+						}
+					})
 				}
 
 				for (const { item, parent } of directories.directories) {
@@ -134,6 +161,14 @@ class Offline {
 						item,
 						parent
 					}
+
+					driveItemStoredOfflineQueryUpdate({
+						updater: true,
+						params: {
+							uuid: item.data.uuid,
+							type: item.type
+						}
+					})
 				}
 
 				for (const { item, parent } of directories.files) {
@@ -141,6 +176,14 @@ class Offline {
 						item,
 						parent
 					}
+
+					driveItemStoredOfflineQueryUpdate({
+						updater: true,
+						params: {
+							uuid: item.data.uuid,
+							type: item.type
+						}
+					})
 				}
 
 				const index: Index = {
@@ -192,18 +235,26 @@ class Offline {
 		return result.data
 	}
 
-	public async isItemStored(file: DriveItem): Promise<boolean> {
+	public async isItemStored(item: DriveItem): Promise<boolean> {
+		if (this.isItemStoredCache[item.data.uuid]) {
+			return Boolean(this.isItemStoredCache[item.data.uuid])
+		}
+
 		const index = await this.readIndex()
 
-		switch (file.type) {
+		switch (item.type) {
 			case "directory":
 			case "sharedDirectory": {
-				return Boolean(index.directories[file.data.uuid])
+				this.isItemStoredCache[item.data.uuid] = Boolean(index.directories[item.data.uuid])
+
+				return Boolean(index.directories[item.data.uuid])
 			}
 
 			case "file":
 			case "sharedFile": {
-				return Boolean(index.files[file.data.uuid])
+				this.isItemStoredCache[item.data.uuid] = Boolean(index.files[item.data.uuid])
+
+				return Boolean(index.files[item.data.uuid])
 			}
 		}
 	}
@@ -287,9 +338,18 @@ class Offline {
 							}
 						})
 
-						// TODO: handle dir not found case
 						if (!listParentResult.success) {
-							return
+							const unwrappedSdkError = unwrapSdkError(listParentResult.error)
+
+							if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.FolderNotFound) {
+								if (dataFile.parentDirectory.exists) {
+									dataFile.parentDirectory.delete()
+								}
+
+								return
+							}
+
+							throw listParentResult.error
 						}
 
 						const existingFile = listParentResult.data.find(f => {
@@ -397,9 +457,26 @@ class Offline {
 							}
 						})
 
-						// TODO: handle dir not found case
-						if (!listParentResult.success) {
+						const metaFile = new FileSystem.File(
+							FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
+						)
+
+						if (!metaFile.exists) {
 							return
+						}
+
+						if (!listParentResult.success) {
+							const unwrappedSdkError = unwrapSdkError(listParentResult.error)
+
+							if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.FolderNotFound) {
+								if (metaFile.parentDirectory.exists) {
+									metaFile.parentDirectory.delete()
+								}
+
+								return
+							}
+
+							throw listParentResult.error
 						}
 
 						// TODO: handle root dir name change
@@ -431,14 +508,6 @@ class Offline {
 								}
 							}
 						})()
-
-						const metaFile = new FileSystem.File(
-							FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
-						)
-
-						if (!metaFile.exists) {
-							return
-						}
 
 						const [remoteDirectoryEntries, directoryMetaBytes] = await Promise.all([
 							sdkClient.listDirRecursiveWithPaths(
@@ -600,8 +669,6 @@ class Offline {
 				])
 
 				await this.updateIndex()
-
-				//TODO update ui state
 			},
 			{
 				throw: true
@@ -691,6 +758,10 @@ class Offline {
 
 			this.ensureDirectories()
 
+			if (await this.isItemStored(file)) {
+				return
+			}
+
 			const dataFile = new FileSystem.File(
 				FileSystem.Paths.join(this.filesDirectory.uri, file.data.uuid, file.data.decryptedMeta.name)
 			)
@@ -735,6 +806,9 @@ class Offline {
 
 				this.itemSizeCache = {}
 				this.listFilesCache = null
+				this.getLocalFileCache = {}
+				this.isItemStoredCache = {}
+				this.getLocalDirectoryCache = {}
 
 				done = true
 			})
@@ -785,6 +859,10 @@ class Offline {
 			})
 
 			this.ensureDirectories()
+
+			if (await this.isItemStored(directory)) {
+				return
+			}
 
 			const dataDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.directoriesDirectory.uri, directory.data.uuid))
 			const metaFile = new FileSystem.File(
@@ -847,6 +925,9 @@ class Offline {
 				this.itemSizeCache = {}
 				this.listDirectoriesCache = null
 				this.listDirectoriesRecursiveCache = null
+				this.getLocalFileCache = {}
+				this.isItemStoredCache = {}
+				this.getLocalDirectoryCache = {}
 
 				done = true
 			})
@@ -1160,6 +1241,11 @@ class Offline {
 							return
 						}
 
+						directories.push({
+							item: directoryMeta.item,
+							parent: directoryMeta.parent
+						})
+
 						const pathToItem: Record<string, DriveItem> = {
 							"/": directoryMeta.item
 						}
@@ -1234,9 +1320,19 @@ class Offline {
 		}
 	}
 
-	public async itemSize(item: DriveItem): Promise<number> {
+	public async itemSize(item: DriveItem): Promise<{
+		size: number
+		files: number
+		dirs: number
+	}> {
 		if (this.itemSizeCache[item.data.uuid]) {
-			return this.itemSizeCache[item.data.uuid] ?? 0
+			return (
+				this.itemSizeCache[item.data.uuid] ?? {
+					size: 0,
+					files: 0,
+					dirs: 0
+				}
+			)
 		}
 
 		this.ensureDirectories()
@@ -1248,14 +1344,26 @@ class Offline {
 				const fileEntry = index.files[item.data.uuid]
 
 				if (!fileEntry || (fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile")) {
-					return 0
+					return {
+						size: 0,
+						files: 0,
+						dirs: 0
+					}
 				}
 
 				const size = Number(fileEntry.item.data.decryptedMeta?.size ?? 0)
 
-				this.itemSizeCache[item.data.uuid] = size
+				this.itemSizeCache[item.data.uuid] = {
+					size,
+					files: 0,
+					dirs: 0
+				}
 
-				return size
+				return {
+					size,
+					files: 0,
+					dirs: 0
+				}
 			}
 
 			case "directory":
@@ -1265,7 +1373,11 @@ class Offline {
 				const sizes = await Promise.all(
 					topLevelDirectories.map(async ({ item: directoryItem }) => {
 						if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
-							return 0
+							return {
+								size: 0,
+								files: 0,
+								dirs: 0
+							}
 						}
 
 						const directoryMetaFile = new FileSystem.File(
@@ -1277,7 +1389,11 @@ class Offline {
 						)
 
 						if (!directoryMetaFile.exists) {
-							return 0
+							return {
+								size: 0,
+								files: 0,
+								dirs: 0
+							}
 						}
 
 						const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
@@ -1288,7 +1404,11 @@ class Offline {
 								e => e.item.data.uuid === item.data.uuid && e.item.type === item.type
 							)
 						) {
-							return 0
+							return {
+								size: 0,
+								files: 0,
+								dirs: 0
+							}
 						}
 
 						const uuidToPath: Record<string, string> = {
@@ -1314,10 +1434,16 @@ class Offline {
 						const targetPath = uuidToPath[item.data.uuid]
 
 						if (!targetPath) {
-							return 0
+							return {
+								size: 0,
+								files: 0,
+								dirs: 0
+							}
 						}
 
 						let size = 0
+						let files = 0
+						let dirs = 0
 
 						for (const path in directoryMeta.entries) {
 							const entryMeta = directoryMeta.entries[path]
@@ -1337,24 +1463,55 @@ class Offline {
 							}
 
 							switch (entryMeta.item.type) {
+								case "directory":
+								case "sharedDirectory": {
+									dirs += 1
+
+									break
+								}
+
 								case "file":
 								case "sharedFile": {
 									size += Number(entryMeta.item.data.decryptedMeta?.size ?? 0)
+									files += 1
 
 									break
 								}
 							}
 						}
 
-						return size
+						return {
+							size,
+							files,
+							dirs
+						}
 					})
 				)
 
-				const size = sizes.reduce((a, b) => a + b, 0)
+				const { size, files, dirs } = sizes.reduce(
+					(a, b) => ({
+						size: a.size + b.size,
+						files: a.files + b.files,
+						dirs: a.dirs + b.dirs
+					}),
+					{
+						size: 0,
+						files: 0,
+						dirs: 0
+					}
+				)
 
-				this.itemSizeCache[item.data.uuid] = size
+				this.itemSizeCache[item.data.uuid] = {
+					size,
+					files,
+					dirs
+				}
 
-				return size
+				return {
+					size,
+					files,
+					dirs
+				}
 			}
 		}
 	}
@@ -1369,74 +1526,218 @@ class Offline {
 
 			this.ensureDirectories()
 
-			let didDelete = false
-
 			if (item.type === "file" || item.type === "sharedFile") {
 				const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid))
 
 				if (parentDirectory.exists) {
 					parentDirectory.delete()
 
-					didDelete = true
+					await this.updateIndex()
+
+					this.itemSizeCache = {}
+					this.listFilesCache = null
+					this.getLocalFileCache = {}
+					this.isItemStoredCache = {}
+					this.getLocalDirectoryCache = {}
 				}
-			}
+			} else {
+				const { directories: topLevelDirectories } = await this.listDirectories()
 
-			const { directories: topLevelDirectories } = await this.listDirectories()
+				await Promise.all(
+					topLevelDirectories.map(async ({ item: directoryItem }) => {
+						if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+							return
+						}
 
-			await Promise.all(
-				topLevelDirectories.map(async ({ item: directoryItem }) => {
-					if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
-						return
-					}
+						// Only allow removing the directory if it's top level
+						if (directoryItem.data.uuid !== item.data.uuid) {
+							return
+						}
 
-					const directoryMetaFile = new FileSystem.File(
-						FileSystem.Paths.join(
-							this.directoriesDirectory.uri,
-							directoryItem.data.uuid,
-							`${directoryItem.data.uuid}.filenmeta`
+						const dataDirectory = new FileSystem.Directory(
+							FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid)
 						)
-					)
 
-					if (!directoryMetaFile.exists) {
-						return
-					}
+						if (!dataDirectory.exists) {
+							return
+						}
 
-					const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
+						dataDirectory.delete()
 
-					if (
-						directoryItem.data.uuid !== item.data.uuid &&
-						!Object.values(directoryMeta.entries).some(e => e.item.data.uuid === item.data.uuid && e.item.type === item.type)
-					) {
-						return
-					}
+						await this.updateIndex()
 
-					const dataDirectory = new FileSystem.Directory(
-						FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid)
-					)
-
-					if (!dataDirectory.exists) {
-						return
-					}
-
-					dataDirectory.delete()
-
-					didDelete = true
-				})
-			)
-
-			if (didDelete) {
-				await this.updateIndex()
-
-				this.itemSizeCache = {}
-				this.listFilesCache = null
-				this.listDirectoriesCache = null
-				this.listDirectoriesRecursiveCache = null
+						this.itemSizeCache = {}
+						this.listDirectoriesCache = null
+						this.listDirectoriesRecursiveCache = null
+						this.getLocalFileCache = {}
+						this.isItemStoredCache = {}
+						this.getLocalDirectoryCache = {}
+					})
+				)
 			}
+
+			driveItemStoredOfflineQueryUpdate({
+				updater: false,
+				params: {
+					uuid: item.data.uuid,
+					type: item.type
+				}
+			})
 		})
 
 		if (!result.success) {
 			throw result.error
 		}
+	}
+
+	public async getLocalFile(item: DriveItem): Promise<FileSystem.File | null> {
+		if (this.getLocalFileCache[item.data.uuid]) {
+			return this.getLocalFileCache[item.data.uuid] ?? null
+		}
+
+		if (item.type !== "file" && item.type !== "sharedFile") {
+			return null
+		}
+
+		const index = await this.readIndex()
+		const fileEntry = index.files[item.data.uuid]
+
+		if (!fileEntry || (fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile")) {
+			return null
+		}
+
+		const file = new FileSystem.File(
+			FileSystem.Paths.join(this.filesDirectory.uri, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
+		)
+
+		if (file.exists) {
+			this.getLocalFileCache[item.data.uuid] = file
+
+			return file
+		}
+
+		const { directories: topLevelDirectories } = await this.listDirectories()
+
+		const results = await Promise.all(
+			topLevelDirectories.map(async ({ item: directoryItem }) => {
+				if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+					return null
+				}
+
+				const directoryMetaFile = new FileSystem.File(
+					FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, `${directoryItem.data.uuid}.filenmeta`)
+				)
+
+				if (!directoryMetaFile.exists) {
+					return null
+				}
+
+				const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
+
+				for (const path in directoryMeta.entries) {
+					const entryMeta = directoryMeta.entries[path]
+
+					if (!entryMeta || (entryMeta.item.type !== "file" && entryMeta.item.type !== "sharedFile")) {
+						continue
+					}
+
+					if (entryMeta.item.data.uuid === item.data.uuid) {
+						const file = new FileSystem.File(
+							FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, path)
+						)
+
+						if (file.exists) {
+							return file
+						}
+					}
+				}
+
+				return null
+			})
+		)
+
+		const foundFile = results.find(f => f !== null) ?? null
+
+		if (!foundFile || !foundFile.exists) {
+			return null
+		}
+
+		this.getLocalFileCache[item.data.uuid] = foundFile
+
+		return foundFile
+	}
+
+	public async getLocalDirectory(item: DriveItem): Promise<FileSystem.Directory | null> {
+		if (this.getLocalDirectoryCache[item.data.uuid]) {
+			return this.getLocalDirectoryCache[item.data.uuid] ?? null
+		}
+
+		if (item.type !== "directory" && item.type !== "sharedDirectory") {
+			return null
+		}
+
+		const { directories: topLevelDirectories } = await this.listDirectories()
+
+		const results = await Promise.all(
+			topLevelDirectories.map(async ({ item: directoryItem }) => {
+				if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+					return null
+				}
+
+				const directoryMetaFile = new FileSystem.File(
+					FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, `${directoryItem.data.uuid}.filenmeta`)
+				)
+
+				if (!directoryMetaFile.exists) {
+					return null
+				}
+
+				const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
+
+				if (
+					directoryMeta.item.data.uuid === item.data.uuid &&
+					(directoryMeta.item.type === "directory" || directoryMeta.item.type === "sharedDirectory")
+				) {
+					const directory = new FileSystem.Directory(
+						FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid)
+					)
+
+					if (directory.exists) {
+						return directory
+					}
+				}
+
+				for (const path in directoryMeta.entries) {
+					const entryMeta = directoryMeta.entries[path]
+
+					if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
+						continue
+					}
+
+					if (entryMeta.item.data.uuid === item.data.uuid) {
+						const directory = new FileSystem.Directory(
+							FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, path)
+						)
+
+						if (directory.exists) {
+							return directory
+						}
+					}
+				}
+
+				return null
+			})
+		)
+
+		const foundDirectory = results.find(f => f !== null) ?? null
+
+		if (!foundDirectory || !foundDirectory.exists) {
+			return null
+		}
+
+		this.getLocalDirectoryCache[item.data.uuid] = foundDirectory
+
+		return foundDirectory
 	}
 }
 

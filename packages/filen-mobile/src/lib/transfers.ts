@@ -4,7 +4,6 @@ import * as FileSystem from "expo-file-system"
 import {
 	type Dir,
 	File,
-	AnyDirEnumWithShareInfo,
 	type FileWithPath,
 	type DirWithPath,
 	FilenSdkError,
@@ -12,7 +11,9 @@ import {
 	ManagedFuture,
 	ParentUuid,
 	type DirEnum,
-	DirEnum_Tags
+	DirEnum_Tags,
+	AnyDirEnum,
+	DirWithMetaEnum_Tags
 } from "@filen/sdk-rs"
 import useTransfersStore from "@/stores/useTransfers.store"
 import {
@@ -582,6 +583,34 @@ class Transfers {
 					directories: []
 				}
 
+				const remoteDir = (() => {
+					switch (item.type) {
+						case "directory": {
+							return new AnyDirEnum.Dir(item.data)
+						}
+
+						case "sharedDirectory": {
+							switch (item.data.dir.tag) {
+								case DirWithMetaEnum_Tags.Dir: {
+									return new AnyDirEnum.Dir(item.data.dir.inner[0])
+								}
+
+								case DirWithMetaEnum_Tags.Root: {
+									return new AnyDirEnum.Root(item.data.dir.inner[0])
+								}
+
+								default: {
+									throw new Error("Invalid dir tag")
+								}
+							}
+						}
+
+						default: {
+							throw new Error("Invalid directory type")
+						}
+					}
+				})()
+
 				await sdkClient.downloadDirRecursively(
 					normalizeFilePathForSdk(destination.uri),
 					{
@@ -679,9 +708,7 @@ class Transfers {
 							)
 						}
 					},
-					item.type === "directory"
-						? new AnyDirEnumWithShareInfo.Dir(item.data)
-						: new AnyDirEnumWithShareInfo.SharedDir(item.data),
+					remoteDir,
 					ManagedFuture.new({
 						pauseSignal: compositePauseSignal.getSignal(),
 						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)

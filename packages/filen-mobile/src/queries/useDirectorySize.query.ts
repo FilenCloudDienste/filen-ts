@@ -4,7 +4,7 @@ import auth from "@/lib/auth"
 import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
-import { AnyDirEnumWithShareInfo_Tags } from "@filen/sdk-rs"
+import { AnyDirEnumWithShareInfo, DirWithMetaEnum_Tags } from "@filen/sdk-rs"
 import offline from "@/lib/offline"
 import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
 
@@ -19,25 +19,48 @@ export async function fetchData(
 	params: UseDirectorySizeQueryParams & {
 		signal?: AbortSignal
 	}
-) {
-	const dir = cache.directoryUuidToAnyDirWithShareInfo.get(params.uuid)
-
-	if (!dir) {
-		throw new Error("Directory not found in cache")
-	}
+): Promise<{
+	size: number
+	files: number
+	dirs: number
+}> {
+	const dir = cache.directoryUuidToDir.get(params.uuid)
+	const sharedDir = cache.sharedDirUuidToDir.get(params.uuid)
 
 	if (params.offline) {
-		if (dir.tag === AnyDirEnumWithShareInfo_Tags.Root) {
-			return BigInt(0)
+		if (dir) {
+			return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(dir)))
 		}
 
-		return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner[0])))
+		if (sharedDir) {
+			return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(sharedDir)))
+		}
+
+		throw new Error("Directory not found in cache")
 	}
 
 	const sdkClient = await auth.getSdkClient()
 
-	const { size } = await sdkClient.getDirSize(
-		dir,
+	const anyDir = (() => {
+		if (sharedDir) {
+			return sharedDir.dir.tag === DirWithMetaEnum_Tags.Dir
+				? new AnyDirEnumWithShareInfo.SharedDir(sharedDir)
+				: new AnyDirEnumWithShareInfo.Root(sharedDir.dir.inner[0])
+		}
+
+		if (dir) {
+			return new AnyDirEnumWithShareInfo.Dir(dir)
+		}
+
+		return undefined
+	})()
+
+	if (!anyDir) {
+		throw new Error("Directory not found in cache")
+	}
+
+	const { size, files, dirs } = await sdkClient.getDirSize(
+		anyDir,
 		params?.signal
 			? {
 					signal: params.signal
@@ -45,7 +68,11 @@ export async function fetchData(
 			: undefined
 	)
 
-	return Number(size)
+	return {
+		size: Number(size),
+		files: Number(files),
+		dirs: Number(dirs)
+	}
 }
 
 export function useDirectorySizeQuery(

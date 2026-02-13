@@ -113,6 +113,54 @@ export const RootLayout = memo(() => {
 															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
 														}}
 													/>
+													<Stack.Screen
+														name="driveItemInfo"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
+													<Stack.Screen
+														name="changeDirectoryColor"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
+													<Stack.Screen
+														name="trash"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
+													<Stack.Screen
+														name="recents"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
+													<Stack.Screen
+														name="favorites"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
+													<Stack.Screen
+														name="sharedIn"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
+													<Stack.Screen
+														name="sharedOut"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
+													<Stack.Screen
+														name="links"
+														options={{
+															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+														}}
+													/>
 												</Stack>
 												{isAuthed && (
 													<Fragment>

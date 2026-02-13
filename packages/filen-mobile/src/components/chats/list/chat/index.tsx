@@ -103,7 +103,7 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 						<View className={cn("size-2.5 rounded-full shrink-0", unreadCount > 0 ? "bg-blue-500" : "bg-transparent")} />
 						{areChatsSelected && (
 							<AnimatedView
-								className="flex-row h-full items-center justify-center bg-transparent px-2"
+								className="flex-row h-full items-center justify-center bg-transparent px-2 shrink-0"
 								entering={FadeIn}
 								exiting={FadeOut}
 							>

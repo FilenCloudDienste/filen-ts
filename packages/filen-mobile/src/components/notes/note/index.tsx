@@ -173,7 +173,7 @@ export const Note = memo(
 							>
 								{areNotesSelected && (
 									<AnimatedView
-										className="flex-row h-full items-center justify-center bg-transparent pr-2"
+										className="flex-row h-full items-center justify-center bg-transparent pr-2 shrink-0"
 										entering={FadeIn}
 										exiting={FadeOut}
 									>

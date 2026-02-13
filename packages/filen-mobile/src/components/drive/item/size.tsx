@@ -23,27 +23,19 @@ export const Size = memo(
 				offline: origin === "offline"
 			},
 			{
-				enabled: info.item.item.type === "directory"
+				enabled: info.item.item.type === "directory" || info.item.item.type === "sharedDirectory"
 			}
 		)
 
 		if (info.item.item.type === "file" || info.item.item.type === "sharedFile") {
-			return formatBytes(Number(info.item.item.data.size))
+			return ` • ${formatBytes(Number(info.item.item.data.size))}`
 		}
 
 		if (directorySizeQuery.status !== "success") {
 			return null
 		}
 
-		return formatBytes(Number(directorySizeQuery.data))
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return (
-				prevProps.info.item.item.data.uuid === nextProps.info.item.item.data.uuid &&
-				prevProps.info.item.item.type === nextProps.info.item.item.type
-			)
-		}
+		return ` • ${formatBytes(directorySizeQuery.data.size)}`
 	}
 )
 

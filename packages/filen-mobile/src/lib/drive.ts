@@ -1,8 +1,9 @@
 import auth from "@/lib/auth"
-import { NonRootItem, NonRootItemTagged_Tags, CreatedTime } from "@filen/sdk-rs"
+import { NonRootItem, NonRootItemTagged_Tags, CreatedTime, DirColor, type FileVersion } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/utils"
+import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import { driveItemVersionsQueryUpdate } from "@/queries/useDriveItemVersions.query"
 
 class Drive {
 	public async favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
@@ -27,30 +28,13 @@ class Drive {
 		)
 
 		if (modifiedItem.tag === NonRootItemTagged_Tags.Dir) {
-			const { meta, shared, dir } = unwrapDirMeta(modifiedItem.inner[0])
-
-			if (!shared) {
-				item = {
-					type: "directory",
-					data: {
-						...dir,
-						size: item.data.size,
-						decryptedMeta: meta
-					}
-				}
-			}
+			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem.inner[0]))
 		} else {
-			const { meta, shared, file } = unwrapFileMeta(modifiedItem.inner[0])
+			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem.inner[0]))
+		}
 
-			if (!shared) {
-				item = {
-					type: "file",
-					data: {
-						...file,
-						decryptedMeta: meta
-					}
-				}
-			}
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
 		}
 
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
@@ -107,30 +91,13 @@ class Drive {
 
 		// Ugly but works for now, until we have a better way
 		if (!("region" in modifiedItem)) {
-			const { meta, shared, dir } = unwrapDirMeta(modifiedItem)
-
-			if (!shared) {
-				item = {
-					type: "directory",
-					data: {
-						...dir,
-						size: item.data.size,
-						decryptedMeta: meta
-					}
-				}
-			}
+			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
 		} else {
-			const { meta, shared, file } = unwrapFileMeta(modifiedItem)
+			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
+		}
 
-			if (!shared) {
-				item = {
-					type: "file",
-					data: {
-						...file,
-						decryptedMeta: meta
-					}
-				}
-			}
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
 		}
 
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
@@ -139,6 +106,51 @@ class Drive {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuid,
 				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+			})
+		}
+
+		return item
+	}
+
+	public async deletePermanently({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const sdkClient = await auth.getSdkClient()
+		const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
+
+		if (item.type === "directory") {
+			await sdkClient.deleteDirPermanently(
+				item.data,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		} else {
+			await sdkClient.deleteFilePermanently(
+				item.data,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		}
+
+		if (unwrappedParentUuidPrevious) {
+			driveItemsQueryUpdateGlobal({
+				parentUuid: unwrappedParentUuidPrevious,
+				updater: prev =>
+					prev.filter(i => {
+						if (i.data.uuid === item.data.uuid && i.type === item.type) {
+							return false
+						}
+
+						return true
+					})
 			})
 		}
 
@@ -174,30 +186,9 @@ class Drive {
 
 		// Ugly but works for now, until we have a better way
 		if (!("region" in modifiedItem)) {
-			const { meta, shared, dir } = unwrapDirMeta(modifiedItem)
-
-			if (!shared) {
-				item = {
-					type: "directory",
-					data: {
-						...dir,
-						size: item.data.size,
-						decryptedMeta: meta
-					}
-				}
-			}
+			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
 		} else {
-			const { meta, shared, file } = unwrapFileMeta(modifiedItem)
-
-			if (!shared) {
-				item = {
-					type: "file",
-					data: {
-						...file,
-						decryptedMeta: meta
-					}
-				}
-			}
+			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
 		}
 
 		if (unwrappedParentUuidPrevious) {
@@ -234,6 +225,195 @@ class Drive {
 		})
 
 		return item
+	}
+
+	public async setDirColor({ item, color, signal }: { item: DriveItem; color: DirColor; signal?: AbortSignal }) {
+		if (item.type !== "directory") {
+			throw new Error("Invalid item type")
+		}
+
+		const sdkClient = await auth.getSdkClient()
+
+		const modifiedDir = await sdkClient.setDirColor(
+			item.data,
+			color,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedDir))
+
+		if (item.type !== "directory") {
+			throw new Error("Invalid item type")
+		}
+
+		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+		if (unwrappedParentUuid) {
+			driveItemsQueryUpdateGlobal({
+				parentUuid: unwrappedParentUuid,
+				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+			})
+		}
+
+		return item
+	}
+
+	public async restoreFileVersion({ item, version, signal }: { item: DriveItem; version: FileVersion; signal?: AbortSignal }) {
+		if (item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const sdkClient = await auth.getSdkClient()
+
+		const modifiedFile = await sdkClient.restoreFileVersion(
+			item.data,
+			version,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedFile))
+
+		if (item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+		if (unwrappedParentUuid) {
+			driveItemsQueryUpdateGlobal({
+				parentUuid: unwrappedParentUuid,
+				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+			})
+		}
+
+		return item
+	}
+
+	public async emptyTrash({ signal }: { signal?: AbortSignal }) {
+		const sdkClient = await auth.getSdkClient()
+
+		await sdkClient.emptyTrash(
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "trash",
+					uuid: null
+				}
+			},
+			updater: () => []
+		})
+	}
+
+	public async deleteVersion({ item, version, signal }: { item: DriveItem; version: FileVersion; signal?: AbortSignal }) {
+		if (item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const sdkClient = await auth.getSdkClient()
+
+		await sdkClient.deleteFileVersion(
+			version,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		driveItemVersionsQueryUpdate({
+			params: {
+				uuid: item.data.uuid
+			},
+			updater: prev => prev.filter(v => v.uuid !== version.uuid)
+		})
+	}
+
+	public async restore({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const sdkClient = await auth.getSdkClient()
+
+		const modifiedItem =
+			item.type === "directory"
+				? await sdkClient.restoreDir(
+						item.data,
+						signal
+							? {
+									signal
+								}
+							: undefined
+					)
+				: await sdkClient.restoreFile(
+						item.data,
+						signal
+							? {
+									signal
+								}
+							: undefined
+					)
+
+		// Ugly but works for now, until we have a better way
+		if (!("region" in modifiedItem)) {
+			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
+		} else {
+			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
+		}
+
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+		if (unwrappedParentUuid) {
+			driveItemsQueryUpdateGlobal({
+				parentUuid: unwrappedParentUuid,
+				updater: prev => [
+					...prev.filter(i => {
+						if (i.data.uuid === item.data.uuid && i.type === item.type) {
+							return false
+						}
+
+						return true
+					}),
+					item
+				]
+			})
+		}
+
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "trash",
+					uuid: null
+				}
+			},
+			updater: prev =>
+				prev.filter(i => {
+					if (i.data.uuid === item.data.uuid && i.type === item.type) {
+						return false
+					}
+
+					return true
+				})
+		})
 	}
 }
 

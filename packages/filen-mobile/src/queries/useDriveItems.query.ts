@@ -6,7 +6,6 @@ import cache from "@/lib/cache"
 import { sortParams } from "@filen/utils"
 import {
 	DirEnum,
-	DirWithMetaEnum,
 	AnyDirEnumWithShareInfo,
 	NonRootItemTagged,
 	type File,
@@ -16,7 +15,7 @@ import {
 	DirWithMetaEnum_Tags
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
-import { unwrapFileMeta, unwrapDirMeta } from "@/lib/utils"
+import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import type { DriveItem } from "@/types"
 import offline from "@/lib/offline"
 
@@ -79,10 +78,10 @@ export async function fetchData(
 						return undefined
 					}
 
-					const cachedDir = cache.directoryUuidToDir.get(params.path.uuid)
+					const cachedDir = cache.sharedDirUuidToDir.get(params.path.uuid)
 
 					if (cachedDir) {
-						return new DirWithMetaEnum.Dir(cachedDir)
+						return cachedDir.dir
 					}
 
 					return undefined
@@ -97,20 +96,62 @@ export async function fetchData(
 						return undefined
 					}
 
-					const cachedDir = cache.directoryUuidToDir.get(params.path.uuid)
+					const cachedDir = cache.sharedDirUuidToDir.get(params.path.uuid)
 
 					if (cachedDir) {
-						return new DirWithMetaEnum.Dir(cachedDir)
+						return cachedDir
 					}
 
 					return undefined
 				})()
 
-				return sdkClient.listOutShared(dir, params.path.contact, signal)
+				if (!dir) {
+					return sdkClient.listOutShared(undefined, undefined, signal)
+				}
+
+				if (dir.sharingRole.inner[0].id === (await sdkClient.toStringified()).userId) {
+					return {
+						dirs: [],
+						files: []
+					}
+				}
+
+				const contacts = await sdkClient.getContacts(signal)
+				const contact = contacts.find(contact => contact.userId === dir.sharingRole.inner[0].id)
+
+				return sdkClient.listOutShared(dir.dir, contact, signal)
 			}
 
 			case "trash": {
 				return sdkClient.listTrash(signal)
+			}
+
+			case "links": {
+				const dir = (() => {
+					if (!params.path.uuid || params.path.uuid.length === 0) {
+						return null
+					}
+
+					const cachedDir = cache.directoryUuidToDir.get(params.path.uuid)
+
+					if (cachedDir) {
+						return new DirEnum.Dir(cachedDir)
+					}
+
+					return null
+				})()
+
+				// If not parent is provided, we need to list the root links
+				if (!dir) {
+					// TODO: wait for sdk list links impl
+					return {
+						dirs: [],
+						files: []
+					}
+				}
+
+				// If we have a parent dir we can simply list it from the main drive
+				return sdkClient.listDir(dir, signal)
 			}
 
 			case "offline": {
@@ -203,48 +244,34 @@ export async function fetchData(
 	const items: DriveItem[] = []
 
 	for (const resultDir of result.dirs) {
-		const { meta, shared, dir, uuid } = unwrapDirMeta(resultDir)
+		const unwrappedDir = unwrapDirMeta(resultDir)
+		const item = unwrappedDirIntoDriveItem(unwrappedDir)
 
-		if (!uuid) {
-			continue
-		}
+		cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta?.name ?? unwrappedDir.uuid)
+		cache.uuidToDriveItem.set(unwrappedDir.uuid, item)
 
-		if (!shared) {
-			items.push({
-				type: "directory",
-				data: {
-					...dir,
-					size: 0n,
-					decryptedMeta: meta
-				}
-			})
+		if (!unwrappedDir.shared) {
+			items.push(item)
 
-			cache.directoryUuidToDir.set(uuid, dir)
-			cache.directoryUuidToName.set(uuid, meta?.name ?? uuid)
-			cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.Dir(dir))
+			cache.directoryUuidToDir.set(unwrappedDir.uuid, unwrappedDir.dir)
+			cache.directoryUuidToAnyDirWithShareInfo.set(unwrappedDir.uuid, new AnyDirEnumWithShareInfo.Dir(unwrappedDir.dir))
 		} else {
-			items.push({
-				type: "sharedDirectory",
-				data: {
-					...dir,
-					size: 0n,
-					decryptedMeta: meta,
-					uuid
-				}
-			})
+			items.push(item)
 
-			cache.sharedDirUuidToDir.set(uuid, dir)
-			cache.sharedDirectoryUuidToName.set(uuid, meta?.name ?? uuid)
+			cache.sharedDirUuidToDir.set(unwrappedDir.uuid, unwrappedDir.dir)
 
-			switch (dir.dir.tag) {
+			switch (unwrappedDir.dir.dir.tag) {
 				case DirWithMetaEnum_Tags.Dir: {
-					cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.SharedDir(dir))
+					cache.directoryUuidToAnyDirWithShareInfo.set(unwrappedDir.uuid, new AnyDirEnumWithShareInfo.SharedDir(unwrappedDir.dir))
 
 					break
 				}
 
 				case DirWithMetaEnum_Tags.Root: {
-					cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.Root(dir.dir.inner[0]))
+					cache.directoryUuidToAnyDirWithShareInfo.set(
+						unwrappedDir.uuid,
+						new AnyDirEnumWithShareInfo.Root(unwrappedDir.dir.dir.inner[0])
+					)
 
 					break
 				}
@@ -253,26 +280,15 @@ export async function fetchData(
 	}
 
 	for (const resultFile of result.files) {
-		const { meta, shared, file } = unwrapFileMeta(resultFile)
+		const unwrappedFile = unwrapFileMeta(resultFile)
+		const item = unwrappedFileIntoDriveItem(unwrappedFile)
 
-		if (!shared) {
-			items.push({
-				type: "file",
-				data: {
-					...file,
-					decryptedMeta: meta
-				}
-			})
+		items.push(item)
+
+		if (!unwrappedFile.shared) {
+			cache.uuidToDriveItem.set(unwrappedFile.file.uuid, item)
 		} else {
-			items.push({
-				type: "sharedFile",
-				data: {
-					...file,
-					size: meta?.size ?? 0n,
-					decryptedMeta: meta,
-					uuid: file.file.uuid
-				}
-			})
+			cache.uuidToDriveItem.set(unwrappedFile.file.file.uuid, item)
 		}
 	}
 

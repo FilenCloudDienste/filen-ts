@@ -1,8 +1,8 @@
 import { memo } from "@/lib/memo"
 import Drive from "@/components/drive"
 
-const Offline = memo(() => {
+const Recents = memo(() => {
 	return <Drive />
 })
 
-export default Offline
+export default Recents

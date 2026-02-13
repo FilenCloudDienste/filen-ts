@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
-import { type View as RNView, RefreshControl, ActivityIndicator, Platform } from "react-native"
+import { type View as RNView, RefreshControl, ActivityIndicator, Platform, useWindowDimensions } from "react-native"
 import View from "@/components/ui/view"
 import useViewLayout from "@/hooks/useViewLayout"
 import { cn, run, type DeferFn } from "@filen/utils"
@@ -37,6 +37,7 @@ export const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAt
 	const { layout, onLayout } = useViewLayout(viewRef)
 	const [refreshing, setRefreshing] = useState<boolean>(false)
 	const textForeground = useResolveClassNames("text-foreground")
+	const windowDimensions = useWindowDimensions()
 
 	const itemsPerRow = useMemo(() => {
 		if (props.itemsPerRow) {
@@ -114,6 +115,7 @@ export const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAt
 				refreshing={refreshing}
 				refreshControl={refreshControl}
 				numColumns={itemsPerRow}
+				drawDistance={Math.floor(Math.max(100, layout.height / 2, windowDimensions.height / 2))}
 				maxItemsInRecyclePool={0}
 				removeClippedSubviews={Platform.OS === "android"}
 				showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}

@@ -1,8 +1,8 @@
 import { memo } from "@/lib/memo"
 import Drive from "@/components/drive"
 
-const Offline = memo(() => {
+const Trash = memo(() => {
 	return <Drive />
 })
 
-export default Offline
+export default Trash

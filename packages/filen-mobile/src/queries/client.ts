@@ -153,14 +153,13 @@ export async function restoreQueries(): Promise<void> {
 								}
 
 								if (item.type === "sharedDirectory") {
-									const { meta, uuid } = unwrapDirMeta(item.data)
+									const { uuid } = unwrapDirMeta(item.data)
 
 									if (!uuid) {
 										continue
 									}
 
 									cache.sharedDirUuidToDir.set(uuid, item.data)
-									cache.sharedDirectoryUuidToName.set(uuid, meta?.name ?? uuid)
 									cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.SharedDir(item.data))
 								}
 							}
@@ -185,6 +184,7 @@ export async function restoreQueries(): Promise<void> {
 		)
 	} catch (e) {
 		console.error(e)
+		alerts.error(e)
 	}
 }
 
@@ -226,9 +226,7 @@ export const DEFAULT_QUERY_OPTIONS: Pick<
 			return
 		}
 
-		if (err instanceof Error) {
-			alerts.error(err.message)
-		}
+		alerts.error(err)
 
 		return false
 	}
@@ -273,9 +271,7 @@ export const DEFAULT_QUERY_OPTIONS_ETERNAL: Pick<
 			return
 		}
 
-		if (err instanceof Error) {
-			alerts.error(err.message)
-		}
+		alerts.error(err)
 
 		return false
 	}
@@ -317,6 +313,8 @@ export function useDefaultQueryParams(
 }
 
 export class QueryUpdater {
+	private readonly persistMutex = new Semaphore(1)
+
 	public get<T>(queryKey: unknown[]): T | undefined {
 		return queryClient.getQueryData<T>(queryKey)
 	}
@@ -336,7 +334,15 @@ export class QueryUpdater {
 			}
 		)
 
-		queryClientPersister.persistQueryByKey(queryKey, queryClient).catch(console.error)
+		run(async defer => {
+			await this.persistMutex.acquire()
+
+			defer(() => {
+				this.persistMutex.release()
+			})
+
+			await queryClientPersister.persistQueryByKey(queryKey, queryClient)
+		})
 	}
 }
 

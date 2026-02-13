@@ -1,4 +1,5 @@
 import type { Dir, Note, SharedDir, AnyDirEnumWithShareInfo, Chat } from "@filen/sdk-rs"
+import type { DriveItem } from "@/types"
 
 const cache = {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -7,10 +8,10 @@ const cache = {
 	directoryUuidToDir: new Map<string, Dir>(),
 	noteUuidToNote: new Map<string, Note>(),
 	sharedDirUuidToDir: new Map<string, SharedDir>(),
-	sharedDirectoryUuidToName: new Map<string, string>(),
 	sharedDirectoryUuidToDir: new Map<string, SharedDir>(),
 	directoryUuidToAnyDirWithShareInfo: new Map<string, AnyDirEnumWithShareInfo>(),
-	chatUuidToChat: new Map<string, Chat>()
+	chatUuidToChat: new Map<string, Chat>(),
+	uuidToDriveItem: new Map<string, DriveItem>()
 }
 
 export default cache
