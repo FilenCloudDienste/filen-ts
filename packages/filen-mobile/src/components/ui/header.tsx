@@ -54,7 +54,7 @@ export const HeaderLeftRightWrapper = memo(
 						ios: liquidGlassAvailable ? "h-9 min-w-9" : "",
 						default: ""
 					}),
-					items && items.length >= 2 ? "gap-4" : "",
+					items && items.length >= 2 ? "gap-2" : "",
 					Platform.select({
 						ios: items && items.length >= 2 && liquidGlassAvailable ? "px-2" : "",
 						default: ""
@@ -69,7 +69,7 @@ export const HeaderLeftRightWrapper = memo(
 						case "text": {
 							return (
 								<View
-									className="bg-transparent min-h-9 min-w-9"
+									className="bg-transparent min-h-9 min-w-9 flex-row items-center"
 									key={index}
 								>
 									<Text {...item.props} />
@@ -133,7 +133,7 @@ export const HeaderLeftRightWrapper = memo(
 						case "custom": {
 							return (
 								<View
-									className="bg-transparent min-h-9 min-w-9"
+									className="bg-transparent min-h-9 min-w-9 flex-row items-center"
 									key={index}
 								>
 									{item.children}
@@ -144,7 +144,7 @@ export const HeaderLeftRightWrapper = memo(
 						case "loader": {
 							return (
 								<View
-									className="min-h-9 min-w-9 size-9 items-center justify-center rounded-full bg-transparent"
+									className="size-9 flex-row items-center justify-center rounded-full bg-transparent"
 									key={index}
 								>
 									<ActivityIndicator {...item.props} />
@@ -197,7 +197,7 @@ export const Header = memo(
 	}) => {
 		const bgBackground = useResolveClassNames("bg-background")
 		const textForeground = useResolveClassNames("text-foreground")
-		const liquidGlassAvailable = useMemo(() => isLiquidGlassAvailable(), [])
+		const liquidGlassAvailable = isLiquidGlassAvailable()
 
 		const headerRightItems = useMemo(() => {
 			const items = typeof rightItems === "function" ? rightItems() : rightItems

@@ -27,7 +27,6 @@ import { enableFreeze } from "react-native-screens"
 import Socket from "@/components/socket"
 import Pathname from "@/components/pathname"
 import { Platform } from "react-native"
-import alerts from "@/lib/alerts"
 import useEffectOnce from "@/hooks/useEffectOnce"
 
 enableFreeze(true)
@@ -54,7 +53,6 @@ export const RootLayout = memo(() => {
 
 		if (!result.success) {
 			console.error(result.error)
-			alerts.error(result.error)
 
 			setIsSetupDone(false)
 
