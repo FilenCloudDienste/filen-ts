@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
-import { type View as RNView, RefreshControl, ActivityIndicator, Platform, useWindowDimensions } from "react-native"
+import { type View as RNView, RefreshControl, ActivityIndicator, useWindowDimensions } from "react-native"
 import View from "@/components/ui/view"
 import useViewLayout from "@/hooks/useViewLayout"
 import { cn, run, type DeferFn } from "@filen/utils"
@@ -85,6 +85,28 @@ export const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAt
 		)
 	}, [props, refreshing, onRefresh])
 
+	const emptyComponent = useMemo(() => {
+		if (props.loading) {
+			return null
+		}
+
+		if (props.emptyComponent) {
+			return (
+				<View
+					className="flex-1 bg-transparent"
+					style={{
+						width: layout.width,
+						height: layout.height
+					}}
+				>
+					{props.emptyComponent()}
+				</View>
+			)
+		}
+
+		return null
+	}, [props, layout])
+
 	if (!props.keyExtractor) {
 		throw new Error("VirtualList requires a keyExtractor prop")
 	}
@@ -96,12 +118,12 @@ export const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAt
 	return (
 		<View
 			ref={viewRef}
-			className={cn("flex-1", props.parentClassName)}
+			className={cn("flex-1 bg-transparent", props.parentClassName)}
 			onLayout={onLayout}
 		>
 			{props.loading && (
 				<AnimatedView
-					className="absolute inset-0 z-99 bg-background items-center justify-center"
+					className="absolute inset-0 z-99 bg-transparent items-center justify-center"
 					exiting={FadeOut}
 				>
 					<ActivityIndicator
@@ -117,31 +139,10 @@ export const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAt
 				numColumns={itemsPerRow}
 				drawDistance={Math.floor(Math.max(100, layout.height / 2, windowDimensions.height / 2))}
 				maxItemsInRecyclePool={0}
-				removeClippedSubviews={Platform.OS === "android"}
 				showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 				showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 				scrollEnabled={!props.loading && (props.data ?? []).length > 0}
-				ListEmptyComponent={() => {
-					if (props.loading) {
-						return null
-					}
-
-					if (props.emptyComponent) {
-						return (
-							<View
-								className="flex-1 bg-transparent"
-								style={{
-									width: layout.width,
-									height: layout.height
-								}}
-							>
-								{props.emptyComponent()}
-							</View>
-						)
-					}
-
-					return null
-				}}
+				ListEmptyComponent={emptyComponent}
 				ListFooterComponent={props.footerComponent}
 				ListHeaderComponent={props.headerComponent}
 				{...props}

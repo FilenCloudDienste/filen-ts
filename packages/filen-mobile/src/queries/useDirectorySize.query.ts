@@ -36,10 +36,12 @@ export async function fetchData(
 			return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(sharedDir)))
 		}
 
-		throw new Error("Directory not found in cache")
+		return {
+			size: 0,
+			files: 0,
+			dirs: 0
+		}
 	}
-
-	const sdkClient = await auth.getSdkClient()
 
 	const anyDir = (() => {
 		if (sharedDir) {
@@ -56,10 +58,15 @@ export async function fetchData(
 	})()
 
 	if (!anyDir) {
-		throw new Error("Directory not found in cache")
+		return {
+			size: 0,
+			files: 0,
+			dirs: 0
+		}
 	}
 
-	const { size, files, dirs } = await sdkClient.getDirSize(
+	const { authedSdkClient } = await auth.getSdkClients()
+	const { size, files, dirs } = await authedSdkClient.getDirSize(
 		anyDir,
 		params?.signal
 			? {

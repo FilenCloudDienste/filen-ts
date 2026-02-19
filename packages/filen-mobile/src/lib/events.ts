@@ -1,6 +1,7 @@
 import { EventEmitter } from "eventemitter3"
 import type { ShowActionSheetOptions } from "@/providers/actionSheet.provider"
 import type { NoteContentEdited } from "@filen/sdk-rs"
+import type { DriveItem } from "@/types"
 
 export type Events = {
 	secureStoreChange: {
@@ -26,6 +27,16 @@ export type Events = {
 	focusChatInput: {
 		chatUuid: string
 	}
+	driveSelect:
+		| {
+				id: string
+				selectedItems: DriveItem[]
+				cancelled: false
+		  }
+		| {
+				id: string
+				cancelled: true
+		  }
 }
 
 class TypedEventEmitter<T> {

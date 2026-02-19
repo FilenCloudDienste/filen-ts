@@ -20,7 +20,7 @@ class Setup {
 			const isAuthed = await auth.isAuthed()
 
 			if (isAuthed.isAuthed && isAuthed.stringifiedClient) {
-				await auth.setSdkClient(isAuthed.stringifiedClient)
+				await auth.setSdkClients(isAuthed.stringifiedClient)
 			}
 
 			await Promise.all([secureStore.init(), sqlite.init(), restoreQueries()])

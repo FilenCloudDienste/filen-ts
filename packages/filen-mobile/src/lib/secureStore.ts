@@ -12,6 +12,7 @@ import { Buffer } from "@craftzdog/react-native-buffer"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import isEqual from "react-fast-compare"
 import { useCallback } from "@/lib/memo"
+import { normalizeFilePathForSdk } from "@/lib/utils"
 
 class SecureStore {
 	private readonly mmkv: MMKV
@@ -49,17 +50,28 @@ class SecureStore {
 			)
 		}
 
+		const mmkvDirectory = new FileSystem.Directory(
+			Platform.select({
+				ios: FileSystem.Paths.join(
+					FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
+					"mmkv"
+				),
+				default: FileSystem.Paths.join(FileSystem.Paths.document.uri, "mmkv")
+			})
+		)
+
+		if (!mmkvDirectory.exists) {
+			mmkvDirectory.create({
+				intermediates: true,
+				idempotent: true
+			})
+		}
+
 		this.mmkv = createMMKV({
 			id: this.fallbackMmkvId,
 			mode: "single-process",
 			encryptionKey: process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"],
-			path: Platform.select({
-				ios: FileSystem.Paths.join(
-					FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
-					this.fallbackMmkvId
-				),
-				default: FileSystem.Paths.join(FileSystem.Paths.document.uri, this.fallbackMmkvId)
-			}),
+			path: normalizeFilePathForSdk(mmkvDirectory.uri),
 			readOnly: false
 		})
 	}
@@ -104,13 +116,6 @@ class SecureStore {
 		if (!result.success) {
 			throw result.error
 		}
-
-		console.log("SecureStore: Initialized", {
-			available: this.available,
-			keys: Object.keys(result.data.current),
-			encryptionKey: result.data.encryptionKey,
-			values: result.data.current
-		})
 	}
 
 	private async isAvailable(): Promise<boolean> {

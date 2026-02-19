@@ -8,7 +8,7 @@ import { type Note as TNote, NoteType, type NoteTag } from "@filen/sdk-rs"
 import { run, fastLocaleCompare } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { Platform, TextInput } from "react-native"
-import { useRouter, useLocalSearchParams } from "expo-router"
+import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { memo, useCallback, useMemo } from "@/lib/memo"
 import Note, { type ListItem as NoteListItem } from "@/components/notes/note"
@@ -30,7 +30,6 @@ import * as Sharing from "expo-sharing"
 
 const Header = memo(
 	({ withSearch, setSearchQuery }: { withSearch?: boolean; setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
-		const router = useRouter()
 		const stringifiedClient = useStringifiedClient()
 		const textForeground = useResolveClassNames("text-foreground")
 		const selectedNotes = useNotesStore(useShallow(state => state.selectedNotes))
@@ -170,7 +169,7 @@ const Header = memo(
 
 				router.push(Paths.join("/", "note", createResult.data.uuid))
 			},
-			[router, tag]
+			[tag]
 		)
 
 		const headerRightItems = useMemo(() => {
@@ -892,7 +891,6 @@ const Header = memo(
 			return items
 		}, [
 			withSearch,
-			router,
 			tag,
 			textForeground.color,
 			viewMode,
@@ -922,41 +920,20 @@ const Header = memo(
 			return [
 				{
 					type: "button",
-					props: {
-						hitSlop: 20,
-						onPress: () => {
-							if (viewMode === "notes") {
-								if (selectedNotes.length === onlyNotes.length) {
-									useNotesStore.getState().setSelectedNotes([])
-
-									return
-								}
-
-								useNotesStore.getState().setSelectedNotes(onlyNotes)
-							} else {
-								if (selectedTags.length === notesTags.length) {
-									useNotesStore.getState().setSelectedTags([])
-
-									return
-								}
-
-								useNotesStore.getState().setSelectedTags(notesTags)
-							}
-						}
+					icon: {
+						name: "close-outline",
+						color: textForeground.color,
+						size: 20
 					},
-					text: {
-						children:
-							viewMode === "notes"
-								? selectedNotes.length === onlyNotes.length
-									? "tbd_deselectAll"
-									: "tbd_selectAll"
-								: selectedTags.length === notesTags.length
-									? "tbd_deselectAll"
-									: "tbd_selectAll"
+					props: {
+						onPress: () => {
+							useNotesStore.getState().setSelectedNotes([])
+							useNotesStore.getState().setSelectedTags([])
+						}
 					}
 				}
 			] satisfies HeaderItem[]
-		}, [selectedNotes, selectedTags, viewMode, onlyNotes, notesTags])
+		}, [selectedNotes, selectedTags, textForeground.color])
 
 		const title = useMemo(() => {
 			if (viewMode === "notes") {
@@ -1192,6 +1169,18 @@ export const Notes = memo(({ withSearch }: { withSearch?: boolean }) => {
 		return notesViewMode
 	}, [tag, notesViewMode])
 
+	useFocusEffect(
+		useCallback(() => {
+			useNotesStore.getState().setSelectedNotes([])
+			useNotesStore.getState().setSelectedTags([])
+
+			return () => {
+				useNotesStore.getState().setSelectedNotes([])
+				useNotesStore.getState().setSelectedTags([])
+			}
+		}, [])
+	)
+
 	return (
 		<Fragment>
 			<Header
@@ -1211,6 +1200,7 @@ export const Notes = memo(({ withSearch }: { withSearch?: boolean }) => {
 							keyExtractor={keyExtractorNotesView}
 							data={notes}
 							renderItem={renderItemNotesView}
+							loading={notesQuery.status !== "success"}
 							onRefresh={onRefresh}
 							emptyComponent={() => {
 								return (
@@ -1227,6 +1217,7 @@ export const Notes = memo(({ withSearch }: { withSearch?: boolean }) => {
 							contentContainerClassName="pb-40"
 							keyExtractor={keyExtractorTagsView}
 							data={notesTags}
+							loading={notesTagsQuery.status !== "success"}
 							renderItem={renderItemTagsView}
 							onRefresh={onRefresh}
 							emptyComponent={() => {

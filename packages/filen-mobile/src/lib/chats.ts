@@ -8,9 +8,9 @@ class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
 
 	public async listBefore({ chat, before, signal }: { chat: Chat; before: bigint; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		return await sdkClient.listMessagesBefore(
+		return await authedSdkClient.listMessagesBefore(
 			chat,
 			before,
 			signal
@@ -34,7 +34,7 @@ class Chats {
 		signal?: AbortSignal
 		inflightId: string
 	}) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
 		await this.sendTyping({
 			chat,
@@ -42,7 +42,7 @@ class Chats {
 			signal
 		})
 
-		chat = await sdkClient.sendChatMessage(
+		chat = await authedSdkClient.sendChatMessage(
 			chat,
 			message,
 			replyTo,
@@ -100,9 +100,9 @@ class Chats {
 	}
 
 	public async sendTyping({ chat, type, signal }: { chat: Chat; type: ChatTypingType; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		return await sdkClient.sendTypingSignal(
+		return await authedSdkClient.sendTypingSignal(
 			chat,
 			type,
 			signal
@@ -114,9 +114,9 @@ class Chats {
 	}
 
 	public async deleteMessage({ chat, message, signal }: { chat: Chat; message: ChatMessage; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await sdkClient.deleteMessage(
+		chat = await authedSdkClient.deleteMessage(
 			chat,
 			message,
 			signal
@@ -155,9 +155,9 @@ class Chats {
 			return message
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		message = await sdkClient.editMessage(
+		message = await authedSdkClient.editMessage(
 			chat,
 			message,
 			newMessage,
@@ -201,9 +201,9 @@ class Chats {
 			return message
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		message = await sdkClient.disableMessageEmbed(
+		message = await authedSdkClient.disableMessageEmbed(
 			message,
 			signal
 				? {
@@ -241,9 +241,9 @@ class Chats {
 			return chat
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await sdkClient.renameChat(
+		chat = await authedSdkClient.renameChat(
 			chat,
 			newName,
 			signal
@@ -261,9 +261,9 @@ class Chats {
 	}
 
 	public async leave({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		await sdkClient.leaveChat(
+		await authedSdkClient.leaveChat(
 			chat,
 			signal
 				? {
@@ -288,7 +288,7 @@ class Chats {
 	}
 
 	public async delete({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
 		chatsQueryUpdate({
 			updater: prev => prev.filter(c => c.uuid !== chat.uuid)
@@ -301,7 +301,7 @@ class Chats {
 			updater: () => []
 		})
 
-		await sdkClient.deleteChat(
+		await authedSdkClient.deleteChat(
 			chat,
 			signal
 				? {
@@ -330,9 +330,9 @@ class Chats {
 			return chat
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await sdkClient.muteChat(
+		chat = await authedSdkClient.muteChat(
 			chat,
 			mute,
 			signal
@@ -350,9 +350,9 @@ class Chats {
 	}
 
 	public async create({ contacts, signal }: { contacts: Contact[]; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		const chat = await sdkClient.createChat(
+		const chat = await authedSdkClient.createChat(
 			contacts,
 			signal
 				? {
@@ -373,9 +373,9 @@ class Chats {
 			return chat
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await sdkClient.addChatParticipant(
+		chat = await authedSdkClient.addChatParticipant(
 			chat,
 			contact,
 			signal
@@ -397,9 +397,9 @@ class Chats {
 			return chat
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await sdkClient.removeChatParticipant(
+		chat = await authedSdkClient.removeChatParticipant(
 			chat,
 			contact,
 			signal
@@ -417,9 +417,9 @@ class Chats {
 	}
 
 	public async markRead({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		return await sdkClient.markChatRead(
+		return await authedSdkClient.markChatRead(
 			chat,
 			signal
 				? {
@@ -430,9 +430,9 @@ class Chats {
 	}
 
 	public async updateOnlineStatus({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await sdkClient.updateChatOnlineStatus(
+		chat = await authedSdkClient.updateChatOnlineStatus(
 			chat,
 			signal
 				? {
@@ -449,9 +449,9 @@ class Chats {
 	}
 
 	public async updateLastFocusTimesNow({ chats, signal }: { chats: Chat[]; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		chats = await sdkClient.updateLastChatFocusTimesNow(
+		chats = await authedSdkClient.updateLastChatFocusTimesNow(
 			chats,
 			signal
 				? {

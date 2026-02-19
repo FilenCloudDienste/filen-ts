@@ -7,21 +7,24 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
-import { SharingRole_Tags, type AnyDirEnumWithShareInfo, FileVersion } from "@filen/sdk-rs"
+import { SharingRole_Tags, type AnyDirEnumWithShareInfo, type FileVersion } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
 import { Platform } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import offline from "@/lib/offline"
-import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil } from "@/lib/utils"
+import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, unwrapAnyDirUuid } from "@/lib/utils"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
-import type { DrivePath } from "@/hooks/useDrivePath"
+import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
 import { pack } from "msgpackr"
 import { simpleDate } from "@/lib/time"
 import { actionSheet } from "@/providers/actionSheet.provider"
+import auth from "@/lib/auth"
+import { Buffer } from "@craftzdog/react-native-buffer"
+import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 
 export type DriveItemMenuOrigin =
 	| "drive"
@@ -54,6 +57,8 @@ export function createMenuButtons({
 }): MenuButton[] {
 	const menuButtons: MenuButton[] = []
 	const previewType = item.type === "file" || item.type === "sharedFile" ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
+	const isOwner =
+		item.type === "sharedFile" || item.type === "sharedDirectory" ? item.data.sharingRole.tag === SharingRole_Tags.Receiver : true
 
 	if (
 		(item.type === "directory" || item.type === "sharedDirectory") &&
@@ -70,16 +75,20 @@ export function createMenuButtons({
 			title: "tbd_open",
 			onPress: () => {
 				router.push({
-					pathname:
-						origin === "offline"
+					pathname: drivePath.selectOptions
+						? "/driveSelect/[uuid]"
+						: origin === "offline"
 							? "/offline/[uuid]"
-							: item.type === "directory"
-								? "/tabs/drive/[uuid]"
-								: item.data.sharingRole.tag === SharingRole_Tags.Receiver
-									? "/sharedIn/[uuid]"
-									: "/sharedOut/[uuid]",
+							: origin === "links"
+								? "/links/[uuid]"
+								: item.type === "directory"
+									? "/tabs/drive/[uuid]"
+									: !isOwner
+										? "/sharedIn/[uuid]"
+										: "/sharedOut/[uuid]",
 					params: {
-						uuid: item.data.uuid
+						uuid: item.data.uuid,
+						selectOptions: drivePath.selectOptions ? Buffer.from(pack(drivePath.selectOptions)).toString("base64") : undefined
 					}
 				})
 			}
@@ -202,7 +211,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if ((item.type === "file" || item.type === "directory") && parent && origin !== "sharedIn" && !isStoredOffline) {
+	if (parent && !isStoredOffline) {
 		downloadSubButtons.push({
 			id: "makeAvailableOffline",
 			title: "tbd_make_available_offline",
@@ -374,7 +383,6 @@ export function createMenuButtons({
 	if (
 		downloadSubButtons.length > 0 &&
 		origin !== "offline" &&
-		origin !== "trash" &&
 		(item.type === "file" || item.type === "sharedFile" ? (item.data.decryptedMeta?.size ?? 0) > 0 : true) &&
 		isOnline
 	) {
@@ -658,6 +666,58 @@ export function createMenuButtons({
 				}
 			}
 		})
+
+		menuButtons.push({
+			id: "move",
+			title: "tbd_move",
+			icon: "edit",
+			onPress: async () => {
+				const driveRootUuidResult = await run(async () => {
+					const { authedSdkClient } = await auth.getSdkClients()
+
+					return authedSdkClient.root().uuid
+				})
+
+				if (!driveRootUuidResult.success) {
+					console.error(driveRootUuidResult.error)
+					alerts.error(driveRootUuidResult.error)
+
+					return
+				}
+
+				router.push({
+					pathname: "/driveSelect/[uuid]",
+					params: {
+						uuid: driveRootUuidResult.data,
+						selectOptions: Buffer.from(
+							pack({
+								type: "single",
+								files: false,
+								directories: true,
+								intention: "move",
+								items: [item],
+								id: randomUUID()
+							} satisfies SelectOptions)
+						).toString("base64")
+					}
+				})
+			}
+		})
+
+		menuButtons.push({
+			id: "selectTest",
+			title: "tbd_selectTest",
+			onPress: async () => {
+				const res = await selectDriveItems({
+					type: "single",
+					files: false,
+					directories: true,
+					items: [item]
+				})
+
+				console.log("Selected items:", res)
+			}
+		})
 	}
 
 	// Removing offline files should only be allowed when inside the root of the offline view or when it is already stored offline
@@ -703,12 +763,162 @@ export function createMenuButtons({
 	}
 
 	if (
+		(origin === "links" || (item.type === "file" && origin === "preview")) &&
 		(item.type === "file" || item.type === "directory") &&
-		origin !== "trash" &&
-		origin !== "sharedIn" &&
-		origin !== "offline" &&
+		isOnline &&
+		!parent
+	) {
+		menuButtons.push({
+			id: "removeLink",
+			title: "tbd_remove_link",
+			icon: "delete",
+			destructive: true,
+			onPress: async () => {
+				const promptResult = await run(async () => {
+					return await prompts.alert({
+						title: "tbd_remove_link_item",
+						message: "tbd_confirm_remove_link",
+						cancelText: "tbd_cancel",
+						okText: "tbd_remove_link"
+					})
+				})
+
+				if (!promptResult.success) {
+					console.error(promptResult.error)
+					alerts.error(promptResult.error)
+
+					return
+				}
+
+				if (promptResult.data.cancelled) {
+					return
+				}
+
+				const result = await runWithLoading(async () => {
+					await drive.removeShare({
+						item,
+						parentUuid: parent ? (unwrapAnyDirUuid(parent) ?? undefined) : undefined
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+
+				if (item.type === "file" && origin === "preview" && router.canGoBack()) {
+					router.back()
+				}
+			}
+		})
+	}
+
+	if (
+		((origin === "sharedIn" && !parent) ||
+			(origin === "preview" && !isOwner && (item.type === "sharedFile" || item.type === "sharedDirectory"))) &&
 		isOnline
 	) {
+		menuButtons.push({
+			id: "removeShare",
+			title: "tbd_remove_share",
+			icon: "delete",
+			destructive: true,
+			onPress: async () => {
+				const promptResult = await run(async () => {
+					return await prompts.alert({
+						title: "tbd_remove_share_item",
+						message: "tbd_confirm_remove_share",
+						cancelText: "tbd_cancel",
+						okText: "tbd_remove_share"
+					})
+				})
+
+				if (!promptResult.success) {
+					console.error(promptResult.error)
+					alerts.error(promptResult.error)
+
+					return
+				}
+
+				if (promptResult.data.cancelled) {
+					return
+				}
+
+				const result = await runWithLoading(async () => {
+					await drive.removeShare({
+						item,
+						parentUuid: parent ? (unwrapAnyDirUuid(parent) ?? undefined) : undefined
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+
+				if ((item.type === "file" || item.type === "sharedFile") && origin === "preview" && router.canGoBack()) {
+					router.back()
+				}
+			}
+		})
+	}
+
+	if (
+		((origin === "sharedOut" && !parent) ||
+			(origin === "preview" && isOwner && (item.type === "sharedFile" || item.type === "sharedDirectory"))) &&
+		isOnline
+	) {
+		menuButtons.push({
+			id: "stopSharing",
+			title: "tbd_stop_sharing",
+			icon: "delete",
+			destructive: true,
+			onPress: async () => {
+				const promptResult = await run(async () => {
+					return await prompts.alert({
+						title: "tbd_stop_sharing_item",
+						message: "tbd_confirm_stop_sharing",
+						cancelText: "tbd_cancel",
+						okText: "tbd_stop_sharing"
+					})
+				})
+
+				if (!promptResult.success) {
+					console.error(promptResult.error)
+					alerts.error(promptResult.error)
+
+					return
+				}
+
+				if (promptResult.data.cancelled) {
+					return
+				}
+
+				const result = await runWithLoading(async () => {
+					await drive.removeShare({
+						item
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+
+				if ((item.type === "file" || item.type === "sharedFile") && origin === "preview" && router.canGoBack()) {
+					router.back()
+				}
+			}
+		})
+	}
+
+	if (origin !== "trash" && origin !== "sharedIn" && origin !== "offline" && origin !== "recents" && isOnline) {
 		menuButtons.push({
 			id: "trash",
 			title: "tbd_trash",
@@ -747,6 +957,10 @@ export function createMenuButtons({
 
 					return
 				}
+
+				if (item.type === "file" && origin === "preview" && router.canGoBack()) {
+					router.back()
+				}
 			}
 		})
 	}
@@ -773,7 +987,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if ((item.type === "file" || item.type === "directory") && origin === "trash" && isOnline) {
+	if ((item.type === "file" || item.type === "directory") && (origin === "trash" || origin === "preview") && isOnline) {
 		menuButtons.push({
 			id: "deletePermanently",
 			title: "tbd_delete_permanently",
@@ -812,6 +1026,10 @@ export function createMenuButtons({
 
 					return
 				}
+
+				if (item.type === "file" && origin === "preview" && router.canGoBack()) {
+					router.back()
+				}
 			}
 		})
 	}
@@ -833,7 +1051,8 @@ const Menu = memo(
 		drivePath,
 		isStoredOffline,
 		isOnline,
-		versions
+		versions,
+		disabled
 	}: {
 		item: DriveItem
 		children: React.ReactNode
@@ -848,8 +1067,13 @@ const Menu = memo(
 		isStoredOffline: boolean
 		isOnline: boolean
 		versions: FileVersion[]
+		disabled?: boolean
 	}) => {
 		const menuButtons = useMemo(() => {
+			if (disabled) {
+				return []
+			}
+
 			return createMenuButtons({
 				item,
 				origin,
@@ -859,7 +1083,7 @@ const Menu = memo(
 				isOnline,
 				versions
 			})
-		}, [origin, item, parent, drivePath, isStoredOffline, isOnline, versions])
+		}, [origin, item, parent, drivePath, isStoredOffline, isOnline, versions, disabled])
 
 		return (
 			<MenuComponent
@@ -870,6 +1094,7 @@ const Menu = memo(
 				title={item.data.decryptedMeta?.name}
 				onCloseMenu={onCloseMenu}
 				onOpenMenu={onOpenMenu}
+				disabled={disabled}
 			>
 				{children}
 			</MenuComponent>

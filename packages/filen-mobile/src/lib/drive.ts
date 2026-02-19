@@ -1,9 +1,20 @@
 import auth from "@/lib/auth"
-import { NonRootItem, NonRootItemTagged_Tags, CreatedTime, DirColor, type FileVersion } from "@filen/sdk-rs"
+import {
+	NonRootItem,
+	NonRootItemTagged_Tags,
+	CreatedTime,
+	DirColor,
+	type FileVersion,
+	SharedRootItem,
+	type DirPublicLink,
+	type FilePublicLink,
+	DirEnum
+} from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/queries/useDriveItemVersions.query"
+import cache from "@/lib/cache"
 
 class Drive {
 	public async favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
@@ -15,9 +26,8 @@ class Drive {
 			return item
 		}
 
-		const sdkClient = await auth.getSdkClient()
-
-		const modifiedItem = await sdkClient.setFavorite(
+		const { authedSdkClient } = await auth.getSdkClients()
+		const modifiedItem = await authedSdkClient.setFavorite(
 			item.type === "directory" ? new NonRootItem.Dir(item.data) : new NonRootItem.File(item.data),
 			favorited,
 			signal
@@ -46,6 +56,16 @@ class Drive {
 			})
 		}
 
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "favorites",
+					uuid: null
+				}
+			},
+			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+		})
+
 		return item
 	}
 
@@ -58,11 +78,11 @@ class Drive {
 			return item
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
 		const modifiedItem =
 			item.type === "directory"
-				? await sdkClient.updateDirMetadata(
+				? await authedSdkClient.updateDirMetadata(
 						item.data,
 						{
 							name: newName,
@@ -74,7 +94,7 @@ class Drive {
 								}
 							: undefined
 					)
-				: await sdkClient.updateFileMetadata(
+				: await authedSdkClient.updateFileMetadata(
 						item.data,
 						{
 							name: newName,
@@ -117,11 +137,11 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 		const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
 
 		if (item.type === "directory") {
-			await sdkClient.deleteDirPermanently(
+			await authedSdkClient.deleteDirPermanently(
 				item.data,
 				signal
 					? {
@@ -130,7 +150,7 @@ class Drive {
 					: undefined
 			)
 		} else {
-			await sdkClient.deleteFilePermanently(
+			await authedSdkClient.deleteFilePermanently(
 				item.data,
 				signal
 					? {
@@ -143,14 +163,7 @@ class Drive {
 		if (unwrappedParentUuidPrevious) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuidPrevious,
-				updater: prev =>
-					prev.filter(i => {
-						if (i.data.uuid === item.data.uuid && i.type === item.type) {
-							return false
-						}
-
-						return true
-					})
+				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
 			})
 		}
 
@@ -162,12 +175,12 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 		const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
 
 		const modifiedItem =
 			item.type === "directory"
-				? await sdkClient.trashDir(
+				? await authedSdkClient.trashDir(
 						item.data,
 						signal
 							? {
@@ -175,7 +188,7 @@ class Drive {
 								}
 							: undefined
 					)
-				: await sdkClient.trashFile(
+				: await authedSdkClient.trashFile(
 						item.data,
 						signal
 							? {
@@ -194,16 +207,20 @@ class Drive {
 		if (unwrappedParentUuidPrevious) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuidPrevious,
-				updater: prev =>
-					prev.filter(i => {
-						if (i.data.uuid === item.data.uuid && i.type === item.type) {
-							return false
-						}
-
-						return true
-					})
+				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
 			})
 		}
+
+		// We have to add it to recents again after removing it above
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "recents",
+					uuid: null
+				}
+			},
+			updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
+		})
 
 		driveItemsQueryUpdate({
 			params: {
@@ -212,16 +229,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => [
-				...prev.filter(i => {
-					if (i.data.uuid === item.data.uuid && i.type === item.type) {
-						return false
-					}
-
-					return true
-				}),
-				item
-			]
+			updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
 		})
 
 		return item
@@ -232,9 +240,8 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
-		const sdkClient = await auth.getSdkClient()
-
-		const modifiedDir = await sdkClient.setDirColor(
+		const { authedSdkClient } = await auth.getSdkClients()
+		const modifiedDir = await authedSdkClient.setDirColor(
 			item.data,
 			color,
 			signal
@@ -267,9 +274,8 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
-		const sdkClient = await auth.getSdkClient()
-
-		const modifiedFile = await sdkClient.restoreFileVersion(
+		const { authedSdkClient } = await auth.getSdkClients()
+		const modifiedFile = await authedSdkClient.restoreFileVersion(
 			item.data,
 			version,
 			signal
@@ -298,9 +304,9 @@ class Drive {
 	}
 
 	public async emptyTrash({ signal }: { signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		await sdkClient.emptyTrash(
+		await authedSdkClient.emptyTrash(
 			signal
 				? {
 						signal
@@ -324,9 +330,9 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		await sdkClient.deleteFileVersion(
+		await authedSdkClient.deleteFileVersion(
 			version,
 			signal
 				? {
@@ -348,11 +354,10 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
-		const sdkClient = await auth.getSdkClient()
-
+		const { authedSdkClient } = await auth.getSdkClients()
 		const modifiedItem =
 			item.type === "directory"
-				? await sdkClient.restoreDir(
+				? await authedSdkClient.restoreDir(
 						item.data,
 						signal
 							? {
@@ -360,7 +365,7 @@ class Drive {
 								}
 							: undefined
 					)
-				: await sdkClient.restoreFile(
+				: await authedSdkClient.restoreFile(
 						item.data,
 						signal
 							? {
@@ -385,16 +390,7 @@ class Drive {
 		if (unwrappedParentUuid) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuid,
-				updater: prev => [
-					...prev.filter(i => {
-						if (i.data.uuid === item.data.uuid && i.type === item.type) {
-							return false
-						}
-
-						return true
-					}),
-					item
-				]
+				updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
 			})
 		}
 
@@ -405,15 +401,261 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev =>
-				prev.filter(i => {
-					if (i.data.uuid === item.data.uuid && i.type === item.type) {
-						return false
-					}
-
-					return true
-				})
+			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
 		})
+	}
+
+	public async removeShare({ item, signal, parentUuid }: { item: DriveItem; signal?: AbortSignal; parentUuid?: string }) {
+		if (item.type !== "sharedDirectory" && item.type !== "sharedFile") {
+			throw new Error("Invalid item type")
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		await authedSdkClient.removeSharedItem(
+			item.type === "sharedDirectory" ? new SharedRootItem.Dir(item.data) : new SharedRootItem.File(item.data),
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		if (parentUuid) {
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "sharedOut",
+						uuid: parentUuid
+					}
+				},
+				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			})
+
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "sharedIn",
+						uuid: parentUuid
+					}
+				},
+				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			})
+		}
+
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "sharedOut",
+					uuid: null
+				}
+			},
+			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+		})
+
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "sharedIn",
+					uuid: null
+				}
+			},
+			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+		})
+	}
+
+	public async removeDirLink({ item, signal, link }: { item: DriveItem; signal?: AbortSignal; link: DirPublicLink }) {
+		if (item.type !== "directory") {
+			throw new Error("Invalid item type")
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		await authedSdkClient.removeDirLink(
+			link,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "links",
+					uuid: null
+				}
+			},
+			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+		})
+	}
+
+	public async removeFileLink({ item, signal, link }: { item: DriveItem; signal?: AbortSignal; link: FilePublicLink }) {
+		if (item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		await authedSdkClient.removeFileLink(
+			item.data,
+			link,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "links",
+					uuid: null
+				}
+			},
+			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+		})
+	}
+
+	public async createDirectory({ parent, signal, name }: { parent: DriveItem | "root" | DirEnum; signal?: AbortSignal; name: string }) {
+		if (!DirEnum.instanceOf(parent) && parent !== "root" && parent.type !== "directory") {
+			throw new Error("Invalid parent type")
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+		let parentDir: DirEnum | null = DirEnum.instanceOf(parent) ? parent : null
+
+		if (!parentDir && !DirEnum.instanceOf(parent)) {
+			if (parent === "root" || parent.data.uuid === authedSdkClient.root().uuid) {
+				parentDir = new DirEnum.Root(authedSdkClient.root())
+			} else {
+				const dir = cache.directoryUuidToDir.get(parent.data.uuid)
+
+				if (!dir) {
+					throw new Error("Parent not found in cache")
+				}
+
+				parentDir = new DirEnum.Dir(dir)
+			}
+		}
+
+		if (!parentDir) {
+			throw new Error("Parent directory not found")
+		}
+
+		const createdDir = await authedSdkClient.createDir(
+			parentDir,
+			name,
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		const createdDriveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(createdDir))
+
+		if (createdDriveItem.type !== "directory") {
+			throw new Error("Invalid item type")
+		}
+
+		driveItemsQueryUpdateGlobal({
+			parentUuid: parentDir.inner[0].uuid,
+			updater: prev => [
+				...prev.filter(i => !(i.data.uuid === createdDriveItem.data.uuid && i.type === createdDriveItem.type)),
+				createdDriveItem
+			]
+		})
+
+		return createdDriveItem
+	}
+
+	public async move({ item, newParent, signal }: { item: DriveItem; newParent: DriveItem | "root" | DirEnum; signal?: AbortSignal }) {
+		if (!DirEnum.instanceOf(newParent) && newParent !== "root" && newParent.type !== "directory") {
+			throw new Error("Invalid parent type")
+		}
+
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
+		const { authedSdkClient } = await auth.getSdkClients()
+		let newParentDir: DirEnum | null = DirEnum.instanceOf(newParent) ? newParent : null
+
+		if (!newParentDir && !DirEnum.instanceOf(newParent)) {
+			if (newParent === "root" || newParent.data.uuid === authedSdkClient.root().uuid) {
+				newParentDir = new DirEnum.Root(authedSdkClient.root())
+			} else {
+				const dir = cache.directoryUuidToDir.get(newParent.data.uuid)
+
+				if (!dir) {
+					throw new Error("New parent not found in cache")
+				}
+
+				newParentDir = new DirEnum.Dir(dir)
+			}
+		}
+
+		if (!newParentDir) {
+			throw new Error("New parent directory not found")
+		}
+
+		if (unwrappedParentUuidPrevious === newParentDir.inner[0].uuid) {
+			return item
+		}
+
+		const modifiedItem =
+			item.type === "directory"
+				? await authedSdkClient.moveDir(
+						item.data,
+						newParentDir,
+						signal
+							? {
+									signal
+								}
+							: undefined
+					)
+				: await authedSdkClient.moveFile(
+						item.data,
+						newParentDir,
+						signal
+							? {
+									signal
+								}
+							: undefined
+					)
+
+		// Ugly but works for now, until we have a better way
+		if (!("region" in modifiedItem)) {
+			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
+		} else {
+			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
+		}
+
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		if (unwrappedParentUuidPrevious) {
+			driveItemsQueryUpdateGlobal({
+				parentUuid: unwrappedParentUuidPrevious,
+				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			})
+		}
+
+		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+		if (unwrappedParentUuid) {
+			driveItemsQueryUpdateGlobal({
+				parentUuid: unwrappedParentUuid,
+				updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
+			})
+		}
+
+		return item
 	}
 }
 

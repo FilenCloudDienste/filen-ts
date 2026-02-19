@@ -132,7 +132,7 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 							/>
 						)}
 						<View className="flex-col border-b border-border w-full py-3 items-start gap-0.5 bg-transparent flex-1">
-							<View className="flex-1 flex-row items-center gap-2">
+							<View className="flex-1 flex-row items-center gap-2 bg-transparent">
 								{info.item.muted && (
 									<Ionicons
 										className="shrink-0"

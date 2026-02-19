@@ -142,13 +142,6 @@ class Sqlite {
 		if (!result.success) {
 			throw result.error
 		}
-
-		console.log("SQLite: Initialized", {
-			dbDirectory: this.dbFileDirectory.list().map(entry => FileSystem.Paths.basename(entry.uri)),
-			dbFileName: this.dbFileName,
-			path: this.db?.databasePath,
-			dbFileParent: FileSystem.Paths.dirname(this.dbFileDirectory.uri)
-		})
 	}
 
 	public async clearAsync(): Promise<void> {

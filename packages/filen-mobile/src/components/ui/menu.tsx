@@ -465,6 +465,23 @@ export const MenuInner = memo(
 			[uniqueButtons]
 		)
 
+		const { menuConfig, actions } = useMemo(() => {
+			return {
+				menuConfig: toIosMenuConfig({
+					buttons: uniqueButtons,
+					title
+				}),
+				actions: toReactNativeMenuActions({
+					buttons: uniqueButtons,
+					colors: {
+						normal: (textForeground.color as string) ?? "white",
+						destructive: (textRed500.color as string) ?? "white",
+						disabled: (textMutedForeground.color as string) ?? "white"
+					}
+				})
+			}
+		}, [uniqueButtons, textForeground.color, textRed500.color, textMutedForeground.color, title])
+
 		if (disabled) {
 			return children
 		}
@@ -494,10 +511,7 @@ export const MenuInner = memo(
 					}
 					onPressMenuItem={onPressMenuItem}
 					shouldWaitForMenuToHideBeforeFiringOnPressMenuItem={false}
-					menuConfig={toIosMenuConfig({
-						buttons: uniqueButtons,
-						title
-					})}
+					menuConfig={menuConfig}
 				>
 					{children}
 				</ContextMenuView>
@@ -507,14 +521,7 @@ export const MenuInner = memo(
 		return (
 			<MenuView
 				shouldOpenOnLongPress={type === "context"}
-				actions={toReactNativeMenuActions({
-					buttons: uniqueButtons,
-					colors: {
-						normal: (textForeground.color as string) ?? "white",
-						destructive: (textRed500.color as string) ?? "white",
-						disabled: (textMutedForeground.color as string) ?? "white"
-					}
-				})}
+				actions={actions}
 				onPressAction={onPressAction}
 				style={style}
 				isAnchoredToRight={isAnchoredToRight}

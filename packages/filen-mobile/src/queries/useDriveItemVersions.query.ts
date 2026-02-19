@@ -19,12 +19,12 @@ export async function fetchData(
 	const item = cache.uuidToDriveItem.get(params.uuid)
 
 	if (!item || item.type !== "file") {
-		throw new Error("Item not found in cache")
+		return []
 	}
 
-	const sdkClient = await auth.getSdkClient()
+	const { authedSdkClient } = await auth.getSdkClients()
 
-	return await sdkClient.listFileVersions(
+	return await authedSdkClient.listFileVersions(
 		item.data,
 		params?.signal
 			? {

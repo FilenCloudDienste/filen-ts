@@ -103,6 +103,7 @@ export const Photos = memo(() => {
 						data={data}
 						renderItem={renderItem}
 						onRefresh={onRefresh}
+						loading={driveItemsQuery.status !== "success"}
 					/>
 				</View>
 			</SafeAreaView>

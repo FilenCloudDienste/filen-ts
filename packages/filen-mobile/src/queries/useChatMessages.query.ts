@@ -17,15 +17,14 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	const sdkClient = await auth.getSdkClient()
-
+	const { authedSdkClient } = await auth.getSdkClients()
 	const chat = cache.chatUuidToChat.get(params.uuid)
 
 	if (!chat) {
-		throw new Error("Chat not found")
+		return []
 	}
 
-	const messages = await sdkClient.listMessagesBefore(
+	const messages = await authedSdkClient.listMessagesBefore(
 		chat,
 		BigInt(Date.now() + 3600000),
 		params?.signal

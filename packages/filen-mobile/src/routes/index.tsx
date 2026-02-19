@@ -1,8 +1,9 @@
 import { Redirect } from "expo-router"
-import { useIsAuthed } from "@/lib/auth"
+import { useIsAuthed, useStringifiedClient } from "@/lib/auth"
 
 export default function Index() {
 	const isAuthed = useIsAuthed()
+	const stringifiedClient = useStringifiedClient()
 
 	if (!isAuthed) {
 		return <Redirect href="/auth/login" />
@@ -13,7 +14,7 @@ export default function Index() {
 			href={{
 				pathname: "/tabs/drive/[uuid]",
 				params: {
-					uuid: ""
+					uuid: stringifiedClient?.rootUuid ?? "root"
 				}
 			}}
 		/>

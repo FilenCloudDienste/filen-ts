@@ -144,7 +144,7 @@ export const HeaderLeftRightWrapper = memo(
 						case "loader": {
 							return (
 								<View
-									className="min-h-9 min-w-9 size-9 items-center justify-center rounded-full"
+									className="min-h-9 min-w-9 size-9 items-center justify-center rounded-full bg-transparent"
 									key={index}
 								>
 									<ActivityIndicator {...item.props} />

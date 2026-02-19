@@ -89,6 +89,7 @@ export const List = memo(({ searchQuery }: { searchQuery?: string }) => {
 			className="flex-1"
 			contentInsetAdjustmentBehavior="automatic"
 			contentContainerClassName="pb-40"
+			loading={chatsQuery.status !== "success"}
 			keyExtractor={keyExtractor}
 			data={chats}
 			renderItem={renderItem}

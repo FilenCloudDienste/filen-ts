@@ -9,9 +9,9 @@ import { Semaphore, run } from "@filen/utils"
 import { unpack, pack } from "msgpackr"
 import alerts from "@/lib/alerts"
 import type { DriveItem } from "@/types"
-import { unwrapDirMeta } from "@/lib/utils"
+import { unwrapDirMeta, unwrapSdkError } from "@/lib/utils"
 import cache from "@/lib/cache"
-import { AnyDirEnumWithShareInfo, type Note, type Chat, FilenSdkError, ErrorKind } from "@filen/sdk-rs"
+import { AnyDirEnumWithShareInfo, type Note, type Chat, ErrorKind } from "@filen/sdk-rs"
 
 export const VERSION = 1
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
@@ -108,78 +108,82 @@ export async function restoreQueries(): Promise<void> {
 
 		await Promise.all(
 			keys.map(async key => {
-				if (key.startsWith(QUERY_CLIENT_PERSISTER_PREFIX)) {
-					const query = (await queryClientPersisterKv.getItem(key)) as unknown as string | null
+				if (!key.startsWith(QUERY_CLIENT_PERSISTER_PREFIX)) {
+					return
+				}
 
-					if (!query) {
-						return
-					}
+				const query = (await queryClientPersisterKv.getItem(key)) as unknown as string | null
 
-					const persistedQuery = unpack(query as unknown as Buffer) as unknown as PersistedQuery
+				if (!query) {
+					return
+				}
 
-					if (
-						!persistedQuery ||
-						!persistedQuery.state ||
-						!shouldPersistQuery(persistedQuery) ||
-						persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now() ||
-						persistedQuery.state.status !== "success"
-					) {
-						await queryClientPersisterKv.removeItem(key)
+				const persistedQuery = unpack(query as unknown as Buffer) as unknown as PersistedQuery
 
-						return
-					}
+				if (
+					!persistedQuery ||
+					!persistedQuery.state ||
+					!shouldPersistQuery(persistedQuery) ||
+					persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now() ||
+					persistedQuery.state.status !== "success"
+				) {
+					await queryClientPersisterKv.removeItem(key)
 
-					queryClient.setQueryData(persistedQuery.queryKey, persistedQuery.state.data, {
-						updatedAt: persistedQuery.state.dataUpdatedAt
-					})
+					return
+				}
 
-					try {
-						if (persistedQuery.queryKey.some(key => key === "useDriveItems")) {
-							for (const item of persistedQuery.state.data as DriveItem[]) {
-								if (!item.data.decryptedMeta) {
+				try {
+					if (persistedQuery.queryKey.some(key => key === "useDriveItemsQuery")) {
+						for (const item of persistedQuery.state.data as DriveItem[]) {
+							if (!item.data.decryptedMeta) {
+								continue
+							}
+
+							cache.uuidToDriveItem.set(item.data.uuid, item)
+
+							if (item.type === "directory") {
+								const { meta, uuid } = unwrapDirMeta(item.data)
+
+								if (!uuid) {
 									continue
 								}
 
-								if (item.type === "directory") {
-									const { meta, uuid } = unwrapDirMeta(item.data)
+								cache.directoryUuidToDir.set(uuid, item.data)
+								cache.directoryUuidToName.set(uuid, meta?.name ?? uuid)
+								cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.Dir(item.data))
+							}
 
-									if (!uuid) {
-										continue
-									}
+							if (item.type === "sharedDirectory") {
+								const { uuid } = unwrapDirMeta(item.data)
 
-									cache.directoryUuidToDir.set(uuid, item.data)
-									cache.directoryUuidToName.set(uuid, meta?.name ?? uuid)
-									cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.Dir(item.data))
+								if (!uuid) {
+									continue
 								}
 
-								if (item.type === "sharedDirectory") {
-									const { uuid } = unwrapDirMeta(item.data)
-
-									if (!uuid) {
-										continue
-									}
-
-									cache.sharedDirUuidToDir.set(uuid, item.data)
-									cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.SharedDir(item.data))
-								}
+								cache.sharedDirUuidToDir.set(uuid, item.data)
+								cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.SharedDir(item.data))
 							}
 						}
-
-						if (persistedQuery.queryKey.some(key => key === "useNotesWithContentQuery")) {
-							for (const note of persistedQuery.state.data as Note[]) {
-								cache.noteUuidToNote.set(note.uuid, note)
-							}
-						}
-
-						if (persistedQuery.queryKey.some(key => key === "useChatsQuery")) {
-							for (const chat of persistedQuery.state.data as Chat[]) {
-								cache.chatUuidToChat.set(chat.uuid, chat)
-							}
-						}
-					} catch {
-						// Noop
 					}
+
+					if (persistedQuery.queryKey.some(key => key === "useNotesWithContentQuery")) {
+						for (const note of persistedQuery.state.data as Note[]) {
+							cache.noteUuidToNote.set(note.uuid, note)
+						}
+					}
+
+					if (persistedQuery.queryKey.some(key => key === "useChatsQuery")) {
+						for (const chat of persistedQuery.state.data as Chat[]) {
+							cache.chatUuidToChat.set(chat.uuid, chat)
+						}
+					}
+				} catch {
+					// Noop
 				}
+
+				queryClient.setQueryData(persistedQuery.queryKey, persistedQuery.state.data, {
+					updatedAt: persistedQuery.state.dataUpdatedAt
+				})
 			})
 		)
 	} catch (e) {
@@ -220,7 +224,9 @@ export const DEFAULT_QUERY_OPTIONS: Pick<
 	throwOnError(err) {
 		console.error(err)
 
-		if (FilenSdkError.hasInner(err) && FilenSdkError.getInner(err).kind() === ErrorKind.Unauthenticated) {
+		const unwrappedSdkError = unwrapSdkError(err)
+
+		if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
 			// TODO: Logout on auth errors
 
 			return
@@ -265,7 +271,9 @@ export const DEFAULT_QUERY_OPTIONS_ETERNAL: Pick<
 	throwOnError(err) {
 		console.error(err)
 
-		if (FilenSdkError.hasInner(err) && FilenSdkError.getInner(err).kind() === ErrorKind.Unauthenticated) {
+		const unwrappedSdkError = unwrapSdkError(err)
+
+		if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
 			// TODO: Logout on auth errors
 
 			return

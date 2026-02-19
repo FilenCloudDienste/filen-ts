@@ -6,9 +6,9 @@ import auth from "@/lib/auth"
 export const BASE_QUERY_KEY = "useNotesTagsQuery"
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
-	const sdkClient = await auth.getSdkClient()
+	const { authedSdkClient } = await auth.getSdkClients()
 
-	return await sdkClient.listNoteTags(
+	return await authedSdkClient.listNoteTags(
 		params?.signal
 			? {
 					signal: params.signal

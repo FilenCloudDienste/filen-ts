@@ -10,9 +10,9 @@ import { sanitizeFileName } from "@/lib/utils"
 
 class Notes {
 	public async getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		return await sdkClient.getNoteContent(
+		return await authedSdkClient.getNoteContent(
 			note,
 			signal
 				? {
@@ -33,9 +33,9 @@ class Notes {
 		signal?: AbortSignal
 		updateQuery?: boolean
 	}) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.setNoteContent(
+		note = await authedSdkClient.setNoteContent(
 			note,
 			content,
 			createNotePreviewFromContentText(
@@ -88,9 +88,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.setNoteType(
+		note = await authedSdkClient.setNoteType(
 			note,
 			type,
 			knownContent,
@@ -121,9 +121,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.setNotePinned(
+		note = await authedSdkClient.setNotePinned(
 			note,
 			pinned,
 			signal
@@ -153,9 +153,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.setNoteFavorited(
+		note = await authedSdkClient.setNoteFavorited(
 			note,
 			favorite,
 			signal
@@ -181,9 +181,9 @@ class Notes {
 	}
 
 	public async duplicate({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 		const [{ original, duplicated }, content] = await Promise.all([
-			sdkClient.duplicateNote(
+			authedSdkClient.duplicateNote(
 				note,
 				signal
 					? {
@@ -291,9 +291,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.archiveNote(
+		note = await authedSdkClient.archiveNote(
 			note,
 			signal
 				? {
@@ -322,9 +322,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.restoreNote(
+		note = await authedSdkClient.restoreNote(
 			note,
 			signal
 				? {
@@ -349,9 +349,9 @@ class Notes {
 	}
 
 	public async restoreFromHistory({ note, history, signal }: { note: Note; history: NoteHistory; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.restoreNoteFromHistory(
+		note = await authedSdkClient.restoreNoteFromHistory(
 			note,
 			history,
 			signal
@@ -381,9 +381,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.trashNote(
+		note = await authedSdkClient.trashNote(
 			note,
 			signal
 				? {
@@ -412,9 +412,9 @@ class Notes {
 			return
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		await sdkClient.deleteNote(
+		await authedSdkClient.deleteNote(
 			note,
 			signal
 				? {
@@ -443,9 +443,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.setNoteTitle(
+		note = await authedSdkClient.setNoteTitle(
 			note,
 			newTitle,
 			signal
@@ -475,8 +475,8 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
-		const { note: modifiedNote } = await sdkClient.addTagToNote(
+		const { authedSdkClient } = await auth.getSdkClients()
+		const { note: modifiedNote } = await authedSdkClient.addTagToNote(
 			note,
 			tag,
 			signal
@@ -506,9 +506,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.removeTagFromNote(
+		note = await authedSdkClient.removeTagFromNote(
 			note,
 			tag,
 			signal
@@ -534,8 +534,8 @@ class Notes {
 	}
 
 	public async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
-		const note = await sdkClient.createNote(
+		const { authedSdkClient } = await auth.getSdkClients()
+		const note = await authedSdkClient.createNote(
 			title,
 			signal
 				? {
@@ -572,8 +572,8 @@ class Notes {
 	}
 
 	public async createTag({ name, signal }: { name: string; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
-		const tag = await sdkClient.createNoteTag(
+		const { authedSdkClient } = await auth.getSdkClients()
+		const tag = await authedSdkClient.createNoteTag(
 			name,
 			signal
 				? {
@@ -594,9 +594,9 @@ class Notes {
 			return tag
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		tag = await sdkClient.renameNoteTag(
+		tag = await authedSdkClient.renameNoteTag(
 			tag,
 			newName,
 			signal
@@ -614,9 +614,9 @@ class Notes {
 	}
 
 	public async deleteTag({ tag, signal }: { tag: NoteTag; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		await sdkClient.deleteNoteTag(
+		await authedSdkClient.deleteNoteTag(
 			tag,
 			signal
 				? {
@@ -635,9 +635,9 @@ class Notes {
 			return tag
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		tag = await sdkClient.setNoteTagFavorited(
+		tag = await authedSdkClient.setNoteTagFavorited(
 			tag,
 			favorite,
 			signal
@@ -655,11 +655,11 @@ class Notes {
 	}
 
 	public async leave({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.removeNoteParticipant(
+		note = await authedSdkClient.removeNoteParticipant(
 			note,
-			(await sdkClient.toStringified()).userId,
+			(await authedSdkClient.toStringified()).userId,
 			signal
 				? {
 						signal
@@ -689,9 +689,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.removeNoteParticipant(
+		note = await authedSdkClient.removeNoteParticipant(
 			note,
 			participantUserId,
 			signal
@@ -731,9 +731,9 @@ class Notes {
 			return note
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await sdkClient.addNoteParticipant(
+		note = await authedSdkClient.addNoteParticipant(
 			note,
 			contact,
 			permissionsWrite,
@@ -774,9 +774,9 @@ class Notes {
 			return
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 
-		participant = await sdkClient.setNoteParticipantPermission(
+		participant = await authedSdkClient.setNoteParticipantPermission(
 			note.uuid,
 			participant,
 			permissionsWrite,

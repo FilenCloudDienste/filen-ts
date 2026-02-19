@@ -274,10 +274,10 @@ class Offline {
 
 				this.ensureDirectories()
 
-				const [files, { directories: topLevelDirectories }, sdkClient] = await Promise.all([
+				const [files, { directories: topLevelDirectories }, { authedSdkClient }] = await Promise.all([
 					this.listFiles(),
 					this.listDirectories(),
-					auth.getSdkClient()
+					auth.getSdkClients()
 				])
 
 				await Promise.all([
@@ -304,12 +304,12 @@ class Offline {
 						const listParentResult = await run(async () => {
 							switch (parent.tag) {
 								case AnyDirEnumWithShareInfo_Tags.Dir: {
-									const { files } = await sdkClient.listDir(new DirEnum.Dir(parent.inner[0]))
+									const { files } = await authedSdkClient.listDir(new DirEnum.Dir(parent.inner[0]))
 
 									return files
 								}
 								case AnyDirEnumWithShareInfo_Tags.Root: {
-									const { files } = await sdkClient.listDir(new DirEnum.Root(parent.inner[0]))
+									const { files } = await authedSdkClient.listDir(new DirEnum.Root(parent.inner[0]))
 
 									return files
 								}
@@ -318,20 +318,24 @@ class Offline {
 									if (parent.inner[0].sharingRole.tag === SharingRole_Tags.Sharer) {
 										switch (parent.inner[0].dir.tag) {
 											case DirWithMetaEnum_Tags.Dir: {
-												const { files } = await sdkClient.listDir(new DirEnum.Dir(parent.inner[0].dir.inner[0]))
+												const { files } = await authedSdkClient.listDir(
+													new DirEnum.Dir(parent.inner[0].dir.inner[0])
+												)
 
 												return files
 											}
 
 											case DirWithMetaEnum_Tags.Root: {
-												const { files } = await sdkClient.listDir(new DirEnum.Root(parent.inner[0].dir.inner[0]))
+												const { files } = await authedSdkClient.listDir(
+													new DirEnum.Root(parent.inner[0].dir.inner[0])
+												)
 
 												return files
 											}
 										}
 									}
 
-									const { files } = await sdkClient.listInShared(parent.inner[0].dir)
+									const { files } = await authedSdkClient.listInShared(parent.inner[0].dir)
 
 									return files
 								}
@@ -422,13 +426,13 @@ class Offline {
 						const listParentResult = await run(async () => {
 							switch (parent.tag) {
 								case AnyDirEnumWithShareInfo_Tags.Dir: {
-									const { dirs } = await sdkClient.listDir(new DirEnum.Dir(parent.inner[0]))
+									const { dirs } = await authedSdkClient.listDir(new DirEnum.Dir(parent.inner[0]))
 
 									return dirs
 								}
 
 								case AnyDirEnumWithShareInfo_Tags.Root: {
-									const { dirs } = await sdkClient.listDir(new DirEnum.Root(parent.inner[0]))
+									const { dirs } = await authedSdkClient.listDir(new DirEnum.Root(parent.inner[0]))
 
 									return dirs
 								}
@@ -437,20 +441,24 @@ class Offline {
 									if (parent.inner[0].sharingRole.tag === SharingRole_Tags.Sharer) {
 										switch (parent.inner[0].dir.tag) {
 											case DirWithMetaEnum_Tags.Dir: {
-												const { dirs } = await sdkClient.listDir(new DirEnum.Dir(parent.inner[0].dir.inner[0]))
+												const { dirs } = await authedSdkClient.listDir(
+													new DirEnum.Dir(parent.inner[0].dir.inner[0])
+												)
 
 												return dirs
 											}
 
 											case DirWithMetaEnum_Tags.Root: {
-												const { dirs } = await sdkClient.listDir(new DirEnum.Root(parent.inner[0].dir.inner[0]))
+												const { dirs } = await authedSdkClient.listDir(
+													new DirEnum.Root(parent.inner[0].dir.inner[0])
+												)
 
 												return dirs
 											}
 										}
 									}
 
-									const { dirs } = await sdkClient.listInShared(parent.inner[0].dir)
+									const { dirs } = await authedSdkClient.listInShared(parent.inner[0].dir)
 
 									return dirs
 								}
@@ -510,7 +518,7 @@ class Offline {
 						})()
 
 						const [remoteDirectoryEntries, directoryMetaBytes] = await Promise.all([
-							sdkClient.listDirRecursiveWithPaths(
+							authedSdkClient.listDirRecursiveWithPaths(
 								remoteDir,
 								{
 									onProgress() {

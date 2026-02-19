@@ -72,7 +72,7 @@ class Transfers {
 			throw new Error("A transfer with the same ID or local URI is already in progress.")
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = new AbortController()
 		const transferPauseSignal = new PauseSignal()
 		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
@@ -149,7 +149,7 @@ class Transfers {
 					directories: []
 				}
 
-				await sdkClient.uploadDirRecursively(
+				await authedSdkClient.uploadDirRecursively(
 					normalizeFilePathForSdk(localFileOrDir.uri),
 					{
 						onScanComplete(totalDirs, totalFiles, totalBytes) {
@@ -384,7 +384,7 @@ class Transfers {
 					.catch(console.error)
 			})
 
-			const transferred = await sdkClient.uploadFile(
+			const transferred = await authedSdkClient.uploadFile(
 				parent,
 				normalizeFilePathForSdk(localFileOrDir.uri),
 				{
@@ -506,7 +506,7 @@ class Transfers {
 			throw new Error("A transfer with the same ID and destination URI is already in progress.")
 		}
 
-		const sdkClient = await auth.getSdkClient()
+		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = new AbortController()
 		const transferPauseSignal = new PauseSignal()
 		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
@@ -611,7 +611,7 @@ class Transfers {
 					}
 				})()
 
-				await sdkClient.downloadDirRecursively(
+				await authedSdkClient.downloadDirRecursively(
 					normalizeFilePathForSdk(destination.uri),
 					{
 						onDownloadErrors(errors) {
@@ -825,7 +825,7 @@ class Transfers {
 					.catch(console.error)
 			})
 
-			await sdkClient.downloadFile(
+			await authedSdkClient.downloadFileToPath(
 				file,
 				normalizeFilePathForSdk(destination.uri),
 				{

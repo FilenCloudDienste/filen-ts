@@ -18,12 +18,12 @@ export async function fetchData(
 	const parsed = parseFilenPublicLink(params.link)
 
 	if (!parsed) {
-		throw new Error("Invalid Filen public link")
+		return []
 	}
 
-	const sdkClient = await auth.getSdkClient()
+	const { authedSdkClient } = await auth.getSdkClients()
 
-	return await sdkClient.listChats(
+	return await authedSdkClient.listChats(
 		params?.signal
 			? {
 					signal: params.signal

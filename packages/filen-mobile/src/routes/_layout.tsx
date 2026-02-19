@@ -3,7 +3,7 @@ import "@/global"
 import "@/queries/onlineStatus"
 
 import StyleProvider from "@/providers/style.provider"
-import { useState, useEffect, Fragment } from "react"
+import { useState, Fragment } from "react"
 import { memo, useCallback } from "@/lib/memo"
 import { Stack } from "expo-router"
 import { useResolveClassNames } from "uniwind"
@@ -27,6 +27,8 @@ import { enableFreeze } from "react-native-screens"
 import Socket from "@/components/socket"
 import Pathname from "@/components/pathname"
 import { Platform } from "react-native"
+import alerts from "@/lib/alerts"
+import useEffectOnce from "@/hooks/useEffectOnce"
 
 enableFreeze(true)
 
@@ -46,18 +48,17 @@ export const RootLayout = memo(() => {
 		const result = await run(async () => {
 			setIsSetupDone(false)
 
-			return await setup.setup()
+			await setup.setup()
 		})
 
 		if (!result.success) {
 			console.error(result.error)
+			alerts.error(result.error)
 
 			setIsSetupDone(false)
 
 			return
 		}
-
-		console.log("Setup complete, isAuthed:", result.data.isAuthed)
 
 		setIsSetupDone(true)
 
@@ -66,9 +67,13 @@ export const RootLayout = memo(() => {
 		}, 1)
 	}, [])
 
-	useEffect(() => {
+	useEffectOnce(() => {
 		runSetup()
-	}, [runSetup])
+	})
+
+	if (!isSetupDone) {
+		return null
+	}
 
 	return (
 		<StyleProvider>
@@ -89,86 +94,88 @@ export const RootLayout = memo(() => {
 						<NotifierWrapper useRNScreensOverlay={true}>
 							<QueryClientProvider client={queryClient}>
 								<ActionSheetProvider>
-									<View className="flex-1">
-										{isSetupDone && (
+									<View className="flex-1 bg-background">
+										<Stack
+											initialRouteName={isAuthed ? "tabs" : "auth"}
+											screenOptions={{
+												headerShown: false,
+												contentStyle: {
+													backgroundColor: bgBackground.backgroundColor
+												}
+											}}
+										>
+											<Stack.Screen
+												name="transfers"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="offline"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="driveItemInfo"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="changeDirectoryColor"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="trash"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="recents"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="favorites"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="sharedIn"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="sharedOut"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="links"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+											<Stack.Screen
+												name="driveSelect"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+												}}
+											/>
+										</Stack>
+										{isAuthed && (
 											<Fragment>
-												<Stack
-													initialRouteName={isAuthed ? "tabs" : "auth"}
-													screenOptions={{
-														headerShown: false,
-														contentStyle: {
-															backgroundColor: bgBackground.backgroundColor
-														}
-													}}
-												>
-													<Stack.Screen
-														name="transfers"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="offline"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="driveItemInfo"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="changeDirectoryColor"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="trash"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="recents"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="favorites"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="sharedIn"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="sharedOut"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-													<Stack.Screen
-														name="links"
-														options={{
-															presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
-														}}
-													/>
-												</Stack>
-												{isAuthed && (
-													<Fragment>
-														<Socket />
-														<NotesSync />
-														<ChatsSync />
-													</Fragment>
-												)}
+												<Socket />
+												<NotesSync />
+												<ChatsSync />
 											</Fragment>
 										)}
 										<Pathname />

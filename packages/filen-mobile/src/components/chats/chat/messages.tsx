@@ -145,6 +145,7 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 				data={messages}
 				renderItem={renderItem}
 				onEndReachedThreshold={0.5}
+				loading={chatMessagesQuery.status !== "success"}
 				footerComponent={
 					isFetchingMore
 						? () => {

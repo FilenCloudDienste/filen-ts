@@ -18,6 +18,7 @@ import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.
 import { simpleDate } from "@/lib/time"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { getPreviewType } from "@/lib/utils"
+import { useStringifiedClient } from "@/lib/auth"
 
 export const Information = memo(({ item }: { item: DriveItem }) => {
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -322,6 +323,7 @@ const DriveItemInfo = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
+	const stringifiedClient = useStringifiedClient()
 
 	const item = useMemo(() => {
 		if (!itemPackedBase64) {
@@ -337,7 +339,7 @@ const DriveItemInfo = memo(() => {
 				href={{
 					pathname: "/tabs/drive/[uuid]",
 					params: {
-						uuid: ""
+						uuid: stringifiedClient?.rootUuid ?? "root"
 					}
 				}}
 			/>

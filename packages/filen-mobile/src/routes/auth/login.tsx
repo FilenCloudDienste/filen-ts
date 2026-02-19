@@ -31,12 +31,12 @@ export const Login = memo(() => {
 								twoFactorCode: undefined
 							})
 
-							console.log("Logged in")
+							const { authedSdkClient } = await auth.getSdkClients()
 
 							router.replace({
 								pathname: "/tabs/drive/[uuid]",
 								params: {
-									uuid: ""
+									uuid: authedSdkClient.root().uuid
 								}
 							})
 						}}

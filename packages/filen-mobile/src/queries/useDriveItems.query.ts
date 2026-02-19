@@ -22,7 +22,7 @@ import offline from "@/lib/offline"
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 
 export type UseDriveItemsQueryParams = {
-	path: DrivePath
+	path: Omit<DrivePath, "selectOptions">
 }
 
 export async function fetchData(
@@ -34,7 +34,7 @@ export async function fetchData(
 		return []
 	}
 
-	const sdkClient = await auth.getSdkClient()
+	const { authedSdkClient } = await auth.getSdkClients()
 
 	const signal = params.signal
 		? {
@@ -46,7 +46,7 @@ export async function fetchData(
 		switch (params.path.type) {
 			case "drive": {
 				const dir = (() => {
-					const root = new DirEnum.Root(sdkClient.root())
+					const root = new DirEnum.Root(authedSdkClient.root())
 
 					if (!params.path.uuid || params.path.uuid.length === 0) {
 						return root
@@ -61,15 +61,35 @@ export async function fetchData(
 					return root
 				})()
 
-				return sdkClient.listDir(dir, signal)
+				return authedSdkClient.listDir(dir, signal)
 			}
 
 			case "favorites": {
-				return sdkClient.listFavorites(signal)
+				const dir = (() => {
+					if (!params.path.uuid || params.path.uuid.length === 0) {
+						return null
+					}
+
+					const cachedDir = cache.directoryUuidToDir.get(params.path.uuid)
+
+					if (cachedDir) {
+						return new DirEnum.Dir(cachedDir)
+					}
+
+					return null
+				})()
+
+				// If not parent is provided, we need to list the root favorites
+				if (!dir) {
+					return authedSdkClient.listFavorites(signal)
+				}
+
+				// If we have a parent dir we can simply list it from the main drive
+				return authedSdkClient.listDir(dir, signal)
 			}
 
 			case "recents": {
-				return sdkClient.listRecents(signal)
+				return authedSdkClient.listRecents(signal)
 			}
 
 			case "sharedIn": {
@@ -87,7 +107,7 @@ export async function fetchData(
 					return undefined
 				})()
 
-				return sdkClient.listInShared(dir, signal)
+				return authedSdkClient.listInShared(dir, signal)
 			}
 
 			case "sharedOut": {
@@ -106,24 +126,25 @@ export async function fetchData(
 				})()
 
 				if (!dir) {
-					return sdkClient.listOutShared(undefined, undefined, signal)
+					return authedSdkClient.listOutShared(undefined, undefined, signal)
 				}
 
-				if (dir.sharingRole.inner[0].id === (await sdkClient.toStringified()).userId) {
+				// If the sharer ID is the same as the logged in user, we are actually not listing a shared out dir, since shared out dirs need to have a contact
+				if (dir.sharingRole.inner[0].id === (await authedSdkClient.toStringified()).userId) {
 					return {
 						dirs: [],
 						files: []
 					}
 				}
 
-				const contacts = await sdkClient.getContacts(signal)
+				const contacts = await authedSdkClient.getContacts(signal)
 				const contact = contacts.find(contact => contact.userId === dir.sharingRole.inner[0].id)
 
-				return sdkClient.listOutShared(dir.dir, contact, signal)
+				return authedSdkClient.listOutShared(dir.dir, contact, signal)
 			}
 
 			case "trash": {
-				return sdkClient.listTrash(signal)
+				return authedSdkClient.listTrash(signal)
 			}
 
 			case "links": {
@@ -143,15 +164,11 @@ export async function fetchData(
 
 				// If not parent is provided, we need to list the root links
 				if (!dir) {
-					// TODO: wait for sdk list links impl
-					return {
-						dirs: [],
-						files: []
-					}
+					return authedSdkClient.listLinkedItems(signal)
 				}
 
 				// If we have a parent dir we can simply list it from the main drive
-				return sdkClient.listDir(dir, signal)
+				return authedSdkClient.listDir(dir, signal)
 			}
 
 			case "offline": {
@@ -295,12 +312,24 @@ export async function fetchData(
 	return items
 }
 
+function removeSelectOptionsFromParams(params: UseDriveItemsQueryParams): UseDriveItemsQueryParams {
+	if ("selectOptions" in params.path) {
+		const { selectOptions: _, ...rest } = params.path
+
+		return {
+			path: rest
+		}
+	}
+
+	return params
+}
+
 export function useDriveItemsQuery(
 	params: UseDriveItemsQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const defaultParams = useDefaultQueryParams(options)
-	const sortedParams = sortParams(params)
+	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
@@ -332,7 +361,7 @@ export function driveItemsQueryUpdate({
 		| Awaited<ReturnType<typeof fetchData>>
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 }): void {
-	const sortedParams = sortParams(params)
+	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
 
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams], prev => {
 		const currentData = prev ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
@@ -376,7 +405,7 @@ export function driveItemsQueryUpdateGlobal({
 }
 
 export function driveItemsQueryGet(params: UseDriveItemsQueryParams) {
-	const sortedParams = sortParams(params)
+	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
 
 	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams])
 }

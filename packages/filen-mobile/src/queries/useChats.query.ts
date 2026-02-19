@@ -6,9 +6,9 @@ import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 export const BASE_QUERY_KEY = "useChatsQuery"
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
-	const sdkClient = await auth.getSdkClient()
+	const { authedSdkClient } = await auth.getSdkClients()
 
-	return await sdkClient.listChats(
+	return await authedSdkClient.listChats(
 		params?.signal
 			? {
 					signal: params.signal

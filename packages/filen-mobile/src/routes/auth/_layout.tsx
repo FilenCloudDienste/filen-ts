@@ -1,10 +1,11 @@
 import { Stack, Redirect } from "expo-router"
 import { memo } from "@/lib/memo"
-import { useIsAuthed } from "@/lib/auth"
+import { useIsAuthed, useStringifiedClient } from "@/lib/auth"
 import View from "@/components/ui/view"
 
 export const AuthLayout = memo(() => {
 	const isAuthed = useIsAuthed()
+	const stringifiedClient = useStringifiedClient()
 
 	if (isAuthed) {
 		return (
@@ -12,7 +13,7 @@ export const AuthLayout = memo(() => {
 				href={{
 					pathname: "/tabs/drive/[uuid]",
 					params: {
-						uuid: ""
+						uuid: stringifiedClient?.rootUuid ?? "root"
 					}
 				}}
 			/>

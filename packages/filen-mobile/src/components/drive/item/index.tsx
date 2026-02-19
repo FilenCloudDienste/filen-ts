@@ -1,4 +1,4 @@
-import { memo, useCallback } from "@/lib/memo"
+import { memo, useCallback, useMemo } from "@/lib/memo"
 import View from "@/components/ui/view"
 import { PressableScale } from "@/components/ui/pressables"
 import Menu, { type DriveItemMenuOrigin } from "@/components/drive/item/menu"
@@ -24,6 +24,9 @@ import { useShallow } from "zustand/shallow"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Buffer } from "@craftzdog/react-native-buffer"
+import { pack } from "msgpackr"
+import useDriveSelectStore from "@/stores/useDriveSelect.store"
 
 const Item = memo(
 	({
@@ -47,6 +50,10 @@ const Item = memo(
 			useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type))
 		)
 		const areDriveItemsSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
+		const isSelectedFromDriveSelect = useDriveSelectStore(
+			useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type))
+		)
+		const selectedItemsFromDriveSelectLength = useDriveSelectStore(useShallow(state => state.selectedItems.length))
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
 			{
@@ -67,7 +74,87 @@ const Item = memo(
 			}
 		)
 
+		const disabled = useMemo(() => {
+			if (!drivePath.selectOptions) {
+				return false
+			}
+
+			switch (drivePath.selectOptions.intention) {
+				case "move": {
+					return drivePath.selectOptions.items.some(
+						i => i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type
+					)
+				}
+
+				case "select": {
+					const allowedItemTypes: ("file" | "directory")[] = []
+
+					if (drivePath.selectOptions.files) {
+						allowedItemTypes.push("file")
+					}
+
+					if (drivePath.selectOptions.directories) {
+						allowedItemTypes.push("directory")
+					}
+
+					const normalizeItemType =
+						info.item.item.type === "sharedDirectory"
+							? "directory"
+							: info.item.item.type === "sharedFile"
+								? "file"
+								: info.item.item.type
+
+					if (!allowedItemTypes.includes(normalizeItemType)) {
+						return true
+					}
+
+					switch (drivePath.selectOptions.type) {
+						case "single": {
+							return selectedItemsFromDriveSelectLength > 0 && !isSelectedFromDriveSelect
+						}
+
+						case "multiple": {
+							return false
+						}
+					}
+				}
+			}
+		}, [drivePath.selectOptions, info.item, isSelectedFromDriveSelect, selectedItemsFromDriveSelectLength])
+
+		const onPressSelectForDriveSelect = useCallback(() => {
+			if (disabled) {
+				return
+			}
+
+			if (drivePath.selectOptions && drivePath.selectOptions.intention === "select") {
+				useDriveSelectStore.getState().setSelectedItems(prev => {
+					const prevSelected = prev.some(i => i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type)
+
+					if (prevSelected) {
+						return prev.filter(i => !(i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type))
+					}
+
+					return [
+						...prev.filter(i => !(i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type)),
+						info.item.item
+					]
+				})
+
+				return
+			}
+		}, [disabled, drivePath.selectOptions, info.item])
+
 		const onPress = useCallback(() => {
+			if (disabled) {
+				return
+			}
+
+			if (isSelectedFromDriveSelect) {
+				onPressSelectForDriveSelect()
+
+				return
+			}
+
 			if (areDriveItemsSelected) {
 				useDriveStore.getState().setSelectedItems(prev => {
 					const prevSelected = prev.some(i => i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type)
@@ -119,6 +206,40 @@ const Item = memo(
 					return
 				}
 
+				if (origin === "favorites") {
+					router.push({
+						pathname: "/favorites/[uuid]",
+						params: {
+							uuid: info.item.item.data.uuid
+						}
+					})
+
+					return
+				}
+
+				if (origin === "links") {
+					router.push({
+						pathname: "/links/[uuid]",
+						params: {
+							uuid: info.item.item.data.uuid
+						}
+					})
+
+					return
+				}
+
+				if (drivePath.selectOptions) {
+					router.push({
+						pathname: "/driveSelect/[uuid]",
+						params: {
+							uuid: info.item.item.data.uuid,
+							selectOptions: Buffer.from(pack(drivePath.selectOptions)).toString("base64")
+						}
+					})
+
+					return
+				}
+
 				router.push({
 					pathname: "/tabs/drive/[uuid]",
 					params: {
@@ -128,18 +249,28 @@ const Item = memo(
 
 				return
 			}
-		}, [info.item, origin, areDriveItemsSelected])
+		}, [
+			info.item,
+			origin,
+			areDriveItemsSelected,
+			drivePath.selectOptions,
+			isSelectedFromDriveSelect,
+			onPressSelectForDriveSelect,
+			disabled
+		])
 
 		return (
 			<View
 				className={cn(
-					"w-full h-auto flex-col",
-					isMenuOpen ? (origin === "offline" ? "bg-background-tertiary" : "bg-background-secondary") : "bg-transparent"
+					"w-full h-auto flex-row items-center flex-1",
+					isMenuOpen ? (origin === "offline" ? "bg-background-tertiary" : "bg-background-secondary") : "bg-transparent",
+					disabled && "opacity-50"
 				)}
 			>
 				<Menu
-					className="flex-row w-full h-auto"
+					className="flex-row w-full h-auto flex-1 items-center"
 					type="context"
+					disabled={!!drivePath.selectOptions}
 					isAnchoredToRight={true}
 					item={info.item.item}
 					parent={info.item.parent}
@@ -151,20 +282,42 @@ const Item = memo(
 					isOnline={netInfo.hasInternet}
 					versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 				>
-					<PressableScale
-						className="w-full h-auto flex-row"
-						onPress={onPress}
+					<View
+						className={cn(
+							"w-full h-auto flex-row px-4 bg-transparent items-center gap-4",
+							areDriveItemsSelected || (drivePath.selectOptions && drivePath.selectOptions.intention === "select" && "pr-14")
+						)}
 					>
-						<View className="w-full h-auto flex-row px-4 gap-4 bg-transparent">
-							{areDriveItemsSelected && (
-								<AnimatedView
-									className="flex-row h-full items-center justify-center bg-transparent pr-2 shrink-0"
-									entering={FadeIn}
-									exiting={FadeOut}
-								>
-									<Checkbox value={isSelected} />
-								</AnimatedView>
-							)}
+						{areDriveItemsSelected && (
+							<AnimatedView
+								className="flex-row h-full items-center justify-center bg-transparent shrink-0"
+								entering={FadeIn}
+								exiting={FadeOut}
+							>
+								<Checkbox
+									value={isSelected}
+									onValueChange={onPress}
+									hitSlop={16}
+								/>
+							</AnimatedView>
+						)}
+						{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && (
+							<AnimatedView
+								className="flex-row h-full items-center justify-center bg-transparent shrink-0"
+								entering={FadeIn}
+								exiting={FadeOut}
+							>
+								<Checkbox
+									value={isSelectedFromDriveSelect}
+									onValueChange={onPressSelectForDriveSelect}
+									hitSlop={16}
+								/>
+							</AnimatedView>
+						)}
+						<PressableScale
+							className="w-full h-auto flex-row gap-4 bg-transparent"
+							onPress={onPress}
+						>
 							<View className="bg-transparent shrink-0 items-center flex-row">
 								{(info.item.item.type === "file" || info.item.item.type === "directory") &&
 									info.item.item.data.favorited &&
@@ -227,7 +380,7 @@ const Item = memo(
 										/>
 									</Text>
 								</View>
-								{Platform.OS === "android" && (
+								{Platform.OS === "android" && !drivePath.selectOptions && (
 									<View className="flex-row items-center shrink-0 bg-transparent pl-4">
 										<Menu
 											type="dropdown"
@@ -242,17 +395,19 @@ const Item = memo(
 											isOnline={netInfo.hasInternet}
 											versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 										>
-											<Ionicons
-												name="ellipsis-horizontal"
-												size={20}
-												color={textForeground.color}
-											/>
+											<View className="pl-4 h-full items-center justify-center flex-row bg-transparent">
+												<Ionicons
+													name="ellipsis-horizontal"
+													size={20}
+													color={textForeground.color}
+												/>
+											</View>
 										</Menu>
 									</View>
 								)}
 							</View>
-						</View>
-					</PressableScale>
+						</PressableScale>
+					</View>
 				</Menu>
 			</View>
 		)

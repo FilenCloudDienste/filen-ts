@@ -36,7 +36,7 @@
     "@expo/react-native-action-sheet": "^4.1.1",
     "@expo/ui": "^0.2.0-beta.9",
     "@expo/vector-icons": "^15.0.3",
-    "@filen/sdk-rs": "^0.3.41",
+    "@filen/sdk-rs": "^0.3.43",
     "@filen/utils": "^0.0.6",
     "@legendapp/list": "^2.0.19",
     "@react-native-community/netinfo": "11.4.1",
@@ -135,10 +135,10 @@
     "reanimated-color-picker": "^4.2.0",
     "regexify-string": "^1.0.19",
     "rehype-sanitize": "^6.0.0",
-    "tailwind-merge": "^3.4.0",
-    "tailwindcss": "^4.1.18",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.0",
     "unist-util-visit": "^5.1.0",
-    "uniwind": "^1.3.1",
+    "uniwind": "^1.3.2",
     "uuid": "^13.0.0",
     "zustand": "^5.0.11"
   },
@@ -154,12 +154,12 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-compiler": "^19.1.0-rc.2",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "npm-check-updates": "^19.3.2",
+    "npm-check-updates": "^19.4.0",
     "patch-package": "^8.0.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.55.0"
+    "typescript-eslint": "^8.56.0"
   }
 }

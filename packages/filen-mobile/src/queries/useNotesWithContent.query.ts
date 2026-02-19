@@ -6,9 +6,9 @@ import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 export const BASE_QUERY_KEY = "useNotesWithContentQuery"
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
-	const sdkClient = await auth.getSdkClient()
+	const { authedSdkClient } = await auth.getSdkClients()
 
-	const all = await sdkClient.listNotes(
+	const all = await authedSdkClient.listNotes(
 		params?.signal
 			? {
 					signal: params.signal
@@ -18,7 +18,7 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 
 	const withContent = await Promise.all(
 		all.map(async note => {
-			const content = await sdkClient.getNoteContent(
+			const content = await authedSdkClient.getNoteContent(
 				note,
 				params?.signal
 					? {

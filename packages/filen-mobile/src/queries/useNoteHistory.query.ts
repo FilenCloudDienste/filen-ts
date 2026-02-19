@@ -16,15 +16,15 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	const sdkClient = await auth.getSdkClient()
-
 	const note = cache.noteUuidToNote.get(params.uuid)
 
 	if (!note) {
-		throw new Error("Note not found")
+		return []
 	}
 
-	return await sdkClient.getNoteHistory(
+	const { authedSdkClient } = await auth.getSdkClients()
+
+	return await authedSdkClient.getNoteHistory(
 		note,
 		params.signal
 			? {

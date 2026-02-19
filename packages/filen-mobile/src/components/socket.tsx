@@ -1,5 +1,5 @@
 import { memo, useCallback } from "@/lib/memo"
-import { useSdkClient, useStringifiedClient } from "@/lib/auth"
+import { useSdkClients, useStringifiedClient } from "@/lib/auth"
 import {
 	type JsClientInterface,
 	SocketEvent_Tags,
@@ -595,13 +595,13 @@ export const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }
 })
 
 export const Socket = memo(() => {
-	const sdkClient = useSdkClient()
+	const { authedSdkClient } = useSdkClients()
 
-	if (!sdkClient) {
+	if (!authedSdkClient) {
 		return null
 	}
 
-	return <InnerSocket sdkClient={sdkClient} />
+	return <InnerSocket sdkClient={authedSdkClient} />
 })
 
 export default Socket

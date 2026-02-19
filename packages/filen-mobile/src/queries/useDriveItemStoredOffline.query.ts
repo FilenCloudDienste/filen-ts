@@ -20,11 +20,7 @@ export async function fetchData(
 ) {
 	const item = cache.uuidToDriveItem.get(params.uuid)
 
-	if (!item) {
-		throw new Error("Item not found in cache")
-	}
-
-	if (item.type !== params.type) {
+	if (!item || item.type !== params.type) {
 		return false
 	}
 

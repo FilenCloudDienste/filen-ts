@@ -16,7 +16,11 @@ import {
 	PauseSignal as SdkPauseSignal,
 	ParentUuid_Tags,
 	type ParentUuid,
-	FilenSdkError
+	FilenSdkError,
+	type AnyDirEnum,
+	type AnyDirEnumWithShareInfo,
+	AnyDirEnum_Tags,
+	AnyDirEnumWithShareInfo_Tags
 } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
@@ -155,7 +159,31 @@ export function unwrapSdkError(error: unknown): FilenSdkError | null {
 	return null
 }
 
-export function unwrapParentUuid(parent: ParentUuid) {
+export function unwrapAnyDirUuid(dir: AnyDirEnum | AnyDirEnumWithShareInfo): string | null {
+	switch (dir.tag) {
+		case AnyDirEnum_Tags.Dir: {
+			return dir.inner[0].uuid
+		}
+
+		case AnyDirEnum_Tags.Root: {
+			return dir.inner[0].uuid
+		}
+
+		case AnyDirEnum_Tags.RootWithMeta: {
+			return dir.inner[0].uuid
+		}
+
+		case AnyDirEnumWithShareInfo_Tags.SharedDir: {
+			return dir.inner[0].dir.inner[0].uuid
+		}
+
+		default: {
+			return null
+		}
+	}
+}
+
+export function unwrapParentUuid(parent: ParentUuid): string | null {
 	switch (parent.tag) {
 		case ParentUuid_Tags.Uuid: {
 			return parent.inner[0]

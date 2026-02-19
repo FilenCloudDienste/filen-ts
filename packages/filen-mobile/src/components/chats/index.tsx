@@ -1,14 +1,14 @@
 import { Fragment, useState } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo, useCallback } from "@/lib/memo"
 import { Platform, TextInput } from "react-native"
 import List from "@/components/chats/list"
 import { useShallow } from "zustand/shallow"
 import useChatsStore from "@/stores/useChats.store"
 import useChatsQuery from "@/queries/useChats.query"
 import { useStringifiedClient } from "@/lib/auth"
-import { useRouter } from "expo-router"
+import { router, useFocusEffect } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { Paths } from "expo-file-system"
 import chatsLib from "@/lib/chats"
@@ -24,7 +24,6 @@ const Header = memo(
 	({ withSearch, setSearchQuery }: { withSearch?: boolean; setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
 		const stringigiedClient = useStringifiedClient()
 		const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
-		const router = useRouter()
 		const textForeground = useResolveClassNames("text-foreground")
 		const selectedChatsIncludesMuted = useChatsStore(useShallow(state => state.selectedChats.some(chat => chat.muted)))
 		const everySelectedChatOwnedBySelf = useChatsStore(
@@ -60,24 +59,19 @@ const Header = memo(
 			return [
 				{
 					type: "button",
-					props: {
-						hitSlop: 20,
-						onPress: () => {
-							if (selectedChats.length === chats.length) {
-								useChatsStore.getState().setSelectedChats([])
-
-								return
-							}
-
-							useChatsStore.getState().setSelectedChats(chats)
-						}
+					icon: {
+						name: "close-outline",
+						color: textForeground.color,
+						size: 20
 					},
-					text: {
-						children: selectedChats.length === chats.length ? "tbd_deselectAll" : "tbd_selectAll"
+					props: {
+						onPress: () => {
+							useChatsStore.getState().setSelectedChats([])
+						}
 					}
 				}
 			] satisfies HeaderItem[]
-		}, [selectedChats, chats])
+		}, [selectedChats, textForeground.color])
 
 		const headerRightItems = useMemo(() => {
 			const items: HeaderItem[] = []
@@ -88,8 +82,6 @@ const Header = memo(
 					props: {
 						hitSlop: 20,
 						onPress: () => {
-							useChatsStore.getState().setSelectedChats([])
-
 							router.push(Paths.join("/", "search", "chats"))
 						}
 					},
@@ -286,7 +278,6 @@ const Header = memo(
 			return items
 		}, [
 			withSearch,
-			router,
 			textForeground.color,
 			selectedChats,
 			selectedChatsIncludesMuted,
@@ -372,6 +363,16 @@ const SearchWrapper = memo(
 
 export const Chats = memo(({ withSearch }: { withSearch?: boolean }) => {
 	const [searchQuery, setSearchQuery] = useState<string>("")
+
+	useFocusEffect(
+		useCallback(() => {
+			useChatsStore.getState().setSelectedChats([])
+
+			return () => {
+				useChatsStore.getState().setSelectedChats([])
+			}
+		}, [])
+	)
 
 	return (
 		<Fragment>

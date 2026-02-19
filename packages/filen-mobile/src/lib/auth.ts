@@ -1,13 +1,29 @@
-import { type JsClientInterface, fromStringified, type StringifiedClient, login } from "@filen/sdk-rs"
+import {
+	type JsClientInterface,
+	type StringifiedClient,
+	UnauthJsClient,
+	type UnauthJsClientInterface,
+	type JsClientConfig
+} from "@filen/sdk-rs"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { useEffect, useState } from "react"
 
 class Auth {
-	private sdkClient: JsClientInterface | null = null
+	private authedClient: JsClientInterface | null = null
 	public readonly stringifiedClientStorageKey: string = "stringifiedClient"
+	private unauthedClient: UnauthJsClientInterface | null = null
 
-	public readonly maxIoMemoryUsage: number = 64 * 1024 * 1024 // 64 MiB
-	public readonly maxParallelRequests: number = 128
+	// TODO: adapt numbers
+	public readonly maxIoMemoryUsage: number = 32 * 1024 * 1024 // 32 MiB
+	public readonly maxParallelRequests: number = 64
+	public readonly jsClientBaseConfig: JsClientConfig = {
+		concurrency: undefined,
+		rateLimitPerSec: undefined,
+		uploadBandwidthKilobytesPerSec: undefined,
+		downloadBandwidthKilobytesPerSec: undefined,
+		logLevel: undefined,
+		fileIoMemoryBudget: undefined
+	}
 
 	public async isAuthed(): Promise<
 		| {
@@ -30,52 +46,78 @@ class Auth {
 				}
 	}
 
-	public async setSdkClient(stringifiedClient: StringifiedClient): Promise<JsClientInterface> {
-		this.sdkClient = fromStringified({
+	public async setSdkClients(stringifiedClient: StringifiedClient): Promise<{
+		authedClient: JsClientInterface
+		unauthedClient: UnauthJsClientInterface
+	}> {
+		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+		this.authedClient = this.unauthedClient.fromStringified({
 			...stringifiedClient,
 			maxIoMemoryUsage: this.maxIoMemoryUsage,
 			maxParallelRequests: this.maxParallelRequests
 		})
 
-		return this.sdkClient
+		return {
+			authedClient: this.authedClient,
+			unauthedClient: this.unauthedClient
+		}
 	}
 
-	public async getStringifiedClientFromSecureStorage(): Promise<StringifiedClient | null> {
+	public async getStringifiedAuthedClientFromSecureStorage(): Promise<StringifiedClient | null> {
 		return await secureStore.get<StringifiedClient>(this.stringifiedClientStorageKey)
 	}
 
-	public async getSdkClient(): Promise<JsClientInterface> {
-		while (!this.sdkClient) {
+	public async getSdkClients(): Promise<{
+		authedSdkClient: JsClientInterface
+		unauthedSdkClient: UnauthJsClientInterface
+	}> {
+		if (this.authedClient && this.unauthedClient) {
+			return {
+				authedSdkClient: this.authedClient,
+				unauthedSdkClient: this.unauthedClient
+			}
+		}
+
+		while (!this.authedClient || !this.unauthedClient) {
 			await new Promise<void>(resolve => setTimeout(resolve, 100))
 		}
 
-		return this.sdkClient
+		return {
+			authedSdkClient: this.authedClient,
+			unauthedSdkClient: this.unauthedClient
+		}
 	}
 
-	public async login(...params: Parameters<typeof login>): Promise<JsClientInterface> {
-		this.sdkClient = await login(...params)
+	public async login(...params: Parameters<UnauthJsClientInterface["login"]>): Promise<JsClientInterface> {
+		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+		this.authedClient = await this.unauthedClient.login(...params)
+
+		if (!this.authedClient) {
+			throw new Error("Login failed, authed client is null")
+		}
 
 		await secureStore.set(this.stringifiedClientStorageKey, {
-			...(await this.sdkClient.toStringified()),
+			...(await this.authedClient.toStringified()),
 			maxIoMemoryUsage: this.maxIoMemoryUsage,
 			maxParallelRequests: this.maxParallelRequests
 		})
 
-		const stringifiedClient = await this.getStringifiedClientFromSecureStorage()
+		const stringifiedClient = await this.getStringifiedAuthedClientFromSecureStorage()
 
 		if (!stringifiedClient) {
 			throw new Error("Failed to store stringified client in secure storage")
 		}
 
-		await this.setSdkClient(stringifiedClient)
+		await this.setSdkClients(stringifiedClient)
 
-		return this.sdkClient
+		return this.authedClient
 	}
 
 	public async logout(): Promise<void> {
 		await secureStore.remove(this.stringifiedClientStorageKey)
 
-		this.sdkClient = null
+		this.authedClient = null
+		this.unauthedClient = null
 	}
 }
 
@@ -93,28 +135,36 @@ export function useStringifiedClient(): StringifiedClient | null {
 	return stringifiedClient
 }
 
-export function useSdkClient(): JsClientInterface | null {
-	const [sdkClient, setSdkClient] = useState<JsClientInterface | null>(null)
+export function useSdkClients(): {
+	authedSdkClient: JsClientInterface | null
+	unauthedSdkClient: UnauthJsClientInterface | null
+} {
+	const [authedSdkClient, setAuthedSdkClient] = useState<JsClientInterface | null>(null)
+	const [unauthedSdkClient, setUnauthedSdkClient] = useState<UnauthJsClientInterface | null>(null)
 
 	useEffect(() => {
 		let isMounted = true
 
-		async function fetchSdkClient() {
-			const client = await auth.getSdkClient()
+		async function fetchSdkClients() {
+			const { authedSdkClient, unauthedSdkClient } = await auth.getSdkClients()
 
 			if (isMounted) {
-				setSdkClient(client)
+				setAuthedSdkClient(authedSdkClient)
+				setUnauthedSdkClient(unauthedSdkClient)
 			}
 		}
 
-		fetchSdkClient()
+		fetchSdkClients()
 
 		return () => {
 			isMounted = false
 		}
 	}, [])
 
-	return sdkClient
+	return {
+		authedSdkClient,
+		unauthedSdkClient
+	}
 }
 
 export default auth

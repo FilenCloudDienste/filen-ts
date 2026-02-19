@@ -19,6 +19,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/lib/drive"
 import { ScrollView } from "react-native-gesture-handler"
 import { Information } from "@/routes/driveItemInfo"
+import { useStringifiedClient } from "@/lib/auth"
 
 const ChangeDirectoryColor = memo(() => {
 	const { itemPackedBase64 } = useLocalSearchParams<{
@@ -28,6 +29,7 @@ const ChangeDirectoryColor = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const [selectedColor, setSelectedColor] = useState<string | null>(null)
+	const stringifiedClient = useStringifiedClient()
 
 	const item = useMemo(() => {
 		if (!itemPackedBase64) {
@@ -51,7 +53,7 @@ const ChangeDirectoryColor = memo(() => {
 				href={{
 					pathname: "/tabs/drive/[uuid]",
 					params: {
-						uuid: ""
+						uuid: stringifiedClient?.rootUuid ?? "root"
 					}
 				}}
 			/>
