@@ -41,6 +41,7 @@ SplashScreen.preventAutoHideAsync().catch(console.error)
 
 export const RootLayout = memo(() => {
 	const bgBackground = useResolveClassNames("bg-background")
+	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const [isSetupDone, setIsSetupDone] = useState<boolean>(false)
 	const isAuthed = useIsAuthed()
 
@@ -107,67 +108,100 @@ export const RootLayout = memo(() => {
 											<Stack.Screen
 												name="transfers"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="offline"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="driveItemInfo"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="changeDirectoryColor"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="trash"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="recents"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="favorites"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="sharedIn"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="sharedOut"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="links"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 											<Stack.Screen
 												name="driveSelect"
 												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet"
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
 												}}
 											/>
 										</Stack>
