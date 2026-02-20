@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react"
+import { Fragment, useState, useEffect } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import View, { KeyboardAvoidingView } from "@/components/ui/view"
@@ -25,6 +25,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
 import { AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
 import type { SearchBarProps } from "react-native-screens"
+import { debounce } from "es-toolkit/function"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -417,6 +418,8 @@ const Drive = memo(() => {
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
 	const [searchQuery, setSearchQuery] = useState<string>("")
+	const [globalSearchResult, setGlobalSearchResult] = useState<DriveItem[]>([])
+	const [queryingGlobalSearch, setQueryingGlobalSearch] = useState<boolean>(false)
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -471,7 +474,7 @@ const Drive = memo(() => {
 			return []
 		}
 
-		let items = itemSorter.sortItems(driveItemsQuery.data, "nameAsc")
+		let items = itemSorter.sortItems(driveItemsQuery.data.concat(globalSearchResult), "nameAsc")
 
 		if (searchQuery.length > 0) {
 			const searchQueryNormalized = searchQuery.trim().toLowerCase()
@@ -486,7 +489,7 @@ const Drive = memo(() => {
 		}
 
 		return items
-	}, [driveItemsQuery.data, driveItemsQuery.status, searchQuery])
+	}, [driveItemsQuery.data, driveItemsQuery.status, searchQuery, globalSearchResult])
 
 	const onRefresh = useCallback(async () => {
 		const result = await run(async () => {
@@ -498,6 +501,58 @@ const Drive = memo(() => {
 			alerts.error(result.error)
 		}
 	}, [driveItemsQuery])
+
+	const debouncedSearch = useMemo(
+		() =>
+			debounce(async (value: string) => {
+				const normalized = value.trim().toLowerCase()
+
+				if (normalized.length === 0) {
+					return
+				}
+
+				const result = await run(async () => {
+					return await drive.findItemMatchesForName({
+						name: normalized
+					})
+				})
+
+				setQueryingGlobalSearch(false)
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+
+				setGlobalSearchResult(result.data.map(({ item }) => item))
+			}, 1000),
+		[]
+	)
+
+	useEffect(() => {
+		if (drivePath.type !== "drive" || drivePath.selectOptions) {
+			return
+		}
+
+		if (searchQuery.trim().length === 0) {
+			// eslint-disable-next-line react-hooks/set-state-in-effect
+			setQueryingGlobalSearch(false)
+			setGlobalSearchResult([])
+
+			return
+		}
+
+		setQueryingGlobalSearch(true)
+		debouncedSearch(searchQuery)
+	}, [searchQuery, debouncedSearch, drivePath.type, drivePath.selectOptions])
+
+	useEffect(() => {
+		return () => {
+			debouncedSearch.cancel()
+		}
+	}, [debouncedSearch])
 
 	useFocusEffect(
 		useCallback(() => {
@@ -552,7 +607,7 @@ const Drive = memo(() => {
 						data={items}
 						renderItem={renderItem}
 						onRefresh={onRefresh}
-						loading={driveItemsQuery.status !== "success"}
+						loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
 					/>
 				</KeyboardAvoidingView>
 			</SafeAreaView>

@@ -1130,7 +1130,6 @@ export const Notes = memo(() => {
 						),
 						default: null
 					})}
-
 					{viewMode === "notes" ? (
 						<VirtualList
 							className="flex-1"

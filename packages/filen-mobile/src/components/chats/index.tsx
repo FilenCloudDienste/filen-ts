@@ -334,7 +334,6 @@ export const Chats = memo(() => {
 						),
 						default: null
 					})}
-
 					<List searchQuery={searchQuery} />
 				</KeyboardAvoidingView>
 			</SafeAreaView>

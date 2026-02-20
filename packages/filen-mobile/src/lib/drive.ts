@@ -11,7 +11,14 @@ import {
 	DirEnum
 } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import {
+	unwrapDirMeta,
+	unwrapFileMeta,
+	unwrapParentUuid,
+	unwrappedDirIntoDriveItem,
+	unwrappedFileIntoDriveItem,
+	normalizeFilePathForSdk
+} from "@/lib/utils"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/queries/useDriveItemVersions.query"
 import cache from "@/lib/cache"
@@ -656,6 +663,27 @@ class Drive {
 		}
 
 		return item
+	}
+
+	public async findItemMatchesForName({ name, signal }: { name: string; signal?: AbortSignal }) {
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		const result = await authedSdkClient.findItemMatchesForName(
+			name.trim().toLowerCase(),
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		return result.map(({ item, path }) => ({
+			item:
+				item.tag === NonRootItemTagged_Tags.Dir
+					? unwrappedDirIntoDriveItem(unwrapDirMeta(item.inner[0]))
+					: unwrappedFileIntoDriveItem(unwrapFileMeta(item.inner[0])),
+			path: normalizeFilePathForSdk(path)
+		}))
 	}
 }
 

@@ -139,6 +139,13 @@ export const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAt
 				numColumns={itemsPerRow}
 				drawDistance={Math.floor(Math.max(100, layout.height / 2, windowDimensions.height / 2))}
 				maxItemsInRecyclePool={0}
+				maintainVisibleContentPosition={{
+					disabled: false,
+					autoscrollToTopThreshold: undefined,
+					autoscrollToBottomThreshold: undefined,
+					animateAutoScrollToBottom: false,
+					startRenderingFromBottom: false
+				}}
 				showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 				showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 				scrollEnabled={!props.loading && (props.data ?? []).length > 0}
