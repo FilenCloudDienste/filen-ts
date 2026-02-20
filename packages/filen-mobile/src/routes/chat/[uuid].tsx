@@ -166,7 +166,6 @@ const Header = memo(({ chat }: { chat: TChat }) => {
 			backVisible={true}
 			transparent={false}
 			shadowVisible={true}
-			backTitle="tdb_back"
 			rightItems={headerRightItems}
 		/>
 	)

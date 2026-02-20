@@ -120,7 +120,6 @@ export const Header = memo(({ note, history }: { note: TNote; history?: NoteHist
 			title={history ? simpleDate(Number(history.editedTimestamp)) : (note.title ?? note.uuid)}
 			backVisible={true}
 			transparent={Platform.OS === "ios"}
-			backTitle="tbd_back"
 			rightItems={() => {
 				if (history) {
 					return [

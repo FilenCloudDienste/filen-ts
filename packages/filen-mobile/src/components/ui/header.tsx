@@ -168,7 +168,6 @@ export const Header = memo(
 		shown,
 		largeTitle,
 		backVisible,
-		backTitle,
 		shadowVisible,
 		transparent,
 		blurEffect,
@@ -186,7 +185,6 @@ export const Header = memo(
 		shown?: boolean
 		largeTitle?: boolean
 		backVisible?: boolean
-		backTitle?: string
 		shadowVisible?: boolean
 		transparent?: boolean
 		blurEffect?: BlurEffectTypes
@@ -228,7 +226,8 @@ export const Header = memo(
 					headerBlurEffect: !liquidGlassAvailable && Platform.OS === "ios" ? (blurEffect ?? "systemChromeMaterial") : undefined,
 					headerBackVisible: backVisible,
 					headerTransparent: transparent,
-					headerBackTitle: backTitle,
+					headerBackTitle: "",
+					headerBackButtonDisplayMode: "minimal",
 					headerLargeTitle: largeTitle,
 					headerTitleAlign: "left",
 					headerStyle: backgroundColor

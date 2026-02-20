@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
+import cache from "@/lib/cache"
 
 export const BASE_QUERY_KEY = "useNotesWithContentQuery"
 
@@ -33,6 +34,10 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 			}
 		})
 	)
+
+	for (const note of withContent) {
+		cache.noteUuidToNote.set(note.uuid, note)
+	}
 
 	return withContent
 }
