@@ -202,6 +202,15 @@ export const RootLayout = memo(() => {
 													}
 												}}
 											/>
+											<Stack.Screen
+												name="contacts"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
+												}}
+											/>
 										</Stack>
 										{isAuthed && (
 											<Fragment>

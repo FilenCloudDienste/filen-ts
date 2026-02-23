@@ -24,6 +24,7 @@ import {
 	fetchData as notesWithContentQueryFetch,
 	notesWithContentQueryGet
 } from "@/queries/useNotesWithContent.query"
+import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
 
 const chatTypingTimeoutsRef: Record<number, NodeJS.Timeout> = {}
 
@@ -511,6 +512,26 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				})
 
 				break
+			}
+
+			case SocketEvent_Tags.ContactRequestReceived: {
+				const [inner] = event.inner
+
+				contactRequestsQueryUpdate({
+					updater: prev => ({
+						...prev,
+						incoming: [
+							...prev.incoming.filter(r => r.uuid !== inner.uuid),
+							{
+								uuid: inner.uuid,
+								userId: inner.senderId,
+								email: inner.senderEmail,
+								avatar: inner.senderAvatar,
+								nickName: inner.senderNickName
+							}
+						]
+					})
+				})
 			}
 		}
 	} catch (e) {

@@ -6,6 +6,7 @@ import { useIsAuthed } from "@/lib/auth"
 import { Redirect } from "expo-router"
 import { memo } from "@/lib/memo"
 import useChatsUnreadCount from "@/hooks/useChatsUnreadCount"
+import useContactRequestsQuery from "@/queries/useContactRequests.query"
 
 export const TabsLayout = memo(() => {
 	const bgBackground = useResolveClassNames("bg-background")
@@ -14,6 +15,7 @@ export const TabsLayout = memo(() => {
 	const textRed500 = useResolveClassNames("text-red-500")
 	const isAuthed = useIsAuthed()
 	const chatsUnreadCount = useChatsUnreadCount()
+	const contactRequestsQuery = useContactRequestsQuery()
 
 	if (!isAuthed) {
 		return <Redirect href="/auth/login" />
@@ -95,6 +97,9 @@ export const TabsLayout = memo(() => {
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="more">
 				<Label>tbd_more</Label>
+				{contactRequestsQuery.status === "success" && contactRequestsQuery.data.incoming.length > 0 && (
+					<Badge>{contactRequestsQuery.data.incoming.length.toString()}</Badge>
+				)}
 				{Platform.select({
 					ios: <Icon sf="ellipsis" />,
 					default: (

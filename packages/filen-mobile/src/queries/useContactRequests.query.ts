@@ -3,20 +3,20 @@ import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams, queryUpdater } from "@/qu
 import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import auth from "@/lib/auth"
 
-export const BASE_QUERY_KEY = "useContactsQuery"
+export const BASE_QUERY_KEY = "useContactRequestsQuery"
 
 export async function fetchData(params?: { signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
-	const [contacts, blocked] = await Promise.all([
-		authedSdkClient.getContacts(
+	const [incoming, outgoing] = await Promise.all([
+		authedSdkClient.listIncomingContactRequests(
 			params?.signal
 				? {
 						signal: params.signal
 					}
 				: undefined
 		),
-		authedSdkClient.getBlockedContacts(
+		authedSdkClient.listOutgoingContactRequests(
 			params?.signal
 				? {
 						signal: params.signal
@@ -26,12 +26,12 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 	])
 
 	return {
-		contacts,
-		blocked
+		incoming,
+		outgoing
 	}
 }
 
-export function useContactsQuery(
+export function useContactRequestsQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const defaultParams = useDefaultQueryParams(options)
@@ -55,7 +55,7 @@ export function useContactsQuery(
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
 }
 
-export function contactsQueryUpdate({
+export function contactRequestsQueryUpdate({
 	updater
 }: {
 	updater:
@@ -66,16 +66,16 @@ export function contactsQueryUpdate({
 		return typeof updater === "function"
 			? updater(
 					prev ?? {
-						contacts: [],
-						blocked: []
+						incoming: [],
+						outgoing: []
 					}
 				)
 			: updater
 	})
 }
 
-export function contactsQueryGet() {
+export function contactRequestsQueryGet() {
 	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
 }
 
-export default useContactsQuery
+export default useContactRequestsQuery

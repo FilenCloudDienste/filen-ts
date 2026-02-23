@@ -8,7 +8,7 @@ import { useShallow } from "zustand/shallow"
 import useChatsStore from "@/stores/useChats.store"
 import useChatsQuery from "@/queries/useChats.query"
 import { useStringifiedClient } from "@/lib/auth"
-import { useFocusEffect } from "expo-router"
+import { useFocusEffect, router } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import chatsLib from "@/lib/chats"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -18,6 +18,7 @@ import prompts from "@/lib/prompts"
 import View, { KeyboardAvoidingView } from "@/components/ui/view"
 import type { MenuButton } from "@/components/ui/menu"
 import type { SearchBarProps } from "react-native-screens"
+import { selectContacts } from "@/routes/contacts"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
 	const stringigiedClient = useStringifiedClient()
@@ -96,7 +97,29 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 				title: "tbd_create_chat",
 				icon: "plus",
 				onPress: async () => {
-					// TODO
+					const selectContactsResult = await selectContacts({
+						multiple: true,
+						userIdsToExclude: []
+					})
+
+					if (selectContactsResult.cancelled) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						return await chatsLib.create({
+							contacts: selectContactsResult.selectedContacts
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					router.push(`/chat/${result.data.uuid}`)
 				}
 			})
 		}

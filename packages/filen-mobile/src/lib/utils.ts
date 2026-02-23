@@ -20,7 +20,9 @@ import {
 	type AnyDirEnum,
 	type AnyDirEnumWithShareInfo,
 	AnyDirEnum_Tags,
-	AnyDirEnumWithShareInfo_Tags
+	AnyDirEnumWithShareInfo_Tags,
+	type ContactRequestIn,
+	type ContactRequestOut
 } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
@@ -386,7 +388,7 @@ export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwr
 	) satisfies DriveItem
 }
 
-export function contactDisplayName(contact: Contact | NoteParticipant | ChatParticipant): string {
+export function contactDisplayName(contact: Contact | NoteParticipant | ChatParticipant | ContactRequestIn | ContactRequestOut): string {
 	return contact.nickName && contact.nickName.length > 0 ? contact.nickName : contact.email
 }
 

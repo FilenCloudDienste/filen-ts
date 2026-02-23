@@ -375,7 +375,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 	}, [drivePath, stringifiedClient])
 
 	const searchBarOptions = useMemo(() => {
-		if (!setSearchQuery) {
+		if (!setSearchQuery || drivePath.selectOptions) {
 			return undefined
 		}
 
@@ -391,7 +391,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 			} satisfies SearchBarProps,
 			default: undefined
 		}) satisfies SearchBarProps | undefined
-	}, [setSearchQuery])
+	}, [setSearchQuery, drivePath.selectOptions])
 
 	return (
 		<StackHeader
@@ -469,17 +469,23 @@ const Drive = memo(() => {
 		return item.data.uuid
 	}, [])
 
+	const itemsSorted = useMemo(() => {
+		if (driveItemsQuery.status !== "success") {
+			return []
+		}
+
+		return itemSorter.sortItems([...driveItemsQuery.data, ...globalSearchResult], "nameAsc")
+	}, [driveItemsQuery.data, driveItemsQuery.status, globalSearchResult])
+
 	const items = useMemo(() => {
 		if (driveItemsQuery.status !== "success") {
 			return []
 		}
 
-		let items = itemSorter.sortItems(driveItemsQuery.data.concat(globalSearchResult), "nameAsc")
-
 		if (searchQuery.length > 0) {
 			const searchQueryNormalized = searchQuery.trim().toLowerCase()
 
-			items = items.filter(item => {
+			return itemsSorted.filter(item => {
 				if (item.data.decryptedMeta?.name && item.data.decryptedMeta?.name.toLowerCase().includes(searchQueryNormalized)) {
 					return true
 				}
@@ -488,8 +494,8 @@ const Drive = memo(() => {
 			})
 		}
 
-		return items
-	}, [driveItemsQuery.data, driveItemsQuery.status, searchQuery, globalSearchResult])
+		return itemsSorted
+	}, [driveItemsQuery.status, searchQuery, itemsSorted])
 
 	const onRefresh = useCallback(async () => {
 		const result = await run(async () => {
@@ -502,49 +508,45 @@ const Drive = memo(() => {
 		}
 	}, [driveItemsQuery])
 
-	const debouncedSearch = useMemo(
-		() =>
-			debounce(async (value: string) => {
-				const normalized = value.trim().toLowerCase()
+	const debouncedSearch = useMemo(() => {
+		return debounce(async (value: string) => {
+			const normalized = value.trim().toLowerCase()
 
-				if (normalized.length === 0) {
-					return
-				}
+			if (normalized.length === 0) {
+				return
+			}
 
-				const result = await run(async () => {
-					return await drive.findItemMatchesForName({
-						name: normalized
-					})
+			setQueryingGlobalSearch(true)
+			setGlobalSearchResult([])
+
+			const result = await run(async defer => {
+				defer(() => {
+					setQueryingGlobalSearch(false)
 				})
 
-				setQueryingGlobalSearch(false)
+				return await drive.findItemMatchesForName({
+					name: normalized
+				})
+			})
 
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
+			setQueryingGlobalSearch(false)
 
-					return
-				}
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
 
-				setGlobalSearchResult(result.data.map(({ item }) => item))
-			}, 1000),
-		[]
-	)
+				return
+			}
+
+			setGlobalSearchResult(result.data.map(({ item }) => item))
+		}, 1000)
+	}, [])
 
 	useEffect(() => {
 		if (drivePath.type !== "drive" || drivePath.selectOptions) {
 			return
 		}
 
-		if (searchQuery.trim().length === 0) {
-			// eslint-disable-next-line react-hooks/set-state-in-effect
-			setQueryingGlobalSearch(false)
-			setGlobalSearchResult([])
-
-			return
-		}
-
-		setQueryingGlobalSearch(true)
 		debouncedSearch(searchQuery)
 	}, [searchQuery, debouncedSearch, drivePath.type, drivePath.selectOptions])
 

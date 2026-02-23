@@ -14,6 +14,7 @@ import useTransfersStore from "@/stores/useTransfers.store"
 import { useShallow } from "zustand/shallow"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
+import useContactRequestsQuery from "@/queries/useContactRequests.query"
 
 export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]
@@ -138,6 +139,10 @@ export const More = memo(() => {
 	const stringifiedClient = useStringifiedClient()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
+	const contactRequestsQuery = useContactRequestsQuery({
+		enabled: false
+	})
+
 	return (
 		<Fragment>
 			<Header
@@ -241,6 +246,10 @@ export const More = memo(() => {
 							{
 								icon: "person-outline",
 								title: "tbd_contacts",
+								badge:
+									contactRequestsQuery.status === "success" && contactRequestsQuery.data.incoming.length > 0
+										? contactRequestsQuery.data.incoming.length.toString()
+										: undefined,
 								onPress: () => {
 									router.push("/contacts")
 								}

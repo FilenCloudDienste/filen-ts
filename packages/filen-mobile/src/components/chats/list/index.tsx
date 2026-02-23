@@ -4,11 +4,12 @@ import useChatsQuery from "@/queries/useChats.query"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { Chat as TChat } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
-import { parseNumbersFromString, run } from "@filen/utils"
+import { parseNumbersFromString, run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import Chat from "@/components/chats/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
+import { Platform } from "react-native"
 
 export const List = memo(({ searchQuery }: { searchQuery?: string }) => {
 	const chatsQuery = useChatsQuery()
@@ -88,7 +89,7 @@ export const List = memo(({ searchQuery }: { searchQuery?: string }) => {
 		<VirtualList
 			className="flex-1"
 			contentInsetAdjustmentBehavior="automatic"
-			contentContainerClassName="pb-40"
+			contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 			loading={chatsQuery.status !== "success"}
 			keyExtractor={keyExtractor}
 			data={chats}

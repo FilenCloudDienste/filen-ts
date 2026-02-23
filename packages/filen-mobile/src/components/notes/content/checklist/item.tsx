@@ -37,7 +37,7 @@ export const Item = memo(
 			return content.replace(/\r?\n/g, "")
 		}, [])
 
-		const [value, setValue] = useState<string>(normalizeItemContent(item?.content ?? ""))
+		const [value, setValue] = useState<string>(() => normalizeItemContent(item?.content ?? ""))
 
 		const toggleChecked = useCallback(() => {
 			if (!item) {

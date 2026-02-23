@@ -8,7 +8,6 @@ import { PressableScale } from "@/components/ui/pressables"
 import Menu from "@/components/chats/list/chat/menu"
 import { contactDisplayName } from "@/lib/utils"
 import { useRouter } from "expo-router"
-import { Paths } from "expo-file-system"
 import { useStringifiedClient } from "@/lib/auth"
 import { fastLocaleCompare, cn } from "@filen/utils"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
@@ -46,28 +45,27 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 			return info.item.name
 		}
 
-		if (info.item.participants.length === 2) {
-			const otherParticipant = info.item.participants.find(p => p.userId !== stringifiedClient?.userId)
+		if (participantsWithoutSelf.length === 1) {
+			const otherParticipant = participantsWithoutSelf[0]
 
 			if (otherParticipant) {
 				return contactDisplayName(otherParticipant)
 			}
 		}
 
-		return info.item.participants
-			.filter(p => p.userId !== stringifiedClient?.userId)
+		return participantsWithoutSelf
 			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
 			.map(p => contactDisplayName(p))
 			.join(", ")
-	}, [info.item.name, info.item.participants, stringifiedClient?.userId])
+	}, [info.item.name, participantsWithoutSelf])
 
 	const participantsWithAvatars = useMemo(() => {
-		return info.item.participants
-			.filter(p => p.userId !== stringifiedClient?.userId && p.avatar && p.avatar.startsWith("http"))
+		return participantsWithoutSelf
+			.filter(p => p.avatar && p.avatar.startsWith("http"))
 			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
 			.map(p => p.avatar)
 			.slice(0, 5)
-	}, [info.item.participants, stringifiedClient?.userId])
+	}, [participantsWithoutSelf])
 
 	const onPress = useCallback(() => {
 		if (useChatsStore.getState().selectedChats.length > 0) {
@@ -84,7 +82,7 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 			return
 		}
 
-		router.push(Paths.join("/", "chat", info.item.uuid))
+		router.push(`/chat/${info.item.uuid}`)
 	}, [router, info.item])
 
 	return (
@@ -116,12 +114,12 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 								size={38}
 								immediateFallback={true}
 							/>
-						) : participantsWithAvatars.length === 1 ? (
+						) : participantsWithoutSelf.length <= 1 ? (
 							<Avatar
 								className="shrink-0"
 								size={38}
 								source={{
-									uri: participantsWithAvatars.at(0)
+									uri: participantsWithoutSelf.at(0)?.avatar
 								}}
 							/>
 						) : (
@@ -163,9 +161,17 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 									ellipsizeMode="tail"
 									className={cn("text-xs", unreadCount > 0 ? "text-foreground font-bold" : "text-muted-foreground")}
 								>
-									{info.item.lastMessage?.inner.message}
+									{info.item.lastMessage?.inner.message ?? "tbd_no_messages_yet"}
 								</Text>
-							) : null}
+							) : (
+								<Text
+									numberOfLines={1}
+									ellipsizeMode="tail"
+									className="text-xs text-muted-foreground italic"
+								>
+									tbd_no_messages_yet
+								</Text>
+							)}
 						</View>
 					</View>
 				</PressableScale>

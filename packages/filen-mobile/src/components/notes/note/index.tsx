@@ -52,7 +52,7 @@ export const Note = memo(
 		const router = useRouter()
 		const textForeground = useResolveClassNames("text-foreground")
 		const textRed500 = useResolveClassNames("text-red-500")
-		const itemUuid = useMemo(() => (info.item.type === "header" ? info.item.id : info.item.uuid), [info.item])
+		const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
 		const isInflight = useNotesStore(useShallow(state => (state.inflightContent[itemUuid] ?? []).length > 0))
 		const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
 		const stringifiedClient = useStringifiedClient()

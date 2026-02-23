@@ -18,6 +18,7 @@ import useAppStore from "@/stores/useApp.store"
 import useChatsStore from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
+import { selectContacts } from "@/routes/contacts"
 
 export type ChatMenuOrigin = "chats" | "search" | "chat"
 
@@ -116,7 +117,32 @@ export function createMenuButtons({
 						keepMenuOpenOnPress: Platform.OS === "android",
 						icon: "plus",
 						onPress: async () => {
-							// TODO: Add participant
+							const selectContactsResult = await selectContacts({
+								multiple: true,
+								userIdsToExclude: chat.participants.map(participant => Number(participant.userId))
+							})
+
+							if (selectContactsResult.cancelled) {
+								return
+							}
+
+							const result = await runWithLoading(async () => {
+								return await Promise.all(
+									selectContactsResult.selectedContacts.map(async contact => {
+										return await chats.addParticipant({
+											chat,
+											contact
+										})
+									})
+								)
+							})
+
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
+
+								return
+							}
 						}
 					} satisfies MenuButton
 				}

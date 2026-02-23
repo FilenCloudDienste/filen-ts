@@ -32,40 +32,43 @@ import useChatUnreadCount from "@/hooks/useChatUnreadCount"
 import useChatsStore from "@/stores/useChats.store"
 
 const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
-	const stringigiedClient = useStringifiedClient()
+	const stringifiedClient = useStringifiedClient()
+
+	const participantsWithoutSelf = useMemo(() => {
+		return chat.participants.filter(p => p.userId !== stringifiedClient?.userId)
+	}, [chat.participants, stringifiedClient?.userId])
 
 	const title = useMemo(() => {
 		if (chat.name && chat.name.length > 0) {
 			return chat.name
 		}
 
-		if (chat.participants.length === 2) {
-			const otherParticipant = chat.participants.find(p => p.userId !== stringigiedClient?.userId)
+		if (participantsWithoutSelf.length === 1) {
+			const otherParticipant = participantsWithoutSelf[0]
 
 			if (otherParticipant) {
 				return contactDisplayName(otherParticipant)
 			}
 		}
 
-		return chat.participants
-			.filter(p => p.userId !== stringigiedClient?.userId)
+		return participantsWithoutSelf
 			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
 			.map(p => contactDisplayName(p))
 			.join(", ")
-	}, [chat.name, chat.participants, stringigiedClient?.userId])
+	}, [chat.name, participantsWithoutSelf])
 
 	const participantsWithAvatars = useMemo(() => {
-		return chat.participants
-			.filter(p => p.userId !== stringigiedClient?.userId && p.avatar && p.avatar.startsWith("http"))
+		return participantsWithoutSelf
+			.filter(p => p.avatar && p.avatar.startsWith("http"))
 			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
 			.map(p => p.avatar)
 			.slice(0, 5)
-	}, [chat.participants, stringigiedClient?.userId])
+	}, [participantsWithoutSelf])
 
 	return (
 		<View
 			className={cn(
-				"items-center flex-col justify-center bg-transparent w-full",
+				"items-center flex-col justify-center bg-transparent w-[90%]",
 				Platform.select({
 					ios: "pr-9",
 					default: "pr-3"
@@ -79,32 +82,20 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 						size={36}
 						immediateFallback={true}
 					/>
-				) : participantsWithAvatars.length === 1 ? (
+				) : participantsWithoutSelf.length <= 1 ? (
 					<Avatar
 						className="shrink-0 z-10"
 						size={36}
 						source={{
-							uri: participantsWithAvatars.at(0)
+							uri: participantsWithoutSelf.at(0)?.avatar
 						}}
 					/>
 				) : (
-					<View className="flex-row items-center bg-transparent">
-						{participantsWithAvatars.map((avatar, index) => {
-							return (
-								<Avatar
-									key={avatar}
-									className={cn("shrink-0", index > 0 && "-ml-12")}
-									size={32}
-									style={{
-										zIndex: 100 - index
-									}}
-									source={{
-										uri: avatar
-									}}
-								/>
-							)
-						})}
-					</View>
+					<Avatar
+						className="shrink-0 z-10"
+						size={36}
+						group={participantsWithoutSelf.length}
+					/>
 				)}
 			</View>
 			<CrossGlassContainerView
@@ -114,7 +105,7 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 				<Text
 					className="text-foreground"
 					numberOfLines={1}
-					ellipsizeMode="tail"
+					ellipsizeMode="middle"
 				>
 					{title}
 				</Text>

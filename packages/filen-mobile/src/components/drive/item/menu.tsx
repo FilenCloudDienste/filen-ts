@@ -24,7 +24,7 @@ import { simpleDate } from "@/lib/time"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import auth from "@/lib/auth"
 import { Buffer } from "@craftzdog/react-native-buffer"
-import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
+import { selectContacts } from "@/routes/contacts"
 
 export type DriveItemMenuOrigin =
 	| "drive"
@@ -418,8 +418,13 @@ export function createMenuButtons({
 				{
 					id: "shareFilenUser",
 					title: "tbd_share_filen_user",
-					onPress: () => {
-						// TODO
+					onPress: async () => {
+						const selectContactsResult = await selectContacts({
+							multiple: false,
+							userIdsToExclude: []
+						})
+
+						console.log({ selectContactsResult })
 					}
 				}
 			]
@@ -701,21 +706,6 @@ export function createMenuButtons({
 						).toString("base64")
 					}
 				})
-			}
-		})
-
-		menuButtons.push({
-			id: "selectTest",
-			title: "tbd_selectTest",
-			onPress: async () => {
-				const res = await selectDriveItems({
-					type: "single",
-					files: false,
-					directories: true,
-					items: [item]
-				})
-
-				console.log("Selected items:", res)
 			}
 		})
 	}

@@ -5,7 +5,7 @@ import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import { notesSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import { type Note as TNote, NoteType, type NoteTag } from "@filen/sdk-rs"
-import { run, fastLocaleCompare } from "@filen/utils"
+import { run, fastLocaleCompare, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { Platform, TextInput } from "react-native"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
@@ -1134,7 +1134,7 @@ export const Notes = memo(() => {
 						<VirtualList
 							className="flex-1"
 							contentInsetAdjustmentBehavior="automatic"
-							contentContainerClassName="pb-40"
+							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 							keyExtractor={keyExtractorNotesView}
 							data={notes}
 							renderItem={renderItemNotesView}
@@ -1152,7 +1152,7 @@ export const Notes = memo(() => {
 						<VirtualList
 							className="flex-1"
 							contentInsetAdjustmentBehavior="automatic"
-							contentContainerClassName="pb-40"
+							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
 							keyExtractor={keyExtractorTagsView}
 							data={notesTags}
 							loading={notesTagsQuery.status !== "success"}
