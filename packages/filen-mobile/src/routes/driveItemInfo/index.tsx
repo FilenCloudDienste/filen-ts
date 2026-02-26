@@ -27,7 +27,8 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
 			uuid: item?.data.uuid ?? "",
-			offline: false
+			offline: false,
+			trash: false
 		},
 		{
 			enabled: item !== null && (item.type === "directory" || item.type === "sharedDirectory")

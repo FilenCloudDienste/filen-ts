@@ -20,7 +20,8 @@ export const Size = memo(
 		const directorySizeQuery = useDirectorySizeQuery(
 			{
 				uuid: info.item.item.data.uuid,
-				offline: origin === "offline"
+				offline: origin === "offline",
+				trash: origin === "trash"
 			},
 			{
 				enabled: info.item.item.type === "directory" || info.item.item.type === "sharedDirectory"

@@ -4,7 +4,7 @@ import auth from "@/lib/auth"
 import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
-import { AnyDirEnumWithShareInfo, DirWithMetaEnum_Tags } from "@filen/sdk-rs"
+import { AnyDirEnumWithShareInfo, DirWithMetaEnum_Tags, ParentUuid } from "@filen/sdk-rs"
 import offline from "@/lib/offline"
 import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
 
@@ -13,6 +13,7 @@ export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 export type UseDirectorySizeQueryParams = {
 	uuid: string
 	offline: boolean
+	trash: boolean
 }
 
 export async function fetchData(
@@ -51,6 +52,13 @@ export async function fetchData(
 		}
 
 		if (dir) {
+			if (params.trash) {
+				return new AnyDirEnumWithShareInfo.Dir({
+					...dir,
+					parent: new ParentUuid.Trash()
+				})
+			}
+
 			return new AnyDirEnumWithShareInfo.Dir(dir)
 		}
 
