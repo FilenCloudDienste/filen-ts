@@ -12,10 +12,7 @@ export const StyleProvider = memo(({ children }: { children: React.ReactNode }) 
 
 	useEffect(() => {
 		if (Platform.OS === "android") {
-			Promise.all([
-				NavigationBar.setButtonStyleAsync(theme === "dark" ? "light" : "dark"),
-				NavigationBar.setStyle(theme === "dark" ? "dark" : "light")
-			]).catch(console.error)
+			NavigationBar.setStyle(theme === "dark" ? "dark" : "light")
 		}
 	}, [theme])
 
@@ -23,6 +20,7 @@ export const StyleProvider = memo(({ children }: { children: React.ReactNode }) 
 		<ThemeProvider
 			value={{
 				...DefaultTheme,
+				dark: theme === "dark",
 				colors: {
 					...DefaultTheme.colors,
 					background: "transparent"

@@ -26,8 +26,8 @@ export const Login = memo(() => {
 					<Button
 						onPress={async () => {
 							await auth.login({
-								email: process.env["EXPO_PUBLIC_EMAIL"],
-								password: process.env["EXPO_PUBLIC_PASSWORD"],
+								email: process.env["EXPO_PUBLIC_EMAIL"]!,
+								password: process.env["EXPO_PUBLIC_PASSWORD"]!,
 								twoFactorCode: undefined
 							})
 

@@ -159,7 +159,7 @@ class Sqlite {
 				return null
 			}
 
-			return unpack(row.value) as T
+			return unpack(new Uint8Array(row.value)) as T
 		},
 		set: async <T>(key: string, value: T): Promise<number | null> => {
 			if (!value) {
@@ -167,7 +167,7 @@ class Sqlite {
 			}
 
 			const db = await this.openDb()
-			const row = await db.runAsync("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [key, pack(value)])
+			const row = await db.runAsync("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [key, new Uint8Array(pack(value))])
 
 			return row.lastInsertRowId
 		},

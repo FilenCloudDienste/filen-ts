@@ -1,8 +1,8 @@
-import { Fragment, useState } from "react"
+import { Fragment } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { memo, useMemo, useCallback } from "@/lib/memo"
-import { Platform, TextInput } from "react-native"
+import { Platform } from "react-native"
 import List from "@/components/chats/list"
 import { useShallow } from "zustand/shallow"
 import useChatsStore from "@/stores/useChats.store"
@@ -15,12 +15,10 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { run } from "@filen/utils"
 import prompts from "@/lib/prompts"
-import View, { KeyboardAvoidingView } from "@/components/ui/view"
 import type { MenuButton } from "@/components/ui/menu"
-import type { SearchBarProps } from "react-native-screens"
 import { selectContacts } from "@/routes/contacts"
 
-const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
+const Header = memo(() => {
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
 	const textForeground = useResolveClassNames("text-foreground")
@@ -288,39 +286,17 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 		selfIsParticipantAndNotOwnerOfEverySelectedChat
 	])
 
-	const searchBarOptions = useMemo(() => {
-		if (!setSearchQuery) {
-			return undefined
-		}
-
-		return Platform.select({
-			ios: {
-				placeholder: "tbd_search_chats",
-				onChangeText(e) {
-					setSearchQuery(e.nativeEvent.text)
-				},
-				autoFocus: true,
-				autoCapitalize: "none",
-				placement: "stacked"
-			},
-			default: undefined
-		}) satisfies SearchBarProps | undefined
-	}, [setSearchQuery])
-
 	return (
 		<StackHeader
 			title="tbd_chats"
 			transparent={Platform.OS === "ios"}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
-			searchBarOptions={searchBarOptions}
 		/>
 	)
 })
 
 export const Chats = memo(() => {
-	const [searchQuery, setSearchQuery] = useState<string>("")
-
 	useFocusEffect(
 		useCallback(() => {
 			useChatsStore.getState().setSelectedChats([])
@@ -333,32 +309,9 @@ export const Chats = memo(() => {
 
 	return (
 		<Fragment>
-			<Header setSearchQuery={setSearchQuery} />
+			<Header />
 			<SafeAreaView edges={["left", "right"]}>
-				<KeyboardAvoidingView
-					className="flex-1 flex-col"
-					behavior="padding"
-				>
-					{Platform.select({
-						android: (
-							<View className="px-4 pb-4 shrink-0 bg-transparent">
-								<TextInput
-									className="bg-background-secondary px-4 py-3 rounded-full"
-									placeholder="tbd_search_chats"
-									onChangeText={setSearchQuery}
-									autoCapitalize="none"
-									autoCorrect={false}
-									spellCheck={false}
-									returnKeyType="search"
-									autoComplete="off"
-									autoFocus={false}
-								/>
-							</View>
-						),
-						default: null
-					})}
-					<List searchQuery={searchQuery} />
-				</KeyboardAvoidingView>
+				<List />
 			</SafeAreaView>
 		</Fragment>
 	)

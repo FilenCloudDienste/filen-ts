@@ -1,21 +1,22 @@
 import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
 
-export const VERSION: string = "3.1.0"
+const VERSION: string = "3.1.0"
 
-export const APPLE_TEAM_ID: string = "7YTW5D2K7P"
-export const IOS_APP_GROUP_ID: string = "group.io.filen.app"
-export const JS_ENGINE: "hermes" | "jsc" = "hermes"
-export const NEW_ARCH_ENABLED: boolean = true
-export const ANDROID_MIN_SDK_VERSION: number = 31
-export const ANDROID_TARGET_SDK_VERSION: number = 36
-export const ANDROID_COMPILE_SDK_VERSION: number = 36
-export const ANDROID_BUILD_TOOLS_VERSION: string = "36.0.0"
-export const IOS_DEPLOYMENT_TARGET: string = "18.0"
-export const NAME: string = "Filen"
-export const IDENTIFIER: string = "com.anonymous.filenmobile" // "io.filen.app"
+const APPLE_TEAM_ID: string = "7YTW5D2K7P"
+const IOS_APP_GROUP_ID: string = "group.io.filen.app"
+const JS_ENGINE: "hermes" | "jsc" = "hermes"
+const ANDROID_MIN_SDK_VERSION: number = 31
+const ANDROID_TARGET_SDK_VERSION: number = 36
+const ANDROID_COMPILE_SDK_VERSION: number = 36
+const ANDROID_BUILD_TOOLS_VERSION: string = "36.0.0"
+const IOS_DEPLOYMENT_TARGET: string = "18.0"
+const NAME: string = "Filen"
+const IDENTIFIER: string = "com.anonymous.filenmobile" // "io.filen.app"
 
-export function semverToNumber(version: string): number {
+// TODO: Add back @config-plugins/react-native-blob-util when its updated for sdk 55
+
+function semverToNumber(version: string): number {
 	const parts = version.replace(/^v/, "").split(".").map(Number)
 
 	while (parts.length < 3) {
@@ -36,7 +37,7 @@ export function semverToNumber(version: string): number {
 	return major * 1000000 + minor * 1000 + patch
 }
 
-export const BUILD_NUMBER: number = semverToNumber(VERSION)
+const BUILD_NUMBER: number = semverToNumber(VERSION)
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
 	...config,
@@ -48,7 +49,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 	icon: "./src/assets/images/icon.png",
 	scheme: "iofilenapp",
 	userInterfaceStyle: "automatic",
-	newArchEnabled: NEW_ARCH_ENABLED,
 	jsEngine: JS_ENGINE,
 	platforms: ["ios", "android"],
 	githubUrl: "https://github.com/FilenCloudDienste/filen-ts/packages/filen-mobile",
@@ -59,7 +59,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		bundleIdentifier: IDENTIFIER,
 		requireFullScreen: true,
 		usesIcloudStorage: true,
-		newArchEnabled: NEW_ARCH_ENABLED,
 		jsEngine: JS_ENGINE,
 		appleTeamId: APPLE_TEAM_ID,
 		entitlements: {
@@ -123,8 +122,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 	android: {
 		version: VERSION,
 		versionCode: BUILD_NUMBER,
-		edgeToEdgeEnabled: true,
-		newArchEnabled: NEW_ARCH_ENABLED,
 		jsEngine: JS_ENGINE,
 		allowBackup: false,
 		adaptiveIcon: {
@@ -165,6 +162,31 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 	},
 	plugins: [
 		[
+			"expo-build-properties",
+			{
+				buildReactNativeFromSource: true,
+				useHermesV1: true,
+				android: {
+					compileSdkVersion: ANDROID_COMPILE_SDK_VERSION,
+					targetSdkVersion: ANDROID_TARGET_SDK_VERSION,
+					minSdkVersion: ANDROID_MIN_SDK_VERSION,
+					buildToolsVersion: ANDROID_BUILD_TOOLS_VERSION,
+					enableProguardInReleaseBuilds: false,
+					enableShrinkResourcesInReleaseBuilds: false,
+					enableBundleCompression: false,
+					useLegacyPackaging: false,
+					enablePngCrunchInReleaseBuilds: false,
+					packagingOptions: {
+						pickFirst: ["**/libcrypto.so"]
+					}
+				},
+				ios: {
+					deploymentTarget: IOS_DEPLOYMENT_TARGET,
+					useFrameworks: "static"
+				}
+			}
+		],
+		[
 			"expo-router",
 			{
 				root: "./src/routes"
@@ -185,7 +207,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"expo-video",
 		"expo-sqlite",
 		"expo-localization",
-		"expo-build-properties",
 		"expo-background-task",
 		"expo-audio",
 		"expo-secure-store",
@@ -198,8 +219,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 					enforceNavigationBarContrast: false
 				}
 			}
-		],
-		"@config-plugins/react-native-blob-util"
+		]
 	],
 	experiments: {
 		typedRoutes: true,

@@ -1,4 +1,4 @@
-import { NativeTabs, Icon, Label, VectorIcon, Badge } from "expo-router/unstable-native-tabs"
+import { NativeTabs } from "expo-router/unstable-native-tabs"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
@@ -31,13 +31,13 @@ export const TabsLayout = memo(() => {
 			tintColor={textForeground.color}
 		>
 			<NativeTabs.Trigger name="drive">
-				<Label>tbd_drive</Label>
+				<NativeTabs.Trigger.Label>tbd_drive</NativeTabs.Trigger.Label>
 				{Platform.select({
-					ios: <Icon sf="folder.fill" />,
+					ios: <NativeTabs.Trigger.Icon sf="folder.fill" />,
 					default: (
-						<Icon
+						<NativeTabs.Trigger.Icon
 							src={
-								<VectorIcon
+								<NativeTabs.Trigger.VectorIcon
 									family={MaterialIcons}
 									name="folder"
 								/>
@@ -47,13 +47,13 @@ export const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="photos">
-				<Label>tbd_photos</Label>
+				<NativeTabs.Trigger.Label>tbd_photos</NativeTabs.Trigger.Label>
 				{Platform.select({
-					ios: <Icon sf="photo.fill" />,
+					ios: <NativeTabs.Trigger.Icon sf="photo.fill" />,
 					default: (
-						<Icon
+						<NativeTabs.Trigger.Icon
 							src={
-								<VectorIcon
+								<NativeTabs.Trigger.VectorIcon
 									family={MaterialIcons}
 									name="photo-library"
 								/>
@@ -63,13 +63,13 @@ export const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="notes">
-				<Label>tbd_notes</Label>
+				<NativeTabs.Trigger.Label>tbd_notes</NativeTabs.Trigger.Label>
 				{Platform.select({
-					ios: <Icon sf="note.text" />,
+					ios: <NativeTabs.Trigger.Icon sf="note.text" />,
 					default: (
-						<Icon
+						<NativeTabs.Trigger.Icon
 							src={
-								<VectorIcon
+								<NativeTabs.Trigger.VectorIcon
 									family={MaterialIcons}
 									name="book"
 								/>
@@ -79,14 +79,14 @@ export const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="chats">
-				<Label>tbd_chats</Label>
-				{chatsUnreadCount > 0 && <Badge>{chatsUnreadCount.toString()}</Badge>}
+				<NativeTabs.Trigger.Label>tbd_chats</NativeTabs.Trigger.Label>
+				{chatsUnreadCount > 0 && <NativeTabs.Trigger.Badge>{chatsUnreadCount.toString()}</NativeTabs.Trigger.Badge>}
 				{Platform.select({
-					ios: <Icon sf="message.fill" />,
+					ios: <NativeTabs.Trigger.Icon sf="message.fill" />,
 					default: (
-						<Icon
+						<NativeTabs.Trigger.Icon
 							src={
-								<VectorIcon
+								<NativeTabs.Trigger.VectorIcon
 									family={MaterialIcons}
 									name="messenger"
 								/>
@@ -96,16 +96,16 @@ export const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="more">
-				<Label>tbd_more</Label>
+				<NativeTabs.Trigger.Label>tbd_more</NativeTabs.Trigger.Label>
 				{contactRequestsQuery.status === "success" && contactRequestsQuery.data.incoming.length > 0 && (
-					<Badge>{contactRequestsQuery.data.incoming.length.toString()}</Badge>
+					<NativeTabs.Trigger.Badge>{contactRequestsQuery.data.incoming.length.toString()}</NativeTabs.Trigger.Badge>
 				)}
 				{Platform.select({
-					ios: <Icon sf="ellipsis" />,
+					ios: <NativeTabs.Trigger.Icon sf="ellipsis" />,
 					default: (
-						<Icon
+						<NativeTabs.Trigger.Icon
 							src={
-								<VectorIcon
+								<NativeTabs.Trigger.VectorIcon
 									family={MaterialIcons}
 									name="more-horiz"
 								/>

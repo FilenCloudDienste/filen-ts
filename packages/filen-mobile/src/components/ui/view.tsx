@@ -8,12 +8,13 @@ import {
 	KeyboardAwareScrollView as RNKeyboardControllerKeyboardAwareScrollView,
 	KeyboardStickyView as RNKeyboardControllerKeyboardStickyView
 } from "react-native-keyboard-controller"
-import { BlurView as ExpoBlurView } from "expo-blur"
+import { BlurView as ExpoBlurView, BlurTargetView as ExpoBlurTargetView } from "expo-blur"
 import {
 	GlassView as ExpoGlassView,
 	isLiquidGlassAvailable as expoIsLiquidGlassAvailable,
 	GlassContainer as ExpoGlassContainer
 } from "expo-glass-effect"
+import { useRef } from "react"
 import { ScrollView as RNGestureHandlerScrollView } from "react-native-gesture-handler"
 
 export const UniwindView = memo(withUniwind(NativeView) as React.FC<ViewProps>)
@@ -111,6 +112,7 @@ export const CrossGlassContainerView = memo(
 		disableInteraction?: boolean
 	}) => {
 		const { theme } = useUniwind()
+		const blurTargetViewRef = useRef<RNView>(null)
 
 		if (Platform.OS === "ios" && isLiquidGlassAvailable() && !disableLiquidGlass) {
 			return (
@@ -148,9 +150,21 @@ export const CrossGlassContainerView = memo(
 					ios: "systemChromeMaterial",
 					default: theme === "dark" ? "dark" : "light"
 				})}
-				experimentalBlurMethod="dimezisBlurView"
+				blurMethod="dimezisBlurViewSdk31Plus"
+				blurTarget={blurTargetViewRef}
+				style={[
+					style,
+					{
+						borderWidth: StyleSheet.hairlineWidth
+					}
+				]}
 			>
-				{children}
+				<ExpoBlurTargetView
+					className="flex-row items-center"
+					ref={blurTargetViewRef}
+				>
+					{children}
+				</ExpoBlurTargetView>
 			</BlurView>
 		)
 	}

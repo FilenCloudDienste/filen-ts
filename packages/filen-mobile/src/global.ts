@@ -1,11 +1,11 @@
 import NetInfo from "@react-native-community/netinfo"
-import crypto from "crypto"
 import { Buffer } from "buffer"
 import { NETINFO_CONFIG } from "@/constants"
+import { getRandomValues } from "expo-crypto"
 
 globalThis.crypto = {
 	...globalThis.crypto,
-	getRandomValues: crypto.getRandomValues
+	getRandomValues: getRandomValues
 }
 
 globalThis.Buffer = Buffer

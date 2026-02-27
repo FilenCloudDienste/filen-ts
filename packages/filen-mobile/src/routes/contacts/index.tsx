@@ -3,12 +3,11 @@ import useContactsQuery from "@/queries/useContacts.query"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 import { fastLocaleCompare, run, cn } from "@filen/utils"
 import { Fragment, useState } from "react"
-import { Platform, TextInput } from "react-native"
+import { Platform } from "react-native"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import View, { KeyboardAvoidingView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import type { SearchBarProps } from "react-native-screens"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import { useResolveClassNames } from "uniwind"
 import alerts from "@/lib/alerts"
@@ -109,7 +108,7 @@ function useSelectOptions() {
 	return selectOptions
 }
 
-const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
+const Header = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -238,25 +237,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 		] satisfies HeaderItem[]
 	}, [textForeground.color])
 
-	const searchBarOptions = useMemo(() => {
-		if (!setSearchQuery) {
-			return undefined
-		}
-
-		return Platform.select({
-			ios: {
-				placeholder: "tbd_search_contacts",
-				onChangeText(e) {
-					setSearchQuery(e.nativeEvent.text)
-				},
-				autoFocus: false,
-				autoCapitalize: "none",
-				placement: "stacked"
-			},
-			default: undefined
-		}) satisfies SearchBarProps | undefined
-	}, [setSearchQuery])
-
 	return (
 		<StackHeader
 			transparent={Platform.OS === "ios"}
@@ -267,7 +247,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 				default: bgBackgroundSecondary.backgroundColor as string
 			})}
 			rightItems={headerRightItems}
-			searchBarOptions={searchBarOptions}
 		/>
 	)
 })
@@ -983,51 +962,32 @@ const Contacts = memo(() => {
 
 	return (
 		<Fragment>
-			<Header setSearchQuery={setSearchQuery} />
+			<Header />
 			<SafeAreaView
 				edges={["left", "right"]}
 				className="bg-background-secondary"
 			>
-				<KeyboardAvoidingView
-					className="flex-1 flex-col"
-					behavior="padding"
-				>
-					{Platform.select({
-						android: (
-							<View className="px-4 pb-4 shrink-0 bg-background-secondary">
-								<TextInput
-									className="bg-background-tertiary px-4 py-3 rounded-full"
-									placeholder="tbd_search_contacts"
-									onChangeText={setSearchQuery}
-									autoCapitalize="none"
-									autoCorrect={false}
-									spellCheck={false}
-									returnKeyType="search"
-									autoComplete="off"
-									autoFocus={false}
-								/>
+				<VirtualList
+					className="flex-1 bg-background-secondary"
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+					keyExtractor={keyExtractor}
+					data={items}
+					renderItem={renderItem}
+					loading={contactRequestsQuery.status !== "success" || contactsQuery.status !== "success"}
+					onRefresh={onRefresh}
+					emptyComponent={() => {
+						return (
+							<View className="flex-1 items-center justify-center bg-transparent">
+								<Text>tbd</Text>
 							</View>
-						),
-						default: null
-					})}
-					<VirtualList
-						className="flex-1 bg-background-secondary"
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-						keyExtractor={keyExtractor}
-						data={items}
-						renderItem={renderItem}
-						loading={contactRequestsQuery.status !== "success" || contactsQuery.status !== "success"}
-						onRefresh={onRefresh}
-						emptyComponent={() => {
-							return (
-								<View className="flex-1 items-center justify-center bg-transparent">
-									<Text>tbd</Text>
-								</View>
-							)
-						}}
-					/>
-				</KeyboardAvoidingView>
+						)
+					}}
+					searchBar={{
+						onChangeText: setSearchQuery,
+						placeholder: "tbd_search_contacts"
+					}}
+				/>
 			</SafeAreaView>
 		</Fragment>
 	)

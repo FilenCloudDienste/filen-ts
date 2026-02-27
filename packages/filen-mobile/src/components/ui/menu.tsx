@@ -2,9 +2,9 @@ import { memo, useCallback, useMemo } from "@/lib/memo"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { type StyleProp, type ViewStyle, Platform } from "react-native"
 import { MenuView, type NativeActionEvent, type MenuAction } from "@react-native-menu/menu"
-import { Image as SwiftUiImage } from "@expo/ui/swift-ui"
 import {
 	ContextMenuView,
+	ContextMenuButton,
 	type MenuConfig,
 	type MenuAttributes,
 	type MenuElementConfig,
@@ -12,6 +12,7 @@ import {
 	type MenuElementSize,
 	type MenuPreviewConfig
 } from "react-native-ios-context-menu"
+import { Image as SwiftUiImage } from "@expo/ui/swift-ui"
 
 export type MenuButton = {
 	onPress?: () => void
@@ -486,10 +487,23 @@ export const MenuInner = memo(
 			return children
 		}
 
-		// Due to a bug in react-native-ios-context-menu, we can only use it for context menus (long press).
-		// When placed into an iOS 26 Header, it breaks the layout.
-		// For dropdown menus, we use react-native-menu which works correctly in all scenarios.
-		if (Platform.OS === "ios" && type === "context") {
+		if (Platform.OS === "ios") {
+			if (type === "dropdown") {
+				return (
+					<ContextMenuButton
+						hitSlop={hitSlop}
+						style={style}
+						testID={testID}
+						onMenuWillShow={onOpenMenu}
+						onMenuWillHide={onCloseMenu}
+						onPressMenuItem={onPressMenuItem}
+						menuConfig={menuConfig}
+					>
+						{children}
+					</ContextMenuButton>
+				)
+			}
+
 			return (
 				<ContextMenuView
 					hitSlop={hitSlop}

@@ -1,7 +1,6 @@
 import { Fragment, useState, useEffect } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import View, { KeyboardAvoidingView } from "@/components/ui/view"
 import useDrivePath from "@/hooks/useDrivePath"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
@@ -11,7 +10,7 @@ import Item from "@/components/drive/item"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { memo, useCallback, useMemo } from "@/lib/memo"
-import { Platform, TextInput } from "react-native"
+import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { router, useFocusEffect } from "expo-router"
 import useNetInfo from "@/hooks/useNetInfo"
@@ -24,10 +23,9 @@ import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
 import { AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
-import type { SearchBarProps } from "react-native-screens"
 import { debounce } from "es-toolkit/function"
 
-const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
+const Header = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const netInfo = useNetInfo()
@@ -374,25 +372,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 		}
 	}, [drivePath, stringifiedClient])
 
-	const searchBarOptions = useMemo(() => {
-		if (!setSearchQuery || drivePath.selectOptions) {
-			return undefined
-		}
-
-		return Platform.select({
-			ios: {
-				placeholder: "tbd_search_drive",
-				onChangeText(e) {
-					setSearchQuery(e.nativeEvent.text)
-				},
-				autoFocus: false,
-				autoCapitalize: "none",
-				placement: "stacked"
-			} satisfies SearchBarProps,
-			default: undefined
-		}) satisfies SearchBarProps | undefined
-	}, [setSearchQuery, drivePath.selectOptions])
-
 	return (
 		<StackHeader
 			title={headerTitle}
@@ -409,7 +388,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 			}
 			leftItems={leftItems}
 			rightItems={rightItems}
-			searchBarOptions={searchBarOptions}
 		/>
 	)
 })
@@ -568,7 +546,7 @@ const Drive = memo(() => {
 
 	return (
 		<Fragment>
-			<Header setSearchQuery={setSearchQuery} />
+			<Header />
 			<SafeAreaView
 				className={cn(
 					"flex-1",
@@ -576,42 +554,23 @@ const Drive = memo(() => {
 				)}
 				edges={["left", "right"]}
 			>
-				<KeyboardAvoidingView
-					className="flex-1 flex-col bg-transparent"
-					behavior="padding"
-				>
-					{Platform.select({
-						android: (
-							<View className="px-4 pb-4 shrink-0 bg-transparent">
-								<TextInput
-									className="bg-background-secondary px-4 py-3 rounded-full"
-									placeholder="tbd_search_drive"
-									onChangeText={setSearchQuery}
-									autoCapitalize="none"
-									autoCorrect={false}
-									spellCheck={false}
-									returnKeyType="search"
-									autoComplete="off"
-									autoFocus={false}
-								/>
-							</View>
-						),
-						default: null
-					})}
-					<VirtualList
-						className={cn(
-							"flex-1",
-							drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
-						)}
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-						keyExtractor={keyExtractor}
-						data={items}
-						renderItem={renderItem}
-						onRefresh={onRefresh}
-						loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
-					/>
-				</KeyboardAvoidingView>
+				<VirtualList
+					className={cn(
+						"flex-1",
+						drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
+					)}
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+					keyExtractor={keyExtractor}
+					data={items}
+					renderItem={renderItem}
+					onRefresh={onRefresh}
+					loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
+					searchBar={{
+						placeholder: "tbd_search_drive",
+						onChangeText: setSearchQuery
+					}}
+				/>
 			</SafeAreaView>
 		</Fragment>
 	)

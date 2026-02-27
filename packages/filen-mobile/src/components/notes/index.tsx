@@ -7,7 +7,7 @@ import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualLis
 import { type Note as TNote, NoteType, type NoteTag } from "@filen/sdk-rs"
 import { run, fastLocaleCompare, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import { Platform, TextInput } from "react-native"
+import { Platform } from "react-native"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { memo, useCallback, useMemo } from "@/lib/memo"
@@ -21,14 +21,13 @@ import notesLib from "@/lib/notes"
 import { Paths } from "expo-file-system"
 import { useSecureStore } from "@/lib/secureStore"
 import Tag from "@/components/notes/tag"
-import View, { KeyboardAvoidingView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import type { MenuButton } from "@/components/ui/menu"
-import type { SearchBarProps } from "react-native-screens"
 import { useStringifiedClient } from "@/lib/auth"
 import * as Sharing from "expo-sharing"
 
-const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React.SetStateAction<string>> }) => {
+const Header = memo(() => {
 	const stringifiedClient = useStringifiedClient()
 	const textForeground = useResolveClassNames("text-foreground")
 	const selectedNotes = useNotesStore(useShallow(state => state.selectedNotes))
@@ -919,44 +918,24 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery?: React.Dispatch<React
 		}
 	}, [viewMode, selectedNotes.length, selectedTags.length])
 
-	const searchBarOptions = useMemo(() => {
-		if (!setSearchQuery) {
-			return undefined
-		}
-
-		return Platform.select({
-			ios: {
-				placeholder: "tbd_search_notes",
-				onChangeText(e) {
-					setSearchQuery(e.nativeEvent.text)
-				},
-				autoFocus: false,
-				autoCapitalize: "none",
-				placement: "stacked"
-			},
-			default: undefined
-		}) satisfies SearchBarProps | undefined
-	}, [setSearchQuery])
-
 	return (
 		<StackHeader
 			transparent={Platform.OS === "ios"}
 			title={title}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
-			searchBarOptions={searchBarOptions}
 		/>
 	)
 })
 
 export const Notes = memo(() => {
 	const notesQuery = useNotesWithContentQuery()
-	const [searchQuery, setSearchQuery] = useState<string>("")
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
 	}>()
 	const notesTagsQuery = useNotesTagsQuery()
+	const [searchQuery, setSearchQuery] = useState<string>("")
 
 	const tag = useMemo(() => {
 		if (notesTagsQuery.status !== "success" || !tagUuid) {
@@ -1106,68 +1085,53 @@ export const Notes = memo(() => {
 
 	return (
 		<Fragment>
-			<Header setSearchQuery={setSearchQuery} />
+			<Header />
 			<SafeAreaView edges={["left", "right"]}>
-				<KeyboardAvoidingView
-					className="flex-1 flex-col"
-					behavior="padding"
-				>
-					{Platform.select({
-						android: (
-							<View className="px-4 pb-4 shrink-0 bg-transparent">
-								<TextInput
-									className="bg-background-secondary px-4 py-3 rounded-full"
-									placeholder="tbd_search_notes"
-									onChangeText={setSearchQuery}
-									autoCapitalize="none"
-									autoCorrect={false}
-									spellCheck={false}
-									returnKeyType="search"
-									autoComplete="off"
-									autoFocus={false}
-								/>
-							</View>
-						),
-						default: null
-					})}
-					{viewMode === "notes" ? (
-						<VirtualList
-							className="flex-1"
-							contentInsetAdjustmentBehavior="automatic"
-							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-							keyExtractor={keyExtractorNotesView}
-							data={notes}
-							renderItem={renderItemNotesView}
-							loading={notesQuery.status !== "success"}
-							onRefresh={onRefresh}
-							emptyComponent={() => {
-								return (
-									<View className="flex-1 items-center justify-center">
-										<Text>tbd</Text>
-									</View>
-								)
-							}}
-						/>
-					) : (
-						<VirtualList
-							className="flex-1"
-							contentInsetAdjustmentBehavior="automatic"
-							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-							keyExtractor={keyExtractorTagsView}
-							data={notesTags}
-							loading={notesTagsQuery.status !== "success"}
-							renderItem={renderItemTagsView}
-							onRefresh={onRefresh}
-							emptyComponent={() => {
-								return (
-									<View className="flex-1 items-center justify-center">
-										<Text>tbd</Text>
-									</View>
-								)
-							}}
-						/>
-					)}
-				</KeyboardAvoidingView>
+				{viewMode === "notes" ? (
+					<VirtualList
+						className="flex-1"
+						contentInsetAdjustmentBehavior="automatic"
+						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+						keyExtractor={keyExtractorNotesView}
+						data={notes}
+						renderItem={renderItemNotesView}
+						loading={notesQuery.status !== "success"}
+						onRefresh={onRefresh}
+						emptyComponent={() => {
+							return (
+								<View className="flex-1 items-center justify-center">
+									<Text>tbd</Text>
+								</View>
+							)
+						}}
+						searchBar={{
+							onChangeText: setSearchQuery,
+							placeholder: "tbd_search_notes"
+						}}
+					/>
+				) : (
+					<VirtualList
+						className="flex-1"
+						contentInsetAdjustmentBehavior="automatic"
+						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+						keyExtractor={keyExtractorTagsView}
+						data={notesTags}
+						loading={notesTagsQuery.status !== "success"}
+						renderItem={renderItemTagsView}
+						onRefresh={onRefresh}
+						emptyComponent={() => {
+							return (
+								<View className="flex-1 items-center justify-center">
+									<Text>tbd</Text>
+								</View>
+							)
+						}}
+						searchBar={{
+							onChangeText: setSearchQuery,
+							placeholder: "tbd_search_notes_tags"
+						}}
+					/>
+				)}
 			</SafeAreaView>
 		</Fragment>
 	)

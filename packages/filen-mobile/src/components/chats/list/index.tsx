@@ -9,11 +9,13 @@ import alerts from "@/lib/alerts"
 import Chat from "@/components/chats/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
+import { useState } from "react"
 import { Platform } from "react-native"
 
-export const List = memo(({ searchQuery }: { searchQuery?: string }) => {
+export const List = memo(() => {
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
+	const [searchQuery, setSearchQuery] = useState<string>("")
 
 	const chats = useMemo(() => {
 		if (chatsQuery.status !== "success") {
@@ -101,6 +103,10 @@ export const List = memo(({ searchQuery }: { searchQuery?: string }) => {
 						<Text>{searchQuery && searchQuery.length > 0 ? "tbd_no_chats_search" : "tbd_no_chats"}</Text>
 					</View>
 				)
+			}}
+			searchBar={{
+				onChangeText: setSearchQuery,
+				placeholder: "tbd_search_chats"
 			}}
 		/>
 	)
