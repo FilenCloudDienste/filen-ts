@@ -23,13 +23,10 @@ import FullScreenLoadingModal from "@/components/ui/fullScreenLoadingModal"
 import NotesSync from "@/components/notes/sync"
 import ChatsSync from "@/components/chats/sync"
 import ActionSheetProvider from "@/providers/actionSheet.provider"
-import { enableFreeze } from "react-native-screens"
 import Socket from "@/components/socket"
 import Pathname from "@/components/pathname"
 import { Platform } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
-
-enableFreeze(true)
 
 SplashScreen.setOptions({
 	duration: 400,
