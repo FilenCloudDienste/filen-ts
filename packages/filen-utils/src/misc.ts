@@ -84,62 +84,66 @@ export function chunkArray<T>(array: T[], chunkSize: number): T[][] {
 	return chunks
 }
 
+// eslint-disable-next-line no-control-regex
+const ZERO_WIDTH_AND_CONTROL_RE = /[\u200B-\u200D\uFEFF\u00AD\u0000-\u001F\u007F-\u009F]/g
+// eslint-disable-next-line no-control-regex
+const NON_ASCII_RE = /[^\x00-\x7F]/g
+const ILLEGAL_CHARS_WINDOWS_RE = /[<>:"/\\|?*]/g
+const ILLEGAL_CHARS_UNIX_RE = /\//g
+const TRAILING_DOTS_SPACES_RE = /[. ]+$/
+const WHITESPACE_RE = /\s+/g
+const RESERVED_NAMES_WINDOWS: Set<string> = new Set([
+	"CON",
+	"PRN",
+	"AUX",
+	"NUL",
+	"COM1",
+	"COM2",
+	"COM3",
+	"COM4",
+	"COM5",
+	"COM6",
+	"COM7",
+	"COM8",
+	"COM9",
+	"LPT1",
+	"LPT2",
+	"LPT3",
+	"LPT4",
+	"LPT5",
+	"LPT6",
+	"LPT7",
+	"LPT8",
+	"LPT9"
+])
+const textEncoder = new TextEncoder()
+const textDecoder = new TextDecoder("utf-8", { fatal: false })
+
 export function sanitizeFileName(filename: string, replacement: string = "_"): string {
 	// Normalize to UTF-8 NFC form (canonical decomposition followed by canonical composition)
 	let sanitizedFilename = filename.normalize("NFC")
 
-	// Remove or replace problematic Unicode characters
 	// Remove zero-width characters and other invisible/control characters
-	// eslint-disable-next-line no-control-regex
-	sanitizedFilename = sanitizedFilename.replace(/[\u200B-\u200D\uFEFF\u00AD\u0000-\u001F\u007F-\u009F]/g, "")
+	sanitizedFilename = sanitizedFilename.replace(ZERO_WIDTH_AND_CONTROL_RE, "")
 
 	// Replace non-ASCII characters that might cause issues
-	// eslint-disable-next-line no-control-regex
-	sanitizedFilename = sanitizedFilename.replace(/[^\x00-\x7F]/g, replacement)
+	sanitizedFilename = sanitizedFilename.replace(NON_ASCII_RE, replacement)
 
-	const illegalCharsWindows = /[<>:"/\\|?*]/g
-	const illegalCharsUnix = /\//g
-	const reservedNamesWindows: Set<string> = new Set([
-		"CON",
-		"PRN",
-		"AUX",
-		"NUL",
-		"COM1",
-		"COM2",
-		"COM3",
-		"COM4",
-		"COM5",
-		"COM6",
-		"COM7",
-		"COM8",
-		"COM9",
-		"LPT1",
-		"LPT2",
-		"LPT3",
-		"LPT4",
-		"LPT5",
-		"LPT6",
-		"LPT7",
-		"LPT8",
-		"LPT9"
-	])
+	sanitizedFilename = sanitizedFilename.replace(ILLEGAL_CHARS_WINDOWS_RE, replacement)
+	sanitizedFilename = sanitizedFilename.replace(ILLEGAL_CHARS_UNIX_RE, replacement)
+	sanitizedFilename = sanitizedFilename.replace(TRAILING_DOTS_SPACES_RE, "")
+	sanitizedFilename = sanitizedFilename.replace(WHITESPACE_RE, replacement)
 
-	sanitizedFilename = sanitizedFilename.replace(illegalCharsWindows, replacement)
-	sanitizedFilename = sanitizedFilename.replace(illegalCharsUnix, replacement)
-	sanitizedFilename = sanitizedFilename.replace(/[. ]+$/, "")
-	sanitizedFilename = sanitizedFilename.replace(/\s+/g, replacement)
-
-	if (reservedNamesWindows.has(sanitizedFilename.toUpperCase())) {
+	if (RESERVED_NAMES_WINDOWS.has(sanitizedFilename.toUpperCase())) {
 		sanitizedFilename += replacement
 	}
 
-	// Calculate byte length for UTF-8 to respect filesystem limits
+	// Truncate to 255 bytes (filesystem limit) in O(n) instead of O(n²)
 	const maxByteLength = 255
-	let byteLength = new TextEncoder().encode(sanitizedFilename).length
+	const encoded = textEncoder.encode(sanitizedFilename)
 
-	while (byteLength > maxByteLength && sanitizedFilename.length > 0) {
-		sanitizedFilename = sanitizedFilename.slice(0, -1)
-		byteLength = new TextEncoder().encode(sanitizedFilename).length
+	if (encoded.length > maxByteLength) {
+		sanitizedFilename = textDecoder.decode(encoded.subarray(0, maxByteLength)).replace(/\uFFFD/g, "")
 	}
 
 	if (!sanitizedFilename) {
@@ -189,9 +193,13 @@ export function extractLinksFromString(text: string): string[] {
 	return results
 }
 
+const HAS_UPPERCASE_RE = /[A-Z]/
+const HAS_LOWERCASE_RE = /[a-z]/
+const HAS_SPECIAL_CHARS_RE = /[!@#$%^&*(),.?":{}|<>]/
+const YOUTUBE_VIDEO_ID_RE = /(?:\?v=|\/embed\/|\/watch\?v=|\/\w+\/\w+\/|youtu.be\/)([\w-]{11})/
+
 export function parseYouTubeVideoId(url: string): string | null {
-	const regExp = /(?:\?v=|\/embed\/|\/watch\?v=|\/\w+\/\w+\/|youtu.be\/)([\w-]{11})/
-	const match = url.match(regExp)
+	const match = url.match(YOUTUBE_VIDEO_ID_RE)
 
 	if (match && match.length === 2 && match[1]) {
 		return match[1]
@@ -200,14 +208,16 @@ export function parseYouTubeVideoId(url: string): string | null {
 	return null
 }
 
+const FILEN_PUBLIC_LINK_RE =
+	/https?:\/\/(?:app|drive)\.filen\.io\/#\/([df])\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:%23|#)([A-Za-z0-9]{32,})/
+const HEX_64_RE = /^[0-9A-Fa-f]{64}$/
+
 export function parseFilenPublicLink(url: string): { uuid: string; key: string; type: "file" | "directory" } | null {
 	if (!url || url.length === 0) {
 		return null
 	}
 
-	const filenRegex: RegExp =
-		/https?:\/\/(?:app|drive)\.filen\.io\/#\/([df])\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:%23|#)([A-Za-z0-9]{32,})/
-	const match = filenRegex.exec(url)
+	const match = FILEN_PUBLIC_LINK_RE.exec(url)
 
 	if (!match || match.length < 4 || !match[1] || !match[2] || !match[3]) {
 		return null
@@ -217,7 +227,7 @@ export function parseFilenPublicLink(url: string): { uuid: string; key: string; 
 	const uuid: string = match[2]
 	let key: string = match[3]
 
-	if (/^[0-9A-Fa-f]{64}$/.test(key)) {
+	if (HEX_64_RE.test(key)) {
 		try {
 			key = Buffer.from(key, "hex").toString("utf8")
 		} catch {
@@ -254,9 +264,9 @@ export function ratePasswordStrength(password: string): {
 	specialChars: boolean
 	length: boolean
 } {
-	const hasUppercase = /[A-Z]/.test(password)
-	const hasLowercase = /[a-z]/.test(password)
-	const hasSpecialChars = /[!@#$%^&*(),.?":{}|<>]/.test(password)
+	const hasUppercase = HAS_UPPERCASE_RE.test(password)
+	const hasLowercase = HAS_LOWERCASE_RE.test(password)
+	const hasSpecialChars = HAS_SPECIAL_CHARS_RE.test(password)
 	const length = password.length
 
 	let strength: "weak" | "normal" | "strong" | "best" = "weak"
@@ -304,7 +314,7 @@ export function jsonBigIntReplacer(_: string, value: unknown) {
 
 export function jsonBigIntReviver(_: string, value: unknown) {
 	if (typeof value === "string" && value.startsWith("$bigint:") && value.endsWith("n")) {
-		return BigInt(value.substring(8, -1))
+		return BigInt(value.slice(8, -1))
 	}
 
 	return value
@@ -433,24 +443,24 @@ export function bpsToReadable(bps: number): string {
 		return "0.1 B/s"
 	}
 
-	let i = 0
+	let i = -1
 	let value = bps
 
 	if (value >= 1024) {
 		value /= 1024
-		i = 1
+		i = 0
 
 		if (value >= 1024) {
 			value /= 1024
-			i = 2
+			i = 1
 
 			if (value >= 1024) {
 				value /= 1024
-				i = 3
+				i = 2
 
 				if (value >= 1024) {
 					value /= 1024
-					i = 4
+					i = 3
 				}
 			}
 		}
@@ -458,6 +468,10 @@ export function bpsToReadable(bps: number): string {
 
 	if (value < 0.1) {
 		value = 0.1
+	}
+
+	if (i < 0) {
+		return value.toFixed(1) + " B"
 	}
 
 	return value.toFixed(1) + " " + BPS_TO_READABLE_UNITS[i]
@@ -492,4 +506,31 @@ export function formatBytes(bytes: number, decimals: number = 2): string {
 	const rounded = Math.round(value * multiplier) / multiplier
 
 	return rounded + " " + FORMAT_BYTES_SIZES[i]
+}
+
+export function isAbortError(error: unknown): boolean {
+	if (error instanceof DOMException && error.name === "AbortError") {
+		return true
+	}
+
+	if (error instanceof Error && error.name === "AbortError") {
+		return true
+	}
+
+	// Handle FFI errors (uniffi-bindgen-react-native, wasm-bindgen)
+	// that may not be instanceof Error
+	if (typeof error === "object" && error !== null) {
+		const obj = error as Record<string, unknown>
+
+		if (obj.name === "AbortError") {
+			return true
+		}
+
+		// uniffi-bindgen-react-native FilenSdkError with kind "Cancelled"
+		if (obj.kind === "Cancelled") {
+			return true
+		}
+	}
+
+	return false
 }

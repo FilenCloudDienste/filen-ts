@@ -17,13 +17,10 @@ export function createNotePreviewFromContentText(type: "rich" | "checklist" | "o
 		if (type === "checklist") {
 			const ex = content
 				// eslint-disable-next-line quotes
-				.split('<ul data-checked="false">')
-				.join("")
+				.replaceAll('<ul data-checked="false">', "")
 				// eslint-disable-next-line quotes
-				.split('<ul data-checked="true">')
-				.join("")
-				.split("\n")
-				.join("")
+				.replaceAll('<ul data-checked="true">', "")
+				.replaceAll("\n", "")
 				.split("<li>")
 
 			for (const listPoint of ex) {

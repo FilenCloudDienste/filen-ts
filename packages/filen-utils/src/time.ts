@@ -1,13 +1,8 @@
 export function isTimestampSameDay(timestamp1: number, timestamp2: number): boolean {
 	const diff = timestamp1 - timestamp2
 
-	if (diff >= -86400000 && diff <= 86400000) {
-		const day1 = Math.floor(timestamp1 / 86400000)
-		const day2 = Math.floor(timestamp2 / 86400000)
-
-		if (day1 === day2) {
-			return true
-		}
+	if (diff < -86400000 || diff > 86400000) {
+		return false
 	}
 
 	const date1 = new Date(timestamp1)

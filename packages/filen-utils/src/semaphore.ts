@@ -59,7 +59,7 @@ export class Semaphore {
 	}
 
 	private processQueue(): void {
-		if (this.waiting.length > 0 && this.counter < this.maxCount) {
+		while (this.waiting.length > 0 && this.counter < this.maxCount) {
 			this.counter++
 
 			const waiter = this.waiting.shift()

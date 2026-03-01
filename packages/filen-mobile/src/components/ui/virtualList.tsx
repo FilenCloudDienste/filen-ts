@@ -181,9 +181,10 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 			<RefreshControl
 				refreshing={refreshing}
 				onRefresh={onRefresh}
+				progressViewOffset={props.searchBar ? searchBarHeight : undefined}
 			/>
 		)
-	}, [props, refreshing, onRefresh])
+	}, [props, refreshing, onRefresh, searchBarHeight])
 
 	const emptyComponent = useMemo(() => {
 		if (props.loading) {
@@ -280,6 +281,6 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 	displayName?: string
 }
 
-export const VirtualList = withUniwind(VirtualListInner) as typeof VirtualListInner
+const VirtualList = withUniwind(VirtualListInner) as typeof VirtualListInner
 
 export default VirtualList

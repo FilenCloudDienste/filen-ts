@@ -50,13 +50,17 @@ class Transfers {
 		localFileOrDir,
 		parent,
 		hideProgress,
-		awaitExternalCompletionBeforeMarkingAsFinished
+		awaitExternalCompletionBeforeMarkingAsFinished,
+		abortController,
+		pauseSignal
 	}: {
 		id: string
 		localFileOrDir: FileSystem.File | FileSystem.Directory
 		parent: DirEnum
 		hideProgress?: boolean
 		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
+		abortController?: AbortController
+		pauseSignal?: PauseSignal
 	}): Promise<{
 		files: File[]
 		directories: Dir[]
@@ -73,8 +77,8 @@ class Transfers {
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
-		const transferAbortController = new AbortController()
-		const transferPauseSignal = new PauseSignal()
+		const transferAbortController = abortController ?? new AbortController()
+		const transferPauseSignal = pauseSignal ?? new PauseSignal()
 		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
 		const compositeAbortSignal = createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
@@ -480,13 +484,17 @@ class Transfers {
 		item,
 		destination,
 		hideProgress,
-		awaitExternalCompletionBeforeMarkingAsFinished
+		awaitExternalCompletionBeforeMarkingAsFinished,
+		abortController,
+		pauseSignal
 	}: {
 		itemUuid: string
 		item: DriveItem
 		destination: FileSystem.File | FileSystem.Directory
 		hideProgress?: boolean
 		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
+		abortController?: AbortController
+		pauseSignal?: PauseSignal
 	}): Promise<{
 		files: FileWithPath[]
 		directories: DirWithPath[]
@@ -507,8 +515,8 @@ class Transfers {
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
-		const transferAbortController = new AbortController()
-		const transferPauseSignal = new PauseSignal()
+		const transferAbortController = abortController ?? new AbortController()
+		const transferPauseSignal = pauseSignal ?? new PauseSignal()
 		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
 		const compositeAbortSignal = createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 

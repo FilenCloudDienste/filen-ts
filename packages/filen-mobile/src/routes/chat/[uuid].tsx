@@ -68,10 +68,10 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 	return (
 		<View
 			className={cn(
-				"items-center flex-col justify-center bg-transparent w-[90%]",
+				"items-center flex-col justify-center bg-transparent",
 				Platform.select({
-					ios: "pr-9",
-					default: "pr-3"
+					ios: "pr-9 w-[90%]",
+					default: "pr-0 w-full"
 				})
 			)}
 		>
@@ -155,8 +155,10 @@ const Header = memo(({ chat }: { chat: TChat }) => {
 		<StackHeader
 			title={<HeaderTitle chat={chat} />}
 			backVisible={true}
+			// TODO: enable transparent header on ios once its fixed upstream
+			// ref: https://github.com/facebook/react-native/issues/54181
 			transparent={false}
-			shadowVisible={true}
+			shadowVisible={false}
 			rightItems={headerRightItems}
 		/>
 	)

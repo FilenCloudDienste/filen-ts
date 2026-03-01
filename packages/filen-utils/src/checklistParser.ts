@@ -59,7 +59,9 @@ export class ChecklistParser {
 				currentCheckedStatus = item.checked
 			}
 
-			html += `<li>${item.content.trim().length > 0 ? item.content.trim() : "<br>"}</li>`
+			const trimmed = item.content.trim()
+
+		html += `<li>${trimmed.length > 0 ? trimmed : "<br>"}</li>`
 		}
 
 		if (checklist.length > 0) {

@@ -2,7 +2,7 @@
 	"include": ["./src", "./src/**/*.d.ts"],
 	"exclude": ["./src/dev.ts"],
 	"compilerOptions": {
-		"target": "es6",
+		"target": "es2020",
 		"jsx": "react-jsx",
 		"module": "ESNext",
 		"lib": ["DOM", "DOM.Iterable", "WebWorker", "Webworker.Iterable", "esnext", "DOM.AsyncIterable", "WebWorker.AsyncIterable"],

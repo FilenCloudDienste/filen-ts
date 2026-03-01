@@ -287,13 +287,11 @@ export async function runRetry<TResult, E = unknown>(
 	const maxAttempts = options?.maxAttempts ?? 3
 	const delayMs = options?.delayMs ?? 1000
 	const backoff = options?.backoff ?? "exponential"
+	const runOptions: Options = { onError: options?.onError, throw: false }
 	let lastError: E | null = null
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-		const result = await run<TResult, E>(defer => fn(defer, attempt), {
-			...options,
-			throw: false
-		})
+		const result = await run<TResult, E>(defer => fn(defer, attempt), runOptions)
 
 		if (result.success) {
 			return result
@@ -341,19 +339,17 @@ export async function runTimeout<TResult, E = unknown>(
 	timeoutMs: number,
 	options?: Options
 ): Promise<Result<TResult, E>> {
-	const controller = new AbortController()
+	let timeoutId: ReturnType<typeof setTimeout> | null = null
 
 	try {
 		const result = await Promise.race([
 			run(fn, options),
 			new Promise<never>((_, reject) => {
-				const timeoutId = setTimeout(() => {
-					controller.abort()
+				timeoutId = setTimeout(() => {
+					timeoutId = null
 
 					reject(new TimeoutError(`Operation timed out after ${timeoutMs}ms`))
 				}, timeoutMs)
-
-				controller.signal.addEventListener("abort", () => clearTimeout(timeoutId))
 			})
 		])
 
@@ -370,6 +366,10 @@ export async function runTimeout<TResult, E = unknown>(
 			data: null,
 			error: e as E
 		}
+	} finally {
+		if (timeoutId !== null) {
+			clearTimeout(timeoutId)
+		}
 	}
 }
 
@@ -379,7 +379,9 @@ export function runDebounced<TResult, TArgs extends unknown[]>(
 	options?: Options
 ): (...args: TArgs) => Promise<Result<TResult, unknown>> {
 	let timeoutId: NodeJS.Timeout | null = null
+	let pendingResolve: ((value: Result<TResult, unknown>) => void) | null = null
 	let pendingPromise: Promise<Result<TResult, unknown>> | null = null
+	let executing = false
 
 	return (...args: TArgs) => {
 		if (timeoutId) {
@@ -388,18 +390,170 @@ export function runDebounced<TResult, TArgs extends unknown[]>(
 
 		if (!pendingPromise) {
 			pendingPromise = new Promise(resolve => {
-				timeoutId = setTimeout(async () => {
-					const result = await run(defer => fn(defer, ...args), options)
-
-					resolve(result)
-
-					pendingPromise = null
-					timeoutId = null
-				}, delayMs)
+				pendingResolve = resolve
 			})
 		}
 
+		timeoutId = setTimeout(async () => {
+			if (executing || !pendingResolve) {
+				return
+			}
+
+			executing = true
+
+			const result = await run(defer => fn(defer, ...args), options)
+
+			executing = false
+
+			if (pendingResolve) {
+				pendingResolve(result)
+			}
+
+			pendingPromise = null
+			pendingResolve = null
+			timeoutId = null
+		}, delayMs)
+
 		return pendingPromise
+	}
+}
+
+export type StepFn<T> = (defer: DeferFn, signal: AbortSignal) => Promise<T> | T
+
+export type StepHandle<T> = {
+	then: Promise<T>["then"]
+	catch: Promise<T>["catch"]
+	finally: Promise<T>["finally"]
+}
+
+export function createAbortablePipeline(signal?: AbortSignal) {
+	const controller = new AbortController()
+	const controllerSignal = controller.signal
+
+	if (signal) {
+		if (signal.aborted) {
+			controller.abort(signal.reason)
+		} else {
+			signal.addEventListener("abort", () => controller.abort(signal.reason), {
+				once: true
+			})
+		}
+	}
+
+	let chain: Promise<void> = Promise.resolve()
+	let halted = false
+
+	const step = <T>(fn: StepFn<T>): StepHandle<T> => {
+		let resolve: (v: T) => void
+		let reject: (e: unknown) => void
+
+		const promise = new Promise<T>((res, rej) => {
+			resolve = res
+			reject = rej
+		})
+
+		chain = chain.then(async (): Promise<void> => {
+			if (halted || controllerSignal.aborted) {
+				reject(new AbortError(controllerSignal.aborted ? abortSignalReason(controllerSignal) : "Pipeline halted"))
+
+				return
+			}
+
+			const stepDeferred: DeferredFunctions = []
+
+			const defer: DeferFn = deferFn => {
+				stepDeferred.push(deferFn)
+			}
+
+			const runCleanups = async () => {
+				for (let i = stepDeferred.length - 1; i >= 0; i--) {
+					try {
+						await stepDeferred[i]?.()
+					} catch {
+						// Swallow cleanup errors
+					}
+				}
+			}
+
+			let fnSucceeded = false
+			let fnValue: T
+			let fnError: unknown
+
+			const fnPromise = (async () => {
+				try {
+					fnValue = await fn(defer, controllerSignal)
+					fnSucceeded = true
+				} catch (e) {
+					fnError = e
+					fnSucceeded = false
+				}
+			})()
+
+			// If abort was triggered during fn's synchronous execution,
+			// let fn complete and use its result
+			if (controllerSignal.aborted) {
+				await fnPromise
+				await runCleanups()
+
+				if (fnSucceeded) {
+					resolve(fnValue!)
+				} else {
+					halted = true
+
+					reject(fnError)
+				}
+
+				return
+			}
+
+			// Set up abort handler for external aborts while fn is running asynchronously
+			try {
+				await new Promise<void>((res, rej) => {
+					const onAbort = () => {
+						rej(new AbortError(abortSignalReason(controllerSignal)))
+					}
+
+					controllerSignal.addEventListener("abort", onAbort, {
+						once: true
+					})
+
+					fnPromise.then(() => {
+						controllerSignal.removeEventListener("abort", onAbort)
+
+						res()
+					})
+				})
+			} catch (e) {
+				await runCleanups()
+
+				halted = true
+
+				reject(e)
+
+				return
+			}
+
+			await runCleanups()
+
+			if (fnSucceeded) {
+				resolve(fnValue!)
+			} else {
+				halted = true
+
+				reject(fnError)
+			}
+		})
+
+		return {
+			then: promise.then.bind(promise),
+			catch: promise.catch.bind(promise),
+			finally: promise.finally.bind(promise)
+		}
+	}
+
+	return {
+		step,
+		signal: controllerSignal
 	}
 }
 

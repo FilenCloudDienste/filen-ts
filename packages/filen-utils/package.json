@@ -1,6 +1,6 @@
 {
 	"name": "@filen/utils",
-	"version": "0.0.6",
+	"version": "0.0.10",
 	"description": "A collection of utils for Filen",
 	"private": false,
 	"repository": {

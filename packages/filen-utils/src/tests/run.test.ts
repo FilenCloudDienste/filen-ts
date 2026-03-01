@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { run, runAbortable, runEffect, runRetry, runTimeout, runDebounced, AbortError, TimeoutError } from "../run"
+import { run, runAbortable, runEffect, runRetry, runTimeout, runDebounced, AbortError, TimeoutError, createAbortablePipeline } from "../run"
 
 describe("run", () => {
 	describe("basic functionality", () => {
@@ -835,5 +835,359 @@ describe("integration tests", () => {
 		})
 
 		expect(order).toEqual(["inner-2", "inner-1", "outer-2", "outer-1"])
+	})
+})
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((res, rej) => {
+		const t = setTimeout(res, ms)
+		signal?.addEventListener(
+			"abort",
+			() => {
+				clearTimeout(t)
+				rej(new DOMException("Aborted", "AbortError"))
+			},
+			{ once: true }
+		)
+	})
+}
+
+describe("createAbortablePipeline", () => {
+	it("executes steps in order (FIFO)", async () => {
+		const { step } = createAbortablePipeline()
+		const order: number[] = []
+
+		const s1 = step(async () => {
+			order.push(1)
+		})
+		const s2 = step(async () => {
+			order.push(2)
+		})
+		const s3 = step(async () => {
+			order.push(3)
+		})
+
+		await Promise.all([s1, s2, s3])
+
+		expect(order).toEqual([1, 2, 3])
+	})
+
+	it("returns correct typed values from each step", async () => {
+		const { step } = createAbortablePipeline()
+
+		const a = step(() => 42)
+		const b = step(async () => "hello")
+		const c = step(async () => ({ x: 1 }))
+
+		const [ra, rb, rc] = await Promise.all([a, b, c])
+
+		expect(ra).toBe(42)
+		expect(rb).toBe("hello")
+		expect(rc).toEqual({ x: 1 })
+	})
+
+	it("passes signal and defer to each step fn", async () => {
+		const controller = new AbortController()
+		const { step } = createAbortablePipeline(controller.signal)
+
+		let receivedSignal: AbortSignal | null = null
+		let deferCalled = false
+
+		await step((defer, signal) => {
+			receivedSignal = signal
+			defer(() => {
+				deferCalled = true
+			})
+		})
+
+		expect(receivedSignal).not.toBeNull()
+		expect(deferCalled).toBe(true)
+	})
+
+	it("exposes the internal signal", () => {
+		const { signal } = createAbortablePipeline()
+		expect(signal).toBeInstanceOf(AbortSignal)
+		expect(signal.aborted).toBe(false)
+	})
+
+	it("aborts cleanly between steps", async () => {
+		const controller = new AbortController()
+		const { step } = createAbortablePipeline(controller.signal)
+		const order: number[] = []
+
+		const s1 = step(async () => {
+			order.push(1)
+		})
+		const s2 = step(async (_, signal) => {
+			await sleep(50, signal)
+			order.push(2)
+		})
+		const s3 = step(async () => {
+			order.push(3)
+		})
+
+		await s1
+		controller.abort("stopped")
+		await s2.catch(() => {})
+		await s3.catch(() => {})
+
+		expect(order).toEqual([1])
+	})
+
+	it("auto-aborts mid-step even if fn ignores the signal", async () => {
+		const controller = new AbortController()
+		const { step } = createAbortablePipeline(controller.signal)
+
+		const s1 = step(async () => {
+			await new Promise<void>(res => setTimeout(res, 10_000)) // deliberately ignores signal
+		})
+
+		setTimeout(() => controller.abort("timeout"), 20)
+
+		await expect(s1).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("rejects remaining steps with AbortError when aborted mid-pipeline", async () => {
+		const controller = new AbortController()
+		const { step } = createAbortablePipeline(controller.signal)
+
+		const s1 = step(async () => {
+			controller.abort("cancelled")
+		})
+		const s2 = step(async () => "should not run")
+
+		await s1
+		await expect(s2).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("halts pipeline and rejects subsequent steps when a step throws", async () => {
+		const { step } = createAbortablePipeline()
+		const order: number[] = []
+
+		const s1 = step(async () => {
+			order.push(1)
+			throw new Error("boom")
+		})
+		const s2 = step(async () => {
+			order.push(2)
+		})
+		const s3 = step(async () => {
+			order.push(3)
+		})
+
+		await s1.catch(() => {})
+		await s2.catch(() => {})
+		await s3.catch(() => {})
+
+		expect(order).toEqual([1])
+		await expect(s2).rejects.toThrow()
+		await expect(s3).rejects.toThrow()
+	})
+
+	it("rejects immediately when created with a pre-aborted signal", async () => {
+		const controller = new AbortController()
+		controller.abort("already done")
+
+		const { step } = createAbortablePipeline(controller.signal)
+
+		await expect(step(() => 1)).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("propagates parent signal abort reason", async () => {
+		const controller = new AbortController()
+		const { step } = createAbortablePipeline(controller.signal)
+
+		const s1 = step(async (_, signal) => await sleep(100, signal))
+
+		setTimeout(() => controller.abort("custom reason"), 20)
+
+		const err = await s1.catch(e => e)
+		expect(err.name).toBe("AbortError")
+		expect(err.message).toBe("custom reason")
+	})
+
+	it("does not leak abort listeners after normal completion", async () => {
+		const controller = new AbortController()
+		const { step } = createAbortablePipeline(controller.signal)
+
+		const handles = Array.from({ length: 100 }, (_, i) => step(() => i))
+		await Promise.all(handles)
+
+		// If listeners leaked, aborting would fire 100 stale callbacks — should be silent
+		expect(() => controller.abort()).not.toThrow()
+	})
+
+	it("supports dynamically added steps after previous ones complete", async () => {
+		const { step } = createAbortablePipeline()
+		const order: number[] = []
+
+		await step(async () => {
+			order.push(1)
+		})
+		await step(async () => {
+			order.push(2)
+		})
+
+		expect(order).toEqual([1, 2])
+	})
+
+	it("handles large sequential pipelines without memory issues", async () => {
+		const { step } = createAbortablePipeline()
+
+		let last: ReturnType<typeof step<number>> | undefined
+		for (let i = 0; i < 10_000; i++) {
+			last = step(() => i)
+		}
+
+		await expect(last!).resolves.toBe(9999)
+	})
+})
+
+describe("defer", () => {
+	it("runs deferred cleanups in LIFO order after step completes", async () => {
+		const { step } = createAbortablePipeline()
+		const order: string[] = []
+
+		await step(defer => {
+			defer(() => {
+				order.push("cleanup-1")
+			})
+			defer(() => {
+				order.push("cleanup-2")
+			})
+			defer(() => {
+				order.push("cleanup-3")
+			})
+			order.push("work")
+		})
+
+		expect(order).toEqual(["work", "cleanup-3", "cleanup-2", "cleanup-1"])
+	})
+
+	it("runs deferred cleanups even when step throws", async () => {
+		const { step } = createAbortablePipeline()
+		let cleaned = false
+
+		await step(defer => {
+			defer(() => {
+				cleaned = true
+			})
+			throw new Error("step failed")
+		}).catch(() => {})
+
+		expect(cleaned).toBe(true)
+	})
+
+	it("runs deferred cleanups even when pipeline is aborted mid-step", async () => {
+		const controller = new AbortController()
+		const { step } = createAbortablePipeline(controller.signal)
+		let cleaned = false
+
+		const s1 = step(async defer => {
+			defer(() => {
+				cleaned = true
+			})
+			await new Promise<void>(res => setTimeout(res, 10_000)) // ignores signal
+		})
+
+		setTimeout(() => controller.abort(), 20)
+		await s1.catch(() => {})
+
+		expect(cleaned).toBe(true)
+	})
+
+	it("continues running remaining deferred fns even if one throws", async () => {
+		const { step } = createAbortablePipeline()
+		let secondCleanupRan = false
+
+		await step(defer => {
+			defer(() => {
+				throw new Error("cleanup error")
+			})
+			defer(() => {
+				secondCleanupRan = true
+			})
+		})
+
+		expect(secondCleanupRan).toBe(true)
+	})
+})
+
+describe("run", () => {
+	it("returns Success result when fn succeeds", async () => {
+		const result = await run(() => 42)
+
+		expect(result.success).toBe(true)
+		expect(result.data).toBe(42)
+		expect(result.error).toBeNull()
+	})
+
+	it("returns Failure result when fn throws", async () => {
+		const result = await run(() => {
+			throw new Error("oops")
+		})
+
+		expect(result.success).toBe(false)
+		expect(result.error).toBeInstanceOf(Error)
+		expect((result.error as Error).message).toBe("oops")
+		expect(result.data).toBeNull()
+	})
+
+	it("rethrows when throw option is true", async () => {
+		await expect(
+			run(
+				() => {
+					throw new Error("rethrown")
+				},
+				{ throw: true }
+			)
+		).rejects.toThrow("rethrown")
+	})
+
+	it("calls onError callback when fn throws", async () => {
+		const onError = vi.fn()
+		await run(
+			() => {
+				throw new Error("err")
+			},
+			{ onError }
+		)
+		expect(onError).toHaveBeenCalledOnce()
+	})
+
+	it("runs deferred functions after success", async () => {
+		const order: string[] = []
+
+		await run(defer => {
+			defer(() => {
+				order.push("cleanup")
+			})
+			order.push("work")
+		})
+
+		expect(order).toEqual(["work", "cleanup"])
+	})
+
+	it("runs deferred functions after failure", async () => {
+		const order: string[] = []
+
+		await run(defer => {
+			defer(() => {
+				order.push("cleanup")
+			})
+			throw new Error("fail")
+		})
+
+		expect(order).toContain("cleanup")
+	})
+
+	it("handles async step functions", async () => {
+		const result = await run(async () => {
+			await sleep(10)
+			return "async result"
+		})
+
+		expect(result.success).toBe(true)
+		expect(result.data).toBe("async result")
 	})
 })
