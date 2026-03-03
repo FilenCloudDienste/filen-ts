@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { pack } from "msgpackr"
-import type { DriveItem } from "../types"
+import type { DriveItem } from "@/types"
 import type { AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
 
 // ── In-memory VFS ─────────────────────────────────────────────────────────────
@@ -246,10 +246,10 @@ vi.mock("@/constants", () => ({
 
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (p: string) => ("/" + p.replace(/^\/+/, "")).replace(/\/+/g, "/").replace(/(?<!^)\/$/, "") || "/",
-	unwrapFileMeta: vi.fn((f: any) => ({ meta: f?._meta ?? null, shared: false, file: f })),
-	unwrapDirMeta: vi.fn((d: any) => ({ meta: d?._meta ?? null, shared: false, dir: d, uuid: d?._uuid ?? d?.uuid ?? "" })),
-	unwrappedDirIntoDriveItem: vi.fn((u: any) => u._driveItem),
-	unwrappedFileIntoDriveItem: vi.fn((u: any) => u._driveItem),
+	unwrapFileMeta: vi.fn((f: unknown) => ({ meta: (f as Record<string, unknown>)["_meta"] ?? null, shared: false, file: f })),
+	unwrapDirMeta: vi.fn((d: unknown) => { const obj = d as Record<string, unknown>; return { meta: obj["_meta"] ?? null, shared: false, dir: d, uuid: (obj["_uuid"] as string | undefined) ?? (obj["uuid"] as string | undefined) ?? "" } }),
+	unwrappedDirIntoDriveItem: vi.fn((u: unknown) => (u as Record<string, unknown>)["_driveItem"]),
+	unwrappedFileIntoDriveItem: vi.fn((u: unknown) => (u as Record<string, unknown>)["_driveItem"]),
 	unwrapSdkError: vi.fn(() => null)
 }))
 
@@ -534,7 +534,7 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			mockDownload.mockImplementation(async ({ destination }: any) => {
+			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1, 2, 3]))
 
 				return { files: [], directories: [] }
@@ -544,7 +544,7 @@ describe("Offline", () => {
 
 			expect(mockDownload).toHaveBeenCalledOnce()
 
-			const call = mockDownload.mock.calls[0]?.[0] as any
+			const call = mockDownload.mock.calls[0]?.[0] as { item: DriveItem; itemUuid: string }
 
 			expect(call.item).toBe(item)
 			expect(call.itemUuid).toBe(UUID_FILE)
@@ -555,7 +555,7 @@ describe("Offline", () => {
 			const parent = makeDirParent()
 			const metaPath = `${FILES_DIR}/${UUID_FILE}/${UUID_FILE}.filenmeta`
 
-			mockDownload.mockImplementation(async ({ destination }: any) => {
+			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
 				return { files: [], directories: [] }
@@ -582,7 +582,7 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			mockDownload.mockImplementation(async ({ destination }: any) => {
+			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
 				return { files: [], directories: [] }
@@ -598,7 +598,7 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			mockDownload.mockImplementation(async ({ destination }: any) => {
+			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
 				return { files: [], directories: [] }
@@ -700,7 +700,7 @@ describe("Offline", () => {
 			expect(before).toHaveLength(1)
 
 			// Store a second file (the mock seeds its data file so updateIndex can see it)
-			mockDownload.mockImplementation(async ({ destination }: any) => {
+			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
 				return { files: [], directories: [] }
