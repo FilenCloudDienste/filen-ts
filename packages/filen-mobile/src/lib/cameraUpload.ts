@@ -5,7 +5,7 @@ import { PauseSignal, normalizeFilePathForSdk, unwrapFileMeta, normalizeFilePath
 import pathModule from "path"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
-import { run, Semaphore, createAbortablePipeline, fastLocaleCompare } from "@filen/utils"
+import { run, Semaphore, fastLocaleCompare } from "@filen/utils"
 import useCameraUploadStore from "@/stores/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { randomUUID } from "expo-crypto"
@@ -186,34 +186,32 @@ class CameraUpload {
 				const [title, assets] = await Promise.all([album.getTitle(), album.getAssets()])
 
 				// Phase 1: fetch all asset infos concurrently (rate-limited by semaphore).
-				const infos = (
-					await Promise.all(
-						assets.map(asset =>
-							run(
-								async defer => {
-									await this.getLocalAssetInfoSemaphore.acquire()
+				const infos = await Promise.all(
+					assets.map(async asset => {
+						const result = await run(
+							async defer => {
+								await this.getLocalAssetInfoSemaphore.acquire()
 
-									defer(() => {
-										this.getLocalAssetInfoSemaphore.release()
-									})
+								defer(() => {
+									this.getLocalAssetInfoSemaphore.release()
+								})
 
-									return {
-										asset,
-										info: await asset.getInfo()
-									}
-								},
-								{
-									throw: true
+								return {
+									asset,
+									info: await asset.getInfo()
 								}
-							)
+							},
+							{
+								throw: true
+							}
 						)
-					)
-				).map(
-					r =>
-						r.data as {
-							asset: MediaLibrary.Asset
-							info: MediaLibrary.AssetInfo
+
+						if (!result.success) {
+							throw result.error
 						}
+
+						return result.data
+					})
 				)
 
 				// Phase 2: sort by creationTime ascending before building the tree.
@@ -271,7 +269,7 @@ class CameraUpload {
 		return tree
 	}
 
-	private async listRemote(remoteDir: Dir): Promise<RemoteTree> {
+	private async listRemote(remoteDir: Dir, signal?: AbortSignal): Promise<RemoteTree> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
 			new AnyDirEnum.Dir(remoteDir),
@@ -286,7 +284,7 @@ class CameraUpload {
 				}
 			},
 			{
-				signal: this.globalAbortController.signal
+				signal: signal ?? this.globalAbortController.signal
 			}
 		)
 
@@ -340,12 +338,12 @@ class CameraUpload {
 		return tree
 	}
 
-	private async deltas(config: Config): Promise<Delta[]> {
+	private async deltas(config: Config, signal?: AbortSignal): Promise<Delta[]> {
 		if (!config.enabled) {
 			return []
 		}
 
-		const [localTree, remoteTree] = await Promise.all([this.listLocal(config.albums), this.listRemote(config.remoteDir)])
+		const [localTree, remoteTree] = await Promise.all([this.listLocal(config.albums), this.listRemote(config.remoteDir, signal)])
 		const deltas: Delta[] = []
 
 		for (const path in localTree) {
@@ -417,12 +415,8 @@ class CameraUpload {
 				this.syncMutex.release()
 			})
 
-			const { step } = createAbortablePipeline(params?.signal ?? this.globalAbortController.signal)
 			const remoteDirEnum = new DirEnum.Dir(config.remoteDir)
-
-			const allDeltas = await step(async () => {
-				return await this.deltas(config)
-			})
+			const allDeltas = await this.deltas(config, params?.signal ?? this.globalAbortController.signal)
 
 			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
 			// recently captured media is prioritised within the limited OS execution window, then cap the
@@ -465,9 +459,7 @@ class CameraUpload {
 								assetFile.copy(tmpFile)
 
 								if (config.compress) {
-									await step(async () => {
-										return await this.compress(tmpFile)
-									})
+									await this.compress(tmpFile)
 								}
 
 								// TODO: create parent dir (album title) first and then upload into it
