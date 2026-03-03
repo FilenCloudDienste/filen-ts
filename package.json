@@ -4,7 +4,8 @@
 	"workspaces": [
 		"packages/filen-web",
 		"packages/filen-desktop",
-		"packages/filen-utils"
+		"packages/filen-utils",
+		"packages/filen-mobile"
 	],
 	"scripts": {
 		"dev:web": "npm run dev --workspace=packages/filen-web",
