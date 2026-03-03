@@ -2,9 +2,7 @@
 name: security
 description: >
     Write secure code and identify security vulnerabilities in any language or framework. Always use this
-    skill whenever writing, reviewing, or modifying code — especially code that handles user input,
-    authentication, file operations, network requests, cryptography, database queries, secrets,
-    or data serialization. Proactively flag any pattern that could lead to a security issue before
+    skill. Proactively flag any pattern that could lead to a security issue before
     writing it, not after. Trigger for any code task involving APIs, auth, file I/O, env vars,
     HTTP, SQL, shell commands, IPC, or third-party data. Apply always — security is not a
     separate phase, it is part of writing correct code.

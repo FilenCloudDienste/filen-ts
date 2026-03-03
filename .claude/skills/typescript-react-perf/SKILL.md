@@ -2,8 +2,7 @@
 name: typescript-react-performance
 description: >
     Write maximally performant, efficient TypeScript, React, React Native, Node.js, and Bun code. Always use
-    this skill whenever writing or reviewing TypeScript, JavaScript, React components, React Native /
-    Expo apps, Node.js servers, or Bun scripts where performance and efficiency matter. This skill
+    this skill. This skill
     enforces zero-waste CPU usage, minimal memory allocation, optimal data structures, and
     engine-friendly code patterns — including Hermes-specific optimizations for React Native. Trigger
     for any performance-sensitive code, hot paths, server handlers, data processing, React or React
@@ -29,7 +28,9 @@ Performance is a hard requirement, not a nice-to-have. Every line of code either
 
 ## 1. TypeScript Compiler & Runtime Settings
 
-### tsconfig.json — always use these
+### tsconfig.json
+
+Check the tsconfig.json of the package first, then merge this tsconfig.json with it - tsconfig.json keys/props of the package have higher priority then the provided one below.
 
 ```json
 {

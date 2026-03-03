@@ -24,11 +24,11 @@ The evaluation (Step 1) is WORTHLESS unless you ACTIVATE (Step 2) the skills.
 
 Example of correct sequence:
 - research: NO - not a research task
-- typescript-perf: YES - need to optimize a TS function
+- typescript-react-performance: YES - need to optimize a TS function
 - code-style: YES - need to follow specific code style guidelines
 
 [Then IMMEDIATELY use Skill() tool:]
-> Skill(typescript-perf)
+> Skill(typescript-react-performance)
 > Skill(code-style)
 
 [THEN and ONLY THEN start implementation]
