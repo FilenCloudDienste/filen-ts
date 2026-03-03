@@ -27,7 +27,8 @@
     "ncu": "ncu --interactive --format group && npx expo install --fix",
     "expo:install:fix": "npx expo install --fix",
     "clean": "tsx ./clean.ts",
-    "superclean": "tsx ./superclean.ts"
+    "superclean": "tsx ./superclean.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@blazejkustra/react-native-alert": "^1.0.0",
@@ -165,6 +166,7 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.56.1"
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^3.2.4"
   }
 }
