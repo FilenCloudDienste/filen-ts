@@ -1,4 +1,4 @@
-name: Test (filen-utils)
+name: Tests
 
 on:
   workflow_dispatch:
@@ -6,13 +6,15 @@ on:
   push:
     paths:
       - 'packages/filen-utils/**/*'
+      - 'packages/filen-mobile/**/*'
 
   pull_request:
     paths:
       - 'packages/filen-utils/**/*'
+      - 'packages/filen-mobile/**/*'
 
 concurrency:
-  group: 'test-utils'
+  group: 'tests'
   cancel-in-progress: true
 
 jobs:
@@ -30,4 +32,21 @@ jobs:
         run: npm install --package-lock-only && npm ci
       - name: Test
         working-directory: packages/filen-utils
+        run: npm test
+  test-mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install patch-package
+        run: npm install -g patch-package
+      - name: Install dependencies
+        working-directory: packages/filen-mobile
+        run: npm install --package-lock-only && npm ci
+      - name: Test
+        working-directory: packages/filen-mobile
         run: npm test

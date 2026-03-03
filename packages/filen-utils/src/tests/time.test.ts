@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { isTimestampSameDay, isTimestampSameMinute, formatSecondsToHHMM, formatSecondsToMMSS, getTimeRemaining } from "../time"
+import { isTimestampSameDay, isTimestampSameMinute, formatSecondsToHHMM, formatSecondsToMMSS, getTimeRemaining } from "@filen/utils"
 
 describe("isTimestampSameDay", () => {
 	it("should return true for same timestamp", () => {

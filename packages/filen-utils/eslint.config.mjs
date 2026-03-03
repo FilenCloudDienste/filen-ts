@@ -5,7 +5,7 @@ export default tseslint.config(
 	js.configs.recommended,
 	...tseslint.configs.recommended,
 	{
-		ignores: ["node_modules/**/*", "dist/**/*"]
+		ignores: ["node_modules/**/*", "dist/**/*", "src/dev.ts"]
 	},
 	{
 		files: ["**/*.ts"],
@@ -24,7 +24,20 @@ export default tseslint.config(
 					caughtErrorsIgnorePattern: "^_",
 					destructuredArrayIgnorePattern: "^_"
 				}
+			],
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [".*"]
+				}
 			]
+		}
+	},
+	{
+		// Barrel re-exports legitimately use relative paths
+		files: ["src/index.ts"],
+		rules: {
+			"no-restricted-imports": "off"
 		}
 	}
 )

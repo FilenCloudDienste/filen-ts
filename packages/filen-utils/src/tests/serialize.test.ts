@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { serializeError, deserializeError } from "../serialize"
+import { serializeError, deserializeError } from "@filen/utils"
 
 describe("serializeError", () => {
 	it("should serialize error name, message, and stack", () => {

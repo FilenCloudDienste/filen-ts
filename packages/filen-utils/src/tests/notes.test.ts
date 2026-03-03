@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { createNotePreviewFromContentText } from "../notes"
+import { createNotePreviewFromContentText } from "@filen/utils"
 
 describe("createNotePreviewFromContentText", () => {
 	describe("rich text", () => {

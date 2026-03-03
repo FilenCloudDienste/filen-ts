@@ -22,6 +22,9 @@
 		"noUncheckedIndexedAccess": true,
 		"resolveJsonModule": true,
 		"baseUrl": ".",
+		"paths": {
+			"@filen/utils": ["./src/index.ts"]
+		},
 		"rootDir": "src",
 		"outDir": "./dist",
 		"declaration": true,
