@@ -685,6 +685,75 @@ class Drive {
 			path: normalizeFilePathForSdk(path)
 		}))
 	}
+
+	public async updateTimestamps({
+		item,
+		created,
+		modified,
+		signal
+	}: {
+		item: DriveItem
+		created?: number
+		modified?: number
+		signal?: AbortSignal
+	}) {
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		const modifiedItem =
+			item.type === "directory"
+				? await authedSdkClient.updateDirMetadata(
+						item.data,
+						{
+							name: undefined,
+							created: created ? BigInt(created) : undefined
+						},
+						signal
+							? {
+									signal
+								}
+							: undefined
+					)
+				: await authedSdkClient.updateFileMetadata(
+						item.data,
+						{
+							name: undefined,
+							mime: undefined,
+							lastModified: modified ? BigInt(modified) : undefined,
+							created: created ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
+						},
+						signal
+							? {
+									signal
+								}
+							: undefined
+					)
+
+		// Ugly but works for now, until we have a better way
+		if (!("region" in modifiedItem)) {
+			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
+		} else {
+			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
+		}
+
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+		if (unwrappedParentUuid) {
+			driveItemsQueryUpdateGlobal({
+				parentUuid: unwrappedParentUuid,
+				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+			})
+		}
+
+		return item
+	}
 }
 
 const drive = new Drive()
