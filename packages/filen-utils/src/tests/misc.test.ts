@@ -415,25 +415,25 @@ describe("bpsToReadable", () => {
 	it("should format values under 1 KiB as bytes", () => {
 		const result = bpsToReadable(512)
 
-		expect(result).toBe("512.0 B")
+		expect(result).toBe("512.0 B/s")
 	})
 
 	it("should format KiB range values", () => {
 		const result = bpsToReadable(1024)
 
-		expect(result).toBe("1.0 KiB")
+		expect(result).toBe("1.0 KiB/s")
 	})
 
 	it("should format MiB range values", () => {
 		const result = bpsToReadable(1048576)
 
-		expect(result).toBe("1.0 MiB")
+		expect(result).toBe("1.0 MiB/s")
 	})
 
 	it("should format GiB range values", () => {
 		const result = bpsToReadable(1073741824)
 
-		expect(result).toBe("1.0 GiB")
+		expect(result).toBe("1.0 GiB/s")
 	})
 })
 
