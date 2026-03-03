@@ -17,7 +17,8 @@
 		"dev": "tsx src/dev.ts",
 		"test": "vitest",
 		"test:ui": "vitest --ui",
-		"test:coverage": "vitest --coverage"
+		"test:coverage": "vitest --coverage",
+		"lint": "eslint src/"
 	},
 	"keywords": [
 		"filen"
@@ -27,9 +28,11 @@
 	},
 	"license": "AGPLv3",
 	"devDependencies": {
+		"eslint": "^9.39.3",
 		"rimraf": "^6.1.0",
 		"tsx": "^4.20.6",
 		"typescript": "^5.9.3",
+		"typescript-eslint": "^8.56.1",
 		"vitest": "^3.2.4"
 	},
 	"dependencies": {
