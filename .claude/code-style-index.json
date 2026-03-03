@@ -117,6 +117,7 @@
 		"Zustand stores: functional setState pattern with updater functions (fn | ((prev) => fn(prev)))",
 		"Never use non-null assertion '!'. Try to handle null/undefined cases explicitly instead of asserting non-null. If impossible, use explicit 'as Type' cast when the type is known to be non-null, rather than '!'.",
 		"Use fastLocaleCompare() from @filen/utils instead of String.prototype.localeCompare() for filen-mobile and filen-web — it has better performance and consistent behavior across platforms",
-		"Use exposed run<X>() functions from @filen/utils for rust-style RAII wrappers"
+		"Use exposed run<X>() functions from @filen/utils for rust-style RAII wrappers",
+		"When functions have params, always use objects for better readability and easier future extension, except for when the function only has a single parameter"
 	]
 }
