@@ -35,6 +35,7 @@ class Transfers {
 	public cancelAll(): void {
 		this.globalAbortController.abort()
 		this.globalAbortController = new AbortController()
+		this.globalPauseSignal = new PauseSignal()
 	}
 
 	public pauseAll(): void {
