@@ -49,7 +49,7 @@ jobs:
           cache-dependency-path: packages/filen-utils/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --package-lock-only && npm ci
+        run: npm install --package-lock-only --no-workspaces && npm ci
       - name: Test
         working-directory: packages/filen-utils
         run: npm test
