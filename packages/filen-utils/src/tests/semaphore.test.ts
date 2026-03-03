@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { Semaphore } from "../semaphore"
+import { Semaphore } from "@filen/utils"
 
 describe("Semaphore", () => {
 	describe("constructor", () => {

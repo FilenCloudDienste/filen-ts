@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import checklistParser from "../checklistParser"
+import { checklistParser } from "@filen/utils"
 
 describe("ChecklistParser", () => {
 	it("should parse empty string to empty checklist", () => {
