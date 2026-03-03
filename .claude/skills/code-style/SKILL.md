@@ -128,6 +128,7 @@ Read the files and check **every one** of these:
 - [ ] **Export style**: named, default, barrel pattern?
 - [ ] **Multiline**: Single-property objects passed as arguments are still expanded to multiple lines: run(fn, {\n\tthrow: true\n}) for better readability
 - [ ] **Multiline**: Inline defer callbacks are forbidden — always expand the body: defer(() => {\n\tthis.x.release()\n}) for better readability
+- [ ] **Switch cases**: Curly braces for cases for better readability, with a line break between each case
 
 ---
 

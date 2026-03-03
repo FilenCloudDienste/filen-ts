@@ -2,9 +2,7 @@
 name: live-docs
 description: >
     Always fetch up-to-date documentation from the internet before writing code that uses any external
-    library, framework, or API — in any language or ecosystem. Always use this skill whenever the project
-    involves third-party packages, external APIs, frameworks, CLIs, or platform SDKs in any language:
-    TypeScript, JavaScript, Python, Rust, Go, Ruby, PHP, Swift, Kotlin, C#, Java, Dart, or any other.
+    library, framework, or API — in any language or ecosystem. Always use this skill.
     Never rely solely on training data for API signatures, configuration options, or behavior. Trigger
     when the task involves installing or using any package manager dependency (npm, pip, cargo, gem,
     go get, pub, nuget, maven, composer, hex, etc.), calling an external API, configuring a framework,
