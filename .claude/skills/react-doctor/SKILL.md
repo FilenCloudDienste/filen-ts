@@ -8,7 +8,7 @@ version: 1.0.0
 
 Scans your React codebase for security, performance, correctness, and architecture issues. Outputs a 0-100 score with actionable diagnostics.
 
-## Usage
+## Usage example
 
 ```bash
 npx -y react-doctor@latest . --verbose --no-dead-code --offline --no-ami
