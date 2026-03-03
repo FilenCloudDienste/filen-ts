@@ -13,7 +13,7 @@
 			"Bash(grep * .env*)"
 		]
 	},
-	"model": "sonnet[1m]",
+	"model": "claude-sonnet-4-6",
 	"attribution": {
 		"commit": "",
 		"pr": ""
