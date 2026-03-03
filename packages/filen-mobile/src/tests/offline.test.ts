@@ -246,8 +246,21 @@ vi.mock("@/constants", () => ({
 
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (p: string) => ("/" + p.replace(/^\/+/, "")).replace(/\/+/g, "/").replace(/(?<!^)\/$/, "") || "/",
-	unwrapFileMeta: vi.fn((f: unknown) => ({ meta: (f as Record<string, unknown>)["_meta"] ?? null, shared: false, file: f })),
-	unwrapDirMeta: vi.fn((d: unknown) => { const obj = d as Record<string, unknown>; return { meta: obj["_meta"] ?? null, shared: false, dir: d, uuid: (obj["_uuid"] as string | undefined) ?? (obj["uuid"] as string | undefined) ?? "" } }),
+	unwrapFileMeta: vi.fn((f: unknown) => ({
+		meta: (f as Record<string, unknown>)["_meta"] ?? null,
+		shared: false,
+		file: f
+	})),
+	unwrapDirMeta: vi.fn((d: unknown) => {
+		const obj = d as Record<string, unknown>
+
+		return {
+			meta: obj["_meta"] ?? null,
+			shared: false,
+			dir: d,
+			uuid: (obj["_uuid"] as string | undefined) ?? (obj["uuid"] as string | undefined) ?? ""
+		}
+	}),
 	unwrappedDirIntoDriveItem: vi.fn((u: unknown) => (u as Record<string, unknown>)["_driveItem"]),
 	unwrappedFileIntoDriveItem: vi.fn((u: unknown) => (u as Record<string, unknown>)["_driveItem"]),
 	unwrapSdkError: vi.fn(() => null)
@@ -272,7 +285,11 @@ function makeFileItem(uuid: string, name = "photo.jpg"): DriveItem {
 		data: {
 			uuid,
 			size: 1024n,
-			decryptedMeta: { name, size: 1024n, modified: 1000 }
+			decryptedMeta: {
+				name,
+				size: 1024n,
+				modified: 1000
+			}
 		}
 	} as unknown as DriveItem
 }
@@ -283,7 +300,11 @@ function makeSharedFileItem(uuid: string, name = "shared.jpg"): DriveItem {
 		data: {
 			uuid,
 			size: 512n,
-			decryptedMeta: { name, size: 512n, modified: 2000 }
+			decryptedMeta: {
+				name,
+				size: 512n,
+				modified: 2000
+			}
 		}
 	} as unknown as DriveItem
 }
@@ -301,7 +322,10 @@ function makeDirItem(uuid: string): DriveItem {
 }
 
 function makeDirParent(uuid = "parent-00000000-0000-0000-0000-000000000001"): AnyDirEnumWithShareInfo {
-	return { tag: "Dir", inner: [{ uuid }] } as unknown as AnyDirEnumWithShareInfo
+	return {
+		tag: "Dir",
+		inner: [{ uuid }]
+	} as unknown as AnyDirEnumWithShareInfo
 }
 
 // Write a file meta to the VFS as if storeFile had run
@@ -312,9 +336,16 @@ function seedFileMeta(uuid: string, name: string, parent: AnyDirEnumWithShareInf
 
 	vfsDirs.add(`${FILES_DIR}/${uuid}`)
 	vfsFiles.set(dataPath, new Uint8Array([1, 2, 3]))
-	vfsFiles.set(metaPath, new Uint8Array(pack({ item, parent })))
+	vfsFiles.set(metaPath, new Uint8Array(pack({
+		item,
+		parent
+	})))
 
-	return { item, metaPath, dataPath }
+	return {
+		item,
+		metaPath,
+		dataPath
+	}
 }
 
 // Write a directory meta to the VFS as if storeDirectory had run
@@ -323,9 +354,16 @@ function seedDirMeta(uuid: string, parent: AnyDirEnumWithShareInfo, entries: Rec
 	const metaPath = `${DIRS_DIR}/${uuid}/${uuid}.filenmeta`
 
 	vfsDirs.add(`${DIRS_DIR}/${uuid}`)
-	vfsFiles.set(metaPath, new Uint8Array(pack({ item, parent, entries })))
+	vfsFiles.set(metaPath, new Uint8Array(pack({
+		item,
+		parent,
+		entries
+	})))
 
-	return { item, metaPath }
+	return {
+		item,
+		metaPath
+	}
 }
 
 // Build a populated index and write it to the VFS
@@ -334,7 +372,10 @@ function seedIndex(
 	directories: Record<string, { item: DriveItem; parent: AnyDirEnumWithShareInfo }>
 ) {
 	vfsDirs.add(BASE)
-	vfsFiles.set(INDEX_PATH, new Uint8Array(pack({ files, directories })))
+	vfsFiles.set(INDEX_PATH, new Uint8Array(pack({
+		files,
+		directories
+	})))
 }
 
 // Import the class AFTER all vi.mock() calls (mocks are hoisted, but the import
@@ -350,7 +391,10 @@ describe("Offline", () => {
 		vfsFiles.clear()
 		vfsDirs.clear()
 		vi.clearAllMocks()
-		mockDownload.mockResolvedValue({ files: [], directories: [] })
+		mockDownload.mockResolvedValue({
+			files: [],
+			directories: []
+		})
 		offline = new Offline()
 	})
 
@@ -367,7 +411,12 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
 			expect(await offline.isItemStored(item)).toBe(true)
 		})
@@ -377,7 +426,12 @@ describe("Offline", () => {
 			const other = makeFileItem(UUID_FILE_2)
 			const parent = makeDirParent()
 
-			seedIndex({ [UUID_FILE_2]: { item: other, parent } }, {})
+			seedIndex({
+				[UUID_FILE_2]: {
+					item: other,
+					parent
+				}
+			}, {})
 
 			expect(await offline.isItemStored(item)).toBe(false)
 		})
@@ -386,7 +440,12 @@ describe("Offline", () => {
 			const item = makeDirItem(UUID_DIR)
 			const parent = makeDirParent()
 
-			seedIndex({}, { [UUID_DIR]: { item, parent } })
+			seedIndex({}, {
+				[UUID_DIR]: {
+					item,
+					parent
+				}
+			})
 
 			expect(await offline.isItemStored(item)).toBe(true)
 		})
@@ -395,7 +454,12 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
 			await offline.isItemStored(item)
 
@@ -415,7 +479,12 @@ describe("Offline", () => {
 			// Now seed a real entry — a cache miss would re-read and get true
 			const parent = makeDirParent()
 
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
 			expect(await offline.isItemStored(item)).toBe(false)
 		})
@@ -450,7 +519,10 @@ describe("Offline", () => {
 
 			vfsDirs.add(`${FILES_DIR}/${UUID_FILE}`)
 			vfsFiles.set(dataPath, new Uint8Array([1]))
-			vfsFiles.set(metaPath, new Uint8Array(pack({ item: sharedItem, parent })))
+			vfsFiles.set(metaPath, new Uint8Array(pack({
+				item: sharedItem,
+				parent
+			})))
 
 			const files = await offline.listFiles()
 
@@ -537,10 +609,17 @@ describe("Offline", () => {
 			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1, 2, 3]))
 
-				return { files: [], directories: [] }
+				return {
+					files: [],
+					directories: []
+				}
 			})
 
-			await offline.storeFile({ file: item, parent, skipIndexUpdate: true })
+			await offline.storeFile({
+				file: item,
+				parent,
+				skipIndexUpdate: true
+			})
 
 			expect(mockDownload).toHaveBeenCalledOnce()
 
@@ -558,10 +637,17 @@ describe("Offline", () => {
 			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
-				return { files: [], directories: [] }
+				return {
+					files: [],
+					directories: []
+				}
 			})
 
-			await offline.storeFile({ file: item, parent, skipIndexUpdate: true })
+			await offline.storeFile({
+				file: item,
+				parent,
+				skipIndexUpdate: true
+			})
 
 			expect(vfsFiles.has(metaPath)).toBe(true)
 			expect(vfsFiles.get(metaPath)!.length).toBeGreaterThan(0)
@@ -571,9 +657,18 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
-			await offline.storeFile({ file: item, parent, skipIndexUpdate: true })
+			await offline.storeFile({
+				file: item,
+				parent,
+				skipIndexUpdate: true
+			})
 
 			expect(mockDownload).not.toHaveBeenCalled()
 		})
@@ -585,10 +680,16 @@ describe("Offline", () => {
 			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
-				return { files: [], directories: [] }
+				return {
+					files: [],
+					directories: []
+				}
 			})
 
-			await offline.storeFile({ file: item, parent })
+			await offline.storeFile({
+				file: item,
+				parent
+			})
 
 			// updateIndex writes to the index file
 			expect(vfsFiles.has(INDEX_PATH)).toBe(true)
@@ -601,10 +702,17 @@ describe("Offline", () => {
 			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
-				return { files: [], directories: [] }
+				return {
+					files: [],
+					directories: []
+				}
 			})
 
-			await offline.storeFile({ file: item, parent, skipIndexUpdate: true })
+			await offline.storeFile({
+				file: item,
+				parent,
+				skipIndexUpdate: true
+			})
 
 			expect(vfsFiles.has(INDEX_PATH)).toBe(false)
 		})
@@ -615,7 +723,11 @@ describe("Offline", () => {
 
 			mockDownload.mockRejectedValue(new Error("Network error"))
 
-			await expect(offline.storeFile({ file: item, parent, skipIndexUpdate: true })).rejects.toThrow("Network error")
+			await expect(offline.storeFile({
+				file: item,
+				parent,
+				skipIndexUpdate: true
+			})).rejects.toThrow("Network error")
 
 			// Parent directory should be deleted
 			expect(vfsDirs.has(`${FILES_DIR}/${UUID_FILE}`)).toBe(false)
@@ -625,14 +737,22 @@ describe("Offline", () => {
 			const item = makeDirItem(UUID_DIR)
 			const parent = makeDirParent()
 
-			await expect(offline.storeFile({ file: item, parent, skipIndexUpdate: true })).rejects.toThrow("Item not of type file")
+			await expect(offline.storeFile({
+				file: item,
+				parent,
+				skipIndexUpdate: true
+			})).rejects.toThrow("Item not of type file")
 		})
 
 		it("throws when item has no decryptedMeta", async () => {
 			const item = { type: "file", data: { uuid: UUID_FILE, decryptedMeta: null } } as unknown as DriveItem
 			const parent = makeDirParent()
 
-			await expect(offline.storeFile({ file: item, parent, skipIndexUpdate: true })).rejects.toThrow("File missing decrypted meta")
+			await expect(offline.storeFile({
+				file: item,
+				parent,
+				skipIndexUpdate: true
+			})).rejects.toThrow("File missing decrypted meta")
 		})
 	})
 
@@ -643,7 +763,12 @@ describe("Offline", () => {
 			const parent = makeDirParent()
 
 			seedFileMeta(UUID_FILE, "photo.jpg", parent)
-			seedIndex({ [UUID_FILE]: { item: makeFileItem(UUID_FILE), parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item: makeFileItem(UUID_FILE),
+					parent
+				}
+			}, {})
 
 			await offline.removeItem(makeFileItem(UUID_FILE))
 
@@ -657,7 +782,12 @@ describe("Offline", () => {
 			const parent = makeDirParent()
 
 			seedFileMeta(UUID_FILE, "photo.jpg", parent)
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
 			await offline.removeItem(item)
 
@@ -668,7 +798,12 @@ describe("Offline", () => {
 			const parent = makeDirParent()
 
 			seedDirMeta(UUID_DIR, parent)
-			seedIndex({}, { [UUID_DIR]: { item: makeDirItem(UUID_DIR), parent } })
+			seedIndex({}, {
+				[UUID_DIR]: {
+					item: makeDirItem(UUID_DIR),
+					parent
+				}
+			})
 
 			await offline.removeItem(makeDirItem(UUID_DIR))
 
@@ -703,12 +838,18 @@ describe("Offline", () => {
 			mockDownload.mockImplementation(async ({ destination }: { destination: MockFile }) => {
 				vfsFiles.set(destination.uri, new Uint8Array([1]))
 
-				return { files: [], directories: [] }
+				return {
+					files: [],
+					directories: []
+				}
 			})
 
 			const item2 = makeFileItem(UUID_FILE_2, "video.mp4")
 
-			await offline.storeFile({ file: item2, parent })
+			await offline.storeFile({
+				file: item2,
+				parent
+			})
 
 			// Cache was invalidated by updateIndex — next call rescans and finds 2 files
 			const after = await offline.listFiles()
@@ -721,7 +862,12 @@ describe("Offline", () => {
 			const parent = makeDirParent()
 
 			seedFileMeta(UUID_FILE, "photo.jpg", parent)
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
 			// Warm up the isItemStored cache with true
 			expect(await offline.isItemStored(item)).toBe(true)
@@ -741,14 +887,23 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const result = await offline.itemSize(item)
 
-			expect(result).toEqual({ size: 0, files: 0, dirs: 0 })
+			expect(result).toEqual({
+				size: 0,
+				files: 0,
+				dirs: 0
+			})
 		})
 
 		it("returns the file size from the index for a stored file", async () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
 			const result = await offline.itemSize(item)
 
@@ -759,7 +914,12 @@ describe("Offline", () => {
 			const item = makeFileItem(UUID_FILE)
 			const parent = makeDirParent()
 
-			seedIndex({ [UUID_FILE]: { item, parent } }, {})
+			seedIndex({
+				[UUID_FILE]: {
+					item,
+					parent
+				}
+			}, {})
 
 			const first = await offline.itemSize(item)
 
