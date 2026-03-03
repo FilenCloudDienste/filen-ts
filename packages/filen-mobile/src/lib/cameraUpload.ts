@@ -345,7 +345,7 @@ class CameraUpload {
 		await secureStore.set(this.secureStoreKey, newConfig)
 	}
 
-	public async sync(signal?: AbortSignal): Promise<void> {
+	public async sync(params?: { signal?: AbortSignal; maxUploads?: number }): Promise<void> {
 		const result = await run(async defer => {
 			const config = await this.getConfig()
 
@@ -363,12 +363,23 @@ class CameraUpload {
 				this.syncMutex.release()
 			})
 
-			const { step } = createAbortablePipeline(signal ?? this.globalAbortController.signal)
+			const { step } = createAbortablePipeline(params?.signal ?? this.globalAbortController.signal)
 			const remoteDirEnum = new DirEnum.Dir(config.remoteDir)
 
-			const deltas = await step(async () => {
+			const allDeltas = await step(async () => {
 				return await this.deltas(config)
 			})
+
+			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
+			// recently captured media is prioritised within the limited OS execution window, then cap the
+			// list. Without maxUploads (foreground sync) we use the full delta set as-is.
+			const deltas =
+				params?.maxUploads !== undefined
+					? allDeltas
+							.slice() // shallow copy – don't mutate the original array
+							.sort((a, b) => (b.file.info.modificationTime ?? 0) - (a.file.info.modificationTime ?? 0))
+							.slice(0, params.maxUploads)
+					: allDeltas
 
 			await Promise.all(
 				deltas.map(async delta => {
