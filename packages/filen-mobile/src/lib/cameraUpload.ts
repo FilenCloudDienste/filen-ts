@@ -5,7 +5,7 @@ import { PauseSignal, normalizeFilePathForSdk, unwrapFileMeta, normalizeFilePath
 import pathModule from "path"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
-import { run, Semaphore, createAbortablePipeline } from "@filen/utils"
+import { run, Semaphore, createAbortablePipeline, fastLocaleCompare } from "@filen/utils"
 import useCameraUploadStore from "@/stores/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { randomUUID } from "expo-crypto"
@@ -87,7 +87,7 @@ class CameraUpload {
 	}
 
 	public async compress(file: FileSystem.File): Promise<void> {
-		const extname = pathModule.posix.extname(file.uri.trim().toLowerCase())
+		const extname = pathModule.posix.extname(file.uri).toLowerCase()
 
 		if (!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.includes(extname)) {
 			return
@@ -185,47 +185,86 @@ class CameraUpload {
 			albums.map(async album => {
 				const [title, assets] = await Promise.all([album.getTitle(), album.getAssets()])
 
-				await Promise.all(
-					assets.map(async asset => {
-						await run(
-							async defer => {
-								await this.getLocalAssetInfoSemaphore.acquire()
+				// Phase 1: fetch all asset infos concurrently (rate-limited by semaphore).
+				const infos = (
+					await Promise.all(
+						assets.map(asset =>
+							run(
+								async defer => {
+									await this.getLocalAssetInfoSemaphore.acquire()
 
-								defer(() => {
-									this.getLocalAssetInfoSemaphore.release()
-								})
+									defer(() => {
+										this.getLocalAssetInfoSemaphore.release()
+									})
 
-								const info = await asset.getInfo()
-								let path = normalizeFilePathForSdk(pathModule.posix.join(title, info.filename)).toLowerCase().trim()
-								let iteration = 0
-
-								while (tree[path]) {
-									path =
-										this.modifyAssetPathOnCollision(iteration, path, {
-											name: info.filename,
-											creationTime: info.creationTime ?? 0,
-											modificationTime: info.modificationTime ?? 0
-										}) ?? ""
-
-									if (path.length === 0) {
-										return
+									return {
+										asset,
+										info: await asset.getInfo()
 									}
-
-									iteration++
+								},
+								{
+									throw: true
 								}
-
-								tree[path] = {
-									asset,
-									info,
-									path
-								}
-							},
-							{
-								throw: true
-							}
+							)
 						)
-					})
+					)
+				).map(
+					r =>
+						r.data as {
+							asset: MediaLibrary.Asset
+							info: MediaLibrary.AssetInfo
+						}
 				)
+
+				// Phase 2: sort by creationTime ascending before building the tree.
+				// On iOS, asset filenames cycle (IMG_0001 … IMG_9999 → IMG_0001 …), so multiple
+				// assets can share the same filename. Because getInfo() resolves in non-deterministic
+				// order, building the tree directly inside Promise.all produces a different
+				// winner for the base path slot on each run, causing re-uploads on every sync.
+				// Sorting first ensures the oldest asset always wins the base slot and newer
+				// duplicates consistently receive a collision suffix – stable across runs.
+				// asset.id (localIdentifier) is used as a tiebreaker so equal creationTimes
+				// are also resolved deterministically.
+				infos.sort((a, b) => {
+					const timeDiff = (a.info.creationTime ?? 0) - (b.info.creationTime ?? 0)
+
+					if (timeDiff !== 0) {
+						return timeDiff
+					}
+
+					return fastLocaleCompare(a.asset.id, b.asset.id)
+				})
+
+				// Phase 3: build tree sequentially so collision resolution is deterministic.
+				for (const { asset, info } of infos) {
+					let path = normalizeFilePathForSdk(pathModule.posix.join(title, info.filename)).toLowerCase().trim()
+					let iteration = 0
+
+					while (tree[path]) {
+						path =
+							this.modifyAssetPathOnCollision(iteration, path, {
+								name: info.filename,
+								creationTime: info.creationTime ?? 0,
+								modificationTime: info.modificationTime ?? 0
+							}) ?? ""
+
+						if (path.length === 0) {
+							break
+						}
+
+						iteration++
+					}
+
+					if (path.length === 0) {
+						continue
+					}
+
+					tree[path] = {
+						asset,
+						info,
+						path
+					}
+				}
 			})
 		)
 
@@ -253,8 +292,26 @@ class CameraUpload {
 
 		const tree: RemoteTree = {}
 
-		for (const file of files) {
-			const { meta } = unwrapFileMeta(file.file)
+		// Pre-unwrap metadata and sort by creationTime ascending with UUID as tiebreaker,
+		// mirroring the listLocal sort order. The server does not guarantee a stable return
+		// order, so without sorting, collision resolution would assign different path slots
+		// to the same files across runs, causing spurious re-uploads.
+		const sortedFiles = files
+			.map(file => ({
+				file,
+				meta: unwrapFileMeta(file.file).meta
+			}))
+			.sort((a, b) => {
+				const timeDiff = (a.meta ? Number(a.meta.created) : 0) - (b.meta ? Number(b.meta.created) : 0)
+
+				if (timeDiff !== 0) {
+					return timeDiff
+				}
+
+				return fastLocaleCompare(a.file.file.uuid, b.file.file.uuid)
+			})
+
+		for (const { file, meta } of sortedFiles) {
 			let path = normalizeFilePathForSdk(file.path).toLowerCase().trim()
 			let iteration = 0
 
@@ -277,10 +334,7 @@ class CameraUpload {
 				continue
 			}
 
-			tree[path] = {
-				...file,
-				path
-			}
+			tree[path] = file
 		}
 
 		return tree
@@ -376,7 +430,6 @@ class CameraUpload {
 			const deltas =
 				params?.maxUploads !== undefined
 					? allDeltas
-							.slice() // shallow copy – don't mutate the original array
 							.sort((a, b) => (b.file.info.modificationTime ?? 0) - (a.file.info.modificationTime ?? 0))
 							.slice(0, params.maxUploads)
 					: allDeltas
