@@ -1,7 +1,7 @@
 ---
 name: typescript-react-performance
 description: >
-    Write maximally performant, efficient TypeScript, React, React Native, Node.js, and Bun code. Use
+    Write maximally performant, efficient TypeScript, React, React Native, Node.js, and Bun code. Always use
     this skill whenever writing or reviewing TypeScript, JavaScript, React components, React Native /
     Expo apps, Node.js servers, or Bun scripts where performance and efficiency matter. This skill
     enforces zero-waste CPU usage, minimal memory allocation, optimal data structures, and

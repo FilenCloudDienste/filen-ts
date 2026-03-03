@@ -1,7 +1,7 @@
 ---
 name: security
 description: >
-    Write secure code and identify security vulnerabilities in any language or framework. Use this
+    Write secure code and identify security vulnerabilities in any language or framework. Always use this
     skill whenever writing, reviewing, or modifying code — especially code that handles user input,
     authentication, file operations, network requests, cryptography, database queries, secrets,
     or data serialization. Proactively flag any pattern that could lead to a security issue before

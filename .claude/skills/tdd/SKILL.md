@@ -1,7 +1,7 @@
 ---
 name: tdd
 description: >
-    Apply test-driven development practices when writing or modifying code. Use this skill whenever
+    Apply test-driven development practices when writing or modifying code. Always use this skill whenever
     implementing new features, fixing bugs, refactoring, or writing any logic that can be verified
     with tests. Covers Jest, Vitest, bun:test (TypeScript/JavaScript/React/React Native/Bun servers),
     Rust (cargo test), Playwright (web E2E), and Maestro (mobile E2E). Tests are required for all
@@ -558,9 +558,7 @@ test("user can upload and share a file", async ({ page }) => {
 
 	// Use user-visible locators — never CSS selectors or XPath for stable tests
 	await page.getByRole("button", { name: "Upload" }).click()
-	await page
-		.getByLabel("Choose file")
-		.setInputFiles("test-assets/document.pdf")
+	await page.getByLabel("Choose file").setInputFiles("test-assets/document.pdf")
 
 	// Wait for upload to complete — use expect, not sleep
 	await expect(page.getByText("document.pdf")).toBeVisible()
