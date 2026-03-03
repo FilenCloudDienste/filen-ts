@@ -53,6 +53,7 @@ class CameraUpload {
 	private globalPauseSignal = new PauseSignal()
 	private syncMutex: Semaphore = new Semaphore(1)
 	public secureStoreKey: string = "cameraUploadConfig"
+	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
 
 	public constructor() {
 		events.subscribe("secureStoreChange", ({ key }) => {
@@ -131,30 +132,41 @@ class CameraUpload {
 		asset: {
 			name: string
 			creationTime: number
-			id?: string
+			modificationTime: number
 		}
 	): string | null {
 		const ext = pathModule.posix.extname(asset.name)
 		const basename = pathModule.posix.basename(asset.name, ext)
 		const parentDir = pathModule.posix.dirname(path)
 
-		if (parentDir === ".") {
+		if (parentDir === "." || basename.length === 0 || parentDir.length === 0 || basename === ".") {
 			return null
 		}
 
 		switch (iteration) {
 			case 0: {
-				return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${asset.creationTime}${ext}`))
+				return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${asset.modificationTime}${ext}`))
 					.toLowerCase()
 					.trim()
 			}
 
 			case 1: {
 				return normalizeFilePathForSdk(
-					pathModule.posix.join(
-						parentDir,
-						`${basename}_${xxHash32(asset.id ?? asset.creationTime.toString()).toString(16)}${ext}`
-					)
+					pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.modificationTime.toString()).toString(16)}${ext}`)
+				)
+					.toLowerCase()
+					.trim()
+			}
+
+			case 2: {
+				return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${asset.creationTime}${ext}`))
+					.toLowerCase()
+					.trim()
+			}
+
+			case 3: {
+				return normalizeFilePathForSdk(
+					pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.creationTime.toString()).toString(16)}${ext}`)
 				)
 					.toLowerCase()
 					.trim()
@@ -175,30 +187,43 @@ class CameraUpload {
 
 				await Promise.all(
 					assets.map(async asset => {
-						const info = await asset.getInfo()
-						let path = normalizeFilePathForSdk(pathModule.posix.join(title, info.filename)).toLowerCase().trim()
-						let iteration = 0
+						await run(
+							async defer => {
+								await this.getLocalAssetInfoSemaphore.acquire()
 
-						while (tree[path]) {
-							path =
-								this.modifyAssetPathOnCollision(iteration, path, {
-									name: info.filename,
-									creationTime: info.creationTime ?? 0,
-									id: asset.id
-								}) ?? ""
+								defer(() => {
+									this.getLocalAssetInfoSemaphore.release()
+								})
 
-							if (path.length === 0) {
-								return
+								const info = await asset.getInfo()
+								let path = normalizeFilePathForSdk(pathModule.posix.join(title, info.filename)).toLowerCase().trim()
+								let iteration = 0
+
+								while (tree[path]) {
+									path =
+										this.modifyAssetPathOnCollision(iteration, path, {
+											name: info.filename,
+											creationTime: info.creationTime ?? 0,
+											modificationTime: info.modificationTime ?? 0
+										}) ?? ""
+
+									if (path.length === 0) {
+										return
+									}
+
+									iteration++
+								}
+
+								tree[path] = {
+									asset,
+									info,
+									path
+								}
+							},
+							{
+								throw: true
 							}
-
-							iteration++
-						}
-
-						tree[path] = {
-							asset,
-							info,
-							path
-						}
+						)
 					})
 				)
 			})
@@ -237,7 +262,8 @@ class CameraUpload {
 				path =
 					this.modifyAssetPathOnCollision(iteration, path, {
 						name: meta?.name ?? pathModule.posix.basename(path),
-						creationTime: meta ? Number(meta.created) : 0
+						creationTime: meta ? Number(meta.created) : 0,
+						modificationTime: meta ? Number(meta.modified) : 0
 					}) ?? ""
 
 				if (path.length === 0) {
