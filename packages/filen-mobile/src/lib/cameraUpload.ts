@@ -1,7 +1,7 @@
 import * as MediaLibrary from "expo-media-library/next"
 import auth from "@/lib/auth"
 import { type Dir, AnyDirEnum, type FileWithPath, DirEnum } from "@filen/sdk-rs"
-import { PauseSignal, normalizeFilePathForSdk, unwrapFileMeta, normalizeFilePathForExpo } from "@/lib/utils"
+import { PauseSignal, normalizeFilePathForSdk, unwrapFileMeta, normalizeFilePathForExpo, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import pathModule from "path"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
@@ -14,6 +14,9 @@ import { xxHash32 } from "js-xxhash"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import * as ImageManipulator from "expo-image-manipulator"
 import events from "@/lib/events"
+import { LRUCache } from "lru-cache"
+import { parseExifDate } from "@/lib/exif"
+import drive from "@/lib/drive"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -54,19 +57,34 @@ class CameraUpload {
 	private syncMutex: Semaphore = new Semaphore(1)
 	public secureStoreKey: string = "cameraUploadConfig"
 	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
+	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, Dir>({
+		max: Infinity,
+		maxEntrySize: Infinity,
+		maxSize: Infinity,
+		ttl: 300000,
+		allowStale: false,
+		updateAgeOnGet: false,
+		updateAgeOnHas: false
+	})
 
 	public constructor() {
 		events.subscribe("secureStoreChange", ({ key }) => {
 			if (key === this.secureStoreKey) {
+				this.ensureParentDirectoryExistsCache.clear()
+
 				this.cancel()
 			}
 		})
 
 		events.subscribe("secureStoreClear", () => {
+			this.ensureParentDirectoryExistsCache.clear()
+
 			this.cancel()
 		})
 
 		events.subscribe("secureStoreRemove", ({ key }) => {
+			this.ensureParentDirectoryExistsCache.clear()
+
 			if (key === this.secureStoreKey) {
 				this.cancel()
 			}
@@ -269,7 +287,7 @@ class CameraUpload {
 		return tree
 	}
 
-	private async listRemote(remoteDir: Dir, signal?: AbortSignal): Promise<RemoteTree> {
+	private async listRemote(remoteDir: Dir): Promise<RemoteTree> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
 			new AnyDirEnum.Dir(remoteDir),
@@ -284,7 +302,7 @@ class CameraUpload {
 				}
 			},
 			{
-				signal: signal ?? this.globalAbortController.signal
+				signal: this.globalAbortController.signal
 			}
 		)
 
@@ -338,12 +356,12 @@ class CameraUpload {
 		return tree
 	}
 
-	private async deltas(config: Config, signal?: AbortSignal): Promise<Delta[]> {
+	private async deltas(config: Config): Promise<Delta[]> {
 		if (!config.enabled) {
 			return []
 		}
 
-		const [localTree, remoteTree] = await Promise.all([this.listLocal(config.albums), this.listRemote(config.remoteDir, signal)])
+		const [localTree, remoteTree] = await Promise.all([this.listLocal(config.albums), this.listRemote(config.remoteDir)])
 		const deltas: Delta[] = []
 
 		for (const path in localTree) {
@@ -397,7 +415,36 @@ class CameraUpload {
 		await secureStore.set(this.secureStoreKey, newConfig)
 	}
 
-	public async sync(params?: { signal?: AbortSignal; maxUploads?: number }): Promise<void> {
+	private async ensureParentDirectoryExists({ path, config }: { path: string; config: Config }) {
+		if (!config.enabled) {
+			throw new Error("Camera upload is not enabled")
+		}
+
+		const parentDirName = pathModule.posix.dirname(path)
+		const cacheKey = `${config.remoteDir.uuid}:${parentDirName}`
+		const fromCache = this.ensureParentDirectoryExistsCache.get(cacheKey)
+
+		if (fromCache) {
+			return fromCache
+		}
+
+		if (parentDirName.length === 0 || parentDirName === ".") {
+			throw new Error(`Invalid parent directory path: ${parentDirName}`)
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+		const parentDirEnum = new DirEnum.Dir(config.remoteDir)
+
+		const dir = await authedSdkClient.createDir(parentDirEnum, parentDirName, {
+			signal: this.globalAbortController.signal
+		})
+
+		this.ensureParentDirectoryExistsCache.set(cacheKey, dir)
+
+		return dir
+	}
+
+	public async sync(params?: { maxUploads?: number }): Promise<void> {
 		const result = await run(async defer => {
 			const config = await this.getConfig()
 
@@ -415,8 +462,7 @@ class CameraUpload {
 				this.syncMutex.release()
 			})
 
-			const remoteDirEnum = new DirEnum.Dir(config.remoteDir)
-			const allDeltas = await this.deltas(config, params?.signal ?? this.globalAbortController.signal)
+			const allDeltas = await this.deltas(config)
 
 			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
 			// recently captured media is prioritised within the limited OS execution window, then cap the
@@ -462,21 +508,55 @@ class CameraUpload {
 									await this.compress(tmpFile)
 								}
 
-								// TODO: create parent dir (album title) first and then upload into it
+								const parentDir = await this.ensureParentDirectoryExists({
+									path: delta.file.path,
+									config
+								})
+
+								const parentDirEnum = new DirEnum.Dir(parentDir)
+
 								const { files } = await transfers.upload({
 									id: delta.file.info.id,
 									localFileOrDir: tmpFile,
-									parent: remoteDirEnum,
+									parent: parentDirEnum,
 									abortController: this.globalAbortController,
 									pauseSignal: this.globalPauseSignal
 								})
 
-								// TODO update file timestamps based on exif > info
+								if (delta.file.info.mediaType === MediaLibrary.MediaType.IMAGE) {
+									await Promise.all(
+										files.map(async file =>
+											run(async () => {
+												const exif = await delta.file.asset.getExif()
+												const exifDate = parseExifDate(exif)
+
+												await drive.updateTimestamps({
+													item: unwrappedFileIntoDriveItem(unwrapFileMeta(file)),
+													created:
+														exifDate ??
+														delta.file.info.creationTime ??
+														delta.file.info.modificationTime ??
+														Date.now(),
+													modified:
+														delta.file.info.modificationTime ??
+														exifDate ??
+														delta.file.info.creationTime ??
+														Date.now(),
+													signal: this.globalAbortController.signal
+												})
+											})
+										)
+									)
+								}
 
 								return {
 									type: "upload" as const,
 									files
 								}
+							}
+
+							default: {
+								throw new Error(`Unknown delta type: ${delta.type}`)
 							}
 						}
 					})
