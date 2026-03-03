@@ -436,7 +436,7 @@ export function fastLocaleCompare(a: string, b: string): number {
 	return caseDiff
 }
 
-export const BPS_TO_READABLE_UNITS = ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
+export const BPS_TO_READABLE_UNITS = ["KiB/s", "MiB/s", "GiB/s", "TiB/s", "PiB/s", "EiB/s", "ZiB/s", "YiB/s"]
 
 export function bpsToReadable(bps: number): string {
 	if (!(bps > 0 && bps < 1099511627776)) {
@@ -471,7 +471,7 @@ export function bpsToReadable(bps: number): string {
 	}
 
 	if (i < 0) {
-		return value.toFixed(1) + " B"
+		return value.toFixed(1) + " B/s"
 	}
 
 	return value.toFixed(1) + " " + BPS_TO_READABLE_UNITS[i]
