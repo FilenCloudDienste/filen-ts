@@ -126,6 +126,8 @@ Read the files and check **every one** of these:
 - [ ] **Array/object multiline threshold**: when do they break to multiple lines?
 - [ ] **Comment style**: `//` vs `/* */`, JSDoc style, spacing after `//`
 - [ ] **Export style**: named, default, barrel pattern?
+- [ ] **Multiline**: Single-property objects passed as arguments are still expanded to multiple lines: run(fn, {\n\tthrow: true\n}) for better readability
+- [ ] **Multiline**: Inline defer callbacks are forbidden — always expand the body: defer(() => {\n\tthis.x.release()\n}) for better readability
 
 ---
 
