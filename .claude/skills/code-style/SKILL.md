@@ -3,7 +3,7 @@ name: code-style
 description: >
     Analyze and strictly match the existing code style of any project before writing or editing code.
     Always use this skill whenever writing, editing, refactoring, or adding code to an existing codebase.
-    This skill ensures Claude always mirrors the project's exact formatting conventions — indentation,
+    This skill ensures you mirror the project's exact formatting conventions — indentation,
     quotes, semicolons, trailing commas, bracket spacing, line length, arrow function parens, brace
     style, empty lines, and more — by reading formatter config files and studying existing source files.
     Trigger this skill for ANY code contribution to an existing project, even small edits. Never guess
@@ -156,6 +156,7 @@ When writing or editing code:
 ## Step 6: Create/Update the Style Index
 
 The index lives at `./claude/code-style-index.json`. It is a project-local cache that prevents full codebase re-scanning on future invocations.
+If you are in a monorepo, the index file parent directory lives at the project root.
 
 ### Creating the index (after first full scan)
 
