@@ -7,11 +7,13 @@ on:
     paths:
       - 'packages/filen-web/**/*'
       - 'packages/filen-mobile/**/*'
+      - 'packages/filen-utils/**/*'
 
   pull_request:
     paths:
       - 'packages/filen-web/**/*'
       - 'packages/filen-mobile/**/*'
+      - 'packages/filen-utils/**/*'
 
 concurrency:
   group: 'lint'
@@ -49,4 +51,19 @@ jobs:
         run: npm install --package-lock-only && npm ci
       - name: Lint
         working-directory: packages/filen-mobile
+        run: npm run lint
+  lint-utils:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        working-directory: packages/filen-utils
+        run: npm install --package-lock-only && npm ci
+      - name: Lint
+        working-directory: packages/filen-utils
         run: npm run lint

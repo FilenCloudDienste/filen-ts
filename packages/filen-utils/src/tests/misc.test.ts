@@ -121,12 +121,12 @@ describe("sanitizeFileName", () => {
 	})
 
 	it("should replace illegal Windows characters", () => {
-		const result = sanitizeFileName('file<>:"|?.txt')
+		const result = sanitizeFileName("file<>:\"|?.txt")
 
 		expect(result).not.toContain("<")
 		expect(result).not.toContain(">")
 		expect(result).not.toContain(":")
-		expect(result).not.toContain('"')
+		expect(result).not.toContain("\"")
 		expect(result).not.toContain("|")
 		expect(result).not.toContain("?")
 	})

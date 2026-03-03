@@ -25,21 +25,21 @@ describe("createNotePreviewFromContentText", () => {
 
 	describe("checklist", () => {
 		it("should extract first non-empty list item", () => {
-			const html = '<ul data-checked="false"><li>First item</li><li>Second item</li></ul>'
+			const html = "<ul data-checked=\"false\"><li>First item</li><li>Second item</li></ul>"
 			const result = createNotePreviewFromContentText("checklist", html)
 
 			expect(result).toBe("First item")
 		})
 
 		it("should skip empty items", () => {
-			const html = '<ul data-checked="false"><li></li><li>Actual item</li></ul>'
+			const html = "<ul data-checked=\"false\"><li></li><li>Actual item</li></ul>"
 			const result = createNotePreviewFromContentText("checklist", html)
 
 			expect(result).toBe("Actual item")
 		})
 
 		it("should return empty string for empty checklist", () => {
-			const html = '<ul data-checked="false"><li></li></ul>'
+			const html = "<ul data-checked=\"false\"><li></li></ul>"
 			const result = createNotePreviewFromContentText("checklist", html)
 
 			expect(result).toBe("")
