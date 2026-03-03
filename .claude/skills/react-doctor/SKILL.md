@@ -1,6 +1,6 @@
 ---
 name: react-doctor
-description: Use this skill after making React changes to catch issues early. Use when reviewing code, finishing a feature, or fixing bugs in a React project.
+description: Always use this skill after making React changes to catch issues early. Always use when reviewing code, finishing a feature, or fixing bugs in a React project.
 version: 1.0.0
 ---
 

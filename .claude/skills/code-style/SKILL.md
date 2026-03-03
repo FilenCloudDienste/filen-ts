@@ -2,7 +2,7 @@
 name: code-style
 description: >
     Analyze and strictly match the existing code style of any project before writing or editing code.
-    Use this skill whenever writing, editing, refactoring, or adding code to an existing codebase.
+    Always use this skill whenever writing, editing, refactoring, or adding code to an existing codebase.
     This skill ensures Claude always mirrors the project's exact formatting conventions — indentation,
     quotes, semicolons, trailing commas, bracket spacing, line length, arrow function parens, brace
     style, empty lines, and more — by reading formatter config files and studying existing source files.
