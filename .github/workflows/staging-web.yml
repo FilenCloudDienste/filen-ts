@@ -5,7 +5,7 @@ on:
 
   push:
     paths:
-      - 'packages/filen-web/**/*'
+      - 'packages/filen-web/**'
 
 permissions:
   contents: read
@@ -32,6 +32,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: 'npm'
+          cache-dependency-path: packages/filen-web/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-web
         run: npm install --package-lock-only --no-workspaces && npm ci
