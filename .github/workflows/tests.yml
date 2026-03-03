@@ -45,6 +45,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: 'npm'
+          cache-dependency-path: packages/filen-utils/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-utils
         run: npm install --package-lock-only && npm ci
@@ -62,6 +64,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: 'npm'
+          cache-dependency-path: packages/filen-mobile/package-lock.json
       - name: Install patch-package
         run: npm install -g patch-package
       - name: Install dependencies
