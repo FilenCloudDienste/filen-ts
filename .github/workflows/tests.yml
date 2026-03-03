@@ -5,20 +5,38 @@ on:
 
   push:
     paths:
-      - 'packages/filen-utils/**/*'
-      - 'packages/filen-mobile/**/*'
+      - 'packages/filen-utils/**'
+      - 'packages/filen-mobile/**'
 
   pull_request:
     paths:
-      - 'packages/filen-utils/**/*'
-      - 'packages/filen-mobile/**/*'
+      - 'packages/filen-utils/**'
+      - 'packages/filen-mobile/**'
 
 concurrency:
   group: 'tests'
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      filen-utils: ${{ steps.filter.outputs.filen-utils }}
+      filen-mobile: ${{ steps.filter.outputs.filen-mobile }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            filen-utils:
+              - 'packages/filen-utils/**'
+            filen-mobile:
+              - 'packages/filen-mobile/**'
+
   test-utils:
+    needs: changes
+    if: needs.changes.outputs.filen-utils == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +52,8 @@ jobs:
         working-directory: packages/filen-utils
         run: npm test
   test-mobile:
+    needs: changes
+    if: needs.changes.outputs.filen-mobile == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

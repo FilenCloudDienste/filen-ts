@@ -5,22 +5,43 @@ on:
 
   push:
     paths:
-      - 'packages/filen-web/**/*'
-      - 'packages/filen-mobile/**/*'
-      - 'packages/filen-utils/**/*'
+      - 'packages/filen-web/**'
+      - 'packages/filen-mobile/**'
+      - 'packages/filen-utils/**'
 
   pull_request:
     paths:
-      - 'packages/filen-web/**/*'
-      - 'packages/filen-mobile/**/*'
-      - 'packages/filen-utils/**/*'
+      - 'packages/filen-web/**'
+      - 'packages/filen-mobile/**'
+      - 'packages/filen-utils/**'
 
 concurrency:
   group: 'lint'
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      filen-web: ${{ steps.filter.outputs.filen-web }}
+      filen-mobile: ${{ steps.filter.outputs.filen-mobile }}
+      filen-utils: ${{ steps.filter.outputs.filen-utils }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            filen-web:
+              - 'packages/filen-web/**'
+            filen-mobile:
+              - 'packages/filen-mobile/**'
+            filen-utils:
+              - 'packages/filen-utils/**'
+
   lint-web:
+    needs: changes
+    if: needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,6 +57,8 @@ jobs:
         working-directory: packages/filen-web
         run: npm run lint
   lint-mobile:
+    needs: changes
+    if: needs.changes.outputs.filen-mobile == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -53,6 +76,8 @@ jobs:
         working-directory: packages/filen-mobile
         run: npm run lint
   lint-utils:
+    needs: changes
+    if: needs.changes.outputs.filen-utils == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
