@@ -83,9 +83,9 @@ class CameraUpload {
 		})
 
 		events.subscribe("secureStoreRemove", ({ key }) => {
-			this.ensureParentDirectoryExistsCache.clear()
-
 			if (key === this.secureStoreKey) {
+				this.ensureParentDirectoryExistsCache.clear()
+
 				this.cancel()
 			}
 		})
@@ -94,6 +94,10 @@ class CameraUpload {
 	public cancel(): void {
 		this.globalAbortController.abort()
 		this.globalAbortController = new AbortController()
+		// Replace the pause signal so the next sync starts unpaused. The aborted
+		// controller above will already stop any in-flight transfers before they
+		// can block on the old (possibly paused) signal.
+		this.globalPauseSignal = new PauseSignal()
 	}
 
 	public pause(): void {
@@ -144,15 +148,19 @@ class CameraUpload {
 		return Math.floor(timestamp / 1000)
 	}
 
-	private modifyAssetPathOnCollision(
-		iteration: number,
-		path: string,
+	private modifyAssetPathOnCollision({
+		iteration,
+		path,
+		asset
+	}: {
+		iteration: number
+		path: string
 		asset: {
 			name: string
 			creationTime: number
 			modificationTime: number
 		}
-	): string | null {
+	}): string | null {
 		const ext = pathModule.posix.extname(asset.name)
 		const basename = pathModule.posix.basename(asset.name, ext)
 		const parentDir = pathModule.posix.dirname(path)
@@ -258,10 +266,14 @@ class CameraUpload {
 
 					while (tree[path]) {
 						path =
-							this.modifyAssetPathOnCollision(iteration, path, {
-								name: info.filename,
-								creationTime: info.creationTime ?? 0,
-								modificationTime: info.modificationTime ?? 0
+							this.modifyAssetPathOnCollision({
+								iteration,
+								path,
+								asset: {
+									name: info.filename,
+									creationTime: info.creationTime ?? 0,
+									modificationTime: info.modificationTime ?? 0
+								}
 							}) ?? ""
 
 						if (path.length === 0) {
@@ -287,7 +299,7 @@ class CameraUpload {
 		return tree
 	}
 
-	private async listRemote(remoteDir: Dir): Promise<RemoteTree> {
+	private async listRemote({ remoteDir, signal }: { remoteDir: Dir; signal: AbortSignal }): Promise<RemoteTree> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
 			new AnyDirEnum.Dir(remoteDir),
@@ -302,7 +314,7 @@ class CameraUpload {
 				}
 			},
 			{
-				signal: this.globalAbortController.signal
+				signal
 			}
 		)
 
@@ -333,10 +345,14 @@ class CameraUpload {
 
 			while (tree[path]) {
 				path =
-					this.modifyAssetPathOnCollision(iteration, path, {
-						name: meta?.name ?? pathModule.posix.basename(path),
-						creationTime: meta ? Number(meta.created) : 0,
-						modificationTime: meta ? Number(meta.modified) : 0
+					this.modifyAssetPathOnCollision({
+						iteration,
+						path,
+						asset: {
+							name: meta?.name ?? pathModule.posix.basename(path),
+							creationTime: meta ? Number(meta.created) : 0,
+							modificationTime: meta ? Number(meta.modified) : 0
+						}
 					}) ?? ""
 
 				if (path.length === 0) {
@@ -356,12 +372,19 @@ class CameraUpload {
 		return tree
 	}
 
-	private async deltas(config: Config): Promise<Delta[]> {
+	private async deltas({ config, signal }: { config: Config; signal: AbortSignal }): Promise<Delta[]> {
 		if (!config.enabled) {
 			return []
 		}
 
-		const [localTree, remoteTree] = await Promise.all([this.listLocal(config.albums), this.listRemote(config.remoteDir)])
+		const [localTree, remoteTree] = await Promise.all([
+			this.listLocal(config.albums),
+			this.listRemote({
+				remoteDir: config.remoteDir,
+				signal
+			})
+		])
+
 		const deltas: Delta[] = []
 
 		for (const path in localTree) {
@@ -415,7 +438,7 @@ class CameraUpload {
 		await secureStore.set(this.secureStoreKey, newConfig)
 	}
 
-	private async ensureParentDirectoryExists({ path, config }: { path: string; config: Config }) {
+	private async ensureParentDirectoryExists({ path, config, signal }: { path: string; config: Config; signal: AbortSignal }) {
 		if (!config.enabled) {
 			throw new Error("Camera upload is not enabled")
 		}
@@ -436,7 +459,7 @@ class CameraUpload {
 		const parentDirEnum = new DirEnum.Dir(config.remoteDir)
 
 		const dir = await authedSdkClient.createDir(parentDirEnum, parentDirName, {
-			signal: this.globalAbortController.signal
+			signal
 		})
 
 		this.ensureParentDirectoryExistsCache.set(cacheKey, dir)
@@ -462,7 +485,17 @@ class CameraUpload {
 				this.syncMutex.release()
 			})
 
-			const allDeltas = await this.deltas(config)
+			// Capture both signals once so that cancel() — which aborts the current
+			// controller and creates fresh instances for future syncs — reliably
+			// stops every operation in this sync via the captured references,
+			// regardless of when during execution cancel() fires.
+			const abortController = this.globalAbortController
+			const pauseSignal = this.globalPauseSignal
+
+			const allDeltas = await this.deltas({
+				config,
+				signal: abortController.signal
+			})
 
 			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
 			// recently captured media is prioritised within the limited OS execution window, then cap the
@@ -510,7 +543,8 @@ class CameraUpload {
 
 								const parentDir = await this.ensureParentDirectoryExists({
 									path: delta.file.path,
-									config
+									config,
+									signal: abortController.signal
 								})
 
 								const parentDirEnum = new DirEnum.Dir(parentDir)
@@ -519,8 +553,8 @@ class CameraUpload {
 									id: delta.file.info.id,
 									localFileOrDir: tmpFile,
 									parent: parentDirEnum,
-									abortController: this.globalAbortController,
-									pauseSignal: this.globalPauseSignal
+									abortController,
+									pauseSignal
 								})
 
 								if (delta.file.info.mediaType === MediaLibrary.MediaType.IMAGE) {
@@ -542,7 +576,7 @@ class CameraUpload {
 														exifDate ??
 														delta.file.info.creationTime ??
 														Date.now(),
-													signal: this.globalAbortController.signal
+													signal: abortController.signal
 												})
 											})
 										)
