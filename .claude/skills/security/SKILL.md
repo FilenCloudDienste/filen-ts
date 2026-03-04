@@ -1,11 +1,6 @@
 ---
 name: security
-description: >
-    Write secure code and identify security vulnerabilities in any language or framework. Always use this skill at all times across every
-    task. Proactively flag any pattern that could lead to a security issue before
-    writing it, not after. Trigger for any code task involving APIs, auth, file I/O, env vars,
-    HTTP, SQL, shell commands, IPC, or third-party data. Apply always — security is not a
-    separate phase, it is part of writing correct code.
+description: CRITICAL: Always use this skill, no matter what task you are working on!
 ---
 
 # Cybersecurity — Write Secure Code by Default

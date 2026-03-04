@@ -1,13 +1,6 @@
 ---
 name: tdd
-description: >
-    Apply test-driven development practices when writing or modifying code. Always use this skill whenever
-    implementing new features, fixing bugs, refactoring, or writing any logic that can be verified
-    with tests. Covers Jest, Vitest, bun:test (TypeScript/JavaScript/React/React Native/Bun servers),
-    Rust (cargo test), Playwright (web E2E), and Maestro (mobile E2E). Tests are required for all
-    non-trivial code — but order is flexible for exploratory work. Trigger for any task that involves
-    writing implementation code, fixing a bug, or when the user mentions tests, coverage, TDD, spec,
-    E2E, or flows. Apply proactively — don't wait to be asked.
+description: CRITICAL: Always use this skill, no matter what task you are working on!
 ---
 
 # Test-Driven Development

@@ -1,11 +1,6 @@
 ---
 name: no-hallucination
-description: >
-    Never hallucinate, invent, or guess when uncertain. Always use this skill at all times across every
-    task — code, research, configuration, API usage, debugging, architecture decisions, or any other
-    work. When Claude does not know something, cannot find reliable information after genuine effort,
-    or is not confident enough to act, it must stop and tell the user clearly instead of proceeding
-    with invented or assumed information. Trigger always — this skill has no off switch.
+description: CRITICAL: Always use this skill, no matter what task you are working on!
 ---
 
 # No Hallucination — Honesty Over Invention

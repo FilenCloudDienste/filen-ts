@@ -1,13 +1,6 @@
 ---
 name: code-style
-description: >
-    Analyze and strictly match the existing code style of any project before writing or editing code.
-    Always use this skill whenever writing, editing, refactoring, or adding code to an existing codebase.
-    This skill ensures you mirror the project's exact formatting conventions — indentation,
-    quotes, semicolons, trailing commas, bracket spacing, line length, arrow function parens, brace
-    style, empty lines, and more — by reading formatter config files and studying existing source files.
-    Trigger this skill for ANY code contribution to an existing project, even small edits. Never guess
-    style; always observe it first.
+description: CRITICAL: Always use this skill, no matter what task you are working on!
 ---
 
 # Code Style Matching Skill

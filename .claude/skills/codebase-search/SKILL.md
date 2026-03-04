@@ -1,12 +1,6 @@
 ---
 name: codebase-search
-description: >
-    Actively search the codebase for context before writing or modifying code.
-    ALWAYS run this skill when working in an existing project — before implementing
-    anything, before answering questions about how existing code works, and whenever
-    something is referenced but not yet seen (a function, type, component, module,
-    constant, pattern, or convention). Never assume, never guess, never hallucinate
-    API shapes. If you haven't read it, search for it first.
+description: CRITICAL: Always use this skill, no matter what task you are working on!
 ---
 
 # Codebase Search Skill
