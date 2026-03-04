@@ -1,6 +1,6 @@
 ---
 name: verify-changes
-description: CRITICAL: Always use this skill, no matter what task you are working on!
+description: CRITICAL! Always use this skill, no matter what task you are working on!
 ---
 
 # Verify Changes Skill

@@ -1,6 +1,6 @@
 ---
 name: code-style
-description: CRITICAL: Always use this skill, no matter what task you are working on!
+description: CRITICAL! Always use this skill, no matter what task you are working on!
 ---
 
 # Code Style Matching Skill
