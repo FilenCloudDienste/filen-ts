@@ -22,20 +22,16 @@ creates attack surface or reduces it. Think about which one you are doing before
 
 Before writing any code that touches external data, users, files, or the network:
 
-```bash
+```
 # Find existing auth, validation, and security patterns in the project
-grep -r "auth\|validate\|sanitize\|escape\|middleware\|guard" src/ | head -20
+Grep(pattern: "auth|validate|sanitize|escape|middleware|guard", glob: "src/**/*.ts", output_mode: "files_with_matches")
 
 # Find what security libraries are already in use
-cat package.json 2>/dev/null | grep -E "helmet|cors|csrf|validator|sanitize"
-cat Cargo.toml 2>/dev/null | grep -E "argon|hmac|sha|ring|rustls"
-cat requirements.txt pyproject.toml 2>/dev/null | grep -E "cryptography|passlib|bleach"
-cat go.mod 2>/dev/null | grep -E "crypto|jwt|bcrypt"
-cat Gemfile 2>/dev/null | grep -E "devise|bcrypt|rack-attack"
+Read(file_path: "/absolute/path/to/package.json")
+# → look for: helmet, cors, csrf, validator, sanitize, argon2, bcrypt, jose, crypto
 
-# Understand how existing endpoints or handlers deal with input
-find . -name "*.ts" -o -name "*.py" -o -name "*.go" -o -name "*.rs" \
-  | xargs grep -l "request\|req\|input\|param" 2>/dev/null | head -5
+# Understand how existing entry points handle input
+Grep(pattern: "request|req\\.body|req\\.params|req\\.query|input", glob: "src/**/*.ts", output_mode: "files_with_matches", head_limit: 10)
 ```
 
 **Use what the project already has.** If it has a validation library, use it. If it has an
@@ -411,8 +407,7 @@ do so must be explicitly gated on an environment flag, never on anything the cal
 When writing for a specific platform, check what secure storage and security APIs are
 available before reaching for a generic solution:
 
-- **Mobile (iOS/Android)**: use the platform Keychain/Keystore for sensitive data — never
-  unencrypted local storage or shared preferences for tokens or credentials
+- **Mobile (iOS/Android)**: use the platform Keychain/Keystore for sensitive data (`expo-secure-store`, `react-native-keychain`) — never `AsyncStorage`, `MMKV` (unencrypted), or `SharedPreferences` for tokens or credentials. `AsyncStorage` is stored in plaintext and accessible without root on some devices.
 - **Browser**: use `HttpOnly` cookies over `localStorage` for session tokens — JS-accessible
   storage is vulnerable to XSS
 - **Server**: use secret management services (Vault, AWS Secrets Manager, GCP Secret Manager)

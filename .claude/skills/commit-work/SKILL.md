@@ -49,7 +49,8 @@ Make commits that are easy to review and safe to ship:
     - Prefer an editor for multi-line messages: `git commit -v`
     - Use `references/commit-message-template.md` if helpful.
 7. Run the smallest relevant verification
-    - Run the repo's fastest meaningful check (unit tests, lint, or build) before moving on.
+    - Use the verify-changes skill — it auto-detects ESLint, tsc, and tests and runs them in order.
+    - If verify-changes isn't applicable, run the repo's fastest meaningful check (unit tests, lint, or build) before moving on.
 8. Repeat for the next commit until the working tree is clean
 9. Do not co-author ever.
 

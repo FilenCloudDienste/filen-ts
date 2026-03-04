@@ -309,21 +309,14 @@ if (isMainThread) {
 
 Before applying any React performance pattern, read the project to understand what's actually in use. Never assume or introduce new libraries.
 
-```bash
-# Check what state management, data fetching, and UI libraries are installed
-cat package.json | grep -E '"dependencies"|"devDependencies"' -A 200 | head -100
-
-# Check for virtualization libraries
-grep -r "react-virtual\|react-window\|react-virtualized\|virtua\|tanstack" package.json
-
-# Check for state management
-grep -r "zustand\|jotai\|recoil\|redux\|mobx\|valtio\|nanostores" package.json
-
-# Check for data fetching
-grep -r "react-query\|tanstack/query\|swr\|apollo\|urql\|trpc" package.json
+```
+# Read package.json to see all installed libraries
+Read(file_path: "/absolute/path/to/package.json")
+# → check for: zustand/jotai/recoil/redux (state), react-query/@tanstack/query/swr (data fetching),
+#   react-virtual/react-window/flash-list (virtualization), reanimated/moti (animation)
 
 # See how existing components handle state and memoization
-find src -name "*.tsx" | head -5 | xargs grep -l "useState\|useReducer\|memo\|useCallback"
+Grep(pattern: "useState|useReducer|memo|useCallback", glob: "src/**/*.tsx", output_mode: "files_with_matches")
 ```
 
 **Use what the project already has.** If it uses Zustand, use Zustand. If it has TanStack Query, use it for server state. Don't introduce a second state library. Don't add `@tanstack/react-virtual` if `react-window` is already installed. Match the existing patterns.
@@ -394,9 +387,10 @@ const OPTIONS = ['a', 'b'] as const
 
 ### State — use what the project already uses
 
-```bash
-# Always check first
-grep -E "zustand|jotai|recoil|redux|mobx|valtio|useState|useReducer" src/**/*.tsx | head -20
+```
+# Check package.json for zustand|jotai|recoil|redux|mobx|valtio (already read in Step 0)
+# Check how existing components use state
+Grep(pattern: "zustand|jotai|useReducer|useState", glob: "src/**/*.tsx", output_mode: "files_with_matches", head_limit: 10)
 ```
 
 - **If the project uses Zustand/Jotai/etc.** — use it. Don't mix with local `useState` for shared state.
@@ -406,8 +400,8 @@ grep -E "zustand|jotai|recoil|redux|mobx|valtio|useState|useReducer" src/**/*.ts
 
 ### Server state — use what the project already uses
 
-```bash
-grep -E "react-query|@tanstack/query|swr|apollo|urql|trpc" package.json
+```
+# Check package.json (already read in Step 0) for react-query/@tanstack/query/swr/apollo/urql/trpc
 ```
 
 If TanStack Query / SWR / Apollo is already there, **all** server state goes through it — never `useEffect` + `fetch` + `useState` for data fetching in a project that already has a data fetching library. These libraries give you caching, deduplication, background refetch, and loading states for free.
@@ -551,36 +545,22 @@ React Native runs on **Hermes**, a bytecode-compiled JS engine purpose-built for
 
 ### Step 0 — Inspect the project before writing any React Native code
 
-```bash
-# Full dependency picture
-cat package.json | grep -A 200 '"dependencies"' | head -80
+```
+# Read package.json for full dependency picture — check everything in one pass
+Read(file_path: "/absolute/path/to/package.json")
+# → look for: reanimated/moti/lottie (animation), gesture-handler (gestures),
+#   @shopify/flash-list (lists), expo-image/react-native-fast-image (images),
+#   expo-router/react-navigation (navigation), nativewind/tamagui/unistyles (styling),
+#   "expo" version (SDK version), zustand/@tanstack/react-query (state/data)
 
-# What animation library is in use?
-grep -E "reanimated|react-native-animatable|react-native/Animated|moti|lottie" package.json
+# Check if FlashList is already used in source
+Grep(pattern: "FlashList|@shopify/flash-list", glob: "src/**/*.tsx", output_mode: "files_with_matches")
 
-# What gesture library?
-grep -E "gesture-handler|react-native-gesture" package.json
+# Dominant list pattern
+Grep(pattern: "FlatList|FlashList|SectionList|ScrollView", glob: "src/**/*.tsx", output_mode: "count")
 
-# What list component pattern is dominant?
-grep -rn "FlatList\|FlashList\|SectionList\|VirtualizedList\|ScrollView" src --include="*.tsx" | wc -l
-
-# Is FlashList already used anywhere?
-grep -rn "FlashList\|@shopify/flash-list" src --include="*.tsx" | head -5
-
-# What image component?
-grep -E "expo-image\|react-native-fast-image\|Image.*react-native" package.json
-
-# What navigation library?
-grep -E "expo-router\|react-navigation\|react-native-navigation" package.json
-
-# Is New Architecture enabled?
-grep -E "newArchEnabled|fabric|newarch" app.json app.config.ts app.config.js 2>/dev/null
-
-# Current Expo SDK version
-grep '"expo"' package.json
-
-# Styling approach?
-grep -E "nativewind\|tamagui\|styled-components\|restyle\|gluestack\|unistyles" package.json
+# New Architecture status
+Grep(pattern: "newArchEnabled|newarch", glob: "app.{json,config.*}", output_mode: "content")
 ```
 
 **Adapt to what exists.** If the project uses `react-native-fast-image`, don't introduce `expo-image`. If animations are done with `moti`, use `moti`. If `FlashList` is not installed and only `FlatList` is used project-wide, optimize the `FlatList` — don't add a new dependency without confirming with the developer. Match the patterns already established in the codebase.
@@ -605,9 +585,9 @@ UI Thread      — native rendering, gestures, animations
 
 ### Animations — use what the project uses, but worklets are always better
 
-```bash
-# Check what's installed
-grep -E "reanimated|moti|lottie|animatable" package.json
+```
+# Check package.json for reanimated|moti|lottie|animatable
+Read(file_path: "/absolute/path/to/package.json")
 ```
 
 **If `react-native-reanimated` is installed** (the majority of RN projects):
@@ -647,8 +627,8 @@ Animated.timing(value, {
 
 ### Gestures — use what the project uses
 
-```bash
-grep -E "gesture-handler|@react-native-community/gesture" package.json
+```
+# Check package.json (already read in Step 0) for gesture-handler
 ```
 
 **If `react-native-gesture-handler` is installed**, always use it for any interactive element that must respond during scroll or animation. The old `TouchableOpacity` from core runs on the JS thread and causes frame drops during gestures.
@@ -657,10 +637,9 @@ grep -E "gesture-handler|@react-native-community/gesture" package.json
 
 ### Lists — match and optimize what the project already uses
 
-```bash
-# Understand the existing list patterns first
-grep -rn "FlatList\|FlashList\|SectionList\|ScrollView" src --include="*.tsx" | head -20
-grep "@shopify/flash-list" package.json
+```
+# Understand the existing list patterns first (check package.json already read in Step 0 for flash-list)
+Grep(pattern: "FlatList|FlashList|SectionList|ScrollView", glob: "src/**/*.tsx", output_mode: "files_with_matches", head_limit: 20)
 ```
 
 **Regardless of which list component is used**, these optimizations apply universally:
@@ -713,8 +692,8 @@ const ItemRow = memo(({ item }: { item: Item }) => <View>...</View>)
 
 ### Images — use what the project uses
 
-```bash
-grep -E "expo-image|react-native-fast-image|@d11/react-native-fast-image" package.json
+```
+# Check package.json (already read in Step 0) for expo-image or react-native-fast-image
 ```
 
 - **`expo-image`** — prefer if the project is Expo-managed. Has memory+disk cache, blurhash placeholder, priority hints.
@@ -725,9 +704,11 @@ Whatever is used: always set explicit `width` and `height`. An image without dim
 
 ### Styling — check the project approach first
 
-```bash
-grep -E "nativewind\|tamagui\|styled-components\|restyle\|gluestack\|unistyles\|StyleSheet" package.json
-grep -rn "StyleSheet.create\|style={{" src --include="*.tsx" | wc -l
+```
+# Check package.json for nativewind|tamagui|styled-components|restyle|gluestack|unistyles
+# (already read in Step 0)
+# Count inline style usage
+Grep(pattern: "StyleSheet\\.create|style=\\{\\{", glob: "src/**/*.tsx", output_mode: "count")
 ```
 
 - **`NativeWind`** (Tailwind for RN) — write className strings, NativeWind compiles them. Don't mix with `StyleSheet.create` inline styles.
@@ -788,9 +769,8 @@ grep -E "expo-router|react-navigation" package.json      # Navigation
 
 **Prefer native Expo modules over JS polyfills:**
 
-```bash
-# What's already installed?
-grep -E "expo-crypto|expo-file-system|expo-sqlite|expo-secure-store" package.json
+```
+# Check package.json (already read in Step 0) for expo-crypto|expo-file-system|expo-sqlite|expo-secure-store
 ```
 
 When native Expo modules exist for a task (crypto, file I/O, SQLite, secure storage), always use them — they run off the JS thread. Never use a pure-JS implementation when a native one is installed.

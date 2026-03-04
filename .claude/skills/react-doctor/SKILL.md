@@ -14,12 +14,27 @@ version: 1.0.0
 
 Scans your React codebase for security, performance, correctness, and architecture issues. Outputs a 0-100 score with actionable diagnostics.
 
-## Usage example
+## Usage
 
 ```bash
 npx -y react-doctor@latest . --verbose --no-dead-code --offline --no-ami
 ```
 
+Flags:
+- `.` — scan the current directory (project root)
+- `--verbose` — show detailed diagnostics per file, not just the summary score
+- `--no-dead-code` — skip dead code detection (slow, and often produces false positives in RN)
+- `--offline` — do not phone home / check for updates
+- `--no-ami` — skip the "Are you my instance?" cloud check (irrelevant for local development)
+
+## Output
+
+Produces a 0-100 score across four dimensions:
+- **Security** — XSS vectors, unsafe innerHTML, insecure data handling
+- **Performance** — unnecessary re-renders, missing keys, large bundle imports, missing memo
+- **Correctness** — missing error boundaries, improper hook usage, missing dependency arrays
+- **Architecture** — component complexity, prop drilling depth, coupling issues
+
 ## Workflow
 
-Run after making changes to catch issues early. Show results and only fix issues if prompted to do so, otherwise skip.
+Run after making changes to catch issues early. Show results to the user and only fix reported issues if explicitly asked to do so.

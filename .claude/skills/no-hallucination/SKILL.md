@@ -49,23 +49,28 @@ Resolve unknowns in this order:
 
 ### 1. Search the codebase first
 
-```bash
-# Before assuming anything about how the project works — read it
-find . -type f -name "*.ts" -o -name "*.rs" -o -name "*.py" | head -1000
-grep -r "functionName\|ConfigKey\|ENV_VAR" src/ | head -1000
-cat relevant-file.ts
+Use Claude Code's native tools — not Bash:
 
-# Check existing patterns before inventing new ones
-grep -rn "similar pattern or concept" src/ | head -1000
+```
+# Find files by name/pattern
+Glob(pattern: "src/**/*.ts")
+Glob(pattern: "**/*config*")
+
+# Search content for a symbol, pattern, or concept
+Grep(pattern: "functionName|ConfigKey|ENV_VAR", glob: "src/**/*.ts", output_mode: "content")
+Grep(pattern: "similar pattern or concept", glob: "**/*.{ts,tsx}", output_mode: "files_with_matches")
+
+# Read a specific file in full before using or modifying it
+Read(file_path: "/absolute/path/to/relevant-file.ts")
 ```
 
 ### 2. Check configuration and environment
 
-```bash
+```
 # Before assuming what env vars, settings, or flags exist
-cat .env.example 2>/dev/null
-cat config.ts 2>/dev/null
-cat app.json 2>/dev/null
+Read(file_path: "/path/to/.env.example")
+Read(file_path: "/path/to/config.ts")
+Read(file_path: "/path/to/app.json")
 ```
 
 ### 3. Search the internet
