@@ -18,6 +18,8 @@ import { LRUCache } from "lru-cache"
 import { parseExifDate } from "@/lib/exif"
 import drive from "@/lib/drive"
 
+const CACHE_DIR_URI = FileSystem.Paths.cache.uri
+
 export type LocalFile = {
 	asset: MediaLibrary.Asset
 	info: MediaLibrary.AssetInfo
@@ -108,11 +110,17 @@ class CameraUpload {
 		this.globalPauseSignal.resume()
 	}
 
-	public async compress(file: FileSystem.File): Promise<void> {
+	private async compress(file: FileSystem.File): Promise<void> {
 		const extname = pathModule.posix.extname(file.uri).toLowerCase()
 
-		if (!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.includes(extname)) {
+		if (!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(extname)) {
 			return
+		}
+
+		// Guard: only compress files within the app's cache directory to prevent
+		// processing arbitrary paths if this method is ever called with an unexpected input.
+		if (!file.uri.startsWith(CACHE_DIR_URI)) {
+			throw new Error(`compress() called on file outside cache directory: ${file.uri}`)
 		}
 
 		const manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(file.uri)).renderAsync()
@@ -564,6 +572,8 @@ class CameraUpload {
 									pauseSignal
 								})
 
+								// EXIF metadata is only applied to images. Videos get their timestamps
+								// from the media library (creationTime / modificationTime) instead.
 								if (delta.file.info.mediaType === MediaLibrary.MediaType.IMAGE) {
 									await Promise.all(
 										files.map(async file =>
@@ -638,7 +648,7 @@ export function useCameraUpload() {
 		syncing,
 		errors,
 		config,
-		sync: () => cameraUpload.sync(),
+		sync: (params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params),
 		setConfig: (params: Parameters<CameraUpload["setConfig"]>[0]) => cameraUpload.setConfig(params),
 		cancel: () => cameraUpload.cancel(),
 		pause: () => cameraUpload.pause(),
