@@ -282,6 +282,44 @@ export class Offline {
 		}
 	}
 
+	private parentCacheKey(parent: AnyDirEnumWithShareInfo): string {
+		switch (parent.tag) {
+			case AnyDirEnumWithShareInfo_Tags.Dir: {
+				return `dir:${parent.inner[0].uuid}`
+			}
+
+			case AnyDirEnumWithShareInfo_Tags.Root: {
+				return `root:${parent.inner[0].uuid}`
+			}
+
+			case AnyDirEnumWithShareInfo_Tags.SharedDir: {
+				const sharedDir = parent.inner[0]
+
+				if (sharedDir.sharingRole.tag === SharingRole_Tags.Sharer) {
+					switch (sharedDir.dir.tag) {
+						case DirWithMetaEnum_Tags.Dir: {
+							return `shared-out-dir:${sharedDir.dir.inner[0].uuid}`
+						}
+
+						case DirWithMetaEnum_Tags.Root: {
+							return `shared-out-root:${sharedDir.dir.inner[0].uuid}`
+						}
+					}
+				}
+
+				switch (sharedDir.dir.tag) {
+					case DirWithMetaEnum_Tags.Dir: {
+						return `shared-in-dir:${sharedDir.dir.inner[0].uuid}`
+					}
+
+					case DirWithMetaEnum_Tags.Root: {
+						return `shared-in-root:${sharedDir.dir.inner[0].uuid}`
+					}
+				}
+			}
+		}
+	}
+
 	public async sync(): Promise<void> {
 		await run(
 			async defer => {
@@ -303,48 +341,10 @@ export class Offline {
 					auth.getSdkClients()
 				])
 
-				const parentCacheKey = (parent: AnyDirEnumWithShareInfo): string => {
-					switch (parent.tag) {
-						case AnyDirEnumWithShareInfo_Tags.Dir: {
-							return `dir:${parent.inner[0].uuid}`
-						}
-
-						case AnyDirEnumWithShareInfo_Tags.Root: {
-							return `root:${parent.inner[0].uuid}`
-						}
-
-						case AnyDirEnumWithShareInfo_Tags.SharedDir: {
-							const sharedDir = parent.inner[0]
-
-							if (sharedDir.sharingRole.tag === SharingRole_Tags.Sharer) {
-								switch (sharedDir.dir.tag) {
-									case DirWithMetaEnum_Tags.Dir: {
-										return `dir:${sharedDir.dir.inner[0].uuid}`
-									}
-
-									case DirWithMetaEnum_Tags.Root: {
-										return `root:${sharedDir.dir.inner[0].uuid}`
-									}
-								}
-							}
-
-							switch (sharedDir.dir.tag) {
-								case DirWithMetaEnum_Tags.Dir: {
-									return `shared-dir:${sharedDir.dir.inner[0].uuid}`
-								}
-
-								case DirWithMetaEnum_Tags.Root: {
-									return `shared-root:${sharedDir.dir.inner[0].uuid}`
-								}
-							}
-						}
-					}
-				}
-
 				const uniqueParents = new Map<string, AnyDirEnumWithShareInfo>()
 
 				for (const { parent } of files) {
-					const key = parentCacheKey(parent)
+					const key = this.parentCacheKey(parent)
 
 					if (!uniqueParents.has(key)) {
 						uniqueParents.set(key, parent)
@@ -352,7 +352,7 @@ export class Offline {
 				}
 
 				for (const { parent } of topLevelDirectories) {
-					const key = parentCacheKey(parent)
+					const key = this.parentCacheKey(parent)
 
 					if (!uniqueParents.has(key)) {
 						uniqueParents.set(key, parent)
@@ -410,6 +410,46 @@ export class Offline {
 					})
 				)
 
+				const parentListingIndexes = new Map<
+					string,
+					{
+						byUuid: Map<string, File | SharedFile>
+						byName: Map<string, File | SharedFile>
+					}
+				>()
+
+				for (const [key, listing] of parentListings) {
+					if (!listing) {
+						parentListingIndexes.set(key, {
+							byUuid: new Map(),
+							byName: new Map()
+						})
+
+						continue
+					}
+
+					const byUuid = new Map<string, File | SharedFile>()
+					const byName = new Map<string, File | SharedFile>()
+
+					for (const f of listing.files) {
+						const unwrapped = unwrapFileMeta(f)
+
+						if (!unwrapped.meta) {
+							continue
+						}
+
+						const uuid = unwrapped.shared ? unwrapped.file.file.uuid : unwrapped.file.uuid
+
+						byUuid.set(uuid, f)
+						byName.set(unwrapped.meta.name.trim().toLowerCase(), f)
+					}
+
+					parentListingIndexes.set(key, {
+						byUuid,
+						byName
+					})
+				}
+
 				await Promise.all([
 					...files.map(async ({ item, parent }) => {
 						if (!item.data.decryptedMeta) {
@@ -431,7 +471,7 @@ export class Offline {
 							return
 						}
 
-						const key = parentCacheKey(parent)
+						const key = this.parentCacheKey(parent)
 						const listing = parentListings.get(key)
 
 						if (!listing) {
@@ -442,18 +482,8 @@ export class Offline {
 							return
 						}
 
-						const existingFile = listing.files.find(f => {
-							const unwrappedFileMeta = unwrapFileMeta(f)
-
-							if (!unwrappedFileMeta.meta) {
-								return false
-							}
-
-							return (
-								(unwrappedFileMeta.shared ? unwrappedFileMeta.file.file.uuid : unwrappedFileMeta.file.uuid) ===
-								item.data.uuid
-							)
-						})
+						const index = parentListingIndexes.get(key)
+						const existingFile = index?.byUuid.get(item.data.uuid)
 
 						if (!existingFile && dataFile.parentDirectory.exists) {
 							dataFile.parentDirectory.delete()
@@ -476,19 +506,23 @@ export class Offline {
 							}
 						}
 
-						const updatedFile = listing.files.find(f => {
-							const unwrappedFileMeta = unwrapFileMeta(f)
+						let updatedFile: File | SharedFile | undefined = undefined
+						const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
+						const nameMatch = index?.byName.get(normalizedName)
 
-							if (!unwrappedFileMeta.meta) {
-								return false
+						if (nameMatch) {
+							const unwrappedNameMatch = unwrapFileMeta(nameMatch)
+
+							if (unwrappedNameMatch.meta) {
+								const nameMatchUuid = unwrappedNameMatch.shared
+									? unwrappedNameMatch.file.file.uuid
+									: unwrappedNameMatch.file.uuid
+
+								if (nameMatchUuid !== item.data.uuid) {
+									updatedFile = nameMatch
+								}
 							}
-
-							return (
-								unwrappedFileMeta.meta.name.trim().toLowerCase() === item.data.decryptedMeta?.name.trim().toLowerCase() &&
-								(unwrappedFileMeta.shared ? unwrappedFileMeta.file.file.uuid : unwrappedFileMeta.file.uuid) !==
-									item.data.uuid
-							)
-						})
+						}
 
 						if (!updatedFile) {
 							return
@@ -518,7 +552,7 @@ export class Offline {
 							return
 						}
 
-						const key = parentCacheKey(parent)
+						const key = this.parentCacheKey(parent)
 						const listing = parentListings.get(key)
 
 						if (!listing) {
@@ -577,20 +611,8 @@ export class Offline {
 						])
 
 						const directoryMeta: DirectoryOfflineMeta = unpack(directoryMetaBytes)
-						const localDirectories: Record<
-							string,
-							{
-								item: DriveItem
-								directory: FileSystem.Directory
-							}
-						> = {}
-						const localFiles: Record<
-							string,
-							{
-								item: DriveItem
-								file: FileSystem.File
-							}
-						> = {}
+						const localDirectories = new Map<string, { item: DriveItem; directory: FileSystem.Directory }>()
+						const localFiles = new Map<string, { item: DriveItem; file: FileSystem.File }>()
 
 						for (const path in directoryMeta.entries) {
 							const entry = directoryMeta.entries[path]
@@ -607,10 +629,10 @@ export class Offline {
 									)
 
 									if (directory.exists) {
-										localDirectories[path] = {
+										localDirectories.set(path, {
 											item: entry.item,
 											directory
-										}
+										})
 									}
 
 									break
@@ -623,10 +645,10 @@ export class Offline {
 									)
 
 									if (file.exists) {
-										localFiles[path] = {
+										localFiles.set(path, {
 											item: entry.item,
 											file
-										}
+										})
 									}
 
 									break
@@ -634,24 +656,23 @@ export class Offline {
 							}
 						}
 
-						const remoteFiles: Record<string, File | SharedFile> = {}
-						const remoteDirectories: Record<string, Dir | SharedDir> = {}
+						const remoteFiles = new Map<string, File | SharedFile>()
+						const remoteDirectories = new Map<string, Dir | SharedDir>()
 
 						for (const { dir, path } of remoteDirectoryEntries.dirs) {
 							const normalizedPath = normalizeFilePathForSdk(path)
 
-							remoteDirectories[normalizedPath] = dir
+							remoteDirectories.set(normalizedPath, dir)
 						}
 
 						for (const { file, path } of remoteDirectoryEntries.files) {
 							const normalizedPath = normalizeFilePathForSdk(path)
 
-							remoteFiles[normalizedPath] = file
+							remoteFiles.set(normalizedPath, file)
 						}
 
-						for (const path in localDirectories) {
-							const localDirectory = localDirectories[path]
-							const remoteDirectory = remoteDirectories[path]
+						for (const [path, localDirectory] of localDirectories) {
+							const remoteDirectory = remoteDirectories.get(path)
 
 							if (!remoteDirectory && localDirectory && localDirectory.directory.exists) {
 								localDirectory.directory.delete()
@@ -660,9 +681,8 @@ export class Offline {
 
 						let needsFullResync = false
 
-						for (const path in localFiles) {
-							const localFile = localFiles[path]
-							const remoteFile = remoteFiles[path]
+						for (const [path, localFile] of localFiles) {
+							const remoteFile = remoteFiles.get(path)
 
 							if (!remoteFile && localFile && localFile.file.exists) {
 								localFile.file.delete()
@@ -690,18 +710,16 @@ export class Offline {
 							}
 						}
 
-						for (const path in remoteDirectories) {
-							const remoteDirectory = remoteDirectories[path]
-							const localDirectory = localDirectories[path]
+						for (const [path, remoteDirectory] of remoteDirectories) {
+							const localDirectory = localDirectories.get(path)
 
 							if (!localDirectory && remoteDirectory) {
 								needsFullResync = true
 							}
 						}
 
-						for (const path in remoteFiles) {
-							const remoteFile = remoteFiles[path]
-							const localFile = localFiles[path]
+						for (const [path, remoteFile] of remoteFiles) {
+							const localFile = localFiles.get(path)
 
 							if (!localFile && remoteFile) {
 								needsFullResync = true
@@ -805,6 +823,10 @@ export class Offline {
 				throw new Error("File missing decrypted meta")
 			}
 
+			if (await this.isItemStored(file)) {
+				return
+			}
+
 			await this.storeMutex.acquire()
 
 			defer(() => {
@@ -834,18 +856,18 @@ export class Offline {
 			})
 
 			const innerResult = await run(async () => {
-				let done = false
+				let resolveCompletion!: () => void
+
+				const completionPromise = new Promise<void>(resolve => {
+					resolveCompletion = resolve
+				})
 
 				await transfers.download({
 					item: file,
 					destination: dataFile,
 					itemUuid: file.data.uuid,
 					hideProgress,
-					awaitExternalCompletionBeforeMarkingAsFinished: async () => {
-						while (!done) {
-							await new Promise<void>(resolve => setTimeout(resolve, 100))
-						}
-					}
+					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
 				})
 
 				try {
@@ -862,7 +884,7 @@ export class Offline {
 						await this.updateIndex()
 					}
 				} finally {
-					done = true
+					resolveCompletion()
 				}
 			})
 
@@ -907,6 +929,10 @@ export class Offline {
 				throw new Error("Directory missing decrypted meta")
 			}
 
+			if (await this.isItemStored(directory)) {
+				return
+			}
+
 			await this.storeMutex.acquire()
 
 			defer(() => {
@@ -932,18 +958,18 @@ export class Offline {
 			}
 
 			const innerResult = await run(async () => {
-				let done = false
+				let resolveCompletion!: () => void
+
+				const completionPromise = new Promise<void>(resolve => {
+					resolveCompletion = resolve
+				})
 
 				const transferred = await transfers.download({
 					item: directory,
 					destination: dataDirectory,
 					itemUuid: directory.data.uuid,
 					hideProgress,
-					awaitExternalCompletionBeforeMarkingAsFinished: async () => {
-						while (!done) {
-							await new Promise<void>(resolve => setTimeout(resolve, 100))
-						}
-					}
+					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
 				})
 
 				const entries: DirectoryOfflineMeta["entries"] = {}
@@ -980,7 +1006,7 @@ export class Offline {
 						await this.updateIndex()
 					}
 				} finally {
-					done = true
+					resolveCompletion()
 				}
 			})
 
@@ -1072,7 +1098,6 @@ export class Offline {
 		const files: Awaited<ReturnType<typeof this.listDirectories>>["files"] = []
 		const topLevelEntries = this.directoriesDirectory.list()
 
-		// Fetch the root level if no parent is provided
 		if (!parent) {
 			await Promise.all(
 				topLevelEntries.map(async topLevelEntry => {
@@ -1138,46 +1163,38 @@ export class Offline {
 			}
 		}
 
-		const topLevelMetas = await Promise.all(
-			topLevelEntries
-				.filter((e): e is FileSystem.Directory => e instanceof FileSystem.Directory && validateUuid(e.name))
-				.map(async topLevelEntry => {
-					const innerEntries = topLevelEntry.list()
-					const metaFile = innerEntries.find(e => e instanceof FileSystem.File && e.name === `${topLevelEntry.name}.filenmeta`)
-
-					if (!metaFile || !(metaFile instanceof FileSystem.File) || !metaFile.exists) {
-						return null
-					}
-
-					const meta: DirectoryOfflineMeta = unpack(await metaFile.bytes())
-
-					if (meta.item.type !== "directory") {
-						return null
-					}
-
-					return {
-						meta,
-						topLevelUuid: topLevelEntry.name
-					}
-				})
-		)
-
 		let directoryMeta: DirectoryOfflineMeta | null = null
 		let topLevelUuid: string | null = null
 
-		for (const result of topLevelMetas) {
-			if (!result) {
+		for (const topLevelEntry of topLevelEntries) {
+			if (!(topLevelEntry instanceof FileSystem.Directory) || !validateUuid(topLevelEntry.name)) {
 				continue
 			}
 
-			if (result.meta.item.data.uuid === parentUuid) {
-				directoryMeta = result.meta
-				topLevelUuid = result.topLevelUuid
+			const innerEntries = topLevelEntry.list()
+			const metaFile = innerEntries.find(e => e instanceof FileSystem.File && e.name === `${topLevelEntry.name}.filenmeta`)
+
+			if (!metaFile || !(metaFile instanceof FileSystem.File) || !metaFile.exists) {
+				continue
+			}
+
+			const meta: DirectoryOfflineMeta = unpack(await metaFile.bytes())
+
+			if (meta.item.type !== "directory") {
+				continue
+			}
+
+			if (meta.item.data.uuid === parentUuid) {
+				directoryMeta = meta
+				topLevelUuid = topLevelEntry.name
+
 				break
 			}
 
-			for (const path in result.meta.entries) {
-				const entryMeta = result.meta.entries[path]
+			let found = false
+
+			for (const path in meta.entries) {
+				const entryMeta = meta.entries[path]
 
 				if (!entryMeta) {
 					continue
@@ -1187,13 +1204,15 @@ export class Offline {
 					entryMeta.item.data.uuid === parentUuid &&
 					(entryMeta.item.type === "directory" || entryMeta.item.type === "sharedDirectory")
 				) {
-					directoryMeta = result.meta
-					topLevelUuid = result.topLevelUuid
+					directoryMeta = meta
+					topLevelUuid = topLevelEntry.name
+					found = true
+
 					break
 				}
 			}
 
-			if (directoryMeta) {
+			if (found) {
 				break
 			}
 		}
@@ -1462,140 +1481,113 @@ export class Offline {
 
 				const topLevelEntries = this.directoriesDirectory.list()
 
-				const sizes = await Promise.all(
-					topLevelEntries
-						.filter((e): e is FileSystem.Directory => e instanceof FileSystem.Directory && validateUuid(e.name))
-						.map(async topLevelEntry => {
-							const metaFile = new FileSystem.File(
-								FileSystem.Paths.join(this.directoriesDirectory.uri, topLevelEntry.name, `${topLevelEntry.name}.filenmeta`)
-							)
-
-							if (!metaFile.exists) {
-								return {
-									size: 0,
-									files: 0,
-									dirs: 0
-								}
-							}
-
-							const directoryMeta: DirectoryOfflineMeta = unpack(await metaFile.bytes())
-
-							if (directoryMeta.item.data.uuid !== item.data.uuid) {
-								let found = false
-
-								for (const path in directoryMeta.entries) {
-									const e = directoryMeta.entries[path]
-
-									if (e && e.item.data.uuid === item.data.uuid && e.item.type === item.type) {
-										found = true
-
-										break
-									}
-								}
-
-								if (!found) {
-									return {
-										size: 0,
-										files: 0,
-										dirs: 0
-									}
-								}
-							}
-
-							const uuidToPath: Record<string, string> = {
-								[topLevelEntry.name]: "/"
-							}
-
-							for (const path in directoryMeta.entries) {
-								const entryMeta = directoryMeta.entries[path]
-
-								if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
-									continue
-								}
-
-								uuidToPath[entryMeta.item.data.uuid] = normalizeFilePathForSdk(path)
-							}
-
-							const targetPath = uuidToPath[item.data.uuid]
-
-							if (!targetPath) {
-								return {
-									size: 0,
-									files: 0,
-									dirs: 0
-								}
-							}
-
-							let size = 0
-							let files = 0
-							let dirs = 0
-
-							for (const path in directoryMeta.entries) {
-								const entryMeta = directoryMeta.entries[path]
-
-								if (!entryMeta) {
-									continue
-								}
-
-								let dirname = FileSystem.Paths.dirname(normalizeFilePathForSdk(path))
-
-								if (dirname === "." || dirname === "") {
-									dirname = "/"
-								}
-
-								if (!dirname.startsWith(targetPath)) {
-									continue
-								}
-
-								switch (entryMeta.item.type) {
-									case "directory":
-									case "sharedDirectory": {
-										dirs += 1
-
-										break
-									}
-
-									case "file":
-									case "sharedFile": {
-										size += Number(entryMeta.item.data.decryptedMeta?.size ?? 0)
-										files += 1
-
-										break
-									}
-								}
-							}
-
-							return {
-								size,
-								files,
-								dirs
-							}
-						})
-				)
-
-				const { size, files, dirs } = sizes.reduce(
-					(a, b) => ({
-						size: a.size + b.size,
-						files: a.files + b.files,
-						dirs: a.dirs + b.dirs
-					}),
-					{
-						size: 0,
-						files: 0,
-						dirs: 0
+				for (const topLevelEntry of topLevelEntries) {
+					if (!(topLevelEntry instanceof FileSystem.Directory) || !validateUuid(topLevelEntry.name)) {
+						continue
 					}
-				)
 
-				this.itemSizeCache.set(item.data.uuid, {
-					size,
-					files,
-					dirs
-				})
+					const metaFile = new FileSystem.File(
+						FileSystem.Paths.join(this.directoriesDirectory.uri, topLevelEntry.name, `${topLevelEntry.name}.filenmeta`)
+					)
+
+					if (!metaFile.exists) {
+						continue
+					}
+
+					const directoryMeta: DirectoryOfflineMeta = unpack(await metaFile.bytes())
+
+					if (directoryMeta.item.data.uuid !== item.data.uuid) {
+						let found = false
+
+						for (const path in directoryMeta.entries) {
+							const e = directoryMeta.entries[path]
+
+							if (e && e.item.data.uuid === item.data.uuid && e.item.type === item.type) {
+								found = true
+
+								break
+							}
+						}
+
+						if (!found) {
+							continue
+						}
+					}
+
+					const uuidToPath: Record<string, string> = {
+						[topLevelEntry.name]: "/"
+					}
+
+					for (const path in directoryMeta.entries) {
+						const entryMeta = directoryMeta.entries[path]
+
+						if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
+							continue
+						}
+
+						uuidToPath[entryMeta.item.data.uuid] = normalizeFilePathForSdk(path)
+					}
+
+					const targetPath = uuidToPath[item.data.uuid]
+
+					if (!targetPath) {
+						continue
+					}
+
+					let size = 0
+					let files = 0
+					let dirs = 0
+
+					for (const path in directoryMeta.entries) {
+						const entryMeta = directoryMeta.entries[path]
+
+						if (!entryMeta) {
+							continue
+						}
+
+						let dirname = FileSystem.Paths.dirname(normalizeFilePathForSdk(path))
+
+						if (dirname === "." || dirname === "") {
+							dirname = "/"
+						}
+
+						if (!dirname.startsWith(targetPath)) {
+							continue
+						}
+
+						switch (entryMeta.item.type) {
+							case "directory":
+							case "sharedDirectory": {
+								dirs += 1
+
+								break
+							}
+
+							case "file":
+							case "sharedFile": {
+								size += Number(entryMeta.item.data.decryptedMeta?.size ?? 0)
+								files += 1
+
+								break
+							}
+						}
+					}
+
+					const result = {
+						size,
+						files,
+						dirs
+					}
+
+					this.itemSizeCache.set(item.data.uuid, result)
+
+					return result
+				}
 
 				return {
-					size,
-					files,
-					dirs
+					size: 0,
+					files: 0,
+					dirs: 0
 				}
 			}
 		}
@@ -1628,7 +1620,6 @@ export class Offline {
 							return
 						}
 
-						// Only allow removing the directory if it's top level
 						if (directoryItem.data.uuid !== item.data.uuid) {
 							return
 						}
@@ -1694,53 +1685,43 @@ export class Offline {
 
 		const { directories: topLevelDirectories } = await this.listDirectories()
 
-		const results = await Promise.all(
-			topLevelDirectories.map(async ({ item: directoryItem }) => {
-				if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
-					return null
+		for (const { item: directoryItem } of topLevelDirectories) {
+			if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+				continue
+			}
+
+			const directoryMetaFile = new FileSystem.File(
+				FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, `${directoryItem.data.uuid}.filenmeta`)
+			)
+
+			if (!directoryMetaFile.exists) {
+				continue
+			}
+
+			const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
+
+			for (const path in directoryMeta.entries) {
+				const entryMeta = directoryMeta.entries[path]
+
+				if (!entryMeta || (entryMeta.item.type !== "file" && entryMeta.item.type !== "sharedFile")) {
+					continue
 				}
 
-				const directoryMetaFile = new FileSystem.File(
-					FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, `${directoryItem.data.uuid}.filenmeta`)
-				)
+				if (entryMeta.item.data.uuid === item.data.uuid) {
+					const foundFile = new FileSystem.File(
+						FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, path)
+					)
 
-				if (!directoryMetaFile.exists) {
-					return null
-				}
+					if (foundFile.exists) {
+						this.getLocalFileCache.set(item.data.uuid, foundFile)
 
-				const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
-
-				for (const path in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[path]
-
-					if (!entryMeta || (entryMeta.item.type !== "file" && entryMeta.item.type !== "sharedFile")) {
-						continue
+						return foundFile
 					}
-
-					if (entryMeta.item.data.uuid === item.data.uuid) {
-						const file = new FileSystem.File(
-							FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, path)
-						)
-
-						if (file.exists) {
-							return file
-						}
-					}
 				}
-
-				return null
-			})
-		)
-
-		const foundFile = results.find(f => f !== null) ?? null
-
-		if (!foundFile || !foundFile.exists) {
-			return null
+			}
 		}
 
-		this.getLocalFileCache.set(item.data.uuid, foundFile)
-
-		return foundFile
+		return null
 	}
 
 	public async getLocalDirectory(item: DriveItem): Promise<FileSystem.Directory | null> {
@@ -1758,66 +1739,58 @@ export class Offline {
 
 		const { directories: topLevelDirectories } = await this.listDirectories()
 
-		const results = await Promise.all(
-			topLevelDirectories.map(async ({ item: directoryItem }) => {
-				if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
-					return null
-				}
+		for (const { item: directoryItem } of topLevelDirectories) {
+			if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+				continue
+			}
 
-				const directoryMetaFile = new FileSystem.File(
-					FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, `${directoryItem.data.uuid}.filenmeta`)
+			const directoryMetaFile = new FileSystem.File(
+				FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, `${directoryItem.data.uuid}.filenmeta`)
+			)
+
+			if (!directoryMetaFile.exists) {
+				continue
+			}
+
+			const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
+
+			if (
+				directoryMeta.item.data.uuid === item.data.uuid &&
+				(directoryMeta.item.type === "directory" || directoryMeta.item.type === "sharedDirectory")
+			) {
+				const foundDirectory = new FileSystem.Directory(
+					FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid)
 				)
 
-				if (!directoryMetaFile.exists) {
-					return null
+				if (foundDirectory.exists) {
+					this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
+
+					return foundDirectory
+				}
+			}
+
+			for (const path in directoryMeta.entries) {
+				const entryMeta = directoryMeta.entries[path]
+
+				if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
+					continue
 				}
 
-				const directoryMeta: DirectoryOfflineMeta = unpack(await directoryMetaFile.bytes())
-
-				if (
-					directoryMeta.item.data.uuid === item.data.uuid &&
-					(directoryMeta.item.type === "directory" || directoryMeta.item.type === "sharedDirectory")
-				) {
-					const directory = new FileSystem.Directory(
-						FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid)
+				if (entryMeta.item.data.uuid === item.data.uuid) {
+					const foundDirectory = new FileSystem.Directory(
+						FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, path)
 					)
 
-					if (directory.exists) {
-						return directory
+					if (foundDirectory.exists) {
+						this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
+
+						return foundDirectory
 					}
 				}
-
-				for (const path in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[path]
-
-					if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
-						continue
-					}
-
-					if (entryMeta.item.data.uuid === item.data.uuid) {
-						const directory = new FileSystem.Directory(
-							FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid, path)
-						)
-
-						if (directory.exists) {
-							return directory
-						}
-					}
-				}
-
-				return null
-			})
-		)
-
-		const foundDirectory = results.find(f => f !== null) ?? null
-
-		if (!foundDirectory || !foundDirectory.exists) {
-			return null
+			}
 		}
 
-		this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
-
-		return foundDirectory
+		return null
 	}
 }
 
