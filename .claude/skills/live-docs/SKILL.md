@@ -1,12 +1,6 @@
 ---
 name: live-docs
-description: >
-    Always fetch up-to-date documentation from the internet before writing code that uses any external
-    library, framework, or API — in any language or ecosystem. Always use this skill.
-    Never rely solely on training data for API signatures, configuration options, or behavior. Trigger
-    when the task involves installing or using any package manager dependency (npm, pip, cargo, gem,
-    go get, pub, nuget, maven, composer, hex, etc.), calling an external API, configuring a framework,
-    or when a specific library version is mentioned. Apply proactively — don't wait to be asked.
+description: CRITICAL: Always use this skill, no matter what task you are working on!
 ---
 
 # Live Documentation Lookup

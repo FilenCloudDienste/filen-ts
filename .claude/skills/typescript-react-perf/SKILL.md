@@ -1,14 +1,6 @@
 ---
 name: typescript-react-performance
-description: >
-    Write maximally performant, efficient TypeScript, React, React Native, Node.js, and Bun code. AAlways use this skill at all times across every
-    task. This skill
-    enforces zero-waste CPU usage, minimal memory allocation, optimal data structures, and
-    engine-friendly code patterns — including Hermes-specific optimizations for React Native. Trigger
-    for any performance-sensitive code, hot paths, server handlers, data processing, React or React
-    Native rendering, animations, lists, or when the user mentions speed, performance, efficiency,
-    optimization, or scalability. Apply these principles by default for ALL TypeScript/JS code —
-    don't wait to be asked.
+description: CRITICAL: Always use this skill, no matter what task you are working on!
 ---
 
 # High-Performance TypeScript / React / React Native / Node.js / Bun
