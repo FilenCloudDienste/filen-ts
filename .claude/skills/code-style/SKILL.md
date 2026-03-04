@@ -5,7 +5,7 @@ description: >
     configs (Prettier, ESLint, Biome, EditorConfig) and source files to extract exact style rules:
     indentation, quotes, semicolons, trailing commas, bracket spacing, import ordering, empty-line
     patterns, multiline thresholds, and switch-case bracing. Maintains a cached style index at
-    ./claude/code-style-index.json — check it first, create or update it after a full scan.
+    $CLAUDE_PROJECT_DIR/.claude/code-style-index.json — check it first, create or update it after a full scan or if you find discrepancies.
     Never impose personal defaults; always match what the project actually enforces.
 ---
 
@@ -19,9 +19,10 @@ Before writing or modifying **any** code in an existing project, you must analyz
 
 **Always check for a cached index first** before doing any filesystem scanning. This saves significant tokens on repeated invocations.
 
-```bash
-cat ./claude/code-style-index.json 2>/dev/null
 ```
+Read(file_path: "$CLAUDE_PROJECT_DIR/.claude/code-style-index.json")
+```
+(Use the Read tool with the absolute path — expand `$CLAUDE_PROJECT_DIR` to the actual project root.)
 
 ### If the index exists:
 
@@ -58,22 +59,24 @@ Immediately scan the project root (and relevant subdirectories) for config files
 | **EditorConfig**      | `.editorconfig` (applies to all languages)                                                                                                                                                                       |
 | **TSConfig**          | `tsconfig.json` (affects TS strict settings, not formatting, but useful context)                                                                                                                                 |
 
-**Action**: Run a quick find to locate these files:
+**Action**: Use Glob to locate these files, then Read each one:
 
-```bash
-find . -maxdepth 3 \( -name ".prettierrc*" -o -name "prettier.config.*" \
-  -o -name ".eslintrc*" -o -name "eslint.config.*" \
-  -o -name "biome.json" -o -name "biome.jsonc" \
-  -o -name ".editorconfig" -o -name "rustfmt.toml" -o -name ".rustfmt.toml" \
-  -o -name "ruff.toml" -o -name ".ruff.toml" -o -name "dprint.json" \
-  -o -name "oxlint.json" \) 2>/dev/null | head -30
+```
+Glob(pattern: "**/.prettierrc*")
+Glob(pattern: "**/prettier.config.*")
+Glob(pattern: "**/.eslintrc*")
+Glob(pattern: "**/eslint.config.*")
+Glob(pattern: "**/biome.json{c,}")
+Glob(pattern: "**/.editorconfig")
+Glob(pattern: "**/rustfmt.toml")
+Glob(pattern: "**/ruff.toml")
 ```
 
-Also check `package.json` for inline config:
+Also check `package.json` for inline Prettier/ESLint config using Grep:
 
-```bash
-cat package.json 2>/dev/null | grep -A 30 '"prettier"'
-cat package.json 2>/dev/null | grep -A 30 '"eslintConfig"'
+```
+Grep(pattern: "\"prettier\"", path: "package.json", output_mode: "content", -A: 30)
+Grep(pattern: "\"eslintConfig\"", path: "package.json", output_mode: "content", -A: 30)
 ```
 
 ---
@@ -92,18 +95,19 @@ _(Skip if index was found in Step 0)_
 
 Even with config files, always verify with real code samples. Pick **all representative files** of the same type you'll be editing:
 
-```bash
-# Examples
-
-# For JS/TS projects
-find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" | grep -v node_modules | head -1000
+```
+# For JS/TS projects — use Glob then Read several files
+Glob(pattern: "src/**/*.ts")
+Glob(pattern: "src/**/*.tsx")
 
 # For Rust
-find . -name "*.rs" | grep -v target | head -1000
+Glob(pattern: "src/**/*.rs")
 
 # For Python
-find . -name "*.py" | grep -v __pycache__ | head -1000
+Glob(pattern: "**/*.py")
 ```
+
+Read 3–5 representative files and observe the style directly.
 
 Read the files and check **every one** of these:
 
@@ -154,7 +158,7 @@ When writing or editing code:
 
 ## Step 6: Create/Update the Style Index
 
-The index lives at `./claude/code-style-index.json`. It is a project-local cache that prevents full codebase re-scanning on future invocations.
+The index lives at `$CLAUDE_PROJECT_DIR/.claude/code-style-index.json`. It is a project-local cache that prevents full codebase re-scanning on future invocations.
 If you are in a monorepo, the index file parent directory lives at the project root.
 
 ### Creating the index (after first full scan)
@@ -162,10 +166,10 @@ If you are in a monorepo, the index file parent directory lives at the project r
 After completing Steps 1–3, write all discovered rules to the index:
 
 ```bash
-mkdir -p ./claude
+mkdir -p $CLAUDE_PROJECT_DIR/.claude
 ```
 
-Then write `./claude/code-style-index.json` with this structure:
+Then write `$CLAUDE_PROJECT_DIR/.claude/code-style-index.json` with this structure:
 
 ```json
 {
@@ -246,11 +250,10 @@ If creating a new file from scratch in an existing project:
 
 ## Important Reminders
 
-- **Always check `./claude/code-style-index.json` first** — only scan the full codebase if it's missing
+- **Always check `$CLAUDE_PROJECT_DIR/.claude/code-style-index.json` first** — only scan the full codebase if it's missing
 - **Always create the index** after a full scan so future invocations are cheaper
 - **Always update the index** when you observe uncaptured style rules
 - **EditorConfig is language-agnostic** and often overrides tool-specific settings for indentation — always read it
-- **Monorepos** may have per-package configs — find the config closest to the file being edited; consider per-package index files (e.g., `./packages/api/claude/code-style-index.json`).
 - **Don't run the formatter yourself** unless asked — just write code that would pass formatting unchanged
 - **When in doubt, look at more files** — patterns become obvious with 3–5 examples
 - **Commit the index file** — it should live in version control so the whole team benefits

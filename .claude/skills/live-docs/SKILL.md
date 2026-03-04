@@ -24,12 +24,19 @@ Before fetching anything, identify the language, package manager, and exact vers
 
 ### JavaScript / TypeScript
 
+```
+# Read package.json for declared versions
+Read(file_path: "/absolute/path/to/package.json")
+
+# Exact resolved versions from lock files — use Bash for these (lock files may be binary or very large)
+```
 ```bash
-cat package.json | grep -E '"dependencies"|"devDependencies"' -A 1000 | head -1000
-# Exact resolved versions:
-cat package-lock.json 2>/dev/null | grep -A 2 '"<package>"'
-cat bun.lockb 2>/dev/null | strings | grep "^<package>@"
-cat yarn.lock 2>/dev/null | grep "^<package>@"
+# npm / yarn text lock file
+grep -A 2 '"<package>"' package-lock.json
+grep "^<package>@" yarn.lock
+
+# bun.lockb is binary — use Bash to extract
+bun.lockb 2>/dev/null | strings | grep "^<package>@"
 ```
 
 ### Python

@@ -22,26 +22,29 @@ but nothing moves to production without coverage that actually verifies the beha
 
 Before writing a single test or line of implementation, understand the testing setup:
 
-```bash
-# JavaScript / TypeScript — what unit/integration framework is in use?
-cat package.json | grep -E '"jest"|"vitest"|"bun"|"@testing-library"|"@jest"|"msw"|"supertest"'
-cat jest.config.* 2>/dev/null || cat vitest.config.* 2>/dev/null
+```
+# JavaScript / TypeScript — read package.json to find the test framework
+Read(file_path: "/absolute/path/to/package.json")
+# → look for: "jest", "vitest", "bun test" in scripts, "@testing-library", "msw", "supertest"
 
-# Is this a Bun project?
-cat package.json | grep -E '"scripts"' -A 10 | grep "bun test"
-ls bunfig.toml 2>/dev/null
+# Find test config files
+Glob(pattern: "jest.config.*")
+Glob(pattern: "vitest.config.*")
+Glob(pattern: "bunfig.toml")
 
 # E2E — web or mobile?
-cat package.json | grep -E '"playwright"|"@playwright"'
-ls .maestro 2>/dev/null || find . -name "*.yaml" -path "*maestro*" | head -5
+# → look in package.json for "@playwright/test"
+Glob(pattern: ".maestro/**/*.yaml")
+Glob(pattern: "**/*.yaml", path: ".maestro")
 
 # Where do unit tests live?
-find . -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.spec.ts" \
-  | grep -v node_modules | head -10
+Glob(pattern: "**/*.test.ts")
+Glob(pattern: "**/*.test.tsx")
+Glob(pattern: "**/*.spec.ts")
 
 # Rust — test structure
-grep -r "#\[cfg(test)\]" src/ | head -10
-cat Cargo.toml | grep -E '\[dev-dependencies\]' -A 20
+Grep(pattern: "#\\[cfg\\(test\\)\\]", glob: "src/**/*.rs", output_mode: "files_with_matches")
+Read(file_path: "/absolute/path/to/Cargo.toml")
 
 # Look at existing tests to understand conventions
 # — naming patterns, assertion style, mock approach, file co-location vs __tests__/
@@ -86,10 +89,10 @@ with the developer first.
 
 ### Detect which one is installed
 
-```bash
-cat package.json | grep -E '"jest"|"vitest"'
-# Use whichever is present. If both exist, check which the project scripts use:
-cat package.json | grep -A 5 '"scripts"' | grep -E "test"
+```
+# Read package.json and check "dependencies"/"devDependencies" for "jest" or "vitest"
+# Also check "scripts" for which one the test command uses
+Read(file_path: "/absolute/path/to/package.json")
 ```
 
 Vitest and Jest have nearly identical APIs — `describe`, `it`/`test`, `expect`, `vi`/`jest` for
@@ -97,7 +100,7 @@ mocking. The differences are in config and import style. Match what the project 
 
 ### Test file location — match the project
 
-```bash
+```
 # Co-located (common in RN/Expo and Vite projects)
 src/utils/format.ts
 src/utils/format.test.ts
@@ -107,7 +110,7 @@ src/utils/format.ts
 src/__tests__/utils/format.test.ts
 
 # Check which pattern the project uses before creating new files
-find src -name "*.test.*" | head -5
+Glob(pattern: "src/**/*.test.*")
 ```
 
 ### Structure — match existing conventions
@@ -211,8 +214,9 @@ it("throws on not found", async () => {
 
 ### React component tests — check what's installed first
 
-```bash
-grep -E '"@testing-library/react"|"@testing-library/react-native"' package.json
+```
+# Check package.json for "@testing-library/react" or "@testing-library/react-native"
+Read(file_path: "/absolute/path/to/package.json")
 ```
 
 ```typescript
@@ -274,11 +278,11 @@ uses `bun:test`.
 
 ### Detect bun:test
 
-```bash
-# Check if bun test is the test runner
-cat package.json | grep -E '"test"' | grep "bun test"
-# Or check for bun-specific test imports in existing files
-grep -r "from 'bun:test'" src/ | head -5
+```
+# Check package.json scripts section for "bun test"
+Read(file_path: "/absolute/path/to/package.json")
+# Or search for bun-specific test imports in existing files
+Grep(pattern: "from 'bun:test'", glob: "src/**/*.ts", output_mode: "files_with_matches")
 ```
 
 ### API — Jest-compatible with Bun imports
@@ -529,22 +533,20 @@ require real network, or verify visual/interaction behavior that unit tests cann
 
 ### Detect Playwright
 
-```bash
-cat package.json | grep "@playwright/test"
-ls playwright.config.* 2>/dev/null
-ls e2e/ tests/e2e/ 2>/dev/null
+```
+# Check package.json for "@playwright/test"
+Read(file_path: "/absolute/path/to/package.json")
+Glob(pattern: "playwright.config.*")
+Glob(pattern: "e2e/**")
+Glob(pattern: "tests/e2e/**")
 ```
 
 ### File structure — match the project
 
-```bash
-# Common locations
-e2e/
-tests/e2e/
-playwright/
-
+```
+# Common locations: e2e/, tests/e2e/, playwright/
 # Check what's already there
-find . -name "*.spec.ts" | grep -v node_modules | head -10
+Glob(pattern: "**/*.spec.ts")
 ```
 
 ### Writing Playwright tests
@@ -668,10 +670,10 @@ on-device — not for unit logic.
 
 ### Detect Maestro
 
-```bash
-ls .maestro/ 2>/dev/null
-find . -name "*.yaml" | xargs grep -l "appId" 2>/dev/null | head -5
-which maestro 2>/dev/null
+```
+Glob(pattern: ".maestro/**")
+Grep(pattern: "appId:", glob: "**/*.yaml", output_mode: "files_with_matches")
+# Also: Bash("which maestro") to check if the CLI is installed
 ```
 
 ### File structure
@@ -906,10 +908,11 @@ When mocking IS used, the mock data must accurately represent the real response 
 the actual API response structure first (docs, existing calls in the codebase, or a real request),
 then mirror it precisely.
 
-```bash
-# Find examples of real API responses already in the codebase
-grep -r "mockResolvedValue\|mockReturnValue" src/ | head -10
-find . -name "*.json" -path "*fixtures*" -o -name "*.json" -path "*mocks*" | head -10
+```
+# Find examples of existing mocks/fixtures already in the codebase
+Grep(pattern: "mockResolvedValue|mockReturnValue", glob: "src/**/*.ts", output_mode: "files_with_matches")
+Glob(pattern: "**/*fixtures*/*.json")
+Glob(pattern: "**/*mocks*/*.json")
 ```
 
 ---

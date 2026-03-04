@@ -20,9 +20,10 @@ After **every** code modification — including small edits, refactors, and sing
 
 Run once at the start of any coding session (or when working in a new project). Check which tools are configured:
 
-```bash
-# Check package.json scripts
-cat package.json 2>/dev/null | grep -A 40 '"scripts"'
+```
+# Read package.json to find available scripts
+Read(file_path: "/absolute/path/to/package.json")
+# Then scan the "scripts" section for: lint, typecheck, type-check, test, check, ci, verify
 ```
 
 Then map what's available:

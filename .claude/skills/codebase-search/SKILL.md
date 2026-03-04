@@ -34,62 +34,56 @@ If any of the following are true, **run a search before proceeding**:
 
 ## Search Toolkit
 
-Use these tools in order of specificity. Prefer faster/cheaper tools first.
+Use Claude Code's **native tools** — never Bash for file searching or reading. The dedicated tools are faster, require no shell permission, and automatically exclude noise like `node_modules`.
 
-### 1. Grep — find by name or pattern
+| Task | Use | Never use |
+| ---- | ---- | ---- |
+| Search file contents by pattern | **Grep** tool | `grep` / `rg` in Bash |
+| Find files by name/glob pattern | **Glob** tool | `find` / `ls` in Bash |
+| Read a specific file | **Read** tool | `cat` / `head` / `tail` in Bash |
+| Broad multi-file exploration | **Agent** (Explore subagent) | — |
 
-```bash
-# Find where a symbol is defined
-grep -rn "export.*MyFunction\|export.*MyFunction" --include="*.ts" --include="*.tsx" . | grep -v node_modules
+### 1. Grep — search file contents by pattern
 
-# Find all usages of a symbol
-grep -rn "MyFunction" --include="*.ts" --include="*.tsx" . | grep -v node_modules | grep -v ".d.ts"
-
-# Find a type or interface definition
-grep -rn "^(export )?(type|interface) MyType" --include="*.ts" . | grep -v node_modules
-
-# Find a config key or constant
-grep -rn "MY_CONSTANT\|myConstant" . | grep -v node_modules | grep -v dist
-
-# Case-insensitive search for a concept
-grep -rni "upload.*progress\|progress.*upload" --include="*.ts" --include="*.tsx" . | grep -v node_modules
+```
+Grep(pattern: "export.*MyFunction", glob: "**/*.{ts,tsx}", output_mode: "content")
+Grep(pattern: "MyFunction", glob: "**/*.{ts,tsx}", output_mode: "files_with_matches")
+Grep(pattern: "^(export )?(type|interface) MyType", type: "ts", output_mode: "content")
+Grep(pattern: "MY_CONSTANT|myConstant", output_mode: "files_with_matches")
+Grep(pattern: "upload.*progress|progress.*upload", glob: "**/*.{ts,tsx}", -i: true, output_mode: "content")
 ```
 
-### 2. Find — locate files by name
+The `glob` and `type` parameters scope the search. The Grep tool already excludes `.git`; use `glob: "src/**/*"` to avoid `dist/`, `node_modules/`, etc.
 
-```bash
-# Find a file when you know roughly what it's called
-find . -name "*auth*" -o -name "*Auth*" | grep -v node_modules | grep -v dist
+### 2. Glob — find files by name pattern
 
-# Find files by extension in a specific area
-find ./src/components -name "*.tsx" | head -20
-
-# Find test files related to a module
-find . -name "*.test.ts" -path "*upload*" | grep -v node_modules
+```
+Glob(pattern: "**/*auth*", path: "./src")
+Glob(pattern: "src/components/**/*.tsx")
+Glob(pattern: "**/*.test.ts")
+Glob(pattern: "src/**/*.ts")   // scoped — avoids dist/, node_modules/
 ```
 
-### 3. Read specific files
+Returns paths sorted by modification time. Use this when you know roughly what a file is called.
 
-Once you've located the right file via grep/find, read it in full or in relevant ranges:
+### 3. Read — read a specific file
 
-```bash
-cat ./src/hooks/useUpload.ts
-
-# Or with line numbers for large files
-cat -n ./src/api/routes.ts | head -80
+```
+Read(file_path: "/absolute/path/to/file.ts")
+Read(file_path: "/absolute/path/to/large-file.ts", offset: 50, limit: 100)
 ```
 
-### 4. List directory structure
+Always use absolute paths. Read the whole file before editing — never just the target lines.
 
-When you need to understand module boundaries or find where something belongs:
+### 4. Agent (Explore subagent) — open-ended multi-file exploration
 
-```bash
-# Two levels deep, ignoring noise
-find ./src -maxdepth 2 -type d | grep -v node_modules | sort
+For searches that would require many rounds of Grep + Glob (you don't know what files to look in, or the concept spans many naming conventions), delegate:
 
-# All files in a specific module
-find ./src/features/auth -type f | sort
 ```
+Agent(subagent_type: "Explore", prompt: "Find all places where X pattern is used and how it works")
+```
+
+Use this when: you need to understand a system across many files, or a simple grep won't find everything because the naming is inconsistent.
 
 ---
 
@@ -99,41 +93,41 @@ find ./src/features/auth -type f | sort
 
 Search for its definition to understand the real signature, return type, and any quirks:
 
-```bash
-grep -rn "export.*function useFoo\|export const useFoo" --include="*.ts" --include="*.tsx" . | grep -v node_modules
+```
+Grep(pattern: "export.*function useFoo|export const useFoo", glob: "**/*.{ts,tsx}", output_mode: "content")
 ```
 
 ### Before using any type or interface
 
 Read the actual definition — don't reconstruct it from memory:
 
-```bash
-grep -rn "interface FooProps\|type FooProps" --include="*.ts" --include="*.tsx" . | grep -v node_modules
+```
+Grep(pattern: "interface FooProps|type FooProps", glob: "**/*.{ts,tsx}", output_mode: "content")
 ```
 
 ### Before adding a new instance of a pattern
 
 Find existing instances to match the exact shape:
 
-```bash
+```
 # e.g., before adding a new API route handler
-grep -rn "router\.(get|post|put|delete)" --include="*.ts" . | grep -v node_modules | head -10
+Grep(pattern: "router\.(get|post|put|delete)", type: "ts", output_mode: "content", head_limit: 20)
 ```
 
 ### Before creating something that might already exist
 
 Check first:
 
-```bash
-grep -rn "formatDate\|format_date" --include="*.ts" --include="*.js" . | grep -v node_modules
+```
+Grep(pattern: "formatDate|format_date", glob: "**/*.{ts,js}", output_mode: "files_with_matches")
 ```
 
 ### Before importing from a module
 
 Verify the export exists and get the exact name:
 
-```bash
-grep -rn "^export" ./src/utils/index.ts
+```
+Grep(pattern: "^export", path: "./src/utils/index.ts", output_mode: "content")
 ```
 
 ---
@@ -174,37 +168,30 @@ grep -rn "^export" ./src/utils/index.ts
 
 ## Efficient Search Habits
 
-- **Combine greps**: search for both the definition and a usage in one pass to orient yourself fast
-- **Read before editing**: always `cat` the full file you're about to modify, not just the target lines
-- **Follow imports**: if a file imports something unfamiliar, check what it is before using it
-- **Check barrel files**: many projects re-export from `index.ts` — check these for the canonical import path
-- **Scope searches**: use `--include` and path filters to avoid noise from `node_modules`, `dist`, `__pycache__`, etc.
+- **Combine searches**: run Grep for content and Glob for files in parallel when you need both
+- **Read before editing**: always use Read on the full file you're about to modify — not just target lines
+- **Follow imports**: if a file imports something unfamiliar, Grep for its definition before using it
+- **Check barrel files**: many projects re-export from `index.ts` — Grep `"^export"` there first for the canonical import path
+- **Scope searches**: use `glob: "src/**/*"` or `type: "ts"` to avoid noise from `dist/`, `node_modules/`, `.d.ts`
 
 ---
 
-## Noise Filters (use consistently)
+## Scoping Searches (avoid noise)
 
-```bash
-# Standard exclusions for most projects
-grep -rn "..." . \
-  | grep -v node_modules \
-  | grep -v "/dist/" \
-  | grep -v "/.next/" \
-  | grep -v "__pycache__" \
-  | grep -v ".d.ts" \
-  | grep -v "/coverage/"
+Use `glob` or `type` parameters to limit Grep to relevant files:
+
+```
+# Scoped to source TypeScript only — avoids dist/, node_modules/, .d.ts
+Grep(pattern: "...", glob: "src/**/*.{ts,tsx}", output_mode: "content")
+
+# By file type (auto-excludes common noise)
+Grep(pattern: "...", type: "ts", output_mode: "files_with_matches")
+
+# For Rust/Go/other projects — scope to source dir
+Grep(pattern: "...", glob: "src/**/*.rs", output_mode: "content")
 ```
 
-Or use `--exclude-dir` for cleaner commands:
-
-```bash
-grep -rn "..." \
-  --include="*.ts" \
-  --exclude-dir=node_modules \
-  --exclude-dir=dist \
-  --exclude-dir=.next \
-  .
-```
+Glob patterns are already scoped by the path you provide — `Glob("src/**/*.ts")` never reaches `node_modules`.
 
 ---
 
