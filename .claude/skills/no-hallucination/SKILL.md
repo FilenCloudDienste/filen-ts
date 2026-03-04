@@ -1,6 +1,13 @@
 ---
 name: no-hallucination
-description: CRITICAL! Always use this skill, no matter what task you are working on!
+description: >
+    CRITICAL! Always use before stating facts, writing API calls, adding imports, or making
+    any claim about how code works. Never invent: API signatures, method names, config keys,
+    file paths, import paths, library behaviour, or facts you can't source. Resolution order:
+    (1) search the codebase, (2) check config/env files, (3) fetch docs with WebSearch/WebFetch,
+    (4) ask the user. If a source can't be found, say so explicitly with what you tried and
+    offer options — partial honest work beats complete invented work. The confidence test:
+    "Can I point to a source right now?" Yes → proceed. No → find one first or stop.
 ---
 
 # No Hallucination — Honesty Over Invention

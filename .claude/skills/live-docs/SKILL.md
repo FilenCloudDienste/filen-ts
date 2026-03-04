@@ -1,6 +1,13 @@
 ---
 name: live-docs
-description: CRITICAL! Always use this skill, no matter what task you are working on!
+description: >
+    CRITICAL! Always use before writing code that calls into any external library, API, or
+    framework. Training data goes stale — fetch version-specific docs before writing, not after.
+    Identify the exact installed version from package.json/Cargo.toml/go.mod first, then fetch
+    the matching docs page (not just the homepage). Especially critical for: AI/LLM SDKs
+    (OpenAI, Anthropic), cloud provider SDKs (AWS, GCP, Azure), mobile platform APIs
+    (Expo, iOS, Android), web framework routing (Next.js App Router, Rails, Django), ORM query
+    APIs (Prisma, SQLAlchemy 2.0, Drizzle), and any library that recently released a major version.
 ---
 
 # Live Documentation Lookup

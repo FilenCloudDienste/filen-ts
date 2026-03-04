@@ -1,6 +1,14 @@
 ---
-name: typescript-react-performance
-description: CRITICAL! Always use this skill, no matter what task you are working on!
+name: typescript-react-perf
+description: >
+    CRITICAL! Always use when writing TypeScript, React, React Native, or Expo code. Enforces
+    zero-waste patterns: Map/Set over plain objects/Array for O(1) lookups, pre-allocated arrays
+    over push(), monomorphic object shapes, no hidden class mutations (no delete). React: memo +
+    useCallback + useMemo to prevent re-renders, no inline objects/arrays in JSX, stable keys.
+    React Native / Hermes: Reanimated worklets over JS-driven Animated, gesture-handler over
+    TouchableOpacity, FlashList over ScrollView+map, StyleSheet.create over inline style objects,
+    no generators or Proxy (Hermes penalty). Check project's existing libs before suggesting new
+    ones — always match what's already installed (zustand, flash-list, reanimated, expo-image).
 ---
 
 # High-Performance TypeScript / React / React Native / Node.js / Bun
