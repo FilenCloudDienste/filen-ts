@@ -137,11 +137,11 @@ class CameraUpload {
 			return
 		}
 
-		if (file.exists) {
-			file.delete()
-		}
+		manipulatedFile.copy(file)
 
-		manipulatedFile.move(file)
+		if (manipulatedFile.exists) {
+			manipulatedFile.delete()
+		}
 	}
 
 	private normalizeModificationTimestampForComparison(timestamp: number): number {
@@ -204,7 +204,7 @@ class CameraUpload {
 		}
 	}
 
-	private async listLocal(albums: MediaLibrary.Album[]): Promise<LocalTree> {
+	private async listLocal({ albums, signal }: { albums: MediaLibrary.Album[]; signal: AbortSignal }): Promise<LocalTree> {
 		const tree: LocalTree = {}
 
 		await Promise.all(
@@ -216,12 +216,19 @@ class CameraUpload {
 					assets.map(async asset => {
 						const result = await run(
 							async defer => {
+								if (signal.aborted) {
+									throw new Error("Aborted")
+								}
+
 								await this.getLocalAssetInfoSemaphore.acquire()
 
 								defer(() => {
 									this.getLocalAssetInfoSemaphore.release()
 								})
 
+								if (signal.aborted) {
+									throw new Error("Aborted")
+								}
 								return {
 									asset,
 									info: await asset.getInfo()
@@ -378,7 +385,7 @@ class CameraUpload {
 		}
 
 		const [localTree, remoteTree] = await Promise.all([
-			this.listLocal(config.albums),
+			this.listLocal({ albums: config.albums, signal }),
 			this.listRemote({
 				remoteDir: config.remoteDir,
 				signal
