@@ -1,6 +1,6 @@
 ---
 name: security
-description: CRITICAL: Always use this skill, no matter what task you are working on!
+description: CRITICAL! Always use this skill, no matter what task you are working on!
 ---
 
 # Cybersecurity — Write Secure Code by Default
