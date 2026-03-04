@@ -1,6 +1,13 @@
 ---
 name: security
-description: CRITICAL! Always use this skill, no matter what task you are working on!
+description: >
+    CRITICAL! Always use when writing code that handles: user input or form data, file uploads
+    or filesystem paths, network requests or URLs, authentication/authorization/sessions,
+    credentials/API keys/secrets, cryptography, database queries, or shell commands.
+    Checks for: SQL/shell/template injection, path traversal, hardcoded secrets, insecure crypto
+    (MD5, SHA-* for passwords, ECB mode, Math.random for tokens), missing ownership checks,
+    mass assignment, SSRF, and information leakage in error responses. Also flags security
+    issues spotted in adjacent code even when not directly asked.
 ---
 
 # Cybersecurity — Write Secure Code by Default

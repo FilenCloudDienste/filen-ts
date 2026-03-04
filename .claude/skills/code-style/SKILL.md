@@ -1,6 +1,12 @@
 ---
 name: code-style
-description: CRITICAL! Always use this skill, no matter what task you are working on!
+description: >
+    CRITICAL! Always use before writing or modifying any code. Reads the project's formatter
+    configs (Prettier, ESLint, Biome, EditorConfig) and source files to extract exact style rules:
+    indentation, quotes, semicolons, trailing commas, bracket spacing, import ordering, empty-line
+    patterns, multiline thresholds, and switch-case bracing. Maintains a cached style index at
+    ./claude/code-style-index.json — check it first, create or update it after a full scan.
+    Never impose personal defaults; always match what the project actually enforces.
 ---
 
 # Code Style Matching Skill

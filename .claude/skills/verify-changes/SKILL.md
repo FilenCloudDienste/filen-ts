@@ -1,6 +1,13 @@
 ---
 name: verify-changes
-description: CRITICAL! Always use this skill, no matter what task you are working on!
+description: >
+    CRITICAL! Always use after every code modification — including small edits, single-line
+    fixes, and refactors. Detects available checks from package.json scripts, then runs them
+    in order: (1) ESLint on changed files, (2) TypeScript tsc --noEmit, (3) tests scoped to
+    changed files first, then full suite. Reports ✅/❌/⏭️ status for each check. A change is
+    not done until all available checks are green. Never suppress errors with eslint-disable or
+    @ts-ignore to make checks pass — fix the root cause. If a test was already failing before
+    the change, note it explicitly rather than masking it.
 ---
 
 # Verify Changes Skill

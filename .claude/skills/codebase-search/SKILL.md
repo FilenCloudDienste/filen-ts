@@ -1,6 +1,12 @@
 ---
 name: codebase-search
-description: CRITICAL! Always use this skill, no matter what task you are working on!
+description: >
+    CRITICAL! Always use before writing code, calling any function/hook/method, using any
+    type/interface, adding any import, or implementing any pattern that might already exist.
+    Searches the codebase (Grep, Glob, Read) to find real signatures, existing implementations,
+    and canonical import paths — never assume or reconstruct from memory. Default posture:
+    search first, then write. If in doubt whether something exists: search. Never invent
+    plausible-sounding paths, names, or APIs that haven't been verified in the actual files.
 ---
 
 # Codebase Search Skill
