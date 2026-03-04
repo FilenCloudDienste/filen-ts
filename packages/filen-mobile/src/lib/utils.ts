@@ -511,15 +511,15 @@ export type PreviewType = "image" | "video" | "unknown" | "pdf" | "text" | "code
 export function getPreviewType(name: string): PreviewType {
 	const extname = FileSystem.Paths.extname(name.trim().toLowerCase())
 
-	if (EXPO_IMAGE_SUPPORTED_EXTENSIONS.includes(extname)) {
+	if (EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(extname)) {
 		return "image"
 	}
 
-	if (EXPO_VIDEO_SUPPORTED_EXTENSIONS.includes(extname)) {
+	if (EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(extname)) {
 		return "video"
 	}
 
-	if (EXPO_AUDIO_SUPPORTED_EXTENSIONS.includes(extname)) {
+	if (EXPO_AUDIO_SUPPORTED_EXTENSIONS.has(extname)) {
 		return "audio"
 	}
 
