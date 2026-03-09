@@ -88,6 +88,10 @@ class Transfers {
 
 		if (localFileOrDir instanceof FileSystem.Directory) {
 			const result = await run(async defer => {
+				defer(() => {
+					compositePauseSignal.dispose()
+				})
+
 				if (parent.tag === AnyNormalDir_Tags.Root) {
 					throw new Error("Cannot upload to root directory.")
 				}
@@ -337,8 +341,12 @@ class Transfers {
 
 		// TODO: Add metadata timestamps before upload to copied file
 		const result = await run(async defer => {
-			if (!localFileOrDir.exists || !localFileOrDir.size) {
-				throw new Error("Local file does not exist or is empty.")
+			defer(() => {
+				compositePauseSignal.dispose()
+			})
+
+			if (!localFileOrDir.exists) {
+				throw new Error("Local file does not exist.")
 			}
 
 			if (!hideProgress) {
@@ -528,6 +536,10 @@ class Transfers {
 
 		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 			const result = await run(async defer => {
+				defer(() => {
+					compositePauseSignal.dispose()
+				})
+
 				if (destination instanceof FileSystem.File) {
 					throw new Error("Destination must be a directory for directory downloads.")
 				}
@@ -779,6 +791,10 @@ class Transfers {
 		}
 
 		const result = await run(async defer => {
+			defer(() => {
+				compositePauseSignal.dispose()
+			})
+
 			if (!(destination instanceof FileSystem.File)) {
 				throw new Error("Destination must be a file for file downloads.")
 			}
