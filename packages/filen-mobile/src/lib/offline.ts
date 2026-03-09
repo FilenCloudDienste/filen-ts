@@ -1007,7 +1007,8 @@ export class Offline {
 
 								if (
 									unwrappedRemoteFile.meta &&
-									unwrappedRemoteFile.meta.modified > localFile.item.data.decryptedMeta.modified &&
+									normalizeModificationTimestampForComparison(Number(unwrappedRemoteFile.meta.modified)) >
+										normalizeModificationTimestampForComparison(Number(localFile.item.data.decryptedMeta.modified)) &&
 									localFile.file.exists
 								) {
 									localFile.file.delete()
