@@ -9,8 +9,14 @@
 		"style": "tabs",
 		"size": 4,
 		"overrides": {
-			"*.yaml": { "style": "spaces", "size": 2 },
-			"*.yml": { "style": "spaces", "size": 2 }
+			"*.yaml": {
+				"style": "spaces",
+				"size": 2
+			},
+			"*.yml": {
+				"style": "spaces",
+				"size": 2
+			}
 		}
 	},
 	"quotes": {
