@@ -142,19 +142,39 @@ export class PauseSignal {
 	}
 }
 
-export function createCompositePauseSignal(...signals: PauseSignal[]): PauseSignal {
+export function createCompositePauseSignal(...signals: PauseSignal[]): PauseSignal & {
+	dispose: () => void
+} {
 	const controller = new PauseSignal()
+	const subscriptions: {
+		remove: () => void
+	}[] = []
 
 	for (const signal of signals) {
 		if (signal.isPaused()) {
 			controller.pause()
 		}
 
-		controller.addEventListener("pause", () => controller.pause())
-		controller.addEventListener("resume", () => controller.resume())
+		subscriptions.push(signal.addEventListener("pause", () => controller.pause()))
+
+		subscriptions.push(
+			signal.addEventListener("resume", () => {
+				if (signals.every(s => !s.isPaused())) {
+					controller.resume()
+				}
+			})
+		)
 	}
 
-	return controller
+	return Object.assign(controller, {
+		dispose: () => {
+			for (const sub of subscriptions) {
+				sub.remove()
+			}
+
+			subscriptions.length = 0
+		}
+	})
 }
 
 export function unwrapSdkError(error: unknown): FilenSdkError | null {

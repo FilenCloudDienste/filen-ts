@@ -194,6 +194,9 @@ class SecureStore {
 
 			const [encryptionKey, bytes] = await Promise.all([this.getEncryptionKey(), this.secureStoreFile.bytes()])
 			const cipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(encryptionKey, "hex"), bytes.subarray(0, 12))
+
+			cipher.setAuthTag(bytes.subarray(bytes.length - 16))
+
 			const decrypted = cipher.update(bytes.subarray(12, bytes.length - 16))
 			const final = cipher.final()
 
@@ -280,7 +283,7 @@ class SecureStore {
 			const current = this.readCache ?? (await this.read()) ?? {}
 			const value = current[key]
 
-			if (!value) {
+			if (value == null) {
 				return null
 			}
 
@@ -308,9 +311,11 @@ class SecureStore {
 
 			const current = this.readCache ?? (await this.read()) ?? {}
 
-			delete current[key]
+			const modified = { ...current }
 
-			await this.write(current)
+			delete modified[key]
+
+			await this.write(modified)
 
 			cache.secureStore.delete(key)
 
@@ -328,11 +333,16 @@ class SecureStore {
 		await this.waitForInit()
 
 		const result = await run(async defer => {
-			await Promise.all([this.rwMutex.acquire(), this.modMutex.acquire()])
+			await this.modMutex.acquire()
+
+			defer(() => {
+				this.modMutex.release()
+			})
+
+			await this.rwMutex.acquire()
 
 			defer(() => {
 				this.rwMutex.release()
-				this.modMutex.release()
 			})
 
 			this.readCache = null
@@ -353,7 +363,7 @@ const secureStore = new SecureStore()
 
 const useSecureStoreFlushMutex: Semaphore = new Semaphore(1)
 
-export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => void)) => void] {
+export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => T)) => void] {
 	const fromCache = cache.secureStore.get(key)
 	const [state, setState] = useState<T>(fromCache ?? initialValue)
 	const didRetrieveRef = useRef<boolean>(false)
@@ -395,7 +405,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 
 			const value = await secureStore.get<T>(key)
 
-			if (value && !isEqual(value, state)) {
+			if (value !== null && !isEqual(value, state)) {
 				setState(value)
 			}
 		})
@@ -408,7 +418,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	}, [key, state])
 
 	const set = useCallback(
-		(fn: T | ((prev: T) => void)): void => {
+		(fn: T | ((prev: T) => T)): void => {
 			const before = state
 			const now = typeof fn === "function" ? (fn as (prev: T) => T)(before) : fn
 
