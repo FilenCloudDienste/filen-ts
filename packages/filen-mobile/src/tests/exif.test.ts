@@ -1,0 +1,153 @@
+import { describe, it, expect } from "vitest"
+import { parseExifDate } from "@/lib/exif"
+
+describe("parseExifDate", () => {
+	const BASE_DATE = "2024:06:15 14:30:45"
+	const BASE_TS = Date.parse("2024-06-15T14:30:45Z")
+
+	describe("iOS layout", () => {
+		it("reads fields nested under {Exif} and {TIFF}", () => {
+			const exif = {
+				"{Exif}": {
+					DateTimeOriginal: BASE_DATE
+				},
+				"{TIFF}": {
+					DateTime: "2020:01:01 00:00:00"
+				}
+			}
+
+			expect(parseExifDate(exif)).toBe(BASE_TS)
+		})
+
+		it("falls back to {TIFF} DateTime when {Exif} has no date fields", () => {
+			const exif = {
+				"{Exif}": {},
+				"{TIFF}": {
+					DateTime: BASE_DATE
+				}
+			}
+
+			expect(parseExifDate(exif)).toBe(BASE_TS)
+		})
+	})
+
+	describe("Android layout", () => {
+		it("reads flat fields directly", () => {
+			const exif = {
+				DateTimeOriginal: BASE_DATE
+			}
+
+			expect(parseExifDate(exif)).toBe(BASE_TS)
+		})
+	})
+
+	describe("field priority", () => {
+		it("DateTimeOriginal takes priority over DateTimeDigitized and DateTime", () => {
+			const exif = {
+				DateTimeOriginal: "2024:06:15 10:00:00",
+				DateTimeDigitized: "2024:06:15 11:00:00",
+				DateTime: "2024:06:15 12:00:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T10:00:00Z"))
+		})
+
+		it("falls back to DateTimeDigitized when DateTimeOriginal is missing", () => {
+			const exif = {
+				DateTimeDigitized: "2024:06:15 11:00:00",
+				DateTime: "2024:06:15 12:00:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T11:00:00Z"))
+		})
+
+		it("falls back to DateTime when both above are missing", () => {
+			const exif = {
+				DateTime: "2024:06:15 12:00:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T12:00:00Z"))
+		})
+	})
+
+	describe("SubSecTimeOriginal", () => {
+		it("adds millisecond precision", () => {
+			const exif = {
+				DateTimeOriginal: BASE_DATE,
+				SubSecTimeOriginal: "123"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.123Z"))
+		})
+
+		it("pads single-digit subsec to three digits", () => {
+			const exif = {
+				DateTimeOriginal: BASE_DATE,
+				SubSecTimeOriginal: "7"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.700Z"))
+		})
+	})
+
+	describe("timezone offset", () => {
+		it("applies positive OffsetTimeOriginal correctly", () => {
+			const exif = {
+				DateTimeOriginal: BASE_DATE,
+				OffsetTimeOriginal: "+05:30"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45+05:30"))
+		})
+
+		it("applies negative offset correctly", () => {
+			const exif = {
+				DateTimeOriginal: BASE_DATE,
+				OffsetTimeOriginal: "-08:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45-08:00"))
+		})
+
+		it("treats missing offset as UTC", () => {
+			const exif = {
+				DateTimeOriginal: BASE_DATE
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45Z"))
+		})
+
+		it("falls back to UTC when offset format is invalid", () => {
+			const exif = {
+				DateTimeOriginal: BASE_DATE,
+				OffsetTimeOriginal: "not-an-offset"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45Z"))
+		})
+	})
+
+	describe("edge cases", () => {
+		it("returns null for an empty exif object", () => {
+			expect(parseExifDate({})).toBeNull()
+		})
+
+		it("returns null for an invalid/unparseable date string", () => {
+			const exif = {
+				DateTimeOriginal: "not-a-date"
+			}
+
+			expect(parseExifDate(exif)).toBeNull()
+		})
+
+		it("skips non-string date values", () => {
+			const exif = {
+				DateTimeOriginal: 12345,
+				DateTimeDigitized: null,
+				DateTime: BASE_DATE
+			}
+
+			expect(parseExifDate(exif as Record<string, unknown>)).toBe(BASE_TS)
+		})
+	})
+})
