@@ -788,3 +788,7 @@ export function listLocalDirectoryRecursive(directory: FileSystem.Directory): (F
 
 	return allEntries
 }
+
+export function normalizeModificationTimestampForComparison(timestamp: number): number {
+	return Math.floor(timestamp / 1000)
+}

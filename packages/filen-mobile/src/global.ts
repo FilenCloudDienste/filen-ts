@@ -5,7 +5,9 @@ import QuickCrypto from "react-native-quick-crypto"
 
 globalThis.crypto = {
 	...globalThis.crypto,
-	getRandomValues: QuickCrypto.getRandomValues
+	// This is fine
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	getRandomValues: QuickCrypto.getRandomValues as unknown as any
 }
 
 globalThis.Buffer = Buffer
