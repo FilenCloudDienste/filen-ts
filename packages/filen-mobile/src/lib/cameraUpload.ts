@@ -1,7 +1,14 @@
 import * as MediaLibrary from "expo-media-library/next"
 import auth from "@/lib/auth"
 import { type Dir, type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
-import { PauseSignal, normalizeFilePathForSdk, unwrapFileMeta, normalizeFilePathForExpo, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import {
+	PauseSignal,
+	normalizeFilePathForSdk,
+	unwrapFileMeta,
+	normalizeFilePathForExpo,
+	unwrappedFileIntoDriveItem,
+	normalizeModificationTimestampForComparison
+} from "@/lib/utils"
 import pathModule from "path"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
@@ -150,10 +157,6 @@ class CameraUpload {
 		}
 	}
 
-	private normalizeModificationTimestampForComparison(timestamp: number): number {
-		return Math.floor(timestamp / 1000)
-	}
-
 	private modifyAssetPathOnCollision({
 		iteration,
 		path,
@@ -206,9 +209,7 @@ class CameraUpload {
 			}
 
 			case 4: {
-				return normalizeFilePathForSdk(
-					pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.id).toString(16)}${ext}`)
-				)
+				return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.id).toString(16)}${ext}`))
 					.toLowerCase()
 					.trim()
 			}
@@ -468,8 +469,8 @@ class CameraUpload {
 					remoteFileMeta &&
 					remoteFileMeta.meta?.modified &&
 					localFile.info.modificationTime &&
-					this.normalizeModificationTimestampForComparison(Number(remoteFileMeta.meta.modified)) <
-						this.normalizeModificationTimestampForComparison(localFile.info.modificationTime))
+					normalizeModificationTimestampForComparison(Number(remoteFileMeta.meta.modified)) <
+						normalizeModificationTimestampForComparison(localFile.info.modificationTime))
 			) {
 				deltas.push({
 					type: "upload",
