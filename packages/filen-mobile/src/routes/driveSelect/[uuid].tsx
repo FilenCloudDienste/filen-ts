@@ -8,7 +8,7 @@ import { randomUUID } from "expo-crypto"
 import { router, useFocusEffect } from "expo-router"
 import useDrivePath, { type SelectOptions } from "@/hooks/useDrivePath"
 import { Buffer } from "@craftzdog/react-native-buffer"
-import { pack } from "msgpackr"
+import { pack } from "@/lib/msgpack"
 import type { DriveItem } from "@/types"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
 

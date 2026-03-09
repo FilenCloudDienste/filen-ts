@@ -4,7 +4,7 @@ import auth from "@/lib/auth"
 import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
-import { AnyDirEnumWithShareInfo, DirWithMetaEnum_Tags, ParentUuid } from "@filen/sdk-rs"
+import { AnyDirWithContext_Tags, AnyDirWithContext, AnyNormalDir, AnyNormalDir_Tags, ParentUuid } from "@filen/sdk-rs"
 import offline from "@/lib/offline"
 import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
 
@@ -12,8 +12,7 @@ export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 
 export type UseDirectorySizeQueryParams = {
 	uuid: string
-	offline: boolean
-	trash: boolean
+	type: "offline" | "trash" | "sharedIn" | "sharedOut" | "normal"
 }
 
 export async function fetchData(
@@ -25,18 +24,9 @@ export async function fetchData(
 	files: number
 	dirs: number
 }> {
-	const dir = cache.directoryUuidToDir.get(params.uuid)
-	const sharedDir = cache.sharedDirUuidToDir.get(params.uuid)
+	let anyDirWithContext = cache.directoryUuidToAnyDirWithContext.get(params.uuid) ?? null
 
-	if (params.offline) {
-		if (dir) {
-			return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(dir)))
-		}
-
-		if (sharedDir) {
-			return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(sharedDir)))
-		}
-
+	if (!anyDirWithContext) {
 		return {
 			size: 0,
 			files: 0,
@@ -44,38 +34,27 @@ export async function fetchData(
 		}
 	}
 
-	const anyDir = (() => {
-		if (sharedDir) {
-			return sharedDir.dir.tag === DirWithMetaEnum_Tags.Dir
-				? new AnyDirEnumWithShareInfo.SharedDir(sharedDir)
-				: new AnyDirEnumWithShareInfo.Root(sharedDir.dir.inner[0])
-		}
+	if (params.type === "offline") {
+		return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(anyDirWithContext)))
+	}
 
-		if (dir) {
-			if (params.trash) {
-				return new AnyDirEnumWithShareInfo.Dir({
-					...dir,
-					parent: new ParentUuid.Trash()
-				})
-			}
-
-			return new AnyDirEnumWithShareInfo.Dir(dir)
-		}
-
-		return undefined
-	})()
-
-	if (!anyDir) {
-		return {
-			size: 0,
-			files: 0,
-			dirs: 0
-		}
+	// Hack so we can get the size of items in the trash
+	if (
+		params.type === "trash" &&
+		anyDirWithContext.tag === AnyDirWithContext_Tags.Normal &&
+		anyDirWithContext.inner[0].tag === AnyNormalDir_Tags.Dir
+	) {
+		anyDirWithContext = new AnyDirWithContext.Normal(
+			new AnyNormalDir.Dir({
+				...anyDirWithContext.inner[0].inner[0],
+				parent: new ParentUuid.Trash()
+			})
+		)
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
 	const { size, files, dirs } = await authedSdkClient.getDirSize(
-		anyDir,
+		anyDirWithContext,
 		params?.signal
 			? {
 					signal: params.signal

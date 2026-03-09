@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system"
 import * as ExpoSqlite from "expo-sqlite"
 import { Semaphore, run } from "@filen/utils"
 import { Platform } from "react-native"
-import { pack, unpack } from "msgpackr"
+import { pack, unpack } from "@/lib/msgpack"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 
 const INIT_QUERIES: {

@@ -12,7 +12,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Date from "@/components/drive/item/date"
 import { Platform } from "react-native"
-import { type AnyDirEnumWithShareInfo, DirColor } from "@filen/sdk-rs"
+import { type AnyDirWithContext, DirColor } from "@filen/sdk-rs"
 import { useState } from "react"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { cn } from "@filen/utils"
@@ -25,7 +25,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Buffer } from "@craftzdog/react-native-buffer"
-import { pack } from "msgpackr"
+import { pack } from "@/lib/msgpack"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
 
 const Item = memo(
@@ -36,7 +36,7 @@ const Item = memo(
 	}: {
 		info: ListRenderItemInfo<{
 			item: DriveItem
-			parent?: AnyDirEnumWithShareInfo
+			parent?: AnyDirWithContext
 		}>
 		origin: DriveItemMenuOrigin
 		drivePath: DrivePath
@@ -98,11 +98,11 @@ const Item = memo(
 					}
 
 					const normalizeItemType =
-						info.item.item.type === "sharedDirectory"
+						info.item.item.type === "sharedDirectory" ||
+						info.item.item.type === "directory" ||
+						info.item.item.type === "sharedRootDirectory"
 							? "directory"
-							: info.item.item.type === "sharedFile"
-								? "file"
-								: info.item.item.type
+							: "file"
 
 					if (!allowedItemTypes.includes(normalizeItemType)) {
 						return true
@@ -172,7 +172,12 @@ const Item = memo(
 				return
 			}
 
-			if ((info.item.item.type === "directory" || info.item.item.type === "sharedDirectory") && origin !== "trash") {
+			if (
+				(info.item.item.type === "directory" ||
+					info.item.item.type === "sharedDirectory" ||
+					info.item.item.type === "sharedRootDirectory") &&
+				origin !== "trash"
+			) {
 				if (origin === "offline") {
 					router.push({
 						pathname: "/offline/[uuid]",
@@ -345,7 +350,9 @@ const Item = memo(
 											</View>
 										</View>
 									)}
-								{info.item.item.type === "directory" || info.item.item.type === "sharedDirectory" ? (
+								{info.item.item.type === "directory" ||
+								info.item.item.type === "sharedDirectory" ||
+								info.item.item.type === "sharedRootDirectory" ? (
 									<DirectoryIcon
 										color={info.item.item.type === "directory" ? info.item.item.data.color : DirColor.Default.new()}
 										width={38}

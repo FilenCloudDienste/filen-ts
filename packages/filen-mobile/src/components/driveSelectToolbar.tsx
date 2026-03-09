@@ -13,7 +13,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import drive from "@/lib/drive"
 import cache from "@/lib/cache"
-import { DirEnum } from "@filen/sdk-rs"
+import { AnyNormalDir } from "@filen/sdk-rs"
 import { useSdkClients } from "@/lib/auth"
 import { unwrapParentUuid } from "@/lib/utils"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
@@ -34,16 +34,16 @@ const DriveSelectToolbar = memo(() => {
 		}
 
 		if (!drivePath.uuid || drivePath.uuid === authedSdkClient.root().uuid) {
-			return new DirEnum.Root(authedSdkClient.root())
+			return new AnyNormalDir.Root(authedSdkClient.root())
 		}
 
-		const parentDir = cache.directoryUuidToDir.get(drivePath.uuid)
+		const parentDir = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid)
 
 		if (!parentDir) {
 			return null
 		}
 
-		return new DirEnum.Dir(parentDir)
+		return parentDir
 	}, [drivePath.uuid, authedSdkClient])
 
 	const isSameParentAsSelectedItems = useMemo(() => {

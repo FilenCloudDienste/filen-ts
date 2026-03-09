@@ -5,14 +5,19 @@ import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import cache from "@/lib/cache"
 import { sortParams } from "@filen/utils"
 import {
-	DirEnum,
-	AnyDirEnumWithShareInfo,
-	NonRootItemTagged,
 	type File,
 	type Dir,
 	type SharedDir,
 	type SharedFile,
-	DirWithMetaEnum_Tags
+	SharingRole,
+	type SharedRootDir,
+	AnyNormalDir,
+	AnySharedDir,
+	AnyFile,
+	AnySharedDirWithContext,
+	AnyDirWithContext,
+	type NormalDirsAndFiles,
+	type SharedRootDirsAndFiles
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
@@ -25,6 +30,32 @@ export type UseDriveItemsQueryParams = {
 	path: Omit<DrivePath, "selectOptions">
 }
 
+export type NormalResult = NormalDirsAndFiles & {
+	type: "normal"
+}
+
+export type SharedResult = {
+	dirs: (SharedDir & {
+		sharingRole: SharingRole
+	})[]
+	files: (File & {
+		sharingRole: SharingRole
+	})[]
+	type: "shared"
+}
+
+export type SharedRootResult = SharedRootDirsAndFiles & {
+	type: "sharedRoot"
+}
+
+export type OfflineResult = {
+	dirs: (Dir | SharedDir | SharedRootDir)[]
+	files: (File | SharedFile)[]
+	type: "offline"
+}
+
+export type Result = NormalResult | SharedRootResult | SharedResult | OfflineResult | undefined
+
 export async function fetchData(
 	params: UseDriveItemsQueryParams & {
 		signal?: AbortSignal
@@ -35,88 +66,89 @@ export async function fetchData(
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
-
 	const signal = params.signal
 		? {
 				signal: params.signal
 			}
 		: undefined
 
-	const result = await (async () => {
+	const result: Result = await (async () => {
 		switch (params.path.type) {
 			case "drive": {
-				const dir = (() => {
-					const root = new DirEnum.Root(authedSdkClient.root())
+				const parent = (() => {
+					const root = new AnyNormalDir.Root(authedSdkClient.root())
 
 					if (!params.path.uuid || params.path.uuid.length === 0) {
 						return root
 					}
 
-					const cachedDir = cache.directoryUuidToDir.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnyNormalDir.get(params.path.uuid)
 
 					if (cachedDir) {
-						return new DirEnum.Dir(cachedDir)
+						return cachedDir
 					}
 
 					return root
 				})()
 
-				return authedSdkClient.listDir(dir, signal)
+				const result = await authedSdkClient.listDir(parent, signal)
+
+				return {
+					...result,
+					type: "normal"
+				} satisfies Result
 			}
 
 			case "favorites": {
-				const dir = (() => {
+				const parent = (() => {
 					if (!params.path.uuid || params.path.uuid.length === 0) {
 						return null
 					}
 
-					const cachedDir = cache.directoryUuidToDir.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnyNormalDir.get(params.path.uuid)
 
 					if (cachedDir) {
-						return new DirEnum.Dir(cachedDir)
+						return cachedDir
 					}
 
 					return null
 				})()
 
 				// If not parent is provided, we need to list the root favorites
-				if (!dir) {
-					return authedSdkClient.listFavorites(signal)
+				if (!parent) {
+					const result = await authedSdkClient.listFavorites(signal)
+
+					return {
+						...result,
+						type: "normal"
+					} satisfies Result
 				}
 
 				// If we have a parent dir we can simply list it from the main drive
-				return authedSdkClient.listDir(dir, signal)
+				const result = await authedSdkClient.listDir(parent, signal)
+
+				return {
+					...result,
+					type: "normal"
+				} satisfies Result
 			}
 
 			case "recents": {
-				return authedSdkClient.listRecents(signal)
+				const result = await authedSdkClient.listRecents(signal)
+
+				return {
+					...result,
+					type: "normal"
+				} satisfies Result
 			}
 
 			case "sharedIn": {
-				const dir = (() => {
+				const parent = (() => {
 					if (!params.path.uuid || params.path.uuid.length === 0) {
 						return undefined
 					}
 
-					const cachedDir = cache.sharedDirUuidToDir.get(params.path.uuid)
-
-					if (cachedDir) {
-						return cachedDir.dir
-					}
-
-					return undefined
-				})()
-
-				return authedSdkClient.listInShared(dir, signal)
-			}
-
-			case "sharedOut": {
-				const dir = (() => {
-					if (!params.path.uuid || params.path.uuid.length === 0) {
-						return undefined
-					}
-
-					const cachedDir = cache.sharedDirUuidToDir.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(params.path.uuid)
 
 					if (cachedDir) {
 						return cachedDir
@@ -125,59 +157,139 @@ export async function fetchData(
 					return undefined
 				})()
 
-				if (!dir) {
-					return authedSdkClient.listOutShared(undefined, undefined, signal)
-				}
+				if (!parent) {
+					const result = await authedSdkClient.listInSharedRoot(signal)
 
-				// If the sharer ID is the same as the logged in user, we are actually not listing a shared out dir, since shared out dirs need to have a contact
-				if (dir.sharingRole.inner[0].id === (await authedSdkClient.toStringified()).userId) {
 					return {
-						dirs: [],
-						files: []
+						...result,
+						type: "sharedRoot"
 					}
 				}
 
-				const contacts = await authedSdkClient.getContacts(signal)
-				const contact = contacts.find(contact => contact.userId === dir.sharingRole.inner[0].id)
+				const result: Result = {
+					dirs: [],
+					files: [],
+					type: "shared"
+				}
 
-				return authedSdkClient.listOutShared(dir.dir, contact, signal)
+				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
+
+				for (const resultDir of dirs) {
+					result.dirs.push({
+						...resultDir,
+						sharingRole: parent.shareInfo
+					})
+				}
+
+				for (const resultFile of files) {
+					result.files.push({
+						...resultFile,
+						sharingRole: parent.shareInfo
+					})
+				}
+
+				return result
+			}
+
+			case "sharedOut": {
+				const parent = (() => {
+					if (!params.path.uuid || params.path.uuid.length === 0) {
+						return undefined
+					}
+
+					const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(params.path.uuid)
+
+					if (cachedDir) {
+						return cachedDir
+					}
+
+					return undefined
+				})()
+
+				if (!parent) {
+					const result = await authedSdkClient.listOutShared(undefined, signal)
+
+					return {
+						...result,
+						type: "sharedRoot"
+					} satisfies Result
+				}
+
+				const result: Result = {
+					dirs: [],
+					files: [],
+					type: "shared"
+				}
+
+				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
+
+				for (const resultDir of dirs) {
+					result.dirs.push({
+						...resultDir,
+						sharingRole: parent.shareInfo
+					})
+				}
+
+				for (const resultFile of files) {
+					result.files.push({
+						...resultFile,
+						sharingRole: parent.shareInfo
+					})
+				}
+
+				return result
 			}
 
 			case "trash": {
-				return authedSdkClient.listTrash(signal)
+				const result = await authedSdkClient.listTrash(signal)
+
+				return {
+					...result,
+					type: "normal"
+				} satisfies Result
 			}
 
 			case "links": {
-				const dir = (() => {
+				const parent = (() => {
 					if (!params.path.uuid || params.path.uuid.length === 0) {
 						return null
 					}
 
-					const cachedDir = cache.directoryUuidToDir.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnyNormalDir.get(params.path.uuid)
 
 					if (cachedDir) {
-						return new DirEnum.Dir(cachedDir)
+						return cachedDir
 					}
 
 					return null
 				})()
 
 				// If not parent is provided, we need to list the root links
-				if (!dir) {
-					return authedSdkClient.listLinkedItems(signal)
+				if (!parent) {
+					const result = await authedSdkClient.listLinkedItems(signal)
+
+					return {
+						...result,
+						type: "normal"
+					} satisfies Result
 				}
 
 				// If we have a parent dir we can simply list it from the main drive
-				return authedSdkClient.listDir(dir, signal)
+				const result = await authedSdkClient.listDir(parent, signal)
+
+				return {
+					...result,
+					type: "normal"
+				} satisfies Result
 			}
 
 			case "offline": {
-				const dir = (() => {
+				const parent = (() => {
 					if (!params.path.uuid || params.path.uuid.length === 0) {
 						return null
 					}
 
-					const cachedDir = cache.directoryUuidToAnyDirWithShareInfo.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnyDirWithContext.get(params.path.uuid)
 
 					if (cachedDir) {
 						return cachedDir
@@ -187,65 +299,71 @@ export async function fetchData(
 				})()
 
 				const [offlineFiles, offlineDirectories] = await Promise.all([
-					!dir ? offline.listFiles() : Promise.resolve([]),
-					offline.listDirectories(dir ?? undefined)
+					!parent ? offline.listFiles() : Promise.resolve([]),
+					offline.listDirectories(parent ?? undefined)
 				])
 
-				const dirs: (Dir | SharedDir)[] = []
-				const files: (File | SharedFile)[] = []
+				const result: Result = {
+					dirs: [],
+					files: [],
+					type: "offline"
+				}
 
 				if (offlineDirectories.directories.length > 0) {
 					for (const { item } of offlineDirectories.directories) {
-						if (item.type !== "directory" && item.type !== "sharedDirectory") {
+						if (item.type !== "directory" && item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory") {
 							continue
 						}
 
 						if (item.type === "directory") {
-							dirs.push(new NonRootItemTagged.Dir(item.data).inner[0])
+							result.dirs.push(new AnyNormalDir.Dir(item.data).inner[0])
 
 							continue
 						}
 
-						dirs.push(new AnyDirEnumWithShareInfo.SharedDir(item.data).inner[0])
+						if (item.type === "sharedRootDirectory") {
+							result.dirs.push(new AnySharedDir.Root(item.data).inner[0])
+
+							continue
+						}
+
+						result.dirs.push(new AnySharedDir.Dir(item.data).inner[0])
 					}
 				}
 
-				if (dir && offlineDirectories.files.length > 0) {
+				if (parent && offlineDirectories.files.length > 0) {
 					for (const { item } of offlineDirectories.files) {
 						if (item.type !== "file" && item.type !== "sharedFile") {
 							continue
 						}
 
 						if (item.type === "file") {
-							files.push(new NonRootItemTagged.File(item.data).inner[0])
+							result.files.push(new AnyFile.File(item.data).inner[0])
 
 							continue
 						}
 
-						files.push(item.data)
+						result.files.push(item.data)
 					}
 				}
 
-				if (!dir && offlineFiles.length > 0) {
+				if (!parent && offlineFiles.length > 0) {
 					for (const { item } of offlineFiles) {
 						if (item.type !== "file" && item.type !== "sharedFile") {
 							continue
 						}
 
 						if (item.type === "file") {
-							files.push(new NonRootItemTagged.File(item.data).inner[0])
+							result.files.push(new AnyFile.File(item.data).inner[0])
 
 							continue
 						}
 
-						files.push(item.data)
+						result.files.push(item.data)
 					}
 				}
 
-				return {
-					dirs,
-					files
-				}
+				return result
 			}
 
 			default: {
@@ -260,53 +378,98 @@ export async function fetchData(
 
 	const items: DriveItem[] = []
 
-	for (const resultDir of result.dirs) {
-		const unwrappedDir = unwrapDirMeta(resultDir)
-		const item = unwrappedDirIntoDriveItem(unwrappedDir)
+	switch (result.type) {
+		case "normal": {
+			for (const resultDir of result.dirs) {
+				const unwrappedDir = unwrapDirMeta(resultDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
 
-		cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta?.name ?? unwrappedDir.uuid)
-		cache.uuidToDriveItem.set(unwrappedDir.uuid, item)
+				items.push(driveItem)
 
-		if (!unwrappedDir.shared) {
-			items.push(item)
-
-			cache.directoryUuidToDir.set(unwrappedDir.uuid, unwrappedDir.dir)
-			cache.directoryUuidToAnyDirWithShareInfo.set(unwrappedDir.uuid, new AnyDirEnumWithShareInfo.Dir(unwrappedDir.dir))
-		} else {
-			items.push(item)
-
-			cache.sharedDirUuidToDir.set(unwrappedDir.uuid, unwrappedDir.dir)
-
-			switch (unwrappedDir.dir.dir.tag) {
-				case DirWithMetaEnum_Tags.Dir: {
-					cache.directoryUuidToAnyDirWithShareInfo.set(unwrappedDir.uuid, new AnyDirEnumWithShareInfo.SharedDir(unwrappedDir.dir))
-
-					break
+				if (unwrappedDir.meta?.name) {
+					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
 				}
 
-				case DirWithMetaEnum_Tags.Root: {
-					cache.directoryUuidToAnyDirWithShareInfo.set(
-						unwrappedDir.uuid,
-						new AnyDirEnumWithShareInfo.Root(unwrappedDir.dir.dir.inner[0])
-					)
+				cache.uuidToDriveItem.set(unwrappedDir.uuid, driveItem)
 
-					break
-				}
+				const withContext = new AnyNormalDir.Dir(resultDir)
+
+				cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, withContext)
+				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(withContext))
 			}
+
+			break
+		}
+
+		case "shared": {
+			for (const resultDir of result.dirs) {
+				const unwrappedDir = unwrapDirMeta(resultDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+
+				items.push(driveItem)
+
+				if (unwrappedDir.meta?.name) {
+					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+				}
+
+				cache.uuidToDriveItem.set(unwrappedDir.uuid, driveItem)
+
+				const withContext = AnySharedDirWithContext.new({
+					dir: new AnySharedDir.Dir(resultDir),
+					shareInfo: resultDir.sharingRole
+				})
+
+				cache.directoryUuidToAnySharedDirWithContext.set(unwrappedDir.uuid, withContext)
+				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Shared(withContext))
+			}
+
+			break
+		}
+
+		case "sharedRoot": {
+			for (const resultDir of result.dirs) {
+				const unwrappedDir = unwrapDirMeta(resultDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+
+				items.push(driveItem)
+
+				if (unwrappedDir.meta?.name) {
+					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+				}
+
+				cache.uuidToDriveItem.set(unwrappedDir.uuid, driveItem)
+
+				const withContext = AnySharedDirWithContext.new({
+					dir: new AnySharedDir.Root(resultDir),
+					shareInfo: resultDir.sharingRole
+				})
+
+				cache.directoryUuidToAnySharedDirWithContext.set(unwrappedDir.uuid, withContext)
+				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Shared(withContext))
+			}
+
+			break
+		}
+
+		case "offline": {
+			for (const resultDir of result.dirs) {
+				const unwrappedDir = unwrapDirMeta(resultDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+
+				items.push(driveItem)
+			}
+
+			break
 		}
 	}
 
 	for (const resultFile of result.files) {
 		const unwrappedFile = unwrapFileMeta(resultFile)
-		const item = unwrappedFileIntoDriveItem(unwrappedFile)
+		const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
 
-		items.push(item)
+		items.push(driveItem)
 
-		if (!unwrappedFile.shared) {
-			cache.uuidToDriveItem.set(unwrappedFile.file.uuid, item)
-		} else {
-			cache.uuidToDriveItem.set(unwrappedFile.file.file.uuid, item)
-		}
+		cache.uuidToDriveItem.set(unwrappedFile.file.uuid, driveItem)
 	}
 
 	return items

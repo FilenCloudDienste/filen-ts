@@ -1,5 +1,6 @@
 import secureStore from "@/lib/secureStore"
 import auth from "@/lib/auth"
+import cache from "@/lib/cache"
 import { run, Semaphore } from "@filen/utils"
 import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
@@ -23,7 +24,7 @@ class Setup {
 				await auth.setSdkClients(isAuthed.stringifiedClient)
 			}
 
-			await Promise.all([secureStore.init(), sqlite.init(), restoreQueries()])
+			await Promise.all([secureStore.init(), sqlite.init(), restoreQueries(), cache.restore()])
 
 			return {
 				isAuthed: isAuthed.isAuthed

@@ -4,28 +4,35 @@ import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import type { DriveItem } from "@/types"
 import { run, Semaphore } from "@filen/utils"
 import transfers from "@/lib/transfers"
-import { pack, unpack } from "msgpackr"
+import { pack, unpack } from "@/lib/msgpack"
 import auth from "@/lib/auth"
 import {
-	AnyDirEnum,
-	AnyDirEnumWithShareInfo,
-	AnyDirEnumWithShareInfo_Tags,
 	type File,
 	type Dir,
 	SharingRole_Tags,
-	DirEnum,
 	type SharedFile,
-	DirWithMetaEnum_Tags,
 	type SharedDir,
-	ErrorKind
+	type SharedRootDir,
+	NonRootDir_Tags,
+	ErrorKind,
+	AnyDirWithContext,
+	AnySharedDirWithContext,
+	AnySharedDir,
+	AnyNormalDir,
+	AnyDirWithContext_Tags,
+	AnySharedDir_Tags,
+	AnyNormalDir_Tags,
+	AnyLinkedDir_Tags
 } from "@filen/sdk-rs"
+import cache from "@/lib/cache"
 import {
 	unwrapFileMeta,
 	normalizeFilePathForSdk,
 	unwrapDirMeta,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
-	unwrapSdkError
+	unwrapSdkError,
+	unwrapParentUuid
 } from "@/lib/utils"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
@@ -33,7 +40,7 @@ import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredO
 
 export type FileOrDirectoryOfflineMeta = {
 	item: DriveItem
-	parent: AnyDirEnumWithShareInfo
+	parent: AnyDirWithContext
 }
 
 export type DirectoryOfflineMeta = FileOrDirectoryOfflineMeta & {
@@ -52,14 +59,14 @@ export type Index = {
 		Uuid,
 		{
 			item: DriveItem
-			parent: AnyDirEnumWithShareInfo
+			parent: AnyDirWithContext
 		}
 	>
 	directories: Record<
 		Uuid,
 		{
 			item: DriveItem
-			parent: AnyDirEnumWithShareInfo
+			parent: AnyDirWithContext
 		}
 	>
 }
@@ -263,6 +270,7 @@ export class Offline {
 
 		switch (item.type) {
 			case "directory":
+			case "sharedRootDirectory":
 			case "sharedDirectory": {
 				const storedDir = Boolean(index.directories[item.data.uuid])
 
@@ -282,40 +290,58 @@ export class Offline {
 		}
 	}
 
-	private parentCacheKey(parent: AnyDirEnumWithShareInfo): string {
+	private parentCacheKey(parent: AnyDirWithContext): string {
 		switch (parent.tag) {
-			case AnyDirEnumWithShareInfo_Tags.Dir: {
-				return `dir:${parent.inner[0].uuid}`
-			}
+			case AnyDirWithContext_Tags.Normal: {
+				switch (parent.inner[0].tag) {
+					case AnyNormalDir_Tags.Dir: {
+						return `dir:${parent.inner[0].inner[0].uuid}`
+					}
 
-			case AnyDirEnumWithShareInfo_Tags.Root: {
-				return `root:${parent.inner[0].uuid}`
-			}
+					case AnyNormalDir_Tags.Root: {
+						return `root:${parent.inner[0].inner[0].uuid}`
+					}
 
-			case AnyDirEnumWithShareInfo_Tags.SharedDir: {
-				const sharedDir = parent.inner[0]
-
-				if (sharedDir.sharingRole.tag === SharingRole_Tags.Sharer) {
-					switch (sharedDir.dir.tag) {
-						case DirWithMetaEnum_Tags.Dir: {
-							return `shared-out-dir:${sharedDir.dir.inner[0].uuid}`
-						}
-
-						case DirWithMetaEnum_Tags.Root: {
-							return `shared-out-root:${sharedDir.dir.inner[0].uuid}`
-						}
+					default: {
+						throw new Error("Unknown AnyNormalDir tag")
 					}
 				}
+			}
 
-				switch (sharedDir.dir.tag) {
-					case DirWithMetaEnum_Tags.Dir: {
-						return `shared-in-dir:${sharedDir.dir.inner[0].uuid}`
+			case AnyDirWithContext_Tags.Shared: {
+				switch (parent.inner[0].dir.tag) {
+					case AnySharedDir_Tags.Dir: {
+						return `shared-dir:${parent.inner[0].dir.inner[0].inner.uuid}`
 					}
 
-					case DirWithMetaEnum_Tags.Root: {
-						return `shared-in-root:${sharedDir.dir.inner[0].uuid}`
+					case AnySharedDir_Tags.Root: {
+						return `shared-root:${parent.inner[0].dir.inner[0].inner.uuid}`
+					}
+
+					default: {
+						throw new Error("Unknown AnySharedDir tag")
 					}
 				}
+			}
+
+			case AnyDirWithContext_Tags.Linked: {
+				switch (parent.inner[0].dir.tag) {
+					case AnyLinkedDir_Tags.Dir: {
+						return `linked-dir:${parent.inner[0].dir.inner[0].inner.uuid}`
+					}
+
+					case AnyLinkedDir_Tags.Root: {
+						return `linked-root:${parent.inner[0].dir.inner[0].inner.uuid}`
+					}
+
+					default: {
+						throw new Error("Unknown AnyLinkedDir tag")
+					}
+				}
+			}
+
+			default: {
+				throw new Error("Unknown AnyDirWithContext tag")
 			}
 		}
 	}
@@ -341,7 +367,7 @@ export class Offline {
 					auth.getSdkClients()
 				])
 
-				const uniqueParents = new Map<string, AnyDirEnumWithShareInfo>()
+				const uniqueParents = new Map<string, AnyDirWithContext>()
 
 				for (const { parent } of files) {
 					const key = this.parentCacheKey(parent)
@@ -361,35 +387,55 @@ export class Offline {
 
 				const parentListings = new Map<
 					string,
-					Awaited<ReturnType<typeof authedSdkClient.listDir> | ReturnType<typeof authedSdkClient.listInShared>> | null
+					Awaited<
+						| ReturnType<typeof authedSdkClient.listDir>
+						| ReturnType<typeof authedSdkClient.listSharedDir>
+						| ReturnType<typeof authedSdkClient.listInSharedRoot>
+					> | null
 				>()
 
 				await Promise.all(
 					Array.from(uniqueParents.entries()).map(async ([key, parent]) => {
 						const listResult = await run(async () => {
 							switch (parent.tag) {
-								case AnyDirEnumWithShareInfo_Tags.Dir: {
-									return authedSdkClient.listDir(new DirEnum.Dir(parent.inner[0]))
+								case AnyDirWithContext_Tags.Normal: {
+									return await authedSdkClient.listDir(parent.inner[0])
 								}
 
-								case AnyDirEnumWithShareInfo_Tags.Root: {
-									return authedSdkClient.listDir(new DirEnum.Root(parent.inner[0]))
-								}
+								case AnyDirWithContext_Tags.Shared: {
+									switch (parent.inner[0].dir.tag) {
+										case AnySharedDir_Tags.Dir: {
+											const parentUuid = unwrapParentUuid(parent.inner[0].dir.inner[0].inner.parent)
 
-								case AnyDirEnumWithShareInfo_Tags.SharedDir: {
-									if (parent.inner[0].sharingRole.tag === SharingRole_Tags.Sharer) {
-										switch (parent.inner[0].dir.tag) {
-											case DirWithMetaEnum_Tags.Dir: {
-												return authedSdkClient.listDir(new DirEnum.Dir(parent.inner[0].dir.inner[0]))
+											if (!parentUuid) {
+												throw new Error("Shared directory is missing parent information.")
 											}
 
-											case DirWithMetaEnum_Tags.Root: {
-												return authedSdkClient.listDir(new DirEnum.Root(parent.inner[0].dir.inner[0]))
+											const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+
+											if (!parentDirFromCache) {
+												throw new Error("Parent directory of shared directory not found in cache.")
 											}
+
+											return await authedSdkClient.listSharedDir(parent.inner[0].dir, parentDirFromCache.shareInfo)
+										}
+
+										case AnySharedDir_Tags.Root: {
+											if (parent.inner[0].shareInfo.tag === SharingRole_Tags.Sharer) {
+												return await authedSdkClient.listOutShared(undefined)
+											}
+
+											return await authedSdkClient.listInSharedRoot()
+										}
+
+										default: {
+											throw new Error("Unsupported shared directory type for listing")
 										}
 									}
+								}
 
-									return authedSdkClient.listInShared(parent.inner[0].dir)
+								default: {
+									throw new Error("Unsupported directory type for listing")
 								}
 							}
 						})
@@ -438,9 +484,7 @@ export class Offline {
 							continue
 						}
 
-						const uuid = unwrapped.shared ? unwrapped.file.file.uuid : unwrapped.file.uuid
-
-						byUuid.set(uuid, f)
+						byUuid.set(unwrapped.file.uuid, f)
 						byName.set(unwrapped.meta.name.trim().toLowerCase(), f)
 					}
 
@@ -514,9 +558,7 @@ export class Offline {
 							const unwrappedNameMatch = unwrapFileMeta(nameMatch)
 
 							if (unwrappedNameMatch.meta) {
-								const nameMatchUuid = unwrappedNameMatch.shared
-									? unwrappedNameMatch.file.file.uuid
-									: unwrappedNameMatch.file.uuid
+								const nameMatchUuid = unwrappedNameMatch.file.uuid
 
 								if (nameMatchUuid !== item.data.uuid) {
 									updatedFile = nameMatch
@@ -565,30 +607,44 @@ export class Offline {
 
 						// TODO: handle root dir name change
 
-						const remoteDir = (() => {
+						const remoteDir: AnyDirWithContext = (() => {
 							switch (item.type) {
 								case "directory": {
-									return new AnyDirEnum.Dir(item.data)
+									return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
 								}
 
 								case "sharedDirectory": {
-									switch (item.data.dir.tag) {
-										case DirWithMetaEnum_Tags.Dir: {
-											return new AnyDirEnum.Dir(item.data.dir.inner[0])
-										}
+									const parentUuid = unwrapParentUuid(item.data.inner.parent)
 
-										case DirWithMetaEnum_Tags.Root: {
-											return new AnyDirEnum.Root(item.data.dir.inner[0])
-										}
-
-										default: {
-											throw new Error("Invalid dir tag")
-										}
+									if (!parentUuid) {
+										throw new Error("Shared directory is missing parent information.")
 									}
+
+									const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+
+									if (!parentDirFromCache) {
+										throw new Error("Parent directory of shared directory not found in cache.")
+									}
+
+									return new AnyDirWithContext.Shared(
+										AnySharedDirWithContext.new({
+											dir: new AnySharedDir.Dir(item.data),
+											shareInfo: parentDirFromCache.shareInfo
+										})
+									)
+								}
+
+								case "sharedRootDirectory": {
+									return new AnyDirWithContext.Shared(
+										AnySharedDirWithContext.new({
+											dir: new AnySharedDir.Root(item.data),
+											shareInfo: item.data.sharingRole
+										})
+									)
 								}
 
 								default: {
-									throw new Error("Invalid directory type")
+									throw new Error(`Unsupported directory type: ${item.type}`)
 								}
 							}
 						})()
@@ -611,8 +667,20 @@ export class Offline {
 						])
 
 						const directoryMeta: DirectoryOfflineMeta = unpack(directoryMetaBytes)
-						const localDirectories = new Map<string, { item: DriveItem; directory: FileSystem.Directory }>()
-						const localFiles = new Map<string, { item: DriveItem; file: FileSystem.File }>()
+						const localDirectories = new Map<
+							string,
+							{
+								item: DriveItem
+								directory: FileSystem.Directory
+							}
+						>()
+						const localFiles = new Map<
+							string,
+							{
+								item: DriveItem
+								file: FileSystem.File
+							}
+						>()
 
 						for (const path in directoryMeta.entries) {
 							const entry = directoryMeta.entries[path]
@@ -623,6 +691,7 @@ export class Offline {
 
 							switch (entry.item.type) {
 								case "directory":
+								case "sharedRootDirectory":
 								case "sharedDirectory": {
 									const directory = new FileSystem.Directory(
 										FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
@@ -657,12 +726,16 @@ export class Offline {
 						}
 
 						const remoteFiles = new Map<string, File | SharedFile>()
-						const remoteDirectories = new Map<string, Dir | SharedDir>()
+						const remoteDirectories = new Map<string, Dir | SharedDir | SharedRootDir>()
 
 						for (const { dir, path } of remoteDirectoryEntries.dirs) {
+							if (dir.tag === NonRootDir_Tags.Linked) {
+								continue
+							}
+
 							const normalizedPath = normalizeFilePathForSdk(path)
 
-							remoteDirectories.set(normalizedPath, dir)
+							remoteDirectories.set(normalizedPath, dir.inner[0])
 						}
 
 						for (const { file, path } of remoteDirectoryEntries.files) {
@@ -748,7 +821,7 @@ export class Offline {
 	public async listFiles(): Promise<
 		{
 			item: DriveItem
-			parent: AnyDirEnumWithShareInfo
+			parent: AnyDirWithContext
 		}[]
 	> {
 		if (this.listFilesCache) {
@@ -810,7 +883,7 @@ export class Offline {
 		skipIndexUpdate
 	}: {
 		file: DriveItem
-		parent: AnyDirEnumWithShareInfo
+		parent: AnyDirWithContext
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 	}): Promise<void> {
@@ -916,12 +989,12 @@ export class Offline {
 		skipIndexUpdate
 	}: {
 		directory: DriveItem
-		parent: AnyDirEnumWithShareInfo
+		parent: AnyDirWithContext
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 	}): Promise<void> {
 		const result = await run(async defer => {
-			if (directory.type !== "directory" && directory.type !== "sharedDirectory") {
+			if (directory.type !== "directory" && directory.type !== "sharedDirectory" && directory.type !== "sharedRootDirectory") {
 				throw new Error("Item not of type directory")
 			}
 
@@ -976,10 +1049,14 @@ export class Offline {
 				const dataDirectoryUriNormalized = normalizeFilePathForSdk(dataDirectory.uri)
 
 				for (const { dir, path } of transferred.directories) {
+					if (dir.tag === NonRootDir_Tags.Linked) {
+						continue
+					}
+
 					const normalizedPath = normalizeFilePathForSdk(path.slice(dataDirectoryUriNormalized.length))
 
 					entries[normalizedPath] = {
-						item: unwrappedDirIntoDriveItem(unwrapDirMeta(dir))
+						item: unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner[0]))
 					}
 				}
 
@@ -1031,61 +1108,61 @@ export class Offline {
 		}
 	}
 
-	private findParentAnyDirEnumWithShareInfo(pathToItem: Record<string, DriveItem>, dirname: string): AnyDirEnumWithShareInfo | null {
+	private findParentAnyDirWithContext(pathToItem: Record<string, DriveItem>, dirname: string): AnyDirWithContext | null {
 		const item = pathToItem[dirname]
 
-		if (!item || (item.type !== "directory" && item.type !== "sharedDirectory")) {
+		if (!item || (item.type !== "directory" && item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory")) {
 			return null
 		}
 
 		switch (item.type) {
 			case "directory": {
-				return new AnyDirEnumWithShareInfo.Dir(item.data)
+				return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
 			}
 
 			case "sharedDirectory": {
-				switch (item.data.dir.tag) {
-					case DirWithMetaEnum_Tags.Dir: {
-						return new AnyDirEnumWithShareInfo.SharedDir(item.data)
-					}
+				const parentUuid = unwrapParentUuid(item.data.inner.parent)
 
-					case DirWithMetaEnum_Tags.Root: {
-						return new AnyDirEnumWithShareInfo.Root(item.data)
-					}
-
-					default: {
-						return null
-					}
+				if (!parentUuid) {
+					throw new Error("Shared directory is missing parent information.")
 				}
+
+				const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+
+				if (!parentDirFromCache) {
+					throw new Error("Parent directory of shared directory not found in cache.")
+				}
+
+				return new AnyDirWithContext.Shared(
+					AnySharedDirWithContext.new({
+						dir: new AnySharedDir.Dir(item.data),
+						shareInfo: parentDirFromCache.shareInfo
+					})
+				)
+			}
+
+			case "sharedRootDirectory": {
+				return new AnyDirWithContext.Shared(
+					AnySharedDirWithContext.new({
+						dir: new AnySharedDir.Root(item.data),
+						shareInfo: item.data.sharingRole
+					})
+				)
 			}
 		}
 	}
 
-	public async listDirectories(parent?: AnyDirEnumWithShareInfo): Promise<{
+	public async listDirectories(parent?: AnyDirWithContext): Promise<{
 		files: {
 			item: DriveItem
-			parent: AnyDirEnumWithShareInfo
+			parent: AnyDirWithContext
 		}[]
 		directories: {
 			item: DriveItem
-			parent: AnyDirEnumWithShareInfo
+			parent: AnyDirWithContext
 		}[]
 	}> {
-		const cacheKey: string = parent
-			? ((() => {
-					switch (parent.tag) {
-						case AnyDirEnumWithShareInfo_Tags.Dir:
-						case AnyDirEnumWithShareInfo_Tags.SharedDir: {
-							return unwrapDirMeta(parent.inner[0]).uuid
-						}
-
-						case AnyDirEnumWithShareInfo_Tags.Root: {
-							return parent.inner[0].uuid
-						}
-					}
-				})() ?? "__root__")
-			: "__root__"
-
+		const cacheKey: string = parent ? this.parentCacheKey(parent) : "root"
 		const cached = this.listDirectoriesCache.get(cacheKey)
 
 		if (cached) {
@@ -1114,7 +1191,11 @@ export class Offline {
 
 					const meta: DirectoryOfflineMeta = unpack(await metaFile.bytes())
 
-					if (meta.item.type !== "directory") {
+					if (
+						meta.item.type !== "directory" &&
+						meta.item.type !== "sharedDirectory" &&
+						meta.item.type !== "sharedRootDirectory"
+					) {
 						return
 					}
 
@@ -1139,17 +1220,20 @@ export class Offline {
 			let parentUuid: string | null = null
 
 			switch (parent.tag) {
-				case AnyDirEnumWithShareInfo_Tags.Dir:
-				case AnyDirEnumWithShareInfo_Tags.SharedDir: {
+				case AnyDirWithContext_Tags.Normal: {
 					parentUuid = unwrapDirMeta(parent.inner[0]).uuid
 
 					break
 				}
 
-				case AnyDirEnumWithShareInfo_Tags.Root: {
-					parentUuid = parent.inner[0].uuid
+				case AnyDirWithContext_Tags.Shared: {
+					parentUuid = unwrapDirMeta(parent.inner[0].dir).uuid
 
 					break
+				}
+
+				default: {
+					return null
 				}
 			}
 
@@ -1202,7 +1286,9 @@ export class Offline {
 
 				if (
 					entryMeta.item.data.uuid === parentUuid &&
-					(entryMeta.item.type === "directory" || entryMeta.item.type === "sharedDirectory")
+					(entryMeta.item.type === "directory" ||
+						entryMeta.item.type === "sharedDirectory" ||
+						entryMeta.item.type === "sharedRootDirectory")
 				) {
 					directoryMeta = meta
 					topLevelUuid = topLevelEntry.name
@@ -1234,7 +1320,12 @@ export class Offline {
 		for (const path in directoryMeta.entries) {
 			const entryMeta = directoryMeta.entries[path]
 
-			if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
+			if (
+				!entryMeta ||
+				(entryMeta.item.type !== "directory" &&
+					entryMeta.item.type !== "sharedDirectory" &&
+					entryMeta.item.type !== "sharedRootDirectory")
+			) {
 				continue
 			}
 
@@ -1272,8 +1363,9 @@ export class Offline {
 
 			switch (entryMeta.item.type) {
 				case "directory":
+				case "sharedRootDirectory":
 				case "sharedDirectory": {
-					const parent = this.findParentAnyDirEnumWithShareInfo(pathToItem, dirname)
+					const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
 					if (!parent) {
 						continue
@@ -1289,7 +1381,7 @@ export class Offline {
 
 				case "file":
 				case "sharedFile": {
-					const parent = this.findParentAnyDirEnumWithShareInfo(pathToItem, dirname)
+					const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
 					if (!parent) {
 						continue
@@ -1346,7 +1438,11 @@ export class Offline {
 
 						const directoryMeta: DirectoryOfflineMeta = unpack(await innerEntry.bytes())
 
-						if (directoryMeta.item.type !== "directory" && directoryMeta.item.type !== "sharedDirectory") {
+						if (
+							directoryMeta.item.type !== "directory" &&
+							directoryMeta.item.type !== "sharedDirectory" &&
+							directoryMeta.item.type !== "sharedRootDirectory"
+						) {
 							return
 						}
 
@@ -1362,7 +1458,12 @@ export class Offline {
 						for (const path in directoryMeta.entries) {
 							const entryMeta = directoryMeta.entries[path]
 
-							if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
+							if (
+								!entryMeta ||
+								(entryMeta.item.type !== "directory" &&
+									entryMeta.item.type !== "sharedDirectory" &&
+									entryMeta.item.type !== "sharedRootDirectory")
+							) {
 								continue
 							}
 
@@ -1386,8 +1487,9 @@ export class Offline {
 
 							switch (entryMeta.item.type) {
 								case "directory":
+								case "sharedRootDirectory":
 								case "sharedDirectory": {
-									const parent = this.findParentAnyDirEnumWithShareInfo(pathToItem, dirname)
+									const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
 									if (!parent) {
 										continue
@@ -1403,7 +1505,7 @@ export class Offline {
 
 								case "file":
 								case "sharedFile": {
-									const parent = this.findParentAnyDirEnumWithShareInfo(pathToItem, dirname)
+									const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
 									if (!parent) {
 										continue
@@ -1476,6 +1578,7 @@ export class Offline {
 			}
 
 			case "directory":
+			case "sharedRootDirectory":
 			case "sharedDirectory": {
 				this.ensureDirectories()
 
@@ -1521,7 +1624,12 @@ export class Offline {
 					for (const path in directoryMeta.entries) {
 						const entryMeta = directoryMeta.entries[path]
 
-						if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
+						if (
+							!entryMeta ||
+							(entryMeta.item.type !== "directory" &&
+								entryMeta.item.type !== "sharedDirectory" &&
+								entryMeta.item.type !== "sharedRootDirectory")
+						) {
 							continue
 						}
 
@@ -1557,6 +1665,7 @@ export class Offline {
 
 						switch (entryMeta.item.type) {
 							case "directory":
+							case "sharedRootDirectory":
 							case "sharedDirectory": {
 								dirs += 1
 
@@ -1616,7 +1725,11 @@ export class Offline {
 
 				await Promise.all(
 					topLevelDirectories.map(async ({ item: directoryItem }) => {
-						if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+						if (
+							directoryItem.type !== "directory" &&
+							directoryItem.type !== "sharedDirectory" &&
+							directoryItem.type !== "sharedRootDirectory"
+						) {
 							return
 						}
 
@@ -1686,7 +1799,11 @@ export class Offline {
 		const { directories: topLevelDirectories } = await this.listDirectories()
 
 		for (const { item: directoryItem } of topLevelDirectories) {
-			if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+			if (
+				directoryItem.type !== "directory" &&
+				directoryItem.type !== "sharedDirectory" &&
+				directoryItem.type !== "sharedRootDirectory"
+			) {
 				continue
 			}
 
@@ -1731,7 +1848,7 @@ export class Offline {
 			return cachedLocalDir
 		}
 
-		if (item.type !== "directory" && item.type !== "sharedDirectory") {
+		if (item.type !== "directory" && item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory") {
 			return null
 		}
 
@@ -1740,7 +1857,11 @@ export class Offline {
 		const { directories: topLevelDirectories } = await this.listDirectories()
 
 		for (const { item: directoryItem } of topLevelDirectories) {
-			if (directoryItem.type !== "directory" && directoryItem.type !== "sharedDirectory") {
+			if (
+				directoryItem.type !== "directory" &&
+				directoryItem.type !== "sharedDirectory" &&
+				directoryItem.type !== "sharedRootDirectory"
+			) {
 				continue
 			}
 
@@ -1756,7 +1877,9 @@ export class Offline {
 
 			if (
 				directoryMeta.item.data.uuid === item.data.uuid &&
-				(directoryMeta.item.type === "directory" || directoryMeta.item.type === "sharedDirectory")
+				(directoryMeta.item.type === "directory" ||
+					directoryMeta.item.type === "sharedDirectory" ||
+					directoryMeta.item.type === "sharedRootDirectory")
 			) {
 				const foundDirectory = new FileSystem.Directory(
 					FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid)
@@ -1772,7 +1895,12 @@ export class Offline {
 			for (const path in directoryMeta.entries) {
 				const entryMeta = directoryMeta.entries[path]
 
-				if (!entryMeta || (entryMeta.item.type !== "directory" && entryMeta.item.type !== "sharedDirectory")) {
+				if (
+					!entryMeta ||
+					(entryMeta.item.type !== "directory" &&
+						entryMeta.item.type !== "sharedDirectory" &&
+						entryMeta.item.type !== "sharedRootDirectory")
+				) {
 					continue
 				}
 

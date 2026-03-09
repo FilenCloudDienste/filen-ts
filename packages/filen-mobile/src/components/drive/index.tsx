@@ -22,7 +22,7 @@ import { useShallow } from "zustand/shallow"
 import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
-import { AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import { debounce } from "es-toolkit/function"
 
 const Header = memo(() => {
@@ -408,17 +408,63 @@ const Drive = memo(() => {
 		}
 	)
 
-	const parent = useMemo((): AnyDirEnumWithShareInfo | undefined => {
+	const parent = useMemo((): AnyDirWithContext | undefined => {
 		if (drivePath.type === "drive" && stringifiedClient && (!drivePath.uuid || (drivePath.uuid ?? "") === stringifiedClient.rootUuid)) {
-			return new AnyDirEnumWithShareInfo.Root({
-				uuid: stringifiedClient.rootUuid
-			})
+			return new AnyDirWithContext.Normal(
+				new AnyNormalDir.Root({
+					uuid: stringifiedClient.rootUuid
+				})
+			)
 		}
 
-		const fromCache = cache.directoryUuidToAnyDirWithShareInfo.get(drivePath.uuid ?? "")
+		switch (drivePath.type) {
+			case "drive":
+			case "favorites":
+			case "recents":
+			case "trash": {
+				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
 
-		if (fromCache) {
-			return fromCache
+				if (fromCache) {
+					return fromCache
+				}
+
+				break
+			}
+
+			case "sharedIn":
+			case "sharedOut": {
+				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
+
+				if (fromCache) {
+					return fromCache
+				}
+
+				break
+			}
+
+			case "links": {
+				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
+
+				if (fromCache) {
+					return fromCache
+				}
+
+				break
+			}
+
+			case "offline": {
+				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
+
+				if (fromCache) {
+					return fromCache
+				}
+
+				break
+			}
+
+			default: {
+				return undefined
+			}
 		}
 
 		return undefined

@@ -7,7 +7,6 @@ import {
 	type DecryptedDirMeta,
 	type SharedDir,
 	type SharedFile,
-	DirWithMetaEnum_Tags,
 	type ChatParticipant,
 	type NoteParticipant,
 	type Contact,
@@ -15,14 +14,21 @@ import {
 	type ManagedAbortSignal,
 	PauseSignal as SdkPauseSignal,
 	ParentUuid_Tags,
-	type ParentUuid,
+	ParentUuid,
 	FilenSdkError,
-	type AnyDirEnum,
-	type AnyDirEnumWithShareInfo,
-	AnyDirEnum_Tags,
-	AnyDirEnumWithShareInfo_Tags,
 	type ContactRequestIn,
-	type ContactRequestOut
+	type ContactRequestOut,
+	type SharedRootDir,
+	SharingRole,
+	AnyDirWithContext,
+	AnyDirWithContext_Tags,
+	AnyNormalDir_Tags,
+	AnySharedDir_Tags,
+	AnyNormalDir,
+	AnySharedDir,
+	AnyFile,
+	AnyFile_Tags,
+	AnyLinkedDir_Tags
 } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
@@ -161,22 +167,54 @@ export function unwrapSdkError(error: unknown): FilenSdkError | null {
 	return null
 }
 
-export function unwrapAnyDirUuid(dir: AnyDirEnum | AnyDirEnumWithShareInfo): string | null {
+export function unwrapAnyDirUuid(dir: AnyDirWithContext): string | null {
 	switch (dir.tag) {
-		case AnyDirEnum_Tags.Dir: {
-			return dir.inner[0].uuid
+		case AnyDirWithContext_Tags.Linked: {
+			switch (dir.inner[0].dir.tag) {
+				case AnyLinkedDir_Tags.Dir: {
+					return dir.inner[0].dir.inner[0].inner.uuid
+				}
+
+				case AnyLinkedDir_Tags.Root: {
+					return dir.inner[0].dir.inner[0].inner.uuid
+				}
+
+				default: {
+					return null
+				}
+			}
 		}
 
-		case AnyDirEnum_Tags.Root: {
-			return dir.inner[0].uuid
+		case AnyDirWithContext_Tags.Normal: {
+			switch (dir.inner[0].tag) {
+				case AnyNormalDir_Tags.Dir: {
+					return dir.inner[0].inner[0].uuid
+				}
+
+				case AnyNormalDir_Tags.Root: {
+					return dir.inner[0].inner[0].uuid
+				}
+
+				default: {
+					return null
+				}
+			}
 		}
 
-		case AnyDirEnum_Tags.RootWithMeta: {
-			return dir.inner[0].uuid
-		}
+		case AnyDirWithContext_Tags.Shared: {
+			switch (dir.inner[0].dir.tag) {
+				case AnySharedDir_Tags.Dir: {
+					return dir.inner[0].dir.inner[0].inner.uuid
+				}
 
-		case AnyDirEnumWithShareInfo_Tags.SharedDir: {
-			return dir.inner[0].dir.inner[0].uuid
+				case AnySharedDir_Tags.Root: {
+					return dir.inner[0].dir.inner[0].inner.uuid
+				}
+
+				default: {
+					return null
+				}
+			}
 		}
 
 		default: {
@@ -197,19 +235,97 @@ export function unwrapParentUuid(parent: ParentUuid): string | null {
 	}
 }
 
-export function unwrapDirMeta(dir: Dir | SharedDir):
-	| {
-			meta: DecryptedDirMeta | null
-			shared: false
-			dir: Dir
-			uuid: string
-	  }
-	| {
-			meta: DecryptedDirMeta | null
-			shared: true
-			dir: SharedDir
-			uuid: string
-	  } {
+export type UnwrapDirMetaBase = {
+	meta: DecryptedDirMeta | null
+	uuid: string
+}
+
+export type UnwrapDirMetaNormal = UnwrapDirMetaBase & {
+	shared: false
+	dir: Dir
+}
+
+export type UnwrapDirMetaShared = UnwrapDirMetaBase & {
+	shared: true
+	root: false
+	sharedTag: boolean
+	dir: SharedDir
+}
+
+export type UnwrapDirMetaSharedRoot = UnwrapDirMetaBase & {
+	shared: true
+	root: true
+	dir: SharedRootDir
+	sharingRole: SharingRole
+}
+
+export type UnwrapDirMetaResult = UnwrapDirMetaNormal | UnwrapDirMetaShared | UnwrapDirMetaSharedRoot
+
+export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithContext | AnyNormalDir | AnySharedDir): UnwrapDirMetaResult {
+	if (AnyDirWithContext.instanceOf(dir)) {
+		switch (dir.tag) {
+			case AnyDirWithContext_Tags.Linked: {
+				throw new Error(`Unsupported AnyDirWithContext tag: ${dir.tag}`)
+			}
+
+			case AnyDirWithContext_Tags.Shared: {
+				switch (dir.inner[0].dir.tag) {
+					case AnySharedDir_Tags.Dir: {
+						return unwrapDirMeta(dir.inner[0].dir.inner[0])
+					}
+
+					case AnySharedDir_Tags.Root: {
+						return unwrapDirMeta(dir.inner[0].dir.inner[0])
+					}
+
+					default: {
+						throw new Error("Unknown AnySharedDir tag")
+					}
+				}
+			}
+
+			case AnyDirWithContext_Tags.Normal: {
+				switch (dir.inner[0].tag) {
+					case AnyNormalDir_Tags.Dir: {
+						return unwrapDirMeta(dir.inner[0].inner[0])
+					}
+
+					default: {
+						throw new Error(`Unsupported AnyNormalDir tag: ${dir.inner[0].tag}`)
+					}
+				}
+			}
+		}
+	}
+
+	if (AnyNormalDir.instanceOf(dir)) {
+		switch (dir.tag) {
+			case AnyNormalDir_Tags.Dir: {
+				return unwrapDirMeta(dir.inner[0])
+			}
+
+			default: {
+				throw new Error(`Unsupported AnyNormalDir tag: ${dir.tag}`)
+			}
+		}
+	}
+
+	if (AnySharedDir.instanceOf(dir)) {
+		switch (dir.tag) {
+			case AnySharedDir_Tags.Dir: {
+				return unwrapDirMeta(dir.inner[0])
+			}
+
+			case AnySharedDir_Tags.Root: {
+				return unwrapDirMeta(dir.inner[0])
+			}
+
+			default: {
+				throw new Error("Unknown AnySharedDir tag")
+			}
+		}
+	}
+
 	if ("uuid" in dir) {
 		switch (dir.meta.tag) {
 			case DirMeta_Tags.Decoded: {
@@ -234,96 +350,127 @@ export function unwrapDirMeta(dir: Dir | SharedDir):
 		}
 	}
 
-	switch (dir.dir.tag) {
-		case DirWithMetaEnum_Tags.Dir: {
-			const [inner] = dir.dir.inner
+	if ("sharedTag" in dir) {
+		switch (dir.inner.meta.tag) {
+			case DirMeta_Tags.Decoded: {
+				const [decoded] = dir.inner.meta.inner
 
-			switch (inner.meta.tag) {
-				case DirMeta_Tags.Decoded: {
-					const [decoded] = inner.meta.inner
-
-					return {
-						meta: decoded,
-						shared: true,
-						dir,
-						uuid: inner.uuid
-					}
+				return {
+					meta: decoded,
+					shared: true,
+					root: false,
+					dir,
+					uuid: dir.inner.uuid,
+					sharedTag: dir.sharedTag
 				}
+			}
 
-				default: {
-					return {
-						meta: null,
-						shared: true,
-						dir,
-						uuid: inner.uuid
-					}
+			default: {
+				return {
+					meta: null,
+					shared: true,
+					root: false,
+					sharedTag: dir.sharedTag,
+					dir,
+					uuid: dir.inner.uuid
 				}
 			}
 		}
+	}
 
-		case DirWithMetaEnum_Tags.Root: {
-			const [inner] = dir.dir.inner
+	switch (dir.inner.meta.tag) {
+		case DirMeta_Tags.Decoded: {
+			const [decoded] = dir.inner.meta.inner
 
-			switch (inner.meta.tag) {
-				case DirMeta_Tags.Decoded: {
-					const [decoded] = inner.meta.inner
+			return {
+				meta: decoded,
+				shared: true,
+				root: true,
+				sharingRole: dir.sharingRole,
+				dir,
+				uuid: dir.inner.uuid
+			}
+		}
 
-					return {
-						meta: decoded,
-						shared: true,
-						dir,
-						uuid: inner.uuid
-					}
-				}
-
-				default: {
-					return {
-						meta: null,
-						shared: true,
-						dir,
-						uuid: inner.uuid
-					}
-				}
+		default: {
+			return {
+				meta: null,
+				shared: true,
+				root: true,
+				sharingRole: dir.sharingRole,
+				dir,
+				uuid: dir.inner.uuid
 			}
 		}
 	}
 }
 
 export function unwrappedDirIntoDriveItem(unwrappedDir: ReturnType<typeof unwrapDirMeta>): DriveItem {
-	return (
-		unwrappedDir.shared
-			? {
-					type: "sharedDirectory",
-					data: {
-						...unwrappedDir.dir,
-						size: 0n,
-						decryptedMeta: unwrappedDir.meta,
-						uuid: unwrappedDir.uuid
-					}
+	if (unwrappedDir.shared) {
+		if (unwrappedDir.root) {
+			return {
+				type: "sharedRootDirectory",
+				data: {
+					...unwrappedDir.dir,
+					size: 0n,
+					decryptedMeta: unwrappedDir.meta,
+					uuid: unwrappedDir.uuid
 				}
-			: {
-					type: "directory",
-					data: {
-						...unwrappedDir.dir,
-						size: 0n,
-						decryptedMeta: unwrappedDir.meta
-					}
-				}
-	) satisfies DriveItem
+			}
+		}
+
+		return {
+			type: "sharedDirectory",
+			data: {
+				...unwrappedDir.dir,
+				size: 0n,
+				decryptedMeta: unwrappedDir.meta,
+				uuid: unwrappedDir.uuid
+			}
+		}
+	}
+
+	return {
+		type: "directory",
+		data: {
+			...unwrappedDir.dir,
+			size: 0n,
+			decryptedMeta: unwrappedDir.meta
+		}
+	}
 }
 
-export function unwrapFileMeta(file: File | SharedFile):
-	| {
-			meta: DecryptedFileMeta | null
-			shared: false
-			file: File
-	  }
-	| {
-			meta: DecryptedFileMeta | null
-			shared: true
-			file: SharedFile
-	  } {
-	if ("uuid" in file) {
+export type UnwrapFileMetaBase = {
+	meta: DecryptedFileMeta | null
+}
+
+export type UnwrapFileMetaRegular = UnwrapFileMetaBase & {
+	shared: false
+	file: File
+}
+
+export type UnwrapFileMetaShared = UnwrapFileMetaBase & {
+	shared: true
+	file: SharedFile
+}
+
+export type UnwrapFileMetaResult = UnwrapFileMetaRegular | UnwrapFileMetaShared
+
+export function unwrapFileMeta(file: File | SharedFile | AnyFile): UnwrapFileMetaResult {
+	if (AnyFile.instanceOf(file)) {
+		switch (file.tag) {
+			case AnyFile_Tags.File:
+			case AnyFile_Tags.Shared: {
+				return unwrapFileMeta(file.inner[0])
+			}
+
+			default: {
+				throw new Error(`Unsupported AnyFile tag: ${file.tag}`)
+			}
+		}
+	}
+
+	if ("favorited" in file) {
 		switch (file.meta.tag) {
 			case FileMeta_Tags.Decoded: {
 				const [decoded] = file.meta.inner
@@ -345,9 +492,9 @@ export function unwrapFileMeta(file: File | SharedFile):
 		}
 	}
 
-	switch (file.file.meta.tag) {
+	switch (file.meta.tag) {
 		case FileMeta_Tags.Decoded: {
-			const [decoded] = file.file.meta.inner
+			const [decoded] = file.meta.inner
 
 			return {
 				meta: decoded,
@@ -367,25 +514,25 @@ export function unwrapFileMeta(file: File | SharedFile):
 }
 
 export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwrapFileMeta>): DriveItem {
-	return (
-		unwrappedFile.shared
-			? {
-					type: "sharedFile",
-					data: {
-						...unwrappedFile.file,
-						size: unwrappedFile.meta?.size ?? 0n,
-						decryptedMeta: unwrappedFile.meta,
-						uuid: unwrappedFile.file.file.uuid
-					}
-				}
-			: {
-					type: "file",
-					data: {
-						...unwrappedFile.file,
-						decryptedMeta: unwrappedFile.meta
-					}
-				}
-	) satisfies DriveItem
+	if (unwrappedFile.shared) {
+		return {
+			type: "sharedFile",
+			data: {
+				...unwrappedFile.file,
+				size: unwrappedFile.meta?.size ?? 0n,
+				decryptedMeta: unwrappedFile.meta,
+				uuid: unwrappedFile.file.uuid
+			}
+		}
+	}
+
+	return {
+		type: "file",
+		data: {
+			...unwrappedFile.file,
+			decryptedMeta: unwrappedFile.meta
+		}
+	}
 }
 
 export function contactDisplayName(contact: Contact | NoteParticipant | ChatParticipant | ContactRequestIn | ContactRequestOut): string {

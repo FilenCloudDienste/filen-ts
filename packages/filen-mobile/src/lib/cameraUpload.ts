@@ -1,6 +1,6 @@
 import * as MediaLibrary from "expo-media-library/next"
 import auth from "@/lib/auth"
-import { type Dir, AnyDirEnum, type FileWithPath, DirEnum } from "@filen/sdk-rs"
+import { type Dir, type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
 import { PauseSignal, normalizeFilePathForSdk, unwrapFileMeta, normalizeFilePathForExpo, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import pathModule from "path"
 import transfers from "@/lib/transfers"
@@ -17,8 +17,6 @@ import events from "@/lib/events"
 import { LRUCache } from "lru-cache"
 import { parseExifDate } from "@/lib/exif"
 import drive from "@/lib/drive"
-
-const CACHE_DIR_URI = FileSystem.Paths.cache.uri
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -43,7 +41,7 @@ export type Config =
 	| {
 			enabled: true
 			remoteDir: Dir
-			albums: MediaLibrary.Album[]
+			albumIds: string[]
 			activationTimestamp: number
 			afterActivation: boolean
 			includeVideos: boolean
@@ -119,7 +117,7 @@ class CameraUpload {
 
 		// Guard: only compress files within the app's cache directory to prevent
 		// processing arbitrary paths if this method is ever called with an unexpected input.
-		if (!file.uri.startsWith(CACHE_DIR_URI)) {
+		if (!file.uri.startsWith(FileSystem.Paths.cache.uri)) {
 			throw new Error(`compress() called on file outside cache directory: ${file.uri}`)
 		}
 
@@ -212,8 +210,17 @@ class CameraUpload {
 		}
 	}
 
-	private async listLocal({ albums, signal }: { albums: MediaLibrary.Album[]; signal: AbortSignal }): Promise<LocalTree> {
+	private async listLocal({
+		config,
+		signal
+	}: {
+		config: Config & {
+			enabled: true
+		}
+		signal: AbortSignal
+	}): Promise<LocalTree> {
 		const tree: LocalTree = {}
+		const albums = config.albumIds.map(id => new MediaLibrary.Album(id))
 
 		await Promise.all(
 			albums.map(async album => {
@@ -237,6 +244,7 @@ class CameraUpload {
 								if (signal.aborted) {
 									throw new Error("Aborted")
 								}
+
 								return {
 									asset,
 									info: await asset.getInfo()
@@ -255,6 +263,23 @@ class CameraUpload {
 					})
 				)
 
+				// Phase 1.5: filter out assets that will be excluded from the delta anyway.
+				// This avoids collision resolution and tree construction work for assets that
+				// would be discarded later. Filtering here (after getInfo) rather than in deltas()
+				// is cheaper because getInfo() is needed regardless, but tree construction and
+				// collision resolution are not.
+				const filtered = infos.filter(({ info }) => {
+					if (!config.includeVideos && info.mediaType === MediaLibrary.MediaType.VIDEO) {
+						return false
+					}
+
+					if (config.afterActivation && info.creationTime && info.creationTime < config.activationTimestamp) {
+						return false
+					}
+
+					return true
+				})
+
 				// Phase 2: sort by creationTime ascending before building the tree.
 				// On iOS, asset filenames cycle (IMG_0001 … IMG_9999 → IMG_0001 …), so multiple
 				// assets can share the same filename. Because getInfo() resolves in non-deterministic
@@ -264,7 +289,7 @@ class CameraUpload {
 				// duplicates consistently receive a collision suffix – stable across runs.
 				// asset.id (localIdentifier) is used as a tiebreaker so equal creationTimes
 				// are also resolved deterministically.
-				infos.sort((a, b) => {
+				filtered.sort((a, b) => {
 					const timeDiff = (a.info.creationTime ?? 0) - (b.info.creationTime ?? 0)
 
 					if (timeDiff !== 0) {
@@ -275,7 +300,7 @@ class CameraUpload {
 				})
 
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
-				for (const { asset, info } of infos) {
+				for (const { asset, info } of filtered) {
 					let path = normalizeFilePathForSdk(pathModule.posix.join(title, info.filename)).toLowerCase().trim()
 					let iteration = 0
 
@@ -317,7 +342,7 @@ class CameraUpload {
 	private async listRemote({ remoteDir, signal }: { remoteDir: Dir; signal: AbortSignal }): Promise<RemoteTree> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
-			new AnyDirEnum.Dir(remoteDir),
+			new AnyDirWithContext.Normal(new AnyNormalDir.Dir(remoteDir)),
 			{
 				onProgress() {
 					// Noop
@@ -393,7 +418,10 @@ class CameraUpload {
 		}
 
 		const [localTree, remoteTree] = await Promise.all([
-			this.listLocal({ albums: config.albums, signal }),
+			this.listLocal({
+				config,
+				signal
+			}),
 			this.listRemote({
 				remoteDir: config.remoteDir,
 				signal
@@ -417,13 +445,6 @@ class CameraUpload {
 					this.normalizeModificationTimestampForComparison(Number(remoteFileMeta.meta.modified)) <
 						this.normalizeModificationTimestampForComparison(localFile.info.modificationTime))
 			) {
-				if (
-					(!config.includeVideos && localFile.info.mediaType === MediaLibrary.MediaType.VIDEO) ||
-					(config.afterActivation && localFile.info.creationTime && localFile.info.creationTime < config.activationTimestamp)
-				) {
-					continue
-				}
-
 				deltas.push({
 					type: "upload",
 					file: localFile
@@ -471,8 +492,7 @@ class CameraUpload {
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
-		const parentDirEnum = new DirEnum.Dir(config.remoteDir)
-
+		const parentDirEnum = new AnyNormalDir.Dir(config.remoteDir)
 		const dir = await authedSdkClient.createDir(parentDirEnum, parentDirName, {
 			signal
 		})
@@ -486,7 +506,7 @@ class CameraUpload {
 		const result = await run(async defer => {
 			const config = await this.getConfig()
 
-			if (!config.enabled || config.albums.length === 0) {
+			if (!config.enabled || config.albumIds.length === 0) {
 				return
 			}
 
@@ -562,7 +582,7 @@ class CameraUpload {
 									signal: abortController.signal
 								})
 
-								const parentDirEnum = new DirEnum.Dir(parentDir)
+								const parentDirEnum = new AnyNormalDir.Dir(parentDir)
 
 								const { files } = await transfers.upload({
 									id: delta.file.info.id,

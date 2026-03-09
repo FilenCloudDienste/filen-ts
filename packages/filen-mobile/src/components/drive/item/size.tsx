@@ -3,7 +3,7 @@ import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import useDirectorySizeQuery from "@/queries/useDirectorySize.query"
 import { formatBytes } from "@filen/utils"
-import { type AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
+import { type AnyDirWithContext } from "@filen/sdk-rs"
 import type { DriveItemMenuOrigin } from "@/components/drive/item/menu"
 
 export const Size = memo(
@@ -13,18 +13,29 @@ export const Size = memo(
 	}: {
 		info: ListRenderItemInfo<{
 			item: DriveItem
-			parent?: AnyDirEnumWithShareInfo
+			parent?: AnyDirWithContext
 		}>
 		origin: DriveItemMenuOrigin
 	}) => {
 		const directorySizeQuery = useDirectorySizeQuery(
 			{
 				uuid: info.item.item.data.uuid,
-				offline: origin === "offline",
-				trash: origin === "trash"
+				type:
+					origin === "sharedIn"
+						? "sharedIn"
+						: origin === "sharedOut"
+							? "sharedOut"
+							: origin === "trash"
+								? "trash"
+								: origin === "offline"
+									? "offline"
+									: "normal"
 			},
 			{
-				enabled: info.item.item.type === "directory" || info.item.item.type === "sharedDirectory"
+				enabled:
+					info.item.item.type === "directory" ||
+					info.item.item.type === "sharedDirectory" ||
+					info.item.item.type === "sharedRootDirectory"
 			}
 		)
 

@@ -7,7 +7,7 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
-import { SharingRole_Tags, type AnyDirEnumWithShareInfo, type FileVersion } from "@filen/sdk-rs"
+import { SharingRole_Tags, type FileVersion, type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
@@ -19,7 +19,7 @@ import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
 import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
-import { pack } from "msgpackr"
+import { pack } from "@/lib/msgpack"
 import { simpleDate } from "@/lib/time"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import auth from "@/lib/auth"
@@ -49,7 +49,7 @@ export function createMenuButtons({
 }: {
 	item: DriveItem
 	origin: DriveItemMenuOrigin
-	parent?: AnyDirEnumWithShareInfo
+	parent?: AnyDirWithContext
 	drivePath: DrivePath
 	isStoredOffline: boolean
 	isOnline: boolean
@@ -58,10 +58,12 @@ export function createMenuButtons({
 	const menuButtons: MenuButton[] = []
 	const previewType = item.type === "file" || item.type === "sharedFile" ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
 	const isOwner =
-		item.type === "sharedFile" || item.type === "sharedDirectory" ? item.data.sharingRole.tag === SharingRole_Tags.Receiver : true
+		parent &&
+		(parent.tag === AnyDirWithContext_Tags.Normal ||
+			(parent.tag === AnyDirWithContext_Tags.Shared && parent.inner[0].shareInfo.tag === SharingRole_Tags.Sharer))
 
 	if (
-		(item.type === "directory" || item.type === "sharedDirectory") &&
+		(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") &&
 		(origin === "drive" ||
 			origin === "sharedIn" ||
 			origin === "sharedOut" ||
@@ -98,7 +100,11 @@ export function createMenuButtons({
 	const downloadSubButtons: MenuButton[] = []
 
 	if (
-		(item.type === "file" || item.type === "directory" || item.type === "sharedFile" || item.type === "sharedDirectory") &&
+		(item.type === "file" ||
+			item.type === "directory" ||
+			item.type === "sharedFile" ||
+			item.type === "sharedDirectory" ||
+			item.type === "sharedRootDirectory") &&
 		item.data.decryptedMeta
 	) {
 		downloadSubButtons.push({
@@ -165,7 +171,10 @@ export function createMenuButtons({
 							)
 						}
 
-						if ((item.type === "directory" || item.type === "sharedDirectory") && destination instanceof FileSystem.Directory) {
+						if (
+							(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") &&
+							destination instanceof FileSystem.Directory
+						) {
 							const entries = listLocalDirectoryRecursive(destination)
 
 							await Promise.all(
@@ -807,8 +816,11 @@ export function createMenuButtons({
 
 	if (
 		((origin === "sharedIn" && !parent) ||
-			(origin === "preview" && !isOwner && (item.type === "sharedFile" || item.type === "sharedDirectory"))) &&
-		isOnline
+			(origin === "preview" &&
+				!isOwner &&
+				(item.type === "sharedFile" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"))) &&
+		isOnline &&
+		!parent
 	) {
 		menuButtons.push({
 			id: "removeShare",
@@ -859,8 +871,11 @@ export function createMenuButtons({
 
 	if (
 		((origin === "sharedOut" && !parent) ||
-			(origin === "preview" && isOwner && (item.type === "sharedFile" || item.type === "sharedDirectory"))) &&
-		isOnline
+			(origin === "preview" &&
+				isOwner &&
+				(item.type === "sharedFile" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"))) &&
+		isOnline &&
+		!parent
 	) {
 		menuButtons.push({
 			id: "stopSharing",
@@ -1050,7 +1065,7 @@ const Menu = memo(
 		type: React.ComponentPropsWithoutRef<typeof MenuComponent>["type"]
 		className?: string
 		isAnchoredToRight?: boolean
-		parent?: AnyDirEnumWithShareInfo
+		parent?: AnyDirWithContext
 		onOpenMenu?: () => void
 		onCloseMenu?: () => void
 		drivePath: DrivePath
