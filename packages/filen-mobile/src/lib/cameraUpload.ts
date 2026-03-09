@@ -162,6 +162,7 @@ class CameraUpload {
 		iteration: number
 		path: string
 		asset: {
+			id: string
 			name: string
 			creationTime: number
 			modificationTime: number
@@ -204,7 +205,30 @@ class CameraUpload {
 					.trim()
 			}
 
+			case 4: {
+				return normalizeFilePathForSdk(
+					pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.id).toString(16)}${ext}`)
+				)
+					.toLowerCase()
+					.trim()
+			}
+
+			case 5: {
+				return normalizeFilePathForSdk(
+					pathModule.posix.join(
+						parentDir,
+						`${basename}_${xxHash32(`${asset.id}_${asset.modificationTime}_${asset.creationTime}`).toString(16)}${ext}`
+					)
+				)
+					.toLowerCase()
+					.trim()
+			}
+
 			default: {
+				console.warn(
+					`[CameraUpload] All collision resolution attempts exhausted for "${asset.name}" (id: ${asset.id}). Asset will be skipped.`
+				)
+
 				return null
 			}
 		}
@@ -310,6 +334,7 @@ class CameraUpload {
 								iteration,
 								path,
 								asset: {
+									id: asset.id,
 									name: info.filename,
 									creationTime: info.creationTime ?? 0,
 									modificationTime: info.modificationTime ?? 0
@@ -389,6 +414,7 @@ class CameraUpload {
 						iteration,
 						path,
 						asset: {
+							id: file.file.uuid,
 							name: meta?.name ?? pathModule.posix.basename(path),
 							creationTime: meta ? Number(meta.created) : 0,
 							modificationTime: meta ? Number(meta.modified) : 0
