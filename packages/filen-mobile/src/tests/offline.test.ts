@@ -69,6 +69,7 @@ vi.mock("@/lib/utils", () => ({
 			.replace(/^file:\/+/, "/")
 			.replace(/\/+/g, "/")
 			.replace(/\/$/, ""),
+	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000),
 	unwrapFileMeta: vi.fn((file: unknown) => {
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const f = file as any
