@@ -1,63 +1,34 @@
 ---
 name: commit-work
-description: "Create high-quality git commits: review/stage intended changes, split into logical commits, and write clear commit messages (including Conventional Commits). Use when the user asks to commit, craft a commit message, stage changes, or split work into multiple commits."
+description: >
+    Create high-quality git commits: review/stage intended changes, split into logical commits,
+    and write clear Conventional Commit messages. Use when asked to commit, craft a commit
+    message, stage changes, or split work into multiple commits.
 ---
 
-# Commit work
+# Commit Work
 
 ## Goal
 
-Make commits that are easy to review and safe to ship:
+Make commits that are easy to review and safe to ship: only intended changes are included, commits are logically scoped, messages describe what changed and why.
 
-- only intended changes are included
-- commits are logically scoped (split when needed)
-- commit messages describe what changed and why
+## Workflow
 
-## Inputs to ask for (if missing)
-
-- Single commit or multiple commits? (If unsure: default to multiple small commits when there are unrelated changes.)
-- Commit style: Conventional Commits are required.
-- Any rules: max subject length, required scopes.
-
-## Workflow (checklist)
-
-1. Inspect the working tree before staging
-    - `git status`
-    - `git diff` (unstaged)
-    - If many changes: `git diff --stat`
-2. Decide commit boundaries (split if needed)
-    - Split by: feature vs refactor, backend vs frontend, formatting vs logic, tests vs prod code, dependency bumps vs behavior changes.
-    - If changes are mixed in one file, plan to use patch staging.
-3. Stage only what belongs in the next commit
-    - Prefer patch staging for mixed changes: `git add -p`
-    - To unstage a hunk/file: `git restore --staged -p` or `git restore --staged <path>`
-4. Review what will actually be committed
+1. **Inspect** the working tree before staging
+    - `git status`, `git diff`, `git diff --stat` for many changes
+2. **Decide commit boundaries** (split if needed)
+    - Split by: feature vs refactor, backend vs frontend, formatting vs logic, tests vs prod code, dependency bumps vs behavior changes
+3. **Stage** only what belongs in the next commit
+    - Prefer `git add -p` for mixed changes
+4. **Review** what will be committed
     - `git diff --cached`
-    - Sanity checks:
-        - no secrets or tokens
-        - no accidental debug logging
-        - no unrelated formatting churn
-5. Describe the staged change in 1-2 sentences (before writing the message)
-    - "What changed?" + "Why?"
-    - If you cannot describe it cleanly, the commit is probably too big or mixed; go back to step 2.
-6. Write the commit message
-    - Use Conventional Commits (required):
-        - `type(scope): short summary`
-        - blank line
-        - body (what/why, not implementation diary)
-        - footer (BREAKING CHANGE) if needed
-    - Prefer an editor for multi-line messages: `git commit -v`
-    - Use `references/commit-message-template.md` if helpful.
-7. Run the smallest relevant verification
-    - Use the verify-changes skill — it auto-detects ESLint, tsc, and tests and runs them in order.
-    - If verify-changes isn't applicable, run the repo's fastest meaningful check (unit tests, lint, or build) before moving on.
-8. Repeat for the next commit until the working tree is clean
-9. Do not co-author ever.
-
-## Deliverable
-
-Provide:
-
-- the final commit message(s)
-- a short summary per commit (what/why)
-- the commands used to stage/review (at minimum: `git diff --cached`, plus any tests run)
+    - No secrets, no debug logging, no unrelated churn
+5. **Describe** the staged change in 1-2 sentences (what + why)
+    - If you can't describe it cleanly, the commit is too big — go back to step 2
+6. **Write** the commit message
+    - Conventional Commits (required): `type(scope): short summary`
+    - Body: what/why, not implementation diary
+    - Use `references/commit-message-template.md` if helpful
+7. **Verify** — use the verify-changes skill to run lint/typecheck/tests
+8. **Repeat** for the next commit until the working tree is clean
+9. **Never** add co-author attribution

@@ -1,6 +1,8 @@
 {
 	"env": {
-		"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000"
+		"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
+		"SLASH_COMMAND_TOOL_CHAR_BUDGET": "128000",
+		"ENABLE_LSP_TOOL": "1"
 	},
 	"permissions": {
 		"deny": [
@@ -13,11 +15,10 @@
 			"Bash(grep * .env*)"
 		]
 	},
-	"model": "claude-sonnet-4-6",
-	"attribution": {
-		"commit": "",
-		"pr": ""
+	"enabledPlugins": {
+		"typescript-lsp@claude-plugins-official": true
 	},
+	"model": "claude-opus-4-6",
 	"includeCoAuthoredBy": false,
 	"hooks": {
 		"UserPromptSubmit": [
@@ -30,5 +31,9 @@
 				]
 			}
 		]
+	},
+	"statusLine": {
+		"type": "command",
+		"command": "jq -r '\"\\u001b[\" as $e | (.context_window.used_percentage // 0 | floor) as $pct | (.context_window.context_window_size // 200000) as $total | (($pct * $total / 100 / 1000) | floor | tostring) as $usedK | ($total / 1000 | floor | tostring) as $totalK | (($pct * 20 / 100) | floor) as $filled | (if $pct < 50 then \"32\" elif $pct < 80 then \"33\" else \"31\" end) as $barColor | (\"\\($e)\\($barColor)m\\(\"█\" * $filled)\\($e)90m\\(\"░\" * (20 - $filled))\\($e)0m\") as $bar | ((.cost.total_cost_usd // 0) * 100 | round / 100 | tostring) as $cost | \"\\($bar) \\($e)\\($barColor)m\\($pct)%\\($e)0m \\($e)90m(\\($usedK)k/\\($totalK)k)\\($e)0m · \\($e)32m$\\($cost)\\($e)0m · \\($e)36m\\(.model.display_name)\\($e)0m · \\($e)34m'\"$(pwd)\"'\\($e)0m\"'"
 	}
 }

@@ -1,133 +1,68 @@
 ---
 name: verify-changes
 description: >
-    CRITICAL! Always use after every code modification — including small edits, single-line
-    fixes, and refactors. Detects available checks from package.json scripts, then runs them
-    in order: (1) ESLint on changed files, (2) TypeScript tsc --noEmit, (3) tests scoped to
-    changed files first, then full suite. Reports ✅/❌/⏭️ status for each check. A change is
-    not done until all available checks are green. Never suppress errors with eslint-disable or
-    @ts-ignore to make checks pass — fix the root cause. If a test was already failing before
-    the change, note it explicitly rather than masking it.
+    CRITICAL! Always use after every code modification — including small edits and refactors.
+    Runs available checks in order: (1) ESLint on changed files, (2) TypeScript tsc --noEmit,
+    (3) tests scoped to changed files. A change is not done until all checks pass. Never
+    suppress errors with eslint-disable or @ts-ignore — fix the root cause.
 ---
 
-# Verify Changes Skill
+# Verify Changes
 
-After **every** code modification — including small edits, refactors, and single-line fixes — run all available verification checks. A change is not done until checks pass.
-
----
+After **every** code modification, run all available verification checks. A change is not done until checks pass.
 
 ## Step 1: Detect Available Checks
 
-Run once at the start of any coding session (or when working in a new project). Check which tools are configured:
+This is a monorepo — read the **package-level** `package.json` for the package you're modifying, not just the root:
 
 ```
-# Read package.json to find available scripts
-Read(file_path: "/absolute/path/to/package.json")
-# Then scan the "scripts" section for: lint, typecheck, type-check, test, check, ci, verify
+Read(file_path: "/absolute/path/to/packages/<package>/package.json")
+# Check "scripts" for: lint, typecheck, type-check, test, check, ci
 ```
 
-Then map what's available:
+| Check | Look for |
+|-|-|
+| ESLint | `eslint` in scripts, or `eslint.config.*` present |
+| TypeScript | `tsc` in scripts, or `tsconfig.json` present |
+| Tests | `test`, `jest`, `vitest` in scripts |
 
-| Check          | Look for                                                         |
-| -------------- | ---------------------------------------------------------------- |
-| **ESLint**     | `eslint` in scripts, or `eslint.config.*` / `.eslintrc*` present |
-| **TypeScript** | `tsc` in scripts, or `tsconfig.json` present                     |
-| **Tests**      | `test`, `jest`, `vitest`, `bun test` in scripts, or config files |
-| **Bun**        | `bun.lockb` or scripts using `bun`                               |
-
-If none of the three exist, skip verification entirely and note this.
-
----
-
-## Step 2: Run Checks After Every Change
-
-After each code modification, run all checks that exist. Use this exact priority order:
+## Step 2: Run Checks
 
 ### 1. ESLint
 
 ```bash
-# npm / yarn / pnpm
 npx eslint <changed-file> --max-warnings=0
-
-# bun
-bunx eslint <changed-file> --max-warnings=0
-
-# If a lint script exists, prefer it
-npm run lint 2>/dev/null || yarn lint 2>/dev/null || bun run lint 2>/dev/null
 ```
 
-Prefer linting only the changed file(s) first for speed. If errors reference other files, run the full lint.
-
-**Skip if:** no `eslint` in scripts and no ESLint config file found.
+Lint changed files first for speed. Run full lint if errors reference other files. Skip if no ESLint config found.
 
 ### 2. TypeScript
 
 ```bash
-# Preferred: noEmit typecheck only
 npx tsc --noEmit
-
-# Or via script
-npm run typecheck 2>/dev/null \
-  || npm run type-check 2>/dev/null \
-  || yarn typecheck 2>/dev/null \
-  || bun run typecheck 2>/dev/null \
-  || npx tsc --noEmit
 ```
 
-**Skip if:** no `tsconfig.json` found and no typecheck script present.
+Skip if no `tsconfig.json`.
 
 ### 3. Tests
 
 ```bash
-# Run only tests related to changed files first (fast)
-npx jest --testPathPattern=<changed-file-basename> --passWithNoTests 2>/dev/null \
-  || npx vitest run <changed-file-basename> 2>/dev/null \
-  || bun test <changed-file-basename> 2>/dev/null
+# Scoped to changed files first
+npx jest --testPathPattern=<basename> --passWithNoTests 2>/dev/null
 
-# If no related tests found, run full suite
-npm test 2>/dev/null \
-  || yarn test 2>/dev/null \
-  || bun test 2>/dev/null
+# Or full suite
+npm test
 ```
 
-**Skip if:** no test config and no `test` / `spec` files found anywhere in the project.
-
----
+Skip if no test config or test files.
 
 ## Step 3: Handle Failures
 
-### ESLint failure
-
-- Read the error output carefully
-- Fix each reported issue in the affected file(s)
-- Re-run ESLint on the fixed file before moving on
-- Do **not** disable rules with `// eslint-disable` unless the rule is provably wrong for this case — if you do, add a comment explaining why
-
-### TypeScript failure
-
-- Read every type error — do not suppress with `@ts-ignore` or `@ts-expect-error` unless genuinely necessary
-- If a type error is in a file you didn't touch, check whether your change broke a contract (changed a function signature, narrowed/widened a type, etc.)
-- Fix the root cause, not the symptom
-
-### Test failure
-
-- Determine if the test failure is caused by your change or was pre-existing:
-    ```bash
-    # Check if tests were failing before your change by inspecting what you modified
-    # If unsure, check git status
-    git stash && npm test 2>/dev/null; git stash pop
-    ```
-- If your change caused the failure: fix the implementation or update the test if the behavior change was intentional
-- Never delete or skip tests to make the suite pass
-- If a test was already failing before your change, note it explicitly and do not mask it
-
----
+- **ESLint**: fix each issue, re-run. Do NOT add `eslint-disable` unless the rule is provably wrong.
+- **TypeScript**: fix root cause, not symptoms. No `@ts-ignore` or `@ts-expect-error`.
+- **Tests**: determine if failure is from your change or pre-existing. Never delete tests to pass.
 
 ## Step 4: Report Status
-
-After all checks complete, always report the result before considering the task done:
-
-**All passing:**
 
 ```
 ✅ ESLint: clean
@@ -135,44 +70,4 @@ After all checks complete, always report the result before considering the task 
 ✅ Tests: 42 passed
 ```
 
-**With skips:**
-
-```
-✅ ESLint: clean
-⏭️ TypeScript: skipped (no tsconfig.json)
-✅ Tests: 7 passed
-```
-
-**With failures (before fixing):**
-
-```
-❌ ESLint: 2 errors in src/utils/format.ts
-⏭️ TypeScript: skipped
-✅ Tests: all passed
-```
-
-Do not mark a task complete while any check shows ❌.
-
----
-
-## Quick Reference: Common Script Names
-
-When looking for scripts in `package.json`, these are the most common names to check:
-
-| Check      | Common script names                               |
-| ---------- | ------------------------------------------------- |
-| Lint       | `lint`, `lint:check`, `eslint`                    |
-| Typecheck  | `typecheck`, `type-check`, `tsc`, `ts`, `check`   |
-| Test       | `test`, `test:unit`, `test:run`, `jest`, `vitest` |
-| All-in-one | `check`, `verify`, `ci`, `validate`               |
-
-If a combined `check` or `ci` script exists that runs all three, prefer it over running them individually.
-
----
-
-## Reminders
-
-- **Always run checks after every change** — not just at the end of a multi-step task
-- **Scope checks to changed files first** for speed, then widen if needed
-- **Never suppress errors** to make checks pass — fix the underlying issue
-- **A task is not done** until all available checks are green
+Use ⏭️ for skipped checks, ❌ for failures. Do not mark a task complete while any check shows ❌.

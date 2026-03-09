@@ -1,200 +1,96 @@
 ---
 name: codebase-search
 description: >
-    CRITICAL! Always use before writing code, calling any function/hook/method, using any
+    CRITICAL! Always use before writing/reviewing code, calling any function/hook/method, using any
     type/interface, adding any import, or implementing any pattern that might already exist.
-    Searches the codebase (Grep, Glob, Read) to find real signatures, existing implementations,
-    and canonical import paths — never assume or reconstruct from memory. Default posture:
-    search first, then write. If in doubt whether something exists: search. Never invent
-    plausible-sounding paths, names, or APIs that haven't been verified in the actual files.
+    Default posture: search first, then write. Never invent paths, names, or APIs.
 ---
 
-# Codebase Search Skill
+# Codebase Search — Search First, Then Write
 
-When working in any existing codebase, you must actively search for relevant context before writing or answering. Never rely on assumptions about how things are named, shaped, or wired together. This skill defines when and how to search.
+## When to Search
 
----
+Search before proceeding if:
 
-## Rule: When in Doubt, Search
-
-If any of the following are true, **run a search before proceeding**:
-
-- You are about to call a function, method, or hook you haven't read
-- You are about to use a type, interface, or schema you haven't seen defined
-- You need to import something and aren't certain of its exact export name or path
-- You are implementing a feature that likely has related existing code
-- You are asked how something works but haven't read the relevant files
-- You see a reference (variable, constant, config key) whose value you don't know
-- You are adding to a pattern (e.g. a new route, a new event, a new component) and want to match existing ones
-- You are unsure whether something already exists before creating it
-
-**Default posture: search first, then write.** It is always cheaper to run a grep than to write code against a wrong assumption.
-
----
+- You're about to call a function, method, or hook you haven't read
+- You're about to use a type or interface you haven't seen defined
+- You need an import path you're not certain about
+- You're implementing something that likely has existing related code
+- You're adding to a pattern (new route, event, component) and want to match existing ones
+- You're unsure whether something already exists
 
 ## Search Toolkit
 
-Use Claude Code's **native tools** — never Bash for file searching or reading. The dedicated tools are faster, require no shell permission, and automatically exclude noise like `node_modules`.
+| Task                         | Tool                         |
+| ---------------------------- | ---------------------------- |
+| Search file contents         | **Grep**                     |
+| Find files by name           | **Glob**                     |
+| Read a specific file         | **Read**                     |
+| Broad multi-file exploration | **Agent** (Explore subagent) |
 
-| Task | Use | Never use |
-| ---- | ---- | ---- |
-| Search file contents by pattern | **Grep** tool | `grep` / `rg` in Bash |
-| Find files by name/glob pattern | **Glob** tool | `find` / `ls` in Bash |
-| Read a specific file | **Read** tool | `cat` / `head` / `tail` in Bash |
-| Broad multi-file exploration | **Agent** (Explore subagent) | — |
-
-### 1. Grep — search file contents by pattern
+### Examples
 
 ```
-Grep(pattern: "export.*MyFunction", glob: "**/*.{ts,tsx}", output_mode: "content")
-Grep(pattern: "MyFunction", glob: "**/*.{ts,tsx}", output_mode: "files_with_matches")
-Grep(pattern: "^(export )?(type|interface) MyType", type: "ts", output_mode: "content")
-Grep(pattern: "MY_CONSTANT|myConstant", output_mode: "files_with_matches")
-Grep(pattern: "upload.*progress|progress.*upload", glob: "**/*.{ts,tsx}", -i: true, output_mode: "content")
-```
+# Find a function definition
+Grep(pattern: "export.*function useFoo|export const useFoo", glob: "src/**/*.{ts,tsx}", output_mode: "content")
 
-The `glob` and `type` parameters scope the search. The Grep tool already excludes `.git`; use `glob: "src/**/*"` to avoid `dist/`, `node_modules/`, etc.
+# Find a type definition
+Grep(pattern: "interface FooProps|type FooProps", glob: "src/**/*.{ts,tsx}", output_mode: "content")
 
-### 2. Glob — find files by name pattern
-
-```
-Glob(pattern: "**/*auth*", path: "./src")
-Glob(pattern: "src/components/**/*.tsx")
-Glob(pattern: "**/*.test.ts")
-Glob(pattern: "src/**/*.ts")   // scoped — avoids dist/, node_modules/
-```
-
-Returns paths sorted by modification time. Use this when you know roughly what a file is called.
-
-### 3. Read — read a specific file
-
-```
-Read(file_path: "/absolute/path/to/file.ts")
-Read(file_path: "/absolute/path/to/large-file.ts", offset: 50, limit: 100)
-```
-
-Always use absolute paths. Read the whole file before editing — never just the target lines.
-
-### 4. Agent (Explore subagent) — open-ended multi-file exploration
-
-For searches that would require many rounds of Grep + Glob (you don't know what files to look in, or the concept spans many naming conventions), delegate:
-
-```
-Agent(subagent_type: "Explore", prompt: "Find all places where X pattern is used and how it works")
-```
-
-Use this when: you need to understand a system across many files, or a simple grep won't find everything because the naming is inconsistent.
-
----
-
-## What to Search For
-
-### Before using any function or hook
-
-Search for its definition to understand the real signature, return type, and any quirks:
-
-```
-Grep(pattern: "export.*function useFoo|export const useFoo", glob: "**/*.{ts,tsx}", output_mode: "content")
-```
-
-### Before using any type or interface
-
-Read the actual definition — don't reconstruct it from memory:
-
-```
-Grep(pattern: "interface FooProps|type FooProps", glob: "**/*.{ts,tsx}", output_mode: "content")
-```
-
-### Before adding a new instance of a pattern
-
-Find existing instances to match the exact shape:
-
-```
-# e.g., before adding a new API route handler
-Grep(pattern: "router\.(get|post|put|delete)", type: "ts", output_mode: "content", head_limit: 20)
-```
-
-### Before creating something that might already exist
-
-Check first:
-
-```
-Grep(pattern: "formatDate|format_date", glob: "**/*.{ts,js}", output_mode: "files_with_matches")
-```
-
-### Before importing from a module
-
-Verify the export exists and get the exact name:
-
-```
+# Check exports before importing
 Grep(pattern: "^export", path: "./src/utils/index.ts", output_mode: "content")
+
+# Find files by name
+Glob(pattern: "**/*auth*", path: "./src")
+
+# Check if something already exists
+Grep(pattern: "formatDate|format_date", glob: "src/**/*.{ts,tsx}", output_mode: "files_with_matches")
 ```
 
----
+## Search Depth
 
-## Search Depth Guidelines
+**First search not finding it does NOT mean it doesn't exist.** Things hide behind
+re-exports, barrel files, aliases, wrapper functions, different naming conventions,
+or in unexpected directories. Always try multiple search strategies before concluding
+something doesn't exist.
 
-| Situation                                     | Searches needed                                          |
-| --------------------------------------------- | -------------------------------------------------------- |
-| Using one known, previously-read function     | 0 — already have context                                 |
-| Using a function seen earlier in this session | 0 — already in context                                   |
-| Using any type/function not yet read          | 1–2 targeted greps                                       |
-| Implementing a new feature                    | 3–5 searches across related files                        |
-| Refactoring or modifying existing behavior    | Read all directly affected files first                   |
-| Answering "how does X work"                   | Read the relevant files, don't summarize from assumption |
+| Situation                                  | Minimum searches                                |
+| ------------------------------------------ | ----------------------------------------------- |
+| Using a function already read this session | 0                                               |
+| Using a type/function not yet read         | 2-3 searches with different patterns            |
+| Implementing a new feature                 | 5-8 searches across patterns, names, and dirs   |
+| Refactoring existing behavior              | Read all affected files + search for usages     |
+| "I don't think this exists"                | 3+ searches with varied terms before concluding |
 
----
+### Search Strategies (try in order)
 
-## Anti-Patterns to Avoid
+1. **Exact name** — `Grep(pattern: "useFoo")` — direct match
+2. **Partial/fuzzy** — `Grep(pattern: "foo|Foo")` — catch different casings/prefixes
+3. **Semantic variants** — search for synonyms and related terms (e.g., `format|render|display`, `cache|store|persist`, `delete|remove|destroy`)
+4. **File name** — `Glob(pattern: "**/*foo*")` — maybe it's a whole file
+5. **Directory scan** — `Glob(pattern: "src/lib/**/*.ts")` — browse likely directories
+6. **Re-exports** — `Grep(pattern: "export.*from", path: "src/index.ts")` — check barrel files
+7. **Usage search** — `Grep(pattern: "useFoo|\.foo\(")` — find how others consume it
+8. **Cross-package** — search in other packages (`packages/*/src/`) — monorepo code sharing
 
-**Never do these:**
+### When to Use the Explore Agent
 
-- ❌ Invent a function signature because it "seems right"
-- ❌ Assume an import path without verifying it exists
-- ❌ Reconstruct a type from context instead of reading its definition
-- ❌ Assume a pattern is consistent without checking a real example
-- ❌ Write code that calls into modules you haven't read
-- ❌ Answer "does X exist?" without searching
+Use an Explore subagent (with `subagent_type: "Explore"` and thoroughness `"very thorough"`) when:
 
-**Always do these instead:**
+- Simple Grep/Glob hasn't found what you need after 3 tries
+- You need to understand how a feature works across multiple files
+- You're looking for architectural patterns rather than specific symbols
+- The thing you're looking for might be named very differently than expected
 
-- ✅ Grep for the symbol, read the definition, then use it
-- ✅ Find one or two real usages before writing your own
-- ✅ Check the actual export list before importing
-- ✅ Read the file you're editing from top to bottom before changing it
-- ✅ If a definition, type, function, variable etc. comes from a third party dependency, look it up in the dependency directory (e.g. node_modules)
+## Rules
 
----
-
-## Efficient Search Habits
-
-- **Combine searches**: run Grep for content and Glob for files in parallel when you need both
-- **Read before editing**: always use Read on the full file you're about to modify — not just target lines
-- **Follow imports**: if a file imports something unfamiliar, Grep for its definition before using it
-- **Check barrel files**: many projects re-export from `index.ts` — Grep `"^export"` there first for the canonical import path
-- **Scope searches**: use `glob: "src/**/*"` or `type: "ts"` to avoid noise from `dist/`, `node_modules/`, `.d.ts`
-
----
-
-## Scoping Searches (avoid noise)
-
-Use `glob` or `type` parameters to limit Grep to relevant files:
-
-```
-# Scoped to source TypeScript only — avoids dist/, node_modules/, .d.ts
-Grep(pattern: "...", glob: "src/**/*.{ts,tsx}", output_mode: "content")
-
-# By file type (auto-excludes common noise)
-Grep(pattern: "...", type: "ts", output_mode: "files_with_matches")
-
-# For Rust/Go/other projects — scope to source dir
-Grep(pattern: "...", glob: "src/**/*.rs", output_mode: "content")
-```
-
-Glob patterns are already scoped by the path you provide — `Glob("src/**/*.ts")` never reaches `node_modules`.
-
----
-
-## Reminder
-
-Code that is written without reading the codebase first is a guess. Guesses break things. The codebase is always the source of truth — search it.
+- Grep for the symbol, read the definition, then use it
+- Find 1-2 real usages before writing your own
+- Check the actual export list before importing
+- Read the file you're editing top to bottom before changing it
+- For third-party APIs, check `node_modules` if needed
+- Never invent a function signature because it "seems right"
+- Never assume an import path without verifying
+- Never reconstruct a type from context instead of reading its definition
+- **Never conclude "it doesn't exist" after a single search** — try at least 3 different patterns
+- **Search across all packages** — this is a monorepo, code may live in a sibling package
