@@ -539,8 +539,18 @@ export const Paths = {
 	},
 	dirname(path: string | File | Directory): string {
 		const str = toUriString(path)
+		const result = str.replace(/\/[^/]+\/?$/, "")
 
-		return str.replace(/\/[^/]+\/?$/, "") || DOCUMENT_URI
+		if (result) {
+			return result
+		}
+
+		// For POSIX paths like "/foo", dirname is "/"
+		if (str.startsWith("/") && !str.startsWith("file://")) {
+			return "/"
+		}
+
+		return DOCUMENT_URI
 	},
 	basename(path: string | File | Directory, ext?: string): string {
 		const str = toUriString(path)
