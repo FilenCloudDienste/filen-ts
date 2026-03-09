@@ -3,7 +3,7 @@ import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import { simpleDate } from "@/lib/time"
 import isEqual from "react-fast-compare"
-import { type AnyDirEnumWithShareInfo } from "@filen/sdk-rs"
+import { type AnyDirWithContext } from "@filen/sdk-rs"
 
 export const DateComponent = memo(
 	({
@@ -11,7 +11,7 @@ export const DateComponent = memo(
 	}: {
 		info: ListRenderItemInfo<{
 			item: DriveItem
-			parent?: AnyDirEnumWithShareInfo
+			parent?: AnyDirWithContext
 		}>
 	}) => {
 		if (info.item.item.type === "file" || info.item.item.type === "sharedFile") {

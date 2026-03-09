@@ -137,7 +137,7 @@ class ItemSorter {
 
 	private compareTypes(aType: string, bType: string): number {
 		if (aType !== bType) {
-			return aType === "directory" || aType === "sharedDirectory" ? -1 : 1
+			return aType === "directory" || aType === "sharedDirectory" || aType === "sharedRootDirectory" ? -1 : 1
 		}
 
 		return 0

@@ -6,12 +6,10 @@ import useQueryFocusAware from "@/queries/useQueryFocusAware"
 import useNetInfo from "@/hooks/useNetInfo"
 import sqlite from "@/lib/sqlite"
 import { Semaphore, run } from "@filen/utils"
-import { unpack, pack } from "msgpackr"
+import { unpack, pack } from "@/lib/msgpack"
 import alerts from "@/lib/alerts"
-import type { DriveItem } from "@/types"
-import { unwrapDirMeta, unwrapSdkError } from "@/lib/utils"
-import cache from "@/lib/cache"
-import { AnyDirEnumWithShareInfo, type Note, type Chat, ErrorKind } from "@filen/sdk-rs"
+import { unwrapSdkError } from "@/lib/utils"
+import { ErrorKind } from "@filen/sdk-rs"
 
 export const VERSION = 1
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
@@ -130,55 +128,6 @@ export async function restoreQueries(): Promise<void> {
 					await queryClientPersisterKv.removeItem(key)
 
 					return
-				}
-
-				try {
-					if (persistedQuery.queryKey.some(key => key === "useDriveItemsQuery")) {
-						for (const item of persistedQuery.state.data as DriveItem[]) {
-							if (!item.data.decryptedMeta) {
-								continue
-							}
-
-							cache.uuidToDriveItem.set(item.data.uuid, item)
-
-							if (item.type === "directory") {
-								const { meta, uuid } = unwrapDirMeta(item.data)
-
-								if (!uuid) {
-									continue
-								}
-
-								cache.directoryUuidToDir.set(uuid, item.data)
-								cache.directoryUuidToName.set(uuid, meta?.name ?? uuid)
-								cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.Dir(item.data))
-							}
-
-							if (item.type === "sharedDirectory") {
-								const { uuid } = unwrapDirMeta(item.data)
-
-								if (!uuid) {
-									continue
-								}
-
-								cache.sharedDirUuidToDir.set(uuid, item.data)
-								cache.directoryUuidToAnyDirWithShareInfo.set(uuid, new AnyDirEnumWithShareInfo.SharedDir(item.data))
-							}
-						}
-					}
-
-					if (persistedQuery.queryKey.some(key => key === "useNotesWithContentQuery")) {
-						for (const note of persistedQuery.state.data as Note[]) {
-							cache.noteUuidToNote.set(note.uuid, note)
-						}
-					}
-
-					if (persistedQuery.queryKey.some(key => key === "useChatsQuery")) {
-						for (const chat of persistedQuery.state.data as Chat[]) {
-							cache.chatUuidToChat.set(chat.uuid, chat)
-						}
-					}
-				} catch {
-					// Noop
 				}
 
 				queryClient.setQueryData(persistedQuery.queryKey, persistedQuery.state.data, {
@@ -321,8 +270,6 @@ export function useDefaultQueryParams(
 }
 
 export class QueryUpdater {
-	private readonly persistMutex = new Semaphore(1)
-
 	public get<T>(queryKey: unknown[]): T | undefined {
 		return queryClient.getQueryData<T>(queryKey)
 	}
@@ -342,13 +289,7 @@ export class QueryUpdater {
 			}
 		)
 
-		run(async defer => {
-			await this.persistMutex.acquire()
-
-			defer(() => {
-				this.persistMutex.release()
-			})
-
+		run(async () => {
 			await queryClientPersister.persistQueryByKey(queryKey, queryClient)
 		})
 	}

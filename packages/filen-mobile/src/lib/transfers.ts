@@ -7,13 +7,14 @@ import {
 	type FileWithPath,
 	type DirWithPath,
 	FilenSdkError,
-	NonRootItemTagged,
 	ManagedFuture,
-	ParentUuid,
-	type DirEnum,
-	DirEnum_Tags,
-	AnyDirEnum,
-	DirWithMetaEnum_Tags
+	AnyDirWithContext,
+	AnySharedDirWithContext,
+	AnySharedDir,
+	AnyNormalDir,
+	AnyNormalDir_Tags,
+	AnyFile,
+	type SharedFile
 } from "@filen/sdk-rs"
 import useTransfersStore from "@/stores/useTransfers.store"
 import {
@@ -23,10 +24,12 @@ import {
 	wrapAbortSignalForSdk,
 	PauseSignal,
 	createCompositeAbortSignal,
-	createCompositePauseSignal
+	createCompositePauseSignal,
+	unwrapParentUuid
 } from "@/lib/utils"
 import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
+import cache from "@/lib/cache"
 
 class Transfers {
 	private globalAbortController = new AbortController()
@@ -57,7 +60,7 @@ class Transfers {
 	}: {
 		id: string
 		localFileOrDir: FileSystem.File | FileSystem.Directory
-		parent: DirEnum
+		parent: AnyNormalDir
 		hideProgress?: boolean
 		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 		abortController?: AbortController
@@ -85,7 +88,7 @@ class Transfers {
 
 		if (localFileOrDir instanceof FileSystem.Directory) {
 			const result = await run(async defer => {
-				if (parent.tag === DirEnum_Tags.Root) {
+				if (parent.tag === AnyNormalDir_Tags.Root) {
 					throw new Error("Cannot upload to root directory.")
 				}
 
@@ -230,9 +233,9 @@ class Transfers {
 							for (const uploadedDir of uploadedDirs) {
 								transferred.directories.push(uploadedDir)
 
-								const { meta, dir, shared } = unwrapDirMeta(uploadedDir)
+								const unwrappedDirMeta = unwrapDirMeta(uploadedDir)
 
-								if (!shared) {
+								if (!unwrappedDirMeta.shared) {
 									driveItemsQueryUpdate({
 										params: {
 											path: {
@@ -245,9 +248,9 @@ class Transfers {
 											{
 												type: "directory",
 												data: {
-													...dir,
+													...unwrappedDirMeta.dir,
 													size: 0n,
-													decryptedMeta: meta
+													decryptedMeta: unwrappedDirMeta.meta
 												}
 											}
 										]
@@ -258,9 +261,9 @@ class Transfers {
 							for (const uploadedFile of uploadedFiles) {
 								transferred.files.push(uploadedFile)
 
-								const { meta, shared, file } = unwrapFileMeta(uploadedFile)
+								const unwrappedFileMeta = unwrapFileMeta(uploadedFile)
 
-								if (!shared) {
+								if (!unwrappedFileMeta.shared) {
 									driveItemsQueryUpdate({
 										params: {
 											path: {
@@ -273,8 +276,8 @@ class Transfers {
 											{
 												type: "file",
 												data: {
-													...file,
-													decryptedMeta: meta
+													...unwrappedFileMeta.file,
+													decryptedMeta: unwrappedFileMeta.meta
 												}
 											}
 										]
@@ -283,7 +286,7 @@ class Transfers {
 							}
 						}
 					},
-					new NonRootItemTagged.Dir(parent.inner[0]).inner[0],
+					parent.inner[0],
 					ManagedFuture.new({
 						pauseSignal: compositePauseSignal.getSignal(),
 						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
@@ -451,9 +454,9 @@ class Transfers {
 			throw result.error
 		}
 
-		const { meta, shared, file } = unwrapFileMeta(result.data)
+		const unwrappedFileMeta = unwrapFileMeta(result.data)
 
-		if (!shared) {
+		if (!unwrappedFileMeta.shared) {
 			driveItemsQueryUpdate({
 				params: {
 					path: {
@@ -466,8 +469,8 @@ class Transfers {
 					{
 						type: "file",
 						data: {
-							...file,
-							decryptedMeta: meta
+							...unwrappedFileMeta.file,
+							decryptedMeta: unwrappedFileMeta.meta
 						}
 					}
 				]
@@ -497,7 +500,9 @@ class Transfers {
 		abortController?: AbortController
 		pauseSignal?: PauseSignal
 	}): Promise<{
-		files: FileWithPath[]
+		files: (Omit<FileWithPath, "file"> & {
+			file: File | SharedFile
+		})[]
 		directories: DirWithPath[]
 	}> {
 		const currentTransfers = useTransfersStore
@@ -521,7 +526,7 @@ class Transfers {
 		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
 		const compositeAbortSignal = createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
-		if (item.type === "directory" || item.type === "sharedDirectory") {
+		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 			const result = await run(async defer => {
 				if (destination instanceof FileSystem.File) {
 					throw new Error("Destination must be a directory for directory downloads.")
@@ -584,38 +589,45 @@ class Transfers {
 						.catch(console.error)
 				})
 
-				const transferred: {
-					files: FileWithPath[]
-					directories: DirWithPath[]
-				} = {
+				const transferred: Awaited<ReturnType<Transfers["download"]>> = {
 					files: [],
 					directories: []
 				}
 
-				const remoteDir = (() => {
+				const targetDir: AnyDirWithContext = (() => {
 					switch (item.type) {
 						case "directory": {
-							return new AnyDirEnum.Dir(item.data)
+							return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
 						}
 
 						case "sharedDirectory": {
-							switch (item.data.dir.tag) {
-								case DirWithMetaEnum_Tags.Dir: {
-									return new AnyDirEnum.Dir(item.data.dir.inner[0])
-								}
+							const parentUuid = unwrapParentUuid(item.data.inner.parent)
 
-								case DirWithMetaEnum_Tags.Root: {
-									return new AnyDirEnum.Root(item.data.dir.inner[0])
-								}
-
-								default: {
-									throw new Error("Invalid dir tag")
-								}
+							if (!parentUuid) {
+								throw new Error("Shared directory is missing parent information.")
 							}
+
+							const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+
+							if (!parentDirFromCache) {
+								throw new Error("Parent directory of shared directory not found in cache.")
+							}
+
+							return new AnyDirWithContext.Shared(
+								AnySharedDirWithContext.new({
+									dir: new AnySharedDir.Dir(item.data),
+									shareInfo: parentDirFromCache.shareInfo
+								})
+							)
 						}
 
-						default: {
-							throw new Error("Invalid directory type")
+						case "sharedRootDirectory": {
+							return new AnyDirWithContext.Shared(
+								AnySharedDirWithContext.new({
+									dir: new AnySharedDir.Root(item.data),
+									shareInfo: item.data.sharingRole
+								})
+							)
 						}
 					}
 				})()
@@ -717,7 +729,7 @@ class Transfers {
 							)
 						}
 					},
-					remoteDir,
+					targetDir,
 					ManagedFuture.new({
 						pauseSignal: compositePauseSignal.getSignal(),
 						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
@@ -766,22 +778,22 @@ class Transfers {
 			return result.data
 		}
 
-		const file =
-			item.type === "file"
-				? // Regular file
-					new NonRootItemTagged.File(item.data).inner[0]
-				: // Shared file
-					new NonRootItemTagged.File({
-						...item.data.file,
-						// We don't really care about the parent for downloads, just need to provide some value
-						parent: new ParentUuid.Uuid(item.data.uuid),
-						favorited: false
-					}).inner[0]
-
 		const result = await run(async defer => {
 			if (!(destination instanceof FileSystem.File)) {
 				throw new Error("Destination must be a file for file downloads.")
 			}
+
+			const remoteAnyFile: AnyFile = (() => {
+				switch (item.type) {
+					case "file": {
+						return new AnyFile.File(item.data)
+					}
+
+					case "sharedFile": {
+						return new AnyFile.Shared(item.data)
+					}
+				}
+			})()
 
 			if (!hideProgress) {
 				useTransfersStore.getState().setTransfers(prev => [
@@ -835,7 +847,7 @@ class Transfers {
 			})
 
 			await authedSdkClient.downloadFileToPath(
-				file,
+				remoteAnyFile,
 				normalizeFilePathForSdk(destination.uri),
 				{
 					onUpdate(downloadedBytes) {
@@ -860,11 +872,11 @@ class Transfers {
 				}
 			)
 
-			const transferred = {
+			const transferred: Awaited<ReturnType<Transfers["download"]>> = {
 				files: [
 					{
 						path: normalizeFilePathForSdk(destination.uri),
-						file
+						file: item.data
 					}
 				],
 				directories: []
@@ -887,8 +899,7 @@ class Transfers {
 													...t.errors.download,
 													{
 														path: normalizeFilePathForSdk(destination.uri),
-														error: FilenSdkError.getInner(result.error),
-														item: new NonRootItemTagged.File(file)
+														error: FilenSdkError.getInner(result.error)
 													}
 												]
 											}

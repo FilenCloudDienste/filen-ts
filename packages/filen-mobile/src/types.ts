@@ -1,4 +1,4 @@
-import { type File, type Dir, type DecryptedFileMeta, type DecryptedDirMeta, type SharedDir, type SharedFile } from "@filen/sdk-rs"
+import type { File, Dir, DecryptedFileMeta, DecryptedDirMeta, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk-rs"
 
 export type ExtraData = {
 	size: bigint
@@ -20,7 +20,12 @@ export type DriveItemFileShared = SharedFile &
 		decryptedMeta: DecryptedFileMeta | null
 	}
 
-export type DriveItemDirectoryShared = SharedDir &
+export type DriveItemDirectorySharedNonRoot = SharedDir &
+	ExtraData & {
+		decryptedMeta: DecryptedDirMeta | null
+	}
+
+export type DriveItemDirectorySharedRoot = SharedRootDir &
 	ExtraData & {
 		decryptedMeta: DecryptedDirMeta | null
 	}
@@ -36,7 +41,11 @@ export type DriveItem =
 	  }
 	| {
 			type: "sharedDirectory"
-			data: DriveItemDirectoryShared
+			data: DriveItemDirectorySharedNonRoot
+	  }
+	| {
+			type: "sharedRootDirectory"
+			data: DriveItemDirectorySharedRoot
 	  }
 	| {
 			type: "sharedFile"

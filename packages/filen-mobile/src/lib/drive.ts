@@ -1,14 +1,15 @@
 import auth from "@/lib/auth"
 import {
-	NonRootItem,
-	NonRootItemTagged_Tags,
 	CreatedTime,
 	DirColor,
 	type FileVersion,
 	SharedRootItem,
 	type DirPublicLink,
 	type FilePublicLink,
-	DirEnum
+	NonRootNormalItem,
+	NonRootNormalItem_Tags,
+	NonRootItem_Tags,
+	AnyNormalDir
 } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import {
@@ -35,7 +36,7 @@ class Drive {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 		const modifiedItem = await authedSdkClient.setFavorite(
-			item.type === "directory" ? new NonRootItem.Dir(item.data) : new NonRootItem.File(item.data),
+			item.type === "directory" ? new NonRootNormalItem.Dir(item.data) : new NonRootNormalItem.File(item.data),
 			favorited,
 			signal
 				? {
@@ -44,7 +45,7 @@ class Drive {
 				: undefined
 		)
 
-		if (modifiedItem.tag === NonRootItemTagged_Tags.Dir) {
+		if (modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
 			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem.inner[0]))
 		} else {
 			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem.inner[0]))
@@ -413,14 +414,14 @@ class Drive {
 	}
 
 	public async removeShare({ item, signal, parentUuid }: { item: DriveItem; signal?: AbortSignal; parentUuid?: string }) {
-		if (item.type !== "sharedDirectory" && item.type !== "sharedFile") {
+		if (item.type !== "sharedRootDirectory" && item.type !== "sharedFile") {
 			throw new Error("Invalid item type")
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		await authedSdkClient.removeSharedItem(
-			item.type === "sharedDirectory" ? new SharedRootItem.Dir(item.data) : new SharedRootItem.File(item.data),
+			item.type === "sharedRootDirectory" ? new SharedRootItem.Dir(item.data) : new SharedRootItem.File(item.data),
 			signal
 				? {
 						signal
@@ -526,25 +527,33 @@ class Drive {
 		})
 	}
 
-	public async createDirectory({ parent, signal, name }: { parent: DriveItem | "root" | DirEnum; signal?: AbortSignal; name: string }) {
-		if (!DirEnum.instanceOf(parent) && parent !== "root" && parent.type !== "directory") {
+	public async createDirectory({
+		parent,
+		signal,
+		name
+	}: {
+		parent: DriveItem | "root" | AnyNormalDir
+		signal?: AbortSignal
+		name: string
+	}) {
+		if (!AnyNormalDir.instanceOf(parent) && parent !== "root" && parent.type !== "directory") {
 			throw new Error("Invalid parent type")
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
-		let parentDir: DirEnum | null = DirEnum.instanceOf(parent) ? parent : null
+		let parentDir: AnyNormalDir | null = AnyNormalDir.instanceOf(parent) ? parent : null
 
-		if (!parentDir && !DirEnum.instanceOf(parent)) {
+		if (!parentDir && !AnyNormalDir.instanceOf(parent)) {
 			if (parent === "root" || parent.data.uuid === authedSdkClient.root().uuid) {
-				parentDir = new DirEnum.Root(authedSdkClient.root())
+				parentDir = new AnyNormalDir.Root(authedSdkClient.root())
 			} else {
-				const dir = cache.directoryUuidToDir.get(parent.data.uuid)
+				const dir = cache.directoryUuidToAnyNormalDir.get(parent.data.uuid)
 
 				if (!dir) {
 					throw new Error("Parent not found in cache")
 				}
 
-				parentDir = new DirEnum.Dir(dir)
+				parentDir = dir
 			}
 		}
 
@@ -579,8 +588,16 @@ class Drive {
 		return createdDriveItem
 	}
 
-	public async move({ item, newParent, signal }: { item: DriveItem; newParent: DriveItem | "root" | DirEnum; signal?: AbortSignal }) {
-		if (!DirEnum.instanceOf(newParent) && newParent !== "root" && newParent.type !== "directory") {
+	public async move({
+		item,
+		newParent,
+		signal
+	}: {
+		item: DriveItem
+		newParent: DriveItem | "root" | AnyNormalDir
+		signal?: AbortSignal
+	}) {
+		if (!AnyNormalDir.instanceOf(newParent) && newParent !== "root" && newParent.type !== "directory") {
 			throw new Error("Invalid parent type")
 		}
 
@@ -590,19 +607,19 @@ class Drive {
 
 		const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
 		const { authedSdkClient } = await auth.getSdkClients()
-		let newParentDir: DirEnum | null = DirEnum.instanceOf(newParent) ? newParent : null
+		let newParentDir: AnyNormalDir | null = AnyNormalDir.instanceOf(newParent) ? newParent : null
 
-		if (!newParentDir && !DirEnum.instanceOf(newParent)) {
+		if (!newParentDir && !AnyNormalDir.instanceOf(newParent)) {
 			if (newParent === "root" || newParent.data.uuid === authedSdkClient.root().uuid) {
-				newParentDir = new DirEnum.Root(authedSdkClient.root())
+				newParentDir = new AnyNormalDir.Root(authedSdkClient.root())
 			} else {
-				const dir = cache.directoryUuidToDir.get(newParent.data.uuid)
+				const dir = cache.directoryUuidToAnyNormalDir.get(newParent.data.uuid)
 
 				if (!dir) {
 					throw new Error("New parent not found in cache")
 				}
 
-				newParentDir = new DirEnum.Dir(dir)
+				newParentDir = dir
 			}
 		}
 
@@ -677,13 +694,28 @@ class Drive {
 				: undefined
 		)
 
-		return result.map(({ item, path }) => ({
-			item:
-				item.tag === NonRootItemTagged_Tags.Dir
-					? unwrappedDirIntoDriveItem(unwrapDirMeta(item.inner[0]))
-					: unwrappedFileIntoDriveItem(unwrapFileMeta(item.inner[0])),
-			path: normalizeFilePathForSdk(path)
-		}))
+		return result
+			.map(({ item, path }) => {
+				if (item.tag !== NonRootItem_Tags.NormalDir && item.tag !== NonRootItem_Tags.File) {
+					return null
+				}
+
+				return {
+					item:
+						item.tag === NonRootItem_Tags.NormalDir
+							? unwrappedDirIntoDriveItem(unwrapDirMeta(item.inner[0]))
+							: unwrappedFileIntoDriveItem(unwrapFileMeta(item.inner[0])),
+					path: normalizeFilePathForSdk(path)
+				}
+			})
+			.filter(
+				(
+					i
+				): i is {
+					item: DriveItem
+					path: string
+				} => i !== null
+			)
 	}
 
 	public async updateTimestamps({

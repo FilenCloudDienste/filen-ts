@@ -3,7 +3,7 @@ import { useMemo } from "@/lib/memo"
 import { validate as validateUuid } from "uuid"
 import type { DriveItem } from "@/types"
 import { Buffer } from "@craftzdog/react-native-buffer"
-import { unpack } from "msgpackr"
+import { unpack } from "@/lib/msgpack"
 
 export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links"] as const
 export type DrivePathType = (typeof DRIVE_PATH_TYPES)[number]

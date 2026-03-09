@@ -1,7 +1,13 @@
 import { create } from "zustand"
 import * as FileSystem from "expo-file-system"
-import type { DirEnum, FilenSdkErrorInterface, UploadError, DownloadError, NonRootItemTagged } from "@filen/sdk-rs"
-import type { DriveItemFile, DriveItemDirectory, DriveItemDirectoryShared, DriveItemFileShared } from "@/types"
+import type { AnyNormalDir, FilenSdkErrorInterface, UploadError, DownloadError, NonRootItem } from "@filen/sdk-rs"
+import type {
+	DriveItemDirectory,
+	DriveItemFileShared,
+	DriveItemFile,
+	DriveItemDirectorySharedNonRoot,
+	DriveItemDirectorySharedRoot
+} from "@/types"
 
 export type Transfer = {
 	id: string
@@ -24,7 +30,7 @@ export type Transfer = {
 				unknown: Error[]
 			}
 			localFileOrDir: FileSystem.File | FileSystem.Directory
-			parent: DirEnum
+			parent: AnyNormalDir
 	  }
 	| {
 			type: "uploadFile"
@@ -34,13 +40,13 @@ export type Transfer = {
 				unknown: Error[]
 			}
 			localFileOrDir: FileSystem.File | FileSystem.Directory
-			parent: DirEnum
+			parent: AnyNormalDir
 	  }
 	| {
 			type: "downloadFile"
 			errors: {
 				download: (Omit<DownloadError, "item"> & {
-					item?: NonRootItemTagged
+					item?: NonRootItem
 				})[]
 				scan: FilenSdkErrorInterface[]
 				unknown: Error[]
@@ -58,12 +64,12 @@ export type Transfer = {
 			}
 			errors: {
 				download: (Omit<DownloadError, "item"> & {
-					item?: NonRootItemTagged
+					item?: NonRootItem
 				})[]
 				scan: FilenSdkErrorInterface[]
 				unknown: Error[]
 			}
-			item: DriveItemDirectory | DriveItemDirectoryShared
+			item: DriveItemDirectory | DriveItemDirectorySharedNonRoot | DriveItemDirectorySharedRoot
 			destination: FileSystem.Directory
 	  }
 )

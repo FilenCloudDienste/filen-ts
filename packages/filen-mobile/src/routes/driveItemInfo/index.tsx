@@ -3,7 +3,7 @@ import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
-import { unpack } from "msgpackr"
+import { unpack } from "@/lib/msgpack"
 import { Buffer } from "@craftzdog/react-native-buffer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
@@ -27,11 +27,11 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
 			uuid: item?.data.uuid ?? "",
-			offline: false,
-			trash: false
+			// TODO: Fix type for shared items
+			type: "normal"
 		},
 		{
-			enabled: item !== null && (item.type === "directory" || item.type === "sharedDirectory")
+			enabled: item !== null && (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory")
 		}
 	)
 
@@ -55,7 +55,10 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 				{
 					type: "type",
 					title: "tbd_type",
-					value: item.type === "directory" || item.type === "sharedDirectory" ? "tbd_directory" : "tbd_file"
+					value:
+						item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+							? "tbd_directory"
+							: "tbd_file"
 				},
 				...(item.type === "file" || item.type === "sharedFile"
 					? [
@@ -118,7 +121,8 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 							}
 
 							case "directory":
-							case "sharedDirectory": {
+							case "sharedDirectory":
+							case "sharedRootDirectory": {
 								if (directorySizeQuery.status !== "success") {
 									return "..."
 								}
@@ -128,7 +132,7 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 						}
 					})()
 				},
-				...(item.type === "directory" || item.type === "sharedDirectory"
+				...(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
 					? [
 							{
 								type: "files",
@@ -161,7 +165,7 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 
 							case "sharedFile": {
 								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.file.timestamp))
+									return simpleDate(Number(item.data.timestamp))
 								}
 
 								return simpleDate(Number(item.data.decryptedMeta.created))
@@ -177,7 +181,15 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 
 							case "sharedDirectory": {
 								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.dir.inner[0].timestamp))
+									return simpleDate(Number(item.data.inner.timestamp))
+								}
+
+								return simpleDate(Number(item.data.decryptedMeta.created))
+							}
+
+							case "sharedRootDirectory": {
+								if (!item.data.decryptedMeta.created) {
+									return simpleDate(Number(item.data.inner.timestamp))
 								}
 
 								return simpleDate(Number(item.data.decryptedMeta.created))
@@ -204,7 +216,7 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 
 							case "sharedFile": {
 								if (!item.data.decryptedMeta.modified) {
-									return simpleDate(Number(item.data.file.timestamp))
+									return simpleDate(Number(item.data.timestamp))
 								}
 
 								return simpleDate(Number(item.data.decryptedMeta.modified))
@@ -220,7 +232,15 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 
 							case "sharedDirectory": {
 								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.dir.inner[0].timestamp))
+									return simpleDate(Number(item.data.inner.timestamp))
+								}
+
+								return simpleDate(Number(item.data.decryptedMeta.created))
+							}
+
+							case "sharedRootDirectory": {
+								if (!item.data.decryptedMeta.created) {
+									return simpleDate(Number(item.data.inner.timestamp))
 								}
 
 								return simpleDate(Number(item.data.decryptedMeta.created))
@@ -242,7 +262,7 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 							}
 
 							case "sharedFile": {
-								return simpleDate(Number(item.data.file.timestamp))
+								return simpleDate(Number(item.data.timestamp))
 							}
 
 							case "directory": {
@@ -250,7 +270,11 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 							}
 
 							case "sharedDirectory": {
-								return simpleDate(Number(item.data.dir.inner[0].timestamp))
+								return simpleDate(Number(item.data.inner.timestamp))
+							}
+
+							case "sharedRootDirectory": {
+								return simpleDate(Number(item.data.inner.timestamp))
 							}
 						}
 					})()
@@ -390,7 +414,7 @@ const DriveItemInfo = memo(() => {
 					showsVerticalScrollIndicator={false}
 				>
 					<View className="bg-transparent items-center justify-center flex-col">
-						{item.type === "directory" || item.type === "sharedDirectory" ? (
+						{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory" ? (
 							<DirectoryIcon
 								color={item.type === "directory" ? item.data.color : DirColor.Default.new()}
 								width={128}
@@ -411,7 +435,9 @@ const DriveItemInfo = memo(() => {
 							{item.data.decryptedMeta?.name ?? item.data.uuid}
 						</Text>
 						<Text className="text-muted-foreground">
-							{item.type === "directory" || item.type === "sharedDirectory" ? "tbd_directory" : "tbd_file"}
+							{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+								? "tbd_directory"
+								: "tbd_file"}
 						</Text>
 					</View>
 					<View className="bg-transparent mt-10">
