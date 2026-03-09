@@ -60,11 +60,16 @@ function detectLocaleInfo() {
 		dateFormat = "YMD"
 		dateSeparator = "-"
 	}
-	// MDY format (MM/DD/YYYY) - US and few others
-	else if (lang.startsWith("en-us") || lang.startsWith("en-ph")) {
+	// MDY format (MM/DD/YYYY) + 12-hour time
+	else if (
+		lang.startsWith("en-us") ||
+		lang.startsWith("en-ph") ||
+		lang.startsWith("en-ca") ||
+		lang.startsWith("es-us")
+	) {
 		dateFormat = "MDY"
 		dateSeparator = "/"
-		use24Hour = false // US typically uses 12-hour format
+		use24Hour = false
 	}
 	// DMY format (DD/MM/YYYY) - Most of the world
 	else {
@@ -74,6 +79,8 @@ function detectLocaleInfo() {
 			lang.startsWith("de") ||
 			lang.startsWith("da") ||
 			lang.startsWith("no") ||
+			lang.startsWith("nb") ||
+			lang.startsWith("nn") ||
 			lang.startsWith("fi") ||
 			lang.startsWith("ru") ||
 			lang.startsWith("cs") ||
@@ -83,6 +90,18 @@ function detectLocaleInfo() {
 			dateSeparator = "."
 		} else {
 			dateSeparator = "/"
+		}
+
+		// English DMY locales still use 12-hour time
+		if (
+			lang.startsWith("en-gb") ||
+			lang.startsWith("en-au") ||
+			lang.startsWith("en-nz") ||
+			lang.startsWith("en-ie") ||
+			lang.startsWith("en-za") ||
+			lang.startsWith("en-in")
+		) {
+			use24Hour = false
 		}
 	}
 

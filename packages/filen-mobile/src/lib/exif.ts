@@ -54,6 +54,10 @@ function parseExifDateString(dateStr: string, subSec?: string, offset?: string):
  * Returns null if no parseable date field is found.
  */
 export function parseExifDate(exif: Record<string, unknown>): number | null {
+	if (!exif || typeof exif !== "object") {
+		return null
+	}
+
 	// iOS groups fields under "{Exif}" and "{TIFF}"; Android uses a flat layout.
 	const exifGroup =
 		typeof exif["{Exif}"] === "object" && exif["{Exif}"] !== null

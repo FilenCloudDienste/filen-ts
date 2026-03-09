@@ -136,8 +136,15 @@ class ItemSorter {
 	}
 
 	private compareTypes(aType: string, bType: string): number {
-		if (aType !== bType) {
-			return aType === "directory" || aType === "sharedDirectory" || aType === "sharedRootDirectory" ? -1 : 1
+		const aIsDir = aType === "directory" || aType === "sharedDirectory" || aType === "sharedRootDirectory"
+		const bIsDir = bType === "directory" || bType === "sharedDirectory" || bType === "sharedRootDirectory"
+
+		if (aIsDir && !bIsDir) {
+			return -1
+		}
+
+		if (bIsDir && !aIsDir) {
+			return 1
 		}
 
 		return 0
