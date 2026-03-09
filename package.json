@@ -1,18 +1,4 @@
 {
 	"name": "filen-ts",
-	"private": true,
-	"workspaces": [
-		"packages/filen-web",
-		"packages/filen-desktop",
-		"packages/filen-utils",
-		"packages/filen-mobile"
-	],
-	"scripts": {
-		"dev:web": "npm run dev --workspace=packages/filen-web",
-		"dev:desktop": "concurrently --names \"WEB,DESKTOP\" --prefix-colors \"cyan,magenta\" \"npm run dev:desktop --workspace=packages/filen-web\" \"wait-on http://localhost:5555 && npm run dev --workspace=packages/filen-desktop\""
-	},
-	"devDependencies": {
-		"concurrently": "^9.2.0",
-		"wait-on": "^8.0.4"
-	}
+	"private": true
 }
