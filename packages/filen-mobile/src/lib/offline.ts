@@ -153,6 +153,10 @@ export class Offline {
 		tmp.write(data)
 
 		try {
+			if (file.exists) {
+				file.delete()
+			}
+
 			tmp.move(file)
 		} catch (e) {
 			if (tmp.exists) {
