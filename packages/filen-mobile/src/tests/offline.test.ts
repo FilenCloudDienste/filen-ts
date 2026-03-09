@@ -2506,6 +2506,150 @@ describe("Offline", () => {
 			expect(downloadCalled).toBe(true)
 		})
 
+		it("does not re-sync nested file when normalized timestamps match at sub-second precision", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "MyDir")
+			const parent = makeParent(parentUuid)
+
+			// Local file has modified=1000
+			const localFile = makeFileItem(fileUuid, "data.txt")
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/data/data.txt": { item: localFile }
+				}
+			})
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data/data.txt`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const remoteDir = {
+				uuid: dirUuid,
+				meta: { tag: "Decoded", inner: [{ name: "MyDir" }] }
+			}
+
+			// Remote file has modified=1000.5 — differs only at sub-second precision
+			// normalizeModificationTimestampForComparison floors to seconds: Math.floor(1000.5/1000) === Math.floor(1000/1000) === 1
+			const remoteFileSubSecond = {
+				uuid: fileUuid,
+				meta: {
+					tag: "Decoded",
+					inner: [{ name: "data.txt", size: 100n, modified: 1000.5, created: 900 }]
+				}
+			}
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [remoteDir]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [
+							{
+								file: remoteFileSubSecond,
+								path: "/data/data.txt"
+							}
+						],
+						dirs: []
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			// No re-sync should happen — transfers.download should NOT have been called
+			expect(transfers.download).not.toHaveBeenCalled()
+		})
+
+		it("re-syncs nested file when normalized timestamps actually differ", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "MyDir")
+			const parent = makeParent(parentUuid)
+
+			// Local file has modified=1000 (normalizes to 1)
+			const localFile = makeFileItem(fileUuid, "data.txt")
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/data/data.txt": { item: localFile }
+				}
+			})
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data/data.txt`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const remoteDir = {
+				uuid: dirUuid,
+				meta: { tag: "Decoded", inner: [{ name: "MyDir" }] }
+			}
+
+			// Remote file has modified=2000 (normalizes to 2, which is > 1)
+			const remoteFileNewer = {
+				uuid: fileUuid,
+				meta: {
+					tag: "Decoded",
+					inner: [{ name: "data.txt", size: 100n, modified: 2000, created: 900 }]
+				}
+			}
+
+			let downloadCalled = false
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				downloadCalled = true
+
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/data.txt`, new Uint8Array([10, 20]))
+
+				return {
+					files: [{ file: { uuid: fileUuid }, path: `${destUri}/data.txt` }],
+					directories: []
+				}
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [remoteDir]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [
+							{
+								file: remoteFileNewer,
+								path: "/data/data.txt"
+							}
+						],
+						dirs: []
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			// Full resync should have been triggered because normalized timestamps differ
+			expect(downloadCalled).toBe(true)
+		})
+
 		it("keeps directory meta unchanged when name has not changed remotely", async () => {
 			const dirUuid = "11111111-1111-1111-1111-111111111111"
 			const parentUuid = "22222222-2222-2222-2222-222222222222"
@@ -3042,6 +3186,36 @@ describe("Offline", () => {
 
 			// Should not throw
 			await expect(offline.removeItem(fileItem)).resolves.not.toThrow()
+		})
+
+		it("removeItem for nested file UUID is a no-op", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const nestedFileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "ParentDir")
+			const nestedFile = makeFileItem(nestedFileUuid, "nested.txt")
+			const parent = makeParent(parentUuid)
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/data/nested.txt": { item: nestedFile }
+				}
+			})
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data/nested.txt`, new Uint8Array([1, 2]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Try to remove the nested file directly — should not crash
+			await expect(offline.removeItem(nestedFile)).resolves.not.toThrow()
+
+			// Parent directory should still be intact
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`)).toBe(true)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}/data/nested.txt`)).toBe(true)
 		})
 
 		it("store and remove multiple files, verify remaining", async () => {

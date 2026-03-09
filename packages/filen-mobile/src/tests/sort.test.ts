@@ -162,6 +162,84 @@ describe("itemSorter", () => {
 				"old.txt"
 			])
 		})
+
+		it("treats file and sharedFile as equal rank (both non-directory)", () => {
+			const file = makeItem("file", "beta.txt", { uuid: "aaa-111" })
+			const shared = makeItem("sharedFile", "alpha.txt", { uuid: "bbb-222" })
+
+			const result = itemSorter.sortItems([file, shared], "nameAsc")
+
+			expect(result[0]!.data.decryptedMeta?.name).toBe("alpha.txt")
+			expect(result[1]!.data.decryptedMeta?.name).toBe("beta.txt")
+		})
+
+		it("places sharedDirectory before file", () => {
+			const sharedDir = makeItem("sharedDirectory", "docs")
+			const file = makeItem("file", "alpha.txt")
+
+			const result = itemSorter.sortItems([file, sharedDir], "nameAsc")
+
+			expect(result[0]!.type).toBe("sharedDirectory")
+			expect(result[1]!.type).toBe("file")
+		})
+
+		it("does not crash when decryptedMeta is null (falls back to uuid)", () => {
+			const uuid1 = "aaa-111"
+			const uuid2 = "bbb-222"
+
+			const item1 = {
+				type: "file",
+				data: {
+					uuid: uuid1,
+					size: 0n,
+					timestamp: 1000,
+					decryptedMeta: null
+				}
+			} as unknown as DriveItem
+
+			const item2 = {
+				type: "file",
+				data: {
+					uuid: uuid2,
+					size: 0n,
+					timestamp: 1000,
+					decryptedMeta: null
+				}
+			} as unknown as DriveItem
+
+			expect(() => itemSorter.sortItems([item2, item1], "nameAsc")).not.toThrow()
+
+			const result = itemSorter.sortItems([item2, item1], "nameAsc")
+
+			expect(result).toHaveLength(2)
+		})
+
+		it("produces consistent ordering for items with identical names", () => {
+			const a = makeItem("file", "same.txt", { uuid: "aaa-111" })
+			const b = makeItem("file", "same.txt", { uuid: "bbb-222" })
+			const c = makeItem("file", "same.txt", { uuid: "ccc-333" })
+
+			const result1 = itemSorter.sortItems([a, b, c], "nameAsc")
+			const result2 = itemSorter.sortItems([a, b, c], "nameAsc")
+
+			expect(result1.map(i => i.data.uuid)).toEqual(result2.map(i => i.data.uuid))
+			expect(result1).toHaveLength(3)
+		})
+
+		it("does not mutate input array with shared types", () => {
+			const items = [
+				makeItem("sharedFile", "b.txt"),
+				makeItem("sharedDirectory", "a-dir"),
+				makeItem("file", "c.txt")
+			]
+			const original = [...items]
+
+			itemSorter.sortItems(items, "nameAsc")
+
+			expect(items[0]).toBe(original[0])
+			expect(items[1]).toBe(original[1])
+			expect(items[2]).toBe(original[2])
+		})
 	})
 })
 
@@ -221,6 +299,17 @@ describe("notesSorter", () => {
 				"bbb-222",
 				"aaa-111"
 			])
+		})
+
+		it("produces stable order for notes with identical editedTimestamp (uuid tiebreaker)", () => {
+			const noteA = makeNote({ uuid: "aaa-111", editedTimestamp: 5000n })
+			const noteB = makeNote({ uuid: "bbb-222", editedTimestamp: 5000n })
+			const noteC = makeNote({ uuid: "ccc-333", editedTimestamp: 5000n })
+
+			const result1 = notesSorter.sort([noteA, noteB, noteC])
+			const result2 = notesSorter.sort([noteC, noteA, noteB])
+
+			expect(result1.map(n => n.uuid)).toEqual(result2.map(n => n.uuid))
 		})
 	})
 })

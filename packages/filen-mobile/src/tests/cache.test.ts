@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
@@ -162,12 +162,26 @@ describe("PersistentMap", () => {
 		expect(onMutate).toHaveBeenCalledTimes(2)
 		expect(map.get("key")).toBe("second")
 	})
+
+	it("delete returns true for existing key and false for missing key", () => {
+		const map = new PersistentMap<string>(() => {})
+
+		map.set("key", "value")
+
+		expect(map.delete("key")).toBe(true)
+		expect(map.delete("key")).toBe(false)
+		expect(map.delete("nonexistent")).toBe(false)
+	})
 })
 
 describe("Cache", () => {
 	beforeEach(() => {
 		fs.clear()
 		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
 	})
 
 	describe("constructor", () => {
@@ -282,6 +296,21 @@ describe("Cache", () => {
 
 			expect((cache2[name] as PersistentMap<unknown>).get("real-key")).toBe("real-value")
 			expect(cache2["nonExistentMap"]).toBeUndefined()
+		})
+
+		it("does not throw on corrupted cache file and deletes it", async () => {
+			fs.set(CACHE_DIR_URI, "dir")
+			fs.set(CACHE_FILE_URI, new Uint8Array([0xff, 0xfe, 0x00, 0xab, 0xcd]))
+
+			const cache = await createCache()
+
+			await expect(cache.restore()).resolves.toBeUndefined()
+
+			for (const [, map] of getPersistentMaps(cache)) {
+				expect(map.size).toBe(0)
+			}
+
+			expect(fs.has(CACHE_FILE_URI)).toBe(false)
 		})
 
 		it("does not trigger onMutate during restore (no write-back cycle)", async () => {
@@ -437,6 +466,19 @@ describe("Cache", () => {
 			expect(() => cache.clear()).not.toThrow()
 		})
 
+		it("also clears secureStore", async () => {
+			const cache = await createCache()
+
+			cache.secureStore.set("secret-key", "secret-value")
+			cache.secureStore.set("another-key", "another-value")
+
+			expect(cache.secureStore.size).toBe(2)
+
+			cache.clear()
+
+			expect(cache.secureStore.size).toBe(0)
+		})
+
 		it("cancels any pending debounced persist", async () => {
 			const cache = await createCache()
 			const { map } = getFirstMap(cache)
@@ -465,6 +507,21 @@ describe("Cache", () => {
 			vi.advanceTimersByTime(5000)
 
 			expect(fs.has(CACHE_FILE_URI)).toBe(false)
+		})
+	})
+
+	describe("cleanupTmp", () => {
+		it("removes stale .tmp files from the cache directory on construction", async () => {
+			fs.set(CACHE_DIR_URI, "dir")
+			fs.set(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-0.tmp`, new Uint8Array([1, 2, 3]))
+			fs.set(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-1.tmp`, new Uint8Array([4, 5, 6]))
+			fs.set(CACHE_FILE_URI, new Uint8Array([]))
+
+			await createCache()
+
+			expect(fs.has(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-0.tmp`)).toBe(false)
+			expect(fs.has(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-1.tmp`)).toBe(false)
+			expect(fs.has(CACHE_FILE_URI)).toBe(true)
 		})
 	})
 
