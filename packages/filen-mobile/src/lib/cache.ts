@@ -175,6 +175,10 @@ class Cache {
 		tmp.write(new Uint8Array(pack(data)))
 
 		try {
+			if (this.file.exists) {
+				this.file.delete()
+			}
+
 			tmp.move(this.file)
 		} catch (e) {
 			if (tmp.exists) {
