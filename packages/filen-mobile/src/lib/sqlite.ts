@@ -38,7 +38,7 @@ const INIT_QUERIES: {
 		pragma: true
 	},
 	{
-		query: "PRAGMA busy_timeout = 15000", // 5s timeout
+		query: "PRAGMA busy_timeout = 15000", // 15s timeout
 		pragma: true
 	},
 	{
@@ -54,7 +54,7 @@ const INIT_QUERIES: {
 		pragma: true
 	},
 	{
-		query: "PRAGMA max_page_count = 107374182300", // Prevent database from growing too large
+		query: "PRAGMA max_page_count = 2147483646", // Prevent database from growing too large
 		pragma: true
 	},
 	{
@@ -71,14 +71,6 @@ const INIT_QUERIES: {
 	},
 	{
 		query: "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value BLOB NOT NULL) WITHOUT ROWID",
-		pragma: false
-	},
-	{
-		query: "CREATE INDEX IF NOT EXISTS kv_key ON kv (key)",
-		pragma: false
-	},
-	{
-		query: "CREATE UNIQUE INDEX IF NOT EXISTS kv_key_unique ON kv (key)",
 		pragma: false
 	},
 	{
@@ -122,17 +114,19 @@ class Sqlite {
 				this.initMutex.release()
 			})
 
-			if (this.db) {
+			if (this.initDone) {
 				return
 			}
 
-			this.db = await ExpoSqlite.openDatabaseAsync(
-				this.dbFileName,
-				{
-					useNewConnection: true
-				},
-				this.dbFileDirectory.uri
-			)
+			if (!this.db) {
+				this.db = await ExpoSqlite.openDatabaseAsync(
+					this.dbFileName,
+					{
+						useNewConnection: true
+					},
+					this.dbFileDirectory.uri
+				)
+			}
 
 			await this.db.execAsync(INIT_QUERIES.map(q => q.query).join("; "))
 
@@ -162,7 +156,7 @@ class Sqlite {
 			return unpack(new Uint8Array(row.value)) as T
 		},
 		set: async <T>(key: string, value: T): Promise<number | null> => {
-			if (!value) {
+			if (value == null) {
 				return null
 			}
 

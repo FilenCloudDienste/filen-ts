@@ -1,12 +1,12 @@
 import * as ExpoLocalization from "expo-localization"
 
-export let intlLanguage: string = "de-DE"
+export let intlLanguage: string = "en-US"
 
 try {
 	intlLanguage =
 		ExpoLocalization.getLocales()
 			.filter(lang => lang.languageTag)
-			.at(0)?.languageTag ?? "de-DE"
+			.at(0)?.languageTag ?? "en-US"
 } catch (e) {
 	console.error(e)
 }
@@ -61,7 +61,7 @@ function detectLocaleInfo() {
 		dateSeparator = "-"
 	}
 	// MDY format (MM/DD/YYYY) - US and few others
-	else if (lang.startsWith("en-us") || lang.startsWith("en-ph") || lang.startsWith("en-ca")) {
+	else if (lang.startsWith("en-us") || lang.startsWith("en-ph")) {
 		dateFormat = "MDY"
 		dateSeparator = "/"
 		use24Hour = false // US typically uses 12-hour format

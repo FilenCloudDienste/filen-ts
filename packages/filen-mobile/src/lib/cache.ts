@@ -139,17 +139,24 @@ class Cache {
 			return
 		}
 
-		const data = unpack(bytes) as Record<string, [string, unknown][]>
+		try {
+			const data = unpack(bytes) as Record<string, [string, unknown][]>
 
-		for (const [key, entries] of Object.entries(data)) {
-			const map = (this as Record<string, unknown>)[key]
+			for (const [key, entries] of Object.entries(data)) {
+				const map = (this as Record<string, unknown>)[key]
 
-			if (!(map instanceof PersistentMap) || !Array.isArray(entries)) {
-				continue
+				if (!(map instanceof PersistentMap) || !Array.isArray(entries)) {
+					continue
+				}
+
+				for (const [k, v] of entries) {
+					Map.prototype.set.call(map, k, v)
+				}
 			}
-
-			for (const [k, v] of entries) {
-				Map.prototype.set.call(map, k, v)
+		} catch {
+			// Corrupted cache file — delete it and start fresh
+			if (this.file.exists) {
+				this.file.delete()
 			}
 		}
 	}
@@ -167,11 +174,15 @@ class Cache {
 
 		tmp.write(new Uint8Array(pack(data)))
 
-		if (this.file.exists) {
-			this.file.delete()
-		}
+		try {
+			tmp.move(this.file)
+		} catch (e) {
+			if (tmp.exists) {
+				tmp.delete()
+			}
 
-		tmp.move(this.file)
+			throw e
+		}
 	}
 
 	public flush(): void {

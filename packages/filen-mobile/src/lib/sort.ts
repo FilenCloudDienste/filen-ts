@@ -355,7 +355,7 @@ class NotesSorter {
 				content?: string
 		  })
 	)[] {
-		return notes.sort((a, b) => {
+		return notes.slice().sort((a, b) => {
 			if (a.pinned !== b.pinned) {
 				return b.pinned ? 1 : -1
 			}
