@@ -540,9 +540,9 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 	}
 }
 
-export const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
+const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	const checkConnectionIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
-	const socketListenerHandleRef = useRef<ListenerHandle | null>(null)
+	const socketListenerHandlesRef = useRef<ListenerHandle[]>([])
 	const stringifiedClient = useStringifiedClient()
 
 	const onAppStateChange = useCallback(
@@ -561,17 +561,19 @@ export const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }
 						useSocketStore.getState().setState(prev => (sdkClient.isSocketConnected() ? "connected" : prev))
 					}, 5000)
 
-					socketListenerHandleRef.current = (await sdkClient.addEventListener(
-						{
-							onEvent: event => {
-								onEvent({
-									event,
-									userId: stringifiedClient ? stringifiedClient.userId : BigInt(0)
-								}).catch(console.error)
-							}
-						},
-						undefined
-					)) as ListenerHandle
+					socketListenerHandlesRef.current.push(
+						(await sdkClient.addEventListener(
+							{
+								onEvent: event => {
+									onEvent({
+										event,
+										userId: stringifiedClient ? stringifiedClient.userId : BigInt(0)
+									}).catch(console.error)
+								}
+							},
+							undefined
+						)) as ListenerHandle
+					)
 
 					break
 				}
@@ -579,11 +581,11 @@ export const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }
 				case "background": {
 					clearInterval(checkConnectionIntervalRef.current)
 
-					if (socketListenerHandleRef.current) {
-						socketListenerHandleRef.current.uniffiDestroy()
-
-						socketListenerHandleRef.current = null
+					for (const handle of socketListenerHandlesRef.current) {
+						handle.uniffiDestroy()
 					}
+
+					socketListenerHandlesRef.current = []
 
 					useSocketStore.getState().setState("disconnected")
 
@@ -595,7 +597,7 @@ export const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }
 	)
 
 	useEffect(() => {
-		const { cleanup } = runEffect(async defer => {
+		const { cleanup } = runEffect(defer => {
 			const appStateSubscription = AppState.addEventListener("change", onAppStateChange)
 
 			defer(() => {
@@ -615,7 +617,7 @@ export const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }
 	return null
 })
 
-export const Socket = memo(() => {
+const Socket = memo(() => {
 	const { authedSdkClient } = useSdkClients()
 
 	if (!authedSdkClient) {
