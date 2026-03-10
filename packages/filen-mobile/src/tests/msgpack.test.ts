@@ -50,6 +50,30 @@ class MockOuter extends UniffiEnum {
 	}
 }
 
+// Unit variant — no inner property at all, matching real SDK unit variants
+// like ParentUuid.Trash, CreatedTime.Keep, DirColor.Default.
+class MockUnitVariant extends UniffiEnum {
+	readonly [uniffiTypeNameSymbol] = "TestType"
+	readonly tag = "UnitTag"
+
+	constructor() {
+		super("TestType", "UnitTag")
+	}
+}
+
+// Named-fields variant — inner is a frozen object, not a tuple.
+class MockNamedFieldsVariant extends UniffiEnum {
+	readonly [uniffiTypeNameSymbol] = "TestType"
+	readonly tag = "NamedFields"
+	readonly inner: Readonly<{ name: string; value: number }>
+
+	constructor(name: string, value: number) {
+		super("TestType", "NamedFields")
+
+		this.inner = Object.freeze({ name, value })
+	}
+}
+
 describe("msgpack", () => {
 	describe("BigInt", () => {
 		it("round-trips standalone BigInt", () => {
@@ -192,6 +216,48 @@ describe("msgpack", () => {
 			expect(result.meta[uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result.meta.inner).toEqual(["value"])
 		})
+
+		it("preserves unit variant without inner property", () => {
+			const instance = new MockUnitVariant()
+			const result = unpack(pack(instance))
+
+			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result.tag).toBe("UnitTag")
+			expect(result.inner).toBeUndefined()
+			expect("inner" in result).toBe(false)
+		})
+
+		it("preserves named-fields variant with object inner", () => {
+			const instance = new MockNamedFieldsVariant("hello", 42)
+			const result = unpack(pack(instance))
+
+			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result.tag).toBe("NamedFields")
+			expect(result.inner).toEqual({ name: "hello", value: 42 })
+		})
+
+		it("handles mixed unit and data variants in array", () => {
+			const items = [new MockUnitVariant(), new MockVariant("data"), new MockUnitVariant(), new MockNamedFieldsVariant("test", 1)]
+			const result = unpack(pack(items))
+
+			expect(result).toHaveLength(4)
+			expect(result[0].tag).toBe("UnitTag")
+			expect(result[0].inner).toBeUndefined()
+			expect(result[1].tag).toBe("Variant1")
+			expect(result[1].inner).toEqual(["data"])
+			expect(result[2].tag).toBe("UnitTag")
+			expect(result[2].inner).toBeUndefined()
+			expect(result[3].tag).toBe("NamedFields")
+			expect(result[3].inner).toEqual({ name: "test", value: 1 })
+		})
+
+		it("deserialized tagged union passes instanceof UniffiEnum", () => {
+			const instance = new MockVariant("test")
+			const result = unpack(pack(instance))
+
+			expect(result instanceof UniffiEnum).toBe(true)
+			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
+		})
 	})
 
 	describe("mixed data", () => {
@@ -264,22 +330,77 @@ describe("msgpack", () => {
 			expect(new Uint8Array(result)).toEqual(bytes)
 		})
 
+		it("round-trips raw ArrayBuffer", () => {
+			const buffer = new Uint8Array([10, 20, 30]).buffer
+			const result = unpack(pack(buffer))
+
+			expect(new Uint8Array(result)).toEqual(new Uint8Array([10, 20, 30]))
+		})
+
+		it("round-trips empty ArrayBuffer", () => {
+			const buffer = new ArrayBuffer(0)
+			const result = unpack(pack(buffer))
+
+			expect(new Uint8Array(result)).toEqual(new Uint8Array([]))
+		})
+
 		it("round-trips null", () => {
 			expect(unpack(pack(null))).toBeNull()
 		})
 
-		it("encodes undefined as null (encodeUndefinedAsNil)", () => {
-			expect(unpack(pack(undefined))).toBeNull()
+		it("round-trips standalone undefined", () => {
+			expect(unpack(pack(undefined))).toBeUndefined()
 		})
 
-		it("preserves undefined fields as null in objects", () => {
+		it("preserves undefined object fields as undefined (not null)", () => {
 			const obj = { name: "test", hash: undefined, size: 42 }
 			const result = unpack(pack(obj))
 
 			expect(result.name).toBe("test")
-			expect(result.hash).toBeNull()
+			expect(result.hash).toBeUndefined()
 			expect(result.size).toBe(42)
 			expect("hash" in result).toBe(true)
+		})
+
+		it("preserves null and undefined distinctly", () => {
+			const obj = { a: null, b: undefined, c: "yes" }
+			const result = unpack(pack(obj))
+
+			expect(result.a).toBeNull()
+			expect("a" in result).toBe(true)
+			expect(result.b).toBeUndefined()
+			expect("b" in result).toBe(true)
+			expect(result.c).toBe("yes")
+		})
+
+		it("preserves undefined semantics for optional SDK-shaped fields", () => {
+			const fileMeta = {
+				name: "photo.jpg",
+				mime: "image/jpeg",
+				created: undefined,
+				modified: 1709000000000n,
+				hash: undefined,
+				size: 1024n,
+				key: "abc123",
+				version: 2
+			}
+			const result = unpack(pack(fileMeta))
+
+			expect(result.name).toBe("photo.jpg")
+			expect(result.created).toBeUndefined()
+			expect(result.hash).toBeUndefined()
+			expect(result.modified).toBe(1709000000000n)
+			expect(result.size).toBe(1024n)
+		})
+
+		it("preserves undefined in array elements", () => {
+			const arr = [1, undefined, 3]
+			const result = unpack(pack(arr))
+
+			expect(result[0]).toBe(1)
+			expect(result[1]).toBeUndefined()
+			expect(result[2]).toBe(3)
+			expect(result).toHaveLength(3)
 		})
 
 		it("round-trips strings", () => {
@@ -461,6 +582,31 @@ describe("msgpack", () => {
 			expect(second.meta.tag).toBe("Variant1")
 			expect(second.meta.inner).toEqual(["test"])
 			expect(second.items[0].inner).toEqual(["a"])
+			expect(second.meta[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(second.items[0][uniffiTypeNameSymbol]).toBe("TestType")
+		})
+
+		it("double pack/unpack preserves instanceof and symbol", () => {
+			const instance = new MockVariant("test")
+			const first = unpack(pack(instance))
+			const second = unpack(pack(first))
+
+			expect(second instanceof UniffiEnum).toBe(true)
+			expect(second[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(second.tag).toBe("Variant1")
+			expect(second.inner).toEqual(["test"])
+		})
+
+		it("double pack/unpack preserves unit variant shape", () => {
+			const instance = new MockUnitVariant()
+			const first = unpack(pack(instance))
+			const second = unpack(pack(first))
+
+			expect(second instanceof UniffiEnum).toBe(true)
+			expect(second[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(second.tag).toBe("UnitTag")
+			expect(second.inner).toBeUndefined()
+			expect("inner" in second).toBe(false)
 		})
 	})
 })
