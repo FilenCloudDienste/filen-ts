@@ -1,18 +1,14 @@
 import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { debounce } from "es-toolkit"
-import { pack, unpack } from "@/lib/msgpack"
-import * as FileSystem from "expo-file-system"
-import { randomUUID } from "expo-crypto"
-import { Platform } from "react-native"
-import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
+import sqlite from "@/lib/sqlite"
 
 const VERSION = 1
 const PERSIST_DEBOUNCE_MS = 1000
 
 /**
  * Map subclass that calls an onMutate callback on set/delete/clear.
- * Used with a shared debounced persist so any mutation schedules a single batched disk write.
+ * Used with a per-map debounced persist so any mutation schedules a batched SQLite write.
  */
 export class PersistentMap<V> extends Map<string, V> {
 	private readonly onMutate: () => void
@@ -50,24 +46,20 @@ export class PersistentMap<V> extends Map<string, V> {
 	}
 }
 
+type MapEntry = {
+	key: string
+	map: PersistentMap<unknown>
+	debouncedPersist: ReturnType<typeof debounce>
+}
+
 class Cache {
-	private readonly file: FileSystem.File
-	private readonly debouncedPersist: ReturnType<typeof debounce>
-	private readonly directory = new FileSystem.Directory(
-		Platform.select({
-			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
-				"cache"
-			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document.uri, "cache")
-		})
-	)
+	private readonly registry: MapEntry[] = []
 
 	// Not persisted — managed separately by secureStore.ts with its own encryption
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	public readonly secureStore = new Map<string, any>()
 
-	// Persisted — any PersistentMap field is auto-discovered by persist/restore
+	// Persisted — each PersistentMap is independently persisted to SQLite KV
 	public readonly directoryUuidToName: PersistentMap<string>
 	public readonly noteUuidToNote: PersistentMap<Note>
 	public readonly chatUuidToChat: PersistentMap<Chat>
@@ -77,134 +69,101 @@ class Cache {
 	public readonly directoryUuidToAnyDirWithContext: PersistentMap<AnyDirWithContext>
 
 	public constructor() {
-		if (!this.directory.exists) {
-			this.directory.create({
-				intermediates: true,
-				idempotent: true
-			})
-		}
-
-		this.file = new FileSystem.File(FileSystem.Paths.join(this.directory.uri, `cache.v${VERSION}.bin`))
-
-		this.debouncedPersist = debounce(() => this.persist(), PERSIST_DEBOUNCE_MS, {
-			edges: ["trailing"]
-		})
-
-		this.directoryUuidToName = this.createMap<string>()
-		this.noteUuidToNote = this.createMap<Note>()
-		this.chatUuidToChat = this.createMap<Chat>()
-		this.uuidToDriveItem = this.createMap<DriveItem>()
-		this.directoryUuidToAnySharedDirWithContext = this.createMap<AnySharedDirWithContext>()
-		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>()
-		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>()
-
-		this.cleanupTmp()
+		this.directoryUuidToName = this.createMap<string>("directoryUuidToName")
+		this.noteUuidToNote = this.createMap<Note>("noteUuidToNote")
+		this.chatUuidToChat = this.createMap<Chat>("chatUuidToChat")
+		this.uuidToDriveItem = this.createMap<DriveItem>("uuidToDriveItem")
+		this.directoryUuidToAnySharedDirWithContext = this.createMap<AnySharedDirWithContext>(
+			"directoryUuidToAnySharedDirWithContext"
+		)
+		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
+		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
 	}
 
-	private cleanupTmp(): void {
-		if (!this.directory.exists) {
-			return
-		}
+	private createMap<V>(name: string): PersistentMap<V> {
+		const key = `cache:v${VERSION}:${name}`
 
-		const records = this.directory.list()
+		const map = new PersistentMap<V>(() => {
+			debouncedPersist()
+		})
 
-		for (const record of records) {
-			if (!(record instanceof FileSystem.File) || !record.name.endsWith(".tmp") || !record.exists) {
-				continue
+		const debouncedPersist = debounce(
+			() => {
+				sqlite.kvAsync.set(key, [...map.entries()]).catch(err => {
+					console.error(`[Cache] Failed to persist ${key}`, err)
+				})
+			},
+			PERSIST_DEBOUNCE_MS,
+			{
+				edges: ["trailing"]
 			}
+		)
 
-			record.delete()
-		}
-	}
-
-	private createMap<V>(): PersistentMap<V> {
-		return new PersistentMap<V>(() => {
-			this.debouncedPersist()
+		this.registry.push({
+			key,
+			map: map as PersistentMap<unknown>,
+			debouncedPersist
 		})
+
+		return map
 	}
 
 	/**
-	 * Populate maps from disk. Uses Map.prototype.set to bypass
+	 * Populate maps from SQLite. Uses Map.prototype.set to bypass
 	 * PersistentMap's onMutate and avoid a write-back cycle.
 	 * Call during app setup before first render.
 	 */
 	public async restore(): Promise<void> {
-		if (!this.file.exists) {
-			return
-		}
+		const results = await Promise.allSettled(
+			this.registry.map(async ({ key, map }) => {
+				const entries = await sqlite.kvAsync.get<[string, unknown][]>(key)
 
-		const bytes = await this.file.bytes()
-
-		if (bytes.length === 0) {
-			return
-		}
-
-		try {
-			const data = unpack(bytes) as Record<string, [string, unknown][]>
-
-			for (const [key, entries] of Object.entries(data)) {
-				const map = (this as Record<string, unknown>)[key]
-
-				if (!(map instanceof PersistentMap) || !Array.isArray(entries)) {
-					continue
+				if (!entries) {
+					return
 				}
 
 				for (const [k, v] of entries) {
 					Map.prototype.set.call(map, k, v)
 				}
+			})
+		)
+
+		for (let i = 0; i < results.length; i++) {
+			const result = results[i] as PromiseSettledResult<void>
+
+			if (result.status === "rejected") {
+				const { key } = this.registry[i] as MapEntry
+
+				console.error(`[Cache] Failed to restore ${key}, clearing corrupted data`, result.reason)
+
+				sqlite.kvAsync.remove(key).catch(removeErr => {
+					console.error(`[Cache] Failed to remove corrupted key ${key}`, removeErr)
+				})
 			}
-		} catch {
-			// Corrupted cache file — delete it and start fresh
-			if (this.file.exists) {
-				this.file.delete()
-			}
-		}
-	}
-
-	private persist(): void {
-		const data: Record<string, [string, unknown][]> = {}
-
-		for (const [key, value] of Object.entries(this)) {
-			if (value instanceof PersistentMap) {
-				data[key] = [...value.entries()]
-			}
-		}
-
-		const tmp = new FileSystem.File(`${this.file.uri}.${randomUUID()}.tmp`)
-
-		tmp.write(new Uint8Array(pack(data)))
-
-		try {
-			if (this.file.exists) {
-				this.file.delete()
-			}
-
-			tmp.move(this.file)
-		} catch (e) {
-			if (tmp.exists) {
-				tmp.delete()
-			}
-
-			throw e
 		}
 	}
 
 	public flush(): void {
-		this.debouncedPersist.flush()
+		for (const { debouncedPersist } of this.registry) {
+			debouncedPersist.flush()
+		}
 	}
 
 	public clear(): void {
-		this.debouncedPersist.cancel()
-		this.secureStore.clear()
-
-		for (const value of Object.values(this)) {
-			if (value instanceof PersistentMap) {
-				Map.prototype.clear.call(value)
-			}
+		for (const { debouncedPersist } of this.registry) {
+			debouncedPersist.cancel()
 		}
 
-		if (this.file.exists) {
-			this.file.delete()
+		this.secureStore.clear()
+
+		for (const { map } of this.registry) {
+			Map.prototype.clear.call(map)
+		}
+
+		for (const { key } of this.registry) {
+			sqlite.kvAsync.remove(key).catch(err => {
+				console.error(`[Cache] Failed to remove ${key}`, err)
+			})
 		}
 	}
 }

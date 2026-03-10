@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
+import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest"
 
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
@@ -7,26 +7,108 @@ const { UniffiEnum } = vi.hoisted(() => ({
 	}
 }))
 
+const { mockDb, openDatabaseAsync } = vi.hoisted(() => {
+	const mockDb = {
+		execAsync: vi.fn(),
+		getFirstAsync: vi.fn(),
+		getAllAsync: vi.fn(),
+		runAsync: vi.fn()
+	}
+
+	const openDatabaseAsync = vi.fn().mockResolvedValue(mockDb)
+
+	return { mockDb, openDatabaseAsync }
+})
+
 vi.mock("uniffi-bindgen-react-native", () => ({
 	UniffiEnum
 }))
 
-vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
-
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+
+vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+
+vi.mock("expo-sqlite", () => ({
+	openDatabaseAsync
+}))
+
+vi.mock("@/constants", () => ({
+	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
+}))
 
 // eslint-disable-next-line import/first
 import { PersistentMap } from "@/lib/cache"
 // eslint-disable-next-line import/first
 import { pack, unpack } from "@/lib/msgpack"
-// eslint-disable-next-line import/first
-import { fs } from "@/tests/mocks/expoFileSystem"
-
-const CACHE_DIR_URI = "file:///shared/group.io.filen.app/cache"
-const CACHE_FILE_URI = "file:///shared/group.io.filen.app/cache/cache.v1.bin"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cache = any
+
+/**
+ * In-memory KV store that simulates sqlite.kvAsync behavior.
+ * Values are stored as msgpack blobs (Uint8Array) just like the real SQLite KV.
+ */
+const kvStore = new Map<string, Uint8Array>()
+
+function setupMockDb(): void {
+	mockDb.execAsync.mockResolvedValue(undefined)
+
+	mockDb.runAsync.mockImplementation(async (query: string, params: unknown[]) => {
+		if (query.startsWith("INSERT OR REPLACE")) {
+			const key = params[0] as string
+			const value = params[1] as Uint8Array
+
+			kvStore.set(key, value)
+
+			return { lastInsertRowId: 1, changes: 1 }
+		}
+
+		if (query.startsWith("DELETE FROM kv WHERE")) {
+			const key = params[0] as string
+
+			kvStore.delete(key)
+
+			return { lastInsertRowId: 0, changes: 1 }
+		}
+
+		if (query === "DELETE FROM kv") {
+			kvStore.clear()
+
+			return { lastInsertRowId: 0, changes: kvStore.size }
+		}
+
+		return { lastInsertRowId: 0, changes: 0 }
+	})
+
+	mockDb.getFirstAsync.mockImplementation(async (query: string, params: unknown[]) => {
+		if (query.startsWith("SELECT value FROM kv")) {
+			const key = params[0] as string
+			const value = kvStore.get(key)
+
+			if (!value) {
+				return null
+			}
+
+			return { value }
+		}
+
+		if (query.startsWith("SELECT key FROM kv WHERE")) {
+			const key = params[0] as string
+
+			return kvStore.has(key) ? { key } : null
+		}
+
+		return null
+	})
+
+	mockDb.getAllAsync.mockImplementation(async (query: string) => {
+		if (query.startsWith("SELECT key FROM kv")) {
+			return [...kvStore.keys()].map(key => ({ key }))
+		}
+
+		return []
+	})
+}
 
 async function createCache(): Promise<Cache> {
 	const mod = await import("@/lib/cache")
@@ -59,6 +141,11 @@ function getFirstMap(cache: Cache): { name: string; map: PersistentMap<unknown> 
 	const first = maps[0] as [string, PersistentMap<unknown>]
 
 	return { name: first[0], map: first[1] }
+}
+
+/** Returns the SQLite KV key for a given map field name. */
+function kvKey(mapName: string): string {
+	return `cache:v1:${mapName}`
 }
 
 describe("PersistentMap", () => {
@@ -175,8 +262,18 @@ describe("PersistentMap", () => {
 })
 
 describe("Cache", () => {
+	beforeAll(async () => {
+		// Initialize sqlite singleton once — mock implementations are set in beforeEach
+		setupMockDb()
+
+		const sqliteMod = await import("@/lib/sqlite")
+
+		await sqliteMod.default.init()
+	})
+
 	beforeEach(() => {
-		fs.clear()
+		kvStore.clear()
+		setupMockDb()
 		vi.useFakeTimers()
 	})
 
@@ -185,18 +282,6 @@ describe("Cache", () => {
 	})
 
 	describe("constructor", () => {
-		it("creates the cache directory if it does not exist", async () => {
-			await createCache()
-
-			expect(fs.get(CACHE_DIR_URI)).toBe("dir")
-		})
-
-		it("does not throw if the cache directory already exists", async () => {
-			fs.set(CACHE_DIR_URI, "dir")
-
-			await expect(createCache()).resolves.toBeDefined()
-		})
-
 		it("has at least one PersistentMap field", async () => {
 			const cache = await createCache()
 			const maps = getPersistentMaps(cache)
@@ -206,19 +291,15 @@ describe("Cache", () => {
 	})
 
 	describe("restore", () => {
-		it("populates a map from disk", async () => {
+		it("populates a map from SQLite", async () => {
 			const cache = await createCache()
 			const { name } = getFirstMap(cache)
+			const entries = [
+				["key-1", "value-1"],
+				["key-2", "value-2"]
+			]
 
-			const data: Record<string, [string, unknown][]> = {
-				[name]: [
-					["key-1", "value-1"],
-					["key-2", "value-2"]
-				]
-			}
-
-			fs.set(CACHE_DIR_URI, "dir")
-			fs.set(CACHE_FILE_URI, pack(data))
+			kvStore.set(kvKey(name), new Uint8Array(pack(entries)))
 
 			const cache2 = await createCache()
 
@@ -231,18 +312,15 @@ describe("Cache", () => {
 			expect(restored.size).toBe(2)
 		})
 
-		it("restores all PersistentMap fields from a single file", async () => {
+		it("restores all PersistentMap fields from separate SQLite keys", async () => {
 			const cache = await createCache()
 			const maps = getPersistentMaps(cache)
 
-			const data: Record<string, [string, unknown][]> = {}
-
 			for (const [mapName] of maps) {
-				data[mapName] = [[`${mapName}-key`, `${mapName}-value`]]
-			}
+				const entries = [[`${mapName}-key`, `${mapName}-value`]]
 
-			fs.set(CACHE_DIR_URI, "dir")
-			fs.set(CACHE_FILE_URI, pack(data))
+				kvStore.set(kvKey(mapName), new Uint8Array(pack(entries)))
+			}
 
 			const cache2 = await createCache()
 
@@ -255,7 +333,7 @@ describe("Cache", () => {
 			}
 		})
 
-		it("does nothing when file does not exist", async () => {
+		it("does nothing when SQLite keys do not exist", async () => {
 			const cache = await createCache()
 
 			await cache.restore()
@@ -265,84 +343,79 @@ describe("Cache", () => {
 			}
 		})
 
-		it("does nothing when file is empty", async () => {
-			fs.set(CACHE_DIR_URI, "dir")
-			fs.set(CACHE_FILE_URI, new Uint8Array([]))
-
+		it("skips maps whose SQLite key returns null", async () => {
 			const cache = await createCache()
+			const maps = getPersistentMaps(cache)
+			const firstMap = maps[0] as [string, PersistentMap<unknown>]
 
-			await cache.restore()
-
-			for (const [, map] of getPersistentMaps(cache)) {
-				expect(map.size).toBe(0)
-			}
-		})
-
-		it("skips unknown keys in persisted data", async () => {
-			const cache = await createCache()
-			const { name } = getFirstMap(cache)
-
-			const data: Record<string, [string, unknown][]> = {
-				[name]: [["real-key", "real-value"]],
-				nonExistentMap: [["x", "y"]]
-			}
-
-			fs.set(CACHE_DIR_URI, "dir")
-			fs.set(CACHE_FILE_URI, pack(data))
+			kvStore.set(kvKey(firstMap[0]), new Uint8Array(pack([["k", "v"]])))
 
 			const cache2 = await createCache()
 
 			await cache2.restore()
 
-			expect((cache2[name] as PersistentMap<unknown>).get("real-key")).toBe("real-value")
-			expect(cache2["nonExistentMap"]).toBeUndefined()
+			expect((cache2[firstMap[0]] as PersistentMap<unknown>).get("k")).toBe("v")
+
+			for (const [mapName, map] of getPersistentMaps(cache2)) {
+				if (mapName !== firstMap[0]) {
+					expect(map.size).toBe(0)
+				}
+			}
 		})
 
-		it("does not throw on corrupted cache file and deletes it", async () => {
-			fs.set(CACHE_DIR_URI, "dir")
-			fs.set(CACHE_FILE_URI, new Uint8Array([0xff, 0xfe, 0x00, 0xab, 0xcd]))
-
+		it("handles corrupted data for one map without affecting others", async () => {
 			const cache = await createCache()
+			const maps = getPersistentMaps(cache)
+			const firstMap = maps[0] as [string, PersistentMap<unknown>]
+			const secondMap = maps[1] as [string, PersistentMap<unknown>]
 
-			await expect(cache.restore()).resolves.toBeUndefined()
+			// Corrupt data for first map — getFirstAsync returns a blob that unpack will choke on
+			const corruptBlob = new Uint8Array([0xff, 0xfe, 0x00, 0xab, 0xcd])
 
-			for (const [, map] of getPersistentMaps(cache)) {
-				expect(map.size).toBe(0)
-			}
+			kvStore.set(kvKey(firstMap[0]), corruptBlob)
+			// Valid data for second map
+			kvStore.set(kvKey(secondMap[0]), new Uint8Array(pack([["good-key", "good-value"]])))
 
-			expect(fs.has(CACHE_FILE_URI)).toBe(false)
+			const cache2 = await createCache()
+
+			await expect(cache2.restore()).resolves.toBeUndefined()
+
+			expect((cache2[firstMap[0]] as PersistentMap<unknown>).size).toBe(0)
+			expect((cache2[secondMap[0]] as PersistentMap<unknown>).get("good-key")).toBe("good-value")
 		})
 
 		it("does not trigger onMutate during restore (no write-back cycle)", async () => {
 			const cache = await createCache()
 			const { name } = getFirstMap(cache)
 
-			const data: Record<string, [string, unknown][]> = {
-				[name]: [["key-1", "value-1"]]
-			}
-
-			fs.set(CACHE_DIR_URI, "dir")
-			fs.set(CACHE_FILE_URI, pack(data))
+			kvStore.set(kvKey(name), new Uint8Array(pack([["key-1", "value-1"]])))
 
 			const cache2 = await createCache()
 
 			await cache2.restore()
 
-			expect(fs.get(CACHE_FILE_URI)).toBeInstanceOf(Uint8Array)
-
-			// Wipe the file to detect if persist() rewrites it
-			fs.delete(CACHE_FILE_URI)
+			// Record the current INSERT call count
+			const insertsBefore = mockDb.runAsync.mock.calls.filter(
+				(call: unknown[]) => typeof call[0] === "string" && (call[0] as string).startsWith("INSERT")
+			).length
 
 			vi.advanceTimersByTime(5000)
 
-			// File should still be deleted — no persist was triggered
-			expect(fs.has(CACHE_FILE_URI)).toBe(false)
+			// Allow any pending microtasks to flush
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			const insertsAfter = mockDb.runAsync.mock.calls.filter(
+				(call: unknown[]) => typeof call[0] === "string" && (call[0] as string).startsWith("INSERT")
+			).length
+
+			// No additional INSERT calls should have been made
+			expect(insertsAfter).toBe(insertsBefore)
 			expect((cache2[name] as PersistentMap<unknown>).get("key-1")).toBe("value-1")
 		})
 	})
 
 	describe("persist (via flush)", () => {
-		it("writes PersistentMap data to disk on flush", async () => {
+		it("writes PersistentMap data to SQLite on flush", async () => {
 			const cache = await createCache()
 			const { name, map } = getFirstMap(cache)
 
@@ -352,32 +425,62 @@ describe("Cache", () => {
 			cache.flush()
 			vi.advanceTimersByTime(5000)
 
-			const bytes = fs.get(CACHE_FILE_URI) as Uint8Array
+			// Allow async SQLite write to complete
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(bytes).toBeInstanceOf(Uint8Array)
+			const stored = kvStore.get(kvKey(name))
 
-			const data = unpack(bytes) as Record<string, unknown>
+			expect(stored).toBeInstanceOf(Uint8Array)
 
-			expect(data[name]).toEqual([
+			const entries = unpack(stored as Uint8Array) as [string, unknown][]
+
+			expect(entries).toEqual([
 				["uuid-1", "Documents"],
 				["uuid-2", "Photos"]
 			])
 		})
 
-		it("debounces multiple mutations into a single write", async () => {
+		it("persists each map to its own SQLite key", async () => {
 			const cache = await createCache()
-			const { map } = getFirstMap(cache)
+			const maps = getPersistentMaps(cache)
+
+			for (const [, map] of maps) {
+				map.set("test-key", "test-value")
+			}
+
+			cache.flush()
+			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			for (const [mapName] of maps) {
+				const stored = kvStore.get(kvKey(mapName))
+
+				expect(stored).toBeInstanceOf(Uint8Array)
+
+				const entries = unpack(stored as Uint8Array) as [string, unknown][]
+
+				expect(entries).toEqual([["test-key", "test-value"]])
+			}
+		})
+
+		it("debounces multiple mutations into a single write per map", async () => {
+			const cache = await createCache()
+			const { name, map } = getFirstMap(cache)
 
 			let writeCount = 0
-			const originalSet = fs.set.bind(fs)
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const originalImpl = mockDb.runAsync.getMockImplementation() as (...args: any[]) => any
 
-			fs.set = (...args: Parameters<typeof originalSet>) => {
-				if (typeof args[0] === "string" && args[0] === CACHE_FILE_URI) {
+			mockDb.runAsync.mockImplementation(async (...args: unknown[]) => {
+				const query = args[0] as string
+				const params = args[1] as unknown[]
+
+				if (query.startsWith("INSERT") && (params[0] as string) === kvKey(name)) {
 					writeCount++
 				}
 
-				return originalSet(...args)
-			}
+				return originalImpl(...args)
+			})
 
 			map.set("a", "1")
 			map.set("b", "2")
@@ -385,13 +488,13 @@ describe("Cache", () => {
 
 			expect(writeCount).toBe(0)
 
-			vi.advanceTimersByTime(5000)
-
 			cache.flush()
+			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(writeCount).toBe(1)
 
-			fs.set = originalSet
+			mockDb.runAsync.mockImplementation(originalImpl)
 		})
 
 		it("persists data that survives a full restore round-trip", async () => {
@@ -402,31 +505,13 @@ describe("Cache", () => {
 
 			cache1.flush()
 			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			const cache2 = await createCache()
 
 			await cache2.restore()
 
 			expect((cache2[name] as PersistentMap<unknown>).get("round-trip-key")).toBe("round-trip-value")
-		})
-
-		it("persists all PersistentMap fields in a single file", async () => {
-			const cache = await createCache()
-			const maps = getPersistentMaps(cache)
-
-			for (const [mapName, map] of maps) {
-				map.set(`${mapName}-key`, `${mapName}-value`)
-			}
-
-			cache.flush()
-			vi.advanceTimersByTime(5000)
-
-			const bytes = fs.get(CACHE_FILE_URI) as Uint8Array
-			const data = unpack(bytes) as Record<string, [string, unknown][]>
-
-			for (const [mapName] of maps) {
-				expect(data[mapName]).toEqual([[`${mapName}-key`, `${mapName}-value`]])
-			}
 		})
 	})
 
@@ -445,22 +530,31 @@ describe("Cache", () => {
 			}
 		})
 
-		it("deletes the cache file from disk", async () => {
+		it("removes cache keys from SQLite", async () => {
 			const cache = await createCache()
-			const { map } = getFirstMap(cache)
+			const maps = getPersistentMaps(cache)
 
-			map.set("key", "value")
+			for (const [, map] of maps) {
+				map.set("key", "value")
+			}
+
 			cache.flush()
 			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(fs.has(CACHE_FILE_URI)).toBe(true)
+			for (const [mapName] of maps) {
+				expect(kvStore.has(kvKey(mapName))).toBe(true)
+			}
 
 			cache.clear()
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(fs.has(CACHE_FILE_URI)).toBe(false)
+			for (const [mapName] of maps) {
+				expect(kvStore.has(kvKey(mapName))).toBe(false)
+			}
 		})
 
-		it("does not throw when file does not exist", async () => {
+		it("does not throw when SQLite keys do not exist", async () => {
 			const cache = await createCache()
 
 			expect(() => cache.clear()).not.toThrow()
@@ -481,47 +575,37 @@ describe("Cache", () => {
 
 		it("cancels any pending debounced persist", async () => {
 			const cache = await createCache()
-			const { map } = getFirstMap(cache)
+			const { name, map } = getFirstMap(cache)
 
 			map.set("key", "value")
 
 			cache.clear()
 
 			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(fs.has(CACHE_FILE_URI)).toBe(false)
+			// The key should have been removed by clear(), not written by the persist
+			expect(kvStore.has(kvKey(name))).toBe(false)
 		})
 
 		it("does not trigger onMutate when clearing maps (uses Map.prototype.clear)", async () => {
 			const cache = await createCache()
-			const { map } = getFirstMap(cache)
+			const { name, map } = getFirstMap(cache)
 
 			map.set("key", "value")
 			cache.flush()
 			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			fs.delete(CACHE_FILE_URI)
+			// Remove the key so we can detect if persist rewrites it
+			kvStore.delete(kvKey(name))
 
 			cache.clear()
 
 			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(fs.has(CACHE_FILE_URI)).toBe(false)
-		})
-	})
-
-	describe("cleanupTmp", () => {
-		it("removes stale .tmp files from the cache directory on construction", async () => {
-			fs.set(CACHE_DIR_URI, "dir")
-			fs.set(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-0.tmp`, new Uint8Array([1, 2, 3]))
-			fs.set(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-1.tmp`, new Uint8Array([4, 5, 6]))
-			fs.set(CACHE_FILE_URI, new Uint8Array([]))
-
-			await createCache()
-
-			expect(fs.has(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-0.tmp`)).toBe(false)
-			expect(fs.has(`${CACHE_DIR_URI}/cache.v1.bin.mock-uuid-1.tmp`)).toBe(false)
-			expect(fs.has(CACHE_FILE_URI)).toBe(true)
+			expect(kvStore.has(kvKey(name))).toBe(false)
 		})
 	})
 
@@ -536,15 +620,15 @@ describe("Cache", () => {
 
 			cache.flush()
 			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			const bytes = fs.get(CACHE_FILE_URI) as Uint8Array
-			const data = unpack(bytes) as Record<string, [string, unknown][]>
-			const persistedKeys = Object.keys(data)
-			const mapKeys = maps.map(([name]) => name)
+			for (const [mapName] of maps) {
+				const stored = kvStore.get(kvKey(mapName))
 
-			expect(persistedKeys.sort()).toEqual(mapKeys.sort())
+				expect(stored).toBeInstanceOf(Uint8Array)
 
-			for (const entries of Object.values(data)) {
+				const entries = unpack(stored as Uint8Array) as [string, unknown][]
+
 				expect(entries).toHaveLength(1)
 				expect(entries[0]).toEqual(["test-key", "test-value"])
 			}
@@ -560,11 +644,9 @@ describe("Cache", () => {
 
 			cache.flush()
 			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			const bytes = fs.get(CACHE_FILE_URI) as Uint8Array
-			const data = unpack(bytes) as Record<string, unknown>
-
-			expect(data["_testField"]).toBeUndefined()
+			expect(kvStore.has("cache:v1:_testField")).toBe(false)
 		})
 	})
 })
