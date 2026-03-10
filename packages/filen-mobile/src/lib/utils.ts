@@ -53,22 +53,47 @@ export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
 	return abortController.signal() as ManagedAbortSignal
 }
 
-export function createCompositeAbortSignal(...signals: AbortSignal[]): AbortSignal {
+export function createCompositeAbortSignal(...signals: AbortSignal[]): AbortSignal & {
+	dispose: () => void
+} {
 	const controller = new AbortController()
+	const subscriptions: {
+		remove: () => void
+	}[] = []
 
 	for (const signal of signals) {
 		if (signal.aborted) {
 			controller.abort()
 
-			return controller.signal
+			for (const sub of subscriptions) {
+				sub.remove()
+			}
+
+			return Object.assign(controller.signal, {
+				dispose: () => {}
+			})
 		}
 
-		signal.addEventListener("abort", () => controller.abort(), {
+		const handler = () => controller.abort()
+
+		signal.addEventListener("abort", handler, {
 			once: true
+		})
+
+		subscriptions.push({
+			remove: () => signal.removeEventListener("abort", handler)
 		})
 	}
 
-	return controller.signal
+	return Object.assign(controller.signal, {
+		dispose: () => {
+			for (const sub of subscriptions) {
+				sub.remove()
+			}
+
+			subscriptions.length = 0
+		}
+	})
 }
 
 export class PauseSignal {

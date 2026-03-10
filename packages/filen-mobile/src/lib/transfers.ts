@@ -34,11 +34,17 @@ import cache from "@/lib/cache"
 class Transfers {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
+	private readonly activeUploadIds = new Set<string>()
+	private readonly activeUploadUris = new Set<string>()
+	private readonly activeDownloadKeys = new Set<string>()
 
 	public cancelAll(): void {
 		this.globalAbortController.abort()
 		this.globalAbortController = new AbortController()
 		this.globalPauseSignal = new PauseSignal()
+		this.activeUploadIds.clear()
+		this.activeUploadUris.clear()
+		this.activeDownloadKeys.clear()
 	}
 
 	public pauseAll(): void {
@@ -69,16 +75,12 @@ class Transfers {
 		files: File[]
 		directories: Dir[]
 	}> {
-		const currentTransfers = useTransfersStore.getState().transfers.filter(t => !t.finishedAt)
-
-		if (
-			currentTransfers.find(t => t.id === id) ||
-			currentTransfers.find(
-				t => (t.type === "uploadDirectory" || t.type === "uploadFile") && t.localFileOrDir.uri === localFileOrDir.uri
-			)
-		) {
+		if (this.activeUploadIds.has(id) || this.activeUploadUris.has(localFileOrDir.uri)) {
 			throw new Error("A transfer with the same ID or local URI is already in progress.")
 		}
+
+		this.activeUploadIds.add(id)
+		this.activeUploadUris.add(localFileOrDir.uri)
 
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
@@ -90,6 +92,10 @@ class Transfers {
 			const result = await run(async defer => {
 				defer(() => {
 					compositePauseSignal.dispose()
+					compositeAbortSignal.dispose()
+
+					this.activeUploadIds.delete(id)
+					this.activeUploadUris.delete(localFileOrDir.uri)
 				})
 
 				if (parent.tag === AnyNormalDir_Tags.Root) {
@@ -136,22 +142,27 @@ class Transfers {
 					])
 				}
 
-				defer(() => {
-					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-						.then(() => {
-							useTransfersStore.getState().setTransfers(prev =>
-								prev.map(t =>
-									t.id === id
-										? {
-												...t,
-												finishedAt: Date.now()
-											}
-										: t
+				if (!hideProgress) {
+					defer(() => {
+						;(awaitExternalCompletionBeforeMarkingAsFinished
+							? awaitExternalCompletionBeforeMarkingAsFinished()
+							: Promise.resolve()
+						)
+							.then(() => {
+								useTransfersStore.getState().setTransfers(prev =>
+									prev.map(t =>
+										t.id === id
+											? {
+													...t,
+													finishedAt: Date.now()
+												}
+											: t
+									)
 								)
-							)
-						})
-						.catch(console.error)
-				})
+							})
+							.catch(console.error)
+					})
+				}
 
 				const transferred: {
 					files: File[]
@@ -238,13 +249,14 @@ class Transfers {
 								transferred.directories.push(uploadedDir)
 
 								const unwrappedDirMeta = unwrapDirMeta(uploadedDir)
+								const dirParentUuid = unwrapParentUuid(uploadedDir.parent)
 
-								if (!unwrappedDirMeta.shared) {
+								if (!unwrappedDirMeta.shared && dirParentUuid) {
 									driveItemsQueryUpdate({
 										params: {
 											path: {
 												type: "drive",
-												uuid: parent.inner[0].uuid
+												uuid: dirParentUuid
 											}
 										},
 										updater: prev => [
@@ -266,13 +278,14 @@ class Transfers {
 								transferred.files.push(uploadedFile)
 
 								const unwrappedFileMeta = unwrapFileMeta(uploadedFile)
+								const fileParentUuid = unwrapParentUuid(uploadedFile.parent)
 
-								if (!unwrappedFileMeta.shared) {
+								if (!unwrappedFileMeta.shared && fileParentUuid) {
 									driveItemsQueryUpdate({
 										params: {
 											path: {
 												type: "drive",
-												uuid: parent.inner[0].uuid
+												uuid: fileParentUuid
 											}
 										},
 										updater: prev => [
@@ -304,34 +317,36 @@ class Transfers {
 			})
 
 			if (!result.success) {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "uploadDirectory"
-							? {
-									...t,
-									errors: {
-										...t.errors,
-										...(FilenSdkError.hasInner(result.error)
-											? {
-													upload: [
-														...t.errors.upload,
-														{
-															error: FilenSdkError.getInner(result.error),
-															path: normalizeFilePathForSdk(localFileOrDir.uri)
-														}
-													]
-												}
-											: {
-													unknown: [
-														...t.errors.unknown,
-														result.error instanceof Error ? result.error : new Error(String(result.error))
-													]
-												})
+				if (!hideProgress) {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "uploadDirectory"
+								? {
+										...t,
+										errors: {
+											...t.errors,
+											...(FilenSdkError.hasInner(result.error)
+												? {
+														upload: [
+															...t.errors.upload,
+															{
+																error: FilenSdkError.getInner(result.error),
+																path: normalizeFilePathForSdk(localFileOrDir.uri)
+															}
+														]
+													}
+												: {
+														unknown: [
+															...t.errors.unknown,
+															result.error instanceof Error ? result.error : new Error(String(result.error))
+														]
+													})
+										}
 									}
-								}
-							: t
+								: t
+						)
 					)
-				)
+				}
 
 				throw result.error
 			}
@@ -343,6 +358,10 @@ class Transfers {
 		const result = await run(async defer => {
 			defer(() => {
 				compositePauseSignal.dispose()
+				compositeAbortSignal.dispose()
+
+				this.activeUploadIds.delete(id)
+				this.activeUploadUris.delete(localFileOrDir.uri)
 			})
 
 			if (!localFileOrDir.exists) {
@@ -383,22 +402,24 @@ class Transfers {
 				])
 			}
 
-			defer(() => {
-				;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-					.then(() => {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id
-									? {
-											...t,
-											finishedAt: Date.now()
-										}
-									: t
+			if (!hideProgress) {
+				defer(() => {
+					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
+						.then(() => {
+							useTransfersStore.getState().setTransfers(prev =>
+								prev.map(t =>
+									t.id === id
+										? {
+												...t,
+												finishedAt: Date.now()
+											}
+										: t
+								)
 							)
-						)
-					})
-					.catch(console.error)
-			})
+						})
+						.catch(console.error)
+				})
+			}
 
 			const transferred = await authedSdkClient.uploadFile(
 				parent,
@@ -430,34 +451,36 @@ class Transfers {
 		})
 
 		if (!result.success) {
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.map(t =>
-					t.id === id && t.type === "uploadFile"
-						? {
-								...t,
-								errors: {
-									...t.errors,
-									...(FilenSdkError.hasInner(result.error)
-										? {
-												upload: [
-													...t.errors.upload,
-													{
-														error: FilenSdkError.getInner(result.error),
-														path: normalizeFilePathForSdk(localFileOrDir.uri)
-													}
-												]
-											}
-										: {
-												unknown: [
-													...t.errors.unknown,
-													result.error instanceof Error ? result.error : new Error(String(result.error))
-												]
-											})
+			if (!hideProgress) {
+				useTransfersStore.getState().setTransfers(prev =>
+					prev.map(t =>
+						t.id === id && t.type === "uploadFile"
+							? {
+									...t,
+									errors: {
+										...t.errors,
+										...(FilenSdkError.hasInner(result.error)
+											? {
+													upload: [
+														...t.errors.upload,
+														{
+															error: FilenSdkError.getInner(result.error),
+															path: normalizeFilePathForSdk(localFileOrDir.uri)
+														}
+													]
+												}
+											: {
+													unknown: [
+														...t.errors.unknown,
+														result.error instanceof Error ? result.error : new Error(String(result.error))
+													]
+												})
+									}
 								}
-							}
-						: t
+							: t
+					)
 				)
-			)
+			}
 
 			throw result.error
 		}
@@ -513,20 +536,13 @@ class Transfers {
 		})[]
 		directories: DirWithPath[]
 	}> {
-		const currentTransfers = useTransfersStore
-			.getState()
-			.transfers.filter(t => !t.finishedAt && (t.type === "downloadFile" || t.type === "downloadDirectory"))
+		const downloadKey = `${itemUuid}:${destination.uri}`
 
-		if (
-			currentTransfers.find(
-				t =>
-					(t.type === "downloadFile" || t.type === "downloadDirectory") &&
-					t.id === itemUuid &&
-					t.destination.uri === destination.uri
-			)
-		) {
+		if (this.activeDownloadKeys.has(downloadKey)) {
 			throw new Error("A transfer with the same ID and destination URI is already in progress.")
 		}
+
+		this.activeDownloadKeys.add(downloadKey)
 
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
@@ -538,6 +554,9 @@ class Transfers {
 			const result = await run(async defer => {
 				defer(() => {
 					compositePauseSignal.dispose()
+					compositeAbortSignal.dispose()
+
+					this.activeDownloadKeys.delete(downloadKey)
 				})
 
 				if (destination instanceof FileSystem.File) {
@@ -584,22 +603,27 @@ class Transfers {
 					])
 				}
 
-				defer(() => {
-					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-						.then(() => {
-							useTransfersStore.getState().setTransfers(prev =>
-								prev.map(t =>
-									t.id === itemUuid
-										? {
-												...t,
-												finishedAt: Date.now()
-											}
-										: t
+				if (!hideProgress) {
+					defer(() => {
+						;(awaitExternalCompletionBeforeMarkingAsFinished
+							? awaitExternalCompletionBeforeMarkingAsFinished()
+							: Promise.resolve()
+						)
+							.then(() => {
+								useTransfersStore.getState().setTransfers(prev =>
+									prev.map(t =>
+										t.id === itemUuid
+											? {
+													...t,
+													finishedAt: Date.now()
+												}
+											: t
+									)
 								)
-							)
-						})
-						.catch(console.error)
-				})
+							})
+							.catch(console.error)
+					})
+				}
 
 				const transferred: Awaited<ReturnType<Transfers["download"]>> = {
 					files: [],
@@ -755,34 +779,36 @@ class Transfers {
 			})
 
 			if (!result.success) {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === itemUuid && t.type === "downloadDirectory"
-							? {
-									...t,
-									errors: {
-										...t.errors,
-										...(FilenSdkError.hasInner(result.error)
-											? {
-													download: [
-														...t.errors.download,
-														{
-															path: normalizeFilePathForSdk(destination.uri),
-															error: FilenSdkError.getInner(result.error)
-														}
-													]
-												}
-											: {
-													unknown: [
-														...t.errors.unknown,
-														result.error instanceof Error ? result.error : new Error(String(result.error))
-													]
-												})
+				if (!hideProgress) {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === itemUuid && t.type === "downloadDirectory"
+								? {
+										...t,
+										errors: {
+											...t.errors,
+											...(FilenSdkError.hasInner(result.error)
+												? {
+														download: [
+															...t.errors.download,
+															{
+																path: normalizeFilePathForSdk(destination.uri),
+																error: FilenSdkError.getInner(result.error)
+															}
+														]
+													}
+												: {
+														unknown: [
+															...t.errors.unknown,
+															result.error instanceof Error ? result.error : new Error(String(result.error))
+														]
+													})
+										}
 									}
-								}
-							: t
+								: t
+						)
 					)
-				)
+				}
 
 				throw result.error
 			}
@@ -793,6 +819,9 @@ class Transfers {
 		const result = await run(async defer => {
 			defer(() => {
 				compositePauseSignal.dispose()
+				compositeAbortSignal.dispose()
+
+				this.activeDownloadKeys.delete(downloadKey)
 			})
 
 			if (!(destination instanceof FileSystem.File)) {
@@ -845,22 +874,24 @@ class Transfers {
 				])
 			}
 
-			defer(() => {
-				;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-					.then(() => {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === itemUuid
-									? {
-											...t,
-											finishedAt: Date.now()
-										}
-									: t
+			if (!hideProgress) {
+				defer(() => {
+					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
+						.then(() => {
+							useTransfersStore.getState().setTransfers(prev =>
+								prev.map(t =>
+									t.id === itemUuid
+										? {
+												...t,
+												finishedAt: Date.now()
+											}
+										: t
+								)
 							)
-						)
-					})
-					.catch(console.error)
-			})
+						})
+						.catch(console.error)
+				})
+			}
 
 			await authedSdkClient.downloadFileToPath(
 				remoteAnyFile,
@@ -902,34 +933,36 @@ class Transfers {
 		})
 
 		if (!result.success) {
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.map(t =>
-					t.id === itemUuid && t.type === "downloadFile"
-						? {
-								...t,
-								errors: {
-									...t.errors,
-									...(FilenSdkError.hasInner(result.error)
-										? {
-												download: [
-													...t.errors.download,
-													{
-														path: normalizeFilePathForSdk(destination.uri),
-														error: FilenSdkError.getInner(result.error)
-													}
-												]
-											}
-										: {
-												unknown: [
-													...t.errors.unknown,
-													result.error instanceof Error ? result.error : new Error(String(result.error))
-												]
-											})
+			if (!hideProgress) {
+				useTransfersStore.getState().setTransfers(prev =>
+					prev.map(t =>
+						t.id === itemUuid && t.type === "downloadFile"
+							? {
+									...t,
+									errors: {
+										...t.errors,
+										...(FilenSdkError.hasInner(result.error)
+											? {
+													download: [
+														...t.errors.download,
+														{
+															path: normalizeFilePathForSdk(destination.uri),
+															error: FilenSdkError.getInner(result.error)
+														}
+													]
+												}
+											: {
+													unknown: [
+														...t.errors.unknown,
+														result.error instanceof Error ? result.error : new Error(String(result.error))
+													]
+												})
+									}
 								}
-							}
-						: t
+							: t
+					)
 				)
-			)
+			}
 
 			throw result.error
 		}

@@ -12,10 +12,12 @@ class Auth {
 	private authedClient: JsClientInterface | null = null
 	public readonly stringifiedClientStorageKey: string = "stringifiedClient"
 	private unauthedClient: UnauthJsClientInterface | null = null
-
-	// TODO: adapt numbers
-	public readonly maxIoMemoryUsage: number = 32 * 1024 * 1024 // 32 MiB
-	public readonly maxParallelRequests: number = 64
+	private clientsReadyResolve: (() => void) | null = null
+	private clientsReady: Promise<void> = new Promise(resolve => {
+		this.clientsReadyResolve = resolve
+	})
+	public readonly maxIoMemoryUsage: number = 64 * 1024 * 1024 // 64 MiB
+	public readonly maxParallelRequests: number = 128
 	public readonly jsClientBaseConfig: JsClientConfig = {
 		concurrency: undefined,
 		rateLimitPerSec: undefined,
@@ -46,16 +48,29 @@ class Auth {
 				}
 	}
 
+	private notifyClientsReady(): void {
+		if (!this.clientsReadyResolve) {
+			return
+		}
+
+		this.clientsReadyResolve()
+
+		this.clientsReadyResolve = null
+	}
+
 	public async setSdkClients(stringifiedClient: StringifiedClient): Promise<{
 		authedClient: JsClientInterface
 		unauthedClient: UnauthJsClientInterface
 	}> {
 		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+
 		this.authedClient = this.unauthedClient.fromStringified({
 			...stringifiedClient,
 			maxIoMemoryUsage: this.maxIoMemoryUsage,
 			maxParallelRequests: this.maxParallelRequests
 		})
+
+		this.notifyClientsReady()
 
 		return {
 			authedClient: this.authedClient,
@@ -78,13 +93,11 @@ class Auth {
 			}
 		}
 
-		while (!this.authedClient || !this.unauthedClient) {
-			await new Promise<void>(resolve => setTimeout(resolve, 100))
-		}
+		await this.clientsReady
 
 		return {
-			authedSdkClient: this.authedClient,
-			unauthedSdkClient: this.unauthedClient
+			authedSdkClient: this.authedClient as JsClientInterface,
+			unauthedSdkClient: this.unauthedClient as UnauthJsClientInterface
 		}
 	}
 
@@ -102,13 +115,7 @@ class Auth {
 			maxParallelRequests: this.maxParallelRequests
 		})
 
-		const stringifiedClient = await this.getStringifiedAuthedClientFromSecureStorage()
-
-		if (!stringifiedClient) {
-			throw new Error("Failed to store stringified client in secure storage")
-		}
-
-		await this.setSdkClients(stringifiedClient)
+		this.notifyClientsReady()
 
 		return this.authedClient
 	}
@@ -118,6 +125,10 @@ class Auth {
 
 		this.authedClient = null
 		this.unauthedClient = null
+
+		this.clientsReady = new Promise(resolve => {
+			this.clientsReadyResolve = resolve
+		})
 	}
 }
 
