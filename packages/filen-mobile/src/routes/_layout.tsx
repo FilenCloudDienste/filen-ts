@@ -27,6 +27,7 @@ import Socket from "@/components/socket"
 import Pathname from "@/components/pathname"
 import { Platform } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
+import Http from "@/components/http"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -212,6 +213,7 @@ export const RootLayout = memo(() => {
 										{isAuthed && (
 											<Fragment>
 												<Socket />
+												<Http />
 												<NotesSync />
 												<ChatsSync />
 											</Fragment>
