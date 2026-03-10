@@ -12,6 +12,7 @@ const PERSIST_DEBOUNCE_MS = 1000
  */
 export class PersistentMap<V> extends Map<string, V> {
 	private readonly onMutate: () => void
+	public ready: boolean = false
 
 	public constructor(onMutate: () => void) {
 		super()
@@ -19,7 +20,15 @@ export class PersistentMap<V> extends Map<string, V> {
 		this.onMutate = onMutate
 	}
 
+	private assertReady(): void {
+		if (!this.ready) {
+			throw new Error("Cache not restored yet — call cache.restore() before writing")
+		}
+	}
+
 	public override set(key: string, value: V): this {
+		this.assertReady()
+
 		super.set(key, value)
 
 		this.onMutate()
@@ -28,6 +37,8 @@ export class PersistentMap<V> extends Map<string, V> {
 	}
 
 	public override delete(key: string): boolean {
+		this.assertReady()
+
 		const result = super.delete(key)
 
 		if (result) {
@@ -38,6 +49,8 @@ export class PersistentMap<V> extends Map<string, V> {
 	}
 
 	public override clear(): void {
+		this.assertReady()
+
 		if (this.size > 0) {
 			super.clear()
 
@@ -140,6 +153,10 @@ class Cache {
 					console.error(`[Cache] Failed to remove corrupted key ${key}`, removeErr)
 				})
 			}
+		}
+
+		for (const { map } of this.registry) {
+			map.ready = true
 		}
 	}
 

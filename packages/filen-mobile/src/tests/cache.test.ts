@@ -148,10 +148,45 @@ function kvKey(mapName: string): string {
 	return `cache:v1:${mapName}`
 }
 
+/** Creates a ready PersistentMap for unit tests (ready = true so writes are allowed). */
+function createReadyMap<V>(onMutate: () => void = () => {}): PersistentMap<V> {
+	const map = new PersistentMap<V>(onMutate)
+
+	map.ready = true
+
+	return map
+}
+
 describe("PersistentMap", () => {
+	it("throws on set before ready", () => {
+		const map = new PersistentMap<string>(() => {})
+
+		expect(() => map.set("key", "value")).toThrow("Cache not restored yet")
+	})
+
+	it("throws on delete before ready", () => {
+		const map = new PersistentMap<string>(() => {})
+
+		expect(() => map.delete("key")).toThrow("Cache not restored yet")
+	})
+
+	it("throws on clear before ready", () => {
+		const map = new PersistentMap<string>(() => {})
+
+		expect(() => map.clear()).toThrow("Cache not restored yet")
+	})
+
+	it("allows reads before ready", () => {
+		const map = new PersistentMap<string>(() => {})
+
+		expect(map.get("key")).toBeUndefined()
+		expect(map.has("key")).toBe(false)
+		expect(map.size).toBe(0)
+	})
+
 	it("calls onMutate when set is called", () => {
 		const onMutate = vi.fn()
-		const map = new PersistentMap<string>(onMutate)
+		const map = createReadyMap<string>(onMutate)
 
 		map.set("key", "value")
 
@@ -161,7 +196,7 @@ describe("PersistentMap", () => {
 
 	it("calls onMutate when delete removes an existing key", () => {
 		const onMutate = vi.fn()
-		const map = new PersistentMap<string>(onMutate)
+		const map = createReadyMap<string>(onMutate)
 
 		map.set("key", "value")
 		onMutate.mockClear()
@@ -174,7 +209,7 @@ describe("PersistentMap", () => {
 
 	it("does not call onMutate when delete targets a missing key", () => {
 		const onMutate = vi.fn()
-		const map = new PersistentMap<string>(onMutate)
+		const map = createReadyMap<string>(onMutate)
 
 		map.delete("nonexistent")
 
@@ -183,7 +218,7 @@ describe("PersistentMap", () => {
 
 	it("calls onMutate when clear is called on a non-empty map", () => {
 		const onMutate = vi.fn()
-		const map = new PersistentMap<string>(onMutate)
+		const map = createReadyMap<string>(onMutate)
 
 		map.set("a", "1")
 		map.set("b", "2")
@@ -197,7 +232,7 @@ describe("PersistentMap", () => {
 
 	it("does not call onMutate when clear is called on an empty map", () => {
 		const onMutate = vi.fn()
-		const map = new PersistentMap<string>(onMutate)
+		const map = createReadyMap<string>(onMutate)
 
 		map.clear()
 
@@ -205,7 +240,7 @@ describe("PersistentMap", () => {
 	})
 
 	it("returns this from set for chaining", () => {
-		const map = new PersistentMap<string>(() => {})
+		const map = createReadyMap<string>()
 
 		const result = map.set("a", "1").set("b", "2")
 
@@ -214,7 +249,7 @@ describe("PersistentMap", () => {
 	})
 
 	it("inherits all Map methods (get, has, size, entries, forEach)", () => {
-		const map = new PersistentMap<number>(() => {})
+		const map = createReadyMap<number>()
 
 		map.set("x", 10)
 		map.set("y", 20)
@@ -241,7 +276,7 @@ describe("PersistentMap", () => {
 
 	it("calls onMutate on every set, even overwrites", () => {
 		const onMutate = vi.fn()
-		const map = new PersistentMap<string>(onMutate)
+		const map = createReadyMap<string>(onMutate)
 
 		map.set("key", "first")
 		map.set("key", "second")
@@ -251,7 +286,7 @@ describe("PersistentMap", () => {
 	})
 
 	it("delete returns true for existing key and false for missing key", () => {
-		const map = new PersistentMap<string>(() => {})
+		const map = createReadyMap<string>()
 
 		map.set("key", "value")
 
@@ -282,6 +317,14 @@ describe("Cache", () => {
 	})
 
 	describe("constructor", () => {
+		it("maps are not ready before restore", async () => {
+			const cache = await createCache()
+			const { map } = getFirstMap(cache)
+
+			expect(map.ready).toBe(false)
+			expect(() => map.set("key", "value")).toThrow("Cache not restored yet")
+		})
+
 		it("has at least one PersistentMap field", async () => {
 			const cache = await createCache()
 			const maps = getPersistentMaps(cache)
@@ -310,6 +353,20 @@ describe("Cache", () => {
 			expect(restored.get("key-1")).toBe("value-1")
 			expect(restored.get("key-2")).toBe("value-2")
 			expect(restored.size).toBe(2)
+		})
+
+		it("sets all maps to ready after restore", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			for (const [, map] of getPersistentMaps(cache)) {
+				expect(map.ready).toBe(true)
+			}
+
+			const { map } = getFirstMap(cache)
+
+			expect(() => map.set("key", "value")).not.toThrow()
 		})
 
 		it("restores all PersistentMap fields from separate SQLite keys", async () => {
@@ -417,6 +474,9 @@ describe("Cache", () => {
 	describe("persist (via flush)", () => {
 		it("writes PersistentMap data to SQLite on flush", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const { name, map } = getFirstMap(cache)
 
 			map.set("uuid-1", "Documents")
@@ -442,6 +502,9 @@ describe("Cache", () => {
 
 		it("persists each map to its own SQLite key", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const maps = getPersistentMaps(cache)
 
 			for (const [, map] of maps) {
@@ -465,6 +528,9 @@ describe("Cache", () => {
 
 		it("debounces multiple mutations into a single write per map", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const { name, map } = getFirstMap(cache)
 
 			let writeCount = 0
@@ -499,6 +565,9 @@ describe("Cache", () => {
 
 		it("persists data that survives a full restore round-trip", async () => {
 			const cache1 = await createCache()
+
+			await cache1.restore()
+
 			const { name, map } = getFirstMap(cache1)
 
 			map.set("round-trip-key", "round-trip-value")
@@ -519,6 +588,8 @@ describe("Cache", () => {
 		it("empties all PersistentMap instances", async () => {
 			const cache = await createCache()
 
+			await cache.restore()
+
 			for (const [, map] of getPersistentMaps(cache)) {
 				map.set("key", "value")
 			}
@@ -532,6 +603,9 @@ describe("Cache", () => {
 
 		it("removes cache keys from SQLite", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const maps = getPersistentMaps(cache)
 
 			for (const [, map] of maps) {
@@ -575,6 +649,9 @@ describe("Cache", () => {
 
 		it("cancels any pending debounced persist", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const { name, map } = getFirstMap(cache)
 
 			map.set("key", "value")
@@ -590,6 +667,9 @@ describe("Cache", () => {
 
 		it("does not trigger onMutate when clearing maps (uses Map.prototype.clear)", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const { name, map } = getFirstMap(cache)
 
 			map.set("key", "value")
@@ -612,6 +692,9 @@ describe("Cache", () => {
 	describe("auto-discovery", () => {
 		it("persists exactly the PersistentMap fields found on the instance", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const maps = getPersistentMaps(cache)
 
 			for (const [, map] of maps) {
@@ -636,6 +719,9 @@ describe("Cache", () => {
 
 		it("does not persist non-PersistentMap fields", async () => {
 			const cache = await createCache()
+
+			await cache.restore()
+
 			const { map } = getFirstMap(cache)
 
 			map.set("key", "value")
