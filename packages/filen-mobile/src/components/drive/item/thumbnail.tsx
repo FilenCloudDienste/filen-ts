@@ -4,11 +4,13 @@ import type { ImageStyle } from "expo-image"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import thumbnails from "@/lib/thumbnails"
-import { run } from "@filen/utils"
+import { run, runEffect } from "@filen/utils"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import { useRecyclingState } from "@shopify/flash-list"
+import { AppState } from "react-native"
+import useHttpStore from "@/stores/useHttp.store"
 
 const MAX_ERROR_RETRIES = 3
 const MAX_GENERATE_RETRIES = 3
@@ -61,18 +63,24 @@ const Thumbnail = memo(
 		}, [localPath])
 
 		const generate = useCallback(async () => {
-			if (localPathRef.current || (item.type !== "file" && item.type !== "sharedFile") || !thumbnails.canGenerate(item)) {
+			if (
+				localPathRef.current ||
+				(item.type !== "file" && item.type !== "sharedFile") ||
+				!thumbnails.canGenerate(item) ||
+				AppState.currentState !== "active"
+			) {
 				return
 			}
 
 			abortControllerRef.current?.abort()
+			errorRetryCountRef.current = 0
 			abortControllerRef.current = new AbortController()
 
 			const signal = abortControllerRef.current.signal
 			let lastError: unknown
 
 			for (let attempt = 0; attempt < MAX_GENERATE_RETRIES; attempt++) {
-				if (signal.aborted) {
+				if (signal.aborted || AppState.currentState !== "active") {
 					return
 				}
 
@@ -96,6 +104,8 @@ const Thumbnail = memo(
 				}
 
 				lastError = result.error
+
+				await new Promise<void>(resolve => setTimeout(resolve, 1000))
 			}
 
 			console.error(lastError)
@@ -138,10 +148,52 @@ const Thumbnail = memo(
 		}, [generate])
 
 		useEffect(() => {
+			const { cleanup } = runEffect(defer => {
+				const appStateSubscription = AppState.addEventListener("change", nextAppState => {
+					if (nextAppState === "active") {
+						generate()
+					} else if (nextAppState === "background") {
+						abortControllerRef.current?.abort()
+
+						abortControllerRef.current = null
+						errorRetryCountRef.current = 0
+					}
+				})
+
+				defer(() => {
+					appStateSubscription.remove()
+				})
+
+				const httpStoreUnsub = useHttpStore.subscribe(
+					state => state.port,
+					port => {
+						if (port) {
+							generate()
+						} else {
+							abortControllerRef.current?.abort()
+
+							abortControllerRef.current = null
+							errorRetryCountRef.current = 0
+						}
+					}
+				)
+
+				defer(() => {
+					httpStoreUnsub()
+				})
+			})
+
+			return () => {
+				cleanup()
+			}
+		}, [generate])
+
+		useEffect(() => {
 			return () => {
 				abortControllerRef.current?.abort()
 
 				abortControllerRef.current = null
+				errorRetryCountRef.current = 0
 			}
 		}, [])
 
