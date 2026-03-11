@@ -76,10 +76,13 @@ export const queryClientPersisterKv = {
 		}
 	},
 	keys: async (): Promise<string[]> => {
-		return (await sqlite.kvAsync.keys()).map(key => key.replace(`${QUERY_CLIENT_PERSISTER_PREFIX}:`, ""))
+		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
+		const keys = await sqlite.kvAsync.keysByPrefix(prefix)
+
+		return keys.map(key => key.slice(prefix.length))
 	},
 	clear: async (): Promise<void> => {
-		return sqlite.kvAsync.clear()
+		await sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`)
 	}
 } as const
 
@@ -104,13 +107,9 @@ export async function restoreQueries(): Promise<void> {
 	try {
 		const keys = await queryClientPersisterKv.keys()
 
-		await Promise.all(
+		const results = await Promise.allSettled(
 			keys.map(async key => {
-				if (!key.startsWith(QUERY_CLIENT_PERSISTER_PREFIX)) {
-					return
-				}
-
-				const persistedQuery = (await queryClientPersisterKv.getItem<PersistedQuery>(key))
+				const persistedQuery = await queryClientPersisterKv.getItem<PersistedQuery>(key)
 
 				if (
 					!persistedQuery ||
@@ -129,6 +128,12 @@ export async function restoreQueries(): Promise<void> {
 				})
 			})
 		)
+
+		for (const result of results) {
+			if (result.status === "rejected") {
+				console.error("[restoreQueries] Failed to restore query", result.reason)
+			}
+		}
 	} catch (e) {
 		console.error(e)
 		alerts.error(e)

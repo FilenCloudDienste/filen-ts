@@ -194,6 +194,21 @@ class Sqlite {
 			const db = await this.openDb()
 
 			await db.runAsync("DELETE FROM kv WHERE key = ?", [key])
+		},
+		removeByPrefix: async (prefix: string): Promise<void> => {
+			const db = await this.openDb()
+
+			await db.runAsync("DELETE FROM kv WHERE key LIKE ?", [prefix + "%"])
+		},
+		keysByPrefix: async (prefix: string): Promise<string[]> => {
+			const db = await this.openDb()
+			const rows = await db.getAllAsync<{ key: string }>("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])
+
+			if (!rows || rows.length === 0) {
+				return []
+			}
+
+			return rows.map(row => row.key)
 		}
 	}
 }
