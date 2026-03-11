@@ -12,6 +12,8 @@ import { DirColor } from "@filen/sdk-rs"
 import useHttpStore from "@/stores/useHttp.store"
 import { EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 
+const MAX_ERROR_RETRIES = 1
+
 const Thumbnail = memo(
 	({
 		item,
@@ -29,9 +31,35 @@ const Thumbnail = memo(
 		const existsOnDisk = availableFromCache ? thumbnails.exists(item) : null
 		const [localPath, setLocalPath] = useState<string | null>(existsOnDisk?.exists ? existsOnDisk.path : null)
 		const abortControllerRef = useRef<AbortController | null>(null)
+		const localPathRef = useRef(localPath)
+		const errorRetryCountRef = useRef(0)
+
+		useEffect(() => {
+			localPathRef.current = localPath
+		}, [localPath])
+
+		const isVideo = useMemo(() => {
+			if (item.type !== "file" && item.type !== "sharedFile") {
+				return false
+			}
+
+			const name = item.data.decryptedMeta?.name
+
+			if (!name) {
+				return false
+			}
+
+			const dotIndex = name.lastIndexOf(".")
+
+			if (dotIndex < 0) {
+				return false
+			}
+
+			return EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(name.slice(dotIndex).toLowerCase().trim())
+		}, [item])
 
 		const generate = useCallback(async () => {
-			if (localPath || (item.type !== "file" && item.type !== "sharedFile") || !thumbnails.canGenerate(item)) {
+			if (localPathRef.current || (item.type !== "file" && item.type !== "sharedFile") || !thumbnails.canGenerate(item)) {
 				return
 			}
 
@@ -58,16 +86,38 @@ const Thumbnail = memo(
 			cache.availableThumbnails.set(item.data.uuid, true)
 
 			setLocalPath(result.data)
-		}, [item, localPath])
+		}, [item])
+
+		const generateRef = useRef(generate)
+
+		useEffect(() => {
+			generateRef.current = generate
+		}, [generate])
 
 		const onError = useCallback(() => {
 			cache.availableThumbnails.set(item.data.uuid, false)
 
+			if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
+				setLocalPath(null)
+
+				return
+			}
+
+			errorRetryCountRef.current += 1
+
+			thumbnails.remove(item)
+
+			localPathRef.current = null
+
 			setLocalPath(null)
+
+			generateRef.current?.()
 		}, [item])
 
 		useEffectOnce(() => {
-			generate()
+			if (!localPath) {
+				generate()
+			}
 		})
 
 		const source = useMemo(
@@ -85,26 +135,6 @@ const Thumbnail = memo(
 			[size.thumbnail]
 		)
 
-		const isVideo = useMemo(() => {
-			if (item.type !== "file" && item.type !== "sharedFile") {
-				return false
-			}
-
-			const name = item.data.decryptedMeta?.name
-
-			if (!name) {
-				return false
-			}
-
-			const dotIndex = name.lastIndexOf(".")
-
-			if (dotIndex < 0) {
-				return false
-			}
-
-			return EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(name.slice(dotIndex).toLowerCase().trim())
-		}, [item])
-
 		useEffect(() => {
 			return () => {
 				abortControllerRef.current?.abort()
@@ -120,11 +150,13 @@ const Thumbnail = memo(
 
 			const unsubscribe = useHttpStore.subscribe(
 				s => s.port,
-				port => {
+				(port, prevPort) => {
 					if (port === null) {
 						abortControllerRef.current?.abort()
 
 						abortControllerRef.current = null
+					} else if (prevPort === null) {
+						generateRef.current?.()
 					}
 				}
 			)
