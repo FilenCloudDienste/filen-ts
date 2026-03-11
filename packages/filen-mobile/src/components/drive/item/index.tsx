@@ -172,6 +172,18 @@ const Item = memo(
 				return
 			}
 
+			if (info.item.item.type === "file" || info.item.item.type === "sharedFile") {
+				router.push({
+					pathname: "/preview",
+					params: {
+						item: Buffer.from(pack(info.item.item)).toString("base64"),
+						origin
+					}
+				})
+
+				return
+			}
+
 			if (
 				(info.item.item.type === "directory" ||
 					info.item.item.type === "sharedDirectory" ||

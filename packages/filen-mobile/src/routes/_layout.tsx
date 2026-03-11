@@ -209,6 +209,15 @@ export const RootLayout = memo(() => {
 													}
 												}}
 											/>
+											<Stack.Screen
+												name="preview"
+												options={{
+													presentation: "fullScreenModal",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
+												}}
+											/>
 										</Stack>
 										{isAuthed && (
 											<Fragment>
