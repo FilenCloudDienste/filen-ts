@@ -8,11 +8,10 @@ import { run } from "@filen/utils"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
-import useHttpStore from "@/stores/useHttp.store"
-import { EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { useRecyclingState } from "@shopify/flash-list"
 
-const MAX_ERROR_RETRIES = 1
+const MAX_ERROR_RETRIES = 3
+const MAX_GENERATE_RETRIES = 3
 
 const Thumbnail = memo(
 	({
@@ -61,26 +60,6 @@ const Thumbnail = memo(
 			localPathRef.current = localPath
 		}, [localPath])
 
-		const isVideo = useMemo(() => {
-			if (item.type !== "file" && item.type !== "sharedFile") {
-				return false
-			}
-
-			const name = item.data.decryptedMeta?.name
-
-			if (!name) {
-				return false
-			}
-
-			const dotIndex = name.lastIndexOf(".")
-
-			if (dotIndex < 0) {
-				return false
-			}
-
-			return EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(name.slice(dotIndex).toLowerCase().trim())
-		}, [item])
-
 		const generate = useCallback(async () => {
 			if (localPathRef.current || (item.type !== "file" && item.type !== "sharedFile") || !thumbnails.canGenerate(item)) {
 				return
@@ -90,25 +69,38 @@ const Thumbnail = memo(
 			abortControllerRef.current = new AbortController()
 
 			const signal = abortControllerRef.current.signal
+			let lastError: unknown
 
-			const result = await run(async () => {
-				return await thumbnails.generate({
-					item,
-					signal
+			for (let attempt = 0; attempt < MAX_GENERATE_RETRIES; attempt++) {
+				if (signal.aborted) {
+					return
+				}
+
+				const result = await run(async () => {
+					return await thumbnails.generate({
+						item,
+						signal
+					})
 				})
-			})
 
-			if (!result.success) {
-				console.error(result.error)
+				if (signal.aborted) {
+					return
+				}
 
-				cache.availableThumbnails.set(item.data.uuid, false)
+				if (result.success) {
+					cache.availableThumbnails.set(item.data.uuid, true)
 
-				return
+					setLocalPath(result.data)
+
+					return
+				}
+
+				lastError = result.error
 			}
 
-			cache.availableThumbnails.set(item.data.uuid, true)
+			console.error(lastError)
 
-			setLocalPath(result.data)
+			cache.availableThumbnails.set(item.data.uuid, false)
 		}, [item, setLocalPath])
 
 		const generateRef = useRef(generate)
@@ -141,9 +133,11 @@ const Thumbnail = memo(
 			errorRetryCountRef.current = 0
 
 			if (!localPathRef.current) {
-				generateRef.current?.()
+				generate()
 			}
+		}, [generate])
 
+		useEffect(() => {
 			return () => {
 				abortControllerRef.current?.abort()
 
@@ -165,25 +159,6 @@ const Thumbnail = memo(
 			}),
 			[size.thumbnail]
 		)
-
-		useEffect(() => {
-			if (!isVideo) {
-				return
-			}
-
-			const unsubscribe = useHttpStore.subscribe(
-				s => s.port,
-				port => {
-					if (port !== null) {
-						generateRef.current?.()
-					}
-				}
-			)
-
-			return () => {
-				unsubscribe()
-			}
-		}, [isVideo])
 
 		if (item.type !== "file" && item.type !== "sharedFile") {
 			return (
