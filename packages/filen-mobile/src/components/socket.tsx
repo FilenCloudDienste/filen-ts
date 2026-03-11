@@ -9,7 +9,7 @@ import {
 	type SocketEvent
 } from "@filen/sdk-rs"
 import { useEffect, useRef } from "react"
-import { runEffect } from "@filen/utils"
+import { runEffect, run, Semaphore } from "@filen/utils"
 import useChatsStore from "@/stores/useChats.store"
 import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/queries/useChatMessages.query"
 import { chatsQueryGet, chatsQueryUpdate } from "@/queries/useChats.query"
@@ -540,57 +540,74 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 	}
 }
 
+const mutex = new Semaphore(1)
+
 const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	const checkConnectionIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
-	const socketListenerHandlesRef = useRef<ListenerHandle[]>([])
+	const socketListenerHandleRef = useRef<ListenerHandle | null>(null)
 	const stringifiedClient = useStringifiedClient()
 
 	const onAppStateChange = useCallback(
 		async (nextAppState: AppStateStatus) => {
-			switch (nextAppState) {
-				case "active": {
-					if (sdkClient.isSocketConnected()) {
-						useSocketStore.getState().setState("connected")
+			const result = await run(async defer => {
+				await mutex.acquire()
 
-						return
+				defer(() => {
+					mutex.release()
+				})
+
+				switch (nextAppState) {
+					case "active": {
+						if (sdkClient.isSocketConnected()) {
+							useSocketStore.getState().setState("connected")
+
+							return
+						}
+
+						if (!socketListenerHandleRef.current) {
+							socketListenerHandleRef.current = (await sdkClient.addEventListener(
+								{
+									onEvent: event => {
+										onEvent({
+											event,
+											userId: stringifiedClient ? stringifiedClient.userId : BigInt(0)
+										}).catch(console.error)
+									}
+								},
+								undefined
+							)) as ListenerHandle
+
+							clearInterval(checkConnectionIntervalRef.current)
+
+							checkConnectionIntervalRef.current = setInterval(() => {
+								useSocketStore.getState().setState(prev => (sdkClient.isSocketConnected() ? "connected" : prev))
+							}, 5000)
+						}
+
+						break
 					}
 
-					clearInterval(checkConnectionIntervalRef.current)
+					case "background": {
+						if (socketListenerHandleRef.current) {
+							socketListenerHandleRef.current.uniffiDestroy()
 
-					checkConnectionIntervalRef.current = setInterval(() => {
-						useSocketStore.getState().setState(prev => (sdkClient.isSocketConnected() ? "connected" : prev))
-					}, 5000)
+							socketListenerHandleRef.current = null
 
-					socketListenerHandlesRef.current.push(
-						(await sdkClient.addEventListener(
-							{
-								onEvent: event => {
-									onEvent({
-										event,
-										userId: stringifiedClient ? stringifiedClient.userId : BigInt(0)
-									}).catch(console.error)
-								}
-							},
-							undefined
-						)) as ListenerHandle
-					)
+							useSocketStore.getState().setState("disconnected")
 
-					break
-				}
+							clearInterval(checkConnectionIntervalRef.current)
+						}
 
-				case "background": {
-					clearInterval(checkConnectionIntervalRef.current)
-
-					for (const handle of socketListenerHandlesRef.current) {
-						handle.uniffiDestroy()
+						break
 					}
-
-					socketListenerHandlesRef.current = []
-
-					useSocketStore.getState().setState("disconnected")
-
-					break
 				}
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+
+				return
 			}
 		},
 		[sdkClient, stringifiedClient]

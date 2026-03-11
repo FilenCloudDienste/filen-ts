@@ -80,17 +80,17 @@ class Cache {
 	public readonly directoryUuidToAnySharedDirWithContext: PersistentMap<AnySharedDirWithContext>
 	public readonly directoryUuidToAnyNormalDir: PersistentMap<AnyNormalDir>
 	public readonly directoryUuidToAnyDirWithContext: PersistentMap<AnyDirWithContext>
+	public readonly availableThumbnails: PersistentMap<boolean>
 
 	public constructor() {
 		this.directoryUuidToName = this.createMap<string>("directoryUuidToName")
 		this.noteUuidToNote = this.createMap<Note>("noteUuidToNote")
 		this.chatUuidToChat = this.createMap<Chat>("chatUuidToChat")
 		this.uuidToDriveItem = this.createMap<DriveItem>("uuidToDriveItem")
-		this.directoryUuidToAnySharedDirWithContext = this.createMap<AnySharedDirWithContext>(
-			"directoryUuidToAnySharedDirWithContext"
-		)
+		this.directoryUuidToAnySharedDirWithContext = this.createMap<AnySharedDirWithContext>("directoryUuidToAnySharedDirWithContext")
 		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
 		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
+		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
 	}
 
 	private createMap<V>(name: string): PersistentMap<V> {
