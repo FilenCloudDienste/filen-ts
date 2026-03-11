@@ -11,7 +11,6 @@ import useHttpStore from "@/stores/useHttp.store"
 import { Platform } from "react-native"
 import { randomUUID } from "expo-crypto"
 import cache from "@/lib/cache"
-import { parseExifOrientationFromBytes } from "@/lib/exif"
 
 export type ThumbnailParams = {
 	item: DriveItem
@@ -62,7 +61,7 @@ class Thumbnails {
 	}
 
 	private getPath(item: DriveItem): string {
-		return FileSystem.Paths.join(this.directory.uri, `${item.data.uuid}.jpg`)
+		return FileSystem.Paths.join(this.directory.uri, `${item.data.uuid}.png`)
 	}
 
 	private ensureDirectory(): void {
@@ -208,24 +207,7 @@ class Thumbnails {
 				throw abortError(params.signal)
 			}
 
-			const tempFile = new FileSystem.File(tempPath)
-			const handle = tempFile.open()
-			let rotation: number
-
-			try {
-				const headerSize = Math.min(handle.size ?? 65536, 65536)
-				rotation = parseExifOrientationFromBytes(handle.readBytes(headerSize))
-			} finally {
-				handle.close()
-			}
-
-			let context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(tempPath))
-
-			if (rotation !== 0) {
-				context = context.rotate(rotation)
-			}
-
-			const manipulated = await context
+			const manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(tempPath))
 				.resize({
 					width: params.width
 				})
@@ -237,7 +219,7 @@ class Thumbnails {
 
 			const saved = await manipulated.saveAsync({
 				compress: params.quality,
-				format: ImageManipulator.SaveFormat.JPEG,
+				format: ImageManipulator.SaveFormat.PNG,
 				base64: false
 			})
 
@@ -357,7 +339,7 @@ class Thumbnails {
 
 			const saved = await manipulated.saveAsync({
 				compress: params.quality,
-				format: ImageManipulator.SaveFormat.JPEG,
+				format: ImageManipulator.SaveFormat.PNG,
 				base64: false
 			})
 
