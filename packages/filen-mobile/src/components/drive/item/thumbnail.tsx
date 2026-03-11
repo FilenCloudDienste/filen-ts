@@ -49,6 +49,7 @@ const Thumbnail = memo(
 			[item.data.uuid],
 			() => {
 				abortControllerRef.current?.abort()
+
 				abortControllerRef.current = null
 				errorRetryCountRef.current = 0
 			}
@@ -140,9 +141,15 @@ const Thumbnail = memo(
 			errorRetryCountRef.current = 0
 
 			if (!localPathRef.current) {
-				generate()
+				generateRef.current?.()
 			}
-		}, [generate])
+
+			return () => {
+				abortControllerRef.current?.abort()
+
+				abortControllerRef.current = null
+			}
+		}, [])
 
 		const source = useMemo(
 			() => ({
@@ -158,14 +165,6 @@ const Thumbnail = memo(
 			}),
 			[size.thumbnail]
 		)
-
-		useEffect(() => {
-			return () => {
-				abortControllerRef.current?.abort()
-
-				abortControllerRef.current = null
-			}
-		}, [])
 
 		useEffect(() => {
 			if (!isVideo) {
