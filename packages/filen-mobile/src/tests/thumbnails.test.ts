@@ -138,7 +138,30 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/stores/useHttp.store", () => ({
 	default: {
 		getState: () => mockHttpStoreState,
-		subscribe: (listener: (state: typeof mockHttpStoreState) => void) => {
+		subscribe: (...args: unknown[]) => {
+			if (typeof args[1] === "function") {
+				const selector = args[0] as (state: typeof mockHttpStoreState) => unknown
+				const listener = args[1] as (value: unknown, prevValue: unknown) => void
+				let prevValue = selector(mockHttpStoreState)
+
+				const wrappedListener = (state: typeof mockHttpStoreState) => {
+					const nextValue = selector(state)
+					const prev = prevValue
+
+					prevValue = nextValue
+
+					listener(nextValue, prev)
+				}
+
+				mockHttpStoreSubscribers.add(wrappedListener)
+
+				return () => {
+					mockHttpStoreSubscribers.delete(wrappedListener)
+				}
+			}
+
+			const listener = args[0] as (state: typeof mockHttpStoreState) => void
+
 			mockHttpStoreSubscribers.add(listener)
 
 			return () => {
@@ -157,7 +180,8 @@ vi.mock("@/lib/utils", () => ({
 vi.mock("@/lib/cache", () => ({
 	default: {
 		availableThumbnails: {
-			clear: vi.fn()
+			clear: vi.fn(),
+			delete: vi.fn()
 		}
 	}
 }))
@@ -855,6 +879,62 @@ describe("Thumbnails", () => {
 			expect(result).toBe(`${THUMBNAILS_DIR}/reset-fail-uuid.jpg`)
 		})
 
+		it("does not count aborts toward the failure limit", async () => {
+			const item = makeFileItem("abort-no-fail-uuid", "photo.jpg")
+
+			// Abort 3 times — should NOT hit the failure limit
+			for (let i = 0; i < 3; i++) {
+				const controller = new AbortController()
+
+				mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+					fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
+
+					controller.abort()
+				})
+
+				await expect(thumbnails.generate({
+					item,
+					signal: controller.signal
+				})).rejects.toThrow()
+			}
+
+			// Should still be able to generate — aborts didn't count as failures
+			mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
+			})
+
+			const result = await thumbnails.generate({ item })
+			expect(result).toBe(`${THUMBNAILS_DIR}/abort-no-fail-uuid.jpg`)
+		})
+
+		it("does not count video aborts toward the failure limit", async () => {
+			const item = makeFileItem("abort-vid-no-fail-uuid", "clip.mp4")
+
+			// Abort 3 times during HTTP provider wait
+			for (let i = 0; i < 3; i++) {
+				mockHttpStoreState.port = null
+				mockHttpStoreState.getFileUrl = null
+
+				const controller = new AbortController()
+
+				const promise = thumbnails.generate({
+					item,
+					signal: controller.signal
+				})
+
+				controller.abort()
+
+				await expect(promise).rejects.toThrow()
+
+				mockHttpStoreState.port = 8080
+				mockHttpStoreState.getFileUrl = mockGetFileUrl
+			}
+
+			// Should still be able to generate
+			const result = await thumbnails.generate({ item })
+			expect(result).toBe(`${THUMBNAILS_DIR}/abort-vid-no-fail-uuid.jpg`)
+		})
+
 		it("allows retries up to the limit", async () => {
 			// Fail twice, succeed on third
 			mockDownloadFileToPath
@@ -951,6 +1031,30 @@ describe("Thumbnails", () => {
 			expect(() => {
 				thumbnails.remove(item)
 			}).not.toThrow()
+		})
+
+		it("resets failure count for the item", async () => {
+			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt"))
+
+			const item = makeFileItem("remove-reset-uuid", "photo.jpg")
+
+			// Fail twice
+			for (let i = 0; i < 2; i++) {
+				await expect(thumbnails.generate({ item })).rejects.toThrow("corrupt")
+			}
+
+			// Remove resets failure count
+			thumbnails.remove(item)
+
+			// Fail 3 more times — should work up to limit again (not carry over the 2)
+			for (let i = 0; i < 3; i++) {
+				await expect(thumbnails.generate({ item })).rejects.toThrow("corrupt")
+			}
+
+			// Now should be blocked
+			mockDownloadFileToPath.mockClear()
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
 		})
 	})
 
