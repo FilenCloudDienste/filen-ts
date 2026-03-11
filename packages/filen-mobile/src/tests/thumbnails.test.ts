@@ -4,6 +4,7 @@ const {
 	mockSaveAsync,
 	mockRenderAsync,
 	mockResize,
+	mockRotate,
 	mockManipulate,
 	mockGenerateThumbnailsAsync,
 	mockRelease,
@@ -19,8 +20,10 @@ const {
 	const mockSaveAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/manipulated.jpg" })
 	const mockRenderAsync = vi.fn().mockResolvedValue({ saveAsync: mockSaveAsync })
 	const mockResize = vi.fn().mockReturnValue({ renderAsync: mockRenderAsync })
+	const mockRotate = vi.fn()
 	const mockManipulate = vi.fn().mockReturnValue({
 		resize: mockResize,
+		rotate: mockRotate,
 		renderAsync: mockRenderAsync
 	})
 
@@ -62,6 +65,7 @@ const {
 		mockSaveAsync,
 		mockRenderAsync,
 		mockResize,
+		mockRotate,
 		mockManipulate,
 		mockGenerateThumbnailsAsync,
 		mockRelease,
@@ -253,10 +257,15 @@ describe("Thumbnails", () => {
 
 		mockRenderAsync.mockResolvedValue({ saveAsync: mockSaveAsync })
 		mockResize.mockReturnValue({ renderAsync: mockRenderAsync })
-		mockManipulate.mockReturnValue({
+
+		const manipulatorResult = {
 			resize: mockResize,
+			rotate: mockRotate,
 			renderAsync: mockRenderAsync
-		})
+		}
+
+		mockRotate.mockReturnValue(manipulatorResult)
+		mockManipulate.mockReturnValue(manipulatorResult)
 
 		mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
 			fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
@@ -415,6 +424,100 @@ describe("Thumbnails", () => {
 
 			const tempDirUri = `${THUMBNAILS_DIR}/thumb_tmp_mock-uuid-1234`
 			expect(fs.has(tempDirUri)).toBe(false)
+		})
+	})
+
+	describe("generate — EXIF orientation correction", () => {
+		function buildJpegWithOrientation(orientation: number): Uint8Array {
+			// Little-endian TIFF IFD with orientation tag
+			const tiffIfd = [
+				0x49, 0x49, 0x2a, 0x00, // II + magic 42
+				0x08, 0x00, 0x00, 0x00, // IFD offset = 8
+				0x01, 0x00,             // 1 entry
+				0x12, 0x01,             // orientation tag
+				0x03, 0x00,             // SHORT type
+				0x01, 0x00, 0x00, 0x00, // count = 1
+				orientation, 0x00, 0x00, 0x00 // value
+			]
+
+			const exifHeader = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00]
+			const app1Data = [...exifHeader, ...tiffIfd]
+			const app1Length = app1Data.length + 2
+
+			return new Uint8Array([
+				0xff, 0xd8,
+				0xff, 0xe1, (app1Length >> 8) & 0xff, app1Length & 0xff,
+				...app1Data,
+				0xff, 0xda, 0x00, 0x02
+			])
+		}
+
+		it("applies 90° rotation for orientation 6", async () => {
+			const jpegBytes = buildJpegWithOrientation(6)
+
+			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, jpegBytes)
+			})
+
+			const item = makeFileItem("rot90-uuid", "photo.jpg")
+			await thumbnails.generate({ item })
+
+			expect(mockRotate).toHaveBeenCalledWith(90)
+			expect(mockResize).toHaveBeenCalledWith({ width: 256 })
+		})
+
+		it("applies 180° rotation for orientation 3", async () => {
+			const jpegBytes = buildJpegWithOrientation(3)
+
+			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, jpegBytes)
+			})
+
+			const item = makeFileItem("rot180-uuid", "photo.jpg")
+			await thumbnails.generate({ item })
+
+			expect(mockRotate).toHaveBeenCalledWith(180)
+		})
+
+		it("applies 270° rotation for orientation 8", async () => {
+			const jpegBytes = buildJpegWithOrientation(8)
+
+			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, jpegBytes)
+			})
+
+			const item = makeFileItem("rot270-uuid", "photo.jpg")
+			await thumbnails.generate({ item })
+
+			expect(mockRotate).toHaveBeenCalledWith(270)
+		})
+
+		it("does not rotate for orientation 1 (normal)", async () => {
+			const jpegBytes = buildJpegWithOrientation(1)
+
+			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, jpegBytes)
+			})
+
+			const item = makeFileItem("rot0-uuid", "photo.jpg")
+			await thumbnails.generate({ item })
+
+			expect(mockRotate).not.toHaveBeenCalled()
+		})
+
+		it("does not rotate for non-JPEG files without EXIF", async () => {
+			// PNG magic bytes — no EXIF orientation
+			const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
+
+			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, pngBytes)
+			})
+
+			const item = makeFileItem("png-norot-uuid", "image.png")
+			await thumbnails.generate({ item })
+
+			expect(mockRotate).not.toHaveBeenCalled()
+			expect(mockResize).toHaveBeenCalledTimes(1)
 		})
 	})
 

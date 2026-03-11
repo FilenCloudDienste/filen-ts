@@ -4,6 +4,9 @@ const EXIF_DATE_REGEX = /^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/
 // EXIF timezone offset format: "+HH:MM" or "-HH:MM"
 const EXIF_OFFSET_REGEX = /^([+-])(\d{2}):(\d{2})$/
 
+// EXIF orientation tag ID
+const ORIENTATION_TAG = 0x0112
+
 function parseExifDateString(dateStr: string, subSec?: string, offset?: string): number | null {
 	const match = EXIF_DATE_REGEX.exec(dateStr.trim())
 
@@ -110,4 +113,202 @@ export function parseExifDate(exif: Record<string, unknown>): number | null {
 	}
 
 	return null
+}
+
+/**
+ * Reads a 16-bit unsigned integer from a byte array.
+ */
+function read16(bytes: Uint8Array, offset: number, littleEndian: boolean): number {
+	if (littleEndian) {
+		return (bytes[offset] as number) | ((bytes[offset + 1] as number) << 8)
+	}
+
+	return ((bytes[offset] as number) << 8) | (bytes[offset + 1] as number)
+}
+
+/**
+ * Reads a 32-bit unsigned integer from a byte array.
+ */
+function read32(bytes: Uint8Array, offset: number, littleEndian: boolean): number {
+	if (littleEndian) {
+		return (
+			(bytes[offset] as number) |
+			((bytes[offset + 1] as number) << 8) |
+			((bytes[offset + 2] as number) << 16) |
+			((bytes[offset + 3] as number) << 24)
+		)
+	}
+
+	return (
+		((bytes[offset] as number) << 24) |
+		((bytes[offset + 1] as number) << 16) |
+		((bytes[offset + 2] as number) << 8) |
+		(bytes[offset + 3] as number)
+	)
+}
+
+/**
+ * Maps an EXIF orientation value to clockwise rotation degrees.
+ * Only handles pure rotations (1, 3, 6, 8) since mirror flips
+ * are extremely rare in camera photos.
+ */
+function orientationToDegrees(orientation: number): number {
+	switch (orientation) {
+		case 3:
+			return 180
+		case 6:
+			return 90
+		case 8:
+			return 270
+		default:
+			return 0
+	}
+}
+
+/**
+ * Parses the orientation tag from a TIFF IFD structure.
+ * `tiffStart` is the absolute offset of the TIFF header (byte order mark) in the buffer.
+ */
+function parseTiffOrientation(bytes: Uint8Array, tiffStart: number): number {
+	if (tiffStart + 8 > bytes.length) {
+		return 0
+	}
+
+	const littleEndian = bytes[tiffStart] === 0x49 && bytes[tiffStart + 1] === 0x49
+	const bigEndian = bytes[tiffStart] === 0x4d && bytes[tiffStart + 1] === 0x4d
+
+	if (!littleEndian && !bigEndian) {
+		return 0
+	}
+
+	// Verify TIFF magic number (42)
+	if (read16(bytes, tiffStart + 2, littleEndian) !== 0x002a) {
+		return 0
+	}
+
+	// IFD0 offset (relative to TIFF start)
+	const ifdOffset = read32(bytes, tiffStart + 4, littleEndian)
+
+	if (ifdOffset === 0) {
+		return 0
+	}
+
+	const ifdStart = tiffStart + ifdOffset
+
+	if (ifdStart + 2 > bytes.length) {
+		return 0
+	}
+
+	const entryCount = read16(bytes, ifdStart, littleEndian)
+
+	for (let i = 0; i < entryCount; i++) {
+		const entryOffset = ifdStart + 2 + i * 12
+
+		if (entryOffset + 12 > bytes.length) {
+			break
+		}
+
+		const tag = read16(bytes, entryOffset, littleEndian)
+
+		if (tag === ORIENTATION_TAG) {
+			return orientationToDegrees(read16(bytes, entryOffset + 8, littleEndian))
+		}
+	}
+
+	return 0
+}
+
+/**
+ * Checks if the bytes at `offset` contain "Exif\0\0".
+ */
+function isExifMarker(bytes: Uint8Array, offset: number): boolean {
+	return (
+		offset + 6 <= bytes.length &&
+		bytes[offset] === 0x45 &&
+		bytes[offset + 1] === 0x78 &&
+		bytes[offset + 2] === 0x69 &&
+		bytes[offset + 3] === 0x66 &&
+		bytes[offset + 4] === 0x00 &&
+		bytes[offset + 5] === 0x00
+	)
+}
+
+/**
+ * Parses EXIF orientation from a JPEG file's raw bytes.
+ * Walks JPEG markers to find the APP1 segment containing EXIF data.
+ */
+function parseJpegOrientation(bytes: Uint8Array): number {
+	let offset = 2
+
+	while (offset + 4 < bytes.length) {
+		if (bytes[offset] !== 0xff) {
+			return 0
+		}
+
+		const marker = bytes[offset + 1] as number
+
+		// SOS marker — we've passed all metadata
+		if (marker === 0xda) {
+			return 0
+		}
+
+		const segmentLength = ((bytes[offset + 2] as number) << 8) | (bytes[offset + 3] as number)
+		const segmentStart = offset + 4
+		const segmentDataLength = segmentLength - 2
+
+		// APP1 marker — may contain EXIF
+		if (marker === 0xe1 && segmentDataLength >= 14 && isExifMarker(bytes, segmentStart)) {
+			return parseTiffOrientation(bytes, segmentStart + 6)
+		}
+
+		offset += 2 + segmentLength
+	}
+
+	return 0
+}
+
+/**
+ * Scans for "Exif\0\0" + TIFF header anywhere in the byte buffer.
+ * Works for HEIC/HEIF (ISOBMFF container) and WebP (RIFF container)
+ * where EXIF data is stored in format-specific containers but always
+ * contains the standard "Exif\0\0" prefix before the TIFF header.
+ */
+function scanForExifOrientation(bytes: Uint8Array): number {
+	// Scan for "Exif\0\0" marker — the TIFF header follows immediately after
+	for (let i = 0; i + 14 < bytes.length; i++) {
+		if (isExifMarker(bytes, i)) {
+			return parseTiffOrientation(bytes, i + 6)
+		}
+	}
+
+	return 0
+}
+
+/**
+ * Parses the EXIF orientation from raw image file bytes and returns
+ * the clockwise rotation in degrees needed to correct the orientation.
+ *
+ * Supports JPEG, TIFF, HEIC/HEIF, and WebP formats.
+ * Returns 0 if no rotation is needed or the format is not recognized.
+ */
+export function parseExifOrientationFromBytes(bytes: Uint8Array): number {
+	if (bytes.length < 12) {
+		return 0
+	}
+
+	// JPEG: starts with 0xFFD8 — structured marker walk
+	if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+		return parseJpegOrientation(bytes)
+	}
+
+	// TIFF: starts with "II" (little-endian) or "MM" (big-endian) + magic 42
+	if (
+		((bytes[0] === 0x49 && bytes[1] === 0x49) || (bytes[0] === 0x4d && bytes[1] === 0x4d)) &&
+		(read16(bytes, 2, bytes[0] === 0x49) === 0x002a)
+	) {
+		return parseTiffOrientation(bytes, 0)
+	}
+
+	// Other formats (HEIC, WebP, etc.) — scan for "Exif\0\0" marker
+	return scanForExifOrientation(bytes)
 }
