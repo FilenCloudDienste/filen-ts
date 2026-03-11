@@ -6,7 +6,7 @@ import useQueryFocusAware from "@/queries/useQueryFocusAware"
 import useNetInfo from "@/hooks/useNetInfo"
 import sqlite from "@/lib/sqlite"
 import { Semaphore, run } from "@filen/utils"
-import { unpack, pack } from "@/lib/msgpack"
+import { pack } from "@/lib/msgpack"
 import alerts from "@/lib/alerts"
 import { unwrapSdkError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
@@ -91,10 +91,10 @@ export const queryClientPersister = experimental_createQueryPersister({
 			return undefined
 		}
 
-		return pack(query)
+		return query
 	},
 	deserialize: query => {
-		return unpack(query as unknown as Buffer) as unknown as PersistedQuery
+		return query as unknown as PersistedQuery
 	},
 	prefix: QUERY_CLIENT_PERSISTER_PREFIX,
 	buster: VERSION.toString()
@@ -110,13 +110,7 @@ export async function restoreQueries(): Promise<void> {
 					return
 				}
 
-				const query = (await queryClientPersisterKv.getItem(key)) as unknown as string | null
-
-				if (!query) {
-					return
-				}
-
-				const persistedQuery = unpack(query as unknown as Buffer) as unknown as PersistedQuery
+				const persistedQuery = (await queryClientPersisterKv.getItem<PersistedQuery>(key))
 
 				if (
 					!persistedQuery ||
