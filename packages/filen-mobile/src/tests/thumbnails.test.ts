@@ -96,7 +96,8 @@ vi.mock("expo-image-manipulator", () => ({
 		manipulate: mockManipulate
 	},
 	SaveFormat: {
-		JPEG: "jpeg"
+		JPEG: "jpeg",
+		PNG: "png"
 	}
 }))
 
@@ -304,11 +305,11 @@ describe("Thumbnails", () => {
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
 			expect(mockSaveAsync).toHaveBeenCalledWith({
 				compress: 0.8,
-				format: "jpeg",
+				format: "png",
 				base64: false
 			})
 
-			expect(result).toBe(`${THUMBNAILS_DIR}/test-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/test-uuid.png`)
 		})
 
 		it("generates thumbnail for a .png file", async () => {
@@ -317,7 +318,7 @@ describe("Thumbnails", () => {
 
 			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
 			expect(mockManipulate).toHaveBeenCalledTimes(1)
-			expect(result).toBe(`${THUMBNAILS_DIR}/png-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/png-uuid.png`)
 		})
 
 		it("uses default width/quality when not specified", async () => {
@@ -353,7 +354,7 @@ describe("Thumbnails", () => {
 		})
 
 		it("returns cached path when thumbnail already exists on disk", async () => {
-			const outputPath = `${THUMBNAILS_DIR}/cached-uuid.jpg`
+			const outputPath = `${THUMBNAILS_DIR}/cached-uuid.png`
 			fs.set(outputPath, new Uint8Array([0xFF, 0xD8]))
 
 			const item = makeFileItem("cached-uuid", "photo.jpg")
@@ -427,97 +428,13 @@ describe("Thumbnails", () => {
 		})
 	})
 
-	describe("generate — EXIF orientation correction", () => {
-		function buildJpegWithOrientation(orientation: number): Uint8Array {
-			// Little-endian TIFF IFD with orientation tag
-			const tiffIfd = [
-				0x49, 0x49, 0x2a, 0x00, // II + magic 42
-				0x08, 0x00, 0x00, 0x00, // IFD offset = 8
-				0x01, 0x00,             // 1 entry
-				0x12, 0x01,             // orientation tag
-				0x03, 0x00,             // SHORT type
-				0x01, 0x00, 0x00, 0x00, // count = 1
-				orientation, 0x00, 0x00, 0x00 // value
-			]
-
-			const exifHeader = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00]
-			const app1Data = [...exifHeader, ...tiffIfd]
-			const app1Length = app1Data.length + 2
-
-			return new Uint8Array([
-				0xff, 0xd8,
-				0xff, 0xe1, (app1Length >> 8) & 0xff, app1Length & 0xff,
-				...app1Data,
-				0xff, 0xda, 0x00, 0x02
-			])
-		}
-
-		it("applies 90° rotation for orientation 6", async () => {
-			const jpegBytes = buildJpegWithOrientation(6)
-
-			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, jpegBytes)
-			})
-
-			const item = makeFileItem("rot90-uuid", "photo.jpg")
+	describe("generate — no manual rotation", () => {
+		it("does not call rotate for any image", async () => {
+			const item = makeFileItem("norot-uuid", "photo.jpg")
 			await thumbnails.generate({ item })
 
-			expect(mockRotate).toHaveBeenCalledWith(90)
+			expect(mockRotate).not.toHaveBeenCalled()
 			expect(mockResize).toHaveBeenCalledWith({ width: 256 })
-		})
-
-		it("applies 180° rotation for orientation 3", async () => {
-			const jpegBytes = buildJpegWithOrientation(3)
-
-			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, jpegBytes)
-			})
-
-			const item = makeFileItem("rot180-uuid", "photo.jpg")
-			await thumbnails.generate({ item })
-
-			expect(mockRotate).toHaveBeenCalledWith(180)
-		})
-
-		it("applies 270° rotation for orientation 8", async () => {
-			const jpegBytes = buildJpegWithOrientation(8)
-
-			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, jpegBytes)
-			})
-
-			const item = makeFileItem("rot270-uuid", "photo.jpg")
-			await thumbnails.generate({ item })
-
-			expect(mockRotate).toHaveBeenCalledWith(270)
-		})
-
-		it("does not rotate for orientation 1 (normal)", async () => {
-			const jpegBytes = buildJpegWithOrientation(1)
-
-			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, jpegBytes)
-			})
-
-			const item = makeFileItem("rot0-uuid", "photo.jpg")
-			await thumbnails.generate({ item })
-
-			expect(mockRotate).not.toHaveBeenCalled()
-		})
-
-		it("does not rotate for non-JPEG files without EXIF", async () => {
-			// PNG magic bytes — no EXIF orientation
-			const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
-
-			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
-				fs.set(`file://${path}`, pngBytes)
-			})
-
-			const item = makeFileItem("png-norot-uuid", "image.png")
-			await thumbnails.generate({ item })
-
-			expect(mockRotate).not.toHaveBeenCalled()
-			expect(mockResize).toHaveBeenCalledTimes(1)
 		})
 	})
 
@@ -538,7 +455,7 @@ describe("Thumbnails", () => {
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
 			expect(mockRelease).toHaveBeenCalledTimes(1)
 
-			expect(result).toBe(`${THUMBNAILS_DIR}/video-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/video-uuid.png`)
 		})
 
 		it("uses default video timestamp when not specified", async () => {
@@ -602,7 +519,7 @@ describe("Thumbnails", () => {
 
 			expect(resolved).toBe(true)
 			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledTimes(1)
-			expect(result).toBe(`${THUMBNAILS_DIR}/wait-ready-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/wait-ready-uuid.png`)
 		})
 
 		it("throws when player enters error state", async () => {
@@ -656,7 +573,7 @@ describe("Thumbnails", () => {
 
 			expect(resolved).toBe(true)
 			expect(mockCreateVideoPlayer).toHaveBeenCalledTimes(1)
-			expect(result).toBe(`${THUMBNAILS_DIR}/wait-http-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/wait-http-uuid.png`)
 		})
 
 		it("aborts while waiting for HTTP provider", async () => {
@@ -717,7 +634,7 @@ describe("Thumbnails", () => {
 				expect.any(Object),
 				undefined
 			)
-			expect(result).toBe(`${THUMBNAILS_DIR}/shared-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/shared-uuid.png`)
 		})
 	})
 
@@ -952,7 +869,7 @@ describe("Thumbnails", () => {
 			const goodItem = makeFileItem("good-item-uuid", "good.jpg")
 			const result = await thumbnails.generate({ item: goodItem })
 
-			expect(result).toBe(`${THUMBNAILS_DIR}/good-item-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/good-item-uuid.png`)
 		})
 
 		it("resets failure count when clear() is called", async () => {
@@ -979,7 +896,7 @@ describe("Thumbnails", () => {
 
 			const result = await thumbnails.generate({ item })
 			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-			expect(result).toBe(`${THUMBNAILS_DIR}/reset-fail-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/reset-fail-uuid.png`)
 		})
 
 		it("does not count aborts toward the failure limit", async () => {
@@ -1007,7 +924,7 @@ describe("Thumbnails", () => {
 			})
 
 			const result = await thumbnails.generate({ item })
-			expect(result).toBe(`${THUMBNAILS_DIR}/abort-no-fail-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/abort-no-fail-uuid.png`)
 		})
 
 		it("does not count video aborts toward the failure limit", async () => {
@@ -1035,7 +952,7 @@ describe("Thumbnails", () => {
 
 			// Should still be able to generate
 			const result = await thumbnails.generate({ item })
-			expect(result).toBe(`${THUMBNAILS_DIR}/abort-vid-no-fail-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/abort-vid-no-fail-uuid.png`)
 		})
 
 		it("allows retries up to the limit", async () => {
@@ -1053,7 +970,7 @@ describe("Thumbnails", () => {
 			await expect(thumbnails.generate({ item })).rejects.toThrow("fail 2")
 
 			const result = await thumbnails.generate({ item })
-			expect(result).toBe(`${THUMBNAILS_DIR}/retry-uuid.jpg`)
+			expect(result).toBe(`${THUMBNAILS_DIR}/retry-uuid.png`)
 		})
 	})
 
@@ -1097,7 +1014,7 @@ describe("Thumbnails", () => {
 
 	describe("exists", () => {
 		it("returns exists: true with path when thumbnail file exists on disk", () => {
-			const outputPath = `${THUMBNAILS_DIR}/exists-uuid.jpg`
+			const outputPath = `${THUMBNAILS_DIR}/exists-uuid.png`
 			fs.set(outputPath, new Uint8Array([0xFF, 0xD8]))
 
 			const item = makeFileItem("exists-uuid", "photo.jpg")
@@ -1120,7 +1037,7 @@ describe("Thumbnails", () => {
 
 	describe("remove", () => {
 		it("deletes thumbnail file from disk", () => {
-			const outputPath = `${THUMBNAILS_DIR}/remove-uuid.jpg`
+			const outputPath = `${THUMBNAILS_DIR}/remove-uuid.png`
 			fs.set(outputPath, new Uint8Array([0xFF, 0xD8]))
 
 			const item = makeFileItem("remove-uuid", "photo.jpg")
