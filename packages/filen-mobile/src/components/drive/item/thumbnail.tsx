@@ -1,6 +1,5 @@
 import { memo, useCallback, useMemo } from "@/lib/memo"
-import useEffectOnce from "@/hooks/useEffectOnce"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import type { ImageStyle } from "expo-image"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
@@ -11,6 +10,7 @@ import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import useHttpStore from "@/stores/useHttp.store"
 import { EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
+import { useRecyclingState } from "@shopify/flash-list"
 
 const MAX_ERROR_RETRIES = 1
 
@@ -27,12 +27,34 @@ const Thumbnail = memo(
 		}
 		className?: string
 	}) => {
-		const availableFromCache = item.type === "file" || item.type === "sharedFile" ? cache.availableThumbnails.get(item.data.uuid) : null
-		const existsOnDisk = availableFromCache ? thumbnails.exists(item) : null
-		const [localPath, setLocalPath] = useState<string | null>(existsOnDisk?.exists ? existsOnDisk.path : null)
 		const abortControllerRef = useRef<AbortController | null>(null)
-		const localPathRef = useRef(localPath)
 		const errorRetryCountRef = useRef(0)
+
+		const [localPath, setLocalPath] = useRecyclingState<string | null>(
+			() => {
+				if (item.type !== "file" && item.type !== "sharedFile") {
+					return null
+				}
+
+				const available = cache.availableThumbnails.get(item.data.uuid)
+
+				if (!available) {
+					return null
+				}
+
+				const exists = thumbnails.exists(item)
+
+				return exists.exists ? exists.path : null
+			},
+			[item.data.uuid],
+			() => {
+				abortControllerRef.current?.abort()
+				abortControllerRef.current = null
+				errorRetryCountRef.current = 0
+			}
+		)
+
+		const localPathRef = useRef(localPath)
 
 		useEffect(() => {
 			localPathRef.current = localPath
@@ -86,7 +108,7 @@ const Thumbnail = memo(
 			cache.availableThumbnails.set(item.data.uuid, true)
 
 			setLocalPath(result.data)
-		}, [item])
+		}, [item, setLocalPath])
 
 		const generateRef = useRef(generate)
 
@@ -112,13 +134,15 @@ const Thumbnail = memo(
 			setLocalPath(null)
 
 			generateRef.current?.()
-		}, [item])
+		}, [item, setLocalPath])
 
-		useEffectOnce(() => {
-			if (!localPath) {
+		useEffect(() => {
+			errorRetryCountRef.current = 0
+
+			if (!localPathRef.current) {
 				generate()
 			}
-		})
+		}, [generate])
 
 		const source = useMemo(
 			() => ({
@@ -150,12 +174,8 @@ const Thumbnail = memo(
 
 			const unsubscribe = useHttpStore.subscribe(
 				s => s.port,
-				(port, prevPort) => {
-					if (port === null) {
-						abortControllerRef.current?.abort()
-
-						abortControllerRef.current = null
-					} else if (prevPort === null) {
+				port => {
+					if (port !== null) {
 						generateRef.current?.()
 					}
 				}
