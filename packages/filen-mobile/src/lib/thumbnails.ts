@@ -207,21 +207,41 @@ class Thumbnails {
 				throw abortError(params.signal)
 			}
 
-			const manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(tempPath))
-				.resize({
-					width: params.width
-				})
-				.renderAsync()
+			let manipulated: ImageManipulator.ImageRef | null = null
+
+			try {
+				manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(tempPath))
+					.resize({
+						width: params.width
+					})
+					.renderAsync()
+			} catch (error) {
+				if (params.signal?.aborted) {
+					throw abortError(params.signal)
+				}
+
+				throw error
+			}
 
 			if (params.signal?.aborted) {
 				throw abortError(params.signal)
 			}
 
-			const saved = await manipulated.saveAsync({
-				compress: params.quality,
-				format: ImageManipulator.SaveFormat.PNG,
-				base64: false
-			})
+			let saved: ImageManipulator.ImageResult | null = null
+
+			try {
+				saved = await manipulated.saveAsync({
+					compress: params.quality,
+					format: ImageManipulator.SaveFormat.PNG,
+					base64: false
+				})
+			} catch (error) {
+				if (params.signal?.aborted) {
+					throw abortError(params.signal)
+				}
+
+				throw error
+			}
 
 			const savedFile = new FileSystem.File(saved.uri)
 			const outputFile = new FileSystem.File(params.outputPath)
@@ -331,17 +351,37 @@ class Thumbnails {
 				throw new Error("No thumbnail generated")
 			}
 
-			const manipulated = await ImageManipulator.ImageManipulator.manipulate(thumbnail).renderAsync()
+			let manipulated: ImageManipulator.ImageRef | null = null
+
+			try {
+				manipulated = await ImageManipulator.ImageManipulator.manipulate(thumbnail).renderAsync()
+			} catch (error) {
+				if (params.signal?.aborted) {
+					throw abortError(params.signal)
+				}
+
+				throw error
+			}
 
 			if (params.signal?.aborted) {
 				throw abortError(params.signal)
 			}
 
-			const saved = await manipulated.saveAsync({
-				compress: params.quality,
-				format: ImageManipulator.SaveFormat.PNG,
-				base64: false
-			})
+			let saved: ImageManipulator.ImageResult | null = null
+
+			try {
+				saved = await manipulated.saveAsync({
+					compress: params.quality,
+					format: ImageManipulator.SaveFormat.PNG,
+					base64: false
+				})
+			} catch (error) {
+				if (params.signal?.aborted) {
+					throw abortError(params.signal)
+				}
+
+				throw error
+			}
 
 			const savedFile = new FileSystem.File(saved.uri)
 			const outputFile = new FileSystem.File(params.outputPath)
