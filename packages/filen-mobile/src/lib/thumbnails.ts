@@ -128,13 +128,19 @@ class Thumbnails {
 				signal?.removeEventListener("abort", onAbort)
 			}
 
-			const unsubscribe = useHttpStore.subscribe(nextState => {
-				if (nextState.port !== null && nextState.getFileUrl) {
-					cleanup()
+			const unsubscribe = useHttpStore.subscribe(
+				s => ({
+					port: s.port,
+					getFileUrl: s.getFileUrl
+				}),
+				({ port, getFileUrl }) => {
+					if (port !== null && getFileUrl) {
+						cleanup()
 
-					resolve(nextState.getFileUrl)
+						resolve(getFileUrl)
+					}
 				}
-			})
+			)
 
 			const onAbort = () => {
 				cleanup()
@@ -488,7 +494,9 @@ class Thumbnails {
 		})
 
 		if (!result.success) {
-			this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
+			if (!params.signal?.aborted) {
+				this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
+			}
 
 			const outputFile = new FileSystem.File(params.outputPath)
 
@@ -530,6 +538,10 @@ class Thumbnails {
 		if (file.exists) {
 			file.delete()
 		}
+
+		this.failures.delete(item.data.uuid)
+
+		cache.availableThumbnails.delete(item.data.uuid)
 	}
 
 	public clear(): void {
