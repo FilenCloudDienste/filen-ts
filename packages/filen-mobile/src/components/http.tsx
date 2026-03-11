@@ -1,6 +1,6 @@
 import { memo, useCallback } from "@/lib/memo"
 import { useSdkClients } from "@/lib/auth"
-import type { JsClientInterface, HttpProviderHandle } from "@filen/sdk-rs"
+import type { JsClientInterface, HttpProviderHandle, AnyFile } from "@filen/sdk-rs"
 import { type AppStateStatus, AppState } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { useEffect, useRef } from "react"
@@ -24,11 +24,17 @@ const InnerHttp = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 
 				switch (nextAppState) {
 					case "active": {
-						const handle = (await sdkClient.startHttpProvider(undefined)) as HttpProviderHandle
+						if (!httpHandleRef.current) {
+							const handle = (await sdkClient.startHttpProvider(undefined)) as HttpProviderHandle
 
-						useHttpStore.getState().setPort(handle.port())
+							useHttpStore.getState().setPort(handle.port())
 
-						httpHandleRef.current = handle
+							useHttpStore.getState().setGetFileUrl((file: AnyFile): string => {
+								return handle.getFileUrl(file)
+							})
+
+							httpHandleRef.current = handle
+						}
 
 						break
 					}
@@ -38,6 +44,9 @@ const InnerHttp = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 							httpHandleRef.current.uniffiDestroy()
 
 							httpHandleRef.current = null
+
+							useHttpStore.getState().setPort(null)
+							useHttpStore.getState().setGetFileUrl(null)
 						}
 
 						break

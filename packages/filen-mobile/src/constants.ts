@@ -16,14 +16,14 @@ export const NETINFO_CONFIG: NetInfoConfiguration = {
 }
 
 export const EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS = new Set<string>(Platform.select({
-	ios: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".heic", ".heif", ".webp"],
+	ios: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".heic", ".heif", ".webp", ".avif"],
 	android: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".heif"],
 	default: [".jpg", ".jpeg", ".png", ".gif", ".bmp"]
 }) as string[])
 
 export const EXPO_VIDEO_SUPPORTED_EXTENSIONS = new Set<string>(Platform.select({
 	ios: [".mp4", ".mov", ".m4v", ".3gp"],
-	android: [".mp4", ".webm", ".3gp", ".mkv"],
+	android: [".mp4", ".m4v", ".webm", ".3gp", ".mkv"],
 	default: [".mp4", ".webm"]
 }) as string[])
 
@@ -35,12 +35,12 @@ export const EXPO_AUDIO_SUPPORTED_EXTENSIONS = new Set<string>(Platform.select({
 
 export const EXPO_VIDEO_THUMBNAILS_SUPPORTED_EXTENSIONS = new Set<string>(Platform.select({
 	ios: [".mp4", ".mov", ".m4v", ".3gp"],
-	android: [".mp4", ".webm", ".3gp", ".mkv"],
+	android: [".mp4", ".m4v", ".webm", ".3gp", ".mkv"],
 	default: [".mp4", ".webm"]
 }) as string[])
 
 export const EXPO_IMAGE_SUPPORTED_EXTENSIONS = new Set<string>(Platform.select({
-	ios: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".svg", ".ico", ".icns"],
-	android: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".svg", ".ico", ".icns"],
-	default: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg", ".ico", ".icns"]
+	ios: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico", ".icns"],
+	android: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico"],
+	default: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg", ".ico"]
 }) as string[])
