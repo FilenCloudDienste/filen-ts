@@ -27,6 +27,20 @@ const MAX_CONCURRENT = 3
 const MAX_FAILURES = 3
 const VERSION = 1
 
+function abortError(signal?: AbortSignal): Error {
+	const reason = signal?.reason
+
+	if (reason instanceof Error) {
+		return reason
+	}
+
+	if (reason !== undefined && reason !== null) {
+		return new Error(String(reason))
+	}
+
+	return new Error("Aborted")
+}
+
 class Thumbnails {
 	private readonly directory = new FileSystem.Directory(
 		FileSystem.Paths.join(
@@ -103,7 +117,7 @@ class Thumbnails {
 
 		return new Promise<(file: AnyFile) => string>((resolve, reject) => {
 			if (signal?.aborted) {
-				reject(signal.reason)
+				reject(abortError(signal))
 
 				return
 			}
@@ -125,7 +139,7 @@ class Thumbnails {
 			const onAbort = () => {
 				cleanup()
 
-				reject(signal?.reason ?? new Error("Aborted"))
+				reject(abortError(signal))
 			}
 
 			signal?.addEventListener("abort", onAbort, {
@@ -183,11 +197,19 @@ class Thumbnails {
 					: undefined
 			)
 
+			if (params.signal?.aborted) {
+				throw abortError(params.signal)
+			}
+
 			const manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(tempPath))
 				.resize({
 					width: params.width
 				})
 				.renderAsync()
+
+			if (params.signal?.aborted) {
+				throw abortError(params.signal)
+			}
 
 			const saved = await manipulated.saveAsync({
 				compress: params.quality,
@@ -223,7 +245,7 @@ class Thumbnails {
 			const url = getFileUrl(params.file)
 
 			if (params.signal?.aborted) {
-				throw params.signal.reason
+				throw abortError(params.signal)
 			}
 
 			const player = createVideoPlayer(url)
@@ -249,27 +271,43 @@ class Thumbnails {
 			if (player.status !== "readyToPlay") {
 				await new Promise<void>((resolve, reject) => {
 					if (params.signal?.aborted) {
-						reject(params.signal.reason)
+						reject(abortError(params.signal))
 
 						return
 					}
 
+					const cleanup = () => {
+						subscription.remove()
+
+						params.signal?.removeEventListener("abort", onAbort)
+					}
+
 					const subscription = player.addListener("statusChange", ({ status, error }) => {
 						if (status === "readyToPlay") {
-							subscription.remove()
+							cleanup()
 
 							resolve()
 						} else if (status === "error") {
-							subscription.remove()
+							cleanup()
 
 							reject(new Error(error?.message ?? "Video player failed to load"))
 						}
+					})
+
+					const onAbort = () => {
+						cleanup()
+
+						reject(abortError(params.signal))
+					}
+
+					params.signal?.addEventListener("abort", onAbort, {
+						once: true
 					})
 				})
 			}
 
 			if (params.signal?.aborted) {
-				throw params.signal.reason
+				throw abortError(params.signal)
 			}
 
 			const thumbnails = await player.generateThumbnailsAsync([params.timestamp], {
@@ -278,7 +316,7 @@ class Thumbnails {
 			})
 
 			if (params.signal?.aborted) {
-				throw params.signal.reason
+				throw abortError(params.signal)
 			}
 
 			const thumbnail = thumbnails[0] as VideoThumbnail | undefined
@@ -290,7 +328,7 @@ class Thumbnails {
 			const manipulated = await ImageManipulator.ImageManipulator.manipulate(thumbnail).renderAsync()
 
 			if (params.signal?.aborted) {
-				throw params.signal.reason
+				throw abortError(params.signal)
 			}
 
 			const saved = await manipulated.saveAsync({
@@ -334,6 +372,10 @@ class Thumbnails {
 			defer(() => {
 				this.semaphore.release()
 			})
+
+			if (params.signal?.aborted) {
+				throw abortError(params.signal)
+			}
 
 			const uuid = params.item.data.uuid
 			const ext = this.getExtension(params.item)

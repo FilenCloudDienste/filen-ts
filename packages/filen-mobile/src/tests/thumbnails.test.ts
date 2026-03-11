@@ -154,6 +154,14 @@ vi.mock("@/lib/utils", () => ({
 	wrapAbortSignalForSdk: vi.fn(() => ({}))
 }))
 
+vi.mock("@/lib/cache", () => ({
+	default: {
+		availableThumbnails: {
+			clear: vi.fn()
+		}
+	}
+}))
+
 vi.mock("@/constants", () => ({
 	EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS: new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"]),
 	EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set([".mp4", ".mov", ".webm", ".mkv"]),
@@ -666,6 +674,117 @@ describe("Thumbnails", () => {
 					abortSignal: undefined
 				})
 			)
+		})
+
+		it("image: aborts between download and manipulate", async () => {
+			const controller = new AbortController()
+
+			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
+
+				// Abort after download completes but before manipulate runs
+				controller.abort()
+			})
+
+			const item = makeFileItem("abort-post-dl-uuid", "photo.jpg")
+
+			await expect(thumbnails.generate({
+				item,
+				signal: controller.signal
+			})).rejects.toThrow()
+
+			expect(mockManipulate).not.toHaveBeenCalled()
+		})
+
+		it("image: aborts between renderAsync and saveAsync", async () => {
+			const controller = new AbortController()
+
+			mockRenderAsync.mockImplementationOnce(async () => {
+				// Abort after render completes but before save runs
+				controller.abort()
+
+				return { saveAsync: mockSaveAsync }
+			})
+
+			const item = makeFileItem("abort-post-render-uuid", "photo.jpg")
+
+			await expect(thumbnails.generate({
+				item,
+				signal: controller.signal
+			})).rejects.toThrow()
+
+			expect(mockSaveAsync).not.toHaveBeenCalled()
+		})
+
+		it("throws immediately when signal is already aborted before semaphore releases", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const item = makeFileItem("abort-pre-gen-uuid", "photo.jpg")
+
+			await expect(thumbnails.generate({
+				item,
+				signal: controller.signal
+			})).rejects.toThrow()
+
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
+		})
+
+		it("always throws an Error instance even when signal.reason is undefined", async () => {
+			const controller = new AbortController()
+
+			// Simulate abort with undefined reason (possible in some polyfills)
+			Object.defineProperty(controller.signal, "reason", { value: undefined })
+			controller.abort()
+
+			const item = makeFileItem("abort-undef-reason-uuid", "photo.jpg")
+
+			const result = thumbnails.generate({
+				item,
+				signal: controller.signal
+			})
+
+			await expect(result).rejects.toThrow("Aborted")
+			await expect(result).rejects.toBeInstanceOf(Error)
+		})
+
+		it("video: aborts during readyToPlay wait", async () => {
+			const controller = new AbortController()
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			let statusCallback: ((payload: any) => void) | null = null
+			const listenerRegistered = new Promise<void>(resolve => {
+				mockCreateVideoPlayer.mockReturnValue({
+					status: "loading",
+					generateThumbnailsAsync: mockGenerateThumbnailsAsync,
+					release: mockRelease,
+					addListener: vi.fn((_event: string, callback: (payload: { status: string }) => void) => {
+						statusCallback = callback
+						resolve()
+
+						return { remove: vi.fn() }
+					})
+				})
+			})
+
+			const item = makeFileItem("abort-ready-wait-uuid", "clip.mp4")
+
+			const promise = thumbnails.generate({
+				item,
+				signal: controller.signal
+			})
+
+			await listenerRegistered
+
+			// Abort while waiting for readyToPlay — should not hang
+			controller.abort()
+
+			await expect(promise).rejects.toThrow()
+
+			// Should not have called generateThumbnailsAsync since we aborted before ready
+			expect(mockGenerateThumbnailsAsync).not.toHaveBeenCalled()
+			expect(statusCallback).not.toBeNull()
 		})
 	})
 
