@@ -29,7 +29,8 @@ const Thumbnail = memo(
 		className?: string
 	}) => {
 		const abortControllerRef = useRef<AbortController | null>(null)
-		const errorRetryCountRef = useRef(0)
+		const errorRetryCountRef = useRef<number>(0)
+		const isGeneratingRef = useRef<boolean>(false)
 
 		const [localPath, setLocalPath] = useRecyclingState<string | null>(
 			() => {
@@ -53,6 +54,7 @@ const Thumbnail = memo(
 
 				abortControllerRef.current = null
 				errorRetryCountRef.current = 0
+				isGeneratingRef.current = false
 			}
 		)
 
@@ -63,54 +65,72 @@ const Thumbnail = memo(
 		}, [localPath])
 
 		const generate = useCallback(async () => {
-			if (
-				localPathRef.current ||
-				(item.type !== "file" && item.type !== "sharedFile") ||
-				!thumbnails.canGenerate(item) ||
-				AppState.currentState !== "active"
-			) {
-				return
-			}
-
-			abortControllerRef.current?.abort()
-			errorRetryCountRef.current = 0
-			abortControllerRef.current = new AbortController()
-
-			const signal = abortControllerRef.current.signal
-			let lastError: unknown
-
-			for (let attempt = 0; attempt < MAX_GENERATE_RETRIES; attempt++) {
-				if (signal.aborted || AppState.currentState !== "active") {
+			const result = await run(async defer => {
+				if (isGeneratingRef.current) {
 					return
 				}
 
-				const result = await run(async () => {
-					return await thumbnails.generate({
-						item,
-						signal
-					})
+				isGeneratingRef.current = true
+
+				defer(() => {
+					isGeneratingRef.current = false
 				})
 
-				if (signal.aborted) {
+				if (
+					localPathRef.current ||
+					(item.type !== "file" && item.type !== "sharedFile") ||
+					!thumbnails.canGenerate(item) ||
+					AppState.currentState !== "active"
+				) {
 					return
 				}
 
-				if (result.success) {
-					cache.availableThumbnails.set(item.data.uuid, true)
+				abortControllerRef.current?.abort()
+				errorRetryCountRef.current = 0
+				abortControllerRef.current = new AbortController()
 
-					setLocalPath(result.data)
+				const signal = abortControllerRef.current.signal
+				let lastError: unknown
 
-					return
+				for (let attempt = 0; attempt < MAX_GENERATE_RETRIES; attempt++) {
+					if (signal.aborted || AppState.currentState !== "active") {
+						return
+					}
+
+					const result = await run(async () => {
+						return await thumbnails.generate({
+							item,
+							signal
+						})
+					})
+
+					if (signal.aborted) {
+						return
+					}
+
+					if (result.success) {
+						cache.availableThumbnails.set(item.data.uuid, true)
+
+						setLocalPath(result.data)
+
+						return
+					}
+
+					lastError = result.error
+
+					await new Promise<void>(resolve => setTimeout(resolve, 1000))
 				}
 
-				lastError = result.error
+				console.error(lastError)
 
-				await new Promise<void>(resolve => setTimeout(resolve, 1000))
+				cache.availableThumbnails.set(item.data.uuid, false)
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+
+				return
 			}
-
-			console.error(lastError)
-
-			cache.availableThumbnails.set(item.data.uuid, false)
 		}, [item, setLocalPath])
 
 		const generateRef = useRef(generate)
@@ -157,6 +177,7 @@ const Thumbnail = memo(
 
 						abortControllerRef.current = null
 						errorRetryCountRef.current = 0
+						isGeneratingRef.current = false
 					}
 				})
 
@@ -174,6 +195,7 @@ const Thumbnail = memo(
 
 							abortControllerRef.current = null
 							errorRetryCountRef.current = 0
+							isGeneratingRef.current = false
 						}
 					}
 				)
@@ -194,6 +216,7 @@ const Thumbnail = memo(
 
 				abortControllerRef.current = null
 				errorRetryCountRef.current = 0
+				isGeneratingRef.current = false
 			}
 		}, [])
 
