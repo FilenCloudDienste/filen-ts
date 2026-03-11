@@ -28,7 +28,8 @@
 		"expo:install:fix": "npx expo install --fix",
 		"clean": "tsx ./clean.ts",
 		"superclean": "tsx ./superclean.ts",
-		"test": "vitest run"
+		"test": "vitest run",
+		"verify": "npm run lint && npm run typecheck && npm run test"
 	},
 	"dependencies": {
 		"@blazejkustra/react-native-alert": "^1.0.0",
