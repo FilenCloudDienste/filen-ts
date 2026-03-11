@@ -9,6 +9,8 @@ import { run } from "@filen/utils"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
+import useHttpStore from "@/stores/useHttp.store"
+import { EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 
 const Thumbnail = memo(
 	({
@@ -83,11 +85,54 @@ const Thumbnail = memo(
 			[size.thumbnail]
 		)
 
+		const isVideo = useMemo(() => {
+			if (item.type !== "file" && item.type !== "sharedFile") {
+				return false
+			}
+
+			const name = item.data.decryptedMeta?.name
+
+			if (!name) {
+				return false
+			}
+
+			const dotIndex = name.lastIndexOf(".")
+
+			if (dotIndex < 0) {
+				return false
+			}
+
+			return EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(name.slice(dotIndex).toLowerCase().trim())
+		}, [item])
+
 		useEffect(() => {
 			return () => {
 				abortControllerRef.current?.abort()
+
+				abortControllerRef.current = null
 			}
 		}, [])
+
+		useEffect(() => {
+			if (!isVideo) {
+				return
+			}
+
+			const unsubscribe = useHttpStore.subscribe(
+				s => s.port,
+				port => {
+					if (port === null) {
+						abortControllerRef.current?.abort()
+
+						abortControllerRef.current = null
+					}
+				}
+			)
+
+			return () => {
+				unsubscribe()
+			}
+		}, [isVideo])
 
 		if (item.type !== "file" && item.type !== "sharedFile") {
 			return (
@@ -117,7 +162,7 @@ const Thumbnail = memo(
 				source={source}
 				style={imageStyle}
 				contentFit="contain"
-				cachePolicy="disk"
+				cachePolicy="none"
 				onError={onError}
 			/>
 		)
