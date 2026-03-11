@@ -12,7 +12,6 @@ import { useResolveClassNames } from "uniwind"
 import Date from "@/components/drive/item/date"
 import { Platform } from "react-native"
 import { type AnyDirWithContext } from "@filen/sdk-rs"
-import { useState } from "react"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { cn } from "@filen/utils"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
@@ -27,6 +26,7 @@ import { Buffer } from "@craftzdog/react-native-buffer"
 import { pack } from "@/lib/msgpack"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
 import Thumbnail from "@/components/drive/item/thumbnail"
+import { useRecyclingState } from "@shopify/flash-list"
 
 const Item = memo(
 	({
@@ -42,7 +42,7 @@ const Item = memo(
 		drivePath: DrivePath
 	}) => {
 		const textForeground = useResolveClassNames("text-foreground")
-		const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
+		const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.item.data.uuid])
 		const textGreen500 = useResolveClassNames("text-green-500")
 		const textRed500 = useResolveClassNames("text-red-500")
 		const netInfo = useNetInfo()
