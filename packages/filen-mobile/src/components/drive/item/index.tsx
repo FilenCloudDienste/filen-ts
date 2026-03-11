@@ -2,7 +2,6 @@ import { memo, useCallback, useMemo } from "@/lib/memo"
 import View from "@/components/ui/view"
 import { PressableScale } from "@/components/ui/pressables"
 import Menu, { type DriveItemMenuOrigin } from "@/components/drive/item/menu"
-import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import Text from "@/components/ui/text"
 import { router } from "expo-router"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
@@ -12,7 +11,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Date from "@/components/drive/item/date"
 import { Platform } from "react-native"
-import { type AnyDirWithContext, DirColor } from "@filen/sdk-rs"
+import { type AnyDirWithContext } from "@filen/sdk-rs"
 import { useState } from "react"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { cn } from "@filen/utils"
@@ -27,6 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Buffer } from "@craftzdog/react-native-buffer"
 import { pack } from "@/lib/msgpack"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
+import Thumbnail from "@/components/drive/item/thumbnail"
 
 const Item = memo(
 	({
@@ -350,21 +350,13 @@ const Item = memo(
 											</View>
 										</View>
 									)}
-								{info.item.item.type === "directory" ||
-								info.item.item.type === "sharedDirectory" ||
-								info.item.item.type === "sharedRootDirectory" ? (
-									<DirectoryIcon
-										color={info.item.item.type === "directory" ? info.item.item.data.color : DirColor.Default.new()}
-										width={38}
-										height={38}
-									/>
-								) : (
-									<FileIcon
-										name={info.item.item.data.decryptedMeta?.name ?? ""}
-										width={38}
-										height={38}
-									/>
-								)}
+								<Thumbnail
+									item={info.item.item}
+									size={{
+										icon: 38,
+										thumbnail: 38
+									}}
+								/>
 							</View>
 							<View className="flex-1 flex-row items-center border-b border-border py-3 bg-transparent">
 								<View className="flex-1 flex-col justify-center gap-0.5 bg-transparent">
