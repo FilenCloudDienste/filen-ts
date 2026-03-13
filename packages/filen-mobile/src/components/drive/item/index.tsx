@@ -174,9 +174,10 @@ const Item = memo(
 
 			if (info.item.item.type === "file" || info.item.item.type === "sharedFile") {
 				router.push({
-					pathname: "/preview",
+					pathname: "/drivePreview",
 					params: {
 						item: Buffer.from(pack(info.item.item)).toString("base64"),
+						drivePath: Buffer.from(pack(drivePath)).toString("base64"),
 						origin
 					}
 				})
@@ -266,15 +267,7 @@ const Item = memo(
 
 				return
 			}
-		}, [
-			info.item,
-			origin,
-			areDriveItemsSelected,
-			drivePath.selectOptions,
-			isSelectedFromDriveSelect,
-			onPressSelectForDriveSelect,
-			disabled
-		])
+		}, [info.item, origin, areDriveItemsSelected, isSelectedFromDriveSelect, onPressSelectForDriveSelect, disabled, drivePath])
 
 		return (
 			<View

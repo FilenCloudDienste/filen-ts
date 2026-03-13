@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo } from "@/lib/memo"
 import { useEffect, useRef } from "react"
 import type { ImageStyle } from "expo-image"
-import type { DriveItem } from "@/types"
+import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
 import cache from "@/lib/cache"
 import thumbnails from "@/lib/thumbnails"
 import { run, runEffect } from "@filen/utils"
@@ -20,34 +20,20 @@ type ThumbnailSize = {
 	thumbnail: number
 }
 
-type FileDriveItem =
-	| Extract<
-			DriveItem,
-			{
-				type: "file"
-			}
-	  >
-	| Extract<
-			DriveItem,
-			{
-				type: "sharedFile"
-			}
-	  >
+const DirectoryThumbnail = memo(
+	({ item, size, className }: { item: DriveItemDirectoryExtracted; size: ThumbnailSize; className?: string }) => {
+		return (
+			<DirectoryIcon
+				color={item.type === "directory" ? item.data.color : DirColor.Default.new()}
+				width={size.icon}
+				height={size.icon}
+				className={className}
+			/>
+		)
+	}
+)
 
-type DirectoryDriveItem = Exclude<DriveItem, FileDriveItem>
-
-const DirectoryThumbnail = memo(({ item, size, className }: { item: DirectoryDriveItem; size: ThumbnailSize; className?: string }) => {
-	return (
-		<DirectoryIcon
-			color={item.type === "directory" ? item.data.color : DirColor.Default.new()}
-			width={size.icon}
-			height={size.icon}
-			className={className}
-		/>
-	)
-})
-
-const FileThumbnail = memo(({ item, size, className }: { item: FileDriveItem; size: ThumbnailSize; className?: string }) => {
+const FileThumbnail = memo(({ item, size, className }: { item: DriveItemFileExtracted; size: ThumbnailSize; className?: string }) => {
 	const abortControllerRef = useRef<AbortController | null>(null)
 	const errorRetryCountRef = useRef<number>(0)
 	const isGeneratingRef = useRef<boolean>(false)
