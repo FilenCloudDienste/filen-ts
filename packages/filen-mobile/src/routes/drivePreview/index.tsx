@@ -1,12 +1,13 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { memo, useMemo, useCallback } from "@/lib/memo"
 import ZoomableView from "@/components/ui/zoomableView"
 import View from "@/components/ui/view"
+import { AnimatedView } from "@/components/ui/animated"
 import { router, useLocalSearchParams } from "expo-router"
-import type { DriveItemFileExtracted, DriveItem } from "@/types"
+import { type DriveItemFileExtracted, type DriveItem } from "@/types"
 import { Buffer } from "react-native-quick-crypto"
 import { unpack } from "@/lib/msgpack"
-import type { DrivePath } from "@/hooks/useDrivePath"
+import { type DrivePath } from "@/hooks/useDrivePath"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Image from "@/components/ui/image"
 import Text from "@/components/ui/text"
@@ -16,7 +17,7 @@ import { useShallow } from "zustand/shallow"
 import { AnyFile } from "@filen/sdk-rs"
 import { useWindowDimensions, type ViewStyle, type ViewabilityConfig } from "react-native"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
-import Animated, { type SharedValue, useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated"
+import { type SharedValue, useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated"
 import { runOnJS } from "react-native-worklets"
 import { FlashList, type ListRenderItemInfo, type ViewToken } from "@shopify/flash-list"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
@@ -24,45 +25,16 @@ import { itemSorter } from "@/lib/sort"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
+import { VideoView, useVideoPlayer } from "expo-video"
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
 
 const DISMISS_POSITION_RATIO = 0.1
 const DISMISS_VELOCITY_THRESHOLD = 1000
-
-const fullScreenStyle: ViewStyle = {
-	flex: 1,
-	backgroundColor: "transparent"
-}
-
-const backgroundLayerStyle: ViewStyle = {
-	position: "absolute",
-	top: 0,
-	left: 0,
-	right: 0,
-	bottom: 0,
-	backgroundColor: "black"
-}
 
 const zoomableViewStyle: ViewStyle = {
 	flex: 1,
 	alignItems: "center",
 	justifyContent: "center"
-}
-
-const headerStyle: ViewStyle = {
-	position: "absolute",
-	top: 0,
-	left: 0,
-	right: 0,
-	zIndex: 10
-}
-
-const headerContentStyle: ViewStyle = {
-	flexDirection: "row",
-	alignItems: "center",
-	paddingHorizontal: 8,
-	height: 44,
-	gap: 8,
-	backgroundColor: "transparent"
 }
 
 const VIEWABILITY_CONFIG: ViewabilityConfig = {
@@ -95,6 +67,28 @@ function getFileUrlForItem(item: DriveItem, getFileUrl: (file: AnyFile) => strin
 	}
 
 	return null
+}
+
+function handleZoomChange(zoomScale: SharedValue<number>, zoom: number, setScrollEnabled: (enabled: boolean) => void) {
+	zoomScale.value = zoom
+
+	setScrollEnabled(zoom <= 1)
+}
+
+function handleSingleTap(headerOpacity: SharedValue<number>, isImage: boolean) {
+	if (!isImage) {
+		return
+	}
+
+	headerOpacity.value = withTiming(headerOpacity.value > 0.5 ? 0 : 1, {
+		duration: 200
+	})
+}
+
+function setHeaderOpacity(headerOpacity: SharedValue<number>, visible: boolean) {
+	headerOpacity.value = withTiming(visible ? 1 : 0, {
+		duration: 200
+	})
 }
 
 function buildDismissGesture(sv: DismissSharedValues, screenHeight: number, goBack: () => void) {
@@ -188,12 +182,30 @@ const Return = memo(() => {
 })
 
 const GalleryHeader = memo(
-	({ title, animatedStyle, goBack }: { title: string; animatedStyle: { opacity: number }; goBack: () => void }) => {
+	({
+		title,
+		animatedStyle,
+		goBack
+	}: {
+		title: string
+		animatedStyle: {
+			opacity: number
+		}
+		goBack: () => void
+	}) => {
 		const insets = useSafeAreaInsets()
 
 		return (
-			<Animated.View style={[headerStyle, { paddingTop: insets.top }, animatedStyle]}>
-				<View style={headerContentStyle}>
+			<AnimatedView
+				className="absolute top-0 left-0 right-0 z-10"
+				style={[
+					{
+						paddingTop: insets.top
+					},
+					animatedStyle
+				]}
+			>
+				<View className="flex-row items-center px-2 h-11 gap-2 bg-transparent">
 					<PressableScale
 						className="size-9 items-center justify-center"
 						onPress={goBack}
@@ -212,7 +224,7 @@ const GalleryHeader = memo(
 						{title}
 					</Text>
 				</View>
-			</Animated.View>
+			</AnimatedView>
 		)
 	}
 )
@@ -262,6 +274,104 @@ const PreviewImage = memo(
 	}
 )
 
+const PreviewVideo = memo(({ fileUrl }: { fileUrl: string }) => {
+	const dimensions = useWindowDimensions()
+
+	const player = useVideoPlayer(fileUrl, p => {
+		p.loop = false
+
+		p.play()
+	})
+
+	const videoViewStyle = useMemo<ViewStyle>(() => {
+		return {
+			width: dimensions.width,
+			height: dimensions.height
+		}
+	}, [dimensions.width, dimensions.height])
+
+	return (
+		<VideoView
+			style={videoViewStyle}
+			player={player}
+			contentFit="contain"
+			nativeControls={true}
+			allowsPictureInPicture={false}
+		/>
+	)
+})
+
+function formatAudioTime(seconds: number): string {
+	if (!isFinite(seconds) || seconds < 0) {
+		return "0:00"
+	}
+
+	const mins = Math.floor(seconds / 60)
+	const secs = Math.floor(seconds % 60)
+
+	return `${mins}:${secs < 10 ? "0" : ""}${secs}`
+}
+
+const PreviewAudio = memo(({ fileUrl }: { fileUrl: string }) => {
+	const player = useAudioPlayer(fileUrl)
+	const status = useAudioPlayerStatus(player)
+
+	const onPlayPause = useCallback(() => {
+		if (status.playing) {
+			player.pause()
+		} else {
+			player.play()
+		}
+	}, [player, status.playing])
+
+	const progress = status.duration > 0 ? status.currentTime / status.duration : 0
+
+	const progressWidth = useMemo(() => {
+		return {
+			width: `${Math.min(progress * 100, 100)}%` as const
+		}
+	}, [progress])
+
+	return (
+		<View className="flex-1 items-center justify-center px-4 bg-transparent">
+			<PressableScale
+				className="size-16 rounded-full bg-white/15 items-center justify-center mb-10"
+				onPress={onPlayPause}
+			>
+				<Ionicons
+					name={status.playing ? "pause" : "play"}
+					size={36}
+					color="white"
+				/>
+			</PressableScale>
+			<View className="w-full h-1 bg-white/20 rounded-sm mb-2">
+				<View
+					className="h-1 bg-white rounded-sm"
+					style={progressWidth}
+				/>
+			</View>
+			<View className="w-full flex-row justify-between bg-transparent">
+				<Text
+					className="text-white/70 text-xs"
+					style={{
+						fontVariant: ["tabular-nums"]
+					}}
+				>
+					{formatAudioTime(status.currentTime)}
+				</Text>
+				<Text
+					className="text-white/70 text-xs"
+					style={{
+						fontVariant: ["tabular-nums"]
+					}}
+				>
+					{formatAudioTime(status.duration)}
+				</Text>
+			</View>
+		</View>
+	)
+})
+
 const GalleryItem = memo(
 	({
 		info,
@@ -293,19 +403,26 @@ const GalleryItem = memo(
 		const itemStyle = useMemo(() => {
 			return {
 				width: dimensions.width,
-				height: dimensions.height,
-				backgroundColor: "transparent"
+				height: dimensions.height
 			}
 		}, [dimensions.width, dimensions.height])
 
 		if (!fileUrl || !previewType || previewType === "unknown") {
-			return <View style={itemStyle} />
+			return (
+				<View
+					className="bg-transparent"
+					style={itemStyle}
+				/>
+			)
 		}
 
 		switch (previewType) {
 			case "image": {
 				return (
-					<View style={itemStyle}>
+					<View
+						className="bg-transparent"
+						style={itemStyle}
+					>
 						<PreviewImage
 							fileUrl={fileUrl}
 							zoomScale={zoomScale}
@@ -317,8 +434,35 @@ const GalleryItem = memo(
 				)
 			}
 
+			case "video": {
+				return (
+					<View
+						className="bg-transparent"
+						style={itemStyle}
+					>
+						<PreviewVideo fileUrl={fileUrl} />
+					</View>
+				)
+			}
+
+			case "audio": {
+				return (
+					<View
+						className="bg-transparent"
+						style={itemStyle}
+					>
+						<PreviewAudio fileUrl={fileUrl} />
+					</View>
+				)
+			}
+
 			default: {
-				return <View style={itemStyle} />
+				return (
+					<View
+						className="bg-transparent"
+						style={itemStyle}
+					/>
+				)
 			}
 		}
 	}
@@ -327,7 +471,7 @@ const GalleryItem = memo(
 const Gallery = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drivePath: DrivePath }) => {
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
-	const [currentItemName, setCurrentItemName] = useState<string>(item.data.decryptedMeta?.name ?? "")
+	const [currentItem, setCurrentItem] = useState<DriveItemFileExtracted>(item)
 	const headerOpacity = useSharedValue<number>(1)
 	const zoomScale = useSharedValue<number>(1)
 	const dismissTranslateY = useSharedValue<number>(0)
@@ -352,18 +496,23 @@ const Gallery = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drive
 
 	const onZoomChange = useCallback(
 		(zoom: number) => {
-			zoomScale.value = zoom
-
-			setScrollEnabled(zoom <= 1)
+			handleZoomChange(zoomScale, zoom, setScrollEnabled)
 		},
 		[zoomScale]
 	)
 
+	const currentItemName = currentItem.data.decryptedMeta?.name ?? ""
+	const currentPreviewType = getPreviewType(currentItemName)
+	const isImage = currentPreviewType === "image"
+	const isVideo = currentPreviewType === "video"
+
 	const onSingleTap = useCallback(() => {
-		headerOpacity.value = withTiming(headerOpacity.value > 0.5 ? 0 : 1, {
-			duration: 200
-		})
-	}, [headerOpacity])
+		handleSingleTap(headerOpacity, isImage)
+	}, [headerOpacity, isImage])
+
+	useEffect(() => {
+		setHeaderOpacity(headerOpacity, !isVideo)
+	}, [isVideo, headerOpacity])
 
 	const headerAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
@@ -382,7 +531,7 @@ const Gallery = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drive
 			const first = info.viewableItems[0]
 
 			if (first && first.item) {
-				setCurrentItemName(first.item.data.decryptedMeta?.name ?? "")
+				setCurrentItem(first.item)
 			}
 		},
 		[]
@@ -469,15 +618,21 @@ const Gallery = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drive
 	}
 
 	return (
-		<View style={fullScreenStyle}>
-			<Animated.View style={[backgroundLayerStyle, backgroundAnimatedStyle]} />
+		<View className="flex-1 bg-transparent">
+			<AnimatedView
+				className="absolute inset-0 bg-black"
+				style={backgroundAnimatedStyle}
+			/>
 			<GalleryHeader
 				title={currentItemName}
 				animatedStyle={headerAnimatedStyle}
 				goBack={goBack}
 			/>
 			<GestureDetector gesture={dismissGesture}>
-				<Animated.View style={[fullScreenStyle, dismissContentStyle]}>
+				<AnimatedView
+					className="flex-1 bg-transparent"
+					style={dismissContentStyle}
+				>
 					<FlashList<DriveItemFileExtracted>
 						data={itemsSorted}
 						keyExtractor={keyExtractor}
@@ -490,7 +645,7 @@ const Gallery = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drive
 						onViewableItemsChanged={onViewableItemsChanged}
 						viewabilityConfig={VIEWABILITY_CONFIG}
 					/>
-				</Animated.View>
+				</AnimatedView>
 			</GestureDetector>
 		</View>
 	)
