@@ -2,7 +2,7 @@ import { useLocalSearchParams, useNavigation } from "expo-router"
 import { useMemo } from "@/lib/memo"
 import { validate as validateUuid } from "uuid"
 import type { DriveItem } from "@/types"
-import { Buffer } from "@craftzdog/react-native-buffer"
+import { Buffer } from "react-native-quick-crypto"
 import { unpack } from "@/lib/msgpack"
 
 export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links"] as const

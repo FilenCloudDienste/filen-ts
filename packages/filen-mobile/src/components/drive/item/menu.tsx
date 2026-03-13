@@ -23,7 +23,7 @@ import { pack } from "@/lib/msgpack"
 import { simpleDate } from "@/lib/time"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import auth from "@/lib/auth"
-import { Buffer } from "@craftzdog/react-native-buffer"
+import { Buffer } from "react-native-quick-crypto"
 import { selectContacts } from "@/routes/contacts"
 
 export type DriveItemMenuOrigin =
