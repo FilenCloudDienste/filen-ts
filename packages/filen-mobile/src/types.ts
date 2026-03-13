@@ -51,3 +51,19 @@ export type DriveItem =
 			type: "sharedFile"
 			data: DriveItemFileShared
 	  }
+
+export type DriveItemFileExtracted =
+	| Extract<
+			DriveItem,
+			{
+				type: "file"
+			}
+	  >
+	| Extract<
+			DriveItem,
+			{
+				type: "sharedFile"
+			}
+	  >
+
+export type DriveItemDirectoryExtracted = Exclude<DriveItem, DriveItemFile>
