@@ -40,10 +40,10 @@ vi.mock("react-native-mmkv", () => ({
 	createMMKV: () => mockMmkv
 }))
 
-vi.mock("@craftzdog/react-native-buffer", async () => {
+vi.mock("react-native-quick-crypto", async () => {
 	const { Buffer } = await import("buffer")
 
-	return { Buffer }
+	return { default: {}, Buffer }
 })
 
 vi.mock("react-fast-compare", () => ({
