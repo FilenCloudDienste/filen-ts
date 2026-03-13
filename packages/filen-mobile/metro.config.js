@@ -11,7 +11,6 @@ const config = {
 	resolver: {
 		...defaultConfig.resolver,
 		extraNodeModules: {
-			buffer: require.resolve("@craftzdog/react-native-buffer"),
 			crypto: require.resolve("react-native-quick-crypto"),
 			stream: require.resolve("readable-stream"),
 			path: require.resolve("path-browserify")
