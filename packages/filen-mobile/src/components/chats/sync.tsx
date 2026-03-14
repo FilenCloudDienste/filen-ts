@@ -69,8 +69,6 @@ export class Sync {
 		// We don't really care if it failed, we just proceed
 		this.initDone = true
 
-		console.log("Finished initializing chat sync.", result.data)
-
 		if (Object.keys(result.data ?? {}).length > 0) {
 			this.sync()
 		}
@@ -170,8 +168,7 @@ export class Sync {
 							throw e
 						}
 
-						let didFlushToDisk = false
-						let flushToDiskError: Error | null = null
+						let updatedMessages: InflightChatMessages | null = null
 
 						useChatsStore.getState().setInflightMessages(prev => {
 							const updated = {
@@ -188,24 +185,14 @@ export class Sync {
 									delete updated[chatUuid]
 								}
 
-								this.flushToDisk(updated, false)
-									.then(() => {
-										didFlushToDisk = true
-									})
-									.catch(err => {
-										flushToDiskError = err
-									})
+								updatedMessages = updated
 							}
 
 							return updated
 						})
 
-						while (!didFlushToDisk) {
-							if (flushToDiskError) {
-								throw flushToDiskError
-							}
-
-							await new Promise<void>(resolve => setTimeout(resolve, 100))
+						if (updatedMessages) {
+							await this.flushToDisk(updatedMessages, false)
 						}
 					}
 				})

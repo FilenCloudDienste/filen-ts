@@ -9,6 +9,12 @@
  * Add more as needed.
  */
 
+export const AppState = {
+	addEventListener: (_type: string, _handler: (state: string) => void) => ({
+		remove: () => {}
+	})
+}
+
 export const Platform = {
 	OS: "ios" as "ios" | "android",
 	select<T>(specifics: { ios?: T; android?: T; default?: T }): T | undefined {

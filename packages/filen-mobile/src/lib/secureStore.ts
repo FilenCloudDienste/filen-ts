@@ -77,9 +77,11 @@ class SecureStore {
 	}
 
 	private async waitForInit(): Promise<void> {
-		while (!this.initDone) {
-			await this.init()
+		if (this.initDone) {
+			return
 		}
+
+		await this.init()
 	}
 
 	public async init(): Promise<void> {
@@ -289,6 +291,7 @@ class SecureStore {
 
 			cache.secureStore.set(key, value)
 
+			// Trusted cast: callers are responsible for using the correct type parameter
 			return value as T
 		})
 

@@ -78,6 +78,45 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 		return item.inner.uuid
 	}, [])
 
+	const footerComponent = useMemo(() => {
+		if (!isFetchingMore) {
+			return undefined
+		}
+
+		// eslint-disable-next-line react/display-name
+		return () => {
+			return (
+				<View className="w-full h-auto items-center justify-center pt-4">
+					<ActivityIndicator
+						size="small"
+						color={textMutedForeground.color}
+					/>
+				</View>
+			)
+		}
+	}, [isFetchingMore, textMutedForeground.color])
+
+	const headerComponent = useCallback(() => {
+		return <AnimatedView style={headerStyle} />
+	}, [headerStyle])
+
+	const emptyComponent = useCallback(() => {
+		return (
+			<View
+				className="flex-1 items-center justify-center"
+				style={{
+					transform: [
+						{
+							scaleY: -1
+						}
+					]
+				}}
+			>
+				<Text>tbd_no_messages</Text>
+			</View>
+		)
+	}, [])
+
 	const fetchMore = useCallback(async () => {
 		if (isFetchingMoreRef.current || chatMessagesQuery.status !== "success" || messages.length === 0 || !hasMoreRef.current) {
 			return
@@ -125,6 +164,8 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 		setFetchedMessages(prev => [...prev, ...result.data])
 	}, [chatMessagesQuery.status, chat, messages])
 
+	const onEndReached = useCallback(() => fetchMore(), [fetchMore])
+
 	return (
 		<View
 			className="bg-transparent flex-1"
@@ -146,43 +187,13 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 				renderItem={renderItem}
 				onEndReachedThreshold={0.5}
 				loading={chatMessagesQuery.status !== "success"}
-				footerComponent={
-					isFetchingMore
-						? () => {
-								return (
-									<View className="w-full h-auto items-center justify-center pt-4">
-										<ActivityIndicator
-											size="small"
-											color={textMutedForeground.color}
-										/>
-									</View>
-								)
-							}
-						: undefined
-				}
-				onEndReached={() => fetchMore()}
+				footerComponent={footerComponent}
+				onEndReached={onEndReached}
 				maintainVisibleContentPosition={{
 					disabled: true
 				}}
-				headerComponent={() => {
-					return <AnimatedView style={headerStyle} />
-				}}
-				emptyComponent={() => {
-					return (
-						<View
-							className="flex-1 items-center justify-center"
-							style={{
-								transform: [
-									{
-										scaleY: -1
-									}
-								]
-							}}
-						>
-							<Text>tbd_no_messages</Text>
-						</View>
-					)
-				}}
+				headerComponent={headerComponent}
+				emptyComponent={emptyComponent}
 			/>
 		</View>
 	)

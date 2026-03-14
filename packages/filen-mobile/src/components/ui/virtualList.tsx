@@ -14,9 +14,10 @@ import {
 	type FlashListRef,
 	type ListRenderItemInfo as FlashListListRenderItemInfo
 } from "@shopify/flash-list"
-import { useHeaderHeight } from "@react-navigation/elements"
+import useHeaderHeight from "@/hooks/useHeaderHeight"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
+import { KeyboardController } from "react-native-keyboard-controller"
 
 export type ListRenderItemInfo<T> = FlashListListRenderItemInfo<T>
 
@@ -34,6 +35,7 @@ export type VirtualListExtraProps = {
 	footerComponent?: () => React.ReactNode
 	headerComponent?: () => React.ReactNode
 	keyboardAvoidingViewBehavior?: React.ComponentProps<typeof KeyboardAvoidingView>["behavior"]
+	headerHeightCacheKey?: string
 	searchBar?: {
 		onChangeText?: (text: string) => void
 		placeholder?: string
@@ -44,13 +46,15 @@ const ListSearchBar = memo(
 	({
 		onChangeText,
 		onHeightChange,
-		placeholder
+		placeholder,
+		headerHeightCacheKey
 	}: {
 		onChangeText?: (text: string) => void
 		onHeightChange?: (height: number) => void
 		placeholder?: string
+		headerHeightCacheKey?: string
 	}) => {
-		const headerHeight = useHeaderHeight()
+		const headerHeight = useHeaderHeight(headerHeightCacheKey)
 		const textForeground = useResolveClassNames("text-foreground")
 		const [hasText, setHasText] = useState<boolean>(false)
 		const inputRef = useRef<TextInput>(null)
@@ -68,6 +72,13 @@ const ListSearchBar = memo(
 
 			setHasText(false)
 			onChangeText?.("")
+
+			if (KeyboardController.isVisible()) {
+				KeyboardController.dismiss().catch(err => {
+					console.error(err)
+					alerts.error(err)
+				})
+			}
 		}, [onChangeText])
 
 		return (
@@ -89,7 +100,7 @@ const ListSearchBar = memo(
 					})
 				}}
 			>
-				<View className={cn("px-4 pb-4 shrink-0 bg-transparent", Platform.OS === "ios" && "min-h-12")}>
+				<View className="px-4 pb-4 shrink-0 bg-transparent">
 					<CrossGlassContainerView className="flex-row items-center gap-2 px-3 w-full h-full">
 						<View className="bg-transparent flex-row items-center justify-center">
 							<Ionicons
@@ -100,7 +111,7 @@ const ListSearchBar = memo(
 						</View>
 						<TextInput
 							ref={inputRef}
-							className="py-3 text-foreground flex-1"
+							className="py-3 text-foreground flex-1 h-11"
 							placeholder={placeholder ?? "tbd_search"}
 							placeholderTextColorClassName="text-muted-foreground"
 							onChangeText={onChangeTextInternal}
@@ -223,6 +234,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 					onChangeText={props.searchBar.onChangeText}
 					onHeightChange={setSearchBarHeight}
 					placeholder={props.searchBar.placeholder}
+					headerHeightCacheKey={props.headerHeightCacheKey}
 				/>
 			)}
 			<View

@@ -950,6 +950,21 @@ const Contacts = memo(() => {
 		}
 	}, [contactsQuery, contactRequestsQuery])
 
+	const emptyComponent = useCallback(() => {
+		return (
+			<View className="flex-1 items-center justify-center bg-transparent">
+				<Text>tbd</Text>
+			</View>
+		)
+	}, [])
+
+	const searchBar = useMemo(() => {
+		return {
+			onChangeText: setSearchQuery,
+			placeholder: "tbd_search_contacts"
+		}
+	}, [setSearchQuery])
+
 	useFocusEffect(
 		useCallback(() => {
 			useContactsStore.getState().setSelectedContacts([])
@@ -976,17 +991,9 @@ const Contacts = memo(() => {
 					renderItem={renderItem}
 					loading={contactRequestsQuery.status !== "success" || contactsQuery.status !== "success"}
 					onRefresh={onRefresh}
-					emptyComponent={() => {
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent">
-								<Text>tbd</Text>
-							</View>
-						)
-					}}
-					searchBar={{
-						onChangeText: setSearchQuery,
-						placeholder: "tbd_search_contacts"
-					}}
+					emptyComponent={emptyComponent}
+					headerHeightCacheKey="contacts"
+					searchBar={searchBar}
 				/>
 			</SafeAreaView>
 		</Fragment>

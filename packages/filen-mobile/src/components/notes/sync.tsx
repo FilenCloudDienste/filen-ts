@@ -138,13 +138,12 @@ export class Sync {
 						return
 					}
 
-					let didFlushToDisk = false
-					let flushToDiskError: Error | null = null
-
 					const updatedNote = await notes.setContent({
 						note: mostRecentContent.note,
 						content: mostRecentContent.content
 					})
+
+					let updatedContent: InflightContent | null = null
 
 					useNotesStore.getState().setInflightContent(prev => {
 						const updated = {
@@ -162,23 +161,13 @@ export class Sync {
 							}
 						}
 
-						this.flushToDisk(updated, false)
-							.then(() => {
-								didFlushToDisk = true
-							})
-							.catch(err => {
-								flushToDiskError = err
-							})
+						updatedContent = updated
 
 						return updated
 					})
 
-					while (!didFlushToDisk) {
-						if (flushToDiskError) {
-							throw flushToDiskError
-						}
-
-						await new Promise<void>(resolve => setTimeout(resolve, 100))
+					if (updatedContent) {
+						await this.flushToDisk(updatedContent, false)
 					}
 				})
 			)

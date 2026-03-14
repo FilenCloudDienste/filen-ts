@@ -1009,14 +1009,23 @@ export const Notes = memo(() => {
 			return {}
 		}
 
-		return notesTagsQuery.data.reduce(
-			(acc, tag) => {
-				acc[tag.uuid] = notesQuery.data.filter(n => n.tags.some(t => t.uuid === tag.uuid))
+		const index: Record<string, TNote[]> = {}
 
-				return acc
-			},
-			{} as Record<string, TNote[]>
-		)
+		for (const tag of notesTagsQuery.data) {
+			index[tag.uuid] = []
+		}
+
+		for (const note of notesQuery.data) {
+			for (const tag of note.tags) {
+				const tagNotes = index[tag.uuid]
+
+				if (tagNotes) {
+					tagNotes.push(note)
+				}
+			}
+		}
+
+		return index
 	}, [notesQuery.data, notesQuery.status, notesTagsQuery.data, notesTagsQuery.status])
 
 	const renderItemNotesView = useCallback(
@@ -1083,6 +1092,36 @@ export const Notes = memo(() => {
 		}, [])
 	)
 
+	const notesEmptyComponent = useCallback(() => {
+		return (
+			<View className="flex-1 items-center justify-center">
+				<Text>tbd</Text>
+			</View>
+		)
+	}, [])
+
+	const notesSearchBar = useMemo(() => {
+		return {
+			onChangeText: setSearchQuery,
+			placeholder: "tbd_search_notes"
+		}
+	}, [setSearchQuery])
+
+	const tagsEmptyComponent = useCallback(() => {
+		return (
+			<View className="flex-1 items-center justify-center">
+				<Text>tbd</Text>
+			</View>
+		)
+	}, [])
+
+	const tagsSearchBar = useMemo(() => {
+		return {
+			onChangeText: setSearchQuery,
+			placeholder: "tbd_search_notes_tags"
+		}
+	}, [setSearchQuery])
+
 	return (
 		<Fragment>
 			<Header />
@@ -1097,17 +1136,9 @@ export const Notes = memo(() => {
 						renderItem={renderItemNotesView}
 						loading={notesQuery.status !== "success"}
 						onRefresh={onRefresh}
-						emptyComponent={() => {
-							return (
-								<View className="flex-1 items-center justify-center">
-									<Text>tbd</Text>
-								</View>
-							)
-						}}
-						searchBar={{
-							onChangeText: setSearchQuery,
-							placeholder: "tbd_search_notes"
-						}}
+						emptyComponent={notesEmptyComponent}
+						headerHeightCacheKey="notes"
+						searchBar={notesSearchBar}
 					/>
 				) : (
 					<VirtualList
@@ -1119,17 +1150,9 @@ export const Notes = memo(() => {
 						loading={notesTagsQuery.status !== "success"}
 						renderItem={renderItemTagsView}
 						onRefresh={onRefresh}
-						emptyComponent={() => {
-							return (
-								<View className="flex-1 items-center justify-center">
-									<Text>tbd</Text>
-								</View>
-							)
-						}}
-						searchBar={{
-							onChangeText: setSearchQuery,
-							placeholder: "tbd_search_notes_tags"
-						}}
+						emptyComponent={tagsEmptyComponent}
+						headerHeightCacheKey="notes"
+						searchBar={tagsSearchBar}
 					/>
 				)}
 			</SafeAreaView>

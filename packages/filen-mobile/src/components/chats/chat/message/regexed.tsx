@@ -29,13 +29,9 @@ export const REGEX: RegExp = new RegExp(
 	`${EMOJI_REGEX_WITH_SKIN_TONES.source}|${CODE_REGEX.source}|${URL_REGEX.source}|${MENTIONS.source}|${LINE_BREAK_REGEX.source}`
 )
 
-export const customEmojisList = customEmojis.map(emoji => emoji.id)
-export const customEmojisListRecord: Record<string, string> = customEmojis.reduce(
-	(prev, value) => ({
-		...prev,
-		[value.id]: value.skins[0] ? value.skins[0].src : ""
-	}),
-	{}
+export const customEmojisSet = new Set(customEmojis.map(emoji => emoji.id))
+export const customEmojisListRecord: Record<string, string> = Object.fromEntries(
+	customEmojis.map(emoji => [emoji.id, emoji.skins[0] ? emoji.skins[0].src : ""])
 )
 
 export const Mention = memo(
@@ -268,7 +264,7 @@ export const Regexed = memo(
 
 					const customEmoji = match.split(":").join("").trim()
 
-					if (customEmojisList.includes(customEmoji) && customEmojisListRecord[customEmoji]) {
+					if (customEmojisSet.has(customEmoji) && customEmojisListRecord[customEmoji]) {
 						return (
 							<Image
 								cachePolicy="disk"
