@@ -95,9 +95,13 @@ class Auth {
 
 		await this.clientsReady
 
+		if (!this.authedClient || !this.unauthedClient) {
+			throw new Error("SDK clients not initialized after clientsReady resolved")
+		}
+
 		return {
-			authedSdkClient: this.authedClient as JsClientInterface,
-			unauthedSdkClient: this.unauthedClient as UnauthJsClientInterface
+			authedSdkClient: this.authedClient,
+			unauthedSdkClient: this.unauthedClient
 		}
 	}
 

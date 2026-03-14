@@ -2,6 +2,7 @@ import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithConte
 import type { DriveItem } from "@/types"
 import { debounce } from "es-toolkit"
 import sqlite from "@/lib/sqlite"
+import { AppState } from "react-native"
 
 const VERSION = 1
 const PERSIST_DEBOUNCE_MS = 1000
@@ -158,6 +159,12 @@ class Cache {
 		for (const { map } of this.registry) {
 			map.ready = true
 		}
+
+		AppState.addEventListener("change", state => {
+			if (state === "background" || state === "inactive") {
+				this.flush()
+			}
+		})
 	}
 
 	public flush(): void {

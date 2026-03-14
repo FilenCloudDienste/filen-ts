@@ -428,12 +428,10 @@ export function createMenuButtons({
 					id: "shareFilenUser",
 					title: "tbd_share_filen_user",
 					onPress: async () => {
-						const selectContactsResult = await selectContacts({
+						await selectContacts({
 							multiple: false,
 							userIdsToExclude: []
 						})
-
-						console.log({ selectContactsResult })
 					}
 				}
 			]

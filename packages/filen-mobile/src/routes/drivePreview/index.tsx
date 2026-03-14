@@ -27,6 +27,8 @@ import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { VideoView, useVideoPlayer } from "expo-video"
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
+import TextEditor from "@/components/textEditor"
+import { useQuery } from "@tanstack/react-query"
 
 const DISMISS_POSITION_RATIO = 0.1
 const DISMISS_VELOCITY_THRESHOLD = 1000
@@ -372,6 +374,37 @@ const PreviewAudio = memo(({ fileUrl }: { fileUrl: string }) => {
 	)
 })
 
+const PreviewText = memo(({ fileUrl, previewType }: { fileUrl: string; previewType: ReturnType<typeof getPreviewType> }) => {
+	const query = useQuery({
+		queryKey: ["drivePreviewTextContent", fileUrl],
+		queryFn: async () => {
+			const response = await fetch(fileUrl)
+
+			if (!response.ok) {
+				throw new Error(`HTTP error: ${response.status}`)
+			}
+
+			return response.text()
+		},
+		gcTime: 0,
+		staleTime: 0,
+		refetchOnMount: "always",
+		refetchOnWindowFocus: "always"
+	})
+
+	return (
+		<TextEditor
+			initialValue={query.data ?? ""}
+			onValueChange={() => {}}
+			readOnly={true}
+			placeholder="tbd_placeholder"
+			type={previewType === "code" ? "code" : "text"}
+			disableMarkdownPreview={true}
+			disableRichtextToolbar={true}
+		/>
+	)
+})
+
 const GalleryItem = memo(
 	({
 		info,
@@ -453,6 +486,41 @@ const GalleryItem = memo(
 					>
 						<PreviewAudio fileUrl={fileUrl} />
 					</View>
+				)
+			}
+
+			case "text":
+			case "code": {
+				return (
+					<View
+						className="bg-transparent"
+						style={itemStyle}
+					>
+						<PreviewText
+							fileUrl={fileUrl}
+							previewType={previewType}
+						/>
+					</View>
+				)
+			}
+
+			case "docx": {
+				// TODO
+				return (
+					<View
+						className="bg-transparent"
+						style={itemStyle}
+					/>
+				)
+			}
+
+			case "pdf": {
+				// TODO
+				return (
+					<View
+						className="bg-transparent"
+						style={itemStyle}
+					/>
 				)
 			}
 

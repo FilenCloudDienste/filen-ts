@@ -184,13 +184,14 @@ class Chats {
 			params: {
 				uuid: chat.uuid
 			},
-			updater: prev => [
-				...prev.filter(m => m.inner.uuid !== message.inner.uuid),
-				{
-					...message,
-					inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-				}
-			]
+			updater: prev => prev.map(m =>
+				m.inner.uuid === message.inner.uuid
+					? {
+							...message,
+							inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+						}
+					: m
+			)
 		})
 
 		return message

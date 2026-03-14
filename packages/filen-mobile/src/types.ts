@@ -66,4 +66,4 @@ export type DriveItemFileExtracted =
 			}
 	  >
 
-export type DriveItemDirectoryExtracted = Exclude<DriveItem, DriveItemFile>
+export type DriveItemDirectoryExtracted = Exclude<DriveItem, DriveItemFileExtracted>

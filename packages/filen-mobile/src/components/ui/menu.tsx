@@ -304,6 +304,7 @@ function toIosMenuSubMenuConfig(button: MenuButton): MenuElementConfig {
 	}
 
 	const attributes = iosMenuAttributesFromButton(button)
+	const iosIcon = button.icon ? iconToSwiftUiIcon(button.icon) : undefined
 
 	return {
 		menuOptions: button.subButtonsInline ? ["displayInline"] : undefined,
@@ -312,11 +313,11 @@ function toIosMenuSubMenuConfig(button: MenuButton): MenuElementConfig {
 		menuPreferredElementSize: button.iOSItemSize,
 		discoverabilityTitle: button.subTitle,
 		menuAttributes: attributes.length > 0 ? attributes : undefined,
-		icon: button.icon
+		icon: iosIcon
 			? {
 					type: "IMAGE_SYSTEM",
 					imageValue: {
-						systemName: iconToSwiftUiIcon(button.icon)
+						systemName: iosIcon
 					}
 				}
 			: undefined,
@@ -342,6 +343,7 @@ function toIosMenuElementConfig(button: MenuButton): MenuElementConfig {
 	}
 
 	const attributes = iosMenuAttributesFromButton(button)
+	const iosIcon = button.icon ? iconToSwiftUiIcon(button.icon) : undefined
 
 	return {
 		actionKey: button.id,
@@ -349,11 +351,11 @@ function toIosMenuElementConfig(button: MenuButton): MenuElementConfig {
 		actionSubtitle: button.subTitle,
 		discoverabilityTitle: button.subTitle,
 		menuAttributes: attributes.length > 0 ? attributes : undefined,
-		icon: button.icon
+		icon: iosIcon
 			? {
 					type: "IMAGE_SYSTEM",
 					imageValue: {
-						systemName: iconToSwiftUiIcon(button.icon)
+						systemName: iosIcon
 					}
 				}
 			: undefined,

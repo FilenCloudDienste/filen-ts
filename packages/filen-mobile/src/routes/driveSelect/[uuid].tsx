@@ -46,8 +46,6 @@ export async function selectDriveItems(options: Omit<SelectOptions, "intention" 
 			}
 		})
 
-		console.log(options)
-
 		router.push({
 			pathname: "/driveSelect/[uuid]",
 			params: {

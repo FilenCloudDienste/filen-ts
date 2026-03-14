@@ -620,6 +620,10 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			defer(() => {
 				appStateSubscription.remove()
 			})
+
+			defer(() => {
+				clearInterval(checkConnectionIntervalRef.current)
+			})
 		})
 
 		return () => {

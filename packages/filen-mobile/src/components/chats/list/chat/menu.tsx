@@ -375,8 +375,6 @@ export function createMenuButtons({
 								return
 							}
 
-							console.log(useAppStore.getState().pathname)
-
 							if (useAppStore.getState().pathname.startsWith(`/chat/${chat.uuid}`) && router.canGoBack()) {
 								router.back()
 							}

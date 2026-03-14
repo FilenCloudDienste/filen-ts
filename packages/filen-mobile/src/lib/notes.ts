@@ -408,7 +408,7 @@ class Notes {
 	}
 
 	public async delete({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		if (!note.trash || note.archive) {
+		if (!note.trash) {
 			return
 		}
 

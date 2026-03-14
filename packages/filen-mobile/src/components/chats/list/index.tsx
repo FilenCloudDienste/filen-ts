@@ -104,6 +104,7 @@ export const List = memo(() => {
 					</View>
 				)
 			}}
+			headerHeightCacheKey="chats"
 			searchBar={{
 				onChangeText: setSearchQuery,
 				placeholder: "tbd_search_chats"
