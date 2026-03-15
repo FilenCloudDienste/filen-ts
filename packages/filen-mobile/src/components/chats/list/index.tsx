@@ -87,6 +87,19 @@ export const List = memo(() => {
 		return <Chat info={info} />
 	}, [])
 
+	const emptyComponent = useCallback(() => {
+		return (
+			<View className="flex-1 items-center justify-center">
+				<Text>{searchQuery && searchQuery.length > 0 ? "tbd_no_chats_search" : "tbd_no_chats"}</Text>
+			</View>
+		)
+	}, [searchQuery])
+
+	const searchBarProps = useMemo(() => ({
+		onChangeText: setSearchQuery,
+		placeholder: "tbd_search_chats"
+	}), [setSearchQuery])
+
 	return (
 		<VirtualList
 			className="flex-1"
@@ -97,18 +110,9 @@ export const List = memo(() => {
 			data={chats}
 			renderItem={renderItem}
 			onRefresh={onRefresh}
-			emptyComponent={() => {
-				return (
-					<View className="flex-1 items-center justify-center">
-						<Text>{searchQuery && searchQuery.length > 0 ? "tbd_no_chats_search" : "tbd_no_chats"}</Text>
-					</View>
-				)
-			}}
+			emptyComponent={emptyComponent}
 			headerHeightCacheKey="chats"
-			searchBar={{
-				onChangeText: setSearchQuery,
-				placeholder: "tbd_search_chats"
-			}}
+			searchBar={searchBarProps}
 		/>
 	)
 })

@@ -13,8 +13,16 @@ export function useNativeDomEvents<T>(params: {
 	const postMessage = useCallback(
 		(message: T) => {
 			;(async () => {
-				while (!params.ref.current) {
-					await new Promise<void>(resolve => setTimeout(resolve, 10))
+				let attempts = 0
+
+				while (!params.ref.current && attempts < 100) {
+					await new Promise<void>(resolve => setTimeout(resolve, 100))
+
+					attempts++
+				}
+
+				if (!params.ref.current) {
+					return
 				}
 
 				try {

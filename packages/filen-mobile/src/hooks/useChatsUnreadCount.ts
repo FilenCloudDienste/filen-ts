@@ -15,12 +15,13 @@ export function useChatsUnreadCount() {
 		enabled: false
 	})
 
-	const unreadCount = useMemo(() => {
+	const { unreadCount, hasMissingMessages } = useMemo(() => {
 		if (chatsQuery.status !== "success" || !stringifiedClient) {
-			return 0
+			return { unreadCount: 0, hasMissingMessages: false }
 		}
 
-		let unreadCount = 0
+		let count = 0
+		let missing = false
 
 		for (const chat of chatsQuery.data) {
 			const messages = chatMessagesQueryGet({
@@ -28,7 +29,7 @@ export function useChatsUnreadCount() {
 			})
 
 			if (!messages) {
-				chats.refetchChatsAndMessages().catch(console.error)
+				missing = true
 
 				continue
 			}
@@ -37,7 +38,7 @@ export function useChatsUnreadCount() {
 				continue
 			}
 
-			unreadCount += messages.filter(
+			count += messages.filter(
 				message =>
 					chat.lastFocus &&
 					chat.lastMessage &&
@@ -47,8 +48,14 @@ export function useChatsUnreadCount() {
 			).length
 		}
 
-		return unreadCount
+		return { unreadCount: count, hasMissingMessages: missing }
 	}, [chatsQuery.status, chatsQuery.data, stringifiedClient])
+
+	useEffect(() => {
+		if (hasMissingMessages) {
+			chats.refetchChatsAndMessages().catch(console.error)
+		}
+	}, [hasMissingMessages])
 
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {

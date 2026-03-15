@@ -13,6 +13,13 @@ import type { Platform } from "react-native"
 import type { TextEditorEvents, Colors, Font } from "@/components/textEditor"
 import { memo, useCallback } from "@/lib/memo"
 
+DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
+	if (node.tagName === "A" && node.getAttribute("href")) {
+		node.setAttribute("target", "_blank")
+		node.setAttribute("rel", "noopener noreferrer")
+	}
+})
+
 export type HeaderLevel = 1 | 2 | 3 | 4 | 5 | 6
 export type ListType = "ordered" | "bullet" | "checked" | "unchecked"
 export type ScriptType = "sub" | "super"
@@ -299,13 +306,6 @@ const RichTextEditorDom = memo(
 						"div"
 					],
 					ALLOWED_ATTR: ["href", "target", "rel", "src", "alt", "class", "style"]
-				})
-
-				DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
-					if (node.tagName === "A" && node.getAttribute("href")) {
-						node.setAttribute("target", "_blank")
-						node.setAttribute("rel", "noopener noreferrer")
-					}
 				})
 
 				quillRef.current.clipboard.dangerouslyPasteHTML(sanitized, "silent")

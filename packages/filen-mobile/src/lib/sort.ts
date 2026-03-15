@@ -199,9 +199,9 @@ class ItemSorter {
 			return typeComp
 		}
 
-		const diff = Number(a.data.size) - Number(b.data.size)
+		const cmp = a.data.size > b.data.size ? 1 : a.data.size < b.data.size ? -1 : 0
 
-		return isAsc ? diff : -diff
+		return isAsc ? cmp : -cmp
 	}
 
 	private compareDate = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
@@ -349,6 +349,22 @@ class ItemSorter {
 export const itemSorter = new ItemSorter()
 
 class NotesSorter {
+	private readonly uuidCache: Map<string, number> = new Map()
+
+	private parseUuid(uuid: string): number {
+		const cached = this.uuidCache.get(uuid)
+
+		if (cached !== undefined) {
+			return cached
+		}
+
+		const result = parseNumbersFromString(uuid)
+
+		this.uuidCache.set(uuid, result)
+
+		return result
+	}
+
 	public sort(
 		notes: (
 			| Note
@@ -380,7 +396,7 @@ class NotesSorter {
 			}
 
 			if (b.editedTimestamp === a.editedTimestamp) {
-				return parseNumbersFromString(b.uuid) - parseNumbersFromString(a.uuid)
+				return this.parseUuid(b.uuid) - this.parseUuid(a.uuid)
 			}
 
 			return Number(b.editedTimestamp) - Number(a.editedTimestamp)
