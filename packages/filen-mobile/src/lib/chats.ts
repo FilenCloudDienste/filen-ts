@@ -184,14 +184,15 @@ class Chats {
 			params: {
 				uuid: chat.uuid
 			},
-			updater: prev => prev.map(m =>
-				m.inner.uuid === message.inner.uuid
-					? {
-							...message,
-							inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-						}
-					: m
-			)
+			updater: prev =>
+				prev.map(m =>
+					m.inner.uuid === message.inner.uuid
+						? {
+								...message,
+								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+							}
+						: m
+				)
 		})
 
 		return message
@@ -290,17 +291,6 @@ class Chats {
 
 	public async delete({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
-
-		chatsQueryUpdate({
-			updater: prev => prev.filter(c => c.uuid !== chat.uuid)
-		})
-
-		chatMessagesQueryUpdate({
-			params: {
-				uuid: chat.uuid
-			},
-			updater: () => []
-		})
 
 		await authedSdkClient.deleteChat(
 			chat,

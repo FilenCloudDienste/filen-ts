@@ -1,6 +1,6 @@
 import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { debounce } from "es-toolkit"
+import { debounce } from "es-toolkit/function"
 import sqlite from "@/lib/sqlite"
 import { AppState } from "react-native"
 
@@ -174,17 +174,15 @@ class Cache {
 	}
 
 	public clear(): void {
-		for (const { debouncedPersist } of this.registry) {
-			debouncedPersist.cancel()
-		}
-
 		this.secureStore.clear()
 
 		for (const { map } of this.registry) {
 			Map.prototype.clear.call(map)
 		}
 
-		for (const { key } of this.registry) {
+		for (const { key, debouncedPersist } of this.registry) {
+			debouncedPersist.cancel()
+
 			sqlite.kvAsync.remove(key).catch(err => {
 				console.error(`[Cache] Failed to remove ${key}`, err)
 			})

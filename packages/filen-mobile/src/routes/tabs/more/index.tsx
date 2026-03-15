@@ -11,9 +11,9 @@ import { PressableOpacity } from "@/components/ui/pressables"
 import { cn } from "@filen/utils"
 import { router } from "expo-router"
 import useTransfersStore from "@/stores/useTransfers.store"
-import { useShallow } from "zustand/shallow"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
+import { useShallow } from "zustand/shallow"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 
 export type Button = {
@@ -135,7 +135,9 @@ const Group = memo(({ buttons }: { buttons: Button[] }) => {
 })
 
 export const More = memo(() => {
-	const transfersActiveCount = useTransfersStore(useShallow(state => state.transfers.filter(t => !t.finishedAt).length))
+	const transfersActiveCount = useTransfersStore(
+		useShallow(state => state.transfers.reduce((count, t) => count + (t.finishedAt ? 0 : 1), 0))
+	)
 	const stringifiedClient = useStringifiedClient()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 

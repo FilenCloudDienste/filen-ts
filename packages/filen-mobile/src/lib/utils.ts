@@ -608,6 +608,11 @@ export function sanitizeFileName(filename: string, replacement: string = "_"): s
 	// Android: Trailing dots/spaces can cause issues
 	sanitizedFilename = sanitizedFilename.replace(/^[. ]+|[. ]+$/g, "")
 
+	// Prevent hidden files (leading dot after sanitization)
+	if (sanitizedFilename.startsWith(".")) {
+		sanitizedFilename = sanitizedFilename.slice(1) || "file"
+	}
+
 	// Optionally normalize whitespace (you may want to keep this configurable)
 	sanitizedFilename = sanitizedFilename.replace(/\s+/g, replacement)
 

@@ -231,7 +231,15 @@ class SecureStore {
 			const final = cipher.final()
 			const authTag = cipher.getAuthTag()
 
-			this.secureStoreFile.write(new Uint8Array(Buffer.concat([iv, encrypted, final, authTag])))
+			const tmpFile = new FileSystem.File(`${this.secureStoreFile.uri}.${crypto.randomUUID()}.tmp`)
+
+			tmpFile.write(new Uint8Array(Buffer.concat([iv, encrypted, final, authTag])))
+
+			if (this.secureStoreFile.exists) {
+				this.secureStoreFile.delete()
+			}
+
+			tmpFile.move(this.secureStoreFile)
 
 			this.readCache = data
 		})

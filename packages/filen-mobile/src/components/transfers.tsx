@@ -60,7 +60,7 @@ const TransfersInner = memo(() => {
 
 const Transfers = memo(() => {
 	const insets = useSafeAreaInsets()
-	const transfersActive = useTransfersStore(useShallow(state => state.transfers.filter(t => !t.finishedAt).length > 0))
+	const transfersActive = useTransfersStore(useShallow(state => state.transfers.some(t => !t.finishedAt)))
 
 	const onPress = useCallback(() => {
 		router.push("/transfers")
