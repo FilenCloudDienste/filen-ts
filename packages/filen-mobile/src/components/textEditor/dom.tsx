@@ -23,15 +23,19 @@ import { memo, useCallback, useMemo } from "@/lib/memo"
 const rehypeExternalLinks: Plugin<[], Root> = () => {
 	return tree => {
 		visit(tree, "element", (node: Element) => {
-			if (node.tagName === "a" && node.properties?.["href"]) {
-				const href = String(node.properties["href"]).trim().toLowerCase()
-				const protocols = ["http://", "https://", "mailto:", "tel:", "sms:", "whatsapp:", "geo:", "maps:"]
-				const shouldIntercept = protocols.some(protocol => href.startsWith(protocol))
+			try {
+				if (node.tagName === "a" && node.properties?.["href"]) {
+					const href = String(node.properties["href"]).trim().toLowerCase()
+					const protocols = ["http://", "https://", "mailto:", "tel:", "sms:", "whatsapp:", "geo:", "maps:"]
+					const shouldIntercept = protocols.some(protocol => href.startsWith(protocol))
 
-				if (shouldIntercept) {
-					node.properties["data-external-url"] = href
-					node.properties["href"] = "#"
+					if (shouldIntercept) {
+						node.properties["data-external-url"] = href
+						node.properties["href"] = "#"
+					}
 				}
+			} catch (e) {
+				console.error(e)
 			}
 		})
 	}
@@ -51,7 +55,9 @@ const TextEditorDOM = memo(
 		autoFocus,
 		font,
 		colors,
-		markdownPreviewActive
+		markdownPreviewActive,
+		paddingTop,
+		paddingBottom
 	}: {
 		ref: React.Ref<DOMRef>
 		dom?: DOMProps
@@ -67,6 +73,8 @@ const TextEditorDOM = memo(
 		font?: Font
 		colors?: Colors
 		markdownPreviewActive?: boolean
+		paddingTop?: number
+		paddingBottom?: number
 	}) => {
 		const didTypeRef = useRef<boolean>(false)
 		const [value, setValue] = useState<string>(initialValue ?? "")
@@ -108,8 +116,19 @@ const TextEditorDOM = memo(
 					"&": {
 						outline: "none !important",
 						fontSize: type === "text" ? `${font?.size ?? 16}px !important` : `${font?.size ?? 14}px !important`,
-						fontFamily: `${font?.family ?? "inherit"} !important`,
-						padding: type === "text" ? "16px" : "0px"
+						// eslint-disable-next-line quotes
+						fontFamily: `${font?.family ?? 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'} !important`,
+						padding: type === "text" ? "16px" : "0px",
+						...(paddingTop
+							? {
+									paddingTop: `${paddingTop}px`
+								}
+							: {}),
+						...(paddingBottom
+							? {
+									paddingBottom: `${paddingBottom}px`
+								}
+							: {})
 					},
 					"&.cm-focused": {
 						outline: "none !important",
@@ -150,7 +169,7 @@ const TextEditorDOM = memo(
 			}
 
 			return [...base, lang]
-		}, [isTextFile, fileName, font, type])
+		}, [isTextFile, fileName, font, type, paddingTop, paddingBottom])
 
 		const { onNativeMessage, postMessage } = useDomDomEvents<TextEditorEvents>()
 
@@ -210,7 +229,8 @@ const TextEditorDOM = memo(
 						overflowX: "hidden",
 						overflowY: "auto",
 						width: "100dvw",
-						height: "100dvh"
+						height: "100dvh",
+						touchAction: "pan-y"
 					}}
 				>
 					<MDEditor.Markdown
@@ -221,11 +241,22 @@ const TextEditorDOM = memo(
 							fontSize: font?.size ?? 14,
 							fontFamily: font?.family ?? "inherit",
 							lineHeight: font?.lineHeight ? font.lineHeight : 1.5,
-							paddingTop: 16,
 							paddingLeft: 16,
 							paddingRight: 16,
 							border: "none",
-							borderRadius: 0
+							borderRadius: 0,
+							...(paddingTop
+								? {
+										paddingTop
+									}
+								: {
+										paddingTop: 16
+									}),
+							...(paddingBottom
+								? {
+										paddingBottom
+									}
+								: {})
 						}}
 					/>
 				</div>
@@ -249,7 +280,8 @@ const TextEditorDOM = memo(
 				spellCheck={false}
 				autoFocus={autoFocus}
 				style={{
-					width: "100dvw"
+					width: "100dvw",
+					touchAction: "pan-y"
 				}}
 			/>
 		)

@@ -50,7 +50,9 @@ const RichTextEditorDom = memo(
 		readOnly,
 		colors,
 		font,
-		autoFocus
+		autoFocus,
+		paddingTop,
+		paddingBottom
 	}: {
 		dom?: DOMProps
 		ref: React.Ref<DOMRef>
@@ -63,6 +65,8 @@ const RichTextEditorDom = memo(
 		colors: Colors
 		font?: Font
 		autoFocus?: boolean
+		paddingTop?: number
+		paddingBottom?: number
 	}) => {
 		const quillRef = useRef<Quill | null>(null)
 		const editorRef = useRef<HTMLDivElement | null>(null)
@@ -329,14 +333,25 @@ const RichTextEditorDom = memo(
 					backgroundColor: "transparent",
 					display: "flex",
 					flex: 1,
-					flexDirection: "column"
+					flexDirection: "column",
+					touchAction: "pan-y"
 				}}
 			>
 				<div
 					ref={editorRef}
 					style={{
 						display: "flex",
-						flex: 1
+						flex: 1,
+						...(paddingTop
+							? {
+									paddingTop
+								}
+							: {}),
+						...(paddingBottom
+							? {
+									paddingBottom
+								}
+							: {})
 					}}
 				/>
 			</div>
