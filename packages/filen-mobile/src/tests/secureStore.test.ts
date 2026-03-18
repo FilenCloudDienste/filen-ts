@@ -135,10 +135,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(mockExpoSecureStore.setItemAsync).toHaveBeenCalledWith(
-				"encryptionKey.v1",
-				expect.any(String)
-			)
+			expect(mockExpoSecureStore.setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.any(String))
 		})
 
 		it("reads existing data from file and populates cache", async () => {
@@ -184,9 +181,7 @@ describe("SecureStore", () => {
 
 			await store2.init()
 
-			const changeEmits = mockEvents.emit.mock.calls.filter(
-				([event]) => event === "secureStoreChange"
-			)
+			const changeEmits = mockEvents.emit.mock.calls.filter(([event]) => event === "secureStoreChange")
 
 			expect(changeEmits).toHaveLength(2)
 			expect(changeEmits).toContainEqual(["secureStoreChange", { key: "key1", value: "val1" }])
@@ -202,10 +197,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(mockExpoSecureStore.setItemAsync).toHaveBeenCalledWith(
-				"encryptionKey.v1",
-				expect.stringMatching(/^[0-9a-f]{64}$/)
-			)
+			expect(mockExpoSecureStore.setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.stringMatching(/^[0-9a-f]{64}$/))
 		})
 
 		it("reuses cached key on subsequent calls", async () => {
@@ -230,10 +222,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(mockMmkv.set).toHaveBeenCalledWith(
-				"encryptionKey.v1",
-				expect.stringMatching(/^[0-9a-f]{64}$/)
-			)
+			expect(mockMmkv.set).toHaveBeenCalledWith("encryptionKey.v1", expect.stringMatching(/^[0-9a-f]{64}$/))
 		})
 
 		it("retrieves existing key from MMKV when available", async () => {
@@ -664,7 +653,7 @@ describe("SecureStore", () => {
 			await store.clear()
 			await store.set("b", 2)
 
-			const value = await store.get<number>("b")
+			const value = await store.get("b")
 
 			expect(value).toBe(2)
 		})
@@ -678,9 +667,9 @@ describe("SecureStore", () => {
 
 			await Promise.all([store.set("a", 1), store.set("b", 2), store.set("c", 3)])
 
-			expect(await store.get<number>("a")).toBe(1)
-			expect(await store.get<number>("b")).toBe(2)
-			expect(await store.get<number>("c")).toBe(3)
+			expect(await store.get("a")).toBe(1)
+			expect(await store.get("b")).toBe(2)
+			expect(await store.get("c")).toBe(3)
 		})
 
 		it("remove does not affect other keys written concurrently", async () => {
