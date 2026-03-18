@@ -178,7 +178,7 @@ const Item = memo(
 					params: {
 						item: Buffer.from(pack(info.item.item)).toString("base64"),
 						drivePath: Buffer.from(pack(drivePath)).toString("base64"),
-						origin
+						parent: info.item.parent ? Buffer.from(pack(info.item.parent)).toString("base64") : undefined
 					}
 				})
 
