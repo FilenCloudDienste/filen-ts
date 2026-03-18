@@ -590,10 +590,13 @@ const Drive = memo(() => {
 		}, [])
 	)
 
-	const searchBarProps = useMemo(() => ({
-		placeholder: "tbd_search_drive",
-		onChangeText: setSearchQuery
-	}), [setSearchQuery])
+	const searchBarProps = useMemo(
+		() => ({
+			placeholder: "tbd_search_drive",
+			onChangeText: setSearchQuery
+		}),
+		[setSearchQuery]
+	)
 
 	return (
 		<Fragment>
@@ -617,7 +620,6 @@ const Drive = memo(() => {
 					renderItem={renderItem}
 					onRefresh={onRefresh}
 					loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
-					headerHeightCacheKey="drive"
 					searchBar={searchBarProps}
 				/>
 			</SafeAreaView>

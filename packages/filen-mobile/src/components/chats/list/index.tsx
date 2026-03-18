@@ -95,10 +95,13 @@ export const List = memo(() => {
 		)
 	}, [searchQuery])
 
-	const searchBarProps = useMemo(() => ({
-		onChangeText: setSearchQuery,
-		placeholder: "tbd_search_chats"
-	}), [setSearchQuery])
+	const searchBarProps = useMemo(
+		() => ({
+			onChangeText: setSearchQuery,
+			placeholder: "tbd_search_chats"
+		}),
+		[setSearchQuery]
+	)
 
 	return (
 		<VirtualList
@@ -111,7 +114,6 @@ export const List = memo(() => {
 			renderItem={renderItem}
 			onRefresh={onRefresh}
 			emptyComponent={emptyComponent}
-			headerHeightCacheKey="chats"
 			searchBar={searchBarProps}
 		/>
 	)

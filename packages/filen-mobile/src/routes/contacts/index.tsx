@@ -992,7 +992,6 @@ const Contacts = memo(() => {
 					loading={contactRequestsQuery.status !== "success" || contactsQuery.status !== "success"}
 					onRefresh={onRefresh}
 					emptyComponent={emptyComponent}
-					headerHeightCacheKey="contacts"
 					searchBar={searchBar}
 				/>
 			</SafeAreaView>

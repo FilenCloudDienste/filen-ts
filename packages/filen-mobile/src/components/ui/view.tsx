@@ -1,5 +1,5 @@
 import { NativeView } from "react-native-boost/runtime"
-import { withUniwind, useUniwind } from "uniwind"
+import { withUniwind } from "uniwind"
 import { type ViewProps, type View as RNView, Platform, type StyleProp, type ViewStyle, StyleSheet } from "react-native"
 import { memo } from "@/lib/memo"
 import { cn } from "@filen/utils"
@@ -8,13 +8,8 @@ import {
 	KeyboardAwareScrollView as RNKeyboardControllerKeyboardAwareScrollView,
 	KeyboardStickyView as RNKeyboardControllerKeyboardStickyView
 } from "react-native-keyboard-controller"
-import { BlurView as ExpoBlurView, BlurTargetView as ExpoBlurTargetView } from "expo-blur"
-import {
-	GlassView as ExpoGlassView,
-	isLiquidGlassAvailable as expoIsLiquidGlassAvailable,
-	GlassContainer as ExpoGlassContainer
-} from "expo-glass-effect"
-import { useRef } from "react"
+import { BlurView as ExpoBlurView } from "expo-blur"
+import { GlassView as ExpoGlassView, GlassContainer as ExpoGlassContainer } from "expo-glass-effect"
 import { ScrollView as RNGestureHandlerScrollView } from "react-native-gesture-handler"
 
 export const UniwindView = memo(withUniwind(NativeView) as React.FC<ViewProps>)
@@ -87,13 +82,30 @@ export const LiquidGlassView = memo((props: React.ComponentProps<typeof ExpoGlas
 	return <UniwindLiquidGlassView {...props} />
 })
 
-export const isLiquidGlassAvailable = expoIsLiquidGlassAvailable
-
 export const UniwindGlassContainerView = memo(withUniwind(ExpoGlassContainer) as React.FC<React.ComponentProps<typeof ExpoGlassContainer>>)
 
 export const LiquidGlassContainerView = memo((props: React.ComponentProps<typeof ExpoGlassContainer> & React.RefAttributes<RNView>) => {
 	return <UniwindGlassContainerView {...props} />
 })
+
+const AndroidGlassContainer = memo(
+	({ children, className, style }: { children: React.ReactNode; className?: string; style?: StyleProp<ViewStyle> }) => {
+		return (
+			<View
+				className={cn("border border-border rounded-full overflow-hidden bg-background-secondary/85", className)}
+				style={[
+					style,
+					{
+						borderWidth: StyleSheet.hairlineWidth,
+						elevation: 4
+					}
+				]}
+			>
+				{children}
+			</View>
+		)
+	}
+)
 
 export const CrossGlassContainerView = memo(
 	({
@@ -111,10 +123,7 @@ export const CrossGlassContainerView = memo(
 		disableBlur?: boolean
 		disableInteraction?: boolean
 	}) => {
-		const { theme } = useUniwind()
-		const blurTargetViewRef = useRef<RNView>(null)
-
-		if (Platform.OS === "ios" && isLiquidGlassAvailable() && !disableLiquidGlass) {
+		if (Platform.OS === "ios" && !disableLiquidGlass) {
 			return (
 				<LiquidGlassView
 					className={cn("rounded-full", className)}
@@ -142,16 +151,22 @@ export const CrossGlassContainerView = memo(
 			)
 		}
 
+		if (Platform.OS === "android") {
+			return (
+				<AndroidGlassContainer
+					className={className}
+					style={style}
+				>
+					{children}
+				</AndroidGlassContainer>
+			)
+		}
+
 		return (
 			<BlurView
 				className={cn("border border-border rounded-full overflow-hidden", className)}
 				intensity={100}
-				tint={Platform.select({
-					ios: "systemChromeMaterial",
-					default: theme === "dark" ? "dark" : "light"
-				})}
-				blurMethod="dimezisBlurViewSdk31Plus"
-				blurTarget={blurTargetViewRef}
+				tint="systemChromeMaterial"
 				style={[
 					style,
 					{
@@ -159,12 +174,7 @@ export const CrossGlassContainerView = memo(
 					}
 				]}
 			>
-				<ExpoBlurTargetView
-					className="flex-row items-center"
-					ref={blurTargetViewRef}
-				>
-					{children}
-				</ExpoBlurTargetView>
+				{children}
 			</BlurView>
 		)
 	}

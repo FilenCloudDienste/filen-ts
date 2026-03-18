@@ -1137,7 +1137,6 @@ export const Notes = memo(() => {
 						loading={notesQuery.status !== "success"}
 						onRefresh={onRefresh}
 						emptyComponent={notesEmptyComponent}
-						headerHeightCacheKey="notes"
 						searchBar={notesSearchBar}
 					/>
 				) : (
@@ -1151,7 +1150,6 @@ export const Notes = memo(() => {
 						renderItem={renderItemTagsView}
 						onRefresh={onRefresh}
 						emptyComponent={tagsEmptyComponent}
-						headerHeightCacheKey="notes"
 						searchBar={tagsSearchBar}
 					/>
 				)}
