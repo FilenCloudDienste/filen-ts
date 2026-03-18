@@ -645,5 +645,169 @@ describe("SecureStore", () => {
 
 			expect(mockSecureStoreMap.size).toBe(0)
 		})
+
+		it("does not throw when file does not exist", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+
+			// Clear without any prior writes — file never created
+			await expect(store.clear()).resolves.not.toThrow()
+		})
+
+		it("can set values after clear", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+
+			await store.set("a", 1)
+			await store.clear()
+			await store.set("b", 2)
+
+			const value = await store.get<number>("b")
+
+			expect(value).toBe(2)
+		})
+	})
+
+	describe("concurrent operations", () => {
+		it("serializes concurrent set calls correctly", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+
+			await Promise.all([store.set("a", 1), store.set("b", 2), store.set("c", 3)])
+
+			expect(await store.get<number>("a")).toBe(1)
+			expect(await store.get<number>("b")).toBe(2)
+			expect(await store.get<number>("c")).toBe(3)
+		})
+
+		it("remove does not affect other keys written concurrently", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+
+			await store.set("keep", "value")
+			await store.set("remove", "gone")
+
+			await Promise.all([store.remove("remove"), store.set("keep", "updated")])
+
+			expect(await store.get("remove")).toBeNull()
+			expect(await store.get("keep")).toBe("updated")
+		})
+
+		it("concurrent get calls return correct values without modMutex", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+
+			await store.set("a", 1)
+			await store.set("b", 2)
+			await store.set("c", 3)
+
+			const [a, b, c] = await Promise.all([store.get("a"), store.get("b"), store.get("c")])
+
+			expect(a).toBe(1)
+			expect(b).toBe(2)
+			expect(c).toBe(3)
+		})
+	})
+
+	describe("corrupted file handling", () => {
+		it("handles corrupted file gracefully on init", async () => {
+			const store1 = createSecureStore()
+
+			await store1.init()
+			await store1.set("key", "value")
+
+			const setCall = mockExpoSecureStore.setItemAsync.mock.calls[0] as [string, string]
+			const encryptionKey = setCall[1]
+
+			// Corrupt the file
+			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+
+			fs.set(fileUri, new Uint8Array([0xff, 0xfe, 0xfd, 0xfc, 0xfb]))
+
+			// Second store should handle corrupted file gracefully
+			mockExpoSecureStore.getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			await expect(store2.init()).resolves.not.toThrow()
+
+			const result = await store2.get("key")
+
+			expect(result).toBeNull()
+		})
+
+		it("can write new data after encountering corrupted file", async () => {
+			const store1 = createSecureStore()
+
+			await store1.init()
+			await store1.set("old", "data")
+
+			const setCall = mockExpoSecureStore.setItemAsync.mock.calls[0] as [string, string]
+			const encryptionKey = setCall[1]
+
+			// Corrupt the file
+			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+
+			fs.set(fileUri, new Uint8Array([0x00, 0x01, 0x02]))
+
+			mockExpoSecureStore.getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			await store2.init()
+
+			await store2.set("new", "value")
+
+			const result = await store2.get("new")
+
+			expect(result).toBe("value")
+		})
+
+		it("handles zero-length file as empty store", async () => {
+			const store1 = createSecureStore()
+
+			await store1.init()
+
+			// Overwrite with empty file
+			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+
+			fs.set(fileUri, new Uint8Array(0))
+
+			mockExpoSecureStore.getItemAsync.mockResolvedValue(null)
+
+			const store2 = createSecureStore()
+
+			await store2.init()
+
+			const result = await store2.get("key")
+
+			expect(result).toBeNull()
+		})
+	})
+
+	describe("clear followed by concurrent set", () => {
+		it("set after clear persists new value", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+
+			await store.set("existing", "value")
+
+			// clear is serialized before set via modMutex
+			await Promise.all([store.clear(), store.set("new", "data")])
+
+			const newVal = await store.get("new")
+
+			expect(newVal).toBe("data")
+
+			const oldVal = await store.get("existing")
+
+			expect(oldVal).toBeNull()
+		})
 	})
 })

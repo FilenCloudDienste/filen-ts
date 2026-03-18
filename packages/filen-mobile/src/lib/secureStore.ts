@@ -5,7 +5,7 @@ import { Platform } from "react-native"
 import crypto from "crypto"
 import { pack, unpack } from "@/lib/msgpack"
 import { run, Semaphore, runEffect } from "@filen/utils"
-import { useEffect, useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
 import { Buffer } from "react-native-quick-crypto"
@@ -13,6 +13,7 @@ import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import isEqual from "react-fast-compare"
 import { useCallback } from "@/lib/memo"
 import { normalizeFilePathForSdk } from "@/lib/utils"
+import useEffectOnce from "@/hooks/useEffectOnce"
 
 class SecureStore {
 	private readonly mmkv: MMKV
@@ -26,8 +27,6 @@ class SecureStore {
 	private readonly keyMutex: Semaphore = new Semaphore(1)
 	private readonly initMutex: Semaphore = new Semaphore(1)
 	private readonly modMutex: Semaphore = new Semaphore(1)
-
-	public readonly uncachedKeys: string[] = []
 
 	public readonly version: number = 1
 	public readonly fallbackMmkvId: string = `securestore.fallback.v${this.version}.mmkv`
@@ -95,10 +94,6 @@ class SecureStore {
 			const [encryptionKey, current] = await Promise.all([this.getEncryptionKey(), (await this.read()) ?? {}])
 
 			for (const [key, value] of Object.entries(current)) {
-				if (this.uncachedKeys.includes(key)) {
-					continue
-				}
-
 				cache.secureStore.set(key, value)
 
 				events.emit("secureStoreChange", {
@@ -202,7 +197,11 @@ class SecureStore {
 			const decrypted = cipher.update(bytes.subarray(12, bytes.length - 16))
 			const final = cipher.final()
 
-			return unpack(Buffer.concat([decrypted, final])) as Record<string, unknown>
+			const data = unpack(Buffer.concat([decrypted, final])) as Record<string, unknown>
+
+			this.readCache = data
+
+			return data
 		})
 
 		if (!result.success) {
@@ -210,8 +209,6 @@ class SecureStore {
 
 			return null
 		}
-
-		this.readCache = result.data
 
 		return result.data
 	}
@@ -283,31 +280,17 @@ class SecureStore {
 	public async get<T>(key: string): Promise<T | null> {
 		await this.waitForInit()
 
-		const result = await run(async defer => {
-			await this.modMutex.acquire()
+		const current = this.readCache ?? (await this.read()) ?? {}
+		const value = current[key]
 
-			defer(() => {
-				this.modMutex.release()
-			})
-
-			const current = this.readCache ?? (await this.read()) ?? {}
-			const value = current[key]
-
-			if (value == null) {
-				return null
-			}
-
-			cache.secureStore.set(key, value)
-
-			// Trusted cast: callers are responsible for using the correct type parameter
-			return value as T
-		})
-
-		if (!result.success) {
-			throw result.error
+		if (value == null) {
+			return null
 		}
 
-		return result.data
+		cache.secureStore.set(key, value)
+
+		// Trusted cast: callers are responsible for using the correct type parameter
+		return value as T
 	}
 
 	public async remove(key: string): Promise<void> {
@@ -322,9 +305,7 @@ class SecureStore {
 
 			const current = this.readCache ?? (await this.read()) ?? {}
 
-			const modified = { ...current }
-
-			delete modified[key]
+			const { [key]: _, ...modified } = current
 
 			await this.write(modified)
 
@@ -357,7 +338,10 @@ class SecureStore {
 			})
 
 			this.readCache = null
-			this.secureStoreFile.delete()
+
+			if (this.secureStoreFile.exists) {
+				this.secureStoreFile.delete()
+			}
 
 			cache.secureStore.clear()
 
@@ -372,20 +356,40 @@ class SecureStore {
 
 const secureStore = new SecureStore()
 
-const useSecureStoreFlushMutex: Semaphore = new Semaphore(1)
+const useSecureStoreFlushMutex = new Map<string, Semaphore>()
+
+function getSecureStoreFlushMutex(key: string): Semaphore {
+	if (!useSecureStoreFlushMutex.has(key)) {
+		useSecureStoreFlushMutex.set(key, new Semaphore(1))
+	}
+
+	return useSecureStoreFlushMutex.get(key) as Semaphore
+}
 
 export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => T)) => void] {
 	const fromCache = cache.secureStore.get(key)
 	const [state, setState] = useState<T>(fromCache ?? initialValue)
-	const didRetrieveRef = useRef<boolean>(false)
+	const lastValueRef = useRef<T>(state)
+	const flushMutexRef = useRef<Semaphore>(getSecureStoreFlushMutex(key))
+	const isLocalUpdateRef = useRef<boolean>(false)
+
+	const setStateChecked = useCallback((value: T) => {
+		if (isEqual(value, lastValueRef.current)) {
+			return
+		}
+
+		lastValueRef.current = value
+
+		setState(value)
+	}, [])
 
 	const flush = useCallback(
-		async (before: T, now: T) => {
+		async (now: T) => {
 			const result = await run(async defer => {
-				await useSecureStoreFlushMutex.acquire()
+				await flushMutexRef.current.acquire()
 
 				defer(() => {
-					useSecureStoreFlushMutex.release()
+					flushMutexRef.current.release()
 				})
 
 				await secureStore.set(key, now)
@@ -394,58 +398,74 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 			if (!result.success) {
 				console.error("Error setting value in secureStore:", result.error)
 
-				setState(before)
+				return
 			}
 		},
 		[key]
 	)
 
 	const retrieve = useCallback(async () => {
-		if (didRetrieveRef.current) {
-			return
-		}
-
-		didRetrieveRef.current = true
-
 		const result = await run(async defer => {
-			await useSecureStoreFlushMutex.acquire()
+			await flushMutexRef.current.acquire()
 
 			defer(() => {
-				useSecureStoreFlushMutex.release()
+				flushMutexRef.current.release()
 			})
 
 			const value = await secureStore.get<T>(key)
 
-			if (value !== null && !isEqual(value, state)) {
-				setState(value)
+			if (value !== null) {
+				setStateChecked(value)
 			}
 		})
 
 		if (!result.success) {
 			console.error("Error fetching value from secureStore:", result.error)
-
-			didRetrieveRef.current = false
 		}
-	}, [key, state])
+	}, [key, setStateChecked])
 
 	const set = useCallback(
 		(fn: T | ((prev: T) => T)): void => {
-			const before = state
-			const now = typeof fn === "function" ? (fn as (prev: T) => T)(before) : fn
+			;(async () => {
+				const result = await run(async defer => {
+					await flushMutexRef.current.acquire()
 
-			setState(now)
-			flush(before, now)
+					defer(() => {
+						flushMutexRef.current.release()
+					})
+
+					isLocalUpdateRef.current = true
+
+					defer(() => {
+						isLocalUpdateRef.current = false
+					})
+
+					const now = typeof fn === "function" ? (fn as (prev: T) => T)(lastValueRef.current) : fn
+
+					setStateChecked(now)
+
+					await flush(now)
+				})
+
+				if (!result.success) {
+					console.error("Error setting value in secureStore:", result.error)
+
+					return
+				}
+			})()
 		},
-		[state, flush]
+		[flush, setStateChecked]
 	)
 
-	useEffect(() => {
-		retrieve()
+	useEffectOnce(() => {
+		retrieve().catch(console.error)
+	})
 
+	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
 			const secureStoreChangeSubscription = events.subscribe("secureStoreChange", payload => {
-				if (payload.key === key) {
-					setState(payload.value)
+				if (payload.key === key && !isLocalUpdateRef.current) {
+					setStateChecked(payload.value)
 				}
 			})
 
@@ -454,8 +474,8 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 			})
 
 			const secureStoreRemoveSubscription = events.subscribe("secureStoreRemove", payload => {
-				if (payload.key === key) {
-					setState(initialValue)
+				if (payload.key === key && !isLocalUpdateRef.current) {
+					setStateChecked(initialValue)
 				}
 			})
 
@@ -464,7 +484,9 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 			})
 
 			const secureStoreClearSubscription = events.subscribe("secureStoreClear", () => {
-				setState(initialValue)
+				if (!isLocalUpdateRef.current) {
+					setStateChecked(initialValue)
+				}
 			})
 
 			defer(() => {
@@ -475,7 +497,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		return () => {
 			cleanup()
 		}
-	}, [key, initialValue, retrieve])
+	}, [key, initialValue, setStateChecked])
 
 	return [state, set]
 }
