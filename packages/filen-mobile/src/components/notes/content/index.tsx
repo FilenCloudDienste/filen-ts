@@ -19,6 +19,7 @@ import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { sync } from "@/components/notes/sync"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 export const Loading = memo(({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -53,6 +54,7 @@ export const Loading = memo(({ children, loading, noteType }: { children: React.
 export const Content = memo(
 	({ note, history }: { note: Note; history?: NoteHistory | null }) => {
 		const stringifiedClient = useStringifiedClient()
+		const insets = useSafeAreaInsets()
 
 		const noteContentQuery = useNoteContentQuery(
 			{
@@ -254,6 +256,7 @@ export const Content = memo(
 											: "text"
 						}
 						id={`note:${note.uuid}`}
+						paddingBottom={insets.bottom}
 					/>
 				)}
 			</Loading>

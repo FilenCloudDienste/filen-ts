@@ -119,7 +119,9 @@ export const TextEditor = memo(
 		onReady,
 		disableMarkdownPreview,
 		id,
-		autoFocus
+		autoFocus,
+		paddingTop,
+		paddingBottom
 	}: {
 		initialValue?: string
 		onValueChange?: (value: string) => void
@@ -131,6 +133,8 @@ export const TextEditor = memo(
 		disableMarkdownPreview?: boolean
 		id?: string
 		autoFocus?: boolean
+		paddingTop?: number
+		paddingBottom?: number
 	}) => {
 		const ref = useRef<DOMRef>(null)
 		const textForeground = useResolveClassNames("text-foreground")
@@ -205,7 +209,8 @@ export const TextEditor = memo(
 						<RichTextEditorDOM
 							ref={ref}
 							dom={{
-								onMessage: onDomMessage
+								onMessage: onDomMessage,
+								bounces: false
 							}}
 							onValueChange={onValueChange}
 							darkMode={theme === "dark"}
@@ -230,6 +235,8 @@ export const TextEditor = memo(
 									secondary: bgSecondary.backgroundColor as string
 								}
 							}}
+							paddingTop={paddingTop}
+							paddingBottom={paddingBottom}
 						/>
 					) : (
 						<View
@@ -255,7 +262,8 @@ export const TextEditor = memo(
 								markdownPreviewActive={markdownPreviewActive}
 								autoFocus={autoFocus}
 								dom={{
-									onMessage: onDomMessage
+									onMessage: onDomMessage,
+									bounces: false
 								}}
 								font={{
 									family: text.fontFamily as string,
@@ -273,6 +281,8 @@ export const TextEditor = memo(
 										secondary: bgSecondary.backgroundColor as string
 									}
 								}}
+								paddingTop={paddingTop}
+								paddingBottom={paddingBottom}
 							/>
 						</View>
 					)}
