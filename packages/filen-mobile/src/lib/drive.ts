@@ -4,7 +4,7 @@ import {
 	DirColor,
 	type FileVersion,
 	SharedRootItem,
-	type DirPublicLink,
+	type DirPublicLinkRw,
 	type FilePublicLink,
 	NonRootNormalItem,
 	NonRootNormalItem_Tags,
@@ -472,7 +472,7 @@ class Drive {
 		})
 	}
 
-	public async removeDirLink({ item, signal, link }: { item: DriveItem; signal?: AbortSignal; link: DirPublicLink }) {
+	public async removeDirLink({ item, signal, link }: { item: DriveItem; signal?: AbortSignal; link: DirPublicLinkRw }) {
 		if (item.type !== "directory") {
 			throw new Error("Invalid item type")
 		}
