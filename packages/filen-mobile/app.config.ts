@@ -211,6 +211,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"expo-audio",
 		"expo-secure-store",
 		"expo-navigation-bar",
+		"expo-asset",
+		"expo-sharing",
+		"expo-web-browser",
 		[
 			"react-native-edge-to-edge",
 			{
