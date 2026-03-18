@@ -14,7 +14,7 @@ import {
 	type FlashListRef,
 	type ListRenderItemInfo as FlashListListRenderItemInfo
 } from "@shopify/flash-list"
-import useHeaderHeight from "@/hooks/useHeaderHeight"
+import { useHeaderHeight } from "@react-navigation/elements"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { KeyboardController } from "react-native-keyboard-controller"
@@ -35,7 +35,6 @@ export type VirtualListExtraProps = {
 	footerComponent?: () => React.ReactNode
 	headerComponent?: () => React.ReactNode
 	keyboardAvoidingViewBehavior?: React.ComponentProps<typeof KeyboardAvoidingView>["behavior"]
-	headerHeightCacheKey?: string
 	searchBar?: {
 		onChangeText?: (text: string) => void
 		placeholder?: string
@@ -46,15 +45,13 @@ const ListSearchBar = memo(
 	({
 		onChangeText,
 		onHeightChange,
-		placeholder,
-		headerHeightCacheKey
+		placeholder
 	}: {
 		onChangeText?: (text: string) => void
 		onHeightChange?: (height: number) => void
 		placeholder?: string
-		headerHeightCacheKey?: string
 	}) => {
-		const headerHeight = useHeaderHeight(headerHeightCacheKey)
+		const headerHeight = useHeaderHeight()
 		const textForeground = useResolveClassNames("text-foreground")
 		const [hasText, setHasText] = useState<boolean>(false)
 		const inputRef = useRef<TextInput>(null)
@@ -234,7 +231,6 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 					onChangeText={props.searchBar.onChangeText}
 					onHeightChange={setSearchBarHeight}
 					placeholder={props.searchBar.placeholder}
-					headerHeightCacheKey={props.headerHeightCacheKey}
 				/>
 			)}
 			<View

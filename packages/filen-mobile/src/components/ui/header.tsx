@@ -1,8 +1,8 @@
 import { memo, useMemo } from "@/lib/memo"
 import { useResolveClassNames } from "uniwind"
 import { Stack } from "expo-router"
-import type { BlurEffectTypes, SearchBarProps } from "react-native-screens"
-import { isLiquidGlassAvailable, View } from "@/components/ui/view"
+import type { SearchBarProps } from "react-native-screens"
+import { View } from "@/components/ui/view"
 import { cn } from "@filen/utils"
 import { Platform, ActivityIndicator } from "react-native"
 import Menu from "@/components/ui/menu"
@@ -44,23 +44,21 @@ export const ICON_SIZE = Platform.select({
 
 export const HeaderLeftRightWrapper = memo(
 	({ className, isLeft, isRight, items }: { className?: string; isLeft?: boolean; isRight?: boolean; items?: HeaderItem[] }) => {
-		const liquidGlassAvailable = isLiquidGlassAvailable()
-
 		return (
 			<View
 				className={cn(
 					"flex-row items-center justify-center bg-transparent",
 					Platform.select({
-						ios: liquidGlassAvailable ? "h-9 min-w-9" : "",
+						ios: "h-9 min-w-9",
 						default: ""
 					}),
 					items && items.length >= 2 ? "gap-2" : "",
 					Platform.select({
-						ios: items && items.length >= 2 && liquidGlassAvailable ? "px-2" : "",
+						ios: items && items.length >= 2 ? "px-2" : "",
 						default: ""
 					}),
-					isLeft && (Platform.OS === "android" || !liquidGlassAvailable) ? "pr-4" : "",
-					isRight && (Platform.OS === "android" || !liquidGlassAvailable) ? "pl-4" : "",
+					isLeft && Platform.OS === "android" ? "pr-4" : "",
+					isRight && Platform.OS === "android" ? "pl-4" : "",
 					className
 				)}
 			>
@@ -84,9 +82,7 @@ export const HeaderLeftRightWrapper = memo(
 									{...item.props}
 									className={cn(
 										"size-9 items-center justify-center rounded-full",
-										!item.icon && Platform.OS === "ios" && liquidGlassAvailable
-											? cn("px-2", item.props?.className)
-											: item.props?.className
+										!item.icon && Platform.OS === "ios" ? cn("px-2", item.props?.className) : item.props?.className
 									)}
 								>
 									{item.icon ? (
@@ -112,9 +108,7 @@ export const HeaderLeftRightWrapper = memo(
 										{...item.triggerProps}
 										className={cn(
 											"size-9 items-center justify-center rounded-full",
-											!item.icon && Platform.OS === "ios" && liquidGlassAvailable
-												? cn("px-2", item.props?.className)
-												: item.props?.className
+											!item.icon && Platform.OS === "ios" ? cn("px-2", item.props?.className) : item.props?.className
 										)}
 									>
 										{item.icon ? (
@@ -170,7 +164,6 @@ export const Header = memo(
 		backVisible,
 		shadowVisible,
 		transparent,
-		blurEffect,
 		searchBarOptions,
 		leftItems,
 		rightItems,
@@ -187,7 +180,6 @@ export const Header = memo(
 		backVisible?: boolean
 		shadowVisible?: boolean
 		transparent?: boolean
-		blurEffect?: BlurEffectTypes
 		searchBarOptions?: SearchBarProps
 		leftItems?: HeaderItem[] | (() => HeaderItem[] | null | undefined | void)
 		rightItems?: HeaderItem[] | (() => HeaderItem[] | null | undefined | void)
@@ -195,7 +187,6 @@ export const Header = memo(
 	}) => {
 		const bgBackground = useResolveClassNames("bg-background")
 		const textForeground = useResolveClassNames("text-foreground")
-		const liquidGlassAvailable = isLiquidGlassAvailable()
 
 		const headerRightItems = useMemo(() => {
 			const items = typeof rightItems === "function" ? rightItems() : rightItems
@@ -223,7 +214,7 @@ export const Header = memo(
 					headerTitle: typeof title === "function" ? props => title(props) : typeof title === "string" ? title : () => title,
 					headerShown: shown ?? true,
 					headerShadowVisible: shadowVisible,
-					headerBlurEffect: !liquidGlassAvailable && Platform.OS === "ios" ? (blurEffect ?? "systemChromeMaterial") : undefined,
+					headerBlurEffect: undefined,
 					headerBackVisible: backVisible,
 					headerTransparent: transparent,
 					headerBackTitle: "",
