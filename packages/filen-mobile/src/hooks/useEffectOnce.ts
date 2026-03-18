@@ -1,15 +1,7 @@
-import { useEffect, useRef } from "react"
+import { useEffect } from "react"
 
 export default function useEffectOnce(effect: React.EffectCallback) {
-	const didRun = useRef<boolean>(false)
-
-	useEffect(() => {
-		if (didRun.current) {
-			return
-		}
-
-		didRun.current = true
-
-		return effect()
-	}, [effect])
+	// eslint-disable-next-line react-compiler/react-compiler
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	useEffect(effect, [])
 }
