@@ -92,7 +92,7 @@ export class Offline {
 	private readonly indexMutex = new Semaphore(1)
 	private indexCache: Index | null = null
 	private readonly syncMutex = new Semaphore(1)
-	private readonly storeMutex = new Semaphore(1)
+	private readonly storeMutex = new Semaphore(3)
 	private readonly listDirectoriesCache = new Map<string, Awaited<ReturnType<Offline["listDirectories"]>>>()
 	private listFilesCache: Awaited<ReturnType<Offline["listFiles"]>> | null = null
 	private listDirectoriesRecursiveCache: Awaited<ReturnType<Offline["listDirectoriesRecursive"]>> | null = null
@@ -109,6 +109,7 @@ export class Offline {
 	private readonly getLocalDirectoryCache = new Map<string, FileSystem.Directory>()
 	private directoriesEnsured = false
 	private readonly directoryMetaCache = new Map<string, DirectoryOfflineMeta>()
+	private uuidToTopLevelCache: Map<string, string> | null = null
 
 	public constructor() {
 		this.ensureDirectories()
@@ -178,6 +179,7 @@ export class Offline {
 		this.getLocalFileCache.clear()
 		this.getLocalDirectoryCache.clear()
 		this.directoryMetaCache.clear()
+		this.uuidToTopLevelCache = null
 		this.directoriesEnsured = false
 	}
 
@@ -225,6 +227,10 @@ export class Offline {
 	 * scanning all top-level directories.
 	 */
 	private async buildUuidToTopLevelIndex(): Promise<Map<string, string>> {
+		if (this.uuidToTopLevelCache) {
+			return this.uuidToTopLevelCache
+		}
+
 		const index = new Map<string, string>()
 		const topLevelEntries = this.directoriesDirectory.list()
 
@@ -251,6 +257,8 @@ export class Offline {
 				}
 			}
 		}
+
+		this.uuidToTopLevelCache = index
 
 		return index
 	}
@@ -392,7 +400,7 @@ export class Offline {
 	public async isItemStored(item: DriveItem): Promise<boolean> {
 		const cachedStored = this.isItemStoredCache.get(item.data.uuid)
 
-		if (cachedStored) {
+		if (cachedStored !== undefined) {
 			return cachedStored
 		}
 
@@ -577,11 +585,9 @@ export class Offline {
 
 							if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.FolderNotFound) {
 								parentListings.set(key, null)
-
-								return
 							}
 
-							throw listResult.error
+							return
 						}
 
 						parentListings.set(key, listResult.data)
@@ -658,7 +664,7 @@ export class Offline {
 				}
 
 				await Promise.all([
-					...files.map(async ({ item, parent }) => {
+					...files.map(({ item, parent }) => run(async () => {
 						if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
 							return
 						}
@@ -679,6 +685,11 @@ export class Offline {
 						}
 
 						const key = this.parentCacheKey(parent)
+
+						if (!parentListings.has(key)) {
+							return
+						}
+
 						const listing = parentListings.get(key)
 
 						if (!listing) {
@@ -739,6 +750,10 @@ export class Offline {
 							}
 						}
 
+						if (existingFile) {
+							return
+						}
+
 						let updatedFile: File | SharedFile | undefined = undefined
 						const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
 						const nameMatch = index?.byName.get(normalizedName)
@@ -769,8 +784,8 @@ export class Offline {
 						if (dataFile.parentDirectory.exists) {
 							dataFile.parentDirectory.delete()
 						}
-					}),
-					...topLevelDirectories.map(async ({ item, parent }) => {
+					})),
+					...topLevelDirectories.map(({ item, parent }) => run(async () => {
 						if (!item.data.decryptedMeta) {
 							return
 						}
@@ -784,6 +799,11 @@ export class Offline {
 						}
 
 						const key = this.parentCacheKey(parent)
+
+						if (!parentListings.has(key)) {
+							return
+						}
+
 						const listing = parentListings.get(key)
 
 						if (!listing) {
@@ -821,34 +841,23 @@ export class Offline {
 							}
 						}
 
-						let replacementDir: Dir | SharedDir | SharedRootDir | undefined = undefined
-						const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
-						const nameMatch = dirIndex?.byName.get(normalizedName)
-
-						if (nameMatch) {
-							const unwrappedNameMatch = unwrapDirMeta(nameMatch)
-
-							if (unwrappedNameMatch.meta && unwrappedNameMatch.uuid !== item.data.uuid) {
-								replacementDir = nameMatch
-							}
-						}
-
-						if (replacementDir) {
-							await this.storeDirectory({
-								directory: unwrappedDirIntoDriveItem(unwrapDirMeta(replacementDir)),
-								parent,
-								hideProgress: true,
-								skipIndexUpdate: true
-							})
-
-							if (metaFile.parentDirectory.exists) {
-								metaFile.parentDirectory.delete()
-							}
-
-							return
-						}
-
 						if (!existingDir) {
+							const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
+							const nameMatch = dirIndex?.byName.get(normalizedName)
+
+							if (nameMatch) {
+								const unwrappedNameMatch = unwrapDirMeta(nameMatch)
+
+								if (unwrappedNameMatch.meta && unwrappedNameMatch.uuid !== item.data.uuid) {
+									await this.storeDirectory({
+										directory: unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch)),
+										parent,
+										hideProgress: true,
+										skipIndexUpdate: true
+									})
+								}
+							}
+
 							return
 						}
 
@@ -1063,7 +1072,7 @@ export class Offline {
 								force: true
 							})
 						}
-					})
+					}))
 				])
 
 				await this.updateIndex()
@@ -1785,8 +1794,6 @@ export class Offline {
 			case "directory":
 			case "sharedRootDirectory":
 			case "sharedDirectory": {
-				this.ensureDirectories()
-
 				const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
 				const topLevelUuid = uuidToTopLevel.get(item.data.uuid)
 
