@@ -453,7 +453,11 @@ describe("msgpack", () => {
 		})
 
 		it("round-trips Map entries serialized as arrays", () => {
-			const entries: [string, number][] = [["a", 1], ["b", 2], ["c", 3]]
+			const entries: [string, number][] = [
+				["a", 1],
+				["b", 2],
+				["c", 3]
+			]
 			const result = unpack(pack(entries))
 
 			expect(result).toEqual(entries)
@@ -479,7 +483,10 @@ describe("msgpack", () => {
 		})
 
 		it("round-trips Map", () => {
-			const map = new Map<string, number>([["x", 1], ["y", 2]])
+			const map = new Map<string, number>([
+				["x", 1],
+				["y", 2]
+			])
 			const result = unpack(pack(map))
 
 			expect(result).toBeInstanceOf(Map)
@@ -524,7 +531,10 @@ describe("msgpack", () => {
 		})
 
 		it("round-trips Map with BigInt values", () => {
-			const map = new Map([["size", 1024n], ["count", 42n]])
+			const map = new Map([
+				["size", 1024n],
+				["count", 42n]
+			])
 			const result = unpack(pack(map))
 
 			expect(result).toBeInstanceOf(Map)
@@ -562,6 +572,461 @@ describe("msgpack", () => {
 
 			expect(result).toBeInstanceOf(Uint8Array)
 			expect(result).toEqual(new Uint8Array([1, 2, 3, 4, 5]))
+		})
+	})
+
+	describe("property descriptors", () => {
+		it("deserialized symbol property is enumerable, writable, configurable", () => {
+			const instance = new MockVariant("test")
+			const result = unpack(pack(instance))
+			const descriptor = Object.getOwnPropertyDescriptor(result, uniffiTypeNameSymbol)
+
+			expect(descriptor).toBeDefined()
+			expect(descriptor!.value).toBe("TestType")
+			expect(descriptor!.enumerable).toBe(true)
+			expect(descriptor!.writable).toBe(true)
+			expect(descriptor!.configurable).toBe(true)
+		})
+
+		it("inner array is frozen after deserialization", () => {
+			const instance = new MockVariant("test")
+			const result = unpack(pack(instance))
+
+			expect(Object.isFrozen(result.inner)).toBe(true)
+		})
+
+		it("inner non-array is NOT frozen after deserialization", () => {
+			const instance = new MockNamedFieldsVariant("test", 42)
+			const result = unpack(pack(instance))
+
+			expect(Object.isFrozen(result.inner)).toBe(false)
+		})
+
+		it("SDK instanceOf check pattern works on deserialized objects", () => {
+			const instance = new MockVariant("test")
+			const result = unpack(pack(instance))
+
+			const instanceOf = (obj: unknown): boolean => {
+				return (obj as Record<symbol, unknown>)[uniffiTypeNameSymbol] === "TestType"
+			}
+
+			expect(instanceOf(result)).toBe(true)
+		})
+	})
+
+	describe("frozen records with enum fields", () => {
+		it("preserves UniffiEnum fields inside a frozen record", () => {
+			const enumField = new MockVariant("inside-record")
+			const record = Object.freeze({ dir: enumField, name: "test-dir" })
+			const result = unpack(pack(record))
+
+			expect(result.name).toBe("test-dir")
+			expect(result.dir instanceof UniffiEnum).toBe(true)
+			expect(result.dir[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result.dir.tag).toBe("Variant1")
+			expect(result.dir.inner).toEqual(["inside-record"])
+		})
+
+		it("preserves multiple UniffiEnum fields in one record", () => {
+			const record = Object.freeze({
+				dir: new MockVariant("dir-value"),
+				shareInfo: new MockUnitVariant()
+			})
+			const result = unpack(pack(record))
+
+			expect(result.dir[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result.dir.tag).toBe("Variant1")
+			expect(result.dir.inner).toEqual(["dir-value"])
+			expect(result.shareInfo[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result.shareInfo.tag).toBe("UnitTag")
+			expect(result.shareInfo.inner).toBeUndefined()
+		})
+	})
+
+	describe("triple-nested enums", () => {
+		it("preserves enum → enum → record nesting", () => {
+			const dirRecord = { uuid: "abc-123", name: "Documents", size: 1024n }
+			const innerEnum = new MockVariant("dir-tag")
+			const outerEnum = new MockOuter(innerEnum)
+
+			const structure = {
+				item: outerEnum,
+				dirRecord
+			}
+			const result = unpack(pack(structure))
+
+			expect(result.item[uniffiTypeNameSymbol]).toBe("OuterType")
+			expect(result.item.inner[0][uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result.item.inner[0].inner).toEqual(["dir-tag"])
+			expect(result.dirRecord.uuid).toBe("abc-123")
+			expect(result.dirRecord.size).toBe(1024n)
+		})
+	})
+
+	describe("multiple variants of same typeName", () => {
+		it("distinguishes unit and data variants of the same enum type", () => {
+			const items = [new MockUnitVariant(), new MockVariant("custom-color")]
+			const result = unpack(pack(items))
+
+			expect(result[0][uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result[0].tag).toBe("UnitTag")
+			expect("inner" in result[0]).toBe(false)
+
+			expect(result[1][uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result[1].tag).toBe("Variant1")
+			expect(result[1].inner).toEqual(["custom-color"])
+		})
+	})
+
+	describe("DriveItem-shaped structures", () => {
+		it("round-trips a file-type DriveItem with SDK record data", () => {
+			const driveItem = {
+				type: "file",
+				data: {
+					uuid: "file-uuid-123",
+					size: 5368709120n,
+					decryptedMeta: {
+						name: "photo.jpg",
+						mime: "image/jpeg",
+						created: 1709000000000n,
+						modified: 1709000000001n,
+						hash: undefined,
+						key: "enc-key-abc"
+					}
+				}
+			}
+			const result = unpack(pack(driveItem))
+
+			expect(result.type).toBe("file")
+			expect(result.data.uuid).toBe("file-uuid-123")
+			expect(result.data.size).toBe(5368709120n)
+			expect(result.data.decryptedMeta.name).toBe("photo.jpg")
+			expect(result.data.decryptedMeta.created).toBe(1709000000000n)
+			expect(result.data.decryptedMeta.hash).toBeUndefined()
+		})
+
+		it("round-trips a directory DriveItem with DirColor enum", () => {
+			const driveItem = {
+				type: "directory",
+				data: {
+					uuid: "dir-uuid-456",
+					color: new MockUnitVariant(),
+					decryptedMeta: {
+						name: "Documents"
+					}
+				}
+			}
+			const result = unpack(pack(driveItem))
+
+			expect(result.type).toBe("directory")
+			expect(result.data.uuid).toBe("dir-uuid-456")
+			expect(result.data.color instanceof UniffiEnum).toBe(true)
+			expect(result.data.color.tag).toBe("UnitTag")
+			expect(result.data.decryptedMeta.name).toBe("Documents")
+		})
+
+		it("round-trips DriveItem with null decryptedMeta", () => {
+			const driveItem = {
+				type: "file",
+				data: {
+					uuid: "file-no-meta",
+					size: 0n,
+					decryptedMeta: null
+				}
+			}
+			const result = unpack(pack(driveItem))
+
+			expect(result.data.decryptedMeta).toBeNull()
+			expect(result.data.size).toBe(0n)
+		})
+	})
+
+	describe("cache persistence patterns", () => {
+		it("round-trips Map entries with UniffiEnum values", () => {
+			const map = new Map<string, { item: unknown; parent: unknown }>([
+				["uuid-1", { item: { type: "file", data: { uuid: "uuid-1" } }, parent: new MockOuter(new MockVariant("normal")) }],
+				["uuid-2", { item: { type: "directory", data: { uuid: "uuid-2" } }, parent: new MockUnitVariant() }]
+			])
+
+			const entries = [...map.entries()]
+			const result = unpack(pack(entries))
+			const restored = new Map(result)
+
+			expect(restored.size).toBe(2)
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const entry1 = restored.get("uuid-1") as any
+
+			expect(entry1.parent[uniffiTypeNameSymbol]).toBe("OuterType")
+			expect(entry1.parent.inner[0][uniffiTypeNameSymbol]).toBe("TestType")
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const entry2 = restored.get("uuid-2") as any
+
+			expect(entry2.parent[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(entry2.parent.tag).toBe("UnitTag")
+		})
+
+		it("round-trips PersistentMap-style array of [key, enum] pairs", () => {
+			const entries: [string, unknown][] = [
+				["dir-1", new MockVariant("normal-dir")],
+				["dir-2", new MockOuter(new MockVariant("shared-dir"))]
+			]
+			const result = unpack(pack(entries))
+
+			expect(result[0][1][uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result[0][1].inner).toEqual(["normal-dir"])
+			expect(result[1][1][uniffiTypeNameSymbol]).toBe("OuterType")
+			expect(result[1][1].inner[0].inner).toEqual(["shared-dir"])
+		})
+	})
+
+	describe("offline Index structure", () => {
+		it("round-trips an Index with deeply nested UniffiEnums matching real SDK shape", () => {
+			// Simulate: ParentUuid.Uuid("parent-uuid") — UniffiEnum with string inner
+			class ParentUuidVariant extends UniffiEnum {
+				readonly [uniffiTypeNameSymbol] = "ParentUuid"
+				readonly tag = "Uuid"
+				readonly inner: Readonly<[string]>
+
+				constructor(uuid: string) {
+					super("ParentUuid", "Uuid")
+
+					this.inner = Object.freeze([uuid])
+				}
+			}
+
+			// Simulate: DirColor.Blue — unit UniffiEnum
+			class DirColorBlue extends UniffiEnum {
+				readonly [uniffiTypeNameSymbol] = "DirColor"
+				readonly tag = "Blue"
+
+				constructor() {
+					super("DirColor", "Blue")
+				}
+			}
+
+			// Simulate: DirMeta.Encrypted("encrypted-data") — UniffiEnum with string inner
+			class DirMetaEncrypted extends UniffiEnum {
+				readonly [uniffiTypeNameSymbol] = "DirMeta"
+				readonly tag = "Encrypted"
+				readonly inner: Readonly<[string]>
+
+				constructor(data: string) {
+					super("DirMeta", "Encrypted")
+
+					this.inner = Object.freeze([data])
+				}
+			}
+
+			// Simulate: FileMeta.Decoded(decryptedMeta) — UniffiEnum with record inner
+			class FileMetaDecoded extends UniffiEnum {
+				readonly [uniffiTypeNameSymbol] = "FileMeta"
+				readonly tag = "Decoded"
+				readonly inner: Readonly<[Record<string, unknown>]>
+
+				constructor(meta: Record<string, unknown>) {
+					super("FileMeta", "Decoded")
+
+					this.inner = Object.freeze([meta])
+				}
+			}
+
+			// Simulate: AnyNormalDir.Dir(dir) — UniffiEnum with Dir record inner
+			class AnyNormalDirDir extends UniffiEnum {
+				readonly [uniffiTypeNameSymbol] = "AnyNormalDir"
+				readonly tag = "Dir"
+				readonly inner: Readonly<[Record<string, unknown>]>
+
+				constructor(dir: Record<string, unknown>) {
+					super("AnyNormalDir", "Dir")
+
+					this.inner = Object.freeze([dir])
+				}
+			}
+
+			// Simulate: AnyDirWithContext.Normal(anyNormalDir) — UniffiEnum with enum inner
+			class AnyDirWithContextNormal extends UniffiEnum {
+				readonly [uniffiTypeNameSymbol] = "AnyDirWithContext"
+				readonly tag = "Normal"
+				readonly inner: Readonly<[AnyNormalDirDir]>
+
+				constructor(dir: AnyNormalDirDir) {
+					super("AnyDirWithContext", "Normal")
+
+					this.inner = Object.freeze([dir])
+				}
+			}
+
+			// Build a realistic Dir record (frozen, from uniffiCreateRecord)
+			const dirRecord = Object.freeze({
+				uuid: "dir-uuid-123",
+				parent: new ParentUuidVariant("root-uuid"),
+				color: new DirColorBlue(),
+				timestamp: 1709000000000n,
+				favorited: false,
+				meta: new DirMetaEncrypted("encrypted-dir-meta")
+			})
+
+			// Build a realistic File record
+			const fileRecord = Object.freeze({
+				uuid: "file-uuid-456",
+				meta: new FileMetaDecoded({ name: "photo.jpg", mime: "image/jpeg", size: 1024n }),
+				parent: new ParentUuidVariant("dir-uuid-123"),
+				size: 5368709120n,
+				favorited: true,
+				region: "eu-central-1",
+				bucket: "filen-1",
+				timestamp: 1709000000001n,
+				chunks: 5n,
+				canMakeThumbnail: true
+			})
+
+			// Build the nested AnyDirWithContext
+			const anyNormalDir = new AnyNormalDirDir(dirRecord)
+			const parent = new AnyDirWithContextNormal(anyNormalDir)
+
+			// Build the Index exactly as offline.ts does
+			const index = {
+				files: {
+					"file-uuid-456": {
+						item: { type: "file" as const, data: fileRecord },
+						parent
+					}
+				},
+				directories: {
+					"dir-uuid-123": {
+						item: { type: "directory" as const, data: dirRecord },
+						parent
+					}
+				}
+			}
+
+			// pack → unpack (exactly what atomicWrite + readIndex does)
+			const result = unpack(new Uint8Array(pack(index)))
+
+			// Verify top-level structure
+			expect(result.files["file-uuid-456"]).toBeDefined()
+			expect(result.directories["dir-uuid-123"]).toBeDefined()
+
+			// Verify file entry
+			const fileEntry = result.files["file-uuid-456"]
+
+			expect(fileEntry.item.type).toBe("file")
+			expect(fileEntry.item.data.uuid).toBe("file-uuid-456")
+			expect(fileEntry.item.data.size).toBe(5368709120n)
+			expect(fileEntry.item.data.chunks).toBe(5n)
+			expect(fileEntry.item.data.favorited).toBe(true)
+			expect(fileEntry.item.data.region).toBe("eu-central-1")
+			expect(fileEntry.item.data.canMakeThumbnail).toBe(true)
+
+			// Verify File.meta (UniffiEnum: FileMeta.Decoded)
+			expect(fileEntry.item.data.meta[uniffiTypeNameSymbol]).toBe("FileMeta")
+			expect(fileEntry.item.data.meta.tag).toBe("Decoded")
+			expect(fileEntry.item.data.meta.inner[0].name).toBe("photo.jpg")
+			expect(fileEntry.item.data.meta.inner[0].size).toBe(1024n)
+			expect(fileEntry.item.data.meta instanceof UniffiEnum).toBe(true)
+
+			// Verify File.parent (UniffiEnum: ParentUuid.Uuid)
+			expect(fileEntry.item.data.parent[uniffiTypeNameSymbol]).toBe("ParentUuid")
+			expect(fileEntry.item.data.parent.tag).toBe("Uuid")
+			expect(fileEntry.item.data.parent.inner[0]).toBe("dir-uuid-123")
+			expect(fileEntry.item.data.parent instanceof UniffiEnum).toBe(true)
+
+			// Verify parent AnyDirWithContext (triple nesting: AnyDirWithContext → AnyNormalDir → Dir record)
+			expect(fileEntry.parent[uniffiTypeNameSymbol]).toBe("AnyDirWithContext")
+			expect(fileEntry.parent.tag).toBe("Normal")
+			expect(fileEntry.parent instanceof UniffiEnum).toBe(true)
+
+			// Second level: AnyNormalDir
+			const normalDir = fileEntry.parent.inner[0]
+
+			expect(normalDir[uniffiTypeNameSymbol]).toBe("AnyNormalDir")
+			expect(normalDir.tag).toBe("Dir")
+			expect(normalDir instanceof UniffiEnum).toBe(true)
+
+			// Third level: Dir record with its own UniffiEnum fields
+			const innerDir = normalDir.inner[0]
+
+			expect(innerDir.uuid).toBe("dir-uuid-123")
+			expect(innerDir.timestamp).toBe(1709000000000n)
+
+			// Dir.color (UniffiEnum: DirColor.Blue — unit variant)
+			expect(innerDir.color[uniffiTypeNameSymbol]).toBe("DirColor")
+			expect(innerDir.color.tag).toBe("Blue")
+			expect(innerDir.color.inner).toBeUndefined()
+			expect(innerDir.color instanceof UniffiEnum).toBe(true)
+
+			// Dir.parent (UniffiEnum: ParentUuid.Uuid)
+			expect(innerDir.parent[uniffiTypeNameSymbol]).toBe("ParentUuid")
+			expect(innerDir.parent.inner[0]).toBe("root-uuid")
+
+			// Dir.meta (UniffiEnum: DirMeta.Encrypted)
+			expect(innerDir.meta[uniffiTypeNameSymbol]).toBe("DirMeta")
+			expect(innerDir.meta.tag).toBe("Encrypted")
+			expect(innerDir.meta.inner[0]).toBe("encrypted-dir-meta")
+
+			// Verify directory entry shares the same parent structure
+			const dirEntry = result.directories["dir-uuid-123"]
+
+			expect(dirEntry.parent[uniffiTypeNameSymbol]).toBe("AnyDirWithContext")
+			expect(dirEntry.parent.inner[0][uniffiTypeNameSymbol]).toBe("AnyNormalDir")
+			expect(dirEntry.item.data.uuid).toBe("dir-uuid-123")
+		})
+
+		it("double pack/unpack of Index preserves all nested enums", () => {
+			class SimpleEnum extends UniffiEnum {
+				readonly [uniffiTypeNameSymbol] = "ParentUuid"
+				readonly tag = "Uuid"
+				readonly inner: Readonly<[string]>
+
+				constructor(v: string) {
+					super("ParentUuid", "Uuid")
+
+					this.inner = Object.freeze([v])
+				}
+			}
+
+			const index = {
+				files: {
+					"uuid-1": {
+						item: { type: "file", data: { uuid: "uuid-1", parent: new SimpleEnum("root") } },
+						parent: new MockOuter(new MockVariant("normal"))
+					}
+				},
+				directories: {}
+			}
+
+			const first = unpack(new Uint8Array(pack(index)))
+			const second = unpack(new Uint8Array(pack(first)))
+
+			expect(second.files["uuid-1"].item.data.parent[uniffiTypeNameSymbol]).toBe("ParentUuid")
+			expect(second.files["uuid-1"].item.data.parent.inner[0]).toBe("root")
+			expect(second.files["uuid-1"].parent[uniffiTypeNameSymbol]).toBe("OuterType")
+			expect(second.files["uuid-1"].parent.inner[0][uniffiTypeNameSymbol]).toBe("TestType")
+			expect(second.files["uuid-1"].parent.inner[0].inner[0]).toBe("normal")
+		})
+	})
+
+	describe("query key hashing", () => {
+		it("pack produces consistent output for identical query keys", () => {
+			const key1 = ["useDriveItemStoredOfflineQuery", { type: "file", uuid: "abc-123" }]
+			const key2 = ["useDriveItemStoredOfflineQuery", { type: "file", uuid: "abc-123" }]
+
+			const hash1 = pack(key1).toString("base64")
+			const hash2 = pack(key2).toString("base64")
+
+			expect(hash1).toBe(hash2)
+		})
+
+		it("pack produces different output for different query keys", () => {
+			const key1 = ["query", { uuid: "aaa" }]
+			const key2 = ["query", { uuid: "bbb" }]
+
+			const hash1 = pack(key1).toString("base64")
+			const hash2 = pack(key2).toString("base64")
+
+			expect(hash1).not.toBe(hash2)
 		})
 	})
 
