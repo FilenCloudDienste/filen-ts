@@ -8,6 +8,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { fetch } from "expo/fetch"
+import { DEFAULT_QUERY_OPTIONS_ETERNAL, useDefaultQueryParams } from "@/queries/client"
 
 const PreviewText = memo(({ fileUrl, previewType }: { fileUrl: string; previewType: ReturnType<typeof getPreviewType> }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
@@ -15,21 +16,22 @@ const PreviewText = memo(({ fileUrl, previewType }: { fileUrl: string; previewTy
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 
+	const defaultQueryParams = useDefaultQueryParams()
 	const query = useQuery({
+		...DEFAULT_QUERY_OPTIONS_ETERNAL,
+		...defaultQueryParams,
 		queryKey: ["drivePreviewTextContent", fileUrl],
-		queryFn: async () => {
-			const response = await fetch(fileUrl)
+		queryFn: async ({ signal }) => {
+			const response = await fetch(fileUrl, {
+				signal
+			})
 
 			if (!response.ok) {
 				throw new Error(`HTTP error: ${response.status}`)
 			}
 
 			return response.text()
-		},
-		gcTime: 0,
-		staleTime: 0,
-		refetchOnMount: "always",
-		refetchOnWindowFocus: "always"
+		}
 	})
 
 	if (query.status !== "success") {

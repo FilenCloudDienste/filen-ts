@@ -354,7 +354,7 @@ class NotesSorter {
 	private parseUuid(uuid: string): number {
 		const cached = this.uuidCache.get(uuid)
 
-		if (cached !== undefined) {
+		if (cached) {
 			return cached
 		}
 

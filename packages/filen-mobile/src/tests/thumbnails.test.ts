@@ -44,8 +44,8 @@ const {
 		}
 	})
 
-	const mockGetFileUrl = vi.fn((file: { inner?: [{ uuid?: string }] }) =>
-		`http://localhost:8080/file/${file.inner?.[0]?.uuid ?? "unknown"}`
+	const mockGetFileUrl = vi.fn(
+		(file: { inner?: [{ uuid?: string }] }) => `http://localhost:8080/file/${file.inner?.[0]?.uuid ?? "unknown"}`
 	)
 
 	const mockHttpStoreState: {
@@ -177,7 +177,7 @@ vi.mock("@/stores/useHttp.store", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	normalizeFilePathForExpo: vi.fn((path: string) => path.startsWith("file://") ? path : `file://${path}`),
+	normalizeFilePathForExpo: vi.fn((path: string) => (path.startsWith("file://") ? path : `file://${path}`)),
 	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
 	wrapAbortSignalForSdk: vi.fn(() => ({}))
 }))
@@ -252,7 +252,7 @@ describe("Thumbnails", () => {
 
 		mockSaveAsync.mockImplementation(async () => {
 			const uri = "file:///cache/manipulated.jpg"
-			fs.set(uri, new Uint8Array([0xFF, 0xD8]))
+			fs.set(uri, new Uint8Array([0xff, 0xd8]))
 			return { uri }
 		})
 
@@ -355,7 +355,7 @@ describe("Thumbnails", () => {
 
 		it("returns cached path when thumbnail already exists on disk", async () => {
 			const outputPath = `${THUMBNAILS_DIR}/cached-uuid.png`
-			fs.set(outputPath, new Uint8Array([0xFF, 0xD8]))
+			fs.set(outputPath, new Uint8Array([0xff, 0xd8]))
 
 			const item = makeFileItem("cached-uuid", "photo.jpg")
 			const result = await thumbnails.generate({ item })
@@ -444,9 +444,7 @@ describe("Thumbnails", () => {
 			const result = await thumbnails.generate({ item })
 
 			expect(mockCreateVideoPlayer).toHaveBeenCalledTimes(1)
-			expect(mockCreateVideoPlayer).toHaveBeenCalledWith(
-				expect.stringContaining("http://localhost:8080/file/video-uuid")
-			)
+			expect(mockCreateVideoPlayer).toHaveBeenCalledWith(expect.stringContaining("http://localhost:8080/file/video-uuid"))
 			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith([1.0], {
 				maxWidth: 256,
 				maxHeight: 256
@@ -462,10 +460,7 @@ describe("Thumbnails", () => {
 			const item = makeFileItem("vid-default-ts", "clip.mp4")
 			await thumbnails.generate({ item })
 
-			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith(
-				[1.0],
-				expect.any(Object)
-			)
+			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith([1.0], expect.any(Object))
 		})
 
 		it("uses custom video timestamp when specified", async () => {
@@ -475,10 +470,7 @@ describe("Thumbnails", () => {
 				videoTimestamp: 5.0
 			})
 
-			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith(
-				[5.0],
-				expect.any(Object)
-			)
+			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith([5.0], expect.any(Object))
 		})
 
 		it("waits for player to be ready before generating thumbnails", async () => {
@@ -698,10 +690,12 @@ describe("Thumbnails", () => {
 
 			const item = makeFileItem("abort-vid-uuid", "clip.mp4")
 
-			await expect(thumbnails.generate({
-				item,
-				signal: controller.signal
-			})).rejects.toThrow()
+			await expect(
+				thumbnails.generate({
+					item,
+					signal: controller.signal
+				})
+			).rejects.toThrow()
 
 			expect(mockGenerateThumbnailsAsync).not.toHaveBeenCalled()
 		})
@@ -732,10 +726,12 @@ describe("Thumbnails", () => {
 
 			const item = makeFileItem("abort-post-dl-uuid", "photo.jpg")
 
-			await expect(thumbnails.generate({
-				item,
-				signal: controller.signal
-			})).rejects.toThrow()
+			await expect(
+				thumbnails.generate({
+					item,
+					signal: controller.signal
+				})
+			).rejects.toThrow()
 
 			expect(mockManipulate).not.toHaveBeenCalled()
 		})
@@ -752,10 +748,12 @@ describe("Thumbnails", () => {
 
 			const item = makeFileItem("abort-post-render-uuid", "photo.jpg")
 
-			await expect(thumbnails.generate({
-				item,
-				signal: controller.signal
-			})).rejects.toThrow()
+			await expect(
+				thumbnails.generate({
+					item,
+					signal: controller.signal
+				})
+			).rejects.toThrow()
 
 			expect(mockSaveAsync).not.toHaveBeenCalled()
 		})
@@ -766,10 +764,12 @@ describe("Thumbnails", () => {
 
 			const item = makeFileItem("abort-pre-gen-uuid", "photo.jpg")
 
-			await expect(thumbnails.generate({
-				item,
-				signal: controller.signal
-			})).rejects.toThrow()
+			await expect(
+				thumbnails.generate({
+					item,
+					signal: controller.signal
+				})
+			).rejects.toThrow()
 
 			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
 			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
@@ -912,10 +912,12 @@ describe("Thumbnails", () => {
 					controller.abort()
 				})
 
-				await expect(thumbnails.generate({
-					item,
-					signal: controller.signal
-				})).rejects.toThrow()
+				await expect(
+					thumbnails.generate({
+						item,
+						signal: controller.signal
+					})
+				).rejects.toThrow()
 			}
 
 			// Should still be able to generate — aborts didn't count as failures
@@ -1015,7 +1017,7 @@ describe("Thumbnails", () => {
 	describe("exists", () => {
 		it("returns exists: true with path when thumbnail file exists on disk", () => {
 			const outputPath = `${THUMBNAILS_DIR}/exists-uuid.png`
-			fs.set(outputPath, new Uint8Array([0xFF, 0xD8]))
+			fs.set(outputPath, new Uint8Array([0xff, 0xd8]))
 
 			const item = makeFileItem("exists-uuid", "photo.jpg")
 			const result = thumbnails.exists(item)
@@ -1038,7 +1040,7 @@ describe("Thumbnails", () => {
 	describe("remove", () => {
 		it("deletes thumbnail file from disk", () => {
 			const outputPath = `${THUMBNAILS_DIR}/remove-uuid.png`
-			fs.set(outputPath, new Uint8Array([0xFF, 0xD8]))
+			fs.set(outputPath, new Uint8Array([0xff, 0xd8]))
 
 			const item = makeFileItem("remove-uuid", "photo.jpg")
 			thumbnails.remove(item)

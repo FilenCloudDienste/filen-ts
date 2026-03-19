@@ -537,6 +537,9 @@ const Drive = memo(() => {
 			const normalized = value.trim().toLowerCase()
 
 			if (normalized.length === 0) {
+				setGlobalSearchResult([])
+				setQueryingGlobalSearch(false)
+
 				return
 			}
 
@@ -558,6 +561,8 @@ const Drive = memo(() => {
 			if (!result.success) {
 				console.error(result.error)
 				alerts.error(result.error)
+
+				setGlobalSearchResult([])
 
 				return
 			}

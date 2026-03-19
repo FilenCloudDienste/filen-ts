@@ -65,11 +65,7 @@ describe("Sqlite", () => {
 			await sqlite.init()
 
 			expect(openDatabaseAsync).toHaveBeenCalledTimes(1)
-			expect(openDatabaseAsync).toHaveBeenCalledWith(
-				"sqlite.v1.db",
-				{ useNewConnection: true },
-				expect.any(String)
-			)
+			expect(openDatabaseAsync).toHaveBeenCalledWith("sqlite.v1.db", { useNewConnection: true }, expect.any(String))
 			expect(mockDb.execAsync).toHaveBeenCalledTimes(1)
 
 			const execArg = mockDb.execAsync.mock.calls[0]![0] as string
@@ -155,10 +151,7 @@ describe("Sqlite", () => {
 			const result = await sqlite.kvAsync.get("test-key")
 
 			expect(result).toEqual({ hello: "world" })
-			expect(mockDb.getFirstAsync).toHaveBeenCalledWith(
-				"SELECT value FROM kv WHERE key = ?",
-				["test-key"]
-			)
+			expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT value FROM kv WHERE key = ?", ["test-key"])
 		})
 
 		it("returns null for missing key", async () => {
@@ -173,11 +166,7 @@ describe("Sqlite", () => {
 
 	describe("kvAsync.keys", () => {
 		it("returns array of keys", async () => {
-			mockDb.getAllAsync.mockResolvedValue([
-				{ key: "alpha" },
-				{ key: "beta" },
-				{ key: "gamma" }
-			])
+			mockDb.getAllAsync.mockResolvedValue([{ key: "alpha" }, { key: "beta" }, { key: "gamma" }])
 
 			const sqlite = await createSqlite()
 			const keys = await sqlite.kvAsync.keys()
@@ -204,10 +193,7 @@ describe("Sqlite", () => {
 			const result = await sqlite.kvAsync.contains("existing")
 
 			expect(result).toBe(true)
-			expect(mockDb.getFirstAsync).toHaveBeenCalledWith(
-				"SELECT key FROM kv WHERE key = ?",
-				["existing"]
-			)
+			expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT key FROM kv WHERE key = ?", ["existing"])
 		})
 
 		it("returns false when key does not exist", async () => {
@@ -226,10 +212,7 @@ describe("Sqlite", () => {
 
 			await sqlite.kvAsync.remove("doomed-key")
 
-			expect(mockDb.runAsync).toHaveBeenCalledWith(
-				"DELETE FROM kv WHERE key = ?",
-				["doomed-key"]
-			)
+			expect(mockDb.runAsync).toHaveBeenCalledWith("DELETE FROM kv WHERE key = ?", ["doomed-key"])
 		})
 	})
 

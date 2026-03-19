@@ -334,11 +334,7 @@ function buildJpegWithOrientation(orientation: number, littleEndian = true): Uin
 	const orientValue = littleEndian ? [orientation, 0x00, 0x00, 0x00] : [0x00, orientation, 0x00, 0x00]
 
 	// TIFF IFD: byteOrder(2) + magic(2) + ifdOffset(4) + entryCount(2) + entry(12)
-	const tiffIfd = [
-		...byteOrder, ...magic42, ...ifdOffset,
-		...entryCount,
-		...orientTag, ...typeShort, ...count1, ...orientValue
-	]
+	const tiffIfd = [...byteOrder, ...magic42, ...ifdOffset, ...entryCount, ...orientTag, ...typeShort, ...count1, ...orientValue]
 
 	// APP1 segment: "Exif\0\0" + TIFF IFD
 	const exifHeader = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00]
@@ -347,13 +343,17 @@ function buildJpegWithOrientation(orientation: number, littleEndian = true): Uin
 
 	return new Uint8Array([
 		// SOI
-		0xff, 0xd8,
+		0xff,
+		0xd8,
 		// APP1 marker
-		0xff, 0xe1,
-		(app1Length >> 8) & 0xff, app1Length & 0xff,
+		0xff,
+		0xe1,
+		(app1Length >> 8) & 0xff,
+		app1Length & 0xff,
 		...app1Data,
 		// SOS marker (end of metadata)
-		0xff, 0xda
+		0xff,
+		0xda
 	])
 }
 
@@ -370,11 +370,7 @@ function buildTiffWithOrientation(orientation: number, littleEndian = true): Uin
 	const count1 = littleEndian ? [0x01, 0x00, 0x00, 0x00] : [0x00, 0x00, 0x00, 0x01]
 	const orientValue = littleEndian ? [orientation, 0x00, 0x00, 0x00] : [0x00, orientation, 0x00, 0x00]
 
-	return new Uint8Array([
-		...byteOrder, ...magic42, ...ifdOffset,
-		...entryCount,
-		...orientTag, ...typeShort, ...count1, ...orientValue
-	])
+	return new Uint8Array([...byteOrder, ...magic42, ...ifdOffset, ...entryCount, ...orientTag, ...typeShort, ...count1, ...orientValue])
 }
 
 /**
@@ -384,11 +380,26 @@ function buildTiffWithOrientation(orientation: number, littleEndian = true): Uin
 function buildHeicWithOrientation(orientation: number, littleEndian = true): Uint8Array {
 	// ftyp box header (identifies as HEIC)
 	const ftyp = [
-		0x00, 0x00, 0x00, 0x14, // box size = 20
-		0x66, 0x74, 0x79, 0x70, // "ftyp"
-		0x68, 0x65, 0x69, 0x63, // "heic"
-		0x00, 0x00, 0x00, 0x00,
-		0x68, 0x65, 0x69, 0x63  // compatible brand "heic"
+		0x00,
+		0x00,
+		0x00,
+		0x14, // box size = 20
+		0x66,
+		0x74,
+		0x79,
+		0x70, // "ftyp"
+		0x68,
+		0x65,
+		0x69,
+		0x63, // "heic"
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x68,
+		0x65,
+		0x69,
+		0x63 // compatible brand "heic"
 	]
 
 	// Exif data block: "Exif\0\0" + TIFF IFD
@@ -440,10 +451,17 @@ describe("parseExifOrientationFromBytes", () => {
 			const xmpHeader = [0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f] // "http:/"
 			const segLen = xmpHeader.length + 2
 			const bytes = new Uint8Array([
-				0xff, 0xd8,
-				0xff, 0xe1, (segLen >> 8) & 0xff, segLen & 0xff,
+				0xff,
+				0xd8,
+				0xff,
+				0xe1,
+				(segLen >> 8) & 0xff,
+				segLen & 0xff,
 				...xmpHeader,
-				0xff, 0xda, 0x00, 0x02
+				0xff,
+				0xda,
+				0x00,
+				0x02
 			])
 
 			expect(parseExifOrientationFromBytes(bytes)).toBe(0)
@@ -507,9 +525,7 @@ describe("parseExifOrientationFromBytes", () => {
 		it("returns 0 for truncated JPEG EXIF header", () => {
 			// SOI + APP1 marker + length but truncated before TIFF header
 			const bytes = new Uint8Array([
-				0xff, 0xd8,
-				0xff, 0xe1, 0x00, 0x08,
-				0x45, 0x78, 0x69, 0x66, 0x00, 0x00
+				0xff, 0xd8, 0xff, 0xe1, 0x00, 0x08, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00
 				// Missing TIFF header
 			])
 
@@ -519,9 +535,18 @@ describe("parseExifOrientationFromBytes", () => {
 		it("returns 0 for TIFF with invalid magic number", () => {
 			// Valid byte order but wrong magic (99 instead of 42)
 			const bytes = new Uint8Array([
-				0x49, 0x49, 0x63, 0x00, // II + bad magic
-				0x08, 0x00, 0x00, 0x00,
-				0x00, 0x00, 0x00, 0x00
+				0x49,
+				0x49,
+				0x63,
+				0x00, // II + bad magic
+				0x08,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00
 			])
 
 			expect(parseExifOrientationFromBytes(bytes)).toBe(0)
@@ -544,12 +569,7 @@ describe("parseExifOrientationFromBytes", () => {
 			const app1Data = [...exifHeader, ...tiffIfd]
 			const app1Length = app1Data.length + 2
 
-			const bytes = new Uint8Array([
-				0xff, 0xd8,
-				0xff, 0xe1, (app1Length >> 8) & 0xff, app1Length & 0xff,
-				...app1Data,
-				0xff, 0xda
-			])
+			const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe1, (app1Length >> 8) & 0xff, app1Length & 0xff, ...app1Data, 0xff, 0xda])
 
 			expect(parseExifOrientationFromBytes(bytes)).toBe(0)
 		})

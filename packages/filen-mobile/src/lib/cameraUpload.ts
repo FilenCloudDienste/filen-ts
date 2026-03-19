@@ -562,12 +562,11 @@ class CameraUpload {
 			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
 			// recently captured media is prioritised within the limited OS execution window, then cap the
 			// list. Without maxUploads (foreground sync) we use the full delta set as-is.
-			const deltas =
-				params?.maxUploads !== undefined
-					? allDeltas
-							.sort((a, b) => (b.file.info.modificationTime ?? 0) - (a.file.info.modificationTime ?? 0))
-							.slice(0, params.maxUploads)
-					: allDeltas
+			const deltas = params?.maxUploads
+				? allDeltas
+						.sort((a, b) => (b.file.info.modificationTime ?? 0) - (a.file.info.modificationTime ?? 0))
+						.slice(0, params.maxUploads)
+				: allDeltas
 
 			await Promise.all(
 				deltas.map(async delta => {

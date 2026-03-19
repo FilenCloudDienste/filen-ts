@@ -81,9 +81,7 @@ const {
 		}
 	}
 
-	const mockCreateCompositePauseSignal = vi.fn((..._signals: unknown[]) =>
-		Object.assign(new MockPauseSignal(), { dispose: vi.fn() })
-	)
+	const mockCreateCompositePauseSignal = vi.fn((..._signals: unknown[]) => Object.assign(new MockPauseSignal(), { dispose: vi.fn() }))
 
 	const mockCreateCompositeAbortSignal = vi.fn((...signals: AbortSignal[]) => {
 		const controller = new AbortController()
@@ -604,7 +602,7 @@ describe("Transfers", () => {
 				const dir = new FsDirectory("file:///document/testdir")
 				fs.set(dir.uri, "dir")
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
+				const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
 
 				await expect(
 					transfers.upload({
@@ -648,9 +646,7 @@ describe("Transfers", () => {
 					parent: { tag: "Uuid", inner: [subFileParentUuid] }
 				}
 
-				mockUnwrapParentUuid
-					.mockReturnValueOnce(subDirParentUuid)
-					.mockReturnValueOnce(subFileParentUuid)
+				mockUnwrapParentUuid.mockReturnValueOnce(subDirParentUuid).mockReturnValueOnce(subFileParentUuid)
 
 				mockUnwrapDirMeta.mockReturnValueOnce({
 					shared: false,
