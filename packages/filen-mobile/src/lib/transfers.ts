@@ -30,6 +30,7 @@ import {
 import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
+import fileCache from "@/lib/fileCache"
 
 class Transfers {
 	private globalAbortController = new AbortController()
@@ -668,6 +669,10 @@ class Transfers {
 					}
 				})()
 
+				if (destination.exists) {
+					destination.delete()
+				}
+
 				await authedSdkClient.downloadDirRecursively(
 					normalizeFilePathForSdk(destination.uri),
 					{
@@ -893,31 +898,63 @@ class Transfers {
 				})
 			}
 
-			await authedSdkClient.downloadFileToPath(
-				remoteAnyFile,
-				normalizeFilePathForSdk(destination.uri),
-				{
-					onUpdate(downloadedBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === itemUuid
-									? {
-											...t,
-											bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
-										}
-									: t
-							)
-						)
-					}
-				},
-				ManagedFuture.new({
-					pauseSignal: compositePauseSignal.getSignal(),
-					abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
-				}),
-				{
-					signal: compositeAbortSignal
+			const cachedFile = await run(async () => {
+				if (await fileCache.has(item)) {
+					return await fileCache.get({
+						item,
+						signal: compositeAbortSignal
+					})
 				}
-			)
+
+				return null
+			})
+
+			if (destination.exists) {
+				destination.delete()
+			}
+
+			if (cachedFile.success && cachedFile.data) {
+				cachedFile.data.copy(destination)
+
+				if (!hideProgress) {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === itemUuid
+								? {
+										...t,
+										bytesTransferred: Number(item.data.size)
+									}
+								: t
+						)
+					)
+				}
+			} else {
+				await authedSdkClient.downloadFileToPath(
+					remoteAnyFile,
+					normalizeFilePathForSdk(destination.uri),
+					{
+						onUpdate(downloadedBytes) {
+							useTransfersStore.getState().setTransfers(prev =>
+								prev.map(t =>
+									t.id === itemUuid
+										? {
+												...t,
+												bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
+											}
+										: t
+								)
+							)
+						}
+					},
+					ManagedFuture.new({
+						pauseSignal: compositePauseSignal.getSignal(),
+						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
+					}),
+					{
+						signal: compositeAbortSignal
+					}
+				)
+			}
 
 			const transferred: Awaited<ReturnType<Transfers["download"]>> = {
 				files: [
