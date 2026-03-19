@@ -4,6 +4,7 @@ import cache from "@/lib/cache"
 import { run, Semaphore } from "@filen/utils"
 import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
+import offline from "@/lib/offline"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -25,7 +26,7 @@ class Setup {
 			}
 
 			await Promise.all([secureStore.init(), sqlite.init()])
-			await Promise.all([restoreQueries(), cache.restore()])
+			await Promise.all([restoreQueries(), cache.restore(), offline.updateIndex()])
 
 			return {
 				isAuthed: isAuthed.isAuthed

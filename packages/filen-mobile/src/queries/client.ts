@@ -1,4 +1,4 @@
-import { QueryClient, type UseQueryOptions } from "@tanstack/react-query"
+import { QueryClient, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import { useMemo } from "@/lib/memo"
 import useFocusNotifyOnChangeProps from "@/queries/useFocusNotifyOnChangeProps"
@@ -15,11 +15,14 @@ export const VERSION = 1
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
 export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000
 
-export const UNCACHED_QUERY_KEYS: string[] = ["drivePreviewTextContent", "drivePreviewDocxContent"]
+export const UNCACHED_QUERY_KEYS = new Map<string, true>([
+	["drivePreviewTextContent", true],
+	["drivePreviewDocxContent", true]
+])
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
 	const shouldNotPersist = (query.queryKey as unknown[]).some(
-		queryKey => typeof queryKey === "string" && UNCACHED_QUERY_KEYS.includes(queryKey)
+		queryKey => typeof queryKey === "string" && UNCACHED_QUERY_KEYS.has(queryKey)
 	)
 
 	return !shouldNotPersist && query.state.status === "success"
@@ -140,23 +143,8 @@ export async function restoreQueries(): Promise<void> {
 	}
 }
 
-export const DEFAULT_QUERY_OPTIONS: Pick<
-	UseQueryOptions,
-	| "refetchOnMount"
-	| "refetchOnReconnect"
-	| "refetchOnWindowFocus"
-	| "staleTime"
-	| "gcTime"
-	| "refetchInterval"
-	| "throwOnError"
-	| "retryOnMount"
-	| "experimental_prefetchInRender"
-	| "refetchIntervalInBackground"
-	| "retry"
-	| "retryDelay"
-	| "networkMode"
-	| "notifyOnChangeProps"
-> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn"> = {
 	refetchOnMount: "always",
 	refetchOnReconnect: "always",
 	refetchOnWindowFocus: "always",
@@ -165,12 +153,12 @@ export const DEFAULT_QUERY_OPTIONS: Pick<
 	refetchInterval: false,
 	experimental_prefetchInRender: false,
 	refetchIntervalInBackground: false,
-	retry: true,
-	retryDelay: 1000,
+	retry: 5,
+	retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
 	retryOnMount: true,
 	networkMode: "always",
-	throwOnError(err) {
-		console.error(err)
+	throwOnError(err, query: Query) {
+		console.error("Query error for key:", query?.queryKey, err)
 
 		const unwrappedSdkError = unwrapSdkError(err)
 
@@ -184,40 +172,26 @@ export const DEFAULT_QUERY_OPTIONS: Pick<
 
 		return false
 	}
-} as Omit<UseQueryOptions, "queryKey" | "queryFn">
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
 
-export const DEFAULT_QUERY_OPTIONS_ETERNAL: Pick<
-	UseQueryOptions,
-	| "refetchOnMount"
-	| "refetchOnReconnect"
-	| "refetchOnWindowFocus"
-	| "staleTime"
-	| "gcTime"
-	| "refetchInterval"
-	| "throwOnError"
-	| "retryOnMount"
-	| "experimental_prefetchInRender"
-	| "refetchIntervalInBackground"
-	| "retry"
-	| "retryDelay"
-	| "networkMode"
-	| "notifyOnChangeProps"
-> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const DEFAULT_QUERY_OPTIONS_ETERNAL: Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn"> = {
 	notifyOnChangeProps: undefined,
-	refetchOnMount: false,
+	refetchOnMount: true,
 	refetchOnReconnect: false,
 	refetchOnWindowFocus: false,
-	staleTime: Infinity,
-	gcTime: Infinity,
+	staleTime: 0,
+	gcTime: QUERY_CLIENT_CACHE_TIME,
 	refetchInterval: false,
 	experimental_prefetchInRender: false,
 	refetchIntervalInBackground: false,
-	retry: true,
-	retryDelay: 1000,
+	retry: 5,
+	retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
 	retryOnMount: true,
 	networkMode: "always",
-	throwOnError(err) {
-		console.error(err)
+	throwOnError(err, query: Query) {
+		console.error("Query error for key:", query?.queryKey, err)
 
 		const unwrappedSdkError = unwrapSdkError(err)
 
@@ -231,7 +205,8 @@ export const DEFAULT_QUERY_OPTIONS_ETERNAL: Pick<
 
 		return false
 	}
-} as Omit<UseQueryOptions, "queryKey" | "queryFn">
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
 
 export const queryClient = new QueryClient({
 	defaultOptions: {
@@ -265,7 +240,8 @@ export function useDefaultQueryParams(
 	return {
 		notifyOnChangeProps,
 		enabled
-	}
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
 }
 
 export class QueryUpdater {

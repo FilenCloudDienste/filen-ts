@@ -62,10 +62,7 @@ describe("itemSorter", () => {
 		})
 
 		it("does not mutate the input array", () => {
-			const items = [
-				makeItem("file", "b.txt"),
-				makeItem("file", "a.txt")
-			]
+			const items = [makeItem("file", "b.txt"), makeItem("file", "a.txt")]
 			const original = [...items]
 
 			itemSorter.sortItems(items, "nameAsc")
@@ -81,11 +78,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([file10, file2, file1], "nameAsc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual([
-				"file1.txt",
-				"file2.txt",
-				"file10.txt"
-			])
+			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["file1.txt", "file2.txt", "file10.txt"])
 		})
 
 		it("sorts nameDesc in reverse natural order", () => {
@@ -95,11 +88,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([file1, file10, file2], "nameDesc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual([
-				"file10.txt",
-				"file2.txt",
-				"file1.txt"
-			])
+			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["file10.txt", "file2.txt", "file1.txt"])
 		})
 
 		it("places directories before files regardless of sort direction", () => {
@@ -120,11 +109,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([large, small, medium], "sizeAsc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual([
-				"s.txt",
-				"m.txt",
-				"l.txt"
-			])
+			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["s.txt", "m.txt", "l.txt"])
 		})
 
 		it("sorts sizeDesc by file size descending", () => {
@@ -133,10 +118,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([small, large], "sizeDesc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual([
-				"l.txt",
-				"s.txt"
-			])
+			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["l.txt", "s.txt"])
 		})
 
 		it("sorts lastModifiedAsc by modification timestamp", () => {
@@ -145,10 +127,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([recent, old], "lastModifiedAsc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual([
-				"old.txt",
-				"new.txt"
-			])
+			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
 		})
 
 		it("sorts lastModifiedDesc by modification timestamp descending", () => {
@@ -157,10 +136,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([old, recent], "lastModifiedDesc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual([
-				"new.txt",
-				"old.txt"
-			])
+			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
 		})
 
 		it("treats file and sharedFile as equal rank (both non-directory)", () => {
@@ -227,11 +203,7 @@ describe("itemSorter", () => {
 		})
 
 		it("does not mutate input array with shared types", () => {
-			const items = [
-				makeItem("sharedFile", "b.txt"),
-				makeItem("sharedDirectory", "a-dir"),
-				makeItem("file", "c.txt")
-			]
+			const items = [makeItem("sharedFile", "b.txt"), makeItem("sharedDirectory", "a-dir"), makeItem("file", "c.txt")]
 			const original = [...items]
 
 			itemSorter.sortItems(items, "nameAsc")
@@ -246,10 +218,7 @@ describe("itemSorter", () => {
 describe("notesSorter", () => {
 	describe("sort", () => {
 		it("does not mutate the input array", () => {
-			const notes = [
-				makeNote({ uuid: "aaa-111", editedTimestamp: 2000n }),
-				makeNote({ uuid: "bbb-222", editedTimestamp: 3000n })
-			]
+			const notes = [makeNote({ uuid: "aaa-111", editedTimestamp: 2000n }), makeNote({ uuid: "bbb-222", editedTimestamp: 3000n })]
 			const original = [...notes]
 
 			notesSorter.sort(notes)
@@ -294,11 +263,7 @@ describe("notesSorter", () => {
 
 			const result = notesSorter.sort([older, newest, newer])
 
-			expect(result.map(n => n.uuid)).toEqual([
-				"ccc-333",
-				"bbb-222",
-				"aaa-111"
-			])
+			expect(result.map(n => n.uuid)).toEqual(["ccc-333", "bbb-222", "aaa-111"])
 		})
 
 		it("produces stable order for notes with identical editedTimestamp (uuid tiebreaker)", () => {

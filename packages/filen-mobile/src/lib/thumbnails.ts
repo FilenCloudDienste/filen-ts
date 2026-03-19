@@ -34,7 +34,7 @@ function abortError(signal?: AbortSignal): Error {
 		return reason
 	}
 
-	if (reason !== undefined && reason !== null) {
+	if (typeof reason !== "undefined" && reason !== null) {
 		return new Error(String(reason))
 	}
 

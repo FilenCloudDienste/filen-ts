@@ -148,9 +148,7 @@ export class File {
 			throw new Error(`File not found: ${this.uri}`)
 		}
 
-		const destUri = destination instanceof File
-			? destination.uri
-			: Paths.join(destination.uri, this.name)
+		const destUri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
 
 		fs.set(destUri, new Uint8Array(entry))
 	}
@@ -159,9 +157,7 @@ export class File {
 		this.copy(destination)
 		this.delete()
 
-		this.uri = destination instanceof File
-			? destination.uri
-			: Paths.join(destination.uri, this.name)
+		this.uri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
 	}
 
 	rename(newName: string): void {
@@ -258,8 +254,8 @@ export class File {
 
 		if (!(entry instanceof Uint8Array)) {
 			return new Blob([], {
-			type: contentType
-		})
+				type: contentType
+			})
 		}
 
 		return new Blob([entry.slice(start, end)], {
@@ -274,9 +270,8 @@ export class File {
 		destination: Directory | File,
 		_options?: { headers?: Record<string, string>; idempotent?: boolean }
 	): Promise<File> {
-		const destFile = destination instanceof File
-			? destination
-			: new File(Paths.join(destination.uri, url.split("/").pop() ?? "download"))
+		const destFile =
+			destination instanceof File ? destination : new File(Paths.join(destination.uri, url.split("/").pop() ?? "download"))
 
 		destFile.write(new Uint8Array([]))
 
@@ -414,9 +409,7 @@ export class Directory {
 	}
 
 	copy(destination: Directory | File): void {
-		const destUri = destination instanceof Directory
-			? Paths.join(destination.uri, this.name)
-			: destination.uri
+		const destUri = destination instanceof Directory ? Paths.join(destination.uri, this.name) : destination.uri
 		const prefix = this.uri.endsWith("/") ? this.uri : `${this.uri}/`
 
 		fs.set(destUri, "dir")
@@ -434,9 +427,7 @@ export class Directory {
 		this.copy(destination)
 		this.delete()
 
-		this.uri = destination instanceof Directory
-			? Paths.join(destination.uri, this.name)
-			: destination.uri
+		this.uri = destination instanceof Directory ? Paths.join(destination.uri, this.name) : destination.uri
 	}
 
 	rename(newName: string): void {

@@ -228,17 +228,27 @@ class SecureStore {
 			const final = cipher.final()
 			const authTag = cipher.getAuthTag()
 
-			const tmpFile = new FileSystem.File(`${this.secureStoreFile.uri}.${crypto.randomUUID()}.tmp`)
+			const tmpFile = new FileSystem.File(
+				FileSystem.Paths.join(FileSystem.Paths.cache.uri, `.securestore.tmp.${crypto.randomUUID()}`)
+			)
 
-			tmpFile.write(new Uint8Array(Buffer.concat([iv, encrypted, final, authTag])))
+			try {
+				tmpFile.write(new Uint8Array(Buffer.concat([iv, encrypted, final, authTag])))
 
-			if (this.secureStoreFile.exists) {
-				this.secureStoreFile.delete()
+				if (this.secureStoreFile.exists) {
+					this.secureStoreFile.delete()
+				}
+
+				tmpFile.move(this.secureStoreFile)
+
+				this.readCache = data
+			} catch (e) {
+				if (tmpFile.exists) {
+					tmpFile.delete()
+				}
+
+				throw e
 			}
-
-			tmpFile.move(this.secureStoreFile)
-
-			this.readCache = data
 		})
 
 		if (!result.success) {

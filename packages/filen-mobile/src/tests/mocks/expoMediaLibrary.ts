@@ -274,9 +274,7 @@ export class Album {
 	}
 
 	async getAssets(): Promise<Asset[]> {
-		return this.stored.assetIds
-			.filter(id => ml.assets.has(id))
-			.map(id => new Asset(id))
+		return this.stored.assetIds.filter(id => ml.assets.has(id)).map(id => new Asset(id))
 	}
 
 	async getTitle(): Promise<string> {
@@ -423,9 +421,7 @@ export class Query {
 			const stored = ml.albums.get(this.albumFilter.id)
 			const ids = stored ? stored.assetIds : []
 
-			candidates = ids
-				.map(id => ml.assets.get(id))
-				.filter((a): a is StoredAsset => a !== undefined)
+			candidates = ids.map(id => ml.assets.get(id)).filter((a): a is StoredAsset => typeof a !== "undefined")
 		} else {
 			candidates = [...ml.assets.values()]
 		}
@@ -439,11 +435,11 @@ export class Query {
 				const aVal = a[sort.key]
 				const bVal = b[sort.key]
 
-				if (aVal === null || aVal === undefined) {
+				if (aVal === null || typeof aVal === "undefined") {
 					return 1
 				}
 
-				if (bVal === null || bVal === undefined) {
+				if (bVal === null || typeof bVal === "undefined") {
 					return -1
 				}
 
