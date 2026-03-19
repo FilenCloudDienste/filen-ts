@@ -8,7 +8,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { fetch } from "expo/fetch"
-import { DEFAULT_QUERY_OPTIONS_ETERNAL, useDefaultQueryParams } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams } from "@/queries/client"
 
 const PreviewText = memo(({ fileUrl, previewType }: { fileUrl: string; previewType: ReturnType<typeof getPreviewType> }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
@@ -18,7 +18,7 @@ const PreviewText = memo(({ fileUrl, previewType }: { fileUrl: string; previewTy
 
 	const defaultQueryParams = useDefaultQueryParams()
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS_ETERNAL,
+		...DEFAULT_QUERY_OPTIONS,
 		...defaultQueryParams,
 		queryKey: ["drivePreviewTextContent", fileUrl],
 		queryFn: async ({ signal }) => {

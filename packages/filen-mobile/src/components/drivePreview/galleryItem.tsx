@@ -185,10 +185,7 @@ const GalleryItem = memo(
 						style={[itemStyle, dismissAnimatedStyle]}
 					>
 						{isActive ? (
-							<PreviewAudio
-								fileUrl={fileUrl}
-								item={info.item}
-							/>
+							<PreviewAudio item={info.item} />
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">
 								<ActivityIndicator

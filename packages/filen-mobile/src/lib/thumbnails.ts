@@ -459,6 +459,7 @@ class Thumbnails {
 				uuid,
 				ext,
 				isImage,
+				isVideo,
 				outputPath,
 				width: params.width ?? DEFAULT_WIDTH,
 				quality: params.quality ?? DEFAULT_QUALITY,
@@ -495,6 +496,7 @@ class Thumbnails {
 		uuid: string
 		ext: string
 		isImage: boolean
+		isVideo: boolean
 		outputPath: string
 		signal?: AbortSignal
 		width: number
@@ -519,7 +521,7 @@ class Thumbnails {
 					quality: params.quality,
 					signal: params.signal
 				})
-			} else {
+			} else if (params.isVideo) {
 				await this.generateVideo({
 					file,
 					outputPath: params.outputPath,

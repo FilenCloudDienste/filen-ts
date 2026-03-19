@@ -98,9 +98,7 @@ function buildDismissGesture(sv: DismissSharedValues, screenHeight: number, goBa
 		.onEnd(e => {
 			"worklet"
 
-			const threshold = screenHeight * DISMISS_POSITION_RATIO
-
-			if (sv.dismissTranslateY.value > threshold || e.velocityY > DISMISS_VELOCITY_THRESHOLD) {
+			if (sv.dismissTranslateY.value > screenHeight * DISMISS_POSITION_RATIO || e.velocityY > DISMISS_VELOCITY_THRESHOLD) {
 				runOnJS(goBack)()
 			} else {
 				sv.dismissTranslateY.value = withSpring(0, {
@@ -319,16 +317,10 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 	}, [itemsSorted, item])
 
 	useEffect(() => {
-		if (useDrivePreviewStore.getState().currentIndex === null && initialScrollIndex >= 0) {
+		if (initialScrollIndex >= 0) {
 			useDrivePreviewStore.getState().setCurrentIndex(initialScrollIndex)
 		}
 	}, [initialScrollIndex])
-
-	useEffect(() => {
-		return () => {
-			useDrivePreviewStore.getState().reset()
-		}
-	}, [])
 
 	return (
 		<View className="flex-1 bg-transparent">
