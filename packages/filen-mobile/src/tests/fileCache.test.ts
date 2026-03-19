@@ -139,11 +139,11 @@ function makeDirItem(uuid: string, name: string): DriveItem {
 	} as unknown as DriveItem
 }
 
-function writeFile(uuid: string, name: string, data: Uint8Array = new Uint8Array([1, 2, 3])): void {
+function writeFile(uuid: string, data: Uint8Array = new Uint8Array([1, 2, 3])): void {
 	const dir = `${BASE_DIR}/${uuid}`
 
 	fs.set(dir, "dir")
-	fs.set(`${dir}/${name}`, data)
+	fs.set(`${dir}/${uuid}`, data)
 }
 
 function writeMetadata(uuid: string, item: DriveItem): void {
@@ -191,7 +191,7 @@ describe("FileCache", () => {
 
 			const result = cache.getFiles(item)
 
-			expect(result.file.uri).toBe(`${BASE_DIR}/abc-123/test.txt`)
+			expect(result.file.uri).toBe(`${BASE_DIR}/abc-123/abc-123`)
 			expect(result.metadata.uri).toBe(`${BASE_DIR}/abc-123/abc-123.filenmeta`)
 			expect(result.parentDirectory.uri).toBe(`${BASE_DIR}/abc-123`)
 		})
@@ -221,7 +221,7 @@ describe("FileCache", () => {
 			const cache = await createFileCache()
 			const item = makeFileItem("has-uuid", "photo.jpg")
 
-			writeFile("has-uuid", "photo.jpg")
+			writeFile("has-uuid")
 			writeMetadata("has-uuid", item)
 
 			const result = await cache.has(item)
@@ -253,7 +253,7 @@ describe("FileCache", () => {
 			const cache = await createFileCache()
 			const item = makeFileItem("no-meta-uuid", "data.bin")
 
-			writeFile("no-meta-uuid", "data.bin")
+			writeFile("no-meta-uuid")
 
 			const result = await cache.has(item)
 
@@ -264,7 +264,7 @@ describe("FileCache", () => {
 			const cache = await createFileCache()
 			const item = makeFileItem("empty-meta", "file.txt")
 
-			writeFile("empty-meta", "file.txt")
+			writeFile("empty-meta")
 
 			const dir = `${BASE_DIR}/empty-meta`
 
@@ -281,7 +281,7 @@ describe("FileCache", () => {
 			const item = makeFileItem("mismatch-uuid", "v2.txt")
 			const staleItem = makeFileItem("mismatch-uuid", "v1.txt")
 
-			writeFile("mismatch-uuid", "v2.txt")
+			writeFile("mismatch-uuid")
 			writeMetadata("mismatch-uuid", staleItem)
 
 			const result = await cache.has(item)
@@ -295,13 +295,13 @@ describe("FileCache", () => {
 			const cache = await createFileCache()
 			const item = makeFileItem("cached-uuid", "cached.txt")
 
-			writeFile("cached-uuid", "cached.txt", new Uint8Array([99]))
+			writeFile("cached-uuid", new Uint8Array([99]))
 			writeMetadata("cached-uuid", item)
 
 			const file = await cache.get({ item })
 
 			expect(file).toBeInstanceOf(File)
-			expect(file.uri).toBe(`${BASE_DIR}/cached-uuid/cached.txt`)
+			expect(file.uri).toBe(`${BASE_DIR}/cached-uuid/cached-uuid`)
 		})
 
 		it("downloads file via SDK when not cached (cache miss)", async () => {
@@ -321,7 +321,7 @@ describe("FileCache", () => {
 			const file = await cache.get({ item })
 
 			expect(file).toBeInstanceOf(File)
-			expect(file.uri).toBe(`${BASE_DIR}/dl-uuid/download.bin`)
+			expect(file.uri).toBe(`${BASE_DIR}/dl-uuid/dl-uuid`)
 
 			const metaFile = new File(`${BASE_DIR}/dl-uuid/dl-uuid.filenmeta`)
 
@@ -358,7 +358,7 @@ describe("FileCache", () => {
 			const staleItem = makeFileItem("redownload-uuid", "old.txt")
 			const newItem = makeFileItem("redownload-uuid", "new.txt")
 
-			writeFile("redownload-uuid", "old.txt", new Uint8Array([1]))
+			writeFile("redownload-uuid", new Uint8Array([1]))
 			writeMetadata("redownload-uuid", staleItem)
 
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
@@ -373,14 +373,14 @@ describe("FileCache", () => {
 
 			const file = await cache.get({ item: newItem })
 
-			expect(file.uri).toBe(`${BASE_DIR}/redownload-uuid/new.txt`)
+			expect(file.uri).toBe(`${BASE_DIR}/redownload-uuid/redownload-uuid`)
 		})
 
 		it("deletes existing file before re-downloading", async () => {
 			const cache = await createFileCache()
 			const item = makeFileItem("replace-uuid", "replace.txt")
 
-			writeFile("replace-uuid", "replace.txt", new Uint8Array([1, 2, 3]))
+			writeFile("replace-uuid", new Uint8Array([1, 2, 3]))
 
 			// Metadata doesn't match (different item to force re-download)
 			const otherItem = makeFileItem("replace-uuid", "other.txt")
@@ -393,7 +393,7 @@ describe("FileCache", () => {
 				authedSdkClient: {
 					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
 						const uri = "file://" + path
-						const oldFileUri = `${BASE_DIR}/replace-uuid/replace.txt`
+						const oldFileUri = `${BASE_DIR}/replace-uuid/replace-uuid`
 
 						fileExistedDuringDownload = fs.has(oldFileUri)
 						fs.set(uri, new Uint8Array([7, 8, 9]))
@@ -438,12 +438,12 @@ describe("FileCache", () => {
 			const cache = await createFileCache()
 			const item = makeFileItem("rm-uuid", "remove-me.txt")
 
-			writeFile("rm-uuid", "remove-me.txt")
+			writeFile("rm-uuid")
 			writeMetadata("rm-uuid", item)
 
 			await cache.remove(item)
 
-			expect(fs.has(`${BASE_DIR}/rm-uuid/remove-me.txt`)).toBe(false)
+			expect(fs.has(`${BASE_DIR}/rm-uuid/rm-uuid`)).toBe(false)
 			expect(fs.has(`${BASE_DIR}/rm-uuid/rm-uuid.filenmeta`)).toBe(false)
 			expect(fs.has(`${BASE_DIR}/rm-uuid`)).toBe(false)
 		})
@@ -471,13 +471,13 @@ describe("FileCache", () => {
 			const expiredTime = Date.now() - 86400 * 1000 - 1
 
 			fs.set(dir, "dir")
-			fs.set(`${dir}/old.txt`, new Uint8Array([1]))
+			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
 			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(pack({ cachedAt: expiredTime })))
 
 			await cache.gc()
 
 			expect(fs.has(dir)).toBe(false)
-			expect(fs.has(`${dir}/old.txt`)).toBe(false)
+			expect(fs.has(`${dir}/${uuid}`)).toBe(false)
 			expect(fs.has(`${dir}/${uuid}.filenmeta`)).toBe(false)
 		})
 
@@ -488,13 +488,13 @@ describe("FileCache", () => {
 			const dir = `${BASE_DIR}/${uuid}`
 
 			fs.set(dir, "dir")
-			fs.set(`${dir}/fresh.txt`, new Uint8Array([1]))
+			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
 			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(pack({ ...item, cachedAt: Date.now() })))
 
 			await cache.gc()
 
 			expect(fs.has(dir)).toBe(true)
-			expect(fs.has(`${dir}/fresh.txt`)).toBe(true)
+			expect(fs.has(`${dir}/${uuid}`)).toBe(true)
 		})
 
 		it("deletes entries with missing metadata", async () => {
@@ -503,12 +503,12 @@ describe("FileCache", () => {
 			const dir = `${BASE_DIR}/${uuid}`
 
 			fs.set(dir, "dir")
-			fs.set(`${dir}/orphan.txt`, new Uint8Array([1]))
+			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
 
 			await cache.gc()
 
 			expect(fs.has(dir)).toBe(false)
-			expect(fs.has(`${dir}/orphan.txt`)).toBe(false)
+			expect(fs.has(`${dir}/${uuid}`)).toBe(false)
 		})
 	})
 })

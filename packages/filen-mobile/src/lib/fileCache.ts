@@ -78,7 +78,7 @@ export class FileCache {
 		}
 
 		return {
-			file: new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, item.data.decryptedMeta.name)),
+			file: new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, item.data.uuid)),
 			metadata: new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, `${item.data.uuid}.filenmeta`)),
 			parentDirectory
 		}
