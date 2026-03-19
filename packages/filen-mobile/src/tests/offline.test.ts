@@ -236,13 +236,15 @@ import { fs, File } from "@/tests/mocks/expoFileSystem"
 // eslint-disable-next-line import/first
 import type { DriveItem } from "@/types"
 // eslint-disable-next-line import/first
-import { AnyDirWithContext, AnyNormalDir, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
 // eslint-disable-next-line import/first
 import transfers from "@/lib/transfers"
 // eslint-disable-next-line import/first
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
 // eslint-disable-next-line import/first
 import auth from "@/lib/auth"
+// eslint-disable-next-line import/first
+import cache from "@/lib/cache"
 // eslint-disable-next-line import/first
 import useOfflineStore from "@/stores/useOffline.store"
 
@@ -301,6 +303,30 @@ function makeFileItemWithSize(uuid: string, name: string, size: bigint): DriveIt
 
 function makeParent(uuid: string): InstanceType<typeof AnyDirWithContext.Normal> {
 	return new AnyDirWithContext.Normal(new AnyNormalDir.Dir({ uuid } as unknown as Dir))
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeSharedRootParent(uuid: string, role: "Receiver" | "Sharer"): any {
+	return new AnyDirWithContext.Shared(
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(AnySharedDirWithContext as any).new({
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			dir: new (AnySharedDir as any).Root({ inner: { uuid } }),
+			shareInfo: { tag: role === "Receiver" ? SharingRole_Tags.Receiver : SharingRole_Tags.Sharer }
+		})
+	)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeSharedDirParent(uuid: string, grandparentUuid: string): any {
+	return new AnyDirWithContext.Shared(
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(AnySharedDirWithContext as any).new({
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			dir: new (AnySharedDir as any).Dir({ inner: { uuid, parent: grandparentUuid } }),
+			shareInfo: { tag: SharingRole_Tags.Receiver }
+		})
+	)
 }
 
 function writeIndex(index: Index): void {
@@ -3240,6 +3266,858 @@ describe("Offline", () => {
 			expect(remainingUuids).toContain(files[0]!.uuid)
 			expect(remainingUuids).toContain(files[2]!.uuid)
 			expect(remainingUuids).not.toContain(files[1]!.uuid)
+		})
+	})
+
+	describe("sync error resilience (test 19)", () => {
+		it("continues syncing other files when one file's parent listing throws", async () => {
+			const uuid1 = "11111111-1111-1111-1111-111111111111"
+			const uuid2 = "22222222-2222-2222-2222-222222222222"
+			const parent1Uuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const parent2Uuid = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+			const parent1 = makeParent(parent1Uuid)
+			const parent2 = makeParent(parent2Uuid)
+
+			const file1 = makeFileItem(uuid1, "ok.txt")
+			const file2 = makeFileItem(uuid2, "fail.txt")
+
+			// Store both files
+			writeFileData(uuid1, "ok.txt")
+			writeFileMeta(uuid1, { item: file1, parent: parent1 })
+			writeFileData(uuid2, "fail.txt")
+			writeFileMeta(uuid2, { item: file2, parent: parent2 })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Mock SDK: parent1 succeeds (file still exists), parent2 throws
+			const listDirParent1 = vi.fn().mockResolvedValue({
+				files: [
+					{
+						uuid: uuid1,
+						meta: { tag: "Decoded", inner: [{ name: "ok.txt", size: 100n, modified: 1000, created: 900 }] }
+					}
+				],
+				dirs: []
+			})
+
+			const listDirParent2 = vi.fn().mockRejectedValue(new Error("Network timeout"))
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockImplementation((dir: { inner: unknown[] }) => {
+						// eslint-disable-next-line @typescript-eslint/no-explicit-any
+						const uuid = ((dir as any).inner ?? [(dir as any)])[0]?.uuid ?? (dir as any).uuid
+
+						if (uuid === parent1Uuid) {
+							return listDirParent1()
+						}
+
+						return listDirParent2()
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			// Sync should complete without throwing
+			await expect(offline.sync()).resolves.not.toThrow()
+
+			// File 1 should still be intact (its parent listing succeeded)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid1}/ok.txt`)).toBe(true)
+		})
+
+		it("continues syncing directories when one directory's content sync throws", async () => {
+			const dir1Uuid = "11111111-1111-1111-1111-111111111111"
+			const dir2Uuid = "22222222-2222-2222-2222-222222222222"
+			const parentUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const parent = makeParent(parentUuid)
+
+			writeDirectoryMeta(dir1Uuid, {
+				item: makeDirItem(dir1Uuid, "GoodDir"),
+				parent,
+				entries: {}
+			})
+
+			writeDirectoryMeta(dir2Uuid, {
+				item: makeDirItem(dir2Uuid, "BadDir"),
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Both dirs exist remotely, but listDirRecursiveWithPaths fails for dir2
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [
+							{ uuid: dir1Uuid, meta: { tag: "Decoded", inner: [{ name: "GoodDir" }] } },
+							{ uuid: dir2Uuid, meta: { tag: "Decoded", inner: [{ name: "BadDir" }] } }
+						]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockImplementation((dir: { inner: unknown[] }) => {
+						// eslint-disable-next-line @typescript-eslint/no-explicit-any
+						const innerDir = (dir as any).inner?.[0]
+
+						if (innerDir?.uuid === dir2Uuid || innerDir?.inner?.[0]?.uuid === dir2Uuid) {
+							throw new Error("SDK crash for dir2")
+						}
+
+						return Promise.resolve({ files: [], dirs: [] })
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			// Sync should complete without throwing
+			await expect(offline.sync()).resolves.not.toThrow()
+
+			// Dir1 should still be intact
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dir1Uuid}/${dir1Uuid}.filenmeta`)).toBe(true)
+		})
+	})
+
+	describe("sync with shared directory listing paths (test 20)", () => {
+		it("calls listInSharedRoot for a shared root receiver parent", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "shared-file.txt")
+
+			// Create a shared root receiver parent
+			const sharedRootParent = makeSharedRootParent(parentUuid, "Receiver")
+
+			writeFileData(uuid, "shared-file.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: sharedRootParent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const listInSharedRoot = vi.fn().mockResolvedValue({
+				files: [
+					{
+						uuid,
+						meta: { tag: "Decoded", inner: [{ name: "shared-file.txt", size: 100n, modified: 1000, created: 900 }] }
+					}
+				],
+				dirs: []
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listInSharedRoot
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			expect(listInSharedRoot).toHaveBeenCalled()
+		})
+
+		it("calls listOutShared for a shared root sharer parent", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "shared-out.txt")
+
+			const sharedRootParent = makeSharedRootParent(parentUuid, "Sharer")
+
+			writeFileData(uuid, "shared-out.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: sharedRootParent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const listOutShared = vi.fn().mockResolvedValue({
+				files: [
+					{
+						uuid,
+						meta: { tag: "Decoded", inner: [{ name: "shared-out.txt", size: 100n, modified: 1000, created: 900 }] }
+					}
+				],
+				dirs: []
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listOutShared
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			expect(listOutShared).toHaveBeenCalled()
+		})
+
+		it("calls listSharedDir for a shared non-root directory parent", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const grandparentUuid = "33333333-3333-3333-3333-333333333333"
+			const fileItem = makeFileItem(uuid, "nested-shared.txt")
+
+			const sharedDirParent = makeSharedDirParent(parentUuid, grandparentUuid)
+
+			// Set up cache and unwrapParentUuid for shared dir listing
+			cache.directoryUuidToAnySharedDirWithContext.set(grandparentUuid, {
+				shareInfo: { tag: SharingRole_Tags.Receiver }
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			const { unwrapParentUuid } = await import("@/lib/utils")
+
+			vi.mocked(unwrapParentUuid).mockReturnValueOnce(grandparentUuid)
+
+			writeFileData(uuid, "nested-shared.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: sharedDirParent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const listSharedDir = vi.fn().mockResolvedValue({
+				files: [
+					{
+						uuid,
+						meta: { tag: "Decoded", inner: [{ name: "nested-shared.txt", size: 100n, modified: 1000, created: 900 }] }
+					}
+				],
+				dirs: []
+			})
+
+			vi.mocked(unwrapParentUuid).mockReturnValueOnce(grandparentUuid)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listSharedDir
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			expect(listSharedDir).toHaveBeenCalled()
+
+			// Clean up cache
+			cache.directoryUuidToAnySharedDirWithContext.delete(grandparentUuid)
+		})
+	})
+
+	describe("findParentAnyDirWithContext with shared types (test 21)", () => {
+		it("resolves parent for sharedRootDirectory entries in listDirectories", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+			const childFileUuid = "22222222-2222-2222-2222-222222222222"
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			const sharedRootDirItem = {
+				type: "sharedRootDirectory",
+				data: {
+					uuid: topUuid,
+					decryptedMeta: { name: "SharedRoot", size: 0n, modified: 1000, created: 900 },
+					sharingRole: { tag: SharingRole_Tags.Receiver }
+				}
+			} as unknown as DriveItem
+
+			const childFile = makeFileItem(childFileUuid, "child.txt")
+
+			writeDirectoryMeta(topUuid, {
+				item: sharedRootDirItem,
+				parent,
+				entries: {
+					"/child.txt": { item: childFile }
+				}
+			})
+
+			const offline = await createOffline()
+
+			// List children of the sharedRootDirectory
+			// This exercises findParentAnyDirWithContext with sharedRootDirectory type
+			const topParent = new AnyDirWithContext.Normal(new AnyNormalDir.Dir({ uuid: topUuid } as unknown as Dir))
+			const result = await offline.listDirectories(topParent)
+
+			expect(result.files).toHaveLength(1)
+			expect(result.files[0].item.data.uuid).toBe(childFileUuid)
+		})
+
+		it("resolves parent for sharedDirectory entries in listDirectoriesRecursive", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+			const sharedSubDirUuid = "22222222-2222-2222-2222-222222222222"
+			const fileInSharedUuid = "33333333-3333-3333-3333-333333333333"
+			const parent = makeParent("44444444-4444-4444-4444-444444444444")
+
+			const topDirItem = makeDirItem(topUuid, "Root")
+
+			const sharedParentUuid = "55555555-5555-5555-5555-555555555555"
+
+			const sharedSubDir = {
+				type: "sharedDirectory",
+				data: {
+					uuid: sharedSubDirUuid,
+					decryptedMeta: { name: "SharedSub", size: 0n, modified: 1000, created: 900 },
+					inner: { parent: sharedParentUuid }
+				}
+			} as unknown as DriveItem
+
+			writeDirectoryMeta(topUuid, {
+				item: topDirItem,
+				parent,
+				entries: {
+					"/SharedSub": { item: sharedSubDir },
+					"/SharedSub/data.txt": { item: makeFileItem(fileInSharedUuid, "data.txt") }
+				}
+			})
+
+			// Set up cache and mock for sharedDirectory parent resolution
+			cache.directoryUuidToAnySharedDirWithContext.set(sharedParentUuid, {
+				shareInfo: { tag: SharingRole_Tags.Receiver }
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			const { unwrapParentUuid } = await import("@/lib/utils")
+
+			vi.mocked(unwrapParentUuid).mockReset()
+			vi.mocked(unwrapParentUuid).mockImplementation(() => sharedParentUuid)
+
+			const offline = await createOffline()
+			const result = await offline.listDirectoriesRecursive()
+
+			// Should include the top-level directory and the shared subdirectory
+			expect(result.directories.length).toBeGreaterThanOrEqual(2)
+
+			const dirUuids = result.directories.map((d: { item: DriveItem }) => d.item.data.uuid)
+
+			expect(dirUuids).toContain(topUuid)
+			expect(dirUuids).toContain(sharedSubDirUuid)
+
+			// Should include the file inside the shared subdirectory
+			expect(result.files.length).toBeGreaterThanOrEqual(1)
+
+			const fileUuids = result.files.map((f: { item: DriveItem }) => f.item.data.uuid)
+
+			expect(fileUuids).toContain(fileInSharedUuid)
+
+			// Clean up
+			cache.directoryUuidToAnySharedDirWithContext.delete(sharedParentUuid)
+			vi.mocked(unwrapParentUuid).mockImplementation(() => null)
+		})
+	})
+
+	describe("concurrent store operations (test 22)", () => {
+		it("allows multiple concurrent storeFile calls to complete", async () => {
+			const files = [
+				{ uuid: "11111111-1111-1111-1111-111111111111", name: "a.txt" },
+				{ uuid: "22222222-2222-2222-2222-222222222222", name: "b.txt" },
+				{ uuid: "33333333-3333-3333-3333-333333333333", name: "c.txt" },
+				{ uuid: "44444444-4444-4444-4444-444444444444", name: "d.txt" },
+				{ uuid: "55555555-5555-5555-5555-555555555555", name: "e.txt" }
+			]
+
+			const parent = makeParent("66666666-6666-6666-6666-666666666666")
+
+			let concurrentCount = 0
+			let maxConcurrent = 0
+
+			vi.mocked(transfers.download).mockImplementation(async ({ destination }) => {
+				concurrentCount++
+
+				if (concurrentCount > maxConcurrent) {
+					maxConcurrent = concurrentCount
+				}
+
+				// Simulate some async work
+				await new Promise(resolve => setTimeout(resolve, 10))
+
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([1, 2, 3]))
+				}
+
+				concurrentCount--
+
+				return { files: [], directories: [] }
+			})
+
+			const offline = await createOffline()
+
+			// Launch all stores concurrently
+			await Promise.all(
+				files.map(({ uuid, name }) =>
+					offline.storeFile({
+						file: makeFileItem(uuid, name),
+						parent,
+						skipIndexUpdate: true
+					})
+				)
+			)
+
+			// All files should be stored
+			for (const { uuid, name } of files) {
+				expect(fs.get(`${FILES_DIR_URI}/${uuid}/${name}`)).toBeInstanceOf(Uint8Array)
+				expect(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBeInstanceOf(Uint8Array)
+			}
+
+			// Semaphore(3) should allow up to 3 concurrent operations
+			expect(maxConcurrent).toBeGreaterThan(1)
+			expect(maxConcurrent).toBeLessThanOrEqual(3)
+		})
+
+		it("concurrent storeFile + storeDirectory do not interfere", async () => {
+			const fileUuid = "11111111-1111-1111-1111-111111111111"
+			const dirUuid = "22222222-2222-2222-2222-222222222222"
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			vi.mocked(transfers.download).mockImplementation(async ({ destination }): Promise<any> => {
+				await new Promise(resolve => setTimeout(resolve, 5))
+
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([1, 2, 3]))
+				} else {
+					const destUri = (destination as { uri: string }).uri
+
+					fs.set(destUri, "dir")
+
+					return { files: [], directories: [] }
+				}
+
+				return { files: [], directories: [] }
+			})
+
+			const offline = await createOffline()
+
+			await Promise.all([
+				offline.storeFile({
+					file: makeFileItem(fileUuid, "concurrent.txt"),
+					parent,
+					skipIndexUpdate: true
+				}),
+				offline.storeDirectory({
+					directory: makeDirItem(dirUuid, "ConcurrentDir"),
+					parent,
+					skipIndexUpdate: true
+				})
+			])
+
+			// Both should be stored without corruption
+			expect(fs.get(`${FILES_DIR_URI}/${fileUuid}/${fileUuid}.filenmeta`)).toBeInstanceOf(Uint8Array)
+			expect(fs.get(`${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`)).toBeInstanceOf(Uint8Array)
+		})
+	})
+
+	describe("critical coverage gaps", () => {
+		it("sync deletes local subdirectory when removed remotely from stored directory", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const subDirUuid = "22222222-2222-2222-2222-222222222222"
+			const parentUuid = "33333333-3333-3333-3333-333333333333"
+			const dirItem = makeDirItem(dirUuid, "MyDir")
+			const parent = makeParent(parentUuid)
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/sub": { item: makeDirItem(subDirUuid, "sub") }
+				}
+			})
+
+			// Create the subdirectory on disk
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/sub`, "dir")
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Remote: dir still exists but subdir was removed
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [{ uuid: dirUuid, meta: { tag: "Decoded", inner: [{ name: "MyDir" }] } }]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: []
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			// Local subdirectory should be deleted
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}/sub`)).toBe(false)
+		})
+
+		it("sync triggers full resync when new subdirectory added remotely", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "MyDir")
+			const parent = makeParent(parentUuid)
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			let downloadCalled = false
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				downloadCalled = true
+
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/newSubDir`, "dir")
+
+				return {
+					files: [],
+					directories: [
+						{
+							dir: { tag: NonRootDir_Tags.Normal, inner: [{ uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }] },
+							path: `${destUri}/newSubDir`
+						}
+					]
+				}
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [{ uuid: dirUuid, meta: { tag: "Decoded", inner: [{ name: "MyDir" }] } }]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [
+							{
+								dir: { tag: NonRootDir_Tags.Normal, inner: [{ uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }] },
+								path: "/newSubDir"
+							}
+						]
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			// Full resync should have been triggered because of new remote subdirectory
+			expect(downloadCalled).toBe(true)
+		})
+
+		it("sync does not trigger resync when directory content is unchanged", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "MyDir")
+			const parent = makeParent(parentUuid)
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/data/file.txt": { item: makeFileItem(fileUuid, "file.txt") }
+				}
+			})
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data/file.txt`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Remote: everything matches local
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [{ uuid: dirUuid, meta: { tag: "Decoded", inner: [{ name: "MyDir" }] } }]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [
+							{
+								file: {
+									uuid: fileUuid,
+									meta: { tag: "Decoded", inner: [{ name: "file.txt", size: 100n, modified: 1000, created: 900 }] }
+								},
+								path: "/data/file.txt"
+							}
+						],
+						dirs: []
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			// No download should have been triggered
+			expect(transfers.download).not.toHaveBeenCalled()
+		})
+
+		it("sync cleans up when data file name on disk doesn't match meta name", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const parent = makeParent(parentUuid)
+
+			// Store file with name "original.txt" in meta but name the data file differently on disk
+			// This simulates a corruption scenario where meta and data are out of sync
+			const fileItem = makeFileItem(uuid, "original.txt")
+
+			// Write data file with a DIFFERENT name than what meta says
+			writeFileData(uuid, "actual-on-disk.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			// listFiles() finds "actual-on-disk.txt" as the data file, returns the item with meta name "original.txt"
+			// But during sync, dataFile is constructed from meta name "original.txt" — which doesn't exist
+			// The cleanup code should delete the parent directory
+
+			await offline.updateIndex()
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [
+							{
+								uuid,
+								meta: { tag: "Decoded", inner: [{ name: "original.txt", size: 100n, modified: 1000, created: 900 }] }
+							}
+						],
+						dirs: []
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			// Parent directory should be cleaned up since the data file path from meta didn't exist
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)
+		})
+
+		it("isItemStored correctly caches and returns false values", async () => {
+			writeIndex({ files: {}, directories: {} })
+
+			const offline = await createOffline()
+			const item = makeFileItem("99999999-9999-9999-9999-999999999999", "nonexistent.txt")
+
+			// First call reads from index, returns false, caches it
+			expect(await offline.isItemStored(item)).toBe(false)
+
+			// Write a new index with the item — but cached false should be returned
+			writeIndex({
+				files: {
+					"99999999-9999-9999-9999-999999999999": {
+						item,
+						parent: makeParent("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+					}
+				},
+				directories: {}
+			})
+
+			// Second call should return cached false without re-reading index
+			expect(await offline.isItemStored(item)).toBe(false)
+		})
+
+		it("parentCacheKey handles Linked directory context via sync", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "linked-file.txt")
+
+			// Create a Linked parent context (plain object matching the shape parentCacheKey expects)
+			const linkedParent = {
+				tag: "Linked",
+				inner: [
+					{
+						dir: { tag: "Dir", inner: [{ inner: { uuid: parentUuid } }] }
+					}
+				]
+			}
+
+			writeFileData(uuid, "linked-file.txt")
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			writeFileMeta(uuid, { item: fileItem, parent: linkedParent as any })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Sync will call parentCacheKey (Linked branch) and then hit "Unsupported directory type"
+			// in the listing switch — our error isolation should catch it and skip the parent
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await expect(offline.sync()).resolves.not.toThrow()
+
+			// File should be preserved since the parent listing was skipped
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/linked-file.txt`)).toBe(true)
+		})
+
+		it("parentCacheKey handles Normal Root sub-case", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "root-file.txt")
+
+			// Create a Normal Root parent (instead of the usual Normal Dir)
+			const rootParent = new AnyDirWithContext.Normal(new AnyNormalDir.Root({ uuid: parentUuid } as unknown as Dir))
+
+			writeFileData(uuid, "root-file.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: rootParent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Sync should work — parentCacheKey will produce "root:{uuid}"
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [
+							{
+								uuid,
+								meta: { tag: "Decoded", inner: [{ name: "root-file.txt", size: 100n, modified: 1000, created: 900 }] }
+							}
+						],
+						dirs: []
+					})
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await expect(offline.sync()).resolves.not.toThrow()
+
+			// File should still be intact
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/root-file.txt`)).toBe(true)
+		})
+
+		it("atomicWrite cleans up temp file on move failure and propagates error", async () => {
+			const offline = await createOffline()
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "atomic-fail.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			// Patch File.prototype.move to throw for tmp files
+			const originalMove = File.prototype.move
+
+			File.prototype.move = function (this: InstanceType<typeof File>, dest: InstanceType<typeof File>) {
+				if (this.uri.includes(".tmp-")) {
+					// Simulate: original file was already deleted, now move fails
+					throw new Error("Simulated disk failure during move")
+				}
+
+				return originalMove.call(this, dest)
+			}
+
+			try {
+				vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }) => {
+					if (destination instanceof File) {
+						destination.write(new Uint8Array([1, 2, 3]))
+					}
+
+					return { files: [], directories: [] }
+				})
+
+				// storeFile calls atomicWrite for the meta file — which will fail
+				await expect(offline.storeFile({ file: fileItem, parent })).rejects.toThrow("Simulated disk failure during move")
+
+				// Verify no .tmp files are left behind
+				for (const key of fs.keys()) {
+					expect(key).not.toContain(".tmp-")
+				}
+			} finally {
+				File.prototype.move = originalMove
+			}
+		})
+
+		it("readIndex recovers from a valid msgpack encoding of empty object", async () => {
+			// Write valid msgpack for {} — keys length 0 triggers the "Index file is empty" check
+			fs.set(BASE_DIR_URI, "dir")
+			fs.set(FILES_DIR_URI, "dir")
+			fs.set(DIRECTORIES_DIR_URI, "dir")
+
+			writeIndex({} as unknown as Index)
+
+			const offline = await createOffline()
+			const stored = await offline.isItemStored(makeFileItem("11111111-1111-1111-1111-111111111111", "test.txt"))
+
+			// Should not throw — empty index decoded, treated as invalid, file deleted, empty index returned
+			expect(stored).toBe(false)
+
+			// Corrupt index file should be deleted
+			expect(fs.has(INDEX_FILE_URI)).toBe(false)
+		})
+
+		it("readDirectoryMeta returns null for zero-length meta file", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			// Write a zero-length meta file
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`, new Uint8Array([]))
+
+			const offline = await createOffline()
+			const result = await offline.listDirectories()
+
+			// Zero-length meta should be skipped — directory should not appear
+			expect(result.directories).toHaveLength(0)
+		})
+
+		it("listFiles skips entries where meta has non-file item type", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			// Write a data file AND meta file, but meta contains a directory item type
+			const dirItem = makeDirItem(uuid, "actually-a-dir")
+
+			writeFileData(uuid, "actually-a-dir")
+			writeFileMeta(uuid, { item: dirItem, parent })
+
+			const offline = await createOffline()
+			const files = await offline.listFiles()
+
+			// Should be skipped because meta.item.type is "directory", not "file"
+			expect(files).toHaveLength(0)
+		})
+
+		it("sync skips items whose parent listing failed (non-FolderNotFound)", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "preserved.txt")
+			const parent = makeParent(parentUuid)
+
+			writeFileData(uuid, "preserved.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Mock SDK to throw a transient error (not FolderNotFound)
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockRejectedValue(new Error("Connection refused"))
+				}
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any)
+
+			await offline.sync()
+
+			// File should NOT be deleted — parent listing failed, so item was skipped
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/preserved.txt`)).toBe(true)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(true)
 		})
 	})
 })
