@@ -13,23 +13,30 @@ addExtension({
 	type: 0x75,
 	Class: UniffiEnum,
 	write(instance) {
+		const typeName = instance[uniffiTypeNameSymbol]
+		const tag = instance.tag
 		const inner = instance.inner
 
-		return inner != null
-			? [instance[uniffiTypeNameSymbol], instance.tag, inner]
-			: [instance[uniffiTypeNameSymbol], instance.tag]
+		return typeof inner !== "undefined" && inner != null ? [typeName, tag, inner] : [typeName, tag]
 	},
 	read(data) {
 		const obj = Object.create(UniffiEnum.prototype)
 
+		// Match the property descriptors of the original class field initializers
+		// (enumerable + writable + configurable) so that Hermes AOT bytecode
+		// handles them identically to SDK-constructed instances.
 		Object.defineProperty(obj, uniffiTypeNameSymbol, {
-			value: data[0]
+			value: data[0],
+			enumerable: true,
+			writable: true,
+			configurable: true
 		})
 
 		obj.tag = data[1]
 
-		if (data[2] != null) {
-			obj.inner = data[2]
+		if (typeof data[2] !== "undefined" && data[2] != null) {
+			// Freeze inner to match SDK constructors: this.inner = Object.freeze([v0])
+			obj.inner = Array.isArray(data[2]) ? Object.freeze(data[2]) : data[2]
 		}
 
 		return obj
