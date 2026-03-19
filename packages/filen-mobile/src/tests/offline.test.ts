@@ -123,21 +123,19 @@ vi.mock("@/lib/utils", () => ({
 			}
 		})
 	),
-	unwrappedDirIntoDriveItem: vi.fn(
-		(unwrapped: { dir: { uuid?: string }; uuid: string; meta: { name: string } }) => ({
-			type: "directory" as const,
-			data: {
-				uuid: unwrapped.uuid ?? unwrapped.dir?.uuid ?? "dir-uuid",
-				decryptedMeta: {
-					name: unwrapped.meta?.name ?? "test-dir",
-					size: 0n,
-					modified: 1000,
-					created: 900
-				},
-				inner: unwrapped.dir
-			}
-		})
-	),
+	unwrappedDirIntoDriveItem: vi.fn((unwrapped: { dir: { uuid?: string }; uuid: string; meta: { name: string } }) => ({
+		type: "directory" as const,
+		data: {
+			uuid: unwrapped.uuid ?? unwrapped.dir?.uuid ?? "dir-uuid",
+			decryptedMeta: {
+				name: unwrapped.meta?.name ?? "test-dir",
+				size: 0n,
+				modified: 1000,
+				created: 900
+			},
+			inner: unwrapped.dir
+		}
+	})),
 	unwrapParentUuid: vi.fn(() => null),
 	unwrapSdkError: vi.fn(() => null)
 }))
@@ -700,9 +698,9 @@ describe("Offline", () => {
 
 			await offline.removeItem(dirItem)
 
-			// Should be exactly 1 write (from the single updateIndex call),
-			// not N writes from inside Promise.all
-			expect(writeCount).toBeLessThanOrEqual(1)
+			// Should be exactly 1 updateIndex call (which does create + write = 2 fs.set calls),
+			// not N updateIndex calls from inside Promise.all
+			expect(writeCount).toBeLessThanOrEqual(2)
 
 			fs.set = originalSet
 		})
@@ -1322,9 +1320,7 @@ describe("Offline", () => {
 			const fileItem = makeFileItem("11111111-1111-1111-1111-111111111111", "not-a-dir.txt")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 
-			await expect(offline.storeDirectory({ directory: fileItem, parent })).rejects.toThrow(
-				"Item not of type directory"
-			)
+			await expect(offline.storeDirectory({ directory: fileItem, parent })).rejects.toThrow("Item not of type directory")
 		})
 
 		it("throws if decryptedMeta is missing", async () => {
@@ -1338,9 +1334,7 @@ describe("Offline", () => {
 			} as unknown as DriveItem
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 
-			await expect(offline.storeDirectory({ directory: dirItem, parent })).rejects.toThrow(
-				"Directory missing decrypted meta"
-			)
+			await expect(offline.storeDirectory({ directory: dirItem, parent })).rejects.toThrow("Directory missing decrypted meta")
 		})
 
 		it("skips download if directory is already stored", async () => {
@@ -1574,9 +1568,7 @@ describe("Offline", () => {
 			await offline.updateIndex()
 
 			const calls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls
-			const updatedUuids = calls
-				.filter(([arg]) => arg.updater === true)
-				.map(([arg]) => arg.params.uuid)
+			const updatedUuids = calls.filter(([arg]) => arg.updater === true).map(([arg]) => arg.params.uuid)
 
 			expect(updatedUuids).toContain(dirUuid)
 			expect(updatedUuids).toContain(nestedFileUuid)
@@ -1617,9 +1609,7 @@ describe("Offline", () => {
 
 			await offline.removeItem(missingItem)
 
-			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(
-				expect.objectContaining({ updater: false })
-			)
+			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(expect.objectContaining({ updater: false }))
 		})
 
 		it("invalidates query cache for all nested entries when removing a directory", async () => {
@@ -1655,9 +1645,7 @@ describe("Offline", () => {
 			const calls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls
 
 			// Should have invalidated: nested file, nested subdir, and the top-level dir itself
-			const invalidatedUuids = calls
-				.filter(([arg]) => arg.updater === false)
-				.map(([arg]) => arg.params.uuid)
+			const invalidatedUuids = calls.filter(([arg]) => arg.updater === false).map(([arg]) => arg.params.uuid)
 
 			expect(invalidatedUuids).toContain(nestedFileUuid)
 			expect(invalidatedUuids).toContain(nestedSubdirUuid)
@@ -2359,7 +2347,10 @@ describe("Offline", () => {
 					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
 						files: [
 							{
-								file: { uuid: existingFileUuid, meta: { tag: "Decoded", inner: [{ name: "existing.txt", size: 100n, modified: 1000, created: 900 }] } },
+								file: {
+									uuid: existingFileUuid,
+									meta: { tag: "Decoded", inner: [{ name: "existing.txt", size: 100n, modified: 1000, created: 900 }] }
+								},
 								path: "/data/existing.txt"
 							},
 							{
