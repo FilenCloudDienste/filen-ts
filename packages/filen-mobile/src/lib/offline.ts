@@ -147,8 +147,8 @@ export class Offline {
 	 * Write data to a file atomically using write-to-temp-then-move.
 	 * Prevents corruption from crashes mid-write.
 	 */
-	private atomicWrite(file: FileSystem.File, data: Uint8Array): void {
-		const tmp = new FileSystem.File(`${file.uri}.${randomUUID()}.tmp`)
+	private atomicWrite(file: FileSystem.File, data: Uint8Array): FileSystem.File {
+		const tmp = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, `.tmp-${randomUUID()}`))
 
 		tmp.write(data)
 
@@ -158,6 +158,8 @@ export class Offline {
 			}
 
 			tmp.move(file)
+
+			return file
 		} catch (e) {
 			if (tmp.exists) {
 				tmp.delete()
@@ -194,12 +196,16 @@ export class Offline {
 			FileSystem.Paths.join(this.directoriesDirectory.uri, topLevelUuid, `${topLevelUuid}.filenmeta`)
 		)
 
-		if (!metaFile.exists) {
+		if (!metaFile.exists || metaFile.size === 0) {
 			return null
 		}
 
 		const readResult = await run(async () => {
 			const meta: DirectoryOfflineMeta = unpack(await metaFile.bytes())
+
+			if (Object.keys(meta).length === 0) {
+				throw new Error("Directory meta file is empty")
+			}
 
 			return meta
 		})
@@ -249,7 +255,7 @@ export class Offline {
 		return index
 	}
 
-	private async updateIndex(): Promise<void> {
+	public async updateIndex(): Promise<void> {
 		await run(
 			async defer => {
 				await this.indexMutex.acquire()
@@ -316,6 +322,7 @@ export class Offline {
 				}
 
 				this.atomicWrite(this.indexFile, new Uint8Array(pack(index satisfies Index)))
+
 				this.indexCache = index
 			},
 			{
@@ -342,7 +349,7 @@ export class Offline {
 
 			this.ensureDirectories()
 
-			if (!this.indexFile.exists) {
+			if (!this.indexFile.exists || this.indexFile.size === 0) {
 				return {
 					files: {},
 					directories: {}
@@ -351,6 +358,10 @@ export class Offline {
 
 			const readResult = await run(async () => {
 				const index: Index = unpack(await this.indexFile.bytes())
+
+				if (Object.keys(index).length === 0) {
+					throw new Error("Index file is empty")
+				}
 
 				return index
 			})
@@ -381,7 +392,7 @@ export class Offline {
 	public async isItemStored(item: DriveItem): Promise<boolean> {
 		const cachedStored = this.isItemStoredCache.get(item.data.uuid)
 
-		if (cachedStored !== undefined) {
+		if (cachedStored) {
 			return cachedStored
 		}
 
@@ -768,7 +779,7 @@ export class Offline {
 							FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
 						)
 
-						if (!metaFile.exists) {
+						if (!metaFile.exists || metaFile.size === 0) {
 							return
 						}
 
@@ -790,7 +801,7 @@ export class Offline {
 							metaFile.parentDirectory.delete()
 						}
 
-						if (existingDir && metaFile.exists) {
+						if (existingDir && metaFile.exists && metaFile.size > 0) {
 							const unwrappedRemoteDir = unwrapDirMeta(existingDir)
 
 							if (
@@ -901,6 +912,15 @@ export class Offline {
 						])
 
 						const directoryMeta: DirectoryOfflineMeta = unpack(directoryMetaBytes)
+
+						if (Object.keys(directoryMeta).length === 0) {
+							if (metaFile.parentDirectory.exists) {
+								metaFile.parentDirectory.delete()
+							}
+
+							return
+						}
+
 						const localDirectories = new Map<
 							string,
 							{
@@ -1088,12 +1108,16 @@ export class Offline {
 							FileSystem.Paths.join(dataFile.parentDirectory.uri, `${dataFile.parentDirectory.name}.filenmeta`)
 						)
 
-						if (!dataFile.exists || !metaFile.exists) {
+						if (!dataFile.exists || !metaFile.exists || metaFile.size === 0) {
 							return
 						}
 
 						const readResult = await run(async () => {
 							const meta: FileOrDirectoryOfflineMeta = unpack(await metaFile.bytes())
+
+							if (Object.keys(meta).length === 0) {
+								throw new Error("File meta is empty")
+							}
 
 							return meta
 						})
@@ -1170,8 +1194,12 @@ export class Offline {
 				idempotent: true
 			})
 
-			const innerResult = await run(async () => {
+			const innerResult = await run(async defer => {
 				let resolveCompletion!: () => void
+
+				defer(() => {
+					resolveCompletion()
+				})
 
 				const completionPromise = new Promise<void>(resolve => {
 					resolveCompletion = resolve
@@ -1185,22 +1213,18 @@ export class Offline {
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
 				})
 
-				try {
-					this.atomicWrite(
-						metaFile,
-						new Uint8Array(
-							pack({
-								item: file,
-								parent
-							} satisfies FileOrDirectoryOfflineMeta)
-						)
+				this.atomicWrite(
+					metaFile,
+					Uint8Array.from(
+						pack({
+							item: file,
+							parent
+						} satisfies FileOrDirectoryOfflineMeta)
 					)
+				)
 
-					if (!skipIndexUpdate) {
-						await this.updateIndex()
-					}
-				} finally {
-					resolveCompletion()
+				if (!skipIndexUpdate) {
+					await this.updateIndex()
 				}
 			})
 
@@ -1271,8 +1295,12 @@ export class Offline {
 				})
 			}
 
-			const innerResult = await run(async () => {
+			const innerResult = await run(async defer => {
 				let resolveCompletion!: () => void
+
+				defer(() => {
+					resolveCompletion()
+				})
 
 				const completionPromise = new Promise<void>(resolve => {
 					resolveCompletion = resolve
@@ -1309,23 +1337,19 @@ export class Offline {
 					}
 				}
 
-				try {
-					this.atomicWrite(
-						metaFile,
-						new Uint8Array(
-							pack({
-								item: directory,
-								parent,
-								entries
-							} satisfies DirectoryOfflineMeta)
-						)
+				this.atomicWrite(
+					metaFile,
+					Uint8Array.from(
+						pack({
+							item: directory,
+							parent,
+							entries
+						} satisfies DirectoryOfflineMeta)
 					)
+				)
 
-					if (!skipIndexUpdate) {
-						await this.updateIndex()
-					}
-				} finally {
-					resolveCompletion()
+				if (!skipIndexUpdate) {
+					await this.updateIndex()
 				}
 			})
 
