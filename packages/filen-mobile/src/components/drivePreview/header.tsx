@@ -98,7 +98,7 @@ const GalleryHeader = memo(
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{currentItem?.data.decryptedMeta?.name ?? currentItem?.data.uuid ?? "Unknown"}
+						{currentItem?.data.decryptedMeta?.name ?? currentItem?.data.uuid ?? ""}
 					</Text>
 					{currentItem && (
 						<Menu

@@ -251,7 +251,7 @@ import useOfflineStore from "@/stores/useOffline.store"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OfflineInstance = any
 
-const BASE_DIR_URI = "file:///shared/group.io.filen.app/offline_v1"
+const BASE_DIR_URI = "file:///shared/group.io.filen.app/offline/v1"
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
 const DIRECTORIES_DIR_URI = `${BASE_DIR_URI}/directories`
 const INDEX_FILE_URI = `${BASE_DIR_URI}/index`

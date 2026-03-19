@@ -175,39 +175,6 @@ export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "q
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const DEFAULT_QUERY_OPTIONS_ETERNAL: Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn"> = {
-	notifyOnChangeProps: undefined,
-	refetchOnMount: true,
-	refetchOnReconnect: false,
-	refetchOnWindowFocus: false,
-	staleTime: 0,
-	gcTime: QUERY_CLIENT_CACHE_TIME,
-	refetchInterval: false,
-	experimental_prefetchInRender: false,
-	refetchIntervalInBackground: false,
-	retry: 5,
-	retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
-	retryOnMount: true,
-	networkMode: "always",
-	throwOnError(err, query: Query) {
-		console.error("Query error for key:", query?.queryKey, err)
-
-		const unwrappedSdkError = unwrapSdkError(err)
-
-		if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
-			// TODO: Logout on auth errors
-
-			return
-		}
-
-		alerts.error(err)
-
-		return false
-	}
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
-
 export const queryClient = new QueryClient({
 	defaultOptions: {
 		queries: {

@@ -208,7 +208,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"expo-sqlite",
 		"expo-localization",
 		"expo-background-task",
-		"expo-audio",
+		[
+			"expo-audio",
+			{
+				microphonePermission: "Allow Filen to access your microphone.",
+				enableBackgroundPlayback: true,
+				enableBackgroundRecording: false,
+				recordAudioAndroid: true
+			}
+		],
 		"expo-secure-store",
 		"expo-navigation-bar",
 		"expo-asset",

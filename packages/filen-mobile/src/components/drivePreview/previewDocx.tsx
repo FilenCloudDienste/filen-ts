@@ -7,7 +7,7 @@ import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { fetch } from "expo/fetch"
-import { DEFAULT_QUERY_OPTIONS_ETERNAL, useDefaultQueryParams } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams } from "@/queries/client"
 
 const PreviewDocx = memo(({ fileUrl }: { fileUrl: string }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
@@ -15,7 +15,7 @@ const PreviewDocx = memo(({ fileUrl }: { fileUrl: string }) => {
 
 	const defaultQueryParams = useDefaultQueryParams()
 	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS_ETERNAL,
+		...DEFAULT_QUERY_OPTIONS,
 		...defaultQueryParams,
 		queryKey: ["drivePreviewDocxContent", fileUrl],
 		queryFn: async ({ signal }) => {

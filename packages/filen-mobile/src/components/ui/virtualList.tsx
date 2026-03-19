@@ -1,6 +1,6 @@
 import { useRef, useState, Fragment } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
-import { type View as RNView, RefreshControl, ActivityIndicator, useWindowDimensions, TextInput, Platform } from "react-native"
+import { type View as RNView, RefreshControl, ActivityIndicator, TextInput, Platform } from "react-native"
 import View, { CrossGlassContainerView, KeyboardAvoidingView } from "@/components/ui/view"
 import useViewLayout from "@/hooks/useViewLayout"
 import { cn, run, type DeferFn } from "@filen/utils"
@@ -144,7 +144,6 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 	const { layout, onLayout } = useViewLayout(viewRef)
 	const [refreshing, setRefreshing] = useState<boolean>(false)
 	const textForeground = useResolveClassNames("text-foreground")
-	const windowDimensions = useWindowDimensions()
 	const [searchBarHeight, setSearchBarHeight] = useState<number>(0)
 
 	const itemsPerRow = useMemo(() => {
@@ -258,7 +257,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 						refreshing={refreshing}
 						refreshControl={refreshControl}
 						numColumns={itemsPerRow}
-						drawDistance={Math.floor(Math.max(100, layout.height / 2, windowDimensions.height / 2))}
+						drawDistance={0}
 						maxItemsInRecyclePool={0}
 						maintainVisibleContentPosition={{
 							disabled: false,

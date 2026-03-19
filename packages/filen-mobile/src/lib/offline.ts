@@ -79,9 +79,10 @@ export class Offline {
 		Platform.select({
 			ios: FileSystem.Paths.join(
 				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
-				`offline_v${this.version}`
+				"offline",
+				`v${this.version}`
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document.uri, `offline_v${this.version}`)
+			default: FileSystem.Paths.join(FileSystem.Paths.document.uri, "offline", `v${this.version}`)
 		})
 	)
 	private readonly filesDirectory: FileSystem.Directory = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, "files"))
@@ -664,415 +665,421 @@ export class Offline {
 				}
 
 				await Promise.all([
-					...files.map(({ item, parent }) => run(async () => {
-						if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
-							return
-						}
-
-						const dataFile = new FileSystem.File(
-							FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid, item.data.decryptedMeta.name)
-						)
-						const metaFile = new FileSystem.File(
-							FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
-						)
-
-						if (!dataFile.exists || !metaFile.exists) {
-							if (dataFile.parentDirectory.exists) {
-								dataFile.parentDirectory.delete()
+					...files.map(({ item, parent }) =>
+						run(async () => {
+							if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+								return
 							}
 
-							return
-						}
+							const dataFile = new FileSystem.File(
+								FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid, item.data.decryptedMeta.name)
+							)
+							const metaFile = new FileSystem.File(
+								FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
+							)
 
-						const key = this.parentCacheKey(parent)
-
-						if (!parentListings.has(key)) {
-							return
-						}
-
-						const listing = parentListings.get(key)
-
-						if (!listing) {
-							if (dataFile.parentDirectory.exists) {
-								dataFile.parentDirectory.delete()
-							}
-
-							return
-						}
-
-						const index = parentListingIndexes.get(key)
-						const existingFile = index?.byUuid.get(item.data.uuid)
-
-						if (!existingFile && dataFile.parentDirectory.exists) {
-							dataFile.parentDirectory.delete()
-						}
-
-						if (existingFile && dataFile.exists && metaFile.exists) {
-							const unwrappedFileMeta = unwrapFileMeta(existingFile)
-
-							if (unwrappedFileMeta.meta && unwrappedFileMeta.meta.name !== item.data.decryptedMeta.name) {
-								dataFile.rename(unwrappedFileMeta.meta.name)
-
-								this.atomicWrite(
-									metaFile,
-									new Uint8Array(
-										pack({
-											item: unwrappedFileIntoDriveItem(unwrappedFileMeta),
-											parent
-										} satisfies FileOrDirectoryOfflineMeta)
-									)
-								)
-							}
-
-							if (
-								unwrappedFileMeta.meta &&
-								normalizeModificationTimestampForComparison(Number(unwrappedFileMeta.meta.modified)) >
-									normalizeModificationTimestampForComparison(Number(item.data.decryptedMeta.modified))
-							) {
+							if (!dataFile.exists || !metaFile.exists) {
 								if (dataFile.parentDirectory.exists) {
 									dataFile.parentDirectory.delete()
 								}
 
-								this.isItemStoredCache.delete(item.data.uuid)
+								return
+							}
 
-								if (this.indexCache) {
-									delete this.indexCache.files[item.data.uuid]
+							const key = this.parentCacheKey(parent)
+
+							if (!parentListings.has(key)) {
+								return
+							}
+
+							const listing = parentListings.get(key)
+
+							if (!listing) {
+								if (dataFile.parentDirectory.exists) {
+									dataFile.parentDirectory.delete()
 								}
-
-								await this.storeFile({
-									file: unwrappedFileIntoDriveItem(unwrappedFileMeta),
-									parent,
-									hideProgress: true,
-									skipIndexUpdate: true
-								})
 
 								return
 							}
-						}
 
-						if (existingFile) {
-							return
-						}
+							const index = parentListingIndexes.get(key)
+							const existingFile = index?.byUuid.get(item.data.uuid)
 
-						let updatedFile: File | SharedFile | undefined = undefined
-						const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
-						const nameMatch = index?.byName.get(normalizedName)
-
-						if (nameMatch) {
-							const unwrappedNameMatch = unwrapFileMeta(nameMatch)
-
-							if (unwrappedNameMatch.meta) {
-								const nameMatchUuid = unwrappedNameMatch.file.uuid
-
-								if (nameMatchUuid !== item.data.uuid) {
-									updatedFile = nameMatch
-								}
-							}
-						}
-
-						if (!updatedFile) {
-							return
-						}
-
-						await this.storeFile({
-							file: unwrappedFileIntoDriveItem(unwrapFileMeta(updatedFile)),
-							parent,
-							hideProgress: true,
-							skipIndexUpdate: true
-						})
-
-						if (dataFile.parentDirectory.exists) {
-							dataFile.parentDirectory.delete()
-						}
-					})),
-					...topLevelDirectories.map(({ item, parent }) => run(async () => {
-						if (!item.data.decryptedMeta) {
-							return
-						}
-
-						const metaFile = new FileSystem.File(
-							FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
-						)
-
-						if (!metaFile.exists || metaFile.size === 0) {
-							return
-						}
-
-						const key = this.parentCacheKey(parent)
-
-						if (!parentListings.has(key)) {
-							return
-						}
-
-						const listing = parentListings.get(key)
-
-						if (!listing) {
-							if (metaFile.parentDirectory.exists) {
-								metaFile.parentDirectory.delete()
+							if (!existingFile && dataFile.parentDirectory.exists) {
+								dataFile.parentDirectory.delete()
 							}
 
-							return
-						}
+							if (existingFile && dataFile.exists && metaFile.exists) {
+								const unwrappedFileMeta = unwrapFileMeta(existingFile)
 
-						const dirIndex = parentListingDirIndexes.get(key)
-						const existingDir = dirIndex?.byUuid.get(item.data.uuid)
+								if (unwrappedFileMeta.meta && unwrappedFileMeta.meta.name !== item.data.decryptedMeta.name) {
+									dataFile.rename(unwrappedFileMeta.meta.name)
 
-						if (!existingDir && metaFile.parentDirectory.exists) {
-							metaFile.parentDirectory.delete()
-						}
-
-						if (existingDir && metaFile.exists && metaFile.size > 0) {
-							const unwrappedRemoteDir = unwrapDirMeta(existingDir)
-
-							if (
-								unwrappedRemoteDir.meta &&
-								item.data.decryptedMeta &&
-								unwrappedRemoteDir.meta.name !== item.data.decryptedMeta.name
-							) {
-								this.atomicWrite(
-									metaFile,
-									new Uint8Array(
-										pack({
-											item: unwrappedDirIntoDriveItem(unwrappedRemoteDir),
-											parent
-										} satisfies FileOrDirectoryOfflineMeta)
+									this.atomicWrite(
+										metaFile,
+										new Uint8Array(
+											pack({
+												item: unwrappedFileIntoDriveItem(unwrappedFileMeta),
+												parent
+											} satisfies FileOrDirectoryOfflineMeta)
+										)
 									)
-								)
-							}
-						}
+								}
 
-						if (!existingDir) {
-							const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
-							const nameMatch = dirIndex?.byName.get(normalizedName)
+								if (
+									unwrappedFileMeta.meta &&
+									normalizeModificationTimestampForComparison(Number(unwrappedFileMeta.meta.modified)) >
+										normalizeModificationTimestampForComparison(Number(item.data.decryptedMeta.modified))
+								) {
+									if (dataFile.parentDirectory.exists) {
+										dataFile.parentDirectory.delete()
+									}
 
-							if (nameMatch) {
-								const unwrappedNameMatch = unwrapDirMeta(nameMatch)
+									this.isItemStoredCache.delete(item.data.uuid)
 
-								if (unwrappedNameMatch.meta && unwrappedNameMatch.uuid !== item.data.uuid) {
-									await this.storeDirectory({
-										directory: unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch)),
+									if (this.indexCache) {
+										delete this.indexCache.files[item.data.uuid]
+									}
+
+									await this.storeFile({
+										file: unwrappedFileIntoDriveItem(unwrappedFileMeta),
 										parent,
 										hideProgress: true,
 										skipIndexUpdate: true
 									})
+
+									return
 								}
 							}
 
-							return
-						}
+							if (existingFile) {
+								return
+							}
 
-						const remoteDir: AnyDirWithContext = (() => {
-							switch (item.type) {
-								case "directory": {
-									return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
-								}
+							let updatedFile: File | SharedFile | undefined = undefined
+							const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
+							const nameMatch = index?.byName.get(normalizedName)
 
-								case "sharedDirectory": {
-									const parentUuid = unwrapParentUuid(item.data.inner.parent)
+							if (nameMatch) {
+								const unwrappedNameMatch = unwrapFileMeta(nameMatch)
 
-									if (!parentUuid) {
-										throw new Error("Shared directory is missing parent information.")
+								if (unwrappedNameMatch.meta) {
+									const nameMatchUuid = unwrappedNameMatch.file.uuid
+
+									if (nameMatchUuid !== item.data.uuid) {
+										updatedFile = nameMatch
 									}
-
-									const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
-
-									if (!parentDirFromCache) {
-										throw new Error("Parent directory of shared directory not found in cache.")
-									}
-
-									return new AnyDirWithContext.Shared(
-										AnySharedDirWithContext.new({
-											dir: new AnySharedDir.Dir(item.data),
-											shareInfo: parentDirFromCache.shareInfo
-										})
-									)
-								}
-
-								case "sharedRootDirectory": {
-									return new AnyDirWithContext.Shared(
-										AnySharedDirWithContext.new({
-											dir: new AnySharedDir.Root(item.data),
-											shareInfo: item.data.sharingRole
-										})
-									)
-								}
-
-								default: {
-									throw new Error(`Unsupported directory type: ${item.type}`)
 								}
 							}
-						})()
 
-						const [remoteDirectoryEntries, directoryMetaBytes] = await Promise.all([
-							authedSdkClient.listDirRecursiveWithPaths(
-								remoteDir,
-								{
-									onProgress() {
-										// Noop
-									}
-								},
-								{
-									onErrors() {
-										// Noop
-									}
+							if (!updatedFile) {
+								return
+							}
+
+							await this.storeFile({
+								file: unwrappedFileIntoDriveItem(unwrapFileMeta(updatedFile)),
+								parent,
+								hideProgress: true,
+								skipIndexUpdate: true
+							})
+
+							if (dataFile.parentDirectory.exists) {
+								dataFile.parentDirectory.delete()
+							}
+						})
+					),
+					...topLevelDirectories.map(({ item, parent }) =>
+						run(async () => {
+							if (!item.data.decryptedMeta) {
+								return
+							}
+
+							const metaFile = new FileSystem.File(
+								FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
+							)
+
+							if (!metaFile.exists || metaFile.size === 0) {
+								return
+							}
+
+							const key = this.parentCacheKey(parent)
+
+							if (!parentListings.has(key)) {
+								return
+							}
+
+							const listing = parentListings.get(key)
+
+							if (!listing) {
+								if (metaFile.parentDirectory.exists) {
+									metaFile.parentDirectory.delete()
 								}
-							),
-							metaFile.bytes()
-						])
 
-						const directoryMeta: DirectoryOfflineMeta = unpack(directoryMetaBytes)
+								return
+							}
 
-						if (Object.keys(directoryMeta).length === 0) {
-							if (metaFile.parentDirectory.exists) {
+							const dirIndex = parentListingDirIndexes.get(key)
+							const existingDir = dirIndex?.byUuid.get(item.data.uuid)
+
+							if (!existingDir && metaFile.parentDirectory.exists) {
 								metaFile.parentDirectory.delete()
 							}
 
-							return
-						}
-
-						const localDirectories = new Map<
-							string,
-							{
-								item: DriveItem
-								directory: FileSystem.Directory
-							}
-						>()
-						const localFiles = new Map<
-							string,
-							{
-								item: DriveItem
-								file: FileSystem.File
-							}
-						>()
-
-						for (const path in directoryMeta.entries) {
-							const entry = directoryMeta.entries[path]
-
-							if (!entry) {
-								continue
-							}
-
-							switch (entry.item.type) {
-								case "directory":
-								case "sharedRootDirectory":
-								case "sharedDirectory": {
-									const directory = new FileSystem.Directory(
-										FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
-									)
-
-									if (directory.exists) {
-										localDirectories.set(path, {
-											item: entry.item,
-											directory
-										})
-									}
-
-									break
-								}
-
-								case "file":
-								case "sharedFile": {
-									const file = new FileSystem.File(
-										FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
-									)
-
-									if (file.exists) {
-										localFiles.set(path, {
-											item: entry.item,
-											file
-										})
-									}
-
-									break
-								}
-							}
-						}
-
-						const remoteFiles = new Map<string, File | SharedFile>()
-						const remoteDirectories = new Map<string, Dir | SharedDir | SharedRootDir>()
-
-						for (const { dir, path } of remoteDirectoryEntries.dirs) {
-							if (dir.tag === NonRootDir_Tags.Linked) {
-								continue
-							}
-
-							const normalizedPath = normalizeFilePathForSdk(path)
-
-							remoteDirectories.set(normalizedPath, dir.inner[0])
-						}
-
-						for (const { file, path } of remoteDirectoryEntries.files) {
-							const normalizedPath = normalizeFilePathForSdk(path)
-
-							remoteFiles.set(normalizedPath, file)
-						}
-
-						for (const [path, localDirectory] of localDirectories) {
-							const remoteDirectory = remoteDirectories.get(path)
-
-							if (!remoteDirectory && localDirectory && localDirectory.directory.exists) {
-								localDirectory.directory.delete()
-							}
-						}
-
-						let needsFullResync = false
-
-						for (const [path, localFile] of localFiles) {
-							const remoteFile = remoteFiles.get(path)
-
-							if (!remoteFile && localFile && localFile.file.exists) {
-								localFile.file.delete()
-
-								continue
-							}
-
-							if (
-								remoteFile &&
-								localFile &&
-								localFile.item.data.decryptedMeta &&
-								(localFile.item.type === "file" || localFile.item.type === "sharedFile")
-							) {
-								const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
+							if (existingDir && metaFile.exists && metaFile.size > 0) {
+								const unwrappedRemoteDir = unwrapDirMeta(existingDir)
 
 								if (
-									unwrappedRemoteFile.meta &&
-									normalizeModificationTimestampForComparison(Number(unwrappedRemoteFile.meta.modified)) >
-										normalizeModificationTimestampForComparison(Number(localFile.item.data.decryptedMeta.modified)) &&
-									localFile.file.exists
+									unwrappedRemoteDir.meta &&
+									item.data.decryptedMeta &&
+									unwrappedRemoteDir.meta.name !== item.data.decryptedMeta.name
 								) {
+									this.atomicWrite(
+										metaFile,
+										new Uint8Array(
+											pack({
+												item: unwrappedDirIntoDriveItem(unwrappedRemoteDir),
+												parent
+											} satisfies FileOrDirectoryOfflineMeta)
+										)
+									)
+								}
+							}
+
+							if (!existingDir) {
+								const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
+								const nameMatch = dirIndex?.byName.get(normalizedName)
+
+								if (nameMatch) {
+									const unwrappedNameMatch = unwrapDirMeta(nameMatch)
+
+									if (unwrappedNameMatch.meta && unwrappedNameMatch.uuid !== item.data.uuid) {
+										await this.storeDirectory({
+											directory: unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch)),
+											parent,
+											hideProgress: true,
+											skipIndexUpdate: true
+										})
+									}
+								}
+
+								return
+							}
+
+							const remoteDir: AnyDirWithContext = (() => {
+								switch (item.type) {
+									case "directory": {
+										return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
+									}
+
+									case "sharedDirectory": {
+										const parentUuid = unwrapParentUuid(item.data.inner.parent)
+
+										if (!parentUuid) {
+											throw new Error("Shared directory is missing parent information.")
+										}
+
+										const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+
+										if (!parentDirFromCache) {
+											throw new Error("Parent directory of shared directory not found in cache.")
+										}
+
+										return new AnyDirWithContext.Shared(
+											AnySharedDirWithContext.new({
+												dir: new AnySharedDir.Dir(item.data),
+												shareInfo: parentDirFromCache.shareInfo
+											})
+										)
+									}
+
+									case "sharedRootDirectory": {
+										return new AnyDirWithContext.Shared(
+											AnySharedDirWithContext.new({
+												dir: new AnySharedDir.Root(item.data),
+												shareInfo: item.data.sharingRole
+											})
+										)
+									}
+
+									default: {
+										throw new Error(`Unsupported directory type: ${item.type}`)
+									}
+								}
+							})()
+
+							const [remoteDirectoryEntries, directoryMetaBytes] = await Promise.all([
+								authedSdkClient.listDirRecursiveWithPaths(
+									remoteDir,
+									{
+										onProgress() {
+											// Noop
+										}
+									},
+									{
+										onErrors() {
+											// Noop
+										}
+									}
+								),
+								metaFile.bytes()
+							])
+
+							const directoryMeta: DirectoryOfflineMeta = unpack(directoryMetaBytes)
+
+							if (Object.keys(directoryMeta).length === 0) {
+								if (metaFile.parentDirectory.exists) {
+									metaFile.parentDirectory.delete()
+								}
+
+								return
+							}
+
+							const localDirectories = new Map<
+								string,
+								{
+									item: DriveItem
+									directory: FileSystem.Directory
+								}
+							>()
+							const localFiles = new Map<
+								string,
+								{
+									item: DriveItem
+									file: FileSystem.File
+								}
+							>()
+
+							for (const path in directoryMeta.entries) {
+								const entry = directoryMeta.entries[path]
+
+								if (!entry) {
+									continue
+								}
+
+								switch (entry.item.type) {
+									case "directory":
+									case "sharedRootDirectory":
+									case "sharedDirectory": {
+										const directory = new FileSystem.Directory(
+											FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
+										)
+
+										if (directory.exists) {
+											localDirectories.set(path, {
+												item: entry.item,
+												directory
+											})
+										}
+
+										break
+									}
+
+									case "file":
+									case "sharedFile": {
+										const file = new FileSystem.File(
+											FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
+										)
+
+										if (file.exists) {
+											localFiles.set(path, {
+												item: entry.item,
+												file
+											})
+										}
+
+										break
+									}
+								}
+							}
+
+							const remoteFiles = new Map<string, File | SharedFile>()
+							const remoteDirectories = new Map<string, Dir | SharedDir | SharedRootDir>()
+
+							for (const { dir, path } of remoteDirectoryEntries.dirs) {
+								if (dir.tag === NonRootDir_Tags.Linked) {
+									continue
+								}
+
+								const normalizedPath = normalizeFilePathForSdk(path)
+
+								remoteDirectories.set(normalizedPath, dir.inner[0])
+							}
+
+							for (const { file, path } of remoteDirectoryEntries.files) {
+								const normalizedPath = normalizeFilePathForSdk(path)
+
+								remoteFiles.set(normalizedPath, file)
+							}
+
+							for (const [path, localDirectory] of localDirectories) {
+								const remoteDirectory = remoteDirectories.get(path)
+
+								if (!remoteDirectory && localDirectory && localDirectory.directory.exists) {
+									localDirectory.directory.delete()
+								}
+							}
+
+							let needsFullResync = false
+
+							for (const [path, localFile] of localFiles) {
+								const remoteFile = remoteFiles.get(path)
+
+								if (!remoteFile && localFile && localFile.file.exists) {
 									localFile.file.delete()
 
+									continue
+								}
+
+								if (
+									remoteFile &&
+									localFile &&
+									localFile.item.data.decryptedMeta &&
+									(localFile.item.type === "file" || localFile.item.type === "sharedFile")
+								) {
+									const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
+
+									if (
+										unwrappedRemoteFile.meta &&
+										normalizeModificationTimestampForComparison(Number(unwrappedRemoteFile.meta.modified)) >
+											normalizeModificationTimestampForComparison(
+												Number(localFile.item.data.decryptedMeta.modified)
+											) &&
+										localFile.file.exists
+									) {
+										localFile.file.delete()
+
+										needsFullResync = true
+									}
+								}
+							}
+
+							for (const [path, remoteDirectory] of remoteDirectories) {
+								const localDirectory = localDirectories.get(path)
+
+								if (!localDirectory && remoteDirectory) {
 									needsFullResync = true
 								}
 							}
-						}
 
-						for (const [path, remoteDirectory] of remoteDirectories) {
-							const localDirectory = localDirectories.get(path)
+							for (const [path, remoteFile] of remoteFiles) {
+								const localFile = localFiles.get(path)
 
-							if (!localDirectory && remoteDirectory) {
-								needsFullResync = true
+								if (!localFile && remoteFile) {
+									needsFullResync = true
+								}
 							}
-						}
 
-						for (const [path, remoteFile] of remoteFiles) {
-							const localFile = localFiles.get(path)
-
-							if (!localFile && remoteFile) {
-								needsFullResync = true
+							if (needsFullResync) {
+								await this.storeDirectory({
+									directory: item,
+									parent,
+									hideProgress: true,
+									skipIndexUpdate: true,
+									force: true
+								})
 							}
-						}
-
-						if (needsFullResync) {
-							await this.storeDirectory({
-								directory: item,
-								parent,
-								hideProgress: true,
-								skipIndexUpdate: true,
-								force: true
-							})
-						}
-					}))
+						})
+					)
 				])
 
 				await this.updateIndex()

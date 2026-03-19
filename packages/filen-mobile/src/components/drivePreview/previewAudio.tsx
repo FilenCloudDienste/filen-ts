@@ -1,12 +1,12 @@
-import { useState, Fragment } from "react"
+import { useState, Fragment, useEffect } from "react"
 import { memo, useCallback, useMemo } from "@/lib/memo"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
-import { type TextStyle, type LayoutChangeEvent, useWindowDimensions } from "react-native"
+import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio"
+import { type TextStyle, type LayoutChangeEvent, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
 import { Image, ImageBackground } from "@/components/ui/image"
 import { useResolveClassNames } from "uniwind"
@@ -15,6 +15,8 @@ import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDeri
 import { runOnJS } from "react-native-worklets"
 import { Paths } from "expo-file-system"
 import type { DriveItemFileExtracted } from "@/types"
+import useEffectOnce from "@/hooks/useEffectOnce"
+import audioCache, { type Metadata } from "@/lib/audioCache"
 
 const FONT_TABULAR_NUMS: TextStyle = {
 	fontVariant: ["tabular-nums"]
@@ -276,18 +278,20 @@ const AudioSlider = memo(
 	}
 )
 
-const PreviewAudio = memo(({ fileUrl, item }: { fileUrl: string; item: DriveItemFileExtracted }) => {
-	const player = useAudioPlayer(fileUrl, {
+const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtracted; metadata: Metadata }) => {
+	const files = useMemo(() => {
+		return audioCache.getFiles(item)
+	}, [item])
+
+	const player = useAudioPlayer(files.audio.uri, {
 		updateInterval: 1000
 	})
 
 	const status = useAudioPlayerStatus(player)
 
-	const audioMetadataQuery = useAudioMetadataQuery({
-		url: fileUrl
-	})
-
-	const isAtEnd = status.duration > 0 && status.currentTime >= status.duration - 0.5
+	const isAtEnd = useMemo(() => {
+		return status.duration > 0 && status.currentTime >= status.duration - 0.5
+	}, [status.currentTime, status.duration])
 
 	const onPlayPause = useCallback(() => {
 		if (status.playing) {
@@ -307,27 +311,54 @@ const PreviewAudio = memo(({ fileUrl, item }: { fileUrl: string; item: DriveItem
 		[player]
 	)
 
+	useEffect(() => {
+		if (status.playing) {
+			player.setActiveForLockScreen(
+				true,
+				{
+					title: metadata?.title ?? Paths.parse(item.data.decryptedMeta?.name ?? item.data.uuid).name,
+					artist: metadata?.artist ?? undefined
+				},
+				{
+					showSeekBackward: false,
+					showSeekForward: false
+				}
+			)
+		}
+	}, [status, metadata?.title, metadata?.artist, item.data.decryptedMeta?.name, item.data.uuid, player])
+
+	useEffectOnce(() => {
+		setAudioModeAsync({
+			interruptionMode: "doNotMix",
+			playsInSilentMode: true,
+			allowsRecording: false,
+			shouldPlayInBackground: true,
+			shouldRouteThroughEarpiece: false,
+			allowsBackgroundRecording: false
+		}).catch(console.error)
+	})
+
 	return (
-		<Background blurhash={audioMetadataQuery?.data?.pictureBlurhash ?? undefined}>
+		<Background blurhash={metadata?.pictureBlurhash ?? undefined}>
 			<Picture
-				blurhash={audioMetadataQuery?.data?.pictureBlurhash ?? undefined}
-				pictureBase64={audioMetadataQuery?.data?.pictureBase64 ?? undefined}
+				blurhash={metadata?.pictureBlurhash ?? undefined}
+				pictureBase64={metadata?.pictureBase64 ?? undefined}
 			/>
 			<View className="flex-col mt-6 bg-transparent w-full px-4 items-center gap-1">
-				{audioMetadataQuery?.data?.title && audioMetadataQuery?.data?.artist ? (
+				{metadata?.title && metadata?.artist ? (
 					<Fragment>
 						<Text
 							className="font-bold"
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{audioMetadataQuery.data.artist}
+							{metadata.artist}
 						</Text>
 						<Text
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{audioMetadataQuery.data.title}
+							{metadata.title}
 						</Text>
 					</Fragment>
 				) : (
@@ -371,6 +402,30 @@ const PreviewAudio = memo(({ fileUrl, item }: { fileUrl: string; item: DriveItem
 				</Text>
 			</View>
 		</Background>
+	)
+})
+
+const PreviewAudio = memo(({ item }: { item: DriveItemFileExtracted }) => {
+	const audioMetadataQuery = useAudioMetadataQuery({
+		uuid: item.data.uuid
+	})
+
+	if (audioMetadataQuery.status !== "success") {
+		return (
+			<View className="bg-transparent flex-1 items-center justify-center">
+				<ActivityIndicator
+					size="small"
+					color="white"
+				/>
+			</View>
+		)
+	}
+
+	return (
+		<PreviewAudioInner
+			item={item}
+			metadata={audioMetadataQuery.data}
+		/>
 	)
 })
 
