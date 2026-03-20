@@ -2,7 +2,6 @@ import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vite
 
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -36,12 +35,9 @@ vi.mock("@/constants", () => ({
 	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
 }))
 
-// eslint-disable-next-line import/first
 import { PersistentMap } from "@/lib/cache"
-// eslint-disable-next-line import/first
 import { pack, unpack } from "@/lib/msgpack"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cache = any
 
 /**
@@ -534,7 +530,6 @@ describe("Cache", () => {
 			const { name, map } = getFirstMap(cache)
 
 			let writeCount = 0
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const originalImpl = mockDb.runAsync.getMockImplementation() as (...args: any[]) => any
 
 			mockDb.runAsync.mockImplementation(async (...args: unknown[]) => {

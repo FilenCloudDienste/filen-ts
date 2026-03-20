@@ -2,7 +2,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -71,7 +70,6 @@ vi.mock("@/lib/utils", () => ({
 			.replace(/\/$/, ""),
 	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000),
 	unwrapFileMeta: vi.fn((file: unknown) => {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const f = file as any
 
 		if (f && typeof f === "object" && "meta" in f && f.meta && typeof f.meta === "object" && f.meta.tag === "Decoded") {
@@ -81,7 +79,6 @@ vi.mock("@/lib/utils", () => ({
 		return { file, meta: { name: "test.txt", size: 100n, modified: 1000, created: 900 } }
 	}),
 	unwrapDirMeta: vi.fn((dir: unknown) => {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const extractMeta = (d: any) => {
 			if (d && typeof d === "object" && "meta" in d && d.meta && typeof d.meta === "object" && d.meta.tag === "Decoded") {
 				return d.meta.inner[0]
@@ -227,28 +224,17 @@ vi.mock("uuid", () => ({
 	validate: (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 }))
 
-// eslint-disable-next-line import/first
 import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta } from "@/lib/offline"
-// eslint-disable-next-line import/first
 import { pack, unpack } from "@/lib/msgpack"
-// eslint-disable-next-line import/first
 import { fs, File } from "@/tests/mocks/expoFileSystem"
-// eslint-disable-next-line import/first
 import type { DriveItem } from "@/types"
-// eslint-disable-next-line import/first
 import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
-// eslint-disable-next-line import/first
 import transfers from "@/lib/transfers"
-// eslint-disable-next-line import/first
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
-// eslint-disable-next-line import/first
 import auth from "@/lib/auth"
-// eslint-disable-next-line import/first
 import cache from "@/lib/cache"
-// eslint-disable-next-line import/first
 import useOfflineStore from "@/stores/useOffline.store"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OfflineInstance = any
 
 const BASE_DIR_URI = "file:///shared/group.io.filen.app/offline/v1"
@@ -305,24 +291,18 @@ function makeParent(uuid: string): InstanceType<typeof AnyDirWithContext.Normal>
 	return new AnyDirWithContext.Normal(new AnyNormalDir.Dir({ uuid } as unknown as Dir))
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeSharedRootParent(uuid: string, role: "Receiver" | "Sharer"): any {
 	return new AnyDirWithContext.Shared(
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(AnySharedDirWithContext as any).new({
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			dir: new (AnySharedDir as any).Root({ inner: { uuid } }),
 			shareInfo: { tag: role === "Receiver" ? SharingRole_Tags.Receiver : SharingRole_Tags.Sharer }
 		})
 	)
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeSharedDirParent(uuid: string, grandparentUuid: string): any {
 	return new AnyDirWithContext.Shared(
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(AnySharedDirWithContext as any).new({
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			dir: new (AnySharedDir as any).Dir({ inner: { uuid, parent: grandparentUuid } }),
 			shareInfo: { tag: SharingRole_Tags.Receiver }
 		})
@@ -1293,7 +1273,6 @@ describe("Offline", () => {
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 			const dataDirectoryUri = `${DIRECTORIES_DIR_URI}/${uuid}`
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				// Simulate the download writing files into the directory
 				const destUri = destination instanceof File ? destination.uri : destination.uri
@@ -1401,7 +1380,6 @@ describe("Offline", () => {
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 			const dataDirectoryUri = `${DIRECTORIES_DIR_URI}/${uuid}`
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				const destUri = destination instanceof File ? destination.uri : destination.uri
 
@@ -1700,7 +1678,6 @@ describe("Offline", () => {
 
 			let downloadCalled = false
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				downloadCalled = true
 
@@ -1745,7 +1722,6 @@ describe("Offline", () => {
 			const dirItem = makeDirItem(uuid, "NoIndex")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				const destUri = destination instanceof File ? destination.uri : destination.uri
 
@@ -1921,7 +1897,6 @@ describe("Offline", () => {
 				authedSdkClient: {
 					listDir: vi.fn().mockResolvedValue({ files: [], dirs: [] })
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -1970,7 +1945,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2012,7 +1986,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2041,7 +2014,6 @@ describe("Offline", () => {
 				authedSdkClient: {
 					listDir: vi.fn().mockRejectedValue(folderNotFoundError)
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			// Make unwrapSdkError return an error with kind() === FolderNotFound
@@ -2049,7 +2021,6 @@ describe("Offline", () => {
 
 			vi.mocked(unwrapSdkError).mockReturnValueOnce({
 				kind: () => "FolderNotFound"
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2102,7 +2073,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2141,7 +2111,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2176,7 +2145,6 @@ describe("Offline", () => {
 				meta: { tag: "Decoded", inner: [{ name: "ProjectDir" }] }
 			}
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				const destUri = destination instanceof File ? destination.uri : destination.uri
 
@@ -2196,7 +2164,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2237,7 +2204,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2292,7 +2258,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2345,7 +2310,6 @@ describe("Offline", () => {
 
 			let downloadCalled = false
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				downloadCalled = true
 
@@ -2387,7 +2351,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2435,7 +2398,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2483,7 +2445,6 @@ describe("Offline", () => {
 
 			let downloadCalled = false
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				downloadCalled = true
 
@@ -2514,7 +2475,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2578,7 +2538,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2627,7 +2586,6 @@ describe("Offline", () => {
 
 			let downloadCalled = false
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				downloadCalled = true
 
@@ -2658,7 +2616,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2703,7 +2660,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -2765,7 +2721,6 @@ describe("Offline", () => {
 			const parent = makeParent("33333333-3333-3333-3333-333333333333")
 			const dataDirectoryUri = `${DIRECTORIES_DIR_URI}/${dirUuid}`
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				const destUri = destination instanceof File ? destination.uri : destination.uri
 				const destPosix = destUri.replace(/^file:\/+/, "/")
@@ -3156,7 +3111,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3307,7 +3261,6 @@ describe("Offline", () => {
 			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
 				authedSdkClient: {
 					listDir: vi.fn().mockImplementation((dir: { inner: unknown[] }) => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
 						const uuid = ((dir as any).inner ?? [(dir as any)])[0]?.uuid ?? (dir as any).uuid
 
 						if (uuid === parent1Uuid) {
@@ -3317,7 +3270,6 @@ describe("Offline", () => {
 						return listDirParent2()
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			// Sync should complete without throwing
@@ -3360,7 +3312,6 @@ describe("Offline", () => {
 						]
 					}),
 					listDirRecursiveWithPaths: vi.fn().mockImplementation((dir: { inner: unknown[] }) => {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
 						const innerDir = (dir as any).inner?.[0]
 
 						if (innerDir?.uuid === dir2Uuid || innerDir?.inner?.[0]?.uuid === dir2Uuid) {
@@ -3370,7 +3321,6 @@ describe("Offline", () => {
 						return Promise.resolve({ files: [], dirs: [] })
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			// Sync should complete without throwing
@@ -3411,7 +3361,6 @@ describe("Offline", () => {
 				authedSdkClient: {
 					listInSharedRoot
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3447,7 +3396,6 @@ describe("Offline", () => {
 				authedSdkClient: {
 					listOutShared
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3466,7 +3414,6 @@ describe("Offline", () => {
 			// Set up cache and unwrapParentUuid for shared dir listing
 			cache.directoryUuidToAnySharedDirWithContext.set(grandparentUuid, {
 				shareInfo: { tag: SharingRole_Tags.Receiver }
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			const { unwrapParentUuid } = await import("@/lib/utils")
@@ -3496,7 +3443,6 @@ describe("Offline", () => {
 				authedSdkClient: {
 					listSharedDir
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3575,7 +3521,6 @@ describe("Offline", () => {
 			// Set up cache and mock for sharedDirectory parent resolution
 			cache.directoryUuidToAnySharedDirWithContext.set(sharedParentUuid, {
 				shareInfo: { tag: SharingRole_Tags.Receiver }
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			const { unwrapParentUuid } = await import("@/lib/utils")
@@ -3670,7 +3615,6 @@ describe("Offline", () => {
 			const dirUuid = "22222222-2222-2222-2222-222222222222"
 			const parent = makeParent("33333333-3333-3333-3333-333333333333")
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementation(async ({ destination }): Promise<any> => {
 				await new Promise(resolve => setTimeout(resolve, 5))
 
@@ -3743,7 +3687,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3770,7 +3713,6 @@ describe("Offline", () => {
 
 			let downloadCalled = false
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
 				downloadCalled = true
 
@@ -3806,7 +3748,6 @@ describe("Offline", () => {
 						]
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3856,7 +3797,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3898,7 +3838,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()
@@ -3947,7 +3886,6 @@ describe("Offline", () => {
 			}
 
 			writeFileData(uuid, "linked-file.txt")
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			writeFileMeta(uuid, { item: fileItem, parent: linkedParent as any })
 
 			const offline = await createOffline()
@@ -3958,7 +3896,6 @@ describe("Offline", () => {
 			// in the listing switch — our error isolation should catch it and skip the parent
 			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
 				authedSdkClient: {}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await expect(offline.sync()).resolves.not.toThrow()
@@ -3995,7 +3932,6 @@ describe("Offline", () => {
 						dirs: []
 					})
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await expect(offline.sync()).resolves.not.toThrow()
@@ -4110,7 +4046,6 @@ describe("Offline", () => {
 				authedSdkClient: {
 					listDir: vi.fn().mockRejectedValue(new Error("Connection refused"))
 				}
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			} as any)
 
 			await offline.sync()

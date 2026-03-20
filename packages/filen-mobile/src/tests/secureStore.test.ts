@@ -8,7 +8,6 @@ const { UniffiEnum, mockSecureStoreMap, mockEvents, mockExpoSecureStore, mockMmk
 
 	return {
 		UniffiEnum: class UniffiEnum {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			protected constructor(..._args: any[]) {}
 		},
 		mockSecureStoreMap,
@@ -79,12 +78,9 @@ vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))
 
-// eslint-disable-next-line import/first
 import secureStore from "@/lib/secureStore"
-// eslint-disable-next-line import/first
 import { fs } from "@/tests/mocks/expoFileSystem"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SecureStoreInstance = any
 
 const SecureStoreCtor = secureStore.constructor as new () => SecureStoreInstance
@@ -108,7 +104,6 @@ beforeEach(() => {
 describe("SecureStore", () => {
 	describe("constructor", () => {
 		it("throws if EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY is missing", () => {
-			// eslint-disable-next-line expo/no-dynamic-env-var
 			const saved = process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"]
 
 			delete process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"]

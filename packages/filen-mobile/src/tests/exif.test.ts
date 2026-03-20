@@ -247,12 +247,10 @@ describe("parseExifDate", () => {
 
 	describe("edge cases", () => {
 		it("returns null for null input", () => {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			expect(parseExifDate(null as any)).toBeNull()
 		})
 
 		it("returns null for undefined input", () => {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			expect(parseExifDate(undefined as any)).toBeNull()
 		})
 

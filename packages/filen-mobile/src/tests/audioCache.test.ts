@@ -2,7 +2,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -49,13 +48,9 @@ vi.mock("@/constants", () => ({
 	MUSIC_METADATA_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus"])
 }))
 
-// eslint-disable-next-line import/first
 import { fs, File, Directory } from "@/tests/mocks/expoFileSystem"
-// eslint-disable-next-line import/first
 import { pack } from "@/lib/msgpack"
-// eslint-disable-next-line import/first
 import type { DriveItem } from "@/types"
-// eslint-disable-next-line import/first
 import type { Metadata } from "@/lib/audioCache"
 
 const fileCache = (await import("@/lib/fileCache")).default
@@ -102,13 +97,11 @@ function setupFileCacheGetFiles(): void {
 		file: new File(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}/${item.data.uuid}${extname(item.data.decryptedMeta!.name)}`),
 		metadata: new File(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}/${item.data.uuid}.filenmeta`),
 		parentDirectory: new Directory(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}`)
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	})) as any)
 }
 
 async function createAudioCache(): Promise<InstanceType<(typeof import("@/lib/audioCache"))["AudioCache"]>> {
 	const mod = await import("@/lib/audioCache")
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	return new (mod.AudioCache as new () => any)()
 }
 
@@ -269,7 +262,6 @@ describe("AudioCache", () => {
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
 
 			const result = await cache.get({ item })
@@ -296,7 +288,6 @@ describe("AudioCache", () => {
 			const mockFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockFile.uri, new Uint8Array([1, 2, 3]))
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(fileCache.get).mockResolvedValueOnce(mockFile as any)
 
 			const result = await cache.get({ item })
@@ -335,7 +326,6 @@ describe("AudioCache", () => {
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
 			vi.mocked(parseWebStream).mockRejectedValueOnce(new Error("Parse failed"))
 
@@ -356,7 +346,6 @@ describe("AudioCache", () => {
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
 
 			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
@@ -389,7 +378,6 @@ describe("AudioCache", () => {
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
 
 			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`

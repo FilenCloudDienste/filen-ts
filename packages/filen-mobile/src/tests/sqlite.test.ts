@@ -2,7 +2,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -36,10 +35,8 @@ vi.mock("@/constants", () => ({
 	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
 }))
 
-// eslint-disable-next-line import/first
 import { pack } from "@/lib/msgpack"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Sqlite = any
 
 async function createSqlite(): Promise<Sqlite> {
@@ -98,9 +95,7 @@ describe("Sqlite", () => {
 			const sqlite = await createSqlite()
 
 			// Force init to complete without setting db
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			;(sqlite as any).initDone = true
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			;(sqlite as any).db = null
 
 			await expect(sqlite.openDb()).rejects.toThrow("SQLite database not initialized")

@@ -56,7 +56,6 @@ const {
 		getFileUrl: mockGetFileUrl
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const mockHttpStoreSubscribers = new Set<(state: any) => void>()
 
 	const mockRandomUUID = vi.fn(() => "mock-uuid-1234")
@@ -82,7 +81,6 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", () => ({
 	UniffiEnum: class {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -201,14 +199,11 @@ vi.mock("expo-crypto", () => ({
 	randomUUID: mockRandomUUID
 }))
 
-// eslint-disable-next-line import/first
 import thumbnails from "@/lib/thumbnails"
-// eslint-disable-next-line import/first
 import { fs } from "@/tests/mocks/expoFileSystem"
 
 const THUMBNAILS_DIR = "file:///shared/group.io.filen.app/thumbnails/v1"
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeFileItem(uuid: string, name: string): any {
 	return {
 		type: "file" as const,
@@ -220,7 +215,6 @@ function makeFileItem(uuid: string, name: string): any {
 	}
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeSharedFileItem(uuid: string, name: string): any {
 	return {
 		type: "sharedFile" as const,
@@ -232,7 +226,6 @@ function makeSharedFileItem(uuid: string, name: string): any {
 	}
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeDirItem(uuid: string, name: string): any {
 	return {
 		type: "directory" as const,
@@ -379,7 +372,6 @@ describe("Thumbnails", () => {
 		})
 
 		it("throws for items without decryptedMeta name", async () => {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const item: any = {
 				type: "file" as const,
 				data: {
@@ -474,7 +466,6 @@ describe("Thumbnails", () => {
 		})
 
 		it("waits for player to be ready before generating thumbnails", async () => {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			let statusCallback: ((payload: any) => void) | null = null
 			const listenerRegistered = new Promise<void>(resolve => {
 				mockCreateVideoPlayer.mockReturnValue({
@@ -796,7 +787,6 @@ describe("Thumbnails", () => {
 		it("video: aborts during readyToPlay wait", async () => {
 			const controller = new AbortController()
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			let statusCallback: ((payload: any) => void) | null = null
 			const listenerRegistered = new Promise<void>(resolve => {
 				mockCreateVideoPlayer.mockReturnValue({
@@ -1000,7 +990,6 @@ describe("Thumbnails", () => {
 		})
 
 		it("returns false for items without decryptedMeta name", () => {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const item: any = {
 				type: "file" as const,
 				data: {
