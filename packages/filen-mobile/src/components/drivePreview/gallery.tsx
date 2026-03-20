@@ -319,8 +319,14 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 	useEffect(() => {
 		if (initialScrollIndex >= 0) {
 			useDrivePreviewStore.getState().setCurrentIndex(initialScrollIndex)
+
+			const initialItem = itemsSorted[initialScrollIndex]
+
+			if (initialItem) {
+				useDrivePreviewStore.getState().setCurrentItem(initialItem)
+			}
 		}
-	}, [initialScrollIndex])
+	}, [initialScrollIndex, itemsSorted])
 
 	return (
 		<View className="flex-1 bg-transparent">

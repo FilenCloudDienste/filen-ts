@@ -344,12 +344,22 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 						</Text>
 					</Fragment>
 				) : (
-					<Text
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{Paths.parse(item.data.decryptedMeta?.name ?? item.data.uuid).name}
-					</Text>
+					<Fragment>
+						<Text
+							className="font-bold text-white"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							tbd_unkwn_artist
+						</Text>
+						<Text
+							className="text-white"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{Paths.parse(item.data.decryptedMeta?.name ?? item.data.uuid).name}
+						</Text>
+					</Fragment>
 				)}
 			</View>
 			<PressableScale

@@ -133,7 +133,16 @@ const GalleryItem = memo(
 						className="bg-transparent"
 						style={[itemStyle, dismissAnimatedStyle]}
 					>
-						<PreviewPdf fileUrl={fileUrl} />
+						{isActive ? (
+							<PreviewPdf item={info.item} />
+						) : (
+							<View className="bg-transparent flex-1 items-center justify-center">
+								<ActivityIndicator
+									size="small"
+									color="white"
+								/>
+							</View>
+						)}
 					</AnimatedView>
 				)
 			}
@@ -145,7 +154,7 @@ const GalleryItem = memo(
 						style={[itemStyle, dismissAnimatedStyle]}
 					>
 						{isActive ? (
-							<PreviewDocx fileUrl={fileUrl} />
+							<PreviewDocx item={info.item} />
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">
 								<ActivityIndicator
@@ -206,10 +215,7 @@ const GalleryItem = memo(
 						style={[itemStyle, dismissAnimatedStyle]}
 					>
 						{isActive ? (
-							<PreviewText
-								fileUrl={fileUrl}
-								previewType={previewType}
-							/>
+							<PreviewText item={info.item} />
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">
 								<ActivityIndicator

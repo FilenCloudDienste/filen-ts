@@ -15,10 +15,7 @@ export const VERSION = 1
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
 export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000
 
-export const UNCACHED_QUERY_KEYS = new Map<string, true>([
-	["drivePreviewTextContent", true],
-	["drivePreviewDocxContent", true]
-])
+export const UNCACHED_QUERY_KEYS = new Map<string, true>([])
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
 	const shouldNotPersist = (query.queryKey as unknown[]).some(
