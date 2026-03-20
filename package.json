@@ -1,4 +1,10 @@
 {
 	"name": "filen-ts",
-	"private": true
+	"private": true,
+	"scripts": {
+		"postinstall": "patch-package"
+	},
+	"devDependencies": {
+		"patch-package": "^8.0.1"
+	}
 }
