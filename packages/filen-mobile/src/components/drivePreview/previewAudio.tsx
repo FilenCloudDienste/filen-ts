@@ -1,11 +1,12 @@
-import { useState, Fragment, useEffect } from "react"
+import { useState, Fragment } from "react"
 import { memo, useCallback, useMemo } from "@/lib/memo"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from "expo-audio"
+import audio, { useAudio } from "@/lib/audio"
+import alerts from "@/lib/alerts"
 import { type TextStyle, type LayoutChangeEvent, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
 import { Image, ImageBackground } from "@/components/ui/image"
@@ -15,8 +16,8 @@ import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDeri
 import { runOnJS } from "react-native-worklets"
 import { Paths } from "expo-file-system"
 import type { DriveItemFileExtracted } from "@/types"
+import { type Metadata } from "@/lib/audioCache"
 import useEffectOnce from "@/hooks/useEffectOnce"
-import audioCache, { type Metadata } from "@/lib/audioCache"
 
 const FONT_TABULAR_NUMS: TextStyle = {
 	fontVariant: ["tabular-nums"]
@@ -279,63 +280,43 @@ const AudioSlider = memo(
 )
 
 const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtracted; metadata: Metadata }) => {
-	const files = useMemo(() => {
-		return audioCache.getFiles(item)
-	}, [item])
+	const { status, pausePreview, resumePreview, seekPreview, loading } = useAudio()
 
-	const player = useAudioPlayer(files.audio.uri, {
-		updateInterval: 1000
-	})
-
-	const status = useAudioPlayerStatus(player)
-
-	const isAtEnd = useMemo(() => {
-		return status.duration > 0 && status.currentTime >= status.duration - 0.5
-	}, [status.currentTime, status.duration])
+	const isLoadingOrBuffering = useMemo(() => {
+		return loading || (status["preview"]?.isBuffering ?? false)
+	}, [status, loading])
 
 	const onPlayPause = useCallback(() => {
-		if (status.playing) {
-			player.pause()
-		} else if (isAtEnd) {
-			player.seekTo(0)
-			player.play()
-		} else {
-			player.play()
+		if (isLoadingOrBuffering) {
+			return
 		}
-	}, [player, status.playing, isAtEnd])
+
+		if (status["preview"] && status["preview"].playing) {
+			pausePreview()
+		} else if (status["preview"] && status["preview"].didJustFinish) {
+			seekPreview(0)
+			resumePreview()
+		} else {
+			resumePreview()
+		}
+	}, [status, pausePreview, resumePreview, seekPreview, isLoadingOrBuffering])
 
 	const onSeek = useCallback(
 		(seconds: number) => {
-			player.seekTo(seconds)
+			seekPreview(seconds)
 		},
-		[player]
+		[seekPreview]
 	)
 
-	useEffect(() => {
-		if (status.playing) {
-			player.setActiveForLockScreen(
-				true,
-				{
-					title: metadata?.title ?? Paths.parse(item.data.decryptedMeta?.name ?? item.data.uuid).name,
-					artist: metadata?.artist ?? undefined
-				},
-				{
-					showSeekBackward: false,
-					showSeekForward: false
-				}
-			)
-		}
-	}, [status, metadata?.title, metadata?.artist, item.data.decryptedMeta?.name, item.data.uuid, player])
-
 	useEffectOnce(() => {
-		setAudioModeAsync({
-			interruptionMode: "doNotMix",
-			playsInSilentMode: true,
-			allowsRecording: false,
-			shouldPlayInBackground: true,
-			shouldRouteThroughEarpiece: false,
-			allowsBackgroundRecording: false
-		}).catch(console.error)
+		audio.enterPreviewMode({ item }).catch(err => {
+			console.error(err)
+			alerts.error(err)
+		})
+
+		return () => {
+			audio.exitPreviewMode()
+		}
 	})
 
 	return (
@@ -348,13 +329,14 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 				{metadata?.title && metadata?.artist ? (
 					<Fragment>
 						<Text
-							className="font-bold"
+							className="font-bold text-white"
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
 							{metadata.artist}
 						</Text>
 						<Text
+							className="text-white"
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
@@ -374,16 +356,23 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 				className="bg-white/20 size-16 rounded-full mt-10 mb-6 items-center justify-center"
 				onPress={onPlayPause}
 			>
-				<Ionicons
-					name={status.playing ? "pause" : "play"}
-					size={32}
-					color="white"
-				/>
+				{isLoadingOrBuffering ? (
+					<ActivityIndicator
+						color="white"
+						size="small"
+					/>
+				) : (
+					<Ionicons
+						name={status["preview"]?.playing ? "pause" : "play"}
+						size={32}
+						color="white"
+					/>
+				)}
 			</PressableScale>
 			<View className="bg-transparent px-4 w-full">
 				<AudioSlider
-					currentTime={status.currentTime}
-					duration={status.duration}
+					currentTime={status["preview"]?.currentTime ?? 0}
+					duration={status["preview"]?.duration ?? 0}
 					onSeek={onSeek}
 				/>
 			</View>
@@ -392,13 +381,13 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 					className="text-white/70 text-xs"
 					style={FONT_TABULAR_NUMS}
 				>
-					{formatAudioTime(status.currentTime)}
+					{formatAudioTime(status["preview"]?.currentTime ?? 0)}
 				</Text>
 				<Text
 					className="text-white/70 text-xs"
 					style={FONT_TABULAR_NUMS}
 				>
-					{formatAudioTime(status.duration)}
+					{formatAudioTime(status["preview"]?.duration ?? metadata?.duration ?? 0)}
 				</Text>
 			</View>
 		</Background>
