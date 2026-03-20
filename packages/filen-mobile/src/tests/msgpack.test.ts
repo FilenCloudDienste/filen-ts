@@ -8,7 +8,6 @@ import { Packr } from "msgpackr"
 // in Node either, since they require native Rust modules at the top level.
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -18,7 +17,6 @@ vi.mock("uniffi-bindgen-react-native", () => ({
 }))
 
 // Must import after vi.mock so the mock is active when msgpack.ts loads
-// eslint-disable-next-line import/first
 import { pack, unpack } from "@/lib/msgpack"
 
 const uniffiTypeNameSymbol = Symbol.for("typeName")
@@ -754,13 +752,11 @@ describe("msgpack", () => {
 
 			expect(restored.size).toBe(2)
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const entry1 = restored.get("uuid-1") as any
 
 			expect(entry1.parent[uniffiTypeNameSymbol]).toBe("OuterType")
 			expect(entry1.parent.inner[0][uniffiTypeNameSymbol]).toBe("TestType")
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const entry2 = restored.get("uuid-2") as any
 
 			expect(entry2.parent[uniffiTypeNameSymbol]).toBe("TestType")

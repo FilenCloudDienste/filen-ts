@@ -39,7 +39,8 @@ export default [
 			"metro.config.js",
 			"plugins/**/*",
 			"src/uniwind-types.d.ts",
-			"src/global.css"
+			"src/global.css",
+			"src/tests/**/*"
 		]
 	},
 	{

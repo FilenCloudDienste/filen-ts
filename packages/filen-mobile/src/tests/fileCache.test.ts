@@ -2,7 +2,6 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const { UniffiEnum } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -41,7 +40,6 @@ vi.mock("@filen/utils", () => {
 		release(): void {}
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	async function run(fn: (defer: (cleanup: () => void) => void) => Promise<any>, opts?: { throw?: boolean }): Promise<any> {
 		const cleanups: (() => void)[] = []
 
@@ -99,15 +97,10 @@ vi.mock("react-fast-compare", () => ({
 		JSON.stringify(b, (_k, v) => (typeof v === "bigint" ? `__bigint__${v.toString()}` : v))
 }))
 
-// eslint-disable-next-line import/first
 import { pack, unpack } from "@/lib/msgpack"
-// eslint-disable-next-line import/first
 import { fs, File } from "@/tests/mocks/expoFileSystem"
-// eslint-disable-next-line import/first
 import type { DriveItem } from "@/types"
-// eslint-disable-next-line import/first
 import auth from "@/lib/auth"
-// eslint-disable-next-line import/first
 import type { Metadata } from "@/lib/fileCache"
 
 const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"

@@ -123,7 +123,6 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", () => ({
 	UniffiEnum: class {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		protected constructor(..._args: any[]) {}
 	}
 }))
@@ -245,22 +244,17 @@ vi.mock("@/lib/utils", () => ({
 	unwrapParentUuid: mockUnwrapParentUuid
 }))
 
-// eslint-disable-next-line import/first
 import transfers from "@/lib/transfers"
-// eslint-disable-next-line import/first
 import { fs, File as MockFile, Directory as MockDir } from "@/tests/mocks/expoFileSystem"
-// eslint-disable-next-line import/first
 import type * as FileSystem from "expo-file-system"
 
 const FsFile = MockFile as unknown as typeof FileSystem.File
 const FsDirectory = MockDir as unknown as typeof FileSystem.Directory
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeParentDir(uuid: string): any {
 	return { tag: "Dir" as const, inner: [{ uuid }] }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeFileItem(uuid: string, size = 1024n): any {
 	return {
 		type: "file" as const,
@@ -279,7 +273,6 @@ function makeFileItem(uuid: string, size = 1024n): any {
 	}
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeDirItem(uuid: string): any {
 	return {
 		type: "directory" as const,
@@ -601,7 +594,6 @@ describe("Transfers", () => {
 			it("rejects upload to root directory", async () => {
 				const dir = new FsDirectory("file:///document/testdir")
 				fs.set(dir.uri, "dir")
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
 
 				await expect(
@@ -661,7 +653,6 @@ describe("Transfers", () => {
 				})
 
 				mockUploadDirRecursively.mockImplementationOnce(
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
 					async (_path: string, callbacks: any) => {
 						callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 512n)
 					}
@@ -700,7 +691,6 @@ describe("Transfers", () => {
 				})
 
 				mockUploadDirRecursively.mockImplementationOnce(
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
 					async (_path: string, callbacks: any) => {
 						callbacks.onUploadUpdate([uploadedDir], [], 0n)
 					}
@@ -725,7 +715,6 @@ describe("Transfers", () => {
 				const uploadedFile = { uuid: "file-1", parent: { tag: "Uuid", inner: ["dir-1"] } }
 
 				mockUploadDirRecursively.mockImplementationOnce(
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
 					async (_path: string, callbacks: any) => {
 						callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 1024n)
 					}
