@@ -54,7 +54,7 @@ jobs:
           cache-dependency-path: packages/filen-web/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --package-lock-only --no-workspaces && npm ci
+        run: npm install --package-lock-only && npm ci
       - name: Typecheck
         working-directory: packages/filen-web
         run: npm run typecheck
@@ -75,7 +75,7 @@ jobs:
         run: npm install -g patch-package
       - name: Install dependencies
         working-directory: packages/filen-mobile
-        run: npm install --package-lock-only --no-workspaces && npm ci
+        run: npm install --package-lock-only && npm ci
       - name: Typecheck
         working-directory: packages/filen-mobile
         run: npm run typecheck
@@ -94,7 +94,7 @@ jobs:
           cache-dependency-path: packages/filen-utils/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --package-lock-only --no-workspaces && npm ci
+        run: npm install --package-lock-only && npm ci
       - name: Typecheck
         working-directory: packages/filen-utils
         run: npm run typecheck
