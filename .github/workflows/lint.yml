@@ -54,7 +54,7 @@ jobs:
           cache-dependency-path: packages/filen-web/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --package-lock-only --no-workspaces && npm ci
+        run: npm install --package-lock-only && npm ci
       - name: Lint
         working-directory: packages/filen-web
         run: npm run lint
@@ -71,11 +71,9 @@ jobs:
           node-version: 24
           cache: 'npm'
           cache-dependency-path: packages/filen-mobile/package-lock.json
-      - name: Install patch-package
-        run: npm install -g patch-package
       - name: Install dependencies
         working-directory: packages/filen-mobile
-        run: npm install --package-lock-only --no-workspaces && npm ci
+        run: npm install --package-lock-only && npm ci
       - name: Lint
         working-directory: packages/filen-mobile
         run: npm run lint
@@ -94,7 +92,7 @@ jobs:
           cache-dependency-path: packages/filen-utils/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --package-lock-only --no-workspaces && npm ci
+        run: npm install --package-lock-only && npm ci
       - name: Lint
         working-directory: packages/filen-utils
         run: npm run lint
