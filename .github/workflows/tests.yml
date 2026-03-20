@@ -66,8 +66,6 @@ jobs:
           node-version: 24
           cache: 'npm'
           cache-dependency-path: packages/filen-mobile/package-lock.json
-      - name: Install patch-package
-        run: npm install -g patch-package
       - name: Install dependencies
         working-directory: packages/filen-mobile
         run: npm install --package-lock-only && npm ci
