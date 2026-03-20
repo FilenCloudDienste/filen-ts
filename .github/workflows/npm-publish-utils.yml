@@ -21,7 +21,7 @@ jobs:
           node-version: 24
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --package-lock-only --no-workspaces && npm ci
+        run: npm install --package-lock-only && npm ci
       - name: Build
         working-directory: packages/filen-utils
         run: npm run build
