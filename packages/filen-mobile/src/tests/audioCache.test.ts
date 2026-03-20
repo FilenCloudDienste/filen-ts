@@ -61,6 +61,12 @@ import type { Metadata } from "@/lib/audioCache"
 const fileCache = (await import("@/lib/fileCache")).default
 const { parseWebStream } = await import("music-metadata")
 
+function extname(filename: string): string {
+	const dot = filename.lastIndexOf(".")
+
+	return dot === -1 ? "" : filename.slice(dot)
+}
+
 const AUDIO_BASE_DIR = "file:///shared/group.io.filen.app/audioCache/v1"
 const FILE_CACHE_BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
 
@@ -93,7 +99,7 @@ function makeDirItem(uuid: string): DriveItem {
 
 function setupFileCacheGetFiles(): void {
 	vi.mocked(fileCache.getFiles).mockImplementation(((item: DriveItem) => ({
-		file: new File(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}/${item.data.uuid}`),
+		file: new File(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}/${item.data.uuid}${extname(item.data.decryptedMeta!.name)}`),
 		metadata: new File(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}/${item.data.uuid}.filenmeta`),
 		parentDirectory: new Directory(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}`)
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -128,7 +134,7 @@ describe("AudioCache", () => {
 
 			const files = cache.getFiles(item)
 
-			expect(files.audio.uri).toBe(`${FILE_CACHE_BASE_DIR}/uuid-1/uuid-1`)
+			expect(files.audio.uri).toBe(`${FILE_CACHE_BASE_DIR}/uuid-1/uuid-1.mp3`)
 			expect(files.metadata.uri).toBe(`${AUDIO_BASE_DIR}/uuid-1.filenmeta`)
 		})
 	})
@@ -138,7 +144,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const item = makeFileItem("uuid-2", "song.mp3")
 
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-2/uuid-2`
+			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-2/uuid-2.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-2.filenmeta`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
@@ -197,7 +203,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const item = makeFileItem("uuid-5", "song.mp3")
 
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-5/uuid-5`
+			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-5/uuid-5.mp3`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
 
@@ -210,7 +216,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const item = makeFileItem("uuid-6", "song.mp3")
 
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-6/uuid-6`
+			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-6/uuid-6.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-6.filenmeta`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
@@ -227,7 +233,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const item = makeFileItem("uuid-7", "song.mp3")
 
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-7/uuid-7`
+			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-7/uuid-7.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-7.filenmeta`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
@@ -260,7 +266,7 @@ describe("AudioCache", () => {
 			const name = "song.mp3"
 			const item = makeFileItem(uuid, name)
 
-			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}`)
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -287,7 +293,7 @@ describe("AudioCache", () => {
 			const name = "document.pdf"
 			const item = makeFileItem(uuid, name)
 
-			const mockFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}`)
+			const mockFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockFile.uri, new Uint8Array([1, 2, 3]))
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -326,7 +332,7 @@ describe("AudioCache", () => {
 			const name = "song.mp3"
 			const item = makeFileItem(uuid, name)
 
-			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}`)
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -347,7 +353,7 @@ describe("AudioCache", () => {
 			const name = "song.mp3"
 			const item = makeFileItem(uuid, name)
 
-			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}`)
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -380,7 +386,7 @@ describe("AudioCache", () => {
 			const name = "song.mp3"
 			const item = makeFileItem(uuid, name)
 
-			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}`)
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -401,7 +407,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const item = makeFileItem("uuid-15", "song.mp3")
 
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-15/uuid-15`
+			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-15/uuid-15.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-15.filenmeta`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
@@ -432,7 +438,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const item = makeFileItem("uuid-16", "song.mp3")
 
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-16/uuid-16`
+			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-16/uuid-16.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-16.filenmeta`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
