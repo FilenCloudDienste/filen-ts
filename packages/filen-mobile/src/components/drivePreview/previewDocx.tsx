@@ -1,48 +1,44 @@
 import { memo } from "@/lib/memo"
 import View from "@/components/ui/view"
 import DocxPreview from "@/components/docxPreview"
-import { useQuery } from "@tanstack/react-query"
 import { Buffer } from "react-native-quick-crypto"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { fetch } from "expo/fetch"
-import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams } from "@/queries/client"
+import { useSimpleQuery } from "@/hooks/useSimpleQuery"
+import fileCache from "@/lib/fileCache"
+import type { DriveItemFileExtracted } from "@/types"
+import { ActivityIndicator } from "react-native"
 
-const PreviewDocx = memo(({ fileUrl }: { fileUrl: string }) => {
+const PreviewDocx = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 
-	const defaultQueryParams = useDefaultQueryParams()
-	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
-		...defaultQueryParams,
-		queryKey: ["drivePreviewDocxContent", fileUrl],
-		queryFn: async ({ signal }) => {
-			const response = await fetch(fileUrl, {
-				signal
-			})
+	const query = useSimpleQuery(async signal => {
+		const file = await fileCache.get({
+			item,
+			signal
+		})
 
-			if (!response.ok) {
-				throw new Error(`HTTP error: ${response.status}`)
-			}
-
-			const arrayBuffer = await response.arrayBuffer()
-
-			return Buffer.from(arrayBuffer).toString("base64")
-		}
+		return Buffer.from(await file.bytes()).toString("base64")
 	})
 
 	if (query.status !== "success") {
-		// TODO: show loading state or error message
-		return null
+		return (
+			<View className="bg-transparent flex-1 items-center justify-center">
+				<ActivityIndicator
+					size="small"
+					color="white"
+				/>
+			</View>
+		)
 	}
 
 	return (
-		<View className="bg-transparent flex-1">
+		<View className="bg-background flex-1">
 			<DocxPreview
 				base64={query.data}
-				paddingTop={headerHeight ? headerHeight + 8 : undefined}
+				paddingTop={headerHeight ? headerHeight : undefined}
 				paddingBottom={insets.bottom}
 			/>
 		</View>

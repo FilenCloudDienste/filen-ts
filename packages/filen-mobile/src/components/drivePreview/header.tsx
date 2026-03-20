@@ -1,4 +1,4 @@
-import { memo } from "@/lib/memo"
+import { memo, useMemo } from "@/lib/memo"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
@@ -16,6 +16,9 @@ import useNetInfo from "@/hooks/useNetInfo"
 import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { useShallow } from "zustand/shallow"
+import { getPreviewType } from "@/lib/utils"
+import { cn } from "@filen/utils"
+import { useResolveClassNames } from "uniwind"
 
 const GalleryHeader = memo(
 	({
@@ -35,7 +38,18 @@ const GalleryHeader = memo(
 		const viewRef = useRef<TView>(null)
 		const { onLayout, layout } = useViewLayout(viewRef)
 		const netInfo = useNetInfo()
-		const currentItem = useDrivePreviewStore(useShallow(state => state.currentItem))
+		const textForeground = useResolveClassNames("text-foreground")
+
+		const { currentItem, currentItemPreviewType } = useDrivePreviewStore(
+			useShallow(state => ({
+				currentItem: state.currentItem,
+				currentItemPreviewType: getPreviewType(state.currentItem?.data.decryptedMeta?.name ?? "")
+			}))
+		)
+
+		const solidHeader = useMemo(() => {
+			return currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
+		}, [currentItemPreviewType])
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
 			{
@@ -67,7 +81,7 @@ const GalleryHeader = memo(
 
 		return (
 			<AnimatedView
-				className="absolute top-0 left-0 right-0 z-1000 bg-transparent"
+				className={cn("absolute top-0 left-0 right-0 z-1000", solidHeader ? "bg-background" : "bg-transparent")}
 				style={[
 					{
 						paddingTop: insets.top
@@ -76,7 +90,10 @@ const GalleryHeader = memo(
 				]}
 			>
 				<View
-					className="flex-row items-center px-4 py-2 pt-0 min-h-11 gap-8 bg-transparent justify-between"
+					className={cn(
+						"flex-row items-center px-4 py-3 pt-0 min-h-11 gap-10 justify-between",
+						solidHeader ? "bg-background" : "bg-transparent"
+					)}
 					ref={viewRef}
 					onLayout={onLayout}
 				>
@@ -85,16 +102,26 @@ const GalleryHeader = memo(
 						onPress={goBack}
 						hitSlop={10}
 					>
-						<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
-							<Ionicons
-								name="close-outline"
-								size={30}
-								color="white"
-							/>
-						</CrossGlassContainerView>
+						{currentItemPreviewType === "audio" ? (
+							<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
+								<Ionicons
+									name="close-outline"
+									size={24}
+									color="white"
+								/>
+							</View>
+						) : (
+							<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+								<Ionicons
+									name="close-outline"
+									size={30}
+									color={solidHeader ? textForeground.color : "white"}
+								/>
+							</CrossGlassContainerView>
+						)}
 					</PressableScale>
 					<Text
-						className="flex-1 text-white font-semibold text-base text-center"
+						className={cn("flex-1 font-semibold text-base text-center", solidHeader ? "text-foreground" : "text-white")}
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
@@ -111,13 +138,23 @@ const GalleryHeader = memo(
 							isOnline={netInfo.hasInternet}
 							versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 						>
-							<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
-								<Ionicons
-									name="ellipsis-horizontal"
-									size={24}
-									color="white"
-								/>
-							</CrossGlassContainerView>
+							{currentItemPreviewType === "audio" ? (
+								<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
+									<Ionicons
+										name="ellipsis-horizontal"
+										size={24}
+										color="white"
+									/>
+								</View>
+							) : (
+								<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+									<Ionicons
+										name="ellipsis-horizontal"
+										size={24}
+										color={solidHeader ? textForeground.color : "white"}
+									/>
+								</CrossGlassContainerView>
+							)}
 						</Menu>
 					)}
 				</View>

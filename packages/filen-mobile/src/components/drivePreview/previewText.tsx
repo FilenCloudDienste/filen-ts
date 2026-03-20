@@ -1,42 +1,44 @@
-import { memo } from "@/lib/memo"
+import { memo, useMemo } from "@/lib/memo"
 import View from "@/components/ui/view"
-import { type getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/utils"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
-import { useQuery } from "@tanstack/react-query"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames, useUniwind } from "uniwind"
-import { fetch } from "expo/fetch"
-import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams } from "@/queries/client"
+import { ActivityIndicator } from "react-native"
+import { useSimpleQuery } from "@/hooks/useSimpleQuery"
+import fileCache from "@/lib/fileCache"
+import type { DriveItemFileExtracted } from "@/types"
 
-const PreviewText = memo(({ fileUrl, previewType }: { fileUrl: string; previewType: ReturnType<typeof getPreviewType> }) => {
+const PreviewText = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 
-	const defaultQueryParams = useDefaultQueryParams()
-	const query = useQuery({
-		...DEFAULT_QUERY_OPTIONS,
-		...defaultQueryParams,
-		queryKey: ["drivePreviewTextContent", fileUrl],
-		queryFn: async ({ signal }) => {
-			const response = await fetch(fileUrl, {
-				signal
-			})
+	const previewType = useMemo(() => {
+		return getPreviewType(item.data.decryptedMeta?.name ?? "")
+	}, [item.data.decryptedMeta])
 
-			if (!response.ok) {
-				throw new Error(`HTTP error: ${response.status}`)
-			}
+	const query = useSimpleQuery(async signal => {
+		const file = await fileCache.get({
+			item,
+			signal
+		})
 
-			return response.text()
-		}
+		return await file.text()
 	})
 
 	if (query.status !== "success") {
-		// TODO: show loading state or error message
-		return null
+		return (
+			<View className="bg-transparent flex-1 items-center justify-center">
+				<ActivityIndicator
+					size="small"
+					color="white"
+				/>
+			</View>
+		)
 	}
 
 	return (
@@ -48,7 +50,6 @@ const PreviewText = memo(({ fileUrl, previewType }: { fileUrl: string; previewTy
 			}}
 		>
 			<TextEditor
-				key={query.dataUpdatedAt}
 				initialValue={query.data}
 				onValueChange={() => {}}
 				readOnly={true}
