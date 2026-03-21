@@ -1,5 +1,5 @@
-import { memo, useMemo } from "@/lib/memo"
-import View from "@/components/ui/view"
+import { memo, useMemo, useCallback } from "@/lib/memo"
+import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { getPreviewType } from "@/lib/utils"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
 import { useShallow } from "zustand/shallow"
@@ -10,13 +10,141 @@ import { ActivityIndicator } from "react-native"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import fileCache from "@/lib/fileCache"
 import type { DriveItemFileExtracted } from "@/types"
+import { useState } from "react"
+import { PressableScale } from "@/components/ui/pressables"
+import Ionicons from "@expo/vector-icons/Ionicons"
+import transfers from "@/lib/transfers"
+import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import alerts from "@/lib/alerts"
+import * as FileSystem from "expo-file-system"
+import { randomUUID } from "expo-crypto"
+import { type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 
-const PreviewText = memo(({ item }: { item: DriveItemFileExtracted }) => {
-	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
-	const insets = useSafeAreaInsets()
-	const bgBackground = useResolveClassNames("bg-background")
-	const { theme } = useUniwind()
+const PreviewTextInner = memo(
+	({
+		previewType,
+		text,
+		item,
+		parent
+	}: {
+		previewType: "text" | "code"
+		text: string
+		item: DriveItemFileExtracted
+		parent?: AnyDirWithContext
+	}) => {
+		const bgBackground = useResolveClassNames("bg-background")
+		const { theme } = useUniwind()
+		const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
+		const insets = useSafeAreaInsets()
+		const [editedText, setEditedText] = useState<string | null>(null)
+		const textPrimary = useResolveClassNames("text-primary")
 
+		const readOnly = useMemo(() => {
+			return item.type !== "file" || !item.data.decryptedMeta || !parent
+		}, [item, parent])
+
+		const save = useCallback(async () => {
+			if (editedText === null || readOnly) {
+				return
+			}
+
+			const result = await runWithLoading(async defer => {
+				if (!item.data.decryptedMeta) {
+					throw new Error("Missing decryptedMeta")
+				}
+
+				if (!parent) {
+					throw new Error("Missing parent directory")
+				}
+
+				if (parent.tag !== AnyDirWithContext_Tags.Normal) {
+					throw new Error("Parent is not a normal directory")
+				}
+
+				const tmpFile = new FileSystem.File(
+					FileSystem.Paths.join(FileSystem.Paths.cache.uri, randomUUID(), item.data.decryptedMeta.name)
+				)
+
+				defer(() => {
+					if (tmpFile.parentDirectory.exists) {
+						tmpFile.parentDirectory.delete()
+					}
+				})
+
+				if (!tmpFile.parentDirectory.exists) {
+					tmpFile.parentDirectory.create({
+						idempotent: true,
+						intermediates: true
+					})
+				}
+
+				tmpFile.write(new TextEncoder().encode(editedText))
+
+				return await transfers.upload({
+					id: tmpFile.uri,
+					localFileOrDir: tmpFile,
+					parent: parent.inner[0]
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+
+				return
+			}
+
+			setEditedText(null)
+		}, [editedText, readOnly, item, parent])
+
+		return (
+			<View
+				className="flex-1"
+				style={{
+					backgroundColor:
+						previewType === "text"
+							? bgBackground.backgroundColor
+							: backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
+				}}
+			>
+				{editedText !== null && (
+					<View
+						className="absolute left-0 right-0 bg-transparent z-1000 flex-row items-center justify-end px-4"
+						style={{
+							top: headerHeight ? headerHeight + insets.top : 0
+						}}
+					>
+						<PressableScale
+							className="size-11 items-center justify-center"
+							onPress={save}
+							hitSlop={10}
+						>
+							<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+								<Ionicons
+									name="save-outline"
+									size={20}
+									color={textPrimary.color}
+								/>
+							</CrossGlassContainerView>
+						</PressableScale>
+					</View>
+				)}
+				<TextEditor
+					initialValue={text}
+					onValueChange={setEditedText}
+					readOnly={readOnly}
+					placeholder="tbd_placeholder"
+					type={previewType === "code" ? "code" : "text"}
+					disableRichtextToolbar={true}
+					paddingTop={headerHeight ? headerHeight + 8 : undefined}
+					paddingBottom={insets.bottom}
+				/>
+			</View>
+		)
+	}
+)
+
+const PreviewText = memo(({ item, parent }: { item: DriveItemFileExtracted; parent?: AnyDirWithContext }) => {
 	const previewType = useMemo(() => {
 		return getPreviewType(item.data.decryptedMeta?.name ?? "")
 	}, [item.data.decryptedMeta])
@@ -42,24 +170,12 @@ const PreviewText = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	}
 
 	return (
-		<View
-			className="flex-1"
-			style={{
-				backgroundColor:
-					previewType === "text" ? bgBackground.backgroundColor : backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
-			}}
-		>
-			<TextEditor
-				initialValue={query.data}
-				onValueChange={() => {}}
-				readOnly={true}
-				placeholder="tbd_placeholder"
-				type={previewType === "code" ? "code" : "text"}
-				disableRichtextToolbar={true}
-				paddingTop={headerHeight ? headerHeight + 8 : undefined}
-				paddingBottom={insets.bottom}
-			/>
-		</View>
+		<PreviewTextInner
+			previewType={previewType === "code" ? "code" : "text"}
+			text={query.data}
+			item={item}
+			parent={parent}
+		/>
 	)
 })
 
