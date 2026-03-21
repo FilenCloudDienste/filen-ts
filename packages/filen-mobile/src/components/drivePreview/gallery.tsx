@@ -151,7 +151,11 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		isDismissing.value = 1
 		headerOpacity.value = 0
 
-		router.dismissAll()
+		if (!router.canGoBack()) {
+			return
+		}
+
+		router.back()
 	}, [isDismissing, headerOpacity])
 
 	const onZoomChange = useCallback(

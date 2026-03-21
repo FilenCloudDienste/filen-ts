@@ -39,8 +39,8 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 		[headerHeight, insets.bottom]
 	)
 
-	const onError = useCallback(async (e: OnErrorEventPayload) => {
-		await run(async defer => {
+	const onError = useCallback((e: OnErrorEventPayload) => {
+		run(async defer => {
 			if (onErrorWorkingRef.current) {
 				return
 			}
@@ -66,38 +66,38 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 
 				case "password_incorrect":
 				case "password_required": {
-					if (e.code === "password_incorrect") {
-						alerts.error("tbd_incorrect_password")
-					}
-
-					const result = await run(async () => {
-						return await prompts.input({
-							title: "tbd_password_required",
-							message: "tbd_enter_password",
-							cancelText: "tbd_cancel",
-							okText: "tbd_ok",
-							inputType: "secure-text"
+					while (true) {
+						const result = await run(async () => {
+							return await prompts.input({
+								title: "tbd_password_required",
+								message: "tbd_enter_password",
+								cancelText: "tbd_cancel",
+								okText: "tbd_ok",
+								inputType: "secure-text"
+							})
 						})
-					})
 
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
 
-						return
+							continue
+						}
+
+						if (result.data.cancelled || result.data.type !== "string") {
+							continue
+						}
+
+						const password = result.data.value.trim()
+
+						if (password.length === 0) {
+							continue
+						}
+
+						setPassword(password)
+
+						break
 					}
-
-					if (result.data.cancelled || result.data.type !== "string") {
-						return
-					}
-
-					const password = result.data.value.trim()
-
-					if (password.length === 0) {
-						return
-					}
-
-					setPassword(password)
 				}
 			}
 		})
@@ -105,7 +105,7 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 
 	if (query.status !== "success") {
 		return (
-			<View className="bg-transparent flex-1 items-center justify-center">
+			<View className="bg-background flex-1 items-center justify-center">
 				<ActivityIndicator
 					size="small"
 					color="white"
