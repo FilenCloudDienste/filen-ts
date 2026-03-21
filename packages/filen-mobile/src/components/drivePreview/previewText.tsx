@@ -40,6 +40,7 @@ const PreviewTextInner = memo(
 		const textPrimary = useResolveClassNames("text-primary")
 
 		const readOnly = useMemo(() => {
+			// TODO: fix isOwner check
 			return item.type !== "file" || !item.data.decryptedMeta || !parent
 		}, [item, parent])
 
@@ -145,6 +146,9 @@ const PreviewTextInner = memo(
 )
 
 const PreviewText = memo(({ item, parent }: { item: DriveItemFileExtracted; parent?: AnyDirWithContext }) => {
+	const bgBackground = useResolveClassNames("bg-background")
+	const { theme } = useUniwind()
+
 	const previewType = useMemo(() => {
 		return getPreviewType(item.data.decryptedMeta?.name ?? "")
 	}, [item.data.decryptedMeta])
@@ -160,7 +164,15 @@ const PreviewText = memo(({ item, parent }: { item: DriveItemFileExtracted; pare
 
 	if (query.status !== "success") {
 		return (
-			<View className="bg-transparent flex-1 items-center justify-center">
+			<View
+				className="flex-1 items-center justify-center"
+				style={{
+					backgroundColor:
+						previewType === "text"
+							? bgBackground.backgroundColor
+							: backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
+				}}
+			>
 				<ActivityIndicator
 					size="small"
 					color="white"

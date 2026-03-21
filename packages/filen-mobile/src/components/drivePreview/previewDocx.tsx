@@ -25,7 +25,7 @@ const PreviewDocx = memo(({ item }: { item: DriveItemFileExtracted }) => {
 
 	if (query.status !== "success") {
 		return (
-			<View className="bg-transparent flex-1 items-center justify-center">
+			<View className="bg-background flex-1 items-center justify-center">
 				<ActivityIndicator
 					size="small"
 					color="white"

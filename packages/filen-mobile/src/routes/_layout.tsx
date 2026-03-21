@@ -212,7 +212,7 @@ export const RootLayout = memo(() => {
 											<Stack.Screen
 												name="drivePreview"
 												options={{
-													presentation: "containedTransparentModal",
+													presentation: "transparentModal",
 													animation: "slide_from_bottom",
 													contentStyle: {
 														backgroundColor: "transparent"

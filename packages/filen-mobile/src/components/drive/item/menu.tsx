@@ -57,6 +57,7 @@ export function createMenuButtons({
 }): MenuButton[] {
 	const menuButtons: MenuButton[] = []
 	const previewType = item.type === "file" || item.type === "sharedFile" ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
+	// TODO: Fix isOwner check
 	const isOwner =
 		parent &&
 		(parent.tag === AnyDirWithContext_Tags.Normal ||

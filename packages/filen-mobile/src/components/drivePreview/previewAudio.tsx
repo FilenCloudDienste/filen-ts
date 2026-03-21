@@ -283,7 +283,7 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 	const { status, pausePreview, resumePreview, seekPreview, loading } = useAudio()
 
 	const isLoadingOrBuffering = useMemo(() => {
-		return loading || (status["preview"]?.isBuffering ?? false)
+		return loading || (status["preview"]?.isBuffering ?? false) || !(status["preview"]?.isLoaded ?? false)
 	}, [status, loading])
 
 	const onPlayPause = useCallback(() => {
