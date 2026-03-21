@@ -165,7 +165,7 @@ import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
 // Capture constructor event handlers before beforeEach clears mocks
-const eventHandlers: Record<string, Function> = Object.fromEntries(
+const eventHandlers: Record<string, Function | undefined> = Object.fromEntries(
 	vi.mocked(events.subscribe).mock.calls.map(([event, handler]) => [event as string, handler as Function])
 )
 
@@ -626,7 +626,7 @@ describe("constructor events", () => {
 	it("secureStoreChange with matching key triggers cancel", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
 
-		eventHandlers["secureStoreChange"]({ key: "cameraUploadConfig" })
+		eventHandlers["secureStoreChange"]!({ key: "cameraUploadConfig" })
 
 		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
 	})
@@ -634,7 +634,7 @@ describe("constructor events", () => {
 	it("secureStoreChange with unrelated key does not trigger cancel", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
 
-		eventHandlers["secureStoreChange"]({ key: "someOtherKey" })
+		eventHandlers["secureStoreChange"]!({ key: "someOtherKey" })
 
 		expect((cameraUpload as any).globalAbortController).toBe(controllerBefore)
 	})
@@ -642,7 +642,7 @@ describe("constructor events", () => {
 	it("secureStoreClear triggers cancel", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
 
-		eventHandlers["secureStoreClear"]()
+		eventHandlers["secureStoreClear"]!()
 
 		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
 	})
