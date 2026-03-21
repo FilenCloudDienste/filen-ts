@@ -190,6 +190,14 @@ export class AudioCache {
 							cachedAt: Date.now()
 						}
 
+						if (metadataFile.exists) {
+							metadataFile.delete()
+						}
+
+						metadataFile.create({
+							intermediates: true
+						})
+
 						metadataFile.write(new Uint8Array(pack(metadata)))
 					} else {
 						metadata = unpack(await metadataFile.bytes()) as Metadata
