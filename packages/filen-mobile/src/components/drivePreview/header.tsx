@@ -98,7 +98,7 @@ const GalleryHeader = memo(
 					onLayout={onLayout}
 				>
 					<PressableScale
-						className="size-9 items-center justify-center"
+						className="size-11 items-center justify-center"
 						onPress={goBack}
 						hitSlop={10}
 					>

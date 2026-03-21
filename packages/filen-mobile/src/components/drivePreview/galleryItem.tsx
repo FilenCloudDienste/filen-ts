@@ -12,7 +12,7 @@ import PreviewAudio from "@/components/drivePreview/previewAudio"
 import PreviewText from "@/components/drivePreview/previewText"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import { AnyFile } from "@filen/sdk-rs"
+import { AnyFile, type AnyDirWithContext } from "@filen/sdk-rs"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import View from "@/components/ui/view"
@@ -44,7 +44,8 @@ const GalleryItem = memo(
 		fadeRange,
 		goBack,
 		onZoomChange,
-		onSingleTap
+		onSingleTap,
+		parent
 	}: {
 		info: ListRenderItemInfo<DriveItemFileExtracted>
 		galleryZoomScale: SharedValue<number>
@@ -54,6 +55,7 @@ const GalleryItem = memo(
 		goBack: () => void
 		onZoomChange?: (zoom: number) => void
 		onSingleTap?: () => void
+		parent?: AnyDirWithContext
 	}) => {
 		const dimensions = useWindowDimensions()
 		const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
@@ -215,7 +217,10 @@ const GalleryItem = memo(
 						style={[itemStyle, dismissAnimatedStyle]}
 					>
 						{isActive ? (
-							<PreviewText item={info.item} />
+							<PreviewText
+								item={info.item}
+								parent={parent}
+							/>
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">
 								<ActivityIndicator

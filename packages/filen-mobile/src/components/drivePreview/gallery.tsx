@@ -302,10 +302,11 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 					goBack={goBack}
 					onZoomChange={onZoomChange}
 					onSingleTap={onSingleTap}
+					parent={parent}
 				/>
 			)
 		},
-		[zoomScale, dismissTranslateY, isDismissing, fadeRange, goBack, onZoomChange, onSingleTap]
+		[zoomScale, dismissTranslateY, isDismissing, fadeRange, goBack, onZoomChange, onSingleTap, parent]
 	)
 
 	const keyExtractor = useCallback((driveItem: DriveItemFileExtracted) => {
