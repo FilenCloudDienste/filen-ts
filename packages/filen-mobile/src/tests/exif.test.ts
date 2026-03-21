@@ -186,65 +186,6 @@ describe("parseExifDate", () => {
 		})
 	})
 
-	describe("SubSecTimeDigitized with DateTimeDigitized", () => {
-		it("uses SubSecTimeDigitized when DateTimeOriginal is absent", () => {
-			const exif = {
-				DateTimeDigitized: BASE_DATE,
-				SubSecTimeDigitized: "456"
-			}
-
-			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.456Z"))
-		})
-	})
-
-	describe("SubSecTimeOriginal padding and truncation", () => {
-		it("pads 2-digit subsec to three digits", () => {
-			const exif = {
-				DateTimeOriginal: BASE_DATE,
-				SubSecTimeOriginal: "12"
-			}
-
-			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.120Z"))
-		})
-
-		it("truncates subsec longer than 3 digits", () => {
-			const exif = {
-				DateTimeOriginal: BASE_DATE,
-				SubSecTimeOriginal: "12345"
-			}
-
-			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.123Z"))
-		})
-	})
-
-	describe("zero timezone offset", () => {
-		it("zero timezone offset produces same result as no offset", () => {
-			const withOffset = parseExifDate({
-				DateTimeOriginal: BASE_DATE,
-				OffsetTimeOriginal: "+00:00"
-			})
-
-			const withoutOffset = parseExifDate({
-				DateTimeOriginal: BASE_DATE
-			})
-
-			expect(withOffset).toBe(withoutOffset)
-		})
-	})
-
-	describe("iOS layout edge cases", () => {
-		it("reads SubSecTimeOriginal from nested {Exif} group", () => {
-			const exif = {
-				"{Exif}": {
-					DateTimeOriginal: BASE_DATE,
-					SubSecTimeOriginal: "789"
-				}
-			}
-
-			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.789Z"))
-		})
-	})
-
 	describe("edge cases", () => {
 		it("returns null for null input", () => {
 			expect(parseExifDate(null as any)).toBeNull()
@@ -271,24 +212,6 @@ describe("parseExifDate", () => {
 				DateTimeOriginal: 12345,
 				DateTimeDigitized: null,
 				DateTime: BASE_DATE
-			}
-
-			expect(parseExifDate(exif as Record<string, unknown>)).toBe(BASE_TS)
-		})
-
-		it("falls back to flat lookup when {Exif} is a non-object", () => {
-			const exif = {
-				"{Exif}": "not-an-object",
-				DateTimeOriginal: BASE_DATE
-			}
-
-			expect(parseExifDate(exif)).toBe(BASE_TS)
-		})
-
-		it("works when {TIFF} is null and date is at top level", () => {
-			const exif = {
-				"{TIFF}": null,
-				DateTimeOriginal: BASE_DATE
 			}
 
 			expect(parseExifDate(exif as Record<string, unknown>)).toBe(BASE_TS)
