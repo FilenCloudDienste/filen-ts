@@ -24,6 +24,10 @@ import events from "@/lib/events"
 import { LRUCache } from "lru-cache"
 import { parseExifDate } from "@/lib/exif"
 import drive from "@/lib/drive"
+import { useCallback } from "@/lib/memo"
+import NetInfo from "@react-native-community/netinfo"
+import * as Battery from "expo-battery"
+import { getPermissionsAsync } from "expo-media-library"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -58,6 +62,60 @@ export type Config =
 			compress: boolean
 	  }
 
+export type CollisionParams = {
+	iteration: number
+	path: string
+	asset: {
+		name: string
+		creationTime: number
+	}
+}
+
+/**
+ * Generates a collision-resolved path for a camera upload asset.
+ *
+ * When multiple assets share the same filename, this function appends
+ * a deterministic suffix based on the asset's metadata. The iteration
+ * parameter controls which suffix strategy is used:
+ *
+ *   0 — append creationTime
+ *   1 — append hash of name + creationTime
+ *
+ * Only creationTime is used because modificationTime can change when a
+ * file is edited, which would produce different paths across syncs.
+ *
+ * Returns null when all iterations are exhausted or the path is invalid.
+ */
+export function modifyAssetPathOnCollision({ iteration, path, asset }: CollisionParams): string | null {
+	const ext = pathModule.posix.extname(asset.name)
+	const basename = pathModule.posix.basename(asset.name, ext)
+	const parentDir = pathModule.posix.dirname(path)
+
+	if (parentDir === "." || basename.length === 0 || parentDir.length === 0 || basename === ".") {
+		return null
+	}
+
+	switch (iteration) {
+		case 0: {
+			return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${asset.creationTime}${ext}`))
+				.toLowerCase()
+				.trim()
+		}
+
+		case 1: {
+			return normalizeFilePathForSdk(
+				pathModule.posix.join(parentDir, `${basename}_${xxHash32(`${asset.name}_${asset.creationTime}`).toString(16)}${ext}`)
+			)
+				.toLowerCase()
+				.trim()
+		}
+
+		default: {
+			return null
+		}
+	}
+}
+
 class CameraUpload {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
@@ -68,7 +126,7 @@ class CameraUpload {
 		max: Infinity,
 		maxEntrySize: Infinity,
 		maxSize: Infinity,
-		ttl: 300000,
+		ttl: 60000,
 		allowStale: false,
 		updateAgeOnGet: false,
 		updateAgeOnHas: false
@@ -115,11 +173,11 @@ class CameraUpload {
 		this.globalPauseSignal.resume()
 	}
 
-	private async compress(file: FileSystem.File): Promise<void> {
+	private async compress(file: FileSystem.File): Promise<FileSystem.File> {
 		const extname = pathModule.posix.extname(file.uri).toLowerCase()
 
 		if (!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(extname)) {
-			return
+			return file
 		}
 
 		// Guard: only compress files within the app's cache directory to prevent
@@ -142,12 +200,11 @@ class CameraUpload {
 		}
 
 		if (!manipulatedFile.size || !file.size || manipulatedFile.size >= file.size) {
-			// If the manipulated file is larger than the original, delete it
 			if (manipulatedFile.exists) {
 				manipulatedFile.delete()
 			}
 
-			return
+			return file
 		}
 
 		manipulatedFile.copy(file)
@@ -155,84 +212,18 @@ class CameraUpload {
 		if (manipulatedFile.exists) {
 			manipulatedFile.delete()
 		}
-	}
 
-	private modifyAssetPathOnCollision({
-		iteration,
-		path,
-		asset
-	}: {
-		iteration: number
-		path: string
-		asset: {
-			id: string
-			name: string
-			creationTime: number
-			modificationTime: number
-		}
-	}): string | null {
-		const ext = pathModule.posix.extname(asset.name)
-		const basename = pathModule.posix.basename(asset.name, ext)
-		const parentDir = pathModule.posix.dirname(path)
+		// Correct the extension to .jpg since the content is now JPEG.
+		// File.move() updates the uri property in place.
+		if (extname !== ".jpg" && extname !== ".jpeg") {
+			const newFile = new FileSystem.File(file.uri.replace(/\.[^.]+$/, ".jpg"))
 
-		if (parentDir === "." || basename.length === 0 || parentDir.length === 0 || basename === ".") {
-			return null
+			file.move(newFile)
+
+			return newFile
 		}
 
-		switch (iteration) {
-			case 0: {
-				return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${asset.modificationTime}${ext}`))
-					.toLowerCase()
-					.trim()
-			}
-
-			case 1: {
-				return normalizeFilePathForSdk(
-					pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.modificationTime.toString()).toString(16)}${ext}`)
-				)
-					.toLowerCase()
-					.trim()
-			}
-
-			case 2: {
-				return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${asset.creationTime}${ext}`))
-					.toLowerCase()
-					.trim()
-			}
-
-			case 3: {
-				return normalizeFilePathForSdk(
-					pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.creationTime.toString()).toString(16)}${ext}`)
-				)
-					.toLowerCase()
-					.trim()
-			}
-
-			case 4: {
-				return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${xxHash32(asset.id).toString(16)}${ext}`))
-					.toLowerCase()
-					.trim()
-			}
-
-			case 5: {
-				return normalizeFilePathForSdk(
-					pathModule.posix.join(
-						parentDir,
-						`${basename}_${xxHash32(`${asset.id}_${asset.modificationTime}_${asset.creationTime}`).toString(16)}${ext}`
-					)
-				)
-					.toLowerCase()
-					.trim()
-			}
-
-			default: {
-				console.warn(
-					`[CameraUpload] All collision resolution attempts exhausted for "${asset.name}" (id: ${asset.id}). Asset will be skipped.`
-				)
-
-				return null
-			}
-		}
+		return file
 	}
 
 	private async listLocal({
@@ -249,9 +240,25 @@ class CameraUpload {
 
 		await Promise.all(
 			albums.map(async album => {
-				const [title, assets] = await Promise.all([album.getTitle(), album.getAssets()])
+				// Phase 1: query assets with native-level filters to avoid fetching
+				// info for assets that would be discarded by includeVideos/afterActivation.
+				let query = new MediaLibrary.Query().album(album)
 
-				// Phase 1: fetch all asset infos concurrently (rate-limited by semaphore).
+				if (!config.includeVideos) {
+					query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [
+						MediaLibrary.MediaType.IMAGE,
+						MediaLibrary.MediaType.AUDIO,
+						MediaLibrary.MediaType.UNKNOWN
+					])
+				}
+
+				if (config.afterActivation) {
+					query = query.gte(MediaLibrary.AssetField.CREATION_TIME, config.activationTimestamp)
+				}
+
+				const [title, assets] = await Promise.all([album.getTitle(), query.exe()])
+
+				// Phase 1.5: fetch asset infos concurrently (rate-limited by semaphore).
 				const infos = await Promise.all(
 					assets.map(async asset => {
 						const result = await run(
@@ -288,23 +295,6 @@ class CameraUpload {
 					})
 				)
 
-				// Phase 1.5: filter out assets that will be excluded from the delta anyway.
-				// This avoids collision resolution and tree construction work for assets that
-				// would be discarded later. Filtering here (after getInfo) rather than in deltas()
-				// is cheaper because getInfo() is needed regardless, but tree construction and
-				// collision resolution are not.
-				const filtered = infos.filter(({ info }) => {
-					if (!config.includeVideos && info.mediaType === MediaLibrary.MediaType.VIDEO) {
-						return false
-					}
-
-					if (config.afterActivation && info.creationTime && info.creationTime < config.activationTimestamp) {
-						return false
-					}
-
-					return true
-				})
-
 				// Phase 2: sort by creationTime ascending before building the tree.
 				// On iOS, asset filenames cycle (IMG_0001 … IMG_9999 → IMG_0001 …), so multiple
 				// assets can share the same filename. Because getInfo() resolves in non-deterministic
@@ -312,33 +302,31 @@ class CameraUpload {
 				// winner for the base path slot on each run, causing re-uploads on every sync.
 				// Sorting first ensures the oldest asset always wins the base slot and newer
 				// duplicates consistently receive a collision suffix – stable across runs.
-				// asset.id (localIdentifier) is used as a tiebreaker so equal creationTimes
-				// are also resolved deterministically.
-				filtered.sort((a, b) => {
+				// Filename is used as tiebreaker so both local and remote trees resolve
+				// equal creationTimes in the same order.
+				infos.sort((a, b) => {
 					const timeDiff = (a.info.creationTime ?? 0) - (b.info.creationTime ?? 0)
 
 					if (timeDiff !== 0) {
 						return timeDiff
 					}
 
-					return fastLocaleCompare(a.asset.id, b.asset.id)
+					return fastLocaleCompare(a.info.filename, b.info.filename)
 				})
 
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
-				for (const { asset, info } of filtered) {
+				for (const { asset, info } of infos) {
 					let path = normalizeFilePathForSdk(pathModule.posix.join(title, info.filename)).toLowerCase().trim()
 					let iteration = 0
 
 					while (tree[path]) {
 						path =
-							this.modifyAssetPathOnCollision({
+							modifyAssetPathOnCollision({
 								iteration,
 								path,
 								asset: {
-									id: asset.id,
 									name: info.filename,
-									creationTime: info.creationTime ?? 0,
-									modificationTime: info.modificationTime ?? 0
+									creationTime: info.creationTime ?? 0
 								}
 							}) ?? ""
 
@@ -386,7 +374,7 @@ class CameraUpload {
 
 		const tree: RemoteTree = {}
 
-		// Pre-unwrap metadata and sort by creationTime ascending with UUID as tiebreaker,
+		// Pre-unwrap metadata and sort by creationTime ascending with filename as tiebreaker,
 		// mirroring the listLocal sort order. The server does not guarantee a stable return
 		// order, so without sorting, collision resolution would assign different path slots
 		// to the same files across runs, causing spurious re-uploads.
@@ -402,7 +390,7 @@ class CameraUpload {
 					return timeDiff
 				}
 
-				return fastLocaleCompare(a.file.file.uuid, b.file.file.uuid)
+				return fastLocaleCompare(a.meta?.name ?? "", b.meta?.name ?? "")
 			})
 
 		for (const { file, meta } of sortedFiles) {
@@ -411,14 +399,12 @@ class CameraUpload {
 
 			while (tree[path]) {
 				path =
-					this.modifyAssetPathOnCollision({
+					modifyAssetPathOnCollision({
 						iteration,
 						path,
 						asset: {
-							id: file.file.uuid,
 							name: meta?.name ?? pathModule.posix.basename(path),
-							creationTime: meta ? Number(meta.created) : 0,
-							modificationTime: meta ? Number(meta.modified) : 0
+							creationTime: meta ? Number(meta.created) : 0
 						}
 					}) ?? ""
 
@@ -537,6 +523,24 @@ class CameraUpload {
 				return
 			}
 
+			const [netState, permissions] = await Promise.all([NetInfo.fetch(), getPermissionsAsync()])
+
+			if (!permissions.granted) {
+				return
+			}
+
+			if (!config.cellular && netState.type === "cellular") {
+				return
+			}
+
+			if (!config.lowBattery) {
+				const lowPowerMode = await Battery.isLowPowerModeEnabledAsync()
+
+				if (lowPowerMode) {
+					return
+				}
+			}
+
 			await this.syncMutex.acquire()
 
 			useCameraUploadStore.getState().setSyncing(true)
@@ -564,11 +568,15 @@ class CameraUpload {
 			// list. Without maxUploads (foreground sync) we use the full delta set as-is.
 			const deltas = params?.maxUploads
 				? allDeltas
-						.sort((a, b) => (b.file.info.modificationTime ?? 0) - (a.file.info.modificationTime ?? 0))
+						.sort(
+							(a, b) =>
+								(b.file.info.modificationTime ?? b.file.info.creationTime ?? 0) -
+								(a.file.info.modificationTime ?? a.file.info.creationTime ?? 0)
+						)
 						.slice(0, params.maxUploads)
 				: allDeltas
 
-			await Promise.all(
+			await Promise.allSettled(
 				deltas.map(async delta => {
 					const result = await run(async defer => {
 						switch (delta.type) {
@@ -580,26 +588,25 @@ class CameraUpload {
 								}
 
 								const tmpFile = new FileSystem.File(
-									FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), delta.file.info.filename)
+									FileSystem.Paths.join(FileSystem.Paths.cache, `${randomUUID()}${assetFile.extension}`)
 								)
 
 								defer(() => {
-									if (tmpFile.parentDirectory.exists) {
-										tmpFile.parentDirectory.delete()
+									if (tmpFile.exists) {
+										tmpFile.delete()
 									}
 								})
 
-								if (!tmpFile.parentDirectory.exists) {
-									tmpFile.parentDirectory.create({
-										intermediates: true,
-										idempotent: true
-									})
+								if (tmpFile.exists) {
+									tmpFile.delete()
 								}
 
 								assetFile.copy(tmpFile)
 
+								let uploadFile = tmpFile
+
 								if (config.compress) {
-									await this.compress(tmpFile)
+									uploadFile = await this.compress(tmpFile)
 								}
 
 								const parentDir = await this.ensureParentDirectoryExists({
@@ -612,39 +619,39 @@ class CameraUpload {
 
 								const { files } = await transfers.upload({
 									id: delta.file.info.id,
-									localFileOrDir: tmpFile,
+									localFileOrDir: uploadFile,
 									parent: parentDirEnum,
 									abortController,
 									pauseSignal
 								})
 
-								// EXIF metadata is only applied to images. Videos get their timestamps
-								// from the media library (creationTime / modificationTime) instead.
-								if (delta.file.info.mediaType === MediaLibrary.MediaType.IMAGE) {
-									await Promise.all(
-										files.map(async file =>
-											run(async () => {
-												const exif = await delta.file.asset.getExif()
-												const exifDate = parseExifDate(exif)
+								await Promise.all(
+									files.map(async file =>
+										run(async () => {
+											// Images use EXIF for the most accurate capture timestamp.
+											// Videos don't carry standard EXIF; use media library metadata instead.
+											const exifDate =
+												delta.file.info.mediaType === MediaLibrary.MediaType.IMAGE
+													? parseExifDate(await delta.file.asset.getExif())
+													: null
 
-												await drive.updateTimestamps({
-													item: unwrappedFileIntoDriveItem(unwrapFileMeta(file)),
-													created:
-														exifDate ??
-														delta.file.info.creationTime ??
-														delta.file.info.modificationTime ??
-														Date.now(),
-													modified:
-														delta.file.info.modificationTime ??
-														exifDate ??
-														delta.file.info.creationTime ??
-														Date.now(),
-													signal: abortController.signal
-												})
+											await drive.updateTimestamps({
+												item: unwrappedFileIntoDriveItem(unwrapFileMeta(file)),
+												created:
+													exifDate ??
+													delta.file.info.creationTime ??
+													delta.file.info.modificationTime ??
+													Date.now(),
+												modified:
+													delta.file.info.modificationTime ??
+													exifDate ??
+													delta.file.info.creationTime ??
+													Date.now(),
+												signal: abortController.signal
 											})
-										)
+										})
 									)
-								}
+								)
 
 								return {
 									type: "upload" as const,
@@ -665,8 +672,6 @@ class CameraUpload {
 
 						return
 					}
-
-					return result.data
 				})
 			)
 		})
@@ -690,15 +695,21 @@ export function useCameraUpload() {
 		enabled: false
 	})
 
+	const sync = useCallback((params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params), [])
+	const setConfig = useCallback((params: Parameters<CameraUpload["setConfig"]>[0]) => cameraUpload.setConfig(params), [])
+	const cancel = useCallback(() => cameraUpload.cancel(), [])
+	const pause = useCallback(() => cameraUpload.pause(), [])
+	const resume = useCallback(() => cameraUpload.resume(), [])
+
 	return {
 		syncing,
 		errors,
 		config,
-		sync: (params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params),
-		setConfig: (params: Parameters<CameraUpload["setConfig"]>[0]) => cameraUpload.setConfig(params),
-		cancel: () => cameraUpload.cancel(),
-		pause: () => cameraUpload.pause(),
-		resume: () => cameraUpload.resume()
+		sync,
+		setConfig,
+		cancel,
+		pause,
+		resume
 	}
 }
 
