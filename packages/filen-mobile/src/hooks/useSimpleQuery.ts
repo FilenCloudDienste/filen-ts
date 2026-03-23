@@ -124,6 +124,13 @@ export function useSimpleQuery<T>(
 		})
 	}, [promise, options?.retry])
 
+	const refetch = useCallback(() => {
+		abortControllerRef.current.abort()
+		abortControllerRef.current = new AbortController()
+
+		execute()
+	}, [execute])
+
 	useEffectOnce(() => {
 		if (options?.enabled ?? true) {
 			execute()
@@ -140,6 +147,6 @@ export function useSimpleQuery<T>(
 		isLoading: state.status === "loading",
 		isSuccess: state.status === "success",
 		isError: state.status === "error",
-		refetch: execute
+		refetch
 	}
 }
