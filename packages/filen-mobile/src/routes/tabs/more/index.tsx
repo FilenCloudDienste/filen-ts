@@ -3,7 +3,7 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import { memo } from "@/lib/memo"
 import View from "@/components/ui/view"
-import { ScrollView, Platform } from "react-native"
+import { ScrollView, Platform, Switch } from "react-native"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
@@ -25,21 +25,37 @@ export type Button = {
 	badge?: string
 	badgeColor?: string
 	onPress?: () => void
-	rightText?: string
+	rightItem?:
+		| {
+				type: "switch"
+				value: boolean
+				onValueChange: (value: boolean) => void
+		  }
+		| {
+				type: "text"
+				value: string
+		  }
+		| {
+				type: "badge"
+				value: React.ReactNode | string
+				color?: string
+		  }
 }
 
-const Group = memo(({ buttons }: { buttons: Button[] }) => {
+export const Group = memo(({ buttons, className }: { buttons: Button[]; className?: string }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	return (
-		<View className="bg-background-secondary rounded-3xl overflow-hidden">
-			{buttons.map(({ onPress, icon, iconSize, iconColor, title, subTitle, badge, badgeColor, rightText }, index) => {
+		<View className={cn("bg-background-secondary rounded-3xl overflow-hidden", className)}>
+			{buttons.map(({ onPress, icon, iconSize, iconColor, title, subTitle, rightItem }, index) => {
 				return (
 					<PressableOpacity
 						key={index}
 						className="bg-transparent flex-row items-center gap-4 px-4"
 						onPress={onPress}
+						rippleColor={onPress ? undefined : "transparent"}
+						enabled={!!onPress}
 					>
 						{icon && (
 							<View className="bg-transparent flex-row items-center">
@@ -52,7 +68,7 @@ const Group = memo(({ buttons }: { buttons: Button[] }) => {
 						)}
 						<View
 							className={cn(
-								"bg-transparent flex-row items-center py-3.5 justify-between flex-1 gap-4  min-h-12",
+								"bg-transparent flex-row items-center py-3 justify-between flex-1 gap-4",
 								index !== buttons.length - 1 && "border-b border-border"
 							)}
 						>
@@ -61,14 +77,13 @@ const Group = memo(({ buttons }: { buttons: Button[] }) => {
 									<Text
 										numberOfLines={1}
 										ellipsizeMode="middle"
-										className="flex-1"
 									>
 										{title}
 									</Text>
 									<Text
 										numberOfLines={1}
 										ellipsizeMode="middle"
-										className="flex-1 text-muted-foreground text-xs"
+										className="text-muted-foreground text-xs"
 									>
 										{subTitle}
 									</Text>
@@ -83,38 +98,50 @@ const Group = memo(({ buttons }: { buttons: Button[] }) => {
 								</Text>
 							)}
 							<View className="flex-row items-center gap-2 shrink-0 bg-transparent">
-								{rightText && (
-									<View className="items-center flex-row bg-transparent flex-1 max-w-32">
+								{rightItem?.type === "text" && (
+									<View className="items-center flex-row bg-transparent max-w-32">
 										<Text
 											className="text-sm text-muted-foreground"
 											numberOfLines={1}
 											ellipsizeMode="middle"
 										>
-											{rightText}
+											{rightItem.value}
 										</Text>
 									</View>
 								)}
-								{badge && (
+								{rightItem?.type === "badge" && (
 									<View
 										className={cn(
-											"rounded-full size-4.5 flex-row items-center justify-center",
-											!badgeColor && "bg-red-500"
+											"rounded-full size-5 flex-row items-center justify-center",
+											!rightItem.color && "bg-red-500"
 										)}
 										style={
-											badgeColor
+											rightItem.color
 												? {
-														backgroundColor: badgeColor
+														backgroundColor: rightItem.color
 													}
 												: undefined
 										}
 									>
-										<Text
-											className="text-white text-xs"
-											numberOfLines={1}
-											ellipsizeMode="middle"
-										>
-											{badge}
-										</Text>
+										{typeof rightItem.value === "string" ? (
+											<Text
+												className="text-white text-xs"
+												numberOfLines={1}
+												ellipsizeMode="middle"
+											>
+												{rightItem.value}
+											</Text>
+										) : (
+											rightItem.value
+										)}
+									</View>
+								)}
+								{rightItem?.type === "switch" && (
+									<View className="items-center flex-row bg-transparent">
+										<Switch
+											value={rightItem.value}
+											onValueChange={rightItem.onValueChange}
+										/>
 									</View>
 								)}
 								{onPress && (
@@ -134,7 +161,7 @@ const Group = memo(({ buttons }: { buttons: Button[] }) => {
 	)
 })
 
-export const More = memo(() => {
+const More = memo(() => {
 	const transfersActiveCount = useTransfersStore(
 		useShallow(state => state.transfers.reduce((count, t) => count + (t.finishedAt ? 0 : 1), 0))
 	)

@@ -315,7 +315,8 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 		})
 
 		return () => {
-			audio.exitPreviewMode()
+			// TODO: Fix when exiting drivePreview and playlist player is active
+			// audio.exitPreviewMode()
 		}
 	})
 

@@ -45,22 +45,18 @@ export type Delta = {
 	file: LocalFile
 }
 
-export type Config =
-	| {
-			enabled: false
-	  }
-	| {
-			enabled: true
-			remoteDir: Dir
-			albumIds: string[]
-			activationTimestamp: number
-			afterActivation: boolean
-			includeVideos: boolean
-			cellular: boolean
-			background: boolean
-			lowBattery: boolean
-			compress: boolean
-	  }
+export type Config = {
+	enabled: boolean
+	remoteDir: Dir | null
+	albumIds: string[]
+	activationTimestamp: number
+	afterActivation: boolean
+	includeVideos: boolean
+	cellular: boolean
+	background: boolean
+	lowBattery: boolean
+	compress: boolean
+}
 
 export type CollisionParams = {
 	iteration: number
@@ -69,6 +65,19 @@ export type CollisionParams = {
 		name: string
 		creationTime: number
 	}
+}
+
+export const DEFAULT_CONFIG: Config = {
+	enabled: false,
+	albumIds: [],
+	remoteDir: null,
+	activationTimestamp: 0,
+	afterActivation: false,
+	includeVideos: false,
+	cellular: false,
+	background: false,
+	lowBattery: false,
+	compress: false
 }
 
 /**
@@ -123,9 +132,9 @@ class CameraUpload {
 	public secureStoreKey: string = "cameraUploadConfig"
 	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
 	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, Dir>({
-		max: Infinity,
-		maxEntrySize: Infinity,
-		maxSize: Infinity,
+		max: 100,
+		maxEntrySize: Number.MAX_SAFE_INTEGER,
+		maxSize: Number.MAX_SAFE_INTEGER,
 		ttl: 60000,
 		allowStale: false,
 		updateAgeOnGet: false,
@@ -226,15 +235,7 @@ class CameraUpload {
 		return file
 	}
 
-	private async listLocal({
-		config,
-		signal
-	}: {
-		config: Config & {
-			enabled: true
-		}
-		signal: AbortSignal
-	}): Promise<LocalTree> {
+	private async listLocal({ config, signal }: { config: Config; signal: AbortSignal }): Promise<LocalTree> {
 		const tree: LocalTree = {}
 		const albums = config.albumIds.map(id => new MediaLibrary.Album(id))
 
@@ -426,8 +427,8 @@ class CameraUpload {
 	}
 
 	private async deltas({ config, signal }: { config: Config; signal: AbortSignal }): Promise<Delta[]> {
-		if (!config.enabled) {
-			return []
+		if (!config.remoteDir) {
+			throw new Error("Remote directory is not set in config")
 		}
 
 		const [localTree, remoteTree] = await Promise.all([
@@ -468,13 +469,11 @@ class CameraUpload {
 		return deltas
 	}
 
-	private async getConfig(): Promise<Config> {
+	public async getConfig(): Promise<Config> {
 		const config = await secureStore.get<Config>(this.secureStoreKey)
 
 		if (!config) {
-			return {
-				enabled: false
-			}
+			return DEFAULT_CONFIG
 		}
 
 		return config
@@ -488,8 +487,8 @@ class CameraUpload {
 	}
 
 	private async ensureParentDirectoryExists({ path, config, signal }: { path: string; config: Config; signal: AbortSignal }) {
-		if (!config.enabled) {
-			throw new Error("Camera upload is not enabled")
+		if (!config.remoteDir) {
+			throw new Error("Remote directory is not set in config")
 		}
 
 		const parentDirName = pathModule.posix.dirname(path)
@@ -519,7 +518,7 @@ class CameraUpload {
 		const result = await run(async defer => {
 			const config = await this.getConfig()
 
-			if (!config.enabled || config.albumIds.length === 0) {
+			if (!config.enabled || config.albumIds.length === 0 || !config.remoteDir) {
 				return
 			}
 
@@ -691,12 +690,9 @@ const cameraUpload = new CameraUpload()
 export function useCameraUpload() {
 	const syncing = useCameraUploadStore(useShallow(state => state.syncing))
 	const errors = useCameraUploadStore(useShallow(state => state.errors))
-	const config = useSecureStore<Config>(cameraUpload.secureStoreKey, {
-		enabled: false
-	})
+	const [config, setConfig] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
 
 	const sync = useCallback((params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params), [])
-	const setConfig = useCallback((params: Parameters<CameraUpload["setConfig"]>[0]) => cameraUpload.setConfig(params), [])
 	const cancel = useCallback(() => cameraUpload.cancel(), [])
 	const pause = useCallback(() => cameraUpload.pause(), [])
 	const resume = useCallback(() => cameraUpload.resume(), [])

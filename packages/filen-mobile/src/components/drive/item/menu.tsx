@@ -11,7 +11,7 @@ import { SharingRole_Tags, type FileVersion, type AnyDirWithContext, AnyDirWithC
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
-import { Platform } from "react-native"
+import { Platform, type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import offline from "@/lib/offline"
 import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, unwrapAnyDirUuid } from "@/lib/utils"
@@ -37,6 +37,7 @@ export type DriveItemMenuOrigin =
 	| "links"
 	| "offline"
 	| "search"
+	| "photos"
 
 export function createMenuButtons({
 	item,
@@ -760,12 +761,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		(origin === "links" || (item.type === "file" && origin === "preview")) &&
-		(item.type === "file" || item.type === "directory") &&
-		isOnline &&
-		!parent
-	) {
+	if (origin === "links" && (item.type === "file" || item.type === "directory") && isOnline && !parent) {
 		menuButtons.push({
 			id: "removeLink",
 			title: "tbd_remove_link",
@@ -804,10 +800,6 @@ export function createMenuButtons({
 					alerts.error(result.error)
 
 					return
-				}
-
-				if (item.type === "file" && origin === "preview" && router.canGoBack()) {
-					router.back()
 				}
 			}
 		})
@@ -1056,7 +1048,8 @@ const Menu = memo(
 		isStoredOffline,
 		isOnline,
 		versions,
-		disabled
+		disabled,
+		style
 	}: {
 		item: DriveItem
 		children: React.ReactNode
@@ -1072,6 +1065,7 @@ const Menu = memo(
 		isOnline: boolean
 		versions: FileVersion[]
 		disabled?: boolean
+		style?: StyleProp<ViewStyle>
 	}) => {
 		const menuButtons = useMemo(() => {
 			if (disabled) {
@@ -1099,6 +1093,7 @@ const Menu = memo(
 				onCloseMenu={onCloseMenu}
 				onOpenMenu={onOpenMenu}
 				disabled={disabled}
+				style={style}
 			>
 				{children}
 			</MenuComponent>

@@ -33,246 +33,271 @@ const DirectoryThumbnail = memo(
 	}
 )
 
-const FileThumbnail = memo(({ item, size, className }: { item: DriveItemFileExtracted; size: ThumbnailSize; className?: string }) => {
-	const abortControllerRef = useRef<AbortController | null>(null)
-	const errorRetryCountRef = useRef<number>(0)
-	const isGeneratingRef = useRef<boolean>(false)
+const FileThumbnail = memo(
+	({
+		item,
+		size,
+		className,
+		contentFit
+	}: {
+		item: DriveItemFileExtracted
+		size: ThumbnailSize
+		className?: string
+		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
+	}) => {
+		const abortControllerRef = useRef<AbortController | null>(null)
+		const errorRetryCountRef = useRef<number>(0)
+		const isGeneratingRef = useRef<boolean>(false)
 
-	const [localPath, setLocalPath] = useRecyclingState<string | null>(
-		() => {
-			const available = cache.availableThumbnails.get(item.data.uuid)
+		const [localPath, setLocalPath] = useRecyclingState<string | null>(
+			() => {
+				const available = cache.availableThumbnails.get(item.data.uuid)
 
-			if (!available) {
-				return null
-			}
+				if (!available) {
+					return null
+				}
 
-			const exists = thumbnails.exists(item)
+				const exists = thumbnails.exists(item)
 
-			return exists.exists ? exists.path : null
-		},
-		[item.data.uuid],
-		() => {
-			abortControllerRef.current?.abort()
+				return exists.exists ? exists.path : null
+			},
+			[item.data.uuid],
+			() => {
+				abortControllerRef.current?.abort()
 
-			abortControllerRef.current = null
-			errorRetryCountRef.current = 0
-			isGeneratingRef.current = false
-		}
-	)
-
-	const localPathRef = useRef(localPath)
-
-	useEffect(() => {
-		localPathRef.current = localPath
-	}, [localPath])
-
-	const generate = useCallback(async () => {
-		const result = await run(async defer => {
-			if (isGeneratingRef.current) {
-				return
-			}
-
-			isGeneratingRef.current = true
-
-			defer(() => {
+				abortControllerRef.current = null
+				errorRetryCountRef.current = 0
 				isGeneratingRef.current = false
-			})
-
-			if (localPathRef.current || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
-				return
 			}
+		)
 
-			abortControllerRef.current?.abort()
-			errorRetryCountRef.current = 0
-			abortControllerRef.current = new AbortController()
+		const localPathRef = useRef(localPath)
 
-			const signal = abortControllerRef.current.signal
-			let lastError: unknown
+		useEffect(() => {
+			localPathRef.current = localPath
+		}, [localPath])
 
-			for (let attempt = 0; attempt < MAX_GENERATE_RETRIES; attempt++) {
-				if (signal.aborted || AppState.currentState !== "active") {
+		const generate = useCallback(async () => {
+			const result = await run(async defer => {
+				if (isGeneratingRef.current) {
 					return
 				}
 
-				const result = await run(async () => {
-					return await thumbnails.generate({
-						item,
-						signal
-					})
+				isGeneratingRef.current = true
+
+				defer(() => {
+					isGeneratingRef.current = false
 				})
 
-				if (signal.aborted) {
+				if (localPathRef.current || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
 					return
 				}
 
-				if (result.success) {
-					cache.availableThumbnails.set(item.data.uuid, true)
+				abortControllerRef.current?.abort()
+				errorRetryCountRef.current = 0
+				abortControllerRef.current = new AbortController()
 
-					setLocalPath(result.data)
+				const signal = abortControllerRef.current.signal
+				let lastError: unknown
 
-					return
+				for (let attempt = 0; attempt < MAX_GENERATE_RETRIES; attempt++) {
+					if (signal.aborted || AppState.currentState !== "active") {
+						return
+					}
+
+					const result = await run(async () => {
+						return await thumbnails.generate({
+							item,
+							signal
+						})
+					})
+
+					if (signal.aborted) {
+						return
+					}
+
+					if (result.success) {
+						cache.availableThumbnails.set(item.data.uuid, true)
+
+						setLocalPath(result.data)
+
+						return
+					}
+
+					lastError = result.error
+
+					await new Promise<void>(resolve => setTimeout(resolve, 1000))
 				}
 
-				lastError = result.error
+				console.error(lastError)
 
-				await new Promise<void>(resolve => setTimeout(resolve, 1000))
+				cache.availableThumbnails.set(item.data.uuid, false)
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+
+				return
+			}
+		}, [item, setLocalPath])
+
+		const generateRef = useRef(generate)
+
+		useEffect(() => {
+			generateRef.current = generate
+		}, [generate])
+
+		const onError = useCallback(() => {
+			cache.availableThumbnails.set(item.data.uuid, false)
+
+			if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
+				setLocalPath(null)
+
+				return
 			}
 
-			console.error(lastError)
+			errorRetryCountRef.current += 1
 
-			cache.availableThumbnails.set(item.data.uuid, false)
-		})
+			thumbnails.remove(item)
 
-		if (!result.success) {
-			console.error(result.error)
+			localPathRef.current = null
 
-			return
-		}
-	}, [item, setLocalPath])
-
-	const generateRef = useRef(generate)
-
-	useEffect(() => {
-		generateRef.current = generate
-	}, [generate])
-
-	const onError = useCallback(() => {
-		cache.availableThumbnails.set(item.data.uuid, false)
-
-		if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
 			setLocalPath(null)
 
-			return
-		}
+			generateRef.current?.()
+		}, [item, setLocalPath])
 
-		errorRetryCountRef.current += 1
+		useEffect(() => {
+			errorRetryCountRef.current = 0
 
-		thumbnails.remove(item)
+			if (!localPathRef.current) {
+				generate()
+			}
+		}, [generate])
 
-		localPathRef.current = null
-
-		setLocalPath(null)
-
-		generateRef.current?.()
-	}, [item, setLocalPath])
-
-	useEffect(() => {
-		errorRetryCountRef.current = 0
-
-		if (!localPathRef.current) {
-			generate()
-		}
-	}, [generate])
-
-	useEffect(() => {
-		const { cleanup } = runEffect(defer => {
-			const appStateSubscription = AppState.addEventListener("change", nextAppState => {
-				if (nextAppState === "active") {
-					generate()
-				} else if (nextAppState === "background") {
-					abortControllerRef.current?.abort()
-
-					abortControllerRef.current = null
-					errorRetryCountRef.current = 0
-					isGeneratingRef.current = false
-				}
-			})
-
-			defer(() => {
-				appStateSubscription.remove()
-			})
-
-			const httpStoreUnsub = useHttpStore.subscribe(
-				state => state.port,
-				port => {
-					if (port) {
+		useEffect(() => {
+			const { cleanup } = runEffect(defer => {
+				const appStateSubscription = AppState.addEventListener("change", nextAppState => {
+					if (nextAppState === "active") {
 						generate()
-					} else {
+					} else if (nextAppState === "background") {
 						abortControllerRef.current?.abort()
 
 						abortControllerRef.current = null
 						errorRetryCountRef.current = 0
 						isGeneratingRef.current = false
 					}
-				}
-			)
+				})
 
-			defer(() => {
-				httpStoreUnsub()
+				defer(() => {
+					appStateSubscription.remove()
+				})
+
+				const httpStoreUnsub = useHttpStore.subscribe(
+					state => state.port,
+					port => {
+						if (port) {
+							generate()
+						} else {
+							abortControllerRef.current?.abort()
+
+							abortControllerRef.current = null
+							errorRetryCountRef.current = 0
+							isGeneratingRef.current = false
+						}
+					}
+				)
+
+				defer(() => {
+					httpStoreUnsub()
+				})
 			})
-		})
 
-		return () => {
-			cleanup()
+			return () => {
+				cleanup()
+			}
+		}, [generate])
+
+		useEffect(() => {
+			return () => {
+				abortControllerRef.current?.abort()
+
+				abortControllerRef.current = null
+				errorRetryCountRef.current = 0
+				isGeneratingRef.current = false
+			}
+		}, [])
+
+		const source = useMemo(
+			() => ({
+				uri: localPath ?? undefined
+			}),
+			[localPath]
+		)
+
+		const imageStyle = useMemo<ImageStyle>(
+			() => ({
+				width: size.thumbnail,
+				height: size.thumbnail
+			}),
+			[size.thumbnail]
+		)
+
+		if (!localPath || !source.uri) {
+			return (
+				<FileIcon
+					name={item.data.decryptedMeta?.name ?? ""}
+					width={size.icon}
+					height={size.icon}
+					className={className}
+				/>
+			)
 		}
-	}, [generate])
 
-	useEffect(() => {
-		return () => {
-			abortControllerRef.current?.abort()
-
-			abortControllerRef.current = null
-			errorRetryCountRef.current = 0
-			isGeneratingRef.current = false
-		}
-	}, [])
-
-	const source = useMemo(
-		() => ({
-			uri: localPath ?? undefined
-		}),
-		[localPath]
-	)
-
-	const imageStyle = useMemo<ImageStyle>(
-		() => ({
-			width: size.thumbnail,
-			height: size.thumbnail
-		}),
-		[size.thumbnail]
-	)
-
-	if (!localPath || !source.uri) {
 		return (
-			<FileIcon
-				name={item.data.decryptedMeta?.name ?? ""}
-				width={size.icon}
-				height={size.icon}
+			<Image
 				className={className}
+				source={source}
+				style={imageStyle}
+				contentFit={contentFit ?? "contain"}
+				cachePolicy="none"
+				onError={onError}
 			/>
 		)
 	}
+)
 
-	return (
-		<Image
-			className={className}
-			source={source}
-			style={imageStyle}
-			contentFit="contain"
-			cachePolicy="none"
-			onError={onError}
-		/>
-	)
-})
+const Thumbnail = memo(
+	({
+		item,
+		size,
+		className,
+		contentFit
+	}: {
+		item: DriveItem
+		size: ThumbnailSize
+		className?: string
+		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
+	}) => {
+		if (item.type === "file" || item.type === "sharedFile") {
+			return (
+				<FileThumbnail
+					item={item}
+					size={size}
+					className={className}
+					contentFit={contentFit}
+				/>
+			)
+		}
 
-const Thumbnail = memo(({ item, size, className }: { item: DriveItem; size: ThumbnailSize; className?: string }) => {
-	if (item.type === "file" || item.type === "sharedFile") {
 		return (
-			<FileThumbnail
+			<DirectoryThumbnail
 				item={item}
 				size={size}
 				className={className}
 			/>
 		)
 	}
-
-	return (
-		<DirectoryThumbnail
-			item={item}
-			size={size}
-			className={className}
-		/>
-	)
-})
+)
 
 export default Thumbnail
