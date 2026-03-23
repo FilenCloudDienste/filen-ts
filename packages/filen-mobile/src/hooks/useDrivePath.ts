@@ -5,7 +5,7 @@ import type { DriveItem } from "@/types"
 import { Buffer } from "react-native-quick-crypto"
 import { unpack } from "@/lib/msgpack"
 
-export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links"] as const
+export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links", "photos"] as const
 export type DrivePathType = (typeof DRIVE_PATH_TYPES)[number]
 
 export type SelectOptions = {
@@ -70,6 +70,7 @@ export default function useDrivePath(): DrivePath {
 		}
 
 		const isDriveScreen = navigationId.startsWith("/tabs/drive")
+		const isPhotosScreen = navigationId.startsWith("/tabs/photos")
 		const isOfflineScreen = navigationId.startsWith("/offline")
 		const isTrashScreen = navigationId.startsWith("/trash")
 		const isFavoritesScreen = navigationId.startsWith("/favorites")
@@ -78,7 +79,15 @@ export default function useDrivePath(): DrivePath {
 		const isSharedInScreen = navigationId.startsWith("/sharedIn")
 		const isSharedOutScreen = navigationId.startsWith("/sharedOut")
 
-		if (isDriveScreen || isOfflineScreen || isLinksScreen || isSharedInScreen || isSharedOutScreen || isFavoritesScreen) {
+		if (
+			isDriveScreen ||
+			isOfflineScreen ||
+			isLinksScreen ||
+			isSharedInScreen ||
+			isSharedOutScreen ||
+			isFavoritesScreen ||
+			isPhotosScreen
+		) {
 			const type = isDriveScreen
 				? "drive"
 				: isOfflineScreen
@@ -87,9 +96,11 @@ export default function useDrivePath(): DrivePath {
 						? "sharedIn"
 						: isSharedOutScreen
 							? "sharedOut"
-							: isFavoritesScreen
-								? "favorites"
-								: "links"
+							: isPhotosScreen
+								? "photos"
+								: isFavoritesScreen
+									? "favorites"
+									: "links"
 
 			return {
 				type,

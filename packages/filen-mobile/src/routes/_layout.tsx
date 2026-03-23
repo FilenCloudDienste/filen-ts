@@ -210,6 +210,15 @@ export const RootLayout = memo(() => {
 												}}
 											/>
 											<Stack.Screen
+												name="cameraUpload"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
+												}}
+											/>
+											<Stack.Screen
 												name="drivePreview"
 												options={{
 													presentation: "transparentModal",

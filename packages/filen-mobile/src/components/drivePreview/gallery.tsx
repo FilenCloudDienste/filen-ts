@@ -286,13 +286,17 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		return itemSorter.sortItems(items, "nameAsc").filter(i => {
 			const type = getPreviewType(i.data.decryptedMeta?.name ?? "")
 
+			if (drivePath.type === "photos") {
+				return (i.type === "file" || i.type === "sharedFile") && (type === "image" || type === "video")
+			}
+
 			return (
 				type !== "unknown" &&
 				(i.type === "file" || i.type === "sharedFile") &&
 				(type === "image" || type === "video" || type === "audio")
 			)
 		}) as DriveItemFileExtracted[]
-	}, [driveItemsQuery.data, driveItemsQuery.status, item])
+	}, [driveItemsQuery.data, driveItemsQuery.status, item, drivePath.type])
 
 	const renderItem = useCallback(
 		(info: ListRenderItemInfo<DriveItemFileExtracted>) => {

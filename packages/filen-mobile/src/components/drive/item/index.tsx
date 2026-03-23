@@ -70,7 +70,7 @@ const Item = memo(
 				uuid: info.item.item.data.uuid
 			},
 			{
-				enabled: info.item.item.type === "file" && origin !== "offline"
+				enabled: info.item.item.type === "file" && origin !== "offline" && isMenuOpen
 			}
 		)
 

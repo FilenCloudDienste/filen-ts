@@ -17,12 +17,14 @@ import {
 	AnySharedDirWithContext,
 	AnyDirWithContext,
 	type NormalDirsAndFiles,
-	type SharedRootDirsAndFiles
+	type SharedRootDirsAndFiles,
+	NonRootDir_Tags
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import type { DriveItem } from "@/types"
 import offline from "@/lib/offline"
+import cameraUpload from "@/lib/cameraUpload"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 
@@ -95,6 +97,40 @@ export async function fetchData(
 
 				return {
 					...result,
+					type: "normal"
+				} satisfies Result
+			}
+
+			case "photos": {
+				const config = await cameraUpload.getConfig()
+
+				if (!config.enabled || !config.remoteDir) {
+					return {
+						dirs: [],
+						files: [],
+						type: "normal"
+					} satisfies Result
+				}
+
+				const parent = new AnyNormalDir.Dir(config.remoteDir)
+				const { dirs: resultDirs, files } = await authedSdkClient.listDirRecursive(
+					new AnyDirWithContext.Normal(parent),
+					undefined,
+					signal
+				)
+				const dirs: Dir[] = []
+
+				for (const resultDir of resultDirs) {
+					if (resultDir.tag !== NonRootDir_Tags.Normal) {
+						continue
+					}
+
+					dirs.push(resultDir.inner[0])
+				}
+
+				return {
+					dirs,
+					files,
 					type: "normal"
 				} satisfies Result
 			}
