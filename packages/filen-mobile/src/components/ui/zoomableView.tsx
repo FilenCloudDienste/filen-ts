@@ -1,4 +1,4 @@
-import { memo, useCallback } from "@/lib/memo"
+import { memo, useCallback, useMemo } from "@/lib/memo"
 import { useEffect } from "react"
 import type { LayoutChangeEvent, StyleProp, ViewStyle } from "react-native"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
@@ -12,6 +12,7 @@ const ANIMATION_DURATION = 300
 const PINCH_SOFT_MIN = 0.3
 const PINCH_DISMISS_THRESHOLD = 0.65
 const PINCH_DISMISS_DURATION = 200
+const MAX_PAN_VELOCITY = 3000
 
 const containerViewStyle: ViewStyle = {
 	flex: 1,
@@ -83,6 +84,31 @@ type SharedValues = {
 	scaleValue: SharedValue<number> | undefined
 }
 
+function resetZoom(
+	scale: SharedValue<number>,
+	translateX: SharedValue<number>,
+	translateY: SharedValue<number>,
+	externalScale: SharedValue<number> | undefined
+) {
+	scale.value = withTiming(1, {
+		duration: ANIMATION_DURATION
+	})
+
+	if (externalScale) {
+		externalScale.value = withTiming(1, {
+			duration: ANIMATION_DURATION
+		})
+	}
+
+	translateX.value = withTiming(0, {
+		duration: ANIMATION_DURATION
+	})
+
+	translateY.value = withTiming(0, {
+		duration: ANIMATION_DURATION
+	})
+}
+
 /**
  * Builds all gesture handlers at module scope so the React Compiler does not
  * analyse them.  The compiler only inspects React components and hooks — plain
@@ -121,6 +147,14 @@ function buildComposedGesture(
 		.onUpdate(e => {
 			"worklet"
 
+			// When one finger lifts during a pinch, the focal point jumps to the
+			// remaining finger and scale recalculates against a single touch,
+			// causing a visual snap. Freeze at the last valid 2-finger state and
+			// let onEnd handle the cleanup.
+			if (e.numberOfPointers < 2) {
+				return
+			}
+
 			const effectiveMinZoom = onPinchDismiss ? PINCH_SOFT_MIN : minZoom
 			const newScale = clampNumber(sv.savedScale.value * e.scale, effectiveMinZoom, maxZoom)
 			const ratio = newScale / sv.savedScale.value
@@ -154,15 +188,19 @@ function buildComposedGesture(
 			"worklet"
 
 			if (onPinchDismiss && sv.scale.value < PINCH_DISMISS_THRESHOLD) {
-				sv.scale.value = withTiming(0, {
-					duration: PINCH_DISMISS_DURATION
-				}, finished => {
-					"worklet"
+				sv.scale.value = withTiming(
+					0,
+					{
+						duration: PINCH_DISMISS_DURATION
+					},
+					finished => {
+						"worklet"
 
-					if (finished) {
-						runOnJS(notifyPinchDismiss)()
+						if (finished) {
+							runOnJS(notifyPinchDismiss)()
+						}
 					}
-				})
+				)
 
 				if (sv.scaleValue) {
 					sv.scaleValue.value = withTiming(0, {
@@ -284,12 +322,12 @@ function buildComposedGesture(
 			const maxTy = (sv.containerHeight.value * (sv.scale.value - 1)) / 2
 
 			sv.translateX.value = withDecay({
-				velocity: e.velocityX,
+				velocity: clampNumber(e.velocityX, -MAX_PAN_VELOCITY, MAX_PAN_VELOCITY),
 				clamp: [-maxTx, maxTx]
 			})
 
 			sv.translateY.value = withDecay({
-				velocity: e.velocityY,
+				velocity: clampNumber(e.velocityY, -MAX_PAN_VELOCITY, MAX_PAN_VELOCITY),
 				clamp: [-maxTy, maxTy]
 			})
 		})
@@ -385,16 +423,16 @@ const ZoomableView = memo(
 		scaleValue,
 		onPinchDismiss
 	}: ZoomableViewProps) => {
-		const scale = useSharedValue(1)
-		const translateX = useSharedValue(0)
-		const translateY = useSharedValue(0)
-		const savedScale = useSharedValue(1)
-		const savedTranslateX = useSharedValue(0)
-		const savedTranslateY = useSharedValue(0)
-		const focalX = useSharedValue(0)
-		const focalY = useSharedValue(0)
-		const containerWidth = useSharedValue(0)
-		const containerHeight = useSharedValue(0)
+		const scale = useSharedValue<number>(1)
+		const translateX = useSharedValue<number>(0)
+		const translateY = useSharedValue<number>(0)
+		const savedScale = useSharedValue<number>(1)
+		const savedTranslateX = useSharedValue<number>(0)
+		const savedTranslateY = useSharedValue<number>(0)
+		const focalX = useSharedValue<number>(0)
+		const focalY = useSharedValue<number>(0)
+		const containerWidth = useSharedValue<number>(0)
+		const containerHeight = useSharedValue<number>(0)
 
 		const onLayout = useCallback(
 			(e: LayoutChangeEvent) => {
@@ -419,47 +457,55 @@ const ZoomableView = memo(
 			onPinchDismiss?.()
 		}, [onPinchDismiss])
 
-		useEffect(() => {
-			if (!enabled && scale.value !== 1) {
-				scale.value = withTiming(1, {
-					duration: ANIMATION_DURATION
-				})
-
-				translateX.value = withTiming(0, {
-					duration: ANIMATION_DURATION
-				})
-
-				translateY.value = withTiming(0, {
-					duration: ANIMATION_DURATION
-				})
-			}
-		}, [enabled, scale, translateX, translateY])
-
-		const composed = buildComposedGesture(
-			{
-				scale,
-				translateX,
-				translateY,
-				savedScale,
-				savedTranslateX,
-				savedTranslateY,
-				focalX,
-				focalY,
-				containerWidth,
-				containerHeight,
-				scaleValue
-			},
+		const composed = useMemo(() => {
+			return buildComposedGesture(
+				{
+					scale,
+					translateX,
+					translateY,
+					savedScale,
+					savedTranslateX,
+					savedTranslateY,
+					focalX,
+					focalY,
+					containerWidth,
+					containerHeight,
+					scaleValue
+				},
+				enabled,
+				minZoom,
+				maxZoom,
+				doubleTapZoom,
+				onZoomChange,
+				notifyZoomChange,
+				onSingleTap,
+				notifySingleTap,
+				onPinchDismiss,
+				notifyPinchDismiss
+			)
+		}, [
 			enabled,
 			minZoom,
 			maxZoom,
 			doubleTapZoom,
 			onZoomChange,
-			notifyZoomChange,
 			onSingleTap,
-			notifySingleTap,
 			onPinchDismiss,
+			scale,
+			translateX,
+			translateY,
+			savedScale,
+			savedTranslateX,
+			savedTranslateY,
+			focalX,
+			focalY,
+			containerWidth,
+			containerHeight,
+			scaleValue,
+			notifyZoomChange,
+			notifySingleTap,
 			notifyPinchDismiss
-		)
+		])
 
 		const animatedStyle = useAnimatedStyle(() => {
 			"worklet"
@@ -478,6 +524,12 @@ const ZoomableView = memo(
 				]
 			}
 		})
+
+		useEffect(() => {
+			if (!enabled && scale.value !== 1) {
+				resetZoom(scale, translateX, translateY, scaleValue)
+			}
+		}, [enabled, scale, translateX, translateY, scaleValue])
 
 		return (
 			<GestureDetector gesture={composed}>
