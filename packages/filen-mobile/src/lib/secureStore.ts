@@ -377,11 +377,11 @@ function getSecureStoreFlushMutex(key: string): Semaphore {
 }
 
 export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => T)) => void] {
-	const fromCache = cache.secureStore.get(key)
-	const [state, setState] = useState<T>(fromCache ?? initialValue)
+	const [state, setState] = useState<T>(() => cache.secureStore.get(key) ?? initialValue)
 	const lastValueRef = useRef<T>(state)
 	const flushMutexRef = useRef<Semaphore>(getSecureStoreFlushMutex(key))
 	const isLocalUpdateRef = useRef<boolean>(false)
+	const initialValueRef = useRef<T>(initialValue)
 
 	const setStateChecked = useCallback((value: T) => {
 		if (isEqual(value, lastValueRef.current)) {
@@ -392,27 +392,6 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 
 		setState(value)
 	}, [])
-
-	const flush = useCallback(
-		async (now: T) => {
-			const result = await run(async defer => {
-				await flushMutexRef.current.acquire()
-
-				defer(() => {
-					flushMutexRef.current.release()
-				})
-
-				await secureStore.set(key, now)
-			})
-
-			if (!result.success) {
-				console.error("Error setting value in secureStore:", result.error)
-
-				return
-			}
-		},
-		[key]
-	)
 
 	const retrieve = useCallback(async () => {
 		const result = await run(async defer => {
@@ -454,7 +433,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 
 					setStateChecked(now)
 
-					await flush(now)
+					await secureStore.set(key, now)
 				})
 
 				if (!result.success) {
@@ -464,8 +443,12 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 				}
 			})()
 		},
-		[flush, setStateChecked]
+		[key, setStateChecked]
 	)
+
+	useEffect(() => {
+		initialValueRef.current = initialValue
+	}, [initialValue])
 
 	useEffectOnce(() => {
 		retrieve().catch(console.error)
@@ -485,7 +468,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 
 			const secureStoreRemoveSubscription = events.subscribe("secureStoreRemove", payload => {
 				if (payload.key === key && !isLocalUpdateRef.current) {
-					setStateChecked(initialValue)
+					setStateChecked(initialValueRef.current)
 				}
 			})
 
@@ -495,7 +478,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 
 			const secureStoreClearSubscription = events.subscribe("secureStoreClear", () => {
 				if (!isLocalUpdateRef.current) {
-					setStateChecked(initialValue)
+					setStateChecked(initialValueRef.current)
 				}
 			})
 
@@ -507,7 +490,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		return () => {
 			cleanup()
 		}
-	}, [key, initialValue, setStateChecked])
+	}, [key, setStateChecked])
 
 	return [state, set]
 }
