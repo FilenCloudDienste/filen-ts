@@ -74,6 +74,7 @@ jobs:
       - name: Install dependencies
         working-directory: packages/filen-mobile
         run: |
+          npm install -g patch-package
           touch .git
           npm install --package-lock-only && npm ci
           rm -f .git
