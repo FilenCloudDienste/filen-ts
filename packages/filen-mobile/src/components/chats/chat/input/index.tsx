@@ -1,7 +1,6 @@
 import { type Chat, type ChatParticipant, ChatTypingType } from "@filen/sdk-rs"
-import { useRef, useEffect, Fragment } from "react"
+import { useRef, useEffect, Fragment, memo, useCallback, useMemo } from "react"
 import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent } from "react-native"
-import { memo, useCallback, useMemo } from "@/lib/memo"
 import View, { KeyboardStickyView, CrossGlassContainerView, GestureHandlerScrollView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
@@ -21,7 +20,6 @@ import Avatar from "@/components/ui/avatar"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Image from "@/components/ui/image"
 import { customEmojis } from "@/assets/customEmojis"
-import isEqual from "react-fast-compare"
 import { randomUUID } from "expo-crypto"
 import chats from "@/lib/chats"
 import { sync } from "@/components/chats/sync"
@@ -78,747 +76,710 @@ export const PopupContainerView = memo(
 	}
 )
 
-export const MentionSuggestions = memo(
-	({ chat }: { chat: Chat }) => {
-		const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
-		const stringifiedClient = useStringifiedClient()
-		const inputSelection = useChatsStore(useShallow(state => state.inputSelection))
-		const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
-		const inputFocused = useChatsStore(useShallow(state => state.inputFocused))
+// TODO: Fix memoization
+export const MentionSuggestions = memo(({ chat }: { chat: Chat }) => {
+	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
+	const stringifiedClient = useStringifiedClient()
+	const inputSelection = useChatsStore(useShallow(state => state.inputSelection))
+	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
+	const inputFocused = useChatsStore(useShallow(state => state.inputFocused))
 
-		const { show, text } = useMemo(() => {
-			const valueNormalized = chatInputValue.toLowerCase()
+	const { show, text } = useMemo(() => {
+		const valueNormalized = chatInputValue.toLowerCase()
 
-			if (
-				valueNormalized.length === 0 ||
-				inputSelection.start === 0 ||
-				suggestionsVisible.filter(s => s !== "mentions").length > 0 ||
-				!inputFocused
-			) {
-				return {
-					show: false,
-					text: ""
-				}
-			}
-
-			const closestIndex = findClosestIndexString(valueNormalized, "@", inputSelection.start)
-			const sliced = valueNormalized.slice(
-				closestIndex === -1 ? valueNormalized.lastIndexOf("@") : closestIndex,
-				inputSelection.start
-			)
-
+		if (
+			valueNormalized.length === 0 ||
+			inputSelection.start === 0 ||
+			suggestionsVisible.filter(s => s !== "mentions").length > 0 ||
+			!inputFocused
+		) {
 			return {
-				show:
-					(sliced === "@" && valueNormalized.trim().length === 1) ||
-					(sliced.startsWith("@") &&
-						sliced.length >= 1 &&
-						!sliced.includes(" ") &&
-						!sliced.endsWith("@") &&
-						!sliced.endsWith(" ") &&
-						!valueNormalized
-							.slice(0, closestIndex)
-							.split(/[\s\n]+/)
-							.at(-1)
-							?.startsWith("@")),
-				text: sliced
+				show: false,
+				text: ""
 			}
-		}, [chatInputValue, inputSelection, suggestionsVisible, inputFocused])
-
-		const participants = useMemo(() => {
-			const textNormalized = text.toLowerCase().trim().slice(1)
-
-			return chat.participants
-				.filter(p => {
-					if (p.userId === stringifiedClient?.userId) {
-						return false
-					}
-
-					if (textNormalized.length === 0) {
-						return true
-					}
-
-					return (
-						contactDisplayName(p).toLowerCase().trim().includes(textNormalized) ||
-						p.email.toLowerCase().trim().includes(textNormalized)
-					)
-				})
-				.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-		}, [chat.participants, stringifiedClient?.userId, text])
-
-		useEffect(() => {
-			if (show) {
-				useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== "mentions"), "mentions"])
-			} else {
-				useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== "mentions"))
-			}
-		}, [show])
-
-		if (!show || participants.length === 0) {
-			return null
 		}
 
-		return (
-			<PopupContainerView scrollViewClassName="py-1">
-				{participants.map(participant => {
-					return (
-						<PressableScale
-							key={participant.userId}
-							rippleColor="transparent"
-							onPress={() => {
-								if (chatInputValue.length === 0 || inputSelection.start === 0) {
-									return
-								}
+		const closestIndex = findClosestIndexString(valueNormalized, "@", inputSelection.start)
+		const sliced = valueNormalized.slice(closestIndex === -1 ? valueNormalized.lastIndexOf("@") : closestIndex, inputSelection.start)
 
-								const closestIndex = findClosestIndexString(chatInputValue, "@", inputSelection.start)
-
-								if (closestIndex === -1) {
-									return
-								}
-
-								const replacedMessage = chatInputValue.slice(0, closestIndex) + `@${participant.email} `
-
-								if (replacedMessage.length === 0) {
-									return
-								}
-
-								setChatInputValue(replacedMessage)
-
-								useChatsStore.getState().setInputSelection({
-									start: replacedMessage.length,
-									end: replacedMessage.length
-								})
-							}}
-						>
-							<View className="flex-row items-center gap-3 bg-transparent py-1.5">
-								<Avatar
-									className="shrink-0"
-									size={28}
-									source={{
-										uri: participant.avatar
-									}}
-								/>
-								<View className="bg-transparent flex-1 flex-col">
-									<Text
-										className="flex-1"
-										numberOfLines={1}
-										ellipsizeMode="middle"
-									>
-										{contactDisplayName(participant)}
-									</Text>
-									<Text
-										className="flex-1 text-xs text-muted-foreground"
-										numberOfLines={1}
-										ellipsizeMode="middle"
-									>
-										{participant.email}
-									</Text>
-								</View>
-							</View>
-						</PressableScale>
-					)
-				})}
-			</PopupContainerView>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return prevProps.chat.uuid === nextProps.chat.uuid && isEqual(prevProps.chat.participants, nextProps.chat.participants)
+		return {
+			show:
+				(sliced === "@" && valueNormalized.trim().length === 1) ||
+				(sliced.startsWith("@") &&
+					sliced.length >= 1 &&
+					!sliced.includes(" ") &&
+					!sliced.endsWith("@") &&
+					!sliced.endsWith(" ") &&
+					!valueNormalized
+						.slice(0, closestIndex)
+						.split(/[\s\n]+/)
+						.at(-1)
+						?.startsWith("@")),
+			text: sliced
 		}
+	}, [chatInputValue, inputSelection, suggestionsVisible, inputFocused])
+
+	const participants = useMemo(() => {
+		const textNormalized = text.toLowerCase().trim().slice(1)
+
+		return chat.participants
+			.filter(p => {
+				if (p.userId === stringifiedClient?.userId) {
+					return false
+				}
+
+				if (textNormalized.length === 0) {
+					return true
+				}
+
+				return (
+					contactDisplayName(p).toLowerCase().trim().includes(textNormalized) ||
+					p.email.toLowerCase().trim().includes(textNormalized)
+				)
+			})
+			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
+	}, [chat.participants, stringifiedClient?.userId, text])
+
+	useEffect(() => {
+		if (show) {
+			useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== "mentions"), "mentions"])
+		} else {
+			useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== "mentions"))
+		}
+	}, [show])
+
+	if (!show || participants.length === 0) {
+		return null
 	}
-)
 
-export const EmojiSuggestions = memo(
-	({ chat }: { chat: Chat }) => {
-		const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
-		const inputSelection = useChatsStore(useShallow(state => state.inputSelection))
-		const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
-		const inputFocused = useChatsStore(useShallow(state => state.inputFocused))
-
-		const { show, text } = useMemo(() => {
-			const valueNormalized = chatInputValue.toLowerCase()
-
-			if (
-				valueNormalized.length === 0 ||
-				inputSelection.start === 0 ||
-				suggestionsVisible.filter(s => s !== "emojis").length > 0 ||
-				!inputFocused
-			) {
-				return {
-					show: false,
-					text: ""
-				}
-			}
-
-			const closestIndex = findClosestIndexString(valueNormalized, ":", inputSelection.start)
-			const sliced = valueNormalized.slice(
-				closestIndex === -1 ? valueNormalized.lastIndexOf(":") : closestIndex,
-				inputSelection.start
-			)
-
-			return {
-				show:
-					(sliced === ":" && valueNormalized.trim().length === 3) ||
-					(sliced.startsWith(":") &&
-						sliced.length >= 3 &&
-						!sliced.includes(" ") &&
-						!sliced.endsWith(":") &&
-						!sliced.endsWith(" ") &&
-						!valueNormalized
-							.slice(0, closestIndex)
-							.split(/[\s\n]+/)
-							.at(-1)
-							?.startsWith(":")),
-				text: sliced
-			}
-		}, [chatInputValue, inputSelection, suggestionsVisible, inputFocused])
-
-		const emojis = useMemo(() => {
-			const textNormalized = text.toLowerCase().trim().split(":").join("")
-
-			return customEmojis
-				.filter(e => e.name.toLowerCase().trim().includes(textNormalized))
-				.slice(0, 10)
-				.sort((a, b) => fastLocaleCompare(a.name, b.name))
-		}, [text])
-
-		useEffect(() => {
-			if (show) {
-				useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== "emojis"), "emojis"])
-			} else {
-				useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== "emojis"))
-			}
-		}, [show])
-
-		if (!show || emojis.length === 0) {
-			return null
-		}
-
-		return (
-			<PopupContainerView scrollViewClassName="py-1">
-				{emojis.map(emoji => {
-					return (
-						<PressableScale
-							key={emoji.id}
-							rippleColor="transparent"
-							onPress={() => {
-								if (chatInputValue.length === 0 || inputSelection.start === 0) {
-									return
-								}
-
-								const closestIndex = findClosestIndexString(chatInputValue, ":", inputSelection.start)
-								if (closestIndex === -1) {
-									return
-								}
-
-								const replacedMessage = chatInputValue.slice(0, closestIndex) + `:${emoji.name.toLowerCase().trim()}: `
-
-								if (replacedMessage.length === 0) {
-									return
-								}
-
-								setChatInputValue(replacedMessage)
-
-								useChatsStore.getState().setInputSelection({
-									start: replacedMessage.length,
-									end: replacedMessage.length
-								})
-							}}
-						>
-							<View className="flex-row items-center gap-3 bg-transparent py-1.5">
-								<Image
-									className="shrink-0 w-7 h-7"
-									source={{
-										uri: emoji.skins[0]?.src
-									}}
-								/>
-								<View className="bg-transparent flex-1 flex-col">
-									<Text
-										className="flex-1"
-										numberOfLines={1}
-										ellipsizeMode="middle"
-									>
-										{emoji.name}
-									</Text>
-									<Text
-										className="flex-1 text-xs text-muted-foreground"
-										numberOfLines={1}
-										ellipsizeMode="middle"
-									>
-										:{emoji.name.toLowerCase()}:
-									</Text>
-								</View>
-							</View>
-						</PressableScale>
-					)
-				})}
-			</PopupContainerView>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return prevProps.chat.uuid === nextProps.chat.uuid
-		}
-	}
-)
-
-export const ReplyTo = memo(
-	({ chat }: { chat: Chat }) => {
-		const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
-		const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
-		const textMutedForeground = useResolveClassNames("text-muted-foreground")
-
-		const info = useMemo((): { show: false } | { show: true; participant: ChatParticipant } => {
-			if (!chatReplyTo || suggestionsVisible.filter(s => s !== "reply").length > 0) {
-				return {
-					show: false
-				}
-			}
-
-			const participant = chat.participants.find(p => p.userId === chatReplyTo.inner.senderId)
-
-			if (!participant) {
-				return {
-					show: false
-				}
-			}
-
-			return {
-				show: true,
-				participant
-			}
-		}, [chatReplyTo, suggestionsVisible, chat.participants])
-
-		useEffect(() => {
-			if (info.show) {
-				useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== "reply"), "reply"])
-			} else {
-				useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== "reply"))
-			}
-		}, [info.show])
-
-		if (!info.show || !chatReplyTo) {
-			return null
-		}
-
-		return (
-			<PopupContainerView
-				scrollViewClassName="py-1"
-				scrollViewProps={{
-					scrollEnabled: false
-				}}
-			>
-				<View className="flex-row items-center gap-3 bg-transparent py-1.5">
-					<View className="flex-row items-center gap-3 bg-transparent">
-						<Ionicons
-							size={20}
-							name="arrow-undo-outline"
-							color={textMutedForeground.color}
-							style={{
-								transform: [
-									{
-										scaleX: -1
-									}
-								]
-							}}
-						/>
-						<Avatar
-							className="shrink-0"
-							size={32}
-							source={{
-								uri: chatReplyTo?.inner.senderAvatar
-							}}
-						/>
-					</View>
-					<View className="bg-transparent flex-1 flex-col">
-						<Text
-							className="flex-1"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{contactDisplayName(info.participant)}
-						</Text>
-						<Text
-							className="flex-1 text-xs text-muted-foreground"
-							numberOfLines={1}
-							ellipsizeMode="tail"
-						>
-							{chatReplyTo.inner.message}
-						</Text>
-					</View>
+	return (
+		<PopupContainerView scrollViewClassName="py-1">
+			{participants.map(participant => {
+				return (
 					<PressableScale
-						className="flex-row items-center justify-center"
+						key={participant.userId}
+						rippleColor="transparent"
 						onPress={() => {
-							setChatReplyTo(null)
+							if (chatInputValue.length === 0 || inputSelection.start === 0) {
+								return
+							}
+
+							const closestIndex = findClosestIndexString(chatInputValue, "@", inputSelection.start)
+
+							if (closestIndex === -1) {
+								return
+							}
+
+							const replacedMessage = chatInputValue.slice(0, closestIndex) + `@${participant.email} `
+
+							if (replacedMessage.length === 0) {
+								return
+							}
+
+							setChatInputValue(replacedMessage)
+
+							useChatsStore.getState().setInputSelection({
+								start: replacedMessage.length,
+								end: replacedMessage.length
+							})
 						}}
 					>
-						<Ionicons
-							name="close-outline"
-							size={20}
-							color={textMutedForeground.color}
-						/>
+						<View className="flex-row items-center gap-3 bg-transparent py-1.5">
+							<Avatar
+								className="shrink-0"
+								size={28}
+								source={participant.avatar}
+							/>
+							<View className="bg-transparent flex-1 flex-col">
+								<Text
+									className="flex-1"
+									numberOfLines={1}
+									ellipsizeMode="middle"
+								>
+									{contactDisplayName(participant)}
+								</Text>
+								<Text
+									className="flex-1 text-xs text-muted-foreground"
+									numberOfLines={1}
+									ellipsizeMode="middle"
+								>
+									{participant.email}
+								</Text>
+							</View>
+						</View>
 					</PressableScale>
-				</View>
-			</PopupContainerView>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return prevProps.chat.uuid === nextProps.chat.uuid && isEqual(prevProps.chat.participants, nextProps.chat.participants)
+				)
+			})}
+		</PopupContainerView>
+	)
+})
+
+export const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
+	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
+	const inputSelection = useChatsStore(useShallow(state => state.inputSelection))
+	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
+	const inputFocused = useChatsStore(useShallow(state => state.inputFocused))
+
+	const { show, text } = useMemo(() => {
+		const valueNormalized = chatInputValue.toLowerCase()
+
+		if (
+			valueNormalized.length === 0 ||
+			inputSelection.start === 0 ||
+			suggestionsVisible.filter(s => s !== "emojis").length > 0 ||
+			!inputFocused
+		) {
+			return {
+				show: false,
+				text: ""
+			}
 		}
+
+		const closestIndex = findClosestIndexString(valueNormalized, ":", inputSelection.start)
+		const sliced = valueNormalized.slice(closestIndex === -1 ? valueNormalized.lastIndexOf(":") : closestIndex, inputSelection.start)
+
+		return {
+			show:
+				(sliced === ":" && valueNormalized.trim().length === 3) ||
+				(sliced.startsWith(":") &&
+					sliced.length >= 3 &&
+					!sliced.includes(" ") &&
+					!sliced.endsWith(":") &&
+					!sliced.endsWith(" ") &&
+					!valueNormalized
+						.slice(0, closestIndex)
+						.split(/[\s\n]+/)
+						.at(-1)
+						?.startsWith(":")),
+			text: sliced
+		}
+	}, [chatInputValue, inputSelection, suggestionsVisible, inputFocused])
+
+	const emojis = useMemo(() => {
+		const textNormalized = text.toLowerCase().trim().split(":").join("")
+
+		return customEmojis
+			.filter(e => e.name.toLowerCase().trim().includes(textNormalized))
+			.slice(0, 10)
+			.sort((a, b) => fastLocaleCompare(a.name, b.name))
+	}, [text])
+
+	useEffect(() => {
+		if (show) {
+			useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== "emojis"), "emojis"])
+		} else {
+			useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== "emojis"))
+		}
+	}, [show])
+
+	if (!show || emojis.length === 0) {
+		return null
 	}
-)
 
-export const Input = memo(
-	({ chat }: { chat: Chat }) => {
-		const insets = useSafeAreaInsets()
-		const inputViewRef = useRef<TView>(null)
-		const { onLayout: inputViewOnLayout, layout: inputViewLayout } = useViewLayout(inputViewRef)
-		const textForeground = useResolveClassNames("text-foreground")
-		const windowDimensions = useWindowDimensions()
-		const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
-		const inputRef = useRef<TextInput>(null)
-		const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
-		const stringifiedClient = useStringifiedClient()
-		const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-		const sendTypingEventSemaphoreRef = useRef<Semaphore>(new Semaphore(1))
-		const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
-		const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
+	return (
+		<PopupContainerView scrollViewClassName="py-1">
+			{emojis.map(emoji => {
+				return (
+					<PressableScale
+						key={emoji.id}
+						rippleColor="transparent"
+						onPress={() => {
+							if (chatInputValue.length === 0 || inputSelection.start === 0) {
+								return
+							}
 
-		const onChangeText = useCallback(
-			(text: string) => {
-				setChatInputValue(text)
+							const closestIndex = findClosestIndexString(chatInputValue, ":", inputSelection.start)
+							if (closestIndex === -1) {
+								return
+							}
 
-				if (text.length === 0 && chatEditMessage) {
-					setChatEditMessage(null)
-				}
-			},
-			[setChatInputValue, chatEditMessage, setChatEditMessage]
-		)
+							const replacedMessage = chatInputValue.slice(0, closestIndex) + `:${emoji.name.toLowerCase().trim()}: `
 
-		const me = useMemo(() => {
-			if (!stringifiedClient) {
-				return null
+							if (replacedMessage.length === 0) {
+								return
+							}
+
+							setChatInputValue(replacedMessage)
+
+							useChatsStore.getState().setInputSelection({
+								start: replacedMessage.length,
+								end: replacedMessage.length
+							})
+						}}
+					>
+						<View className="flex-row items-center gap-3 bg-transparent py-1.5">
+							<Image
+								className="shrink-0 w-7 h-7"
+								source={{
+									uri: emoji.skins[0]!.src
+								}}
+							/>
+							<View className="bg-transparent flex-1 flex-col">
+								<Text
+									className="flex-1"
+									numberOfLines={1}
+									ellipsizeMode="middle"
+								>
+									{emoji.name}
+								</Text>
+								<Text
+									className="flex-1 text-xs text-muted-foreground"
+									numberOfLines={1}
+									ellipsizeMode="middle"
+								>
+									:{emoji.name.toLowerCase()}:
+								</Text>
+							</View>
+						</View>
+					</PressableScale>
+				)
+			})}
+		</PopupContainerView>
+	)
+})
+
+export const ReplyTo = memo(({ chat }: { chat: Chat }) => {
+	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
+	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+
+	const info = useMemo((): { show: false } | { show: true; participant: ChatParticipant } => {
+		if (!chatReplyTo || suggestionsVisible.filter(s => s !== "reply").length > 0) {
+			return {
+				show: false
 			}
+		}
 
-			return chat.participants.find(p => p.userId === stringifiedClient.userId)
-		}, [chat.participants, stringifiedClient])
+		const participant = chat.participants.find(p => p.userId === chatReplyTo.inner.senderId)
 
-		const sendTypingEvent = useCallback(
-			async (type: ChatTypingType) => {
-				const result = await run(async defer => {
-					await sendTypingEventSemaphoreRef.current.acquire()
-
-					defer(() => {
-						sendTypingEventSemaphoreRef.current.release()
-					})
-
-					await chats.sendTyping({
-						chat,
-						type
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-
-					return
-				}
-			},
-			[chat]
-		)
-
-		const send = useCallback(async () => {
-			if (!stringifiedClient || !me) {
-				return
+		if (!participant) {
+			return {
+				show: false
 			}
+		}
 
-			const normalizedMessage = chatInputValue.trim()
+		return {
+			show: true,
+			participant
+		}
+	}, [chatReplyTo, suggestionsVisible, chat.participants])
 
-			if (normalizedMessage.length === 0) {
-				return
-			}
+	useEffect(() => {
+		if (info.show) {
+			useChatsStore.getState().setSuggestionsVisible(prev => [...prev.filter(s => s !== "reply"), "reply"])
+		} else {
+			useChatsStore.getState().setSuggestionsVisible(prev => prev.filter(s => s !== "reply"))
+		}
+	}, [info.show])
 
-			clearTimeout(typingTimeoutRef.current)
-			sendTypingEvent(ChatTypingType.Up).catch(console.error)
+	if (!info.show || !chatReplyTo) {
+		return null
+	}
 
-			inputRef.current?.clear()
+	return (
+		<PopupContainerView
+			scrollViewClassName="py-1"
+			scrollViewProps={{
+				scrollEnabled: false
+			}}
+		>
+			<View className="flex-row items-center gap-3 bg-transparent py-1.5">
+				<View className="flex-row items-center gap-3 bg-transparent">
+					<Ionicons
+						size={20}
+						name="arrow-undo-outline"
+						color={textMutedForeground.color}
+						style={{
+							transform: [
+								{
+									scaleX: -1
+								}
+							]
+						}}
+					/>
+					<Avatar
+						className="shrink-0"
+						size={32}
+						source={chatReplyTo?.inner.senderAvatar}
+					/>
+				</View>
+				<View className="bg-transparent flex-1 flex-col">
+					<Text
+						className="flex-1"
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{contactDisplayName(info.participant)}
+					</Text>
+					<Text
+						className="flex-1 text-xs text-muted-foreground"
+						numberOfLines={1}
+						ellipsizeMode="tail"
+					>
+						{chatReplyTo.inner.message}
+					</Text>
+				</View>
+				<PressableScale
+					className="flex-row items-center justify-center"
+					onPress={() => {
+						setChatReplyTo(null)
+					}}
+				>
+					<Ionicons
+						name="close-outline"
+						size={20}
+						color={textMutedForeground.color}
+					/>
+				</PressableScale>
+			</View>
+		</PopupContainerView>
+	)
+})
 
-			setChatInputValue("")
-			setChatReplyTo(null)
+export const Input = memo(({ chat }: { chat: Chat }) => {
+	const insets = useSafeAreaInsets()
+	const inputViewRef = useRef<TView>(null)
+	const { onLayout: inputViewOnLayout, layout: inputViewLayout } = useViewLayout(inputViewRef)
+	const textForeground = useResolveClassNames("text-foreground")
+	const windowDimensions = useWindowDimensions()
+	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
+	const inputRef = useRef<TextInput>(null)
+	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
+	const stringifiedClient = useStringifiedClient()
+	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+	const sendTypingEventSemaphoreRef = useRef<Semaphore>(new Semaphore(1))
+	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
+	const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
 
-			useChatsStore.getState().setInputSelection({
-				start: 0,
-				end: 0
-			})
+	const onChangeText = useCallback(
+		(text: string) => {
+			setChatInputValue(text)
 
-			if (chatEditMessage) {
-				const result = await runWithLoading(async () => {
-					return await chats.editMessage({
-						chat,
-						message: chatEditMessage,
-						newMessage: normalizedMessage
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					setChatInputValue(normalizedMessage)
-
-					useChatsStore.getState().setInputSelection({
-						start: normalizedMessage.length,
-						end: normalizedMessage.length
-					})
-
-					return
-				}
-
+			if (text.length === 0 && chatEditMessage) {
 				setChatEditMessage(null)
+			}
+		},
+		[setChatInputValue, chatEditMessage, setChatEditMessage]
+	)
+
+	const me = useMemo(() => {
+		if (!stringifiedClient) {
+			return null
+		}
+
+		return chat.participants.find(p => p.userId === stringifiedClient.userId)
+	}, [chat.participants, stringifiedClient])
+
+	const sendTypingEvent = useCallback(
+		async (type: ChatTypingType) => {
+			const result = await run(async defer => {
+				await sendTypingEventSemaphoreRef.current.acquire()
+
+				defer(() => {
+					sendTypingEventSemaphoreRef.current.release()
+				})
+
+				await chats.sendTyping({
+					chat,
+					type
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
 
 				return
 			}
+		},
+		[chat]
+	)
 
-			const sentTimestamp = Date.now()
-			let flushedToDisk = false
-			let flushToDiskError: Error | null = null
-			const inflightId = randomUUID()
-			const inflightMessage: ChatMessageWithInflightId = {
-				inflightId,
-				chat: chat.uuid,
-				inner: {
-					uuid: inflightId,
-					senderId: stringifiedClient.userId,
-					senderEmail: stringifiedClient.email,
-					senderAvatar: me.avatar,
-					senderNickName: me.nickName,
-					message: normalizedMessage
-				},
-				replyTo: chatReplyTo
-					? {
-							uuid: chatReplyTo.inner.uuid,
-							senderId: chatReplyTo.inner.senderId,
-							senderEmail: chatReplyTo.inner.senderEmail,
-							senderAvatar: chatReplyTo.inner.senderAvatar,
-							senderNickName: chatReplyTo.inner.senderNickName,
-							message: chatReplyTo.inner.message
-						}
-					: undefined,
-				embedDisabled: false,
-				edited: false,
-				editedTimestamp: BigInt(0),
-				sentTimestamp: BigInt(sentTimestamp)
-			}
+	const send = useCallback(async () => {
+		if (!stringifiedClient || !me) {
+			return
+		}
 
-			chatMessagesQueryUpdate({
-				params: {
-					uuid: chat.uuid
-				},
-				updater: messages => [...messages.filter(m => m.inflightId !== inflightMessage.inflightId), inflightMessage]
-			})
+		const normalizedMessage = chatInputValue.trim()
 
-			useChatsStore.getState().setInflightMessages(prev => {
-				const updated = {
-					...prev,
-					[chat.uuid]: {
-						chat,
-						messages: [...(prev[chat.uuid]?.messages ?? []), inflightMessage]
-					}
-				}
+		if (normalizedMessage.length === 0) {
+			return
+		}
 
-				sync.flushToDisk(updated)
-					.then(() => {
-						flushedToDisk = true
+		clearTimeout(typingTimeoutRef.current)
+		sendTypingEvent(ChatTypingType.Up).catch(console.error)
 
-						sync.sync()
-					})
-					.catch(err => {
-						flushToDiskError = err
-					})
+		inputRef.current?.clear()
 
-				return updated
-			})
+		setChatInputValue("")
+		setChatReplyTo(null)
 
-			const result = await run(async () => {
-				while (!flushedToDisk) {
-					if (flushToDiskError) {
-						throw flushToDiskError
-					}
+		useChatsStore.getState().setInputSelection({
+			start: 0,
+			end: 0
+		})
 
-					await new Promise<void>(resolve => setTimeout(resolve, 100))
-				}
+		if (chatEditMessage) {
+			const result = await runWithLoading(async () => {
+				return await chats.editMessage({
+					chat,
+					message: chatEditMessage,
+					newMessage: normalizedMessage
+				})
 			})
 
 			if (!result.success) {
 				console.error(result.error)
 				alerts.error(result.error)
 
+				setChatInputValue(normalizedMessage)
+
+				useChatsStore.getState().setInputSelection({
+					start: normalizedMessage.length,
+					end: normalizedMessage.length
+				})
+
 				return
 			}
-		}, [
-			chatInputValue,
-			chat,
-			stringifiedClient,
-			me,
-			setChatInputValue,
-			sendTypingEvent,
-			chatReplyTo,
-			setChatReplyTo,
-			chatEditMessage,
-			setChatEditMessage
-		])
 
-		const onKeyPress = useCallback(() => {
-			sendTypingEvent(ChatTypingType.Down).catch(console.error)
+			setChatEditMessage(null)
 
-			clearTimeout(typingTimeoutRef.current)
+			return
+		}
 
-			typingTimeoutRef.current = setTimeout(() => {
-				sendTypingEvent(ChatTypingType.Up).catch(console.error)
-			}, 3000)
-		}, [sendTypingEvent])
+		const sentTimestamp = Date.now()
+		let flushedToDisk = false
+		let flushToDiskError: Error | null = null
+		const inflightId = randomUUID()
+		const inflightMessage: ChatMessageWithInflightId = {
+			inflightId,
+			chat: chat.uuid,
+			inner: {
+				uuid: inflightId,
+				senderId: stringifiedClient.userId,
+				senderEmail: stringifiedClient.email,
+				senderAvatar: me.avatar,
+				senderNickName: me.nickName,
+				message: normalizedMessage
+			},
+			replyTo: chatReplyTo
+				? {
+						uuid: chatReplyTo.inner.uuid,
+						senderId: chatReplyTo.inner.senderId,
+						senderEmail: chatReplyTo.inner.senderEmail,
+						senderAvatar: chatReplyTo.inner.senderAvatar,
+						senderNickName: chatReplyTo.inner.senderNickName,
+						message: chatReplyTo.inner.message
+					}
+				: undefined,
+			embedDisabled: false,
+			edited: false,
+			editedTimestamp: BigInt(0),
+			sentTimestamp: BigInt(sentTimestamp)
+		}
 
-		const onBlur = useCallback(() => {
-			useChatsStore.getState().setInputFocused(false)
+		chatMessagesQueryUpdate({
+			params: {
+				uuid: chat.uuid
+			},
+			updater: messages => [...messages.filter(m => m.inflightId !== inflightMessage.inflightId), inflightMessage]
+		})
 
-			clearTimeout(typingTimeoutRef.current)
+		useChatsStore.getState().setInflightMessages(prev => {
+			const updated = {
+				...prev,
+				[chat.uuid]: {
+					chat,
+					messages: [...(prev[chat.uuid]?.messages ?? []), inflightMessage]
+				}
+			}
+
+			sync.flushToDisk(updated)
+				.then(() => {
+					flushedToDisk = true
+
+					sync.sync()
+				})
+				.catch(err => {
+					flushToDiskError = err
+				})
+
+			return updated
+		})
+
+		const result = await run(async () => {
+			while (!flushedToDisk) {
+				if (flushToDiskError) {
+					throw flushToDiskError
+				}
+
+				await new Promise<void>(resolve => setTimeout(resolve, 100))
+			}
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+	}, [
+		chatInputValue,
+		chat,
+		stringifiedClient,
+		me,
+		setChatInputValue,
+		sendTypingEvent,
+		chatReplyTo,
+		setChatReplyTo,
+		chatEditMessage,
+		setChatEditMessage
+	])
+
+	const onKeyPress = useCallback(() => {
+		sendTypingEvent(ChatTypingType.Down).catch(console.error)
+
+		clearTimeout(typingTimeoutRef.current)
+
+		typingTimeoutRef.current = setTimeout(() => {
 			sendTypingEvent(ChatTypingType.Up).catch(console.error)
-		}, [sendTypingEvent])
+		}, 3000)
+	}, [sendTypingEvent])
 
-		const onFocus = useCallback(() => {
-			useChatsStore.getState().setInputFocused(true)
-		}, [])
+	const onBlur = useCallback(() => {
+		useChatsStore.getState().setInputFocused(false)
 
-		const onSelectionChange = useCallback((e: TextInputSelectionChangeEvent) => {
-			useChatsStore.getState().setInputSelection(e.nativeEvent.selection)
-		}, [])
+		clearTimeout(typingTimeoutRef.current)
+		sendTypingEvent(ChatTypingType.Up).catch(console.error)
+	}, [sendTypingEvent])
 
-		useEffectOnce(() => {
-			if (chatInputValue.length === 0) {
-				return
-			}
+	const onFocus = useCallback(() => {
+		useChatsStore.getState().setInputFocused(true)
+	}, [])
 
-			useChatsStore.getState().setInputSelection({
-				start: chatInputValue.length,
-				end: chatInputValue.length
+	const onSelectionChange = useCallback((e: TextInputSelectionChangeEvent) => {
+		useChatsStore.getState().setInputSelection(e.nativeEvent.selection)
+	}, [])
+
+	useEffectOnce(() => {
+		if (chatInputValue.length === 0) {
+			return
+		}
+
+		useChatsStore.getState().setInputSelection({
+			start: chatInputValue.length,
+			end: chatInputValue.length
+		})
+	})
+
+	useEffect(() => {
+		const { cleanup } = runEffect(defer => {
+			const focusChatInputSubscription = events.subscribe("focusChatInput", data => {
+				if (data.chatUuid !== chat.uuid) {
+					return
+				}
+
+				setTimeout(() => {
+					inputRef.current?.focus()
+				}, 100)
+			})
+
+			defer(() => {
+				focusChatInputSubscription.remove()
 			})
 		})
 
-		useEffect(() => {
-			const { cleanup } = runEffect(defer => {
-				const focusChatInputSubscription = events.subscribe("focusChatInput", data => {
-					if (data.chatUuid !== chat.uuid) {
-						return
-					}
-
-					setTimeout(() => {
-						inputRef.current?.focus()
-					}, 100)
-				})
-
-				defer(() => {
-					focusChatInputSubscription.remove()
-				})
-			})
-
-			return () => {
-				cleanup()
-			}
-		}, [chat.uuid])
-
-		useEffect(() => {
-			useChatsStore.getState().setInputViewLayout(inputViewLayout)
-		}, [inputViewLayout])
-
-		useEffect(() => {
-			return () => {
-				clearTimeout(typingTimeoutRef.current)
-				sendTypingEvent(ChatTypingType.Up).catch(console.error)
-			}
-		}, [sendTypingEvent])
-
-		return (
-			<KeyboardStickyView
-				className="bg-transparent absolute left-0 right-0 bottom-0"
-				offset={{
-					opened: -16,
-					closed: -(insets.bottom + 8)
-				}}
-			>
-				{chatInputValue.length > 0 && (
-					<Fragment>
-						<MentionSuggestions chat={chat} />
-						<EmojiSuggestions chat={chat} />
-					</Fragment>
-				)}
-				<ReplyTo chat={chat} />
-				<View
-					className="bg-transparent flex-row items-end gap-2 px-4"
-					ref={inputViewRef}
-					onLayout={inputViewOnLayout}
-				>
-					<PressableScale rippleColor="transparent">
-						<CrossGlassContainerView className="items-center justify-center rounded-full size-11">
-							<Ionicons
-								name="add-outline"
-								size={24}
-								color={textForeground.color}
-							/>
-						</CrossGlassContainerView>
-					</PressableScale>
-					<CrossGlassContainerView className="flex-1 rounded-3xl min-h-11">
-						<TextInput
-							ref={inputRef}
-							value={chatInputValue}
-							onChangeText={onChangeText}
-							className="ios:py-3 text-foreground min-h-11 flex-1 rounded-3xl py-2 pl-3 pr-12 leading-5"
-							placeholderTextColorClassName="text-muted-foreground"
-							placeholder="tbd_type_a_message"
-							multiline={true}
-							scrollEnabled={true}
-							autoFocus={false}
-							autoCapitalize={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "none" : undefined}
-							autoComplete={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "off" : undefined}
-							autoCorrect={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
-							spellCheck={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
-							keyboardType="default"
-							returnKeyType="default"
-							enterKeyHint="enter"
-							onKeyPress={onKeyPress}
-							onFocus={onFocus}
-							onBlur={onBlur}
-							onSelectionChange={onSelectionChange}
-							style={{
-								maxHeight: Math.max(128, windowDimensions.height / 4)
-							}}
-						/>
-						<AnimatedView
-							className="absolute z-50 bottom-2 right-2"
-							entering={FadeIn}
-							exiting={FadeOut}
-						>
-							<PressableScale
-								className="ios:rounded-full rounded-full size-7 bg-blue-500 items-center justify-center"
-								onPress={send}
-								hitSlop={15}
-							>
-								<Ionicons
-									name="arrow-up-outline"
-									size={18}
-									color="white"
-								/>
-							</PressableScale>
-						</AnimatedView>
-					</CrossGlassContainerView>
-				</View>
-			</KeyboardStickyView>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return prevProps.chat.uuid === nextProps.chat.uuid && isEqual(prevProps.chat.participants, nextProps.chat.participants)
+		return () => {
+			cleanup()
 		}
-	}
-)
+	}, [chat.uuid])
+
+	useEffect(() => {
+		useChatsStore.getState().setInputViewLayout(inputViewLayout)
+	}, [inputViewLayout])
+
+	useEffect(() => {
+		return () => {
+			clearTimeout(typingTimeoutRef.current)
+			sendTypingEvent(ChatTypingType.Up).catch(console.error)
+		}
+	}, [sendTypingEvent])
+
+	return (
+		<KeyboardStickyView
+			className="bg-transparent absolute left-0 right-0 bottom-0"
+			offset={{
+				opened: -16,
+				closed: -(insets.bottom + 8)
+			}}
+		>
+			{chatInputValue.length > 0 && (
+				<Fragment>
+					<MentionSuggestions chat={chat} />
+					<EmojiSuggestions chat={chat} />
+				</Fragment>
+			)}
+			<ReplyTo chat={chat} />
+			<View
+				className="bg-transparent flex-row items-end gap-2 px-4"
+				ref={inputViewRef}
+				onLayout={inputViewOnLayout}
+			>
+				<PressableScale rippleColor="transparent">
+					<CrossGlassContainerView className="items-center justify-center rounded-full size-11">
+						<Ionicons
+							name="add-outline"
+							size={24}
+							color={textForeground.color}
+						/>
+					</CrossGlassContainerView>
+				</PressableScale>
+				<CrossGlassContainerView className="flex-1 rounded-3xl min-h-11">
+					<TextInput
+						ref={inputRef}
+						value={chatInputValue}
+						onChangeText={onChangeText}
+						className="ios:py-3 text-foreground min-h-11 flex-1 rounded-3xl py-2 pl-3 pr-12 leading-5"
+						placeholderTextColorClassName="text-muted-foreground"
+						placeholder="tbd_type_a_message"
+						multiline={true}
+						scrollEnabled={true}
+						autoFocus={false}
+						autoCapitalize={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "none" : undefined}
+						autoComplete={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "off" : undefined}
+						autoCorrect={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
+						spellCheck={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
+						keyboardType="default"
+						returnKeyType="default"
+						enterKeyHint="enter"
+						onKeyPress={onKeyPress}
+						onFocus={onFocus}
+						onBlur={onBlur}
+						onSelectionChange={onSelectionChange}
+						style={{
+							maxHeight: Math.max(128, windowDimensions.height / 4)
+						}}
+					/>
+					<AnimatedView
+						className="absolute z-50 bottom-2 right-2"
+						entering={FadeIn}
+						exiting={FadeOut}
+					>
+						<PressableScale
+							className="ios:rounded-full rounded-full size-7 bg-blue-500 items-center justify-center"
+							onPress={send}
+							hitSlop={15}
+						>
+							<Ionicons
+								name="arrow-up-outline"
+								size={18}
+								color="white"
+							/>
+						</PressableScale>
+					</AnimatedView>
+				</CrossGlassContainerView>
+			</View>
+		</KeyboardStickyView>
+	)
+})
 
 export default Input

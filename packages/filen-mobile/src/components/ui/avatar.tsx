@@ -1,23 +1,23 @@
 import Image from "@/components/ui/image"
-import { memo, useCallback, useMemo } from "@/lib/memo"
+import { memo, useCallback, useMemo } from "react"
 import View from "@/components/ui/view"
 import { cn } from "@filen/utils"
-import { useState } from "react"
 import type { ViewStyle, StyleProp } from "react-native"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
+import { useRecyclingState } from "@shopify/flash-list"
 
-export const Avatar = memo(
+const Avatar = memo(
 	(props: {
 		size?: number
-		source?: React.ComponentProps<typeof Image>["source"]
+		source?: string | null | undefined
 		className?: string
 		style?: StyleProp<ViewStyle>
 		immediateFallback?: boolean
 		group?: number
 		lastActive?: number
 	}) => {
-		const [hasError, setHasError] = useState<boolean>(false)
+		const [hasError, setHasError] = useRecyclingState<boolean>(false, [props])
 		const textMutedForeground = useResolveClassNames("text-muted-foreground")
 		const size = props.size ?? 32
 
@@ -29,13 +29,13 @@ export const Avatar = memo(
 			return props.lastActive > new Date().getTime() - 300000
 		}, [props.lastActive])
 
-		const onError = useCallback(() => {
+		const onFailure = useCallback(() => {
 			setHasError(true)
-		}, [])
+		}, [setHasError])
 
-		const onLoad = useCallback(() => {
+		const onCompletion = useCallback(() => {
 			setHasError(false)
-		}, [])
+		}, [setHasError])
 
 		return (
 			<View className="bg-transparent flex-row items-center justify-center shrink-0">
@@ -71,15 +71,18 @@ export const Avatar = memo(
 						/>
 					) : (
 						<Image
-							className="shrink-0"
-							source={props.source}
-							onError={onError}
-							onLoad={onLoad}
+							className="shrink-0 bg-transparent"
+							source={{
+								uri: props.source
+							}}
+							onFailure={onFailure}
+							onCompletion={onCompletion}
 							style={{
 								width: size,
 								height: size
 							}}
-							contentFit="contain"
+							resizeMode="cover"
+							cachePolicy="dataCache"
 						/>
 					)}
 				</View>

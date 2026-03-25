@@ -1,11 +1,10 @@
-import { useEffect } from "react"
+import { useEffect, memo } from "react"
 import { run, Semaphore } from "@filen/utils"
 import chats from "@/lib/chats"
 import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
 import useChatsStore, { type InflightChatMessages } from "@/stores/useChats.store"
 import sqlite from "@/lib/sqlite"
-import { memo } from "@/lib/memo"
 import { fetchData as chatsQueryFetch } from "@/queries/useChats.query"
 import { FilenSdkError } from "@filen/sdk-rs"
 

@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react"
-import { memo, useMemo, useCallback } from "@/lib/memo"
+import { useState, useEffect, memo, useMemo, useCallback } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { router } from "expo-router"
@@ -123,6 +122,18 @@ function handleZoomChange(zoomScale: SharedValue<number>, zoom: number, setScrol
 	setScrollEnabled(zoom <= 1)
 }
 
+function back(isDismissing: SharedValue<number>, headerOpacity: SharedValue<number>) {
+	isDismissing.value = 1
+	headerOpacity.value = 0
+
+	if (!router.canGoBack()) {
+		return
+	}
+
+	router.back()
+}
+
+// TODO: Fix memo
 const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracted; drivePath: DrivePath; parent?: AnyDirWithContext }) => {
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
@@ -148,14 +159,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 	)
 
 	const goBack = useCallback(() => {
-		isDismissing.value = 1
-		headerOpacity.value = 0
-
-		if (!router.canGoBack()) {
-			return
-		}
-
-		router.back()
+		back(isDismissing, headerOpacity)
 	}, [isDismissing, headerOpacity])
 
 	const onZoomChange = useCallback(

@@ -1,5 +1,5 @@
 import Text from "@/components/ui/text"
-import { memo, useMemo, useCallback } from "@/lib/memo"
+import { memo, useMemo, useCallback } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { Chat as TChat } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
@@ -19,6 +19,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 
+// TODO: Fix memoization
 export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
@@ -118,9 +119,7 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 							<Avatar
 								className="shrink-0"
 								size={38}
-								source={{
-									uri: participantsWithoutSelf.at(0)?.avatar
-								}}
+								source={participantsWithoutSelf.at(0)?.avatar}
 							/>
 						) : (
 							<Avatar

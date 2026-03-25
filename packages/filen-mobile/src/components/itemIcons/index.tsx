@@ -1,5 +1,5 @@
-import { Image } from "expo-image"
-import { memo, useMemo } from "@/lib/memo"
+import { ExpoImage } from "@/components/ui/image"
+import { memo, useMemo } from "react"
 import { Paths } from "expo-file-system"
 import { isValidHexColor, cn } from "@filen/utils"
 import { memoize } from "es-toolkit/function"
@@ -154,7 +154,7 @@ export const FileIcon = memo(
 		}, [name])
 
 		return (
-			<Image
+			<ExpoImage
 				className={cn("shrink-0", className)}
 				source={source}
 				style={{
@@ -162,7 +162,7 @@ export const FileIcon = memo(
 					height: height ?? 32
 				}}
 				contentFit="contain"
-				cachePolicy="memory-disk"
+				cachePolicy="disk"
 			/>
 		)
 	}
@@ -316,7 +316,7 @@ export const DirectoryIcon = memo(
 		}, [color, width, height])
 
 		return (
-			<Image
+			<ExpoImage
 				className={cn("shrink-0", className)}
 				source={source}
 				style={{
@@ -324,7 +324,7 @@ export const DirectoryIcon = memo(
 					height: height ?? 32
 				}}
 				contentFit="contain"
-				cachePolicy="memory-disk"
+				cachePolicy="disk"
 			/>
 		)
 	}

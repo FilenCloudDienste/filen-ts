@@ -1,4 +1,4 @@
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import { withUniwind } from "uniwind"
 import {
 	PressableOpacity as PresstoPressableOpacity,

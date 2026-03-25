@@ -1,9 +1,8 @@
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo } from "react"
 import ZoomableView from "@/components/ui/zoomableView"
 import Image from "@/components/ui/image"
 import { useWindowDimensions, type ViewStyle } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
-import type { ImageStyle, ImageSource } from "expo-image"
 
 const ZOOMABLE_VIEW_STYLE: ViewStyle = {
 	flex: 1,
@@ -27,7 +26,7 @@ const PreviewImage = memo(
 	}) => {
 		const dimensions = useWindowDimensions()
 
-		const imageStyle = useMemo<ImageStyle>(
+		const imageStyle = useMemo(
 			() => ({
 				width: dimensions.width,
 				height: dimensions.height
@@ -35,7 +34,7 @@ const PreviewImage = memo(
 			[dimensions.width, dimensions.height]
 		)
 
-		const imageSource = useMemo<ImageSource>(
+		const imageSource = useMemo(
 			() => ({
 				uri: fileUrl
 			}),
@@ -54,8 +53,8 @@ const PreviewImage = memo(
 				<Image
 					className="flex-1 bg-transparent"
 					source={imageSource}
-					contentFit="contain"
-					cachePolicy="disk"
+					resizeMode="contain"
+					cachePolicy={undefined}
 					style={imageStyle}
 				/>
 			</ZoomableView>

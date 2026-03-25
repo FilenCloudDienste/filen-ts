@@ -1,4 +1,4 @@
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo } from "react"
 import { AnimatedView } from "@/components/ui/animated"
 import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType } from "@/lib/utils"

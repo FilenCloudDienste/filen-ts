@@ -1,6 +1,4 @@
-import { memo, useCallback, useMemo } from "@/lib/memo"
-import { useEffect, useRef } from "react"
-import type { ImageStyle } from "expo-image"
+import { useEffect, useRef, memo, useCallback, useMemo } from "react"
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
 import cache from "@/lib/cache"
 import thumbnails from "@/lib/thumbnails"
@@ -38,12 +36,12 @@ const FileThumbnail = memo(
 		item,
 		size,
 		className,
-		contentFit
+		resizeMode
 	}: {
 		item: DriveItemFileExtracted
 		size: ThumbnailSize
 		className?: string
-		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
+		resizeMode?: React.ComponentProps<typeof Image>["resizeMode"]
 	}) => {
 		const abortControllerRef = useRef<AbortController | null>(null)
 		const errorRetryCountRef = useRef<number>(0)
@@ -147,7 +145,7 @@ const FileThumbnail = memo(
 			generateRef.current = generate
 		}, [generate])
 
-		const onError = useCallback(() => {
+		const onFailure = useCallback(() => {
 			cache.availableThumbnails.set(item.data.uuid, false)
 
 			if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
@@ -228,14 +226,17 @@ const FileThumbnail = memo(
 			}
 		}, [])
 
-		const source = useMemo(
-			() => ({
-				uri: localPath ?? undefined
-			}),
-			[localPath]
-		)
+		const source = useMemo(() => {
+			if (!localPath) {
+				return null
+			}
 
-		const imageStyle = useMemo<ImageStyle>(
+			return {
+				uri: localPath
+			}
+		}, [localPath])
+
+		const imageStyle = useMemo(
 			() => ({
 				width: size.thumbnail,
 				height: size.thumbnail
@@ -243,7 +244,7 @@ const FileThumbnail = memo(
 			[size.thumbnail]
 		)
 
-		if (!localPath || !source.uri) {
+		if (!localPath || !source) {
 			return (
 				<FileIcon
 					name={item.data.decryptedMeta?.name ?? ""}
@@ -259,9 +260,9 @@ const FileThumbnail = memo(
 				className={className}
 				source={source}
 				style={imageStyle}
-				contentFit={contentFit ?? "contain"}
-				cachePolicy="none"
-				onError={onError}
+				resizeMode={resizeMode ?? "contain"}
+				cachePolicy={undefined}
+				onFailure={onFailure}
 			/>
 		)
 	}
@@ -272,12 +273,12 @@ const Thumbnail = memo(
 		item,
 		size,
 		className,
-		contentFit
+		resizeMode
 	}: {
 		item: DriveItem
 		size: ThumbnailSize
 		className?: string
-		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
+		resizeMode?: React.ComponentProps<typeof Image>["resizeMode"]
 	}) => {
 		if (item.type === "file" || item.type === "sharedFile") {
 			return (
@@ -285,7 +286,7 @@ const Thumbnail = memo(
 					item={item}
 					size={size}
 					className={className}
-					contentFit={contentFit}
+					resizeMode={resizeMode}
 				/>
 			)
 		}

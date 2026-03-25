@@ -1,10 +1,9 @@
 import type { Chat as TChat } from "@filen/sdk-rs"
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import { useSecureStore } from "@/lib/secureStore"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/stores/useChats.store"
-import isEqual from "react-fast-compare"
 import * as Clipboard from "expo-clipboard"
 import alerts from "@/lib/alerts"
 import { run } from "@filen/utils"
@@ -148,17 +147,6 @@ export const Menu = memo(
 				{children}
 			</MenuComponent>
 		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return (
-				prevProps.chat.uuid === nextProps.chat.uuid &&
-				isEqual(prevProps.info.item, nextProps.info.item) &&
-				isEqual(prevProps.children, nextProps.children) &&
-				prevProps.className === nextProps.className &&
-				prevProps.isAnchoredToRight === nextProps.isAnchoredToRight
-			)
-		}
 	}
 )
 

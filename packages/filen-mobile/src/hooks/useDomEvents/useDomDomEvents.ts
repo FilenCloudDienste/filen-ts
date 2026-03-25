@@ -1,4 +1,4 @@
-import { useCallback } from "@/lib/memo"
+import { useCallback } from "react"
 import type { JSONValue } from "expo/build/dom/dom.types"
 
 export type RNWebViewFunctions = {

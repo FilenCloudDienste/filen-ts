@@ -1,4 +1,4 @@
-import { memo, useCallback } from "@/lib/memo"
+import { memo, useCallback } from "react"
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"

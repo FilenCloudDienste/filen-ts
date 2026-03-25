@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from "react"
+import { Fragment, useState, useEffect, memo, useCallback, useMemo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useDrivePath from "@/hooks/useDrivePath"
@@ -9,7 +9,6 @@ import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualLis
 import Item from "@/components/drive/item"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import { memo, useCallback, useMemo } from "@/lib/memo"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { router, useFocusEffect } from "expo-router"
@@ -249,7 +248,7 @@ const Header = memo(() => {
 		}
 
 		return items
-	}, [selectedDriveItems, netInfo.hasInternet, textForeground.color, driveItems, drivePath.type, drivePath.selectOptions])
+	}, [selectedDriveItems, netInfo.hasInternet, textForeground, driveItems, drivePath.type, drivePath.selectOptions])
 
 	const leftItems = useMemo((): HeaderItem[] => {
 		if (selectedDriveItems.length > 0) {

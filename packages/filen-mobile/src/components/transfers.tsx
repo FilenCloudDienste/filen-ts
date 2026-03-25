@@ -1,7 +1,6 @@
 import useTransfersStore from "@/stores/useTransfers.store"
 import { useShallow } from "zustand/shallow"
-import { memo, useCallback } from "@/lib/memo"
-import { Fragment } from "react"
+import { Fragment, memo, useCallback } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { useSafeAreaInsets } from "react-native-safe-area-context"

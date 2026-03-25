@@ -8,7 +8,7 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/stores/useNotes.store"
-import { memo, useCallback } from "@/lib/memo"
+import { memo, useCallback } from "react"
 import { simpleDate } from "@/lib/time"
 import Menu from "@/components/notes/tag/menu"
 import { cn } from "@filen/utils"
@@ -18,7 +18,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 
-export const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
+const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
 	const router = useRouter()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")

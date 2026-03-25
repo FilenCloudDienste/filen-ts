@@ -1,6 +1,6 @@
 import { QueryClient, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
-import { useMemo } from "@/lib/memo"
+import { useMemo } from "react"
 import useFocusNotifyOnChangeProps from "@/queries/useFocusNotifyOnChangeProps"
 import useQueryFocusAware from "@/queries/useQueryFocusAware"
 import useNetInfo from "@/hooks/useNetInfo"

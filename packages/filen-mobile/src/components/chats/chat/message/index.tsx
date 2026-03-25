@@ -1,5 +1,4 @@
 import type { Chat as TChat } from "@filen/sdk-rs"
-import { memo, useMemo } from "@/lib/memo"
 import View from "@/components/ui/view"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import Text from "@/components/ui/text"
@@ -10,45 +9,38 @@ import { FadeIn } from "react-native-reanimated"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
 import { contactDisplayName } from "@/lib/utils"
-import { Fragment } from "react"
+import { Fragment, memo, useMemo } from "react"
 import { simpleDate } from "@/lib/time"
-import isEqual from "react-fast-compare"
 import Regexed from "@/components/chats/chat/message/regexed"
 import Menu from "@/components/chats/chat/message/menu"
 
-export const Typing = memo(
-	({ chat }: { chat: TChat }) => {
-		const typing = useChatsStore(useShallow(state => state.typing[chat.uuid] ?? []))
+// TODO: Fix memoization
+export const Typing = memo(({ chat }: { chat: TChat }) => {
+	const typing = useChatsStore(useShallow(state => state.typing[chat.uuid] ?? []))
 
-		const users = useMemo(() => {
-			return typing
-				.map(t => t.senderId)
-				.map(senderId => chat.participants.find(p => p.userId === senderId))
-				.filter(Boolean)
-				.map(participant => contactDisplayName(participant!))
-		}, [typing, chat.participants])
+	const users = useMemo(() => {
+		return typing
+			.map(t => t.senderId)
+			.map(senderId => chat.participants.find(p => p.userId === senderId))
+			.filter(Boolean)
+			.map(participant => contactDisplayName(participant!))
+	}, [typing, chat.participants])
 
-		if (users.length === 0) {
-			return null
-		}
-
-		return (
-			<AnimatedView
-				entering={FadeIn.delay(100)}
-				className="w-full h-auto pb-2 px-4 items-start"
-			>
-				<View className="p-3 rounded-3xl max-w-3/4 bg-background-secondary">
-					<Text className="text-xs">{users.length > 1 ? `${users.join(", ")} tbd_typing...` : "..."}</Text>
-				</View>
-			</AnimatedView>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return prevProps.chat.uuid === nextProps.chat.uuid && isEqual(prevProps.chat.participants, nextProps.chat.participants)
-		}
+	if (users.length === 0) {
+		return null
 	}
-)
+
+	return (
+		<AnimatedView
+			entering={FadeIn.delay(100)}
+			className="w-full h-auto pb-2 px-4 items-start"
+		>
+			<View className="p-3 rounded-3xl max-w-3/4 bg-background-secondary">
+				<Text className="text-xs">{users.length > 1 ? `${users.join(", ")} tbd_typing...` : "..."}</Text>
+			</View>
+		</AnimatedView>
+	)
+})
 
 export const Message = memo(
 	({

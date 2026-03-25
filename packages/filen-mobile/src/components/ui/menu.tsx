@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from "@/lib/memo"
+import { memo } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { type StyleProp, type ViewStyle, Platform } from "react-native"
 import { MenuView, type NativeActionEvent, type MenuAction } from "@react-native-menu/menu"
@@ -388,7 +388,7 @@ function toIosMenuConfig({
 	} satisfies MenuConfig
 }
 
-export const MenuInner = memo(
+const MenuInner = memo(
 	({
 		buttons,
 		type,
@@ -430,60 +430,41 @@ export const MenuInner = memo(
 		const textRed500 = useResolveClassNames("text-red-500")
 		const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
-		const uniqueButtons = useMemo(() => {
-			if (!buttons) {
-				return []
+		const uniqueButtons = buttons && checkIfButtonIdsAreUnique(buttons) ? buttons : []
+
+		const onPressAction = (e: NativeActionEvent) => {
+			const button = findButtonById(uniqueButtons, e.nativeEvent.event)
+
+			if (!button) {
+				return
 			}
 
-			if (!checkIfButtonIdsAreUnique(buttons)) {
-				throw new Error("Menu button IDs must be unique")
+			button?.onPress?.()
+		}
+
+		const onPressMenuItem = (e: OnPressMenuItemEventObject) => {
+			const button = findButtonById(uniqueButtons, e.nativeEvent.actionKey)
+
+			if (!button) {
+				return
 			}
 
-			return buttons
-		}, [buttons])
+			button?.onPress?.()
+		}
 
-		const onPressAction = useCallback(
-			(e: NativeActionEvent) => {
-				const button = findButtonById(uniqueButtons, e.nativeEvent.event)
+		const menuConfig = toIosMenuConfig({
+			buttons: uniqueButtons,
+			title
+		})
 
-				if (!button) {
-					return
-				}
-
-				button?.onPress?.()
-			},
-			[uniqueButtons]
-		)
-
-		const onPressMenuItem = useCallback(
-			(e: OnPressMenuItemEventObject) => {
-				const button = findButtonById(uniqueButtons, e.nativeEvent.actionKey)
-
-				if (!button) {
-					return
-				}
-
-				button?.onPress?.()
-			},
-			[uniqueButtons]
-		)
-
-		const { menuConfig, actions } = useMemo(() => {
-			return {
-				menuConfig: toIosMenuConfig({
-					buttons: uniqueButtons,
-					title
-				}),
-				actions: toReactNativeMenuActions({
-					buttons: uniqueButtons,
-					colors: {
-						normal: (textForeground.color as string) ?? "white",
-						destructive: (textRed500.color as string) ?? "white",
-						disabled: (textMutedForeground.color as string) ?? "white"
-					}
-				})
+		const actions = toReactNativeMenuActions({
+			buttons: uniqueButtons,
+			colors: {
+				normal: (textForeground.color as string) ?? "white",
+				destructive: (textRed500.color as string) ?? "white",
+				disabled: (textMutedForeground.color as string) ?? "white"
 			}
-		}, [uniqueButtons, textForeground.color, textRed500.color, textMutedForeground.color, title])
+		})
 
 		if (disabled) {
 			return children
@@ -567,6 +548,6 @@ export const MenuInner = memo(
 	}
 )
 
-export const Menu = withUniwind(MenuInner) as typeof MenuInner
+export const Menu = memo(withUniwind(MenuInner) as typeof MenuInner)
 
 export default Menu

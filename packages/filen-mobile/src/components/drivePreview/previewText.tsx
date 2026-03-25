@@ -1,4 +1,3 @@
-import { memo, useMemo, useCallback } from "@/lib/memo"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { getPreviewType } from "@/lib/utils"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
@@ -10,7 +9,7 @@ import { ActivityIndicator } from "react-native"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import fileCache from "@/lib/fileCache"
 import type { DriveItemFileExtracted } from "@/types"
-import { useState } from "react"
+import { useState, memo, useMemo, useCallback } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import transfers from "@/lib/transfers"
@@ -19,6 +18,7 @@ import alerts from "@/lib/alerts"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import { type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
+import offline from "@/lib/offline"
 
 const PreviewTextInner = memo(
 	({
@@ -154,6 +154,16 @@ const PreviewText = memo(({ item, parent }: { item: DriveItemFileExtracted; pare
 	}, [item.data.decryptedMeta])
 
 	const query = useSimpleQuery(async signal => {
+		const isStoredOffline = await offline.isItemStored(item)
+
+		if (isStoredOffline) {
+			const file = await offline.getLocalFile(item)
+
+			if (file) {
+				return await file.text()
+			}
+		}
+
 		const file = await fileCache.get({
 			item,
 			signal

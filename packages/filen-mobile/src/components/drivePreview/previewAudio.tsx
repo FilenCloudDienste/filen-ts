@@ -1,5 +1,4 @@
-import { useState, Fragment } from "react"
-import { memo, useCallback, useMemo } from "@/lib/memo"
+import { useState, Fragment, memo, useCallback, useMemo } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
@@ -9,7 +8,7 @@ import audio, { useAudio } from "@/lib/audio"
 import alerts from "@/lib/alerts"
 import { type TextStyle, type LayoutChangeEvent, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
-import { Image, ImageBackground } from "@/components/ui/image"
+import { ImageBackground, ExpoImage } from "@/components/ui/image"
 import { useResolveClassNames } from "uniwind"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
 import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDerivedValue } from "react-native-reanimated"
@@ -67,7 +66,7 @@ const Picture = memo(({ blurhash, pictureBase64 }: { blurhash?: string; pictureB
 				}}
 			>
 				{pictureBase64 ? (
-					<Image
+					<ExpoImage
 						className="size-full rounded-2xl"
 						source={{
 							uri: pictureBase64
@@ -99,12 +98,11 @@ const Picture = memo(({ blurhash, pictureBase64 }: { blurhash?: string; pictureB
 			contentFit="cover"
 			cachePolicy="disk"
 		>
-			<Image
+			<ExpoImage
 				className="size-full rounded-2xl"
-				source={{
-					uri: pictureBase64
-				}}
+				source={pictureBase64}
 				contentFit="contain"
+				cachePolicy="disk"
 			/>
 		</ImageBackground>
 	)
@@ -169,6 +167,7 @@ function buildSliderTapGesture(sv: SliderSharedValues, trackWidth: number, seekT
 	})
 }
 
+// TODO: Fix memo
 const AudioSlider = memo(
 	({ currentTime, duration, onSeek }: { currentTime: number; duration: number; onSeek: (seconds: number) => void }) => {
 		const [trackWidth, setTrackWidth] = useState<number>(0)

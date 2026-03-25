@@ -1,17 +1,17 @@
-import { memo, useCallback, useMemo } from "@/lib/memo"
+import { memo, useCallback, useMemo, useState, useRef } from "react"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import { DriveItemFileExtracted } from "@/types"
 import fileCache from "@/lib/fileCache"
 import { PdfView, type OnErrorEventPayload } from "@kishannareshpal/expo-pdf"
-import { useState, useRef } from "react"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import offline from "@/lib/offline"
 
 const pdfViewStyle = {
 	flex: 1,
@@ -24,12 +24,24 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	const insets = useSafeAreaInsets()
 	const onErrorWorkingRef = useRef<boolean>(false)
 
-	const query = useSimpleQuery(signal =>
-		fileCache.get({
+	const query = useSimpleQuery(async signal => {
+		const isStoredOffline = await offline.isItemStored(item)
+
+		if (isStoredOffline) {
+			const file = await offline.getLocalFile(item)
+
+			if (file) {
+				return file
+			}
+		}
+
+		const file = await fileCache.get({
 			item,
 			signal
 		})
-	)
+
+		return file
+	})
 
 	const contentPadding = useMemo(
 		() => ({

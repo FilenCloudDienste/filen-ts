@@ -1,4 +1,4 @@
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo } from "react"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import type { DriveItem } from "@/types"
 import { router } from "expo-router"

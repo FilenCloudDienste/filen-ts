@@ -68,12 +68,6 @@ vi.mock("@/lib/alerts", () => ({
 	}
 }))
 
-vi.mock("@/lib/memo", () => ({
-	useCallback: (fn: unknown) => fn,
-	useMemo: (fn: () => unknown) => fn(),
-	memo: (component: unknown) => component
-}))
-
 vi.mock("@filen/utils", () => {
 	class Semaphore {
 		async acquire(): Promise<void> {}

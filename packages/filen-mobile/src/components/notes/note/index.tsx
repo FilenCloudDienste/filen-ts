@@ -8,7 +8,7 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/stores/useNotes.store"
-import { memo, useCallback, useMemo } from "@/lib/memo"
+import { memo, useCallback, useMemo } from "react"
 import { useStringifiedClient } from "@/lib/auth"
 import { simpleDate } from "@/lib/time"
 import Icon from "@/components/notes/note/icon"
@@ -37,7 +37,8 @@ export type DataItem = Item & {
 
 export type ListItem = SectionHeader | DataItem
 
-export const Note = memo(
+// TODO: Fix memoization
+const Note = memo(
 	({
 		info,
 		menuOrigin,
@@ -91,7 +92,7 @@ export const Note = memo(
 			}
 
 			return info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
-		}, [info.item, stringifiedClient])
+		}, [info.item, stringifiedClient?.userId])
 
 		const tags = useMemo(() => {
 			if (info.item.type === "header") {
@@ -243,9 +244,7 @@ export const Note = memo(
 													<Avatar
 														className="shrink-0"
 														key={participant.userId}
-														source={{
-															uri: participant.avatar?.startsWith("https://") ? participant.avatar : undefined
-														}}
+														source={participant.avatar?.startsWith("https://") ? participant.avatar : undefined}
 														size={24}
 													/>
 												)

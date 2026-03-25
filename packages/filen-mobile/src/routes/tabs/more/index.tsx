@@ -1,7 +1,6 @@
-import { Fragment } from "react"
+import { Fragment, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
-import { memo } from "@/lib/memo"
 import View from "@/components/ui/view"
 import { ScrollView, Platform, Switch } from "react-native"
 import Text from "@/components/ui/text"

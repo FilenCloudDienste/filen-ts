@@ -1,7 +1,6 @@
-import { useRef } from "react"
+import { useRef, useCallback } from "react"
 import type { NotifyOnChangeProps } from "@tanstack/query-core"
 import { useFocusEffect } from "@react-navigation/native"
-import { useCallback } from "@/lib/memo"
 
 export default function useFocusNotifyOnChangeProps(notifyOnChangeProps?: NotifyOnChangeProps) {
 	const focusedRef = useRef<boolean>(true)

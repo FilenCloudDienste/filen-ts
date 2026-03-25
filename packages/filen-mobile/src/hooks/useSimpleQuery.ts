@@ -1,6 +1,5 @@
 import { useState, useRef } from "react"
 import useEffectOnce from "@/hooks/useEffectOnce"
-import { useCallback } from "@/lib/memo"
 import alerts from "@/lib/alerts"
 import { unwrapSdkError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
@@ -66,7 +65,7 @@ export function useSimpleQuery<T>(
 		error: null
 	})
 
-	const execute = useCallback(async () => {
+	const execute = async () => {
 		setState({
 			status: "loading",
 			data: null,
@@ -122,14 +121,14 @@ export function useSimpleQuery<T>(
 			data: null,
 			error: lastError
 		})
-	}, [promise, options?.retry])
+	}
 
-	const refetch = useCallback(() => {
+	const refetch = () => {
 		abortControllerRef.current.abort()
 		abortControllerRef.current = new AbortController()
 
 		execute()
-	}, [execute])
+	}
 
 	useEffectOnce(() => {
 		if (options?.enabled ?? true) {

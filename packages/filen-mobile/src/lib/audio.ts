@@ -2,10 +2,9 @@ import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-aud
 import audioCache, { type Metadata } from "@/lib/audioCache"
 import type { DriveItemFileExtracted } from "@/types"
 import * as FileSystem from "expo-file-system"
-import { useCallback } from "@/lib/memo"
+import { useCallback, useEffect, useState } from "react"
 import alerts from "@/lib/alerts"
 import events from "@/lib/events"
-import { useEffect, useState } from "react"
 import { Semaphore, run } from "@filen/utils"
 
 export type QueueItem = {

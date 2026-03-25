@@ -1,9 +1,8 @@
 "use dom"
 
-import { useRef, useCallback } from "react"
+import { useRef, useCallback, memo } from "react"
 import { renderAsync } from "docx-preview"
 import { Buffer } from "buffer"
-import { memo } from "@/lib/memo"
 import useEffectOnce from "@/hooks/useEffectOnce"
 
 const Dom = memo(

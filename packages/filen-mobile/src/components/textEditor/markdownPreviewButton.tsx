@@ -9,9 +9,9 @@ import { useSecureStore } from "@/lib/secureStore"
 import { PressableScale } from "@/components/ui/pressables"
 import { useShallow } from "zustand/shallow"
 import useTextEditorStore from "@/stores/useTextEditor.store"
-import { memo, useCallback, useMemo } from "@/lib/memo"
+import { memo, useCallback, useMemo } from "react"
 
-export const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
+const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
 	const keyboardState = useKeyboardState()
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()

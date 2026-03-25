@@ -1,5 +1,4 @@
-import { useState, useEffect, Fragment } from "react"
-import { memo, useCallback } from "@/lib/memo"
+import { useState, useEffect, Fragment, memo, useCallback } from "react"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
 import { checklistParser, type ChecklistItem } from "@filen/utils"
 import Item from "@/components/notes/content/checklist/item"

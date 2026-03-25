@@ -1,4 +1,4 @@
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo } from "react"
 import { useWindowDimensions, type ViewStyle } from "react-native"
 import { VideoView, useVideoPlayer } from "expo-video"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"

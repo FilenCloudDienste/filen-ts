@@ -1,4 +1,4 @@
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { Stack } from "expo-router"
 import type { SearchBarProps } from "react-native-screens"

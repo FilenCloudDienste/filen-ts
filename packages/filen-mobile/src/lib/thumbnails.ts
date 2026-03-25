@@ -20,7 +20,7 @@ export type ThumbnailParams = {
 	signal?: AbortSignal
 }
 
-const DEFAULT_WIDTH = 256
+const DEFAULT_WIDTH = 128
 const DEFAULT_QUALITY = 0.8
 const DEFAULT_VIDEO_TIMESTAMP = 1.0
 const MAX_CONCURRENT = 3

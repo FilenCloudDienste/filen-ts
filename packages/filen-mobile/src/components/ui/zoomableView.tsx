@@ -1,5 +1,4 @@
-import { memo, useCallback, useMemo } from "@/lib/memo"
-import { useEffect } from "react"
+import { useEffect, memo } from "react"
 import type { LayoutChangeEvent, StyleProp, ViewStyle } from "react-native"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
 import Animated, { type SharedValue, useSharedValue, useAnimatedStyle, withTiming, withDecay } from "react-native-reanimated"
@@ -434,78 +433,48 @@ const ZoomableView = memo(
 		const containerWidth = useSharedValue<number>(0)
 		const containerHeight = useSharedValue<number>(0)
 
-		const onLayout = useCallback(
-			(e: LayoutChangeEvent) => {
-				containerWidth.value = e.nativeEvent.layout.width
-				containerHeight.value = e.nativeEvent.layout.height
-			},
-			[containerWidth, containerHeight]
-		)
+		const onLayout = (e: LayoutChangeEvent) => {
+			containerWidth.value = e.nativeEvent.layout.width
+			containerHeight.value = e.nativeEvent.layout.height
+		}
 
-		const notifyZoomChange = useCallback(
-			(zoom: number) => {
-				onZoomChange?.(zoom)
-			},
-			[onZoomChange]
-		)
+		const notifyZoomChange = (zoom: number) => {
+			onZoomChange?.(zoom)
+		}
 
-		const notifySingleTap = useCallback(() => {
+		const notifySingleTap = () => {
 			onSingleTap?.()
-		}, [onSingleTap])
+		}
 
-		const notifyPinchDismiss = useCallback(() => {
+		const notifyPinchDismiss = () => {
 			onPinchDismiss?.()
-		}, [onPinchDismiss])
+		}
 
-		const composed = useMemo(() => {
-			return buildComposedGesture(
-				{
-					scale,
-					translateX,
-					translateY,
-					savedScale,
-					savedTranslateX,
-					savedTranslateY,
-					focalX,
-					focalY,
-					containerWidth,
-					containerHeight,
-					scaleValue
-				},
-				enabled,
-				minZoom,
-				maxZoom,
-				doubleTapZoom,
-				onZoomChange,
-				notifyZoomChange,
-				onSingleTap,
-				notifySingleTap,
-				onPinchDismiss,
-				notifyPinchDismiss
-			)
-		}, [
+		const composed = buildComposedGesture(
+			{
+				scale,
+				translateX,
+				translateY,
+				savedScale,
+				savedTranslateX,
+				savedTranslateY,
+				focalX,
+				focalY,
+				containerWidth,
+				containerHeight,
+				scaleValue
+			},
 			enabled,
 			minZoom,
 			maxZoom,
 			doubleTapZoom,
 			onZoomChange,
-			onSingleTap,
-			onPinchDismiss,
-			scale,
-			translateX,
-			translateY,
-			savedScale,
-			savedTranslateX,
-			savedTranslateY,
-			focalX,
-			focalY,
-			containerWidth,
-			containerHeight,
-			scaleValue,
 			notifyZoomChange,
+			onSingleTap,
 			notifySingleTap,
+			onPinchDismiss,
 			notifyPinchDismiss
-		])
+		)
 
 		const animatedStyle = useAnimatedStyle(() => {
 			"worklet"

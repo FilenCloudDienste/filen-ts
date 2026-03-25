@@ -1,4 +1,4 @@
-import { memo, useMemo } from "@/lib/memo"
+import { memo } from "react"
 import { router, useLocalSearchParams } from "expo-router"
 import { type DriveItemFileExtracted, type DriveItem } from "@/types"
 import { Buffer } from "react-native-quick-crypto"
@@ -17,70 +17,70 @@ const Return = memo(() => {
 	return null
 })
 
-const DrivePreview = memo(() => {
-	const searchParams = useLocalSearchParams<{
-		drivePath?: string
-		item?: string
-		parent?: string
-	}>()
+type SearchParams = {
+	drivePath?: string
+	item?: string
+	parent?: string
+}
 
-	const { drivePath, item, parent } = useMemo((): {
-		drivePath: DrivePath | null
-		item: DriveItemFileExtracted | null
-		parent: AnyDirWithContext | null
-	} => {
-		if (!searchParams.item || !searchParams.drivePath) {
-			return {
-				drivePath: null,
-				item: null,
-				parent: null
-			}
+function parseParams(searchParams: SearchParams): {
+	drivePath: DrivePath | null
+	item: DriveItemFileExtracted | null
+	parent: AnyDirWithContext | null
+} {
+	if (!searchParams.item || !searchParams.drivePath) {
+		return {
+			drivePath: null,
+			item: null,
+			parent: null
+		}
+	}
+
+	let item: DriveItem | null = null
+	let drivePath: DrivePath | null = null
+	let parent: AnyDirWithContext | null = null
+
+	try {
+		if (searchParams.item) {
+			item = unpack(Buffer.from(searchParams.item, "base64")) as DriveItem
 		}
 
-		let item: DriveItem | null = null
-		let drivePath: DrivePath | null = null
-		let parent: AnyDirWithContext | null = null
-
-		try {
-			if (searchParams.item) {
-				item = unpack(Buffer.from(searchParams.item, "base64")) as DriveItem
-			}
-
-			if (searchParams.drivePath) {
-				drivePath = unpack(Buffer.from(searchParams.drivePath, "base64")) as DrivePath
-			}
-
-			if (searchParams.parent) {
-				parent = unpack(Buffer.from(searchParams.parent, "base64")) as AnyDirWithContext
-			}
-		} catch (e) {
-			console.error(e)
-
-			return {
-				item: null,
-				drivePath: null,
-				parent: null
-			}
+		if (searchParams.drivePath) {
+			drivePath = unpack(Buffer.from(searchParams.drivePath, "base64")) as DrivePath
 		}
 
-		if (item?.type !== "file" && item?.type !== "sharedFile") {
-			return {
-				item: null,
-				drivePath: null,
-				parent: null
-			}
+		if (searchParams.parent) {
+			parent = unpack(Buffer.from(searchParams.parent, "base64")) as AnyDirWithContext
 		}
+	} catch (e) {
+		console.error(e)
 
 		return {
-			item,
-			drivePath,
-			parent
+			item: null,
+			drivePath: null,
+			parent: null
 		}
-	}, [searchParams])
+	}
 
-	const previewType = useMemo(() => {
-		return getPreviewType(item?.data.decryptedMeta?.name ?? "")
-	}, [item?.data.decryptedMeta?.name])
+	if (item?.type !== "file" && item?.type !== "sharedFile") {
+		return {
+			item: null,
+			drivePath: null,
+			parent: null
+		}
+	}
+
+	return {
+		item,
+		drivePath,
+		parent
+	}
+}
+
+const DrivePreview = memo(() => {
+	const searchParams = useLocalSearchParams<SearchParams>()
+	const { drivePath, item, parent } = parseParams(searchParams)
+	const previewType = getPreviewType(item?.data.decryptedMeta?.name ?? "")
 
 	if (!drivePath || !item || previewType === "unknown") {
 		return <Return />

@@ -105,10 +105,6 @@ vi.mock("@/lib/drive", () => ({
 	default: { updateTimestamps: vi.fn() }
 }))
 
-vi.mock("@/lib/memo", () => ({
-	useCallback: (fn: Function) => fn
-}))
-
 vi.mock("lru-cache", () => ({
 	LRUCache: class extends Map {
 		constructor() {
@@ -282,27 +278,33 @@ describe("modifyAssetPathOnCollision", () => {
 
 	describe("invalid paths", () => {
 		it("returns null when parentDir is '.'", () => {
-			expect(modifyAssetPathOnCollision({
-				iteration: 0,
-				path: "IMG_0001.jpg",
-				asset: { name: "IMG_0001.jpg", creationTime: 1000 }
-			})).toBeNull()
+			expect(
+				modifyAssetPathOnCollision({
+					iteration: 0,
+					path: "IMG_0001.jpg",
+					asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+				})
+			).toBeNull()
 		})
 
 		it("returns null when parentDir is empty", () => {
-			expect(modifyAssetPathOnCollision({
-				iteration: 0,
-				path: "",
-				asset: { name: "IMG_0001.jpg", creationTime: 1000 }
-			})).toBeNull()
+			expect(
+				modifyAssetPathOnCollision({
+					iteration: 0,
+					path: "",
+					asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+				})
+			).toBeNull()
 		})
 
 		it("returns null when basename is '.'", () => {
-			expect(modifyAssetPathOnCollision({
-				iteration: 0,
-				path: "/camera roll/.",
-				asset: { name: ".", creationTime: 1000 }
-			})).toBeNull()
+			expect(
+				modifyAssetPathOnCollision({
+					iteration: 0,
+					path: "/camera roll/.",
+					asset: { name: ".", creationTime: 1000 }
+				})
+			).toBeNull()
 		})
 	})
 
@@ -314,8 +316,9 @@ describe("modifyAssetPathOnCollision", () => {
 			}
 
 			for (let i = 0; i < 2; i++) {
-				expect(modifyAssetPathOnCollision({ ...params, iteration: i }))
-					.toBe(modifyAssetPathOnCollision({ ...params, iteration: i }))
+				expect(modifyAssetPathOnCollision({ ...params, iteration: i })).toBe(
+					modifyAssetPathOnCollision({ ...params, iteration: i })
+				)
 			}
 		})
 	})
@@ -480,10 +483,7 @@ describe("config management", () => {
 			return { ...prev, cellular: false }
 		})
 
-		expect(secureStore.set).toHaveBeenCalledWith(
-			"cameraUploadConfig",
-			expect.objectContaining({ cellular: false })
-		)
+		expect(secureStore.set).toHaveBeenCalledWith("cameraUploadConfig", expect.objectContaining({ cellular: false }))
 	})
 })
 
@@ -651,13 +651,15 @@ describe("constructor events", () => {
 // ─── Sync flow ───────────────────────────────────────────────────────────────
 
 describe("sync flow", () => {
-	function setupLocalAssets(assets: Array<{
-		id: string
-		filename: string
-		mediaType?: MediaType
-		creationTime?: number
-		modificationTime?: number
-	}>) {
+	function setupLocalAssets(
+		assets: Array<{
+			id: string
+			filename: string
+			mediaType?: MediaType
+			creationTime?: number
+			modificationTime?: number
+		}>
+	) {
 		const albumId = "album-1"
 
 		ml.addAlbum({ id: albumId, title: "Camera Roll", assetIds: assets.map(a => a.id) })
@@ -692,10 +694,12 @@ describe("sync flow", () => {
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
 				listDirRecursiveWithPaths: vi.fn(async () => ({
-					files: [{
-						path: "/Camera Roll/photo.jpg",
-						file: { uuid: "remote-1" }
-					}]
+					files: [
+						{
+							path: "/Camera Roll/photo.jpg",
+							file: { uuid: "remote-1" }
+						}
+					]
 				})),
 				createDir: vi.fn(async () => ({ uuid: "dir" }))
 			}
@@ -716,10 +720,12 @@ describe("sync flow", () => {
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
 				listDirRecursiveWithPaths: vi.fn(async () => ({
-					files: [{
-						path: "/Camera Roll/photo.jpg",
-						file: { uuid: "remote-1" }
-					}]
+					files: [
+						{
+							path: "/Camera Roll/photo.jpg",
+							file: { uuid: "remote-1" }
+						}
+					]
 				})),
 				createDir: vi.fn(async () => ({ uuid: "dir" }))
 			}
@@ -838,12 +844,14 @@ describe("sync flow", () => {
 // ─── listLocal filtering ─────────────────────────────────────────────────────
 
 describe("listLocal filtering", () => {
-	function setupAlbumWithAssets(assets: Array<{
-		id: string
-		filename: string
-		mediaType?: MediaType
-		creationTime?: number
-	}>) {
+	function setupAlbumWithAssets(
+		assets: Array<{
+			id: string
+			filename: string
+			mediaType?: MediaType
+			creationTime?: number
+		}>
+	) {
 		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: assets.map(a => a.id) })
 
 		for (const asset of assets) {

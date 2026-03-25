@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import { Fragment, memo, useCallback, useMemo } from "react"
 import View, { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
 import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
@@ -14,11 +14,10 @@ import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
 import * as Linking from "expo-linking"
 import useTextEditorStore from "@/stores/useTextEditor.store"
-import { memo, useCallback, useMemo } from "@/lib/memo"
 
 const ICON_SIZE = 18
 
-export const Button = memo(
+const Button = memo(
 	({ type, postMessage }: { type: keyof QuillFormats | "keyboard"; postMessage: (message: TextEditorEvents) => void }) => {
 		const formats = useRichtextStore(useShallow(state => state.formats))
 		const textForeground = useResolveClassNames("text-foreground")
@@ -373,7 +372,7 @@ export const Button = memo(
 	}
 )
 
-export const Toolbar = memo(({ postMessage }: { postMessage: (message: TextEditorEvents) => void }) => {
+const Toolbar = memo(({ postMessage }: { postMessage: (message: TextEditorEvents) => void }) => {
 	const insets = useSafeAreaInsets()
 	const keyboardState = useKeyboardState()
 	const textEditorReady = useTextEditorStore(useShallow(state => state.ready))

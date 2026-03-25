@@ -1,9 +1,9 @@
 import { Stack, Redirect } from "expo-router"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import { useIsAuthed, useStringifiedClient } from "@/lib/auth"
 import View from "@/components/ui/view"
 
-export const AuthLayout = memo(() => {
+const AuthLayout = memo(() => {
 	const isAuthed = useIsAuthed()
 	const stringifiedClient = useStringifiedClient()
 

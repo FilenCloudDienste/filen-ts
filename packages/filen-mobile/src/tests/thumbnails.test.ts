@@ -27,7 +27,7 @@ const {
 		renderAsync: mockRenderAsync
 	})
 
-	const mockGenerateThumbnailsAsync = vi.fn().mockResolvedValue([{ width: 256, height: 144 }])
+	const mockGenerateThumbnailsAsync = vi.fn().mockResolvedValue([{ width: 128, height: 144 }])
 	const mockRelease = vi.fn()
 	const mockAddListener = vi.fn()
 	const mockCreateVideoPlayer = vi.fn(() => ({
@@ -265,7 +265,7 @@ describe("Thumbnails", () => {
 			fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
 		})
 
-		mockGenerateThumbnailsAsync.mockResolvedValue([{ width: 256, height: 144 }])
+		mockGenerateThumbnailsAsync.mockResolvedValue([{ width: 128, height: 144 }])
 		mockCreateVideoPlayer.mockReturnValue({
 			status: "readyToPlay",
 			generateThumbnailsAsync: mockGenerateThumbnailsAsync,
@@ -293,7 +293,7 @@ describe("Thumbnails", () => {
 
 			expect(mockManipulate).toHaveBeenCalledTimes(1)
 			expect(mockResize).toHaveBeenCalledWith({
-				width: 256
+				width: 128
 			})
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
 			expect(mockSaveAsync).toHaveBeenCalledWith({
@@ -319,7 +319,7 @@ describe("Thumbnails", () => {
 			await thumbnails.generate({ item })
 
 			expect(mockResize).toHaveBeenCalledWith({
-				width: 256
+				width: 128
 			})
 			expect(mockSaveAsync).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -426,7 +426,7 @@ describe("Thumbnails", () => {
 			await thumbnails.generate({ item })
 
 			expect(mockRotate).not.toHaveBeenCalled()
-			expect(mockResize).toHaveBeenCalledWith({ width: 256 })
+			expect(mockResize).toHaveBeenCalledWith({ width: 128 })
 		})
 	})
 
@@ -438,8 +438,8 @@ describe("Thumbnails", () => {
 			expect(mockCreateVideoPlayer).toHaveBeenCalledTimes(1)
 			expect(mockCreateVideoPlayer).toHaveBeenCalledWith(expect.stringContaining("http://localhost:8080/file/video-uuid"))
 			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith([1.0], {
-				maxWidth: 256,
-				maxHeight: 256
+				maxWidth: 128,
+				maxHeight: 128
 			})
 			expect(mockManipulate).toHaveBeenCalledTimes(1)
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
