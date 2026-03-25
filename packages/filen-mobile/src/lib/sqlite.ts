@@ -1,100 +1,51 @@
 import * as FileSystem from "expo-file-system"
-import * as ExpoSqlite from "expo-sqlite"
+import { open, type DB } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/utils"
 import { Platform } from "react-native"
 import { pack, unpack } from "@/lib/msgpack"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
+import { normalizeFilePathForSdk } from "@/lib/utils"
 
-const INIT_QUERIES: {
-	query: string
-	pragma: boolean
-}[] = [
-	{
-		query: "PRAGMA journal_mode = WAL",
-		pragma: true
-	},
-	{
-		query: "PRAGMA synchronous = NORMAL",
-		pragma: true
-	},
-	{
-		query: "PRAGMA temp_store = FILE", // Use disk instead of memory for temp storage
-		pragma: true
-	},
-	{
-		query: "PRAGMA mmap_size = 33554432", // Set memory mapping size to 32MB
-		pragma: true
-	},
-	{
-		query: "PRAGMA page_size = 4096", // Must be set before any tables are created
-		pragma: true
-	},
-	{
-		query: "PRAGMA cache_size = -8000", // 8MB cache - much smaller for low memory
-		pragma: true
-	},
-	{
-		query: "PRAGMA foreign_keys = ON",
-		pragma: true
-	},
-	{
-		query: "PRAGMA busy_timeout = 15000", // 15s timeout
-		pragma: true
-	},
-	{
-		query: "PRAGMA auto_vacuum = INCREMENTAL",
-		pragma: true
-	},
-	{
-		query: "PRAGMA wal_autocheckpoint = 100", // More frequent checkpoints to keep WAL small
-		pragma: true
-	},
-	{
-		query: "PRAGMA journal_size_limit = 33554432", // 32MB WAL size limit (small)
-		pragma: true
-	},
-	{
-		query: "PRAGMA max_page_count = 2147483646", // Prevent database from growing too large
-		pragma: true
-	},
-	{
-		query: "PRAGMA encoding = 'UTF-8'",
-		pragma: true
-	},
-	{
-		query: "PRAGMA secure_delete = OFF",
-		pragma: true
-	},
-	{
-		query: "PRAGMA cell_size_check = OFF",
-		pragma: true
-	},
-	{
-		query: "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value BLOB NOT NULL) WITHOUT ROWID",
-		pragma: false
-	},
-	{
-		query: "PRAGMA optimize", // Run at the end after schema is created
-		pragma: true
-	}
+const INIT_QUERIES: string[] = [
+	"PRAGMA journal_mode = WAL",
+	"PRAGMA synchronous = NORMAL",
+	"PRAGMA temp_store = MEMORY",
+	"PRAGMA mmap_size = 67108864",
+	"PRAGMA page_size = 4096",
+	"PRAGMA cache_size = -16000",
+	"PRAGMA foreign_keys = ON",
+	"PRAGMA busy_timeout = 15000",
+	"PRAGMA auto_vacuum = INCREMENTAL",
+	"PRAGMA wal_autocheckpoint = 1000",
+	"PRAGMA journal_size_limit = 67108864",
+	"PRAGMA max_page_count = 2147483646",
+	"PRAGMA encoding = 'UTF-8'",
+	"PRAGMA secure_delete = OFF",
+	"PRAGMA cell_size_check = OFF",
+	"CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value BLOB NOT NULL) WITHOUT ROWID",
+	"PRAGMA optimize"
 ]
 
 class Sqlite {
-	public db: ExpoSqlite.SQLiteDatabase | null = null
+	public db: DB | null = null
 	private initDone: boolean = false
 
 	private initMutex: Semaphore = new Semaphore(1)
 
 	public readonly version: number = 1
-	public readonly dbFileName: string = `sqlite.v${this.version}.db`
+	public readonly dbFileName: string = "sqlite.db"
 	public readonly dbFileDirectory: FileSystem.Directory = new FileSystem.Directory(
-		Platform.select({
-			ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
-			default: FileSystem.Paths.document.uri
-		})
+		FileSystem.Paths.join(
+			Platform.select({
+				ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
+				default: FileSystem.Paths.document.uri
+			}),
+			"sqlite",
+			`v${this.version}`
+		)
 	)
 
-	public async openDb(): Promise<ExpoSqlite.SQLiteDatabase> {
+	public async openDb(): Promise<DB> {
 		while (!this.initDone) {
 			await this.init()
 		}
@@ -119,16 +70,20 @@ class Sqlite {
 			}
 
 			if (!this.db) {
-				this.db = await ExpoSqlite.openDatabaseAsync(
-					this.dbFileName,
-					{
-						useNewConnection: true
-					},
-					this.dbFileDirectory.uri
-				)
+				if (!this.dbFileDirectory.exists) {
+					this.dbFileDirectory.create({
+						idempotent: true,
+						intermediates: true
+					})
+				}
+
+				this.db = open({
+					name: this.dbFileName,
+					location: normalizeFilePathForSdk(this.dbFileDirectory.uri)
+				})
 			}
 
-			await this.db.execAsync(INIT_QUERIES.map(q => q.query).join("; "))
+			await this.db.execute(INIT_QUERIES.join("; "))
 
 			this.initDone = true
 		})
@@ -141,19 +96,20 @@ class Sqlite {
 	public async clearAsync(): Promise<void> {
 		const db = await this.openDb()
 
-		await db.execAsync("DELETE FROM kv")
+		await db.execute("DELETE FROM kv")
 	}
 
 	public kvAsync = {
 		get: async <T>(key: string): Promise<T | null> => {
 			const db = await this.openDb()
-			const row = await db.getFirstAsync<{ value: Buffer }>("SELECT value FROM kv WHERE key = ?", [key])
+			const result = await db.execute("SELECT value FROM kv WHERE key = ?", [key])
+			const row = result.rows[0]
 
 			if (!row) {
 				return null
 			}
 
-			return unpack(new Uint8Array(row.value)) as T
+			return unpack(new Uint8Array(row["value"] as ArrayBuffer)) as T
 		},
 		set: async <T>(key: string, value: T): Promise<number | null> => {
 			if (value == null) {
@@ -161,54 +117,42 @@ class Sqlite {
 			}
 
 			const db = await this.openDb()
-			const row = await db.runAsync("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [key, new Uint8Array(pack(value))])
+			const result = await db.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [key, new Uint8Array(pack(value))])
 
-			return row.lastInsertRowId
+			return result.insertId ?? null
 		},
 		keys: async (): Promise<string[]> => {
 			const db = await this.openDb()
-			const rows = await db.getAllAsync<{ key: string }>("SELECT key FROM kv")
+			const result = await db.execute("SELECT key FROM kv")
 
-			if (!rows || rows.length === 0) {
-				return []
-			}
-
-			return rows.map(row => row.key)
+			return result.rows.map(row => row["key"] as string)
 		},
 		clear: async (): Promise<void> => {
 			const db = await this.openDb()
 
-			await db.runAsync("DELETE FROM kv")
+			await db.execute("DELETE FROM kv")
 		},
 		contains: async (key: string): Promise<boolean> => {
 			const db = await this.openDb()
-			const rows = await db.getFirstAsync<{ key: string }>("SELECT key FROM kv WHERE key = ?", [key])
+			const result = await db.execute("SELECT key FROM kv WHERE key = ?", [key])
 
-			if (!rows) {
-				return false
-			}
-
-			return true
+			return result.rows.length > 0
 		},
 		remove: async (key: string): Promise<void> => {
 			const db = await this.openDb()
 
-			await db.runAsync("DELETE FROM kv WHERE key = ?", [key])
+			await db.execute("DELETE FROM kv WHERE key = ?", [key])
 		},
 		removeByPrefix: async (prefix: string): Promise<void> => {
 			const db = await this.openDb()
 
-			await db.runAsync("DELETE FROM kv WHERE key LIKE ?", [prefix + "%"])
+			await db.execute("DELETE FROM kv WHERE key LIKE ?", [prefix + "%"])
 		},
 		keysByPrefix: async (prefix: string): Promise<string[]> => {
 			const db = await this.openDb()
-			const rows = await db.getAllAsync<{ key: string }>("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])
+			const result = await db.execute("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])
 
-			if (!rows || rows.length === 0) {
-				return []
-			}
-
-			return rows.map(row => row.key)
+			return result.rows.map(row => row["key"] as string)
 		}
 	}
 }
