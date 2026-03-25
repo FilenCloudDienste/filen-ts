@@ -1,9 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { UniffiEnum, mockDb, open } = vi.hoisted(() => ({
-	UniffiEnum: class UniffiEnum {
-		protected constructor(..._args: any[]) {}
-	},
+const { mockDb, open } = vi.hoisted(() => ({
 	mockDb: {
 		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
 		executeSync: vi.fn().mockReturnValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
@@ -13,9 +10,7 @@ const { UniffiEnum, mockDb, open } = vi.hoisted(() => ({
 	open: vi.fn()
 }))
 
-vi.mock("uniffi-bindgen-react-native", () => ({
-	UniffiEnum
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
@@ -29,9 +24,7 @@ vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))
 
-vi.mock("@/constants", () => ({
-	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import { pack } from "@/lib/msgpack"
 

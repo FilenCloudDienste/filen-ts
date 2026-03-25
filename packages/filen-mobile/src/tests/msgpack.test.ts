@@ -6,18 +6,12 @@ import { Packr } from "msgpackr"
 // variadic constructor — this mock is byte-for-byte identical to the real thing.
 // Real SDK tagged union classes (DirMeta, ParentUuid, etc.) can't be imported
 // in Node either, since they require native Rust modules at the top level.
-const { UniffiEnum } = vi.hoisted(() => ({
-	UniffiEnum: class UniffiEnum {
-		protected constructor(..._args: any[]) {}
-	}
-}))
-
-vi.mock("uniffi-bindgen-react-native", () => ({
-	UniffiEnum
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 // Must import after vi.mock so the mock is active when msgpack.ts loads
 import { pack, unpack } from "@/lib/msgpack"
+
+const { UniffiEnum } = await import("@/tests/mocks/uniffiBindgenReactNative")
 
 const uniffiTypeNameSymbol = Symbol.for("typeName")
 

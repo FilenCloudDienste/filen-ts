@@ -39,37 +39,17 @@ const { mockSecureStoreMap, mockEventEmitter } = vi.hoisted(() => {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", () => ({
-	NativeEventEmitter: vi.fn(),
-	UniffiEnum: class {
-		protected constructor(..._args: any[]) {}
-	}
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("expo-secure-store", () => ({
-	isAvailableAsync: vi.fn().mockResolvedValue(true),
-	getItemAsync: vi.fn().mockResolvedValue(null),
-	setItemAsync: vi.fn().mockResolvedValue(undefined)
-}))
+vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))
 
-vi.mock("react-native-mmkv", () => ({
-	createMMKV: () => ({
-		getString: vi.fn().mockReturnValue(undefined),
-		set: vi.fn()
-	})
-}))
+vi.mock("react-native-mmkv", async () => await import("@/tests/mocks/reactNativeMMKV"))
 
-vi.mock("react-native-quick-crypto", async () => {
-	const { Buffer } = await import("buffer")
+vi.mock("react-native-quick-crypto", async () => await import("@/tests/mocks/reactNativeQuickCrypto"))
 
-	return { default: {}, Buffer }
-})
-
-vi.mock("react-fast-compare", () => ({
-	default: (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-}))
+vi.mock("react-fast-compare", async () => await import("@/tests/mocks/reactFastCompare"))
 
 vi.mock("@/lib/cache", () => ({
 	default: {
@@ -86,9 +66,7 @@ vi.mock("@/lib/events", () => ({
 	default: mockEventEmitter
 }))
 
-vi.mock("@/constants", () => ({
-	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
