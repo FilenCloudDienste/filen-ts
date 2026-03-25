@@ -74,9 +74,8 @@ jobs:
       - name: Install dependencies
         working-directory: packages/filen-mobile
         run: |
-          npm install --package-lock-only
           npm pkg set scripts.postinstall="echo skipped"
-          npm ci
+          npm install --package-lock-only && npm ci
           git checkout -- package.json
           touch .git && npx patch-package && rm -f .git
       - name: Typecheck
