@@ -153,6 +153,17 @@ class Sqlite {
 			const result = await db.execute("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])
 
 			return result.rows.map(row => row["key"] as string)
+		},
+		getByPrefix: async <T>(prefix: string): Promise<Map<string, T>> => {
+			const db = await this.openDb()
+			const result = await db.execute("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
+			const map = new Map<string, T>()
+
+			for (const row of result.rows) {
+				map.set(row["key"] as string, unpack(new Uint8Array(row["value"] as ArrayBuffer)) as T)
+			}
+
+			return map
 		}
 	}
 }
