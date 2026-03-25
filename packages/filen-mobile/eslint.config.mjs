@@ -1,8 +1,7 @@
 import js from "@eslint/js"
 import { FlatCompat } from "@eslint/eslintrc"
 import reactHooks from "eslint-plugin-react-hooks"
-import typescript from "@typescript-eslint/eslint-plugin"
-import typescriptParser from "@typescript-eslint/parser"
+import tseslint from "typescript-eslint"
 import reactCompiler from "eslint-plugin-react-compiler"
 import importPlugin from "eslint-plugin-import"
 
@@ -46,10 +45,9 @@ export default [
 	{
 		files: ["**/*.ts", "**/*.tsx"],
 		languageOptions: {
-			parser: typescriptParser
+			parser: tseslint.parser
 		},
 		plugins: {
-			"@typescript-eslint": typescript,
 			"react-hooks": reactHooks,
 			"react-compiler": reactCompiler,
 			import: importPlugin
