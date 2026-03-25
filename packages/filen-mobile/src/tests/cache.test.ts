@@ -103,7 +103,7 @@ function setupMockDb(): void {
 
 			for (const [key, value] of kvStore) {
 				if (matchesLike(key, pattern)) {
-					rows.push({ key, value: value.buffer })
+					rows.push({ key, value: value.buffer as ArrayBuffer })
 				}
 			}
 
@@ -201,11 +201,6 @@ function getFirstMap(cache: Cache): { name: string; map: PersistentMap<unknown> 
 	const first = maps[0] as [string, PersistentMap<unknown>]
 
 	return { name: first[0], map: first[1] }
-}
-
-/** Returns the SQLite KV prefix for a given map field name. */
-function kvPrefix(mapName: string): string {
-	return `cache:v1:${mapName}`
 }
 
 /** Returns the SQLite KV key for a given map field name + entry key. */
