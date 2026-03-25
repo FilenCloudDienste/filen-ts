@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react"
+import { memo } from "react"
 import ZoomableView from "@/components/ui/zoomableView"
 import Image from "@/components/ui/image"
 import { useWindowDimensions, type ViewStyle } from "react-native"
@@ -26,20 +26,14 @@ const PreviewImage = memo(
 	}) => {
 		const dimensions = useWindowDimensions()
 
-		const imageStyle = useMemo(
-			() => ({
-				width: dimensions.width,
-				height: dimensions.height
-			}),
-			[dimensions.width, dimensions.height]
-		)
+		const imageStyle = {
+			width: dimensions.width,
+			height: dimensions.height
+		}
 
-		const imageSource = useMemo(
-			() => ({
-				uri: fileUrl
-			}),
-			[fileUrl]
-		)
+		const imageSource = {
+			uri: fileUrl
+		}
 
 		return (
 			<ZoomableView

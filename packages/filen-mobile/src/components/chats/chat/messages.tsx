@@ -1,4 +1,4 @@
-import { useRef, useState, memo, useMemo, useCallback } from "react"
+import { useRef, useState, memo } from "react"
 import type { Chat as TChat } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -37,13 +37,13 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 		}
 	)
 
-	const messages = useMemo(() => {
+	const messages = (() => {
 		if (chatMessagesQuery.status !== "success") {
 			return []
 		}
 
 		return [...chatMessagesQuery.data, ...fetchedMessages].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
-	}, [chatMessagesQuery.data, chatMessagesQuery.status, fetchedMessages])
+	})()
 
 	const headerStyle = useAnimatedStyle(() => {
 		const standardHeight = insets.bottom + inputViewLayout.height + 16
@@ -55,29 +55,26 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 		}
 	}, [insets.bottom, keyboardAnimation, inputViewLayout.height])
 
-	const renderItem = useCallback(
-		(info: ListRenderItemInfo<ChatMessageWithInflightId>) => {
-			if (!chat) {
-				return null
-			}
+	const renderItem = (info: ListRenderItemInfo<ChatMessageWithInflightId>) => {
+		if (!chat) {
+			return null
+		}
 
-			return (
-				<Message
-					chat={chat}
-					info={info}
-					nextMessage={messages[info.index - 1]}
-					prevMessage={messages[info.index + 1]}
-				/>
-			)
-		},
-		[chat, messages]
-	)
+		return (
+			<Message
+				chat={chat}
+				info={info}
+				nextMessage={messages[info.index - 1]}
+				prevMessage={messages[info.index + 1]}
+			/>
+		)
+	}
 
-	const keyExtractor = useCallback((item: ChatMessageWithInflightId) => {
+	const keyExtractor = (item: ChatMessageWithInflightId) => {
 		return item.inner.uuid
-	}, [])
+	}
 
-	const footerComponent = useMemo(() => {
+	const footerComponent = () => {
 		if (!isFetchingMore) {
 			return undefined
 		}
@@ -90,13 +87,13 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 				/>
 			</View>
 		)
-	}, [isFetchingMore, textMutedForeground.color])
+	}
 
-	const headerComponent = useCallback(() => {
+	const headerComponent = () => {
 		return <AnimatedView style={headerStyle} />
-	}, [headerStyle])
+	}
 
-	const emptyComponent = useCallback(() => {
+	const emptyComponent = () => {
 		return (
 			<View
 				className="flex-1 items-center justify-center"
@@ -111,9 +108,9 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 				<Text>tbd_no_messages</Text>
 			</View>
 		)
-	}, [])
+	}
 
-	const fetchMore = useCallback(async () => {
+	const fetchMore = async () => {
 		if (isFetchingMoreRef.current || chatMessagesQuery.status !== "success" || messages.length === 0 || !hasMoreRef.current) {
 			return
 		}
@@ -158,9 +155,9 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 		}
 
 		setFetchedMessages(prev => [...prev, ...result.data])
-	}, [chatMessagesQuery.status, chat, messages])
+	}
 
-	const onEndReached = useCallback(() => fetchMore(), [fetchMore])
+	const onEndReached = () => fetchMore()
 
 	return (
 		<View
@@ -183,7 +180,7 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 				renderItem={renderItem}
 				onEndReachedThreshold={0.5}
 				loading={chatMessagesQuery.status !== "success"}
-				footerComponent={() => footerComponent}
+				footerComponent={footerComponent}
 				onEndReached={onEndReached}
 				maintainVisibleContentPosition={{
 					disabled: true

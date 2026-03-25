@@ -1,4 +1,4 @@
-import { useRef, useState, Fragment, memo, useCallback, useMemo } from "react"
+import { useRef, useState, Fragment, memo } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { type View as RNView, RefreshControl, ActivityIndicator, TextInput, Platform } from "react-native"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
@@ -54,15 +54,12 @@ const ListSearchBar = memo(
 		const [hasText, setHasText] = useState<boolean>(false)
 		const inputRef = useRef<TextInput>(null)
 
-		const onChangeTextInternal = useCallback(
-			(text: string) => {
-				setHasText(text.length > 0)
-				onChangeText?.(text)
-			},
-			[onChangeText]
-		)
+		const onChangeTextInternal = (text: string) => {
+			setHasText(text.length > 0)
+			onChangeText?.(text)
+		}
 
-		const clear = useCallback(() => {
+		const clear = () => {
 			inputRef?.current?.clear()
 
 			setHasText(false)
@@ -74,7 +71,7 @@ const ListSearchBar = memo(
 					alerts.error(err)
 				})
 			}
-		}, [onChangeText])
+		}
 
 		return (
 			<View
@@ -144,7 +141,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 	const textForeground = useResolveClassNames("text-foreground")
 	const [searchBarHeight, setSearchBarHeight] = useState<number>(0)
 
-	const itemsPerRow = useMemo(() => {
+	const itemsPerRow = (() => {
 		if (props.itemsPerRow) {
 			return props.itemsPerRow
 		}
@@ -154,9 +151,9 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 		}
 
 		return Math.round(Math.max(1, Math.round(layout.width / props.itemWidth)))
-	}, [props.grid, props.itemWidth, layout, props.itemsPerRow])
+	})()
 
-	const onRefresh = useCallback(async () => {
+	const onRefresh = async () => {
 		if (!props.onRefresh) {
 			return
 		}
@@ -175,9 +172,9 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 			console.error(result.error)
 			alerts.error(result.error)
 		}
-	}, [props])
+	}
 
-	const refreshControl = useMemo(() => {
+	const refreshControl = (() => {
 		if (!props.onRefresh) {
 			return undefined
 		}
@@ -189,9 +186,9 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 				progressViewOffset={props.searchBar ? searchBarHeight : undefined}
 			/>
 		)
-	}, [props, refreshing, onRefresh, searchBarHeight])
+	})()
 
-	const emptyComponent = useMemo(() => {
+	const emptyComponent = (() => {
 		if (props.loading) {
 			return null
 		}
@@ -211,7 +208,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 		}
 
 		return null
-	}, [props, layout])
+	})()
 
 	if (!props.keyExtractor) {
 		throw new Error("VirtualList requires a keyExtractor prop")

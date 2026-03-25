@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useMemo } from "react"
+import { Fragment, memo } from "react"
 import View, { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
 import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
@@ -24,7 +24,7 @@ const Button = memo(
 		const textPrimary = useResolveClassNames("text-primary")
 		const keyboardState = useKeyboardState()
 
-		const menuButtons = useMemo((): MenuButton[] => {
+		const menuButtons = ((): MenuButton[] => {
 			if (!keyboardState.isVisible) {
 				return []
 			}
@@ -218,9 +218,9 @@ const Button = memo(
 					return []
 				}
 			}
-		}, [type, keyboardState.isVisible, formats.link, postMessage, formats.list])
+		})()
 
-		const onPress = useCallback(() => {
+		const onPress = () => {
 			switch (type) {
 				case "bold": {
 					postMessage({
@@ -297,7 +297,7 @@ const Button = memo(
 					break
 				}
 			}
-		}, [type, postMessage, formats])
+		}
 
 		return (
 			<Menu

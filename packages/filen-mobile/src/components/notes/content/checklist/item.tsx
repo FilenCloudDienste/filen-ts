@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, memo, useCallback } from "react"
+import { useRef, useEffect, useState, memo } from "react"
 import { TextInput, type TextInputKeyPressEvent, type TextInputSubmitEditingEvent } from "react-native"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import { useResolveClassNames } from "uniwind"
@@ -32,13 +32,13 @@ export const Item = memo(
 		const textPrimary = useResolveClassNames("text-primary")
 		const item = useChecklistStore(useShallow(state => state.parsed.find(i => i.id === id)))
 
-		const normalizeItemContent = useCallback((content: string) => {
+		const normalizeItemContent = (content: string) => {
 			return content.replace(/\r?\n/g, "")
-		}, [])
+		}
 
 		const [value, setValue] = useState<string>(() => normalizeItemContent(item?.content ?? ""))
 
-		const toggleChecked = useCallback(() => {
+		const toggleChecked = () => {
 			if (!item) {
 				return
 			}
@@ -53,152 +53,137 @@ export const Item = memo(
 			})
 
 			onDidType()
-		}, [onCheckedChange, item, onDidType, normalizeItemContent])
+		}
 
-		const onChangeText = useCallback(
-			(text: string) => {
-				if (!item) {
-					return
-				}
+		const onChangeText = (text: string) => {
+			if (!item) {
+				return
+			}
 
-				const content = normalizeItemContent(text)
+			const content = normalizeItemContent(text)
 
-				setValue(content)
-				onContentChange({
-					item,
-					content
-				})
-			},
-			[onContentChange, item, normalizeItemContent]
-		)
+			setValue(content)
+			onContentChange({
+				item,
+				content
+			})
+		}
 
-		const focus = useCallback(() => {
+		const focus = () => {
 			textInputRef?.current?.focus()
-		}, [])
+		}
 
-		const focusItem = useCallback((id: string) => {
+		const focusItem = (id: string) => {
 			const ref = useChecklistStore.getState().inputRefs[id]
 			const content = useChecklistStore.getState().parsed.find(i => i.id === id)?.content ?? ""
 
 			ref?.current?.setSelection(content.length, content.length)
 			ref?.current?.focus()
-		}, [])
+		}
 
-		const addNewLine = useCallback(
-			(after: ChecklistItem) => {
-				const parsed = useChecklistStore.getState().parsed
-				const nextIndex = parsed.findIndex(i => i.id === after.id) + 1
+		const addNewLine = (after: ChecklistItem) => {
+			const parsed = useChecklistStore.getState().parsed
+			const nextIndex = parsed.findIndex(i => i.id === after.id) + 1
 
-				if (nextIndex > 0 && parsed[nextIndex] && parsed[nextIndex].content.trim().length === 0) {
-					focusItem(parsed[nextIndex].id)
+			if (nextIndex > 0 && parsed[nextIndex] && parsed[nextIndex].content.trim().length === 0) {
+				focusItem(parsed[nextIndex].id)
 
-					return
-				}
+				return
+			}
 
+			const id = randomUUID()
+
+			useChecklistStore.getState().setParsed(prev => {
+				const newList = [...prev]
+				const index = prev.findIndex(i => i.id === after.id)
+
+				newList.splice(index + 1, 0, {
+					id,
+					checked: false,
+					content: ""
+				})
+
+				useChecklistStore.getState().setIds(newList.map(i => i.id))
+
+				return newList
+			})
+
+			focusItem(id)
+		}
+
+		const removeItem = (item: ChecklistItem) => {
+			const parsed = useChecklistStore.getState().parsed
+
+			if (parsed.length === 1) {
 				const id = randomUUID()
 
-				useChecklistStore.getState().setParsed(prev => {
-					const newList = [...prev]
-					const index = prev.findIndex(i => i.id === after.id)
-
-					newList.splice(index + 1, 0, {
+				useChecklistStore.getState().setParsed([
+					{
 						id,
 						checked: false,
 						content: ""
-					})
+					}
+				])
 
-					useChecklistStore.getState().setIds(newList.map(i => i.id))
+				useChecklistStore.getState().setIds([id])
 
-					return newList
-				})
+				return
+			}
 
-				focusItem(id)
-			},
-			[focusItem]
-		)
+			const index = parsed.findIndex(i => i.id === item.id)
 
-		const removeItem = useCallback(
-			(item: ChecklistItem) => {
-				const parsed = useChecklistStore.getState().parsed
+			if (index === -1 || index === 0) {
+				return
+			}
 
-				if (parsed.length === 1) {
-					const id = randomUUID()
+			const prevItem = parsed[index - 1]
 
-					useChecklistStore.getState().setParsed([
-						{
-							id,
-							checked: false,
-							content: ""
-						}
-					])
+			useChecklistStore.getState().setParsed(prev => {
+				const newList = prev.filter(i => i.id !== item.id)
 
-					useChecklistStore.getState().setIds([id])
+				useChecklistStore.getState().setIds(newList.map(i => i.id))
 
-					return
-				}
+				return newList
+			})
 
-				const index = parsed.findIndex(i => i.id === item.id)
+			if (prevItem) {
+				focusItem(prevItem.id)
+			}
+		}
 
-				if (index === -1 || index === 0) {
-					return
-				}
+		const onSubmitEditing = (e: TextInputSubmitEditingEvent) => {
+			if (!item) {
+				return
+			}
 
-				const prevItem = parsed[index - 1]
+			e.preventDefault()
+			e.stopPropagation()
 
-				useChecklistStore.getState().setParsed(prev => {
-					const newList = prev.filter(i => i.id !== item.id)
+			if (normalizeItemContent(item.content).length > 0) {
+				addNewLine(item)
+			} else {
+				focus()
+			}
+		}
 
-					useChecklistStore.getState().setIds(newList.map(i => i.id))
+		const onKeyPress = (e: TextInputKeyPressEvent) => {
+			if (!item) {
+				return
+			}
 
-					return newList
-				})
+			e.preventDefault()
+			e.stopPropagation()
 
-				if (prevItem) {
-					focusItem(prevItem.id)
-				}
-			},
-			[focusItem]
-		)
+			onDidType()
 
-		const onSubmitEditing = useCallback(
-			(e: TextInputSubmitEditingEvent) => {
-				if (!item) {
-					return
-				}
+			if (e.nativeEvent.key === "Enter") {
+				onSubmitEditing(e as unknown as TextInputSubmitEditingEvent)
+			}
 
-				e.preventDefault()
-				e.stopPropagation()
-
-				if (normalizeItemContent(item.content).length > 0) {
-					addNewLine(item)
-				} else {
-					focus()
-				}
-			},
-			[item, addNewLine, focus, normalizeItemContent]
-		)
-
-		const onKeyPress = useCallback(
-			(e: TextInputKeyPressEvent) => {
-				if (!item) {
-					return
-				}
-
-				e.preventDefault()
-				e.stopPropagation()
-
-				onDidType()
-
-				if (e.nativeEvent.key === "Enter") {
-					onSubmitEditing(e as unknown as TextInputSubmitEditingEvent)
-				}
-
-				if (e.nativeEvent.key === "Backspace" && normalizeItemContent(item.content).length === 0) {
-					removeItem(item)
-				}
-			},
-			[item, removeItem, onDidType, onSubmitEditing, normalizeItemContent]
-		)
+			if (e.nativeEvent.key === "Backspace" && normalizeItemContent(item.content).length === 0) {
+				removeItem(item)
+			}
+		}
 
 		useEffect(() => {
 			if (!item) {

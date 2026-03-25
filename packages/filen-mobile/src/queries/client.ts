@@ -1,6 +1,5 @@
 import { QueryClient, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
-import { useMemo } from "react"
 import useFocusNotifyOnChangeProps from "@/queries/useFocusNotifyOnChangeProps"
 import useQueryFocusAware from "@/queries/useQueryFocusAware"
 import useNetInfo from "@/hooks/useNetInfo"
@@ -189,7 +188,7 @@ export function useDefaultQueryParams(
 	const isFocused = useQueryFocusAware()
 	const notifyOnChangeProps = useFocusNotifyOnChangeProps()
 
-	const enabled = useMemo(() => {
+	const enabled = (() => {
 		if (!hasInternet) {
 			return false
 		}
@@ -199,7 +198,7 @@ export function useDefaultQueryParams(
 		}
 
 		return isFocused()
-	}, [hasInternet, isFocused, options?.enabled])
+	})()
 
 	return {
 		notifyOnChangeProps,

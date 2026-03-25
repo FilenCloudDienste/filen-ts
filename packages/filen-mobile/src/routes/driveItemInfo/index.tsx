@@ -9,7 +9,7 @@ import View from "@/components/ui/view"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import Header from "@/components/ui/header"
-import { Fragment, memo, useMemo } from "react"
+import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { cn, formatBytes } from "@filen/utils"
 import useDirectorySizeQuery from "@/queries/useDirectorySize.query"
@@ -37,15 +37,10 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 		}
 	)
 
-	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
-		{
-			uuid: item?.data.uuid ?? "",
-			type: item?.type ?? "file"
-		},
-		{
-			enabled: item !== null
-		}
-	)
+	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
+		uuid: item?.data.uuid ?? "",
+		type: item?.type ?? "file"
+	})
 
 	// TODO: extract to function and clean up
 	const info: {
@@ -343,13 +338,17 @@ const DriveItemInfo = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
 
-	const item = useMemo(() => {
+	const item = (() => {
 		if (!itemPackedBase64) {
 			return null
 		}
 
-		return unpack(Buffer.from(itemPackedBase64, "base64")) as DriveItem
-	}, [itemPackedBase64])
+		try {
+			return unpack(Buffer.from(itemPackedBase64, "base64")) as DriveItem
+		} catch {
+			return null
+		}
+	})()
 
 	if (!item) {
 		return (

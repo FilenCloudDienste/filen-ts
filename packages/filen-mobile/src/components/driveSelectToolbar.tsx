@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useMemo } from "react"
+import { Fragment, memo } from "react"
 import { CrossGlassContainerView } from "@/components/ui/view"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 import { useResolveClassNames } from "uniwind"
@@ -20,7 +20,6 @@ import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
 import { router } from "expo-router"
 
-// TODO: Fix memoization
 const DriveSelectToolbar = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -28,7 +27,7 @@ const DriveSelectToolbar = memo(() => {
 	const { authedSdkClient } = useSdkClients()
 	const selectedItems = useDriveSelectStore(useShallow(state => state.selectedItems))
 
-	const parentDir = useMemo(() => {
+	const parentDir = (() => {
 		if (!authedSdkClient) {
 			return null
 		}
@@ -44,9 +43,9 @@ const DriveSelectToolbar = memo(() => {
 		}
 
 		return parentDir
-	}, [drivePath.uuid, authedSdkClient])
+	})()
 
-	const isSameParentAsSelectedItems = useMemo(() => {
+	const isSameParentAsSelectedItems = (() => {
 		if (!parentDir || !drivePath.selectOptions) {
 			return false
 		}
@@ -60,9 +59,9 @@ const DriveSelectToolbar = memo(() => {
 
 			return itemParentUuid === parentDir.inner[0].uuid
 		})
-	}, [parentDir, drivePath.selectOptions])
+	})()
 
-	const createDirectory = useCallback(async () => {
+	const createDirectory = async () => {
 		if (!parentDir) {
 			return
 		}
@@ -79,7 +78,6 @@ const DriveSelectToolbar = memo(() => {
 		if (!promptResult.success) {
 			console.error(promptResult.error)
 			alerts.error(promptResult.error)
-
 			return
 		}
 
@@ -103,12 +101,11 @@ const DriveSelectToolbar = memo(() => {
 		if (!result.success) {
 			console.error(result.error)
 			alerts.error(result.error)
-
 			return
 		}
-	}, [parentDir])
+	}
 
-	const submit = useCallback(async () => {
+	const submit = async () => {
 		if (!drivePath.selectOptions) {
 			return
 		}
@@ -134,7 +131,6 @@ const DriveSelectToolbar = memo(() => {
 				if (!result.success) {
 					console.error(result.error)
 					alerts.error(result.error)
-
 					return
 				}
 
@@ -153,7 +149,7 @@ const DriveSelectToolbar = memo(() => {
 				break
 			}
 		}
-	}, [drivePath.selectOptions, parentDir, isSameParentAsSelectedItems, selectedItems])
+	}
 
 	return (
 		<Fragment>

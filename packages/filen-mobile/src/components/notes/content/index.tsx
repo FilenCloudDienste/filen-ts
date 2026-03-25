@@ -11,7 +11,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import useNotesStore from "@/stores/useNotes.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
-import { useEffect, memo, useMemo, useCallback } from "react"
+import { useEffect, memo, useCallback } from "react"
 import { runEffect, run } from "@filen/utils"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -23,13 +23,7 @@ const Loading = memo(({ children, loading, noteType }: { children: React.ReactNo
 	const textForeground = useResolveClassNames("text-foreground")
 	const textEditorReady = useTextEditorStore(useShallow(state => state.ready))
 
-	const showLoader = useMemo(() => {
-		if (noteType === NoteType.Checklist) {
-			return loading
-		}
-
-		return loading || !textEditorReady
-	}, [loading, textEditorReady, noteType])
+	const showLoader = noteType === NoteType.Checklist ? loading : loading || !textEditorReady
 
 	return (
 		<View className="flex-1">
@@ -49,7 +43,7 @@ const Loading = memo(({ children, loading, noteType }: { children: React.ReactNo
 	)
 })
 
-export const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | null }) => {
+const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | null }) => {
 	const stringifiedClient = useStringifiedClient()
 	const insets = useSafeAreaInsets()
 
@@ -62,25 +56,11 @@ export const Content = memo(({ note, history }: { note: Note; history?: NoteHist
 		}
 	)
 
-	const initialValue = useMemo(() => {
-		if (history) {
-			return history.content
-		}
+	const initialValue = history ? history.content : noteContentQuery.status === "success" ? noteContentQuery.data : null
 
-		if (noteContentQuery.status !== "success") {
-			return null
-		}
-
-		return noteContentQuery.data
-	}, [noteContentQuery.data, noteContentQuery.status, history])
-
-	const loading = useMemo(() => {
-		if (history) {
-			return false
-		}
-
-		return (
-			noteContentQuery.isRefetching ||
+	const loading = history
+		? false
+		: noteContentQuery.isRefetching ||
 			noteContentQuery.isLoading ||
 			noteContentQuery.isFetching ||
 			noteContentQuery.isPending ||
@@ -88,20 +68,8 @@ export const Content = memo(({ note, history }: { note: Note; history?: NoteHist
 			noteContentQuery.isRefetchError ||
 			noteContentQuery.isLoadingError ||
 			typeof initialValue !== "string"
-		)
-	}, [
-		noteContentQuery.isError,
-		noteContentQuery.isFetching,
-		noteContentQuery.isLoading,
-		noteContentQuery.isLoadingError,
-		noteContentQuery.isPending,
-		noteContentQuery.isRefetchError,
-		noteContentQuery.isRefetching,
-		initialValue,
-		history
-	])
 
-	const hasWriteAccess = useMemo(() => {
+	const hasWriteAccess = (() => {
 		if (!stringifiedClient || history) {
 			return false
 		}
@@ -110,63 +78,60 @@ export const Content = memo(({ note, history }: { note: Note; history?: NoteHist
 			note.ownerId === stringifiedClient.userId ||
 			note.participants.some(participant => participant.userId === stringifiedClient.userId && participant.permissionsWrite)
 		)
-	}, [stringifiedClient, note, history])
+	})()
 
-	const onValueChange = useCallback(
-		async (value: string) => {
-			if (history) {
-				return
+	const onValueChange = async (value: string) => {
+		if (history) {
+			return
+		}
+
+		const now = Date.now()
+		let didFlushToDisk = false
+		let flushToDiskError: Error | null = null
+
+		useNotesStore.getState().setInflightContent(prev => {
+			const updated = {
+				...prev,
+				[note.uuid]: [
+					{
+						timestamp: now,
+						note,
+						content: value
+					},
+					...(prev[note.uuid] ?? []).filter(c => c.timestamp > now)
+				]
 			}
 
-			const now = Date.now()
-			let didFlushToDisk = false
-			let flushToDiskError: Error | null = null
+			sync.flushToDisk(updated)
+				.then(() => {
+					didFlushToDisk = true
 
-			useNotesStore.getState().setInflightContent(prev => {
-				const updated = {
-					...prev,
-					[note.uuid]: [
-						{
-							timestamp: now,
-							note,
-							content: value
-						},
-						...(prev[note.uuid] ?? []).filter(c => c.timestamp > now)
-					]
+					sync.syncDebounced()
+				})
+				.catch(err => {
+					flushToDiskError = err
+				})
+
+			return updated
+		})
+
+		const result = await run(async () => {
+			while (!didFlushToDisk) {
+				if (flushToDiskError) {
+					throw flushToDiskError
 				}
 
-				sync.flushToDisk(updated)
-					.then(() => {
-						didFlushToDisk = true
-
-						sync.syncDebounced()
-					})
-					.catch(err => {
-						flushToDiskError = err
-					})
-
-				return updated
-			})
-
-			const result = await run(async () => {
-				while (!didFlushToDisk) {
-					if (flushToDiskError) {
-						throw flushToDiskError
-					}
-
-					await new Promise<void>(resolve => setTimeout(resolve, 100))
-				}
-			})
-
-			if (!result.success) {
-				console.error(result.error)
-				alerts.error(result.error)
-
-				return
+				await new Promise<void>(resolve => setTimeout(resolve, 100))
 			}
-		},
-		[note, history]
-	)
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+	}
 
 	const onContentEditedRemotely = useCallback(
 		async (info: { contentEdited: NoteContentEdited; noteUuid: string }) => {

@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react"
+import { memo } from "react"
 import { AnimatedView } from "@/components/ui/animated"
 import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType } from "@/lib/utils"
@@ -61,25 +61,13 @@ const GalleryItem = memo(
 		const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
 		const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
-		const previewType = useMemo(() => {
-			return getPreviewType(info.item.data.decryptedMeta?.name ?? "")
-		}, [info.item.data.decryptedMeta?.name])
+		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
+		const fileUrl = !getFileUrl ? null : getFileUrlForItem(info.item, getFileUrl)
 
-		const fileUrl = useMemo(() => {
-			if (!getFileUrl) {
-				return null
-			}
-
-			return getFileUrlForItem(info.item, getFileUrl)
-		}, [getFileUrl, info.item])
-
-		const itemStyle = useMemo(
-			() => ({
-				width: dimensions.width,
-				height: dimensions.height
-			}),
-			[dimensions.width, dimensions.height]
-		)
+		const itemStyle = {
+			width: dimensions.width,
+			height: dimensions.height
+		}
 
 		const dismissAnimatedStyle = useAnimatedStyle(() => {
 			"worklet"

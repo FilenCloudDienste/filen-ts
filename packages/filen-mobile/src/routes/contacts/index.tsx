@@ -1,7 +1,7 @@
 import useContactsQuery from "@/queries/useContacts.query"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 import { fastLocaleCompare, run, cn } from "@filen/utils"
-import { Fragment, useState, memo, useMemo, useCallback } from "react"
+import { Fragment, useState, memo, useCallback } from "react"
 import { Platform } from "react-native"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
@@ -86,7 +86,7 @@ function useSelectOptions() {
 		selectOptions?: string
 	}>()
 
-	const selectOptions = useMemo((): SelectOptions | null => {
+	const selectOptions = ((): SelectOptions | null => {
 		if (searchParams && searchParams.selectOptions) {
 			try {
 				const parsed = unpack(Buffer.from(searchParams.selectOptions, "base64")) as SelectOptions
@@ -102,7 +102,7 @@ function useSelectOptions() {
 		}
 
 		return null
-	}, [searchParams])
+	})()
 
 	return selectOptions
 }
@@ -116,7 +116,7 @@ const Header = memo(() => {
 		useShallow(state => state.selectedContacts.filter(c => c.type === "contact").map(c => c.data as TContact))
 	)
 
-	const headerRightItems = useMemo(() => {
+	const headerRightItems = (() => {
 		if (selectOptions && selectedContacts.length > 0) {
 			return [
 				{
@@ -212,9 +212,9 @@ const Header = memo(() => {
 		}
 
 		return items
-	}, [textBlue500.color, selectedContacts, selectOptions, textForeground.color])
+	})()
 
-	const headerLeftItems = useMemo(() => {
+	const headerLeftItems = (() => {
 		return [
 			{
 				type: "button",
@@ -234,7 +234,7 @@ const Header = memo(() => {
 				}
 			}
 		] satisfies HeaderItem[]
-	}, [textForeground.color])
+	})()
 
 	return (
 		<StackHeader
@@ -266,7 +266,7 @@ const Contact = memo(
 		)
 		const selectedCount = useContactsStore(useShallow(state => state.selectedContacts.length))
 
-		const onAccept = useCallback(async () => {
+		const onAccept = async () => {
 			const result = await runWithLoading(async () => {
 				if (info.item.type !== "incomingRequest") {
 					throw new Error("Invalid contact request type")
@@ -283,9 +283,9 @@ const Contact = memo(
 
 				return
 			}
-		}, [info.item])
+		}
 
-		const onDeny = useCallback(async () => {
+		const onDeny = async () => {
 			const promptResponse = await run(async () => {
 				switch (info.item.type) {
 					case "incomingRequest": {
@@ -372,9 +372,9 @@ const Contact = memo(
 
 				return
 			}
-		}, [info.item])
+		}
 
-		const menuButtons = useMemo(() => {
+		const menuButtons = (() => {
 			const buttons: MenuButton[] = []
 
 			if (info.item.type === "contact") {
@@ -634,9 +634,9 @@ const Contact = memo(
 			}
 
 			return buttons
-		}, [info.item])
+		})()
 
-		const disabled = useMemo(() => {
+		const disabled = (() => {
 			if (!selectOptions) {
 				return false
 			}
@@ -652,9 +652,9 @@ const Contact = memo(
 			}
 
 			return selectOptions.multiple ? false : selectedCount >= 1 && !isSelected
-		}, [selectOptions, info.item, selectedCount, isSelected])
+		})()
 
-		const onPress = useCallback(() => {
+		const onPress = () => {
 			if (disabled) {
 				return
 			}
@@ -674,7 +674,7 @@ const Contact = memo(
 
 				return [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
 			})
-		}, [info.item, disabled])
+		}
 
 		return (
 			<View
@@ -792,14 +792,13 @@ const Contact = memo(
 	}
 )
 
-// TODO: Fix memo
 const Contacts = memo(() => {
 	const contactsQuery = useContactsQuery()
 	const contactRequestsQuery = useContactRequestsQuery()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const selectOptions = useSelectOptions()
 
-	const itemsSorted = useMemo(() => {
+	const itemsSorted = (() => {
 		if (contactsQuery.status !== "success" || contactRequestsQuery.status !== "success") {
 			return []
 		}
@@ -880,9 +879,9 @@ const Contacts = memo(() => {
 		}
 
 		return items
-	}, [contactsQuery.status, contactsQuery.data, contactRequestsQuery.status, contactRequestsQuery.data, selectOptions])
+	})()
 
-	const items = useMemo(() => {
+	const items = (() => {
 		const searchQueryNormalized = searchQuery.trim().toLowerCase()
 
 		if (searchQueryNormalized.length === 0) {
@@ -899,9 +898,9 @@ const Contacts = memo(() => {
 
 			return email.includes(searchQueryNormalized) || displayName.includes(searchQueryNormalized)
 		})
-	}, [searchQuery, itemsSorted])
+	})()
 
-	const keyExtractor = useCallback((item: ContactListItemWithHeader) => {
+	const keyExtractor = (item: ContactListItemWithHeader) => {
 		switch (item.type) {
 			case "contact": {
 				return `contact-${item.data.uuid}`
@@ -923,22 +922,19 @@ const Contacts = memo(() => {
 				return `header-${item.data.id}`
 			}
 		}
-	}, [])
+	}
 
-	const renderItem = useCallback(
-		(info: ListRenderItemInfo<ContactListItemWithHeader>) => {
-			return (
-				<Contact
-					info={info}
-					nextItem={items.at(info.index + 1)}
-					prevItem={items.at(info.index - 1)}
-				/>
-			)
-		},
-		[items]
-	)
+	const renderItem = (info: ListRenderItemInfo<ContactListItemWithHeader>) => {
+		return (
+			<Contact
+				info={info}
+				nextItem={items.at(info.index + 1)}
+				prevItem={items.at(info.index - 1)}
+			/>
+		)
+	}
 
-	const onRefresh = useCallback(async () => {
+	const onRefresh = async () => {
 		const result = await run(async () => {
 			await Promise.all([contactsQuery.refetch(), contactRequestsQuery.refetch()])
 		})
@@ -947,22 +943,20 @@ const Contacts = memo(() => {
 			console.error(result.error)
 			alerts.error(result.error)
 		}
-	}, [contactsQuery, contactRequestsQuery])
+	}
 
-	const emptyComponent = useCallback(() => {
+	const emptyComponent = () => {
 		return (
 			<View className="flex-1 items-center justify-center bg-transparent">
 				<Text>tbd</Text>
 			</View>
 		)
-	}, [])
+	}
 
-	const searchBar = useMemo(() => {
-		return {
-			onChangeText: setSearchQuery,
-			placeholder: "tbd_search_contacts"
-		}
-	}, [setSearchQuery])
+	const searchBar = {
+		onChangeText: setSearchQuery,
+		placeholder: "tbd_search_contacts"
+	}
 
 	useFocusEffect(
 		useCallback(() => {

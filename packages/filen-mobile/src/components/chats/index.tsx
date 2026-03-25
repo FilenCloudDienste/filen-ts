@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo, useCallback } from "react"
+import { Fragment, memo, useCallback } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { Platform } from "react-native"
@@ -17,7 +17,6 @@ import prompts from "@/lib/prompts"
 import type { MenuButton } from "@/components/ui/menu"
 import { selectContacts } from "@/routes/contacts"
 
-// TODO: Fix memoization
 const Header = memo(() => {
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
@@ -40,15 +39,15 @@ const Header = memo(() => {
 		enabled: false
 	})
 
-	const chats = useMemo(() => {
+	const chats = (() => {
 		if (chatsQuery.status !== "success") {
 			return []
 		}
 
 		return chatsQuery.data.filter(chat => chat.ownerId === stringigiedClient?.userId || chat.lastMessage)
-	}, [chatsQuery.status, chatsQuery.data, stringigiedClient?.userId])
+	})()
 
-	const headerLeftItems = useMemo(() => {
+	const headerLeftItems = (() => {
 		if (selectedChats.length === 0) {
 			return []
 		}
@@ -68,9 +67,9 @@ const Header = memo(() => {
 				}
 			}
 		] satisfies HeaderItem[]
-	}, [selectedChats, textForeground])
+	})()
 
-	const headerRightItems = useMemo(() => {
+	const headerRightItems = (() => {
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
 
@@ -277,14 +276,7 @@ const Header = memo(() => {
 		}
 
 		return items
-	}, [
-		textForeground.color,
-		selectedChats,
-		selectedChatsIncludesMuted,
-		everySelectedChatOwnedBySelf,
-		chats,
-		selfIsParticipantAndNotOwnerOfEverySelectedChat
-	])
+	})()
 
 	return (
 		<StackHeader

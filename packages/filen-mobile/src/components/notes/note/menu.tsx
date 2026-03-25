@@ -1,6 +1,6 @@
 import { type Note as TNote, NoteType, type NoteTag, type NoteParticipant, type NoteHistory } from "@filen/sdk-rs"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
-import { memo, useMemo, useCallback } from "react"
+import { memo } from "react"
 import View from "@/components/ui/view"
 import { useStringifiedClient } from "@/lib/auth"
 import useNotesStore from "@/stores/useNotes.store"
@@ -741,7 +741,6 @@ export function createMenuButtons({
 	return buttons
 }
 
-// TODO: Fix memoization
 const Menu = memo(
 	({
 		children,
@@ -771,57 +770,40 @@ const Menu = memo(
 			}
 		)
 
-		const noteHistory = useMemo(() => {
-			if (noteHistoryQuery.status !== "success") {
-				return []
-			}
+		const noteHistory =
+			noteHistoryQuery.status === "success"
+				? noteHistoryQuery.data.sort((a, b) => Number(b.editedTimestamp) - Number(a.editedTimestamp))
+				: []
 
-			return noteHistoryQuery.data.sort((a, b) => Number(b.editedTimestamp) - Number(a.editedTimestamp))
-		}, [noteHistoryQuery.data, noteHistoryQuery.status])
+		const notesTags = notesTagsQuery.status === "success" ? notesTagsQuery.data : []
 
-		const notesTags = useMemo(() => {
-			if (notesTagsQuery.status !== "success") {
-				return []
-			}
+		const writeAccess =
+			note.ownerId === stringifiedClient?.userId ||
+			note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
 
-			return notesTagsQuery.data
-		}, [notesTagsQuery.data, notesTagsQuery.status])
+		const isOwner = note.ownerId === stringifiedClient?.userId
 
-		const writeAccess = useMemo(() => {
-			return (
-				note.ownerId === stringifiedClient?.userId ||
-				note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
-			)
-		}, [note.ownerId, note.participants, stringifiedClient?.userId])
-
-		const isOwner = useMemo(() => {
-			return note.ownerId === stringifiedClient?.userId
-		}, [note.ownerId, stringifiedClient?.userId])
-
-		const onOpenMenu = useCallback(() => {
+		const onOpenMenu = () => {
 			useNotesStore.getState().setActiveNote(note)
-		}, [note])
+		}
 
-		const onCloseMenu = useCallback(() => {
+		const onCloseMenu = () => {
 			useNotesStore.getState().setActiveNote(null)
-		}, [])
+		}
 
-		const buttons = useMemo(() => {
-			if (rest.disabled || isInflight) {
-				return []
-			}
-
-			return createMenuButtons({
-				note,
-				isSelected,
-				writeAccess,
-				origin,
-				noteHistory,
-				userId: stringifiedClient?.userId ?? BigInt(0),
-				notesTags,
-				isOwner
-			})
-		}, [origin, writeAccess, rest.disabled, isSelected, note, notesTags, isOwner, noteHistory, stringifiedClient, isInflight])
+		const buttons =
+			rest.disabled || isInflight
+				? []
+				: createMenuButtons({
+						note,
+						isSelected,
+						writeAccess,
+						origin,
+						noteHistory,
+						userId: stringifiedClient?.userId ?? BigInt(0),
+						notesTags,
+						isOwner
+					})
 
 		if (buttons.length === 0 || rest.disabled) {
 			return <View className={rest.className}>{children}</View>

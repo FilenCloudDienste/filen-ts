@@ -1,5 +1,5 @@
 import { ExpoImage } from "@/components/ui/image"
-import { memo, useMemo } from "react"
+import { memo } from "react"
 import { Paths } from "expo-file-system"
 import { isValidHexColor, cn } from "@filen/utils"
 import { memoize } from "es-toolkit/function"
@@ -7,7 +7,7 @@ import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
 
 export const FileIcon = memo(
 	({ name, width, height, className }: { name: string; width?: number; height?: number; className?: string }) => {
-		const source = useMemo(() => {
+		const source = (() => {
 			const extname = Paths.extname(name.trim().toLowerCase())
 
 			switch (extname) {
@@ -151,7 +151,7 @@ export const FileIcon = memo(
 					return require("@/components/itemIcons/svg/other.svg")
 				}
 			}
-		}, [name])
+		})()
 
 		return (
 			<ExpoImage
@@ -305,15 +305,13 @@ export const directorySvg = memoize(
 
 export const DirectoryIcon = memo(
 	({ color, width, height, className }: { color?: DirColor; width?: number; height?: number; className?: string }) => {
-		const source = useMemo(() => {
-			return {
-				uri: directorySvg({
-					color: unwrapDirColor(color),
-					width,
-					height
-				})
-			}
-		}, [color, width, height])
+		const source = {
+			uri: directorySvg({
+				color: unwrapDirColor(color),
+				width,
+				height
+			})
+		}
 
 		return (
 			<ExpoImage

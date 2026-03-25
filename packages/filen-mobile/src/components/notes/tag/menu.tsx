@@ -1,6 +1,6 @@
 import { type NoteTag, NoteType } from "@filen/sdk-rs"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
-import { memo, useMemo, useCallback } from "react"
+import { memo } from "react"
 import View from "@/components/ui/view"
 import useNotesStore from "@/stores/useNotes.store"
 import { useShallow } from "zustand/shallow"
@@ -28,70 +28,67 @@ const Menu = memo(
 		const isSelected = useNotesStore(useShallow(state => state.selectedTags.some(selectedTag => selectedTag.uuid === tag.uuid)))
 		const router = useRouter()
 
-		const onOpenMenu = useCallback(() => {
+		const onOpenMenu = () => {
 			useNotesStore.getState().setActiveTag(tag)
-		}, [tag])
+		}
 
-		const onCloseMenu = useCallback(() => {
+		const onCloseMenu = () => {
 			useNotesStore.getState().setActiveTag(null)
-		}, [])
+		}
 
-		const createNote = useCallback(
-			async (type: NoteType) => {
-				const result = await run(async () => {
-					return await prompts.input({
-						title: "tbd_create_note",
-						message: "tbd_enter_note_name",
-						cancelText: "tbd_cancel",
-						okText: "tbd_create"
-					})
+		const createNote = async (type: NoteType) => {
+			const result = await run(async () => {
+				return await prompts.input({
+					title: "tbd_create_note",
+					message: "tbd_enter_note_name",
+					cancelText: "tbd_cancel",
+					okText: "tbd_create"
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+
+				return
+			}
+
+			if (result.data.cancelled || result.data.type !== "string") {
+				return
+			}
+
+			const title = result.data.value.trim()
+
+			if (title.length === 0) {
+				return
+			}
+
+			const createResult = await runWithLoading(async () => {
+				const n = await notes.create({
+					title,
+					content: "",
+					type
 				})
 
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				if (result.data.cancelled || result.data.type !== "string") {
-					return
-				}
-
-				const title = result.data.value.trim()
-
-				if (title.length === 0) {
-					return
-				}
-
-				const createResult = await runWithLoading(async () => {
-					const n = await notes.create({
-						title,
-						content: "",
-						type
-					})
-
-					await notes.addTag({
-						note: n,
-						tag
-					})
-
-					return n
+				await notes.addTag({
+					note: n,
+					tag
 				})
 
-				if (!createResult.success) {
-					console.error(createResult.error)
-					alerts.error(createResult.error)
+				return n
+			})
 
-					return
-				}
+			if (!createResult.success) {
+				console.error(createResult.error)
+				alerts.error(createResult.error)
 
-				router.push(Paths.join("/", "note", createResult.data.uuid))
-			},
-			[router, tag]
-		)
+				return
+			}
 
-		const buttons = useMemo(() => {
+			router.push(Paths.join("/", "note", createResult.data.uuid))
+		}
+
+		const buttons = (() => {
 			if (rest.disabled) {
 				return []
 			}
@@ -275,7 +272,7 @@ const Menu = memo(
 			})
 
 			return buttons
-		}, [origin, rest.disabled, isSelected, tag, createNote])
+		})()
 
 		if (buttons.length === 0 || rest.disabled) {
 			return <View className={rest.className}>{children}</View>

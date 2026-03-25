@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, memo, useCallback, useMemo } from "react"
+import { Fragment, useRef, useState, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import View from "@/components/ui/view"
@@ -160,49 +160,38 @@ const Photos = memo(() => {
 		}
 	)
 
-	const size = useMemo(() => {
-		if (!layout) {
-			return 0
-		}
+	const size = !layout ? 0 : layout.width / 5
 
-		return layout.width / 5
-	}, [layout])
-
-	const renderItem = useCallback(
-		(info: ListRenderItemInfo<DriveItemFileExtracted>) => {
-			return (
-				<Photo
-					info={info}
-					size={size}
-					drivePath={drivePath}
-				/>
-			)
-		},
-		[size, drivePath]
-	)
+	const renderItem = (info: ListRenderItemInfo<DriveItemFileExtracted>) => {
+		return (
+			<Photo
+				info={info}
+				size={size}
+				drivePath={drivePath}
+			/>
+		)
+	}
 
 	const keyExtractor = (item: DriveItemFileExtracted) => {
 		return item.data.uuid
 	}
 
-	const data = useMemo(() => {
-		return driveItemsQuery.data
-			? itemSorter.sortItems(
-					driveItemsQuery.data.filter(item => {
-						if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
-							return false
-						}
+	const data = driveItemsQuery.data
+		? itemSorter.sortItems(
+				driveItemsQuery.data.filter(item => {
+					if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+						return false
+					}
 
-						const previewType = getPreviewType(item.data.decryptedMeta.name)
+					const previewType = getPreviewType(item.data.decryptedMeta.name)
 
-						return previewType === "image" || previewType === "video"
-					}),
-					"creationDesc"
-				)
-			: []
-	}, [driveItemsQuery.data])
+					return previewType === "image" || previewType === "video"
+				}),
+				"creationDesc"
+			)
+		: []
 
-	const onRefresh = useCallback(async () => {
+	const onRefresh = async () => {
 		const result = await run(async () => {
 			await driveItemsQuery.refetch()
 		})
@@ -211,7 +200,7 @@ const Photos = memo(() => {
 			console.error(result.error)
 			alerts.error(result.error)
 		}
-	}, [driveItemsQuery])
+	}
 
 	return (
 		<Fragment>

@@ -1,5 +1,5 @@
 import Image from "@/components/ui/image"
-import { memo, useCallback, useMemo } from "react"
+import { memo } from "react"
 import View from "@/components/ui/view"
 import { cn } from "@filen/utils"
 import type { ViewStyle, StyleProp } from "react-native"
@@ -21,21 +21,15 @@ const Avatar = memo(
 		const textMutedForeground = useResolveClassNames("text-muted-foreground")
 		const size = props.size ?? 32
 
-		const isOnline = useMemo(() => {
-			if (!props.lastActive) {
-				return false
-			}
+		const isOnline = !props.lastActive ? false : props.lastActive > new Date().getTime() - 300000
 
-			return props.lastActive > new Date().getTime() - 300000
-		}, [props.lastActive])
-
-		const onFailure = useCallback(() => {
+		const onFailure = () => {
 			setHasError(true)
-		}, [setHasError])
+		}
 
-		const onCompletion = useCallback(() => {
+		const onCompletion = () => {
 			setHasError(false)
-		}, [setHasError])
+		}
 
 		return (
 			<View className="bg-transparent flex-row items-center justify-center shrink-0">

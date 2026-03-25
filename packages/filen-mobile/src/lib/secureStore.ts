@@ -392,7 +392,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		setState(value)
 	}, [])
 
-	const retrieve = useCallback(async () => {
+	const retrieve = async () => {
 		const result = await run(async defer => {
 			await flushMutexRef.current.acquire()
 
@@ -410,40 +410,37 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		if (!result.success) {
 			console.error("Error fetching value from secureStore:", result.error)
 		}
-	}, [key, setStateChecked])
+	}
 
-	const set = useCallback(
-		(fn: T | ((prev: T) => T)): void => {
-			;(async () => {
-				const result = await run(async defer => {
-					await flushMutexRef.current.acquire()
+	const set = (fn: T | ((prev: T) => T)): void => {
+		;(async () => {
+			const result = await run(async defer => {
+				await flushMutexRef.current.acquire()
 
-					defer(() => {
-						flushMutexRef.current.release()
-					})
-
-					isLocalUpdateRef.current = true
-
-					defer(() => {
-						isLocalUpdateRef.current = false
-					})
-
-					const now = typeof fn === "function" ? (fn as (prev: T) => T)(lastValueRef.current) : fn
-
-					setStateChecked(now)
-
-					await secureStore.set(key, now)
+				defer(() => {
+					flushMutexRef.current.release()
 				})
 
-				if (!result.success) {
-					console.error("Error setting value in secureStore:", result.error)
+				isLocalUpdateRef.current = true
 
-					return
-				}
-			})()
-		},
-		[key, setStateChecked]
-	)
+				defer(() => {
+					isLocalUpdateRef.current = false
+				})
+
+				const now = typeof fn === "function" ? (fn as (prev: T) => T)(lastValueRef.current) : fn
+
+				setStateChecked(now)
+
+				await secureStore.set(key, now)
+			})
+
+			if (!result.success) {
+				console.error("Error setting value in secureStore:", result.error)
+
+				return
+			}
+		})()
+	}
 
 	useEffect(() => {
 		initialValueRef.current = initialValue

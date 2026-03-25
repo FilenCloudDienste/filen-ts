@@ -8,7 +8,7 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/stores/useNotes.store"
-import { memo, useCallback, useMemo } from "react"
+import { memo } from "react"
 import { useStringifiedClient } from "@/lib/auth"
 import { simpleDate } from "@/lib/time"
 import Icon from "@/components/notes/note/icon"
@@ -37,7 +37,6 @@ export type DataItem = Item & {
 
 export type ListItem = SectionHeader | DataItem
 
-// TODO: Fix memoization
 const Note = memo(
 	({
 		info,
@@ -60,7 +59,7 @@ const Note = memo(
 		const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.uuid === itemUuid)))
 		const areNotesSelected = useNotesStore(useShallow(state => state.selectedNotes.length > 0))
 
-		const onPress = useCallback(() => {
+		const onPress = () => {
 			if (info.item.type === "header") {
 				return
 			}
@@ -84,36 +83,24 @@ const Note = memo(
 			}
 
 			router.push(Paths.join("/", "note", itemUuid))
-		}, [router, info.item, itemUuid])
+		}
 
-		const participantsWithoutCurrentUser = useMemo(() => {
-			if (info.item.type === "header") {
-				return []
-			}
+		const participantsWithoutCurrentUser =
+			info.item.type === "header"
+				? []
+				: info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
+		const tags = info.item.type === "header" ? [] : info.item.tags.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
-			return info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
-		}, [info.item, stringifiedClient?.userId])
-
-		const tags = useMemo(() => {
-			if (info.item.type === "header") {
-				return []
-			}
-
-			return info.item.tags.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
-		}, [info.item])
-
-		const roundedCn = useMemo(() => {
-			return cn(
-				nextNote?.type === "note" && prevNote?.type === "note" && "rounded-none",
-				nextNote?.type === "header" && prevNote?.type === "note" && "rounded-b-4xl rounded-t-none",
-				nextNote?.type === "note" && prevNote?.type === "header" && "rounded-t-4xl rounded-b-none",
-				nextNote?.type === "header" && prevNote?.type === "header" && "rounded-4xl",
-				!nextNote && prevNote?.type === "header" && "rounded-4xl",
-				!prevNote && nextNote?.type === "note" && "rounded-t-4xl rounded-b-none",
-				!nextNote && prevNote?.type === "note" && "rounded-b-4xl rounded-t-none",
-				!nextNote && !prevNote && "rounded-4xl"
-			)
-		}, [nextNote, prevNote])
+		const roundedCn = cn(
+			nextNote?.type === "note" && prevNote?.type === "note" && "rounded-none",
+			nextNote?.type === "header" && prevNote?.type === "note" && "rounded-b-4xl rounded-t-none",
+			nextNote?.type === "note" && prevNote?.type === "header" && "rounded-t-4xl rounded-b-none",
+			nextNote?.type === "header" && prevNote?.type === "header" && "rounded-4xl",
+			!nextNote && prevNote?.type === "header" && "rounded-4xl",
+			!prevNote && nextNote?.type === "note" && "rounded-t-4xl rounded-b-none",
+			!nextNote && prevNote?.type === "note" && "rounded-b-4xl rounded-t-none",
+			!nextNote && !prevNote && "rounded-4xl"
+		)
 
 		if (info.item.type === "header") {
 			return (

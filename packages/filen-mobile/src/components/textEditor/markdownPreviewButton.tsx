@@ -9,7 +9,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import { PressableScale } from "@/components/ui/pressables"
 import { useShallow } from "zustand/shallow"
 import useTextEditorStore from "@/stores/useTextEditor.store"
-import { memo, useCallback, useMemo } from "react"
+import { memo } from "react"
 
 const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
 	const keyboardState = useKeyboardState()
@@ -21,11 +21,9 @@ const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
 	)
 	const textEditorReady = useTextEditorStore(useShallow(state => state.ready))
 
-	const active = useMemo(() => {
-		return textEditorMarkdownPreviewActive[id] ?? false
-	}, [id, textEditorMarkdownPreviewActive])
+	const active = textEditorMarkdownPreviewActive[id] ?? false
 
-	const onPress = useCallback(() => {
+	const onPress = () => {
 		if (!id) {
 			return
 		}
@@ -34,7 +32,7 @@ const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
 			...prev,
 			[id]: !prev[id]
 		}))
-	}, [id, setTextEditorMarkdownPreviewActive])
+	}
 
 	if (keyboardState.isVisible || !textEditorReady) {
 		return null

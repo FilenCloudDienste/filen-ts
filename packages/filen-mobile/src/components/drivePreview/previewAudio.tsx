@@ -1,4 +1,4 @@
-import { useState, Fragment, memo, useCallback, useMemo } from "react"
+import { useState, Fragment, memo } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
@@ -167,7 +167,6 @@ function buildSliderTapGesture(sv: SliderSharedValues, trackWidth: number, seekT
 	})
 }
 
-// TODO: Fix memo
 const AudioSlider = memo(
 	({ currentTime, duration, onSeek }: { currentTime: number; duration: number; onSeek: (seconds: number) => void }) => {
 		const [trackWidth, setTrackWidth] = useState<number>(0)
@@ -184,34 +183,26 @@ const AudioSlider = memo(
 			return normalizedProgress
 		})
 
-		const onTrackLayout = useCallback((e: LayoutChangeEvent) => {
+		const onTrackLayout = (e: LayoutChangeEvent) => {
 			setTrackWidth(e.nativeEvent.layout.width)
-		}, [])
+		}
 
-		const seekToPosition = useCallback(
-			(fraction: number) => {
-				if (duration > 0) {
-					onSeek(fraction * duration)
-				}
-			},
-			[duration, onSeek]
+		const seekToPosition = (fraction: number) => {
+			if (duration > 0) {
+				onSeek(fraction * duration)
+			}
+		}
+
+		const sv = {
+			isSeeking,
+			seekProgress,
+			thumbScale
+		}
+
+		const gesture = Gesture.Exclusive(
+			buildSliderPanGesture(sv, trackWidth, seekToPosition),
+			buildSliderTapGesture(sv, trackWidth, seekToPosition)
 		)
-
-		const sv = useMemo<SliderSharedValues>(
-			() => ({
-				isSeeking,
-				seekProgress,
-				thumbScale
-			}),
-			[isSeeking, seekProgress, thumbScale]
-		)
-
-		const gesture = useMemo(() => {
-			return Gesture.Exclusive(
-				buildSliderPanGesture(sv, trackWidth, seekToPosition),
-				buildSliderTapGesture(sv, trackWidth, seekToPosition)
-			)
-		}, [trackWidth, seekToPosition, sv])
 
 		const fillStyle = useAnimatedStyle(() => {
 			"worklet"
@@ -281,11 +272,9 @@ const AudioSlider = memo(
 const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtracted; metadata: Metadata }) => {
 	const { status, pausePreview, resumePreview, seekPreview, loading } = useAudio()
 
-	const isLoadingOrBuffering = useMemo(() => {
-		return loading || (status["preview"]?.isBuffering ?? false) || !(status["preview"]?.isLoaded ?? false)
-	}, [status, loading])
+	const isLoadingOrBuffering = loading || (status["preview"]?.isBuffering ?? false) || !(status["preview"]?.isLoaded ?? false)
 
-	const onPlayPause = useCallback(() => {
+	const onPlayPause = () => {
 		if (isLoadingOrBuffering) {
 			return
 		}
@@ -298,14 +287,11 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 		} else {
 			resumePreview()
 		}
-	}, [status, pausePreview, resumePreview, seekPreview, isLoadingOrBuffering])
+	}
 
-	const onSeek = useCallback(
-		(seconds: number) => {
-			seekPreview(seconds)
-		},
-		[seekPreview]
-	)
+	const onSeek = (seconds: number) => {
+		seekPreview(seconds)
+	}
 
 	useEffectOnce(() => {
 		audio.enterPreviewMode({ item }).catch(err => {

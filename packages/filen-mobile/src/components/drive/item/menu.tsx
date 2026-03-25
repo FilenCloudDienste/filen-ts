@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react"
+import { memo } from "react"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import type { DriveItem } from "@/types"
 import { router } from "expo-router"
@@ -1067,21 +1067,17 @@ const Menu = memo(
 		disabled?: boolean
 		style?: StyleProp<ViewStyle>
 	}) => {
-		const menuButtons = useMemo(() => {
-			if (disabled) {
-				return []
-			}
-
-			return createMenuButtons({
-				item,
-				origin,
-				parent,
-				drivePath,
-				isStoredOffline,
-				isOnline,
-				versions
-			})
-		}, [origin, item, parent, drivePath, isStoredOffline, isOnline, versions, disabled])
+		const menuButtons = disabled
+			? []
+			: createMenuButtons({
+					item,
+					origin,
+					parent,
+					drivePath,
+					isStoredOffline,
+					isOnline,
+					versions
+				})
 
 		return (
 			<MenuComponent

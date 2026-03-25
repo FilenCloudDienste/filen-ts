@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState, useRef } from "react"
+import { memo, useState, useRef } from "react"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
@@ -43,15 +43,12 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 		return file
 	})
 
-	const contentPadding = useMemo(
-		() => ({
-			top: headerHeight ?? 0,
-			bottom: insets.bottom
-		}),
-		[headerHeight, insets.bottom]
-	)
+	const contentPadding = {
+		top: headerHeight ?? 0,
+		bottom: insets.bottom
+	}
 
-	const onError = useCallback((e: OnErrorEventPayload) => {
+	const onError = (e: OnErrorEventPayload) => {
 		run(async defer => {
 			if (onErrorWorkingRef.current) {
 				return
@@ -113,7 +110,7 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 				}
 			}
 		})
-	}, [])
+	}
 
 	if (query.status !== "success") {
 		return (

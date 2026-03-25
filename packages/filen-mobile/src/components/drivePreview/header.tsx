@@ -6,7 +6,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useViewLayout from "@/hooks/useViewLayout"
-import { useRef, useEffect, memo, useMemo } from "react"
+import { useRef, useEffect, memo } from "react"
 import { type View as TView, Platform } from "react-native"
 import Menu from "@/components/drive/item/menu"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
@@ -46,19 +46,12 @@ const GalleryHeader = memo(
 			}))
 		)
 
-		const solidHeader = useMemo(() => {
-			return currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
-		}, [currentItemPreviewType])
+		const solidHeader = currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
 
-		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
-			{
-				uuid: currentItem?.data.uuid ?? "",
-				type: "file"
-			},
-			{
-				enabled: !!currentItem
-			}
-		)
+		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
+			uuid: currentItem?.data.uuid ?? "",
+			type: "file"
+		})
 
 		const driveItemVersionsQuery = useDriveItemVersionsQuery(
 			{

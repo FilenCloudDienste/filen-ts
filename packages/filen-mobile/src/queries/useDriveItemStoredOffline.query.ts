@@ -38,6 +38,7 @@ export function useDriveItemStoredOfflineQuery(
 		...DEFAULT_QUERY_OPTIONS,
 		...defaultParams,
 		...options,
+		enabled: false,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
 			fetchData({

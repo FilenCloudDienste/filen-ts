@@ -9,22 +9,19 @@ import { FadeIn } from "react-native-reanimated"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
 import { contactDisplayName } from "@/lib/utils"
-import { Fragment, memo, useMemo } from "react"
+import { Fragment, memo } from "react"
 import { simpleDate } from "@/lib/time"
 import Regexed from "@/components/chats/chat/message/regexed"
 import Menu from "@/components/chats/chat/message/menu"
 
-// TODO: Fix memoization
 export const Typing = memo(({ chat }: { chat: TChat }) => {
 	const typing = useChatsStore(useShallow(state => state.typing[chat.uuid] ?? []))
 
-	const users = useMemo(() => {
-		return typing
-			.map(t => t.senderId)
-			.map(senderId => chat.participants.find(p => p.userId === senderId))
-			.filter(Boolean)
-			.map(participant => contactDisplayName(participant!))
-	}, [typing, chat.participants])
+	const users = typing
+		.map(t => t.senderId)
+		.map(senderId => chat.participants.find(p => p.userId === senderId))
+		.filter(Boolean)
+		.map(participant => contactDisplayName(participant!))
 
 	if (users.length === 0) {
 		return null

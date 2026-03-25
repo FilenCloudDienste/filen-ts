@@ -1,4 +1,4 @@
-import { useState, useEffect, memo, useCallback } from "react"
+import { useState, useEffect, memo } from "react"
 import { Modal, ActivityIndicator, Platform, type NativeSyntheticEvent } from "react-native"
 import { run, type DeferFn, type Result, type Options, runEffect } from "@filen/utils"
 import { FullWindowOverlay } from "react-native-screens"
@@ -7,10 +7,10 @@ import { AnimatedView } from "@/components/ui/animated"
 import events from "@/lib/events"
 
 const FullScreenLoadingModalParent = memo(({ children, visible }: { children: React.ReactNode; visible: boolean }) => {
-	const onRequestClose = useCallback((e: NativeSyntheticEvent<unknown>) => {
+	const onRequestClose = (e: NativeSyntheticEvent<unknown>) => {
 		e.preventDefault()
 		e.stopPropagation()
-	}, [])
+	}
 
 	if (Platform.OS === "ios" && !visible) {
 		return null

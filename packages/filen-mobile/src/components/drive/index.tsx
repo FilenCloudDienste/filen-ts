@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, memo, useCallback, useMemo } from "react"
+import { Fragment, useState, useEffect, memo, useCallback } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useDrivePath from "@/hooks/useDrivePath"
@@ -41,15 +41,9 @@ const Header = memo(() => {
 		}
 	)
 
-	const driveItems = useMemo(() => {
-		if (driveItemsQuery.status !== "success") {
-			return []
-		}
+	const driveItems = driveItemsQuery.data ?? []
 
-		return driveItemsQuery.data
-	}, [driveItemsQuery.data, driveItemsQuery.status])
-
-	const rightItems = useMemo(() => {
+	const rightItems = (() => {
 		if (drivePath.selectOptions) {
 			return [
 				{
@@ -248,9 +242,9 @@ const Header = memo(() => {
 		}
 
 		return items
-	}, [selectedDriveItems, netInfo.hasInternet, textForeground, driveItems, drivePath.type, drivePath.selectOptions])
+	})()
 
-	const leftItems = useMemo((): HeaderItem[] => {
+	const leftItems = ((): HeaderItem[] => {
 		if (selectedDriveItems.length > 0) {
 			return [
 				{
@@ -303,9 +297,9 @@ const Header = memo(() => {
 		}
 
 		return []
-	}, [selectedDriveItems.length, textForeground.color, drivePath])
+	})()
 
-	const headerTitle = useMemo(() => {
+	const headerTitle = (() => {
 		if (drivePath.selectOptions) {
 			switch (drivePath.selectOptions.intention) {
 				case "move": {
@@ -369,7 +363,7 @@ const Header = memo(() => {
 				return ""
 			}
 		}
-	}, [drivePath, stringifiedClient])
+	})()
 
 	return (
 		<StackHeader
@@ -407,7 +401,7 @@ const Drive = memo(() => {
 		}
 	)
 
-	const parent = useMemo((): AnyDirWithContext | undefined => {
+	const parent = ((): AnyDirWithContext | undefined => {
 		if (drivePath.type === "drive" && stringifiedClient && (!drivePath.uuid || (drivePath.uuid ?? "") === stringifiedClient.rootUuid)) {
 			return new AnyDirWithContext.Normal(
 				new AnyNormalDir.Root({
@@ -467,40 +461,31 @@ const Drive = memo(() => {
 		}
 
 		return undefined
-	}, [drivePath.uuid, stringifiedClient, drivePath.type])
+	})()
 
-	const renderItem = useCallback(
-		(info: ListRenderItemInfo<DriveItem>) => {
-			return (
-				<Item
-					info={{
-						...info,
-						item: {
-							item: info.item,
-							parent
-						}
-					}}
-					origin={drivePath.type ?? "drive"}
-					drivePath={drivePath}
-				/>
-			)
-		},
-		[drivePath, parent]
-	)
+	const renderItem = (info: ListRenderItemInfo<DriveItem>) => {
+		return (
+			<Item
+				info={{
+					...info,
+					item: {
+						item: info.item,
+						parent
+					}
+				}}
+				origin={drivePath.type ?? "drive"}
+				drivePath={drivePath}
+			/>
+		)
+	}
 
-	const keyExtractor = useCallback((item: DriveItem) => {
+	const keyExtractor = (item: DriveItem) => {
 		return item.data.uuid
-	}, [])
+	}
 
-	const itemsSorted = useMemo(() => {
-		if (driveItemsQuery.status !== "success") {
-			return []
-		}
+	const itemsSorted = itemSorter.sortItems([...(driveItemsQuery.data ?? []), ...globalSearchResult], "nameAsc")
 
-		return itemSorter.sortItems([...driveItemsQuery.data, ...globalSearchResult], "nameAsc")
-	}, [driveItemsQuery.data, driveItemsQuery.status, globalSearchResult])
-
-	const items = useMemo(() => {
+	const items = (() => {
 		if (driveItemsQuery.status !== "success") {
 			return []
 		}
@@ -518,9 +503,9 @@ const Drive = memo(() => {
 		}
 
 		return itemsSorted
-	}, [driveItemsQuery.status, searchQuery, itemsSorted])
+	})()
 
-	const onRefresh = useCallback(async () => {
+	const onRefresh = async () => {
 		const result = await run(async () => {
 			return await driveItemsQuery.refetch()
 		})
@@ -529,9 +514,9 @@ const Drive = memo(() => {
 			console.error(result.error)
 			alerts.error(result.error)
 		}
-	}, [driveItemsQuery])
+	}
 
-	const debouncedSearch = useMemo(() => {
+	const debouncedSearch = (() => {
 		return debounce(async (value: string) => {
 			const normalized = value.trim().toLowerCase()
 
@@ -568,7 +553,12 @@ const Drive = memo(() => {
 
 			setGlobalSearchResult(result.data.map(({ item }) => item))
 		}, 1000)
-	}, [])
+	})()
+
+	const searchBarProps = {
+		placeholder: "tbd_search_drive",
+		onChangeText: setSearchQuery
+	}
 
 	useEffect(() => {
 		if (drivePath.type !== "drive" || drivePath.selectOptions) {
@@ -592,14 +582,6 @@ const Drive = memo(() => {
 				useDriveStore.getState().setSelectedItems([])
 			}
 		}, [])
-	)
-
-	const searchBarProps = useMemo(
-		() => ({
-			placeholder: "tbd_search_drive",
-			onChangeText: setSearchQuery
-		}),
-		[setSearchQuery]
 	)
 
 	return (

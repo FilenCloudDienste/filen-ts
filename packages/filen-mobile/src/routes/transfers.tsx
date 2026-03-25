@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react"
+import { memo } from "react"
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
@@ -11,9 +11,9 @@ import { PressableScale } from "@/components/ui/pressables"
 const Transfers = memo(() => {
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 
-	const keyExtractor = useCallback((item: Transfer) => item.id, [])
+	const keyExtractor = (item: Transfer) => item.id
 
-	const renderItem = useCallback((info: ListRenderItemInfo<Transfer>) => {
+	const renderItem = (info: ListRenderItemInfo<Transfer>) => {
 		return (
 			<View className="bg-transparent px-4 items-center justify-between flex-row">
 				<Text className="text-foreground">{info.item.type}</Text>
@@ -29,7 +29,7 @@ const Transfers = memo(() => {
 				</PressableScale>
 			</View>
 		)
-	}, [])
+	}
 
 	return (
 		<SafeAreaView

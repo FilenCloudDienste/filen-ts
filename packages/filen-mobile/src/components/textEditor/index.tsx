@@ -1,4 +1,4 @@
-import { useRef, Fragment, useEffect, memo, useMemo } from "react"
+import { useRef, Fragment, useEffect, memo } from "react"
 import TextEditorDOM from "@/components/textEditor/dom"
 import RichTextEditorDOM, { type QuillFormats, type HeaderLevel } from "@/components/textEditor/richText/dom"
 import View from "@/components/ui/view"
@@ -145,13 +145,7 @@ export const TextEditor = memo(
 		const { theme } = useUniwind()
 		const [textEditorMarkdownPreviewActive] = useSecureStore<Record<string, boolean>>("textEditorMarkdownPreviewActive", {})
 
-		const markdownPreviewActive = useMemo(() => {
-			if (!id) {
-				return false
-			}
-
-			return textEditorMarkdownPreviewActive[id] ?? false
-		}, [id, textEditorMarkdownPreviewActive])
+		const markdownPreviewActive = !id ? false : (textEditorMarkdownPreviewActive[id] ?? false)
 
 		const { onDomMessage, postMessage } = useNativeDomEvents<TextEditorEvents>({
 			ref,

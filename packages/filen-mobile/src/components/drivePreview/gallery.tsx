@@ -1,4 +1,4 @@
-import { useState, useEffect, memo, useMemo, useCallback } from "react"
+import { useState, useEffect, memo } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { router } from "expo-router"
@@ -133,7 +133,6 @@ function back(isDismissing: SharedValue<number>, headerOpacity: SharedValue<numb
 	router.back()
 }
 
-// TODO: Fix memo
 const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracted; drivePath: DrivePath; parent?: AnyDirWithContext }) => {
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
@@ -145,9 +144,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 	const startTouchY = useSharedValue<number>(0)
 	const isDismissing = useSharedValue<number>(0)
 
-	const fadeRange = useMemo(() => {
-		return dimensions.height * 0.5
-	}, [dimensions.height])
+	const fadeRange = dimensions.height * 0.5
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -158,16 +155,13 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}
 	)
 
-	const goBack = useCallback(() => {
+	const goBack = () => {
 		back(isDismissing, headerOpacity)
-	}, [isDismissing, headerOpacity])
+	}
 
-	const onZoomChange = useCallback(
-		(zoom: number) => {
-			handleZoomChange(zoomScale, zoom, setScrollEnabled)
-		},
-		[zoomScale]
-	)
+	const onZoomChange = (zoom: number) => {
+		handleZoomChange(zoomScale, zoom, setScrollEnabled)
+	}
 
 	const { isImage, isVideo, isAudio } = useDrivePreviewStore(
 		useShallow(state => {
@@ -189,13 +183,13 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		})
 	)
 
-	const onSingleTap = useCallback(() => {
+	const onSingleTap = () => {
 		if (!isImage) {
 			return
 		}
 
 		handleSingleTap(headerOpacity)
-	}, [headerOpacity, isImage])
+	}
 
 	const headerAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
@@ -221,44 +215,31 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}
 	})
 
-	const onViewableItemsChanged = useCallback(
-		(info: { viewableItems: ViewToken<DriveItemFileExtracted>[]; changed: ViewToken<DriveItemFileExtracted>[] }) => {
-			const first = info.viewableItems[0]
+	const onViewableItemsChanged = (info: {
+		viewableItems: ViewToken<DriveItemFileExtracted>[]
+		changed: ViewToken<DriveItemFileExtracted>[]
+	}) => {
+		const first = info.viewableItems[0]
 
-			if (first && first.item) {
-				useDrivePreviewStore.getState().setCurrentItem(first.item)
-				useDrivePreviewStore.getState().setCurrentIndex(first.index ?? -1)
+		if (first && first.item) {
+			useDrivePreviewStore.getState().setCurrentItem(first.item)
+			useDrivePreviewStore.getState().setCurrentIndex(first.index ?? -1)
 
-				setHeaderOpacityValue(headerOpacity, true)
-			}
+			setHeaderOpacityValue(headerOpacity, true)
+		}
+	}
+
+	const dismissGesture = buildDismissGesture(
+		{
+			zoomScale,
+			dismissTranslateY,
+			savedDismissTranslateY,
+			startTouchX,
+			startTouchY
 		},
-		[headerOpacity]
-	)
-
-	const dismissGesture = useMemo(() => {
-		return buildDismissGesture(
-			{
-				zoomScale,
-				dismissTranslateY,
-				savedDismissTranslateY,
-				startTouchX,
-				startTouchY
-			},
-			dimensions.height,
-			goBack
-		).enabled(isImage || isVideo || isAudio)
-	}, [
-		zoomScale,
-		dismissTranslateY,
-		savedDismissTranslateY,
-		startTouchX,
-		startTouchY,
 		dimensions.height,
-		goBack,
-		isImage,
-		isVideo,
-		isAudio
-	])
+		goBack
+	).enabled(isImage || isVideo || isAudio)
 
 	const backgroundAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
@@ -278,7 +259,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}
 	})
 
-	const itemsSorted = useMemo(() => {
+	const itemsSorted = (() => {
 		const basePreviewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
 
 		if (basePreviewType === "docx" || basePreviewType === "text" || basePreviewType === "pdf" || basePreviewType === "code") {
@@ -300,34 +281,29 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 				(type === "image" || type === "video" || type === "audio")
 			)
 		}) as DriveItemFileExtracted[]
-	}, [driveItemsQuery.data, driveItemsQuery.status, item, drivePath.type])
+	})()
 
-	const renderItem = useCallback(
-		(info: ListRenderItemInfo<DriveItemFileExtracted>) => {
-			return (
-				<GalleryItem
-					info={info}
-					galleryZoomScale={zoomScale}
-					dismissTranslateY={dismissTranslateY}
-					isDismissing={isDismissing}
-					fadeRange={fadeRange}
-					goBack={goBack}
-					onZoomChange={onZoomChange}
-					onSingleTap={onSingleTap}
-					parent={parent}
-				/>
-			)
-		},
-		[zoomScale, dismissTranslateY, isDismissing, fadeRange, goBack, onZoomChange, onSingleTap, parent]
-	)
+	const renderItem = (info: ListRenderItemInfo<DriveItemFileExtracted>) => {
+		return (
+			<GalleryItem
+				info={info}
+				galleryZoomScale={zoomScale}
+				dismissTranslateY={dismissTranslateY}
+				isDismissing={isDismissing}
+				fadeRange={fadeRange}
+				goBack={goBack}
+				onZoomChange={onZoomChange}
+				onSingleTap={onSingleTap}
+				parent={parent}
+			/>
+		)
+	}
 
-	const keyExtractor = useCallback((driveItem: DriveItemFileExtracted) => {
+	const keyExtractor = (driveItem: DriveItemFileExtracted) => {
 		return driveItem.data.uuid
-	}, [])
+	}
 
-	const initialScrollIndex = useMemo(() => {
-		return itemsSorted.findIndex(i => i.data.uuid === item.data.uuid)
-	}, [itemsSorted, item])
+	const initialScrollIndex = itemsSorted.findIndex(i => i.data.uuid === item.data.uuid)
 
 	useEffect(() => {
 		if (initialScrollIndex >= 0) {
@@ -364,6 +340,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 						pagingEnabled={itemsSorted.length > 1}
 						scrollEnabled={scrollEnabled && itemsSorted.length > 1}
 						bounces={itemsSorted.length > 1}
+						maxItemsInRecyclePool={0}
 						showsHorizontalScrollIndicator={false}
 						initialScrollIndex={initialScrollIndex >= 0 ? initialScrollIndex : 0}
 						onViewableItemsChanged={onViewableItemsChanged}

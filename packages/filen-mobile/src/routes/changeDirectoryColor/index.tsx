@@ -8,7 +8,7 @@ import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
 import { DirectoryIcon, unwrapDirColor, directoryColorToHex } from "@/components/itemIcons"
 import Header from "@/components/ui/header"
-import { Fragment, useState, memo, useMemo } from "react"
+import { Fragment, useState, memo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
 import { DirColor } from "@filen/sdk-rs"
@@ -30,13 +30,17 @@ const ChangeDirectoryColor = memo(() => {
 	const [selectedColor, setSelectedColor] = useState<string | null>(null)
 	const stringifiedClient = useStringifiedClient()
 
-	const item = useMemo(() => {
+	const item = (() => {
 		if (!itemPackedBase64) {
 			return null
 		}
 
-		return unpack(Buffer.from(itemPackedBase64, "base64")) as DriveItem
-	}, [itemPackedBase64])
+		try {
+			return unpack(Buffer.from(itemPackedBase64, "base64")) as DriveItem
+		} catch {
+			return null
+		}
+	})()
 
 	const [hexColor, setHexColor] = useState<string>(() => {
 		if (!item || item.type !== "directory") {

@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment, memo, useCallback } from "react"
+import { useState, useEffect, Fragment, memo } from "react"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
 import { checklistParser, type ChecklistItem } from "@filen/utils"
 import Item from "@/components/notes/content/checklist/item"
@@ -22,53 +22,47 @@ export const Checklist = memo(
 		const [didType, setDidType] = useState<boolean>(false)
 		const ids = useChecklistStore(useShallow(state => state.ids))
 
-		const onContentChange = useCallback(
-			({ item, content }: { item: ChecklistItem; content: string }) => {
-				useChecklistStore.getState().setParsed(prev =>
-					prev.map(i =>
-						i.id === item.id
-							? {
-									...i,
-									content
-								}
-							: i
-					)
+		const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
+			useChecklistStore.getState().setParsed(prev =>
+				prev.map(i =>
+					i.id === item.id
+						? {
+								...i,
+								content
+							}
+						: i
 				)
+			)
 
-				if (didType && onChange) {
-					const parsed = useChecklistStore.getState().parsed
+			if (didType && onChange) {
+				const parsed = useChecklistStore.getState().parsed
 
-					onChange(checklistParser.stringify(parsed))
-				}
-			},
-			[didType, onChange]
-		)
+				onChange(checklistParser.stringify(parsed))
+			}
+		}
 
-		const onCheckedChange = useCallback(
-			({ item, checked }: { item: ChecklistItem; checked: boolean }) => {
-				useChecklistStore.getState().setParsed(prev =>
-					prev.map(i =>
-						i.id === item.id
-							? {
-									...i,
-									checked
-								}
-							: i
-					)
+		const onCheckedChange = ({ item, checked }: { item: ChecklistItem; checked: boolean }) => {
+			useChecklistStore.getState().setParsed(prev =>
+				prev.map(i =>
+					i.id === item.id
+						? {
+								...i,
+								checked
+							}
+						: i
 				)
+			)
 
-				if (onChange) {
-					const parsed = useChecklistStore.getState().parsed
+			if (onChange) {
+				const parsed = useChecklistStore.getState().parsed
 
-					onChange(checklistParser.stringify(parsed))
-				}
-			},
-			[onChange]
-		)
+				onChange(checklistParser.stringify(parsed))
+			}
+		}
 
-		const onTyped = useCallback(() => {
+		const onTyped = () => {
 			setDidType(true)
-		}, [])
+		}
 
 		useEffect(() => {
 			let parsed = initialValue ? checklistParser.parse(initialValue) : []
