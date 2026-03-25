@@ -3,6 +3,7 @@ import type { DriveItem } from "@/types"
 import { debounce } from "es-toolkit/function"
 import sqlite from "@/lib/sqlite"
 import { AppState } from "react-native"
+import { pack } from "@/lib/msgpack"
 
 const VERSION = 1
 const PERSIST_DEBOUNCE_MS = 1000
@@ -63,11 +64,11 @@ export class PersistentMap<V> extends Map<string, V> {
 type MapEntry = {
 	key: string
 	map: PersistentMap<unknown>
-	debouncedPersist: ReturnType<typeof debounce>
 }
 
 class Cache {
 	private readonly registry: MapEntry[] = []
+	private readonly dirty = new Set<string>()
 
 	// Not persisted — managed separately by secureStore.ts with its own encryption
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,28 +99,61 @@ class Cache {
 		const key = `cache:v${VERSION}:${name}`
 
 		const map = new PersistentMap<V>(() => {
-			debouncedPersist()
-		})
+			this.dirty.add(key)
 
-		const debouncedPersist = debounce(
-			() => {
-				sqlite.kvAsync.set(key, [...map.entries()]).catch(err => {
-					console.error(`[Cache] Failed to persist ${key}`, err)
-				})
-			},
-			PERSIST_DEBOUNCE_MS,
-			{
-				edges: ["trailing"]
-			}
-		)
+			this.schedulePersist()
+		})
 
 		this.registry.push({
 			key,
-			map: map as PersistentMap<unknown>,
-			debouncedPersist
+			map: map as PersistentMap<unknown>
 		})
 
 		return map
+	}
+
+	private readonly schedulePersist = debounce(
+		() => {
+			this.persistDirty()
+		},
+		PERSIST_DEBOUNCE_MS,
+		{
+			edges: ["trailing"]
+		}
+	)
+
+	private persistDirty(): void {
+		if (this.dirty.size === 0) {
+			return
+		}
+
+		const commands: [string, (string | Uint8Array)[]][] = []
+
+		for (const entry of this.registry) {
+			if (!this.dirty.has(entry.key)) {
+				continue
+			}
+
+			commands.push([
+				"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
+				[entry.key, new Uint8Array(pack([...entry.map.entries()]))]
+			])
+		}
+
+		this.dirty.clear()
+
+		if (commands.length === 0) {
+			return
+		}
+
+		console.log(`[Cache] Persisting ${commands.length} dirty maps to disk`)
+
+		sqlite
+			.openDb()
+			.then(db => db.executeBatch(commands))
+			.catch(err => {
+				console.error("[Cache] Failed to batch persist", err)
+			})
 	}
 
 	/**
@@ -168,9 +202,9 @@ class Cache {
 	}
 
 	public flush(): void {
-		for (const { debouncedPersist } of this.registry) {
-			debouncedPersist.flush()
-		}
+		this.schedulePersist.cancel()
+
+		this.persistDirty()
 	}
 
 	public clear(): void {
@@ -180,9 +214,11 @@ class Cache {
 			Map.prototype.clear.call(map)
 		}
 
-		for (const { key, debouncedPersist } of this.registry) {
-			debouncedPersist.cancel()
+		this.schedulePersist.cancel()
 
+		this.dirty.clear()
+
+		for (const { key } of this.registry) {
 			sqlite.kvAsync.remove(key).catch(err => {
 				console.error(`[Cache] Failed to remove ${key}`, err)
 			})

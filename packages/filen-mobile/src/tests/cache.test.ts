@@ -6,17 +6,14 @@ const { UniffiEnum } = vi.hoisted(() => ({
 	}
 }))
 
-const { mockDb, openDatabaseAsync } = vi.hoisted(() => {
+const { mockDb, open } = vi.hoisted(() => {
 	const mockDb = {
-		execAsync: vi.fn(),
-		getFirstAsync: vi.fn(),
-		getAllAsync: vi.fn(),
-		runAsync: vi.fn()
+		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
+		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
+		close: vi.fn()
 	}
 
-	const openDatabaseAsync = vi.fn().mockResolvedValue(mockDb)
-
-	return { mockDb, openDatabaseAsync }
+	return { mockDb, open: vi.fn(() => mockDb) }
 })
 
 vi.mock("uniffi-bindgen-react-native", () => ({
@@ -27,8 +24,12 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("expo-sqlite", () => ({
-	openDatabaseAsync
+vi.mock("@op-engineering/op-sqlite", () => ({
+	open
+}))
+
+vi.mock("@/lib/utils", () => ({
+	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))
 
 vi.mock("@/constants", () => ({
@@ -47,62 +48,66 @@ type Cache = any
 const kvStore = new Map<string, Uint8Array>()
 
 function setupMockDb(): void {
-	mockDb.execAsync.mockResolvedValue(undefined)
-
-	mockDb.runAsync.mockImplementation(async (query: string, params: unknown[]) => {
+	mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
 		if (query.startsWith("INSERT OR REPLACE")) {
-			const key = params[0] as string
-			const value = params[1] as Uint8Array
+			const key = params![0] as string
+			const value = params![1] as Uint8Array
 
 			kvStore.set(key, value)
 
-			return { lastInsertRowId: 1, changes: 1 }
+			return { rows: [], insertId: 1, rowsAffected: 1 }
 		}
 
 		if (query.startsWith("DELETE FROM kv WHERE")) {
-			const key = params[0] as string
+			const key = params![0] as string
 
 			kvStore.delete(key)
 
-			return { lastInsertRowId: 0, changes: 1 }
+			return { rows: [], insertId: undefined, rowsAffected: 1 }
 		}
 
 		if (query === "DELETE FROM kv") {
 			kvStore.clear()
 
-			return { lastInsertRowId: 0, changes: kvStore.size }
+			return { rows: [], insertId: undefined, rowsAffected: 0 }
 		}
 
-		return { lastInsertRowId: 0, changes: 0 }
-	})
-
-	mockDb.getFirstAsync.mockImplementation(async (query: string, params: unknown[]) => {
 		if (query.startsWith("SELECT value FROM kv")) {
-			const key = params[0] as string
+			const key = params![0] as string
 			const value = kvStore.get(key)
 
-			if (!value) {
-				return null
-			}
-
-			return { value }
+			return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
 		}
 
 		if (query.startsWith("SELECT key FROM kv WHERE")) {
-			const key = params[0] as string
+			const key = params![0] as string
 
-			return kvStore.has(key) ? { key } : null
+			return { rows: kvStore.has(key) ? [{ key }] : [], insertId: undefined, rowsAffected: 0 }
 		}
 
-		return null
+		if (query.startsWith("SELECT key FROM kv")) {
+			return { rows: [...kvStore.keys()].map(key => ({ key })), insertId: undefined, rowsAffected: 0 }
+		}
+
+		return { rows: [], insertId: undefined, rowsAffected: 0 }
 	})
 
-	mockDb.getAllAsync.mockImplementation(async (query: string) => {
-		if (query.startsWith("SELECT key FROM kv")) {
-			return [...kvStore.keys()].map(key => ({ key }))
+	mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
+		for (const [query, params] of commands) {
+			if (query.startsWith("INSERT OR REPLACE")) {
+				kvStore.set(params[0] as string, params[1] as Uint8Array)
+			}
+
+			if (query.startsWith("DELETE FROM kv WHERE")) {
+				kvStore.delete(params[0] as string)
+			}
+
+			if (query === "DELETE FROM kv") {
+				kvStore.clear()
+			}
 		}
 
-		return []
+		return { rowsAffected: commands.length }
 	})
 }
 
@@ -445,24 +450,15 @@ describe("Cache", () => {
 
 			const cache2 = await createCache()
 
+			mockDb.executeBatch.mockClear()
+
 			await cache2.restore()
 
-			// Record the current INSERT call count
-			const insertsBefore = mockDb.runAsync.mock.calls.filter(
-				(call: unknown[]) => typeof call[0] === "string" && (call[0] as string).startsWith("INSERT")
-			).length
-
 			vi.advanceTimersByTime(5000)
-
-			// Allow any pending microtasks to flush
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			const insertsAfter = mockDb.runAsync.mock.calls.filter(
-				(call: unknown[]) => typeof call[0] === "string" && (call[0] as string).startsWith("INSERT")
-			).length
-
-			// No additional INSERT calls should have been made
-			expect(insertsAfter).toBe(insertsBefore)
+			// No batch writes should have been triggered by restore
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 			expect((cache2[name] as PersistentMap<unknown>).get("key-1")).toBe("value-1")
 		})
 	})
@@ -522,40 +518,26 @@ describe("Cache", () => {
 			}
 		})
 
-		it("debounces multiple mutations into a single write per map", async () => {
+		it("debounces multiple mutations into a single batch write", async () => {
 			const cache = await createCache()
 
 			await cache.restore()
 
-			const { name, map } = getFirstMap(cache)
+			const { map } = getFirstMap(cache)
 
-			let writeCount = 0
-			const originalImpl = mockDb.runAsync.getMockImplementation() as (...args: any[]) => any
-
-			mockDb.runAsync.mockImplementation(async (...args: unknown[]) => {
-				const query = args[0] as string
-				const params = args[1] as unknown[]
-
-				if (query.startsWith("INSERT") && (params[0] as string) === kvKey(name)) {
-					writeCount++
-				}
-
-				return originalImpl(...args)
-			})
+			mockDb.executeBatch.mockClear()
 
 			map.set("a", "1")
 			map.set("b", "2")
 			map.set("c", "3")
 
-			expect(writeCount).toBe(0)
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 
 			cache.flush()
 			vi.advanceTimersByTime(5000)
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(writeCount).toBe(1)
-
-			mockDb.runAsync.mockImplementation(originalImpl)
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
 		})
 
 		it("persists data that survives a full restore round-trip", async () => {

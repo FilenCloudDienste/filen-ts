@@ -1,23 +1,17 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { UniffiEnum } = vi.hoisted(() => ({
+const { UniffiEnum, mockDb, open } = vi.hoisted(() => ({
 	UniffiEnum: class UniffiEnum {
 		protected constructor(..._args: any[]) {}
-	}
+	},
+	mockDb: {
+		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
+		executeSync: vi.fn().mockReturnValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
+		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
+		close: vi.fn()
+	},
+	open: vi.fn()
 }))
-
-const { mockDb, openDatabaseAsync } = vi.hoisted(() => {
-	const mockDb = {
-		execAsync: vi.fn(),
-		getFirstAsync: vi.fn(),
-		getAllAsync: vi.fn(),
-		runAsync: vi.fn()
-	}
-
-	const openDatabaseAsync = vi.fn().mockResolvedValue(mockDb)
-
-	return { mockDb, openDatabaseAsync }
-})
 
 vi.mock("uniffi-bindgen-react-native", () => ({
 	UniffiEnum
@@ -27,8 +21,12 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("expo-sqlite", () => ({
-	openDatabaseAsync
+vi.mock("@op-engineering/op-sqlite", () => ({
+	open
+}))
+
+vi.mock("@/lib/utils", () => ({
+	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))
 
 vi.mock("@/constants", () => ({
@@ -49,23 +47,25 @@ describe("Sqlite", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.resetModules()
-		mockDb.execAsync.mockResolvedValue(undefined)
-		mockDb.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 })
-		mockDb.getFirstAsync.mockResolvedValue(null)
-		mockDb.getAllAsync.mockResolvedValue([])
+		open.mockReturnValue(mockDb)
+		mockDb.execute.mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 })
+		mockDb.executeBatch.mockResolvedValue({ rowsAffected: 0 })
 	})
 
 	describe("init", () => {
-		it("calls openDatabaseAsync and runs INIT_QUERIES via execAsync", async () => {
+		it("calls open and runs INIT_QUERIES via execute", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.init()
 
-			expect(openDatabaseAsync).toHaveBeenCalledTimes(1)
-			expect(openDatabaseAsync).toHaveBeenCalledWith("sqlite.v1.db", { useNewConnection: true }, expect.any(String))
-			expect(mockDb.execAsync).toHaveBeenCalledTimes(1)
+			expect(open).toHaveBeenCalledTimes(1)
+			expect(open).toHaveBeenCalledWith({
+				name: "sqlite.db",
+				location: expect.any(String)
+			})
+			expect(mockDb.execute).toHaveBeenCalledTimes(1)
 
-			const execArg = mockDb.execAsync.mock.calls[0]![0] as string
+			const execArg = mockDb.execute.mock.calls[0]![0] as string
 
 			expect(execArg).toContain("PRAGMA journal_mode = WAL")
 			expect(execArg).toContain("CREATE TABLE IF NOT EXISTS kv")
@@ -78,8 +78,8 @@ describe("Sqlite", () => {
 			await sqlite.init()
 			await sqlite.init()
 
-			expect(openDatabaseAsync).toHaveBeenCalledTimes(1)
-			expect(mockDb.execAsync).toHaveBeenCalledTimes(1)
+			expect(open).toHaveBeenCalledTimes(1)
+			expect(mockDb.execute).toHaveBeenCalledTimes(1)
 		})
 	})
 
@@ -94,7 +94,6 @@ describe("Sqlite", () => {
 		it("throws if db is null after init", async () => {
 			const sqlite = await createSqlite()
 
-			// Force init to complete without setting db
 			;(sqlite as any).initDone = true
 			;(sqlite as any).db = null
 
@@ -103,16 +102,17 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.set", () => {
-		it("calls runAsync with INSERT OR REPLACE and returns lastInsertRowId", async () => {
-			mockDb.runAsync.mockResolvedValue({ lastInsertRowId: 42, changes: 1 })
-
+		it("calls execute with INSERT OR REPLACE and returns insertId", async () => {
 			const sqlite = await createSqlite()
+
+			mockDb.execute.mockResolvedValue({ rows: [], insertId: 42, rowsAffected: 1 })
+
 			const result = await sqlite.kvAsync.set("test-key", "test-value")
 
 			expect(result).toBe(42)
-			expect(mockDb.runAsync).toHaveBeenCalledTimes(1)
 
-			const [query, params] = mockDb.runAsync.mock.calls[0] as [string, unknown[]]
+			const calls = mockDb.execute.mock.calls
+			const [query, params] = calls[calls.length - 1] as [string, unknown[]]
 
 			expect(query).toBe("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)")
 			expect(params[0]).toBe("test-key")
@@ -124,7 +124,7 @@ describe("Sqlite", () => {
 			const result = await sqlite.kvAsync.set("key", null)
 
 			expect(result).toBeNull()
-			expect(mockDb.runAsync).not.toHaveBeenCalled()
+			expect(mockDb.execute).not.toHaveBeenCalled()
 		})
 
 		it("returns null for undefined value", async () => {
@@ -132,25 +132,25 @@ describe("Sqlite", () => {
 			const result = await sqlite.kvAsync.set("key", undefined)
 
 			expect(result).toBeNull()
-			expect(mockDb.runAsync).not.toHaveBeenCalled()
+			expect(mockDb.execute).not.toHaveBeenCalled()
 		})
 	})
 
 	describe("kvAsync.get", () => {
-		it("calls getFirstAsync and unpacks result", async () => {
+		it("calls execute and unpacks result", async () => {
 			const packed = new Uint8Array(pack({ hello: "world" }))
 
-			mockDb.getFirstAsync.mockResolvedValue({ value: packed })
+			mockDb.execute.mockResolvedValue({ rows: [{ value: packed.buffer }], insertId: undefined, rowsAffected: 0 })
 
 			const sqlite = await createSqlite()
 			const result = await sqlite.kvAsync.get("test-key")
 
 			expect(result).toEqual({ hello: "world" })
-			expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT value FROM kv WHERE key = ?", ["test-key"])
+			expect(mockDb.execute).toHaveBeenCalledWith("SELECT value FROM kv WHERE key = ?", ["test-key"])
 		})
 
 		it("returns null for missing key", async () => {
-			mockDb.getFirstAsync.mockResolvedValue(null)
+			mockDb.execute.mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 })
 
 			const sqlite = await createSqlite()
 			const result = await sqlite.kvAsync.get("nonexistent")
@@ -161,18 +161,20 @@ describe("Sqlite", () => {
 
 	describe("kvAsync.keys", () => {
 		it("returns array of keys", async () => {
-			mockDb.getAllAsync.mockResolvedValue([{ key: "alpha" }, { key: "beta" }, { key: "gamma" }])
+			mockDb.execute.mockResolvedValue({
+				rows: [{ key: "alpha" }, { key: "beta" }, { key: "gamma" }],
+				insertId: undefined,
+				rowsAffected: 0
+			})
 
 			const sqlite = await createSqlite()
 			const keys = await sqlite.kvAsync.keys()
 
 			expect(keys).toEqual(["alpha", "beta", "gamma"])
-			expect(mockDb.getAllAsync).toHaveBeenCalledWith("SELECT key FROM kv")
+			expect(mockDb.execute).toHaveBeenCalledWith("SELECT key FROM kv")
 		})
 
 		it("returns empty array when no rows", async () => {
-			mockDb.getAllAsync.mockResolvedValue([])
-
 			const sqlite = await createSqlite()
 			const keys = await sqlite.kvAsync.keys()
 
@@ -182,18 +184,16 @@ describe("Sqlite", () => {
 
 	describe("kvAsync.contains", () => {
 		it("returns true when key exists", async () => {
-			mockDb.getFirstAsync.mockResolvedValue({ key: "existing" })
+			mockDb.execute.mockResolvedValue({ rows: [{ key: "existing" }], insertId: undefined, rowsAffected: 0 })
 
 			const sqlite = await createSqlite()
 			const result = await sqlite.kvAsync.contains("existing")
 
 			expect(result).toBe(true)
-			expect(mockDb.getFirstAsync).toHaveBeenCalledWith("SELECT key FROM kv WHERE key = ?", ["existing"])
+			expect(mockDb.execute).toHaveBeenCalledWith("SELECT key FROM kv WHERE key = ?", ["existing"])
 		})
 
 		it("returns false when key does not exist", async () => {
-			mockDb.getFirstAsync.mockResolvedValue(null)
-
 			const sqlite = await createSqlite()
 			const result = await sqlite.kvAsync.contains("missing")
 
@@ -202,32 +202,32 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.remove", () => {
-		it("calls runAsync with DELETE WHERE", async () => {
+		it("calls execute with DELETE WHERE", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.kvAsync.remove("doomed-key")
 
-			expect(mockDb.runAsync).toHaveBeenCalledWith("DELETE FROM kv WHERE key = ?", ["doomed-key"])
+			expect(mockDb.execute).toHaveBeenCalledWith("DELETE FROM kv WHERE key = ?", ["doomed-key"])
 		})
 	})
 
 	describe("kvAsync.clear", () => {
-		it("calls runAsync with DELETE (no WHERE)", async () => {
+		it("calls execute with DELETE (no WHERE)", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.kvAsync.clear()
 
-			expect(mockDb.runAsync).toHaveBeenCalledWith("DELETE FROM kv")
+			expect(mockDb.execute).toHaveBeenCalledWith("DELETE FROM kv")
 		})
 	})
 
 	describe("clearAsync", () => {
-		it("calls execAsync with DELETE FROM kv", async () => {
+		it("calls execute with DELETE FROM kv", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.clearAsync()
 
-			expect(mockDb.execAsync).toHaveBeenCalledWith("DELETE FROM kv")
+			expect(mockDb.execute).toHaveBeenCalledWith("DELETE FROM kv")
 		})
 	})
 
@@ -235,22 +235,20 @@ describe("Sqlite", () => {
 		it("set then get preserves the value through msgpack", async () => {
 			const store = new Map<string, Uint8Array>()
 
-			mockDb.runAsync.mockImplementation(async (query: string, params?: unknown[]) => {
+			mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
 				if (query.startsWith("INSERT")) {
 					store.set(params![0] as string, params![1] as Uint8Array)
+
+					return { rows: [], insertId: 1, rowsAffected: 1 }
 				}
 
-				return { lastInsertRowId: 1, changes: 1 }
-			})
+				if (query.startsWith("SELECT value")) {
+					const value = store.get(params![0] as string)
 
-			mockDb.getFirstAsync.mockImplementation(async (_query: string, params?: unknown[]) => {
-				const value = store.get(params![0] as string)
-
-				if (!value) {
-					return null
+					return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
 				}
 
-				return { value }
+				return { rows: [], insertId: undefined, rowsAffected: 0 }
 			})
 
 			const sqlite = await createSqlite()
@@ -266,22 +264,20 @@ describe("Sqlite", () => {
 		it("set then get preserves string values", async () => {
 			const store = new Map<string, Uint8Array>()
 
-			mockDb.runAsync.mockImplementation(async (query: string, params?: unknown[]) => {
+			mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
 				if (query.startsWith("INSERT")) {
 					store.set(params![0] as string, params![1] as Uint8Array)
+
+					return { rows: [], insertId: 1, rowsAffected: 1 }
 				}
 
-				return { lastInsertRowId: 1, changes: 1 }
-			})
+				if (query.startsWith("SELECT value")) {
+					const value = store.get(params![0] as string)
 
-			mockDb.getFirstAsync.mockImplementation(async (_query: string, params?: unknown[]) => {
-				const value = store.get(params![0] as string)
-
-				if (!value) {
-					return null
+					return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
 				}
 
-				return { value }
+				return { rows: [], insertId: undefined, rowsAffected: 0 }
 			})
 
 			const sqlite = await createSqlite()
