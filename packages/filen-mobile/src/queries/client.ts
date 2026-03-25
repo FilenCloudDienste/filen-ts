@@ -1,7 +1,5 @@
 import { QueryClient, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
-import useFocusNotifyOnChangeProps from "@/queries/useFocusNotifyOnChangeProps"
-import useQueryFocusAware from "@/queries/useQueryFocusAware"
 import useNetInfo from "@/hooks/useNetInfo"
 import sqlite from "@/lib/sqlite"
 import { Semaphore, run } from "@filen/utils"
@@ -93,6 +91,8 @@ export const queryClientPersister = experimental_createQueryPersister({
 			return undefined
 		}
 
+		console.log("[Query Persister] Persisting query with key:", query.queryKey)
+
 		return query
 	},
 	deserialize: query => {
@@ -143,7 +143,6 @@ export async function restoreQueries(): Promise<void> {
 export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn"> = {
 	refetchOnMount: "always",
 	refetchOnReconnect: "always",
-	refetchOnWindowFocus: "always",
 	staleTime: 0,
 	gcTime: QUERY_CLIENT_CACHE_TIME,
 	refetchInterval: false,
@@ -185,8 +184,6 @@ export function useDefaultQueryParams(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): Omit<UseQueryOptions, "queryKey" | "queryFn"> {
 	const { hasInternet } = useNetInfo()
-	const isFocused = useQueryFocusAware()
-	const notifyOnChangeProps = useFocusNotifyOnChangeProps()
 
 	const enabled = (() => {
 		if (!hasInternet) {
@@ -197,11 +194,10 @@ export function useDefaultQueryParams(
 			return options.enabled
 		}
 
-		return isFocused()
+		return true
 	})()
 
 	return {
-		notifyOnChangeProps,
 		enabled
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">

@@ -1,6 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams, queryUpdater } from "@/queries/client"
-import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import auth from "@/lib/auth"
 
 export const BASE_QUERY_KEY = "useContactsQuery"
@@ -45,11 +44,6 @@ export function useContactsQuery(
 			fetchData({
 				signal
 			})
-	})
-
-	useRefreshOnFocus({
-		isEnabled: query.isEnabled,
-		refetch: query.refetch
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>

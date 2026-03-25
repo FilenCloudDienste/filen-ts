@@ -1,7 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
-import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 
 export const BASE_QUERY_KEY = "useChatsUnread"
 
@@ -31,11 +30,6 @@ export function useChatsUnreadQuery(
 			fetchData({
 				signal
 			})
-	})
-
-	useRefreshOnFocus({
-		isEnabled: query.isEnabled,
-		refetch: query.refetch
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
