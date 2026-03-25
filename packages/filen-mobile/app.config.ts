@@ -1,5 +1,9 @@
+/* eslint-disable import/no-unresolved */
+/* eslint-disable no-restricted-imports */
+
 import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
+import withOPSQLiteAppGroup from "./plugins/withOpSqliteAppGroup"
 
 const VERSION: string = "3.1.0"
 
@@ -78,35 +82,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			LSApplicationCategoryType: "public.app-category.productivity",
 			UIRequiredDeviceCapabilities: ["arm64"],
 			CFBundleAllowMixedLocalizations: true,
-			CFBundleLocalizations: [
-				"en",
-				"de",
-				"fr",
-				"id",
-				"it",
-				"ja",
-				"ko",
-				"nl",
-				"no",
-				"pl",
-				"pt",
-				"ro",
-				"ru",
-				"sv",
-				"th",
-				"uk",
-				"ur",
-				"vi",
-				"zh",
-				"es",
-				"hi",
-				"hu",
-				"cs",
-				"da",
-				"bn",
-				"fi",
-				"he"
-			],
+			CFBundleLocalizations: ["en"],
 			CFBundleDevelopmentRegion: "en",
 			UIPrefersShowingLanguageSettings: true
 		},
@@ -161,6 +137,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		]
 	},
 	plugins: [
+		[
+			"expo-plugin-ios-static-libraries",
+			{
+				libraries: ["op-sqlite"]
+			}
+		],
 		[
 			"expo-build-properties",
 			{
@@ -229,6 +211,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 					parentTheme: "Default",
 					enforceNavigationBarContrast: false
 				}
+			}
+		],
+		[
+			withOPSQLiteAppGroup as unknown as string,
+			{
+				appGroupId: IOS_APP_GROUP_ID
 			}
 		]
 	],
