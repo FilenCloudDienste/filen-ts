@@ -6,17 +6,31 @@ import { AppState } from "react-native"
 import { pack } from "@/lib/msgpack"
 
 const VERSION = 1
-const PERSIST_DEBOUNCE_MS = 1000
+const GLOBAL_PREFIX = `cache:v${VERSION}`
+const PERSIST_DEBOUNCE_MS = 100
+
+type Mutation =
+	| {
+			type: "set"
+			entryKey: string
+	  }
+	| {
+			type: "delete"
+			entryKey: string
+	  }
+	| {
+			type: "clear"
+	  }
 
 /**
- * Map subclass that calls an onMutate callback on set/delete/clear.
- * Used with a per-map debounced persist so any mutation schedules a batched SQLite write.
+ * Map subclass that reports individual mutations (set/delete/clear) to the cache
+ * so only changed entries are persisted to SQLite instead of the entire map.
  */
 export class PersistentMap<V> extends Map<string, V> {
-	private readonly onMutate: () => void
+	private readonly onMutate: (mutation: Mutation) => void
 	public ready: boolean = false
 
-	public constructor(onMutate: () => void) {
+	public constructor(onMutate: (mutation: Mutation) => void) {
 		super()
 
 		this.onMutate = onMutate
@@ -33,7 +47,10 @@ export class PersistentMap<V> extends Map<string, V> {
 
 		super.set(key, value)
 
-		this.onMutate()
+		this.onMutate({
+			type: "set",
+			entryKey: key
+		})
 
 		return this
 	}
@@ -44,7 +61,10 @@ export class PersistentMap<V> extends Map<string, V> {
 		const result = super.delete(key)
 
 		if (result) {
-			this.onMutate()
+			this.onMutate({
+				type: "delete",
+				entryKey: key
+			})
 		}
 
 		return result
@@ -56,7 +76,9 @@ export class PersistentMap<V> extends Map<string, V> {
 		if (this.size > 0) {
 			super.clear()
 
-			this.onMutate()
+			this.onMutate({
+				type: "clear"
+			})
 		}
 	}
 }
@@ -68,13 +90,15 @@ type MapEntry = {
 
 class Cache {
 	private readonly registry: MapEntry[] = []
-	private readonly dirty = new Set<string>()
+	private readonly dirtyUpserts = new Map<string, Set<string>>()
+	private readonly dirtyDeletes = new Map<string, Set<string>>()
+	private readonly dirtyClears = new Set<string>()
 
 	// Not persisted — managed separately by secureStore.ts with its own encryption
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	public readonly secureStore = new Map<string, any>()
 
-	// Persisted — each PersistentMap is independently persisted to SQLite KV
+	// Persisted — each entry independently persisted to SQLite KV
 	public readonly directoryUuidToName: PersistentMap<string>
 	public readonly noteUuidToNote: PersistentMap<Note>
 	public readonly chatUuidToChat: PersistentMap<Chat>
@@ -96,10 +120,51 @@ class Cache {
 	}
 
 	private createMap<V>(name: string): PersistentMap<V> {
-		const key = `cache:v${VERSION}:${name}`
+		const key = `${GLOBAL_PREFIX}:${name}`
 
-		const map = new PersistentMap<V>(() => {
-			this.dirty.add(key)
+		const map = new PersistentMap<V>(mutation => {
+			switch (mutation.type) {
+				case "set": {
+					let upserts = this.dirtyUpserts.get(key)
+
+					if (!upserts) {
+						upserts = new Set()
+
+						this.dirtyUpserts.set(key, upserts)
+					}
+
+					upserts.add(mutation.entryKey)
+
+					this.dirtyDeletes.get(key)?.delete(mutation.entryKey)
+
+					break
+				}
+
+				case "delete": {
+					let deletes = this.dirtyDeletes.get(key)
+
+					if (!deletes) {
+						deletes = new Set()
+
+						this.dirtyDeletes.set(key, deletes)
+					}
+
+					deletes.add(mutation.entryKey)
+
+					this.dirtyUpserts.get(key)?.delete(mutation.entryKey)
+
+					break
+				}
+
+				case "clear": {
+					this.dirtyClears.add(key)
+
+					this.dirtyUpserts.delete(key)
+					this.dirtyDeletes.delete(key)
+
+					break
+				}
+			}
 
 			this.schedulePersist()
 		})
@@ -123,30 +188,48 @@ class Cache {
 	)
 
 	private persistDirty(): void {
-		if (this.dirty.size === 0) {
+		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
 			return
 		}
 
 		const commands: [string, (string | Uint8Array)[]][] = []
 
+		for (const mapKey of this.dirtyClears) {
+			commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
+		}
+
+		for (const [mapKey, entryKeys] of this.dirtyDeletes) {
+			for (const entryKey of entryKeys) {
+				commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
+			}
+		}
+
 		for (const entry of this.registry) {
-			if (!this.dirty.has(entry.key)) {
+			const upsertKeys = this.dirtyUpserts.get(entry.key)
+
+			if (!upsertKeys) {
 				continue
 			}
 
-			commands.push([
-				"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
-				[entry.key, new Uint8Array(pack([...entry.map.entries()]))]
-			])
+			for (const entryKey of upsertKeys) {
+				const value = entry.map.get(entryKey)
+
+				if (value !== undefined) {
+					commands.push([
+						"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
+						[entry.key + ":" + entryKey, new Uint8Array(pack(value))]
+					])
+				}
+			}
 		}
 
-		this.dirty.clear()
+		this.dirtyClears.clear()
+		this.dirtyDeletes.clear()
+		this.dirtyUpserts.clear()
 
 		if (commands.length === 0) {
 			return
 		}
-
-		console.log(`[Cache] Persisting ${commands.length} dirty maps to disk`)
 
 		sqlite
 			.openDb()
@@ -164,14 +247,13 @@ class Cache {
 	public async restore(): Promise<void> {
 		const results = await Promise.allSettled(
 			this.registry.map(async ({ key, map }) => {
-				const entries = await sqlite.kvAsync.get<[string, unknown][]>(key)
+				const prefix = key + ":"
+				const entries = await sqlite.kvAsync.getByPrefix<unknown>(prefix)
 
-				if (!entries) {
-					return
-				}
+				for (const [fullKey, value] of entries) {
+					const entryKey = fullKey.slice(prefix.length)
 
-				for (const [k, v] of entries) {
-					Map.prototype.set.call(map, k, v)
+					Map.prototype.set.call(map, entryKey, value)
 				}
 			})
 		)
@@ -184,8 +266,8 @@ class Cache {
 
 				console.error(`[Cache] Failed to restore ${key}, clearing corrupted data`, result.reason)
 
-				sqlite.kvAsync.remove(key).catch(removeErr => {
-					console.error(`[Cache] Failed to remove corrupted key ${key}`, removeErr)
+				sqlite.kvAsync.removeByPrefix(key + ":").catch(removeErr => {
+					console.error(`[Cache] Failed to remove corrupted keys for ${key}`, removeErr)
 				})
 			}
 		}
@@ -216,10 +298,12 @@ class Cache {
 
 		this.schedulePersist.cancel()
 
-		this.dirty.clear()
+		this.dirtyUpserts.clear()
+		this.dirtyDeletes.clear()
+		this.dirtyClears.clear()
 
 		for (const { key } of this.registry) {
-			sqlite.kvAsync.remove(key).catch(err => {
+			sqlite.kvAsync.removeByPrefix(key + ":").catch(err => {
 				console.error(`[Cache] Failed to remove ${key}`, err)
 			})
 		}
