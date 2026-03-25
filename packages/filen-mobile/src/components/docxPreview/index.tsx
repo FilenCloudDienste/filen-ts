@@ -1,4 +1,4 @@
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import Dom from "@/components/docxPreview/dom"
 
 const DocxPreview = memo(({ base64, paddingTop, paddingBottom }: { base64: string; paddingTop?: number; paddingBottom?: number }) => {

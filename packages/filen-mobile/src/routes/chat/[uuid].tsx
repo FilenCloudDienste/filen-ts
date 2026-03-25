@@ -1,10 +1,9 @@
-import { Fragment, useEffect } from "react"
+import { Fragment, useEffect, memo, useMemo, useCallback } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { useLocalSearchParams, Redirect, useRouter } from "expo-router"
 import type { Chat as TChat } from "@filen/sdk-rs"
 import { Platform, ActivityIndicator } from "react-native"
-import { memo, useMemo, useCallback } from "@/lib/memo"
 import useChatsQuery from "@/queries/useChats.query"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
@@ -31,12 +30,11 @@ import { simpleDateNoTime } from "@/lib/time"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
 import useChatsStore from "@/stores/useChats.store"
 
+// TODO: Fix memoization
 const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 	const stringifiedClient = useStringifiedClient()
 
-	const participantsWithoutSelf = useMemo(() => {
-		return chat.participants.filter(p => p.userId !== stringifiedClient?.userId)
-	}, [chat.participants, stringifiedClient?.userId])
+	const participantsWithoutSelf = chat.participants.filter(p => p.userId !== stringifiedClient?.userId)
 
 	const title = useMemo(() => {
 		if (chat.name && chat.name.length > 0) {
@@ -57,13 +55,11 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 			.join(", ")
 	}, [chat.name, participantsWithoutSelf])
 
-	const participantsWithAvatars = useMemo(() => {
-		return participantsWithoutSelf
-			.filter(p => p.avatar && p.avatar.startsWith("http"))
-			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-			.map(p => p.avatar)
-			.slice(0, 5)
-	}, [participantsWithoutSelf])
+	const participantsWithAvatars = participantsWithoutSelf
+		.filter(p => p.avatar && p.avatar.startsWith("http"))
+		.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
+		.map(p => p.avatar)
+		.slice(0, 5)
 
 	return (
 		<View
@@ -86,9 +82,7 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 					<Avatar
 						className="shrink-0 z-10"
 						size={36}
-						source={{
-							uri: participantsWithoutSelf.at(0)?.avatar
-						}}
+						source={participantsWithoutSelf.at(0)?.avatar}
 					/>
 				) : (
 					<Avatar
@@ -217,7 +211,7 @@ const Unread = memo(({ chat }: { chat: TChat }) => {
 	)
 })
 
-export const Chat = memo(() => {
+const Chat = memo(() => {
 	const { uuid } = useLocalSearchParams<{
 		uuid: string
 	}>()

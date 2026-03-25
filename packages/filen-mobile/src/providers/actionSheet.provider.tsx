@@ -1,6 +1,5 @@
-import { memo } from "@/lib/memo"
 import events from "@/lib/events"
-import { useEffect } from "react"
+import { useEffect, memo } from "react"
 import { runEffect } from "@filen/utils"
 import { ActionSheetProvider as ExpoActionSheetProvider, useActionSheet } from "@expo/react-native-action-sheet"
 import { useResolveClassNames, useUniwind } from "uniwind"
@@ -18,7 +17,7 @@ export type ShowActionSheetOptions = {
 	userInterfaceStyle?: "light" | "dark"
 }
 
-export const ActionSheetProviderInner = memo(({ children }) => {
+export const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode }) => {
 	const { showActionSheetWithOptions } = useActionSheet()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const { theme } = useUniwind()

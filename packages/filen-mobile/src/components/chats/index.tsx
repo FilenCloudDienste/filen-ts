@@ -1,7 +1,6 @@
-import { Fragment } from "react"
+import { Fragment, memo, useMemo, useCallback } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import { memo, useMemo, useCallback } from "@/lib/memo"
 import { Platform } from "react-native"
 import List from "@/components/chats/list"
 import { useShallow } from "zustand/shallow"
@@ -18,6 +17,7 @@ import prompts from "@/lib/prompts"
 import type { MenuButton } from "@/components/ui/menu"
 import { selectContacts } from "@/routes/contacts"
 
+// TODO: Fix memoization
 const Header = memo(() => {
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
@@ -68,7 +68,7 @@ const Header = memo(() => {
 				}
 			}
 		] satisfies HeaderItem[]
-	}, [selectedChats, textForeground.color])
+	}, [selectedChats, textForeground])
 
 	const headerRightItems = useMemo(() => {
 		const items: HeaderItem[] = []

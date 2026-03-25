@@ -1,6 +1,5 @@
-import { useRef } from "react"
+import { useRef, useCallback } from "react"
 import { useFocusEffect } from "@react-navigation/native"
-import { useCallback } from "@/lib/memo"
 
 export default function useQueryFocusAware() {
 	const focusedRef = useRef<boolean>(true)

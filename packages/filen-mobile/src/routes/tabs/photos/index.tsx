@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from "react"
+import { Fragment, useRef, useState, memo, useCallback, useMemo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import View from "@/components/ui/view"
@@ -10,17 +10,15 @@ import { type View as RNView, Platform, type ViewStyle } from "react-native"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import useViewLayout from "@/hooks/useViewLayout"
-import { memo, useCallback, useMemo } from "@/lib/memo"
 import { getPreviewType } from "@/lib/utils"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
 import { PressableScale } from "@/components/ui/pressables"
-import type { DrivePath } from "@/hooks/useDrivePath"
+import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
 import { router } from "expo-router"
 import { Buffer } from "react-native-quick-crypto"
 import { pack } from "@/lib/msgpack"
-import cache from "@/lib/cache"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import Menu from "@/components/drive/item/menu"
@@ -29,11 +27,6 @@ import { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
 import { useResolveClassNames } from "uniwind"
-
-const drivePath: DrivePath = {
-	type: "photos",
-	uuid: "6fc3d024-083f-41ba-906e-638a12a13a71"
-}
 
 const Photo = memo(
 	({
@@ -49,10 +42,7 @@ const Photo = memo(
 	}) => {
 		const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
 		const netInfo = useNetInfo()
-
-		const previewType = useMemo(() => {
-			return getPreviewType(info.item.data.decryptedMeta?.name ?? "")
-		}, [info.item.data.decryptedMeta?.name])
+		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
 			uuid: info.item.data.uuid,
@@ -68,24 +58,17 @@ const Photo = memo(
 			}
 		)
 
-		const { viewStyle, thumbnailSize } = useMemo<{
-			viewStyle: ViewStyle
-			thumbnailSize: React.ComponentProps<typeof Thumbnail>["size"]
-		}>(
-			() => ({
-				viewStyle: {
-					width: size,
-					height: size
-				},
-				thumbnailSize: {
-					icon: size - 2,
-					thumbnail: size - 2
-				}
-			}),
-			[size]
-		)
+		const viewStyle: ViewStyle = {
+			width: size,
+			height: size
+		}
 
-		const onPress = useCallback(() => {
+		const thumbnailSize: React.ComponentProps<typeof Thumbnail>["size"] = {
+			icon: size - 2,
+			thumbnail: size - 2
+		}
+
+		const onPress = () => {
 			router.push({
 				pathname: "/drivePreview",
 				params: {
@@ -94,7 +77,7 @@ const Photo = memo(
 					parent: parent ? Buffer.from(pack(parent)).toString("base64") : undefined
 				}
 			})
-		}, [info.item, drivePath, parent])
+		}
 
 		return (
 			<View
@@ -150,7 +133,7 @@ const Photo = memo(
 							)}
 							<Thumbnail
 								item={info.item}
-								contentFit="cover"
+								resizeMode="cover"
 								size={thumbnailSize}
 							/>
 						</PressableScale>
@@ -161,11 +144,12 @@ const Photo = memo(
 	}
 )
 
-export const Photos = memo(() => {
+const Photos = memo(() => {
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
 	const { config } = useCameraUpload()
 	const textForeground = useResolveClassNames("text-foreground")
+	const drivePath = useDrivePath()
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -184,10 +168,6 @@ export const Photos = memo(() => {
 		return layout.width / 5
 	}, [layout])
 
-	const parent = useMemo(() => {
-		return cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
-	}, [])
-
 	const renderItem = useCallback(
 		(info: ListRenderItemInfo<DriveItemFileExtracted>) => {
 			return (
@@ -195,16 +175,15 @@ export const Photos = memo(() => {
 					info={info}
 					size={size}
 					drivePath={drivePath}
-					parent={parent}
 				/>
 			)
 		},
-		[size, parent]
+		[size, drivePath]
 	)
 
-	const keyExtractor = useCallback((item: DriveItemFileExtracted) => {
+	const keyExtractor = (item: DriveItemFileExtracted) => {
 		return item.data.uuid
-	}, [])
+	}
 
 	const data = useMemo(() => {
 		return driveItemsQuery.data

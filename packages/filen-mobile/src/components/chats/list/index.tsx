@@ -1,5 +1,4 @@
 import Text from "@/components/ui/text"
-import { memo, useMemo, useCallback } from "@/lib/memo"
 import useChatsQuery from "@/queries/useChats.query"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { Chat as TChat } from "@filen/sdk-rs"
@@ -9,7 +8,7 @@ import alerts from "@/lib/alerts"
 import Chat from "@/components/chats/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
-import { useState } from "react"
+import { useState, memo, useMemo, useCallback } from "react"
 import { Platform } from "react-native"
 
 export const List = memo(() => {

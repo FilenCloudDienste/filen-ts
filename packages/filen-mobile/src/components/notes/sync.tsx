@@ -1,11 +1,10 @@
-import { useEffect } from "react"
+import { useEffect, memo } from "react"
 import { run, Semaphore, createExecutableTimeout } from "@filen/utils"
 import notes from "@/lib/notes"
 import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
 import useNotesStore, { type InflightContent } from "@/stores/useNotes.store"
 import sqlite from "@/lib/sqlite"
-import { memo } from "@/lib/memo"
 import { fetchData as notesWithContentQueryFetch } from "@/queries/useNotesWithContent.query"
 
 export class Sync {

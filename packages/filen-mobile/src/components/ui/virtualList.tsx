@@ -1,13 +1,12 @@
-import { useRef, useState, Fragment } from "react"
+import { useRef, useState, Fragment, memo, useCallback, useMemo } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { type View as RNView, RefreshControl, ActivityIndicator, TextInput, Platform } from "react-native"
-import View, { CrossGlassContainerView, KeyboardAvoidingView } from "@/components/ui/view"
+import View, { CrossGlassContainerView } from "@/components/ui/view"
 import useViewLayout from "@/hooks/useViewLayout"
 import { cn, run, type DeferFn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeOut } from "react-native-reanimated"
-import { memo, useCallback, useMemo } from "@/lib/memo"
 import {
 	FlashList,
 	type FlashListProps,
@@ -34,7 +33,6 @@ export type VirtualListExtraProps = {
 	emptyComponent?: () => React.ReactNode
 	footerComponent?: () => React.ReactNode
 	headerComponent?: () => React.ReactNode
-	keyboardAvoidingViewBehavior?: React.ComponentProps<typeof KeyboardAvoidingView>["behavior"]
 	searchBar?: {
 		onChangeText?: (text: string) => void
 		placeholder?: string
@@ -237,50 +235,44 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 				className={cn("flex-1 bg-transparent", props.parentClassName)}
 				onLayout={onLayout}
 			>
-				<KeyboardAvoidingView
-					className={cn("flex-1 bg-transparent", props.parentClassName)}
-					behavior={props.keyboardAvoidingViewBehavior ?? "padding"}
-				>
-					{props.loading && (
-						<AnimatedView
-							className="absolute inset-0 z-99 bg-transparent items-center justify-center"
-							exiting={FadeOut}
-						>
-							<ActivityIndicator
-								size="large"
-								color={textForeground.color as string}
-							/>
-						</AnimatedView>
-					)}
-					<FlashList<T>
-						contentInsetAdjustmentBehavior="automatic"
-						refreshing={refreshing}
-						refreshControl={refreshControl}
-						numColumns={itemsPerRow}
-						drawDistance={0}
-						maxItemsInRecyclePool={0}
-						maintainVisibleContentPosition={{
-							disabled: false,
-							autoscrollToTopThreshold: undefined,
-							autoscrollToBottomThreshold: undefined,
-							animateAutoScrollToBottom: false,
-							startRenderingFromBottom: false
-						}}
-						showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
-						showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
-						scrollEnabled={!props.loading && (props.data ?? []).length > 0}
-						ListEmptyComponent={emptyComponent}
-						ListFooterComponent={props.footerComponent}
-						ListHeaderComponent={props.headerComponent}
-						{...props}
-						contentContainerStyle={[
-							props.contentContainerStyle,
-							{
-								paddingTop: props.searchBar ? searchBarHeight : 0
-							}
-						]}
-					/>
-				</KeyboardAvoidingView>
+				{props.loading && (
+					<AnimatedView
+						className="absolute inset-0 z-99 bg-transparent items-center justify-center"
+						exiting={FadeOut}
+					>
+						<ActivityIndicator
+							size="large"
+							color={textForeground.color as string}
+						/>
+					</AnimatedView>
+				)}
+				<FlashList<T>
+					contentInsetAdjustmentBehavior="automatic"
+					refreshing={refreshing}
+					refreshControl={refreshControl}
+					numColumns={itemsPerRow}
+					drawDistance={layout.height > 0 ? layout.height : undefined}
+					maintainVisibleContentPosition={{
+						disabled: false,
+						autoscrollToTopThreshold: undefined,
+						autoscrollToBottomThreshold: undefined,
+						animateAutoScrollToBottom: false,
+						startRenderingFromBottom: false
+					}}
+					showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
+					showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
+					scrollEnabled={!props.loading && (props.data ?? []).length > 0}
+					ListEmptyComponent={emptyComponent}
+					ListFooterComponent={props.footerComponent}
+					ListHeaderComponent={props.headerComponent}
+					{...props}
+					contentContainerStyle={[
+						props.contentContainerStyle,
+						{
+							paddingTop: props.searchBar ? searchBarHeight : 0
+						}
+					]}
+				/>
 			</View>
 		</Fragment>
 	)
@@ -288,6 +280,10 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 	displayName?: string
 }
 
-const VirtualList = withUniwind(VirtualListInner) as typeof VirtualListInner
+const VirtualList = memo(withUniwind(VirtualListInner) as typeof VirtualListInner) as (<T>(
+	props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps
+) => React.JSX.Element) & {
+	displayName?: string
+}
 
 export default VirtualList

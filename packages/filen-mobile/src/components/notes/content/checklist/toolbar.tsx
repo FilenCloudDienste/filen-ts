@@ -7,9 +7,9 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { PressableScale } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
-import { memo, useCallback } from "@/lib/memo"
+import { memo, useCallback } from "react"
 
-export const Toolbar = memo(() => {
+const Toolbar = memo(() => {
 	const keyboardState = useKeyboardState()
 	const textPrimary = useResolveClassNames("text-primary")
 

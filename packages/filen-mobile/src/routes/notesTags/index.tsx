@@ -1,5 +1,5 @@
 import Notes from "@/components/notes"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 
 export const NotesTags = memo(() => {
 	return <Notes />

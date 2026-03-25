@@ -1,8 +1,7 @@
-import { memo, useMemo, useCallback } from "@/lib/memo"
 import useContactsQuery from "@/queries/useContacts.query"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 import { fastLocaleCompare, run, cn } from "@filen/utils"
-import { Fragment, useState } from "react"
+import { Fragment, useState, memo, useMemo, useCallback } from "react"
 import { Platform } from "react-native"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
@@ -266,19 +265,6 @@ const Contact = memo(
 			useShallow(state => state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid))
 		)
 		const selectedCount = useContactsStore(useShallow(state => state.selectedContacts.length))
-
-		const roundedCn = useMemo(() => {
-			return cn(
-				nextItem?.type !== "header" && prevItem?.type !== "header" && "rounded-none",
-				nextItem?.type === "header" && prevItem?.type !== "header" && "rounded-b-4xl rounded-t-none",
-				nextItem?.type !== "header" && prevItem?.type === "header" && "rounded-t-4xl rounded-b-none",
-				nextItem?.type === "header" && prevItem?.type === "header" && "rounded-4xl",
-				!nextItem && prevItem?.type === "header" && "rounded-4xl",
-				!prevItem && nextItem?.type !== "header" && "rounded-t-4xl rounded-b-none",
-				!nextItem && prevItem?.type !== "header" && "rounded-b-4xl rounded-t-none",
-				!nextItem && !prevItem && "rounded-4xl"
-			)
-		}, [nextItem, prevItem])
 
 		const onAccept = useCallback(async () => {
 			const result = await runWithLoading(async () => {
@@ -708,7 +694,19 @@ const Contact = memo(
 						buttons={menuButtons}
 					>
 						<PressableScale
-							className={cn("bg-background-tertiary px-4 flex-row items-center", roundedCn)}
+							className={cn(
+								"bg-background-tertiary px-4 flex-row items-center",
+								cn(
+									nextItem?.type !== "header" && prevItem?.type !== "header" && "rounded-none",
+									nextItem?.type === "header" && prevItem?.type !== "header" && "rounded-b-4xl rounded-t-none",
+									nextItem?.type !== "header" && prevItem?.type === "header" && "rounded-t-4xl rounded-b-none",
+									nextItem?.type === "header" && prevItem?.type === "header" && "rounded-4xl",
+									!nextItem && prevItem?.type === "header" && "rounded-4xl",
+									!prevItem && nextItem?.type !== "header" && "rounded-t-4xl rounded-b-none",
+									!nextItem && prevItem?.type !== "header" && "rounded-b-4xl rounded-t-none",
+									!nextItem && !prevItem && "rounded-4xl"
+								)
+							)}
 							onPress={onPress}
 						>
 							<View
@@ -794,6 +792,7 @@ const Contact = memo(
 	}
 )
 
+// TODO: Fix memo
 const Contacts = memo(() => {
 	const contactsQuery = useContactsQuery()
 	const contactRequestsQuery = useContactRequestsQuery()

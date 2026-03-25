@@ -1,7 +1,6 @@
-import { useRef } from "react"
+import { useRef, useCallback } from "react"
 import { useFocusEffect } from "@react-navigation/native"
 import type { UseQueryResult } from "@tanstack/react-query"
-import { useCallback } from "@/lib/memo"
 
 export default function useRefreshOnFocus({
 	isEnabled,
@@ -19,6 +18,8 @@ export default function useRefreshOnFocus({
 			}
 
 			if (enabledRef.current) {
+				console.log("[useRefreshOnFocus] Refetching on focus")
+
 				refetch().catch(() => {})
 			} else {
 				enabledRef.current = true

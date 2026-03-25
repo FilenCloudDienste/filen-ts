@@ -1,4 +1,3 @@
-import { memo, useCallback } from "@/lib/memo"
 import { useSdkClients, useStringifiedClient } from "@/lib/auth"
 import {
 	type JsClientInterface,
@@ -8,7 +7,7 @@ import {
 	MaybeEncryptedUniffi_Tags,
 	type SocketEvent
 } from "@filen/sdk-rs"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, memo, useCallback } from "react"
 import { runEffect, run, Semaphore } from "@filen/utils"
 import useChatsStore from "@/stores/useChats.store"
 import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/queries/useChatMessages.query"

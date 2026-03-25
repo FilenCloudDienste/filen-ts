@@ -1,4 +1,4 @@
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import DriveComponent from "@/components/drive"
 
 const Drive = memo(() => {

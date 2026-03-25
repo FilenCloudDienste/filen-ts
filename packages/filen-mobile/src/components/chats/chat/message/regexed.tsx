@@ -1,5 +1,4 @@
-import { Fragment } from "react"
-import { memo, useMemo, useCallback } from "@/lib/memo"
+import { Fragment, memo, useMemo, useCallback } from "react"
 import regexifyString from "regexify-string"
 import { Text } from "@/components/ui/text"
 import View from "@/components/ui/view"
@@ -8,7 +7,6 @@ import { customEmojis } from "@/assets/customEmojis"
 import type { Chat, ChatParticipant } from "@filen/sdk-rs"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/stores/useChats.store"
 import Image from "@/components/ui/image"
-import isEqual from "react-fast-compare"
 import { useShallow } from "zustand/shallow"
 import { PressableScale } from "@/components/ui/pressables"
 import { contactDisplayName } from "@/lib/utils"
@@ -34,36 +32,25 @@ export const customEmojisListRecord: Record<string, string> = Object.fromEntries
 	customEmojis.map(emoji => [emoji.id, emoji.skins[0] ? emoji.skins[0].src : ""])
 )
 
-export const Mention = memo(
-	({ name, participant, inflight }: { name: string; participant?: ChatParticipant; inflight?: boolean }) => {
-		const onPress = useCallback(() => {
-			if (!participant) {
-				return
-			}
-
-			// TODO: profile popup
-		}, [participant])
-
-		return (
-			<PressableScale
-				className="flex-row items-center shrink-0"
-				rippleColor="transparent"
-				onPress={onPress}
-			>
-				<Text className={cn("text-sm", inflight ? "text-muted-foreground" : "text-foreground")}>@{name}</Text>
-			</PressableScale>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return (
-				prevProps.name === nextProps.name &&
-				isEqual(prevProps.participant, nextProps.participant) &&
-				prevProps.inflight === nextProps.inflight
-			)
+export const Mention = memo(({ name, participant, inflight }: { name: string; participant?: ChatParticipant; inflight?: boolean }) => {
+	const onPress = useCallback(() => {
+		if (!participant) {
+			return
 		}
-	}
-)
+
+		// TODO: profile popup
+	}, [participant])
+
+	return (
+		<PressableScale
+			className="flex-row items-center shrink-0"
+			rippleColor="transparent"
+			onPress={onPress}
+		>
+			<Text className={cn("text-sm", inflight ? "text-muted-foreground" : "text-foreground")}>@{name}</Text>
+		</PressableScale>
+	)
+})
 
 export const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean }) => {
 	const code = useMemo(() => {
@@ -189,153 +176,141 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 	)
 })
 
-export const Regexed = memo(
-	({ chat, message, fromSelf }: { chat: Chat; message: ChatMessageWithInflightId; fromSelf: boolean }) => {
-		const isInflight = useChatsStore(
-			useShallow(state => state.inflightMessages[chat.uuid]?.messages.some(m => m.inflightId === message.inflightId))
-		)
+// TODO: Fix memo
+export const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMessageWithInflightId; fromSelf: boolean }) => {
+	const isInflight = useChatsStore(
+		useShallow(state => state.inflightMessages[chat.uuid]?.messages.some(m => m.inflightId === message.inflightId))
+	)
 
-		const replaced = useMemo(() => {
-			if (!message.inner.message) {
-				return []
+	const replaced = useMemo(() => {
+		if (!message.inner.message) {
+			return []
+		}
+
+		const emojiCount = message.inner.message.match(EMOJI_REGEX_WITH_SKIN_TONES)
+		let emojiSize: number | undefined = 32
+
+		if (emojiCount) {
+			const emojiCountJoined = emojiCount.join("")
+
+			if (emojiCountJoined.length !== message.inner.message.trim().length) {
+				emojiSize = 20
 			}
+		}
 
-			const emojiCount = message.inner.message.match(EMOJI_REGEX_WITH_SKIN_TONES)
-			let emojiSize: number | undefined = 32
+		const regexed = regexifyString({
+			pattern: REGEX,
+			decorator: match => {
+				if (match.startsWith("@") && (match.split("@").length === 3 || match.startsWith("@everyone"))) {
+					const email = match.slice(1).trim()
 
-			if (emojiCount) {
-				const emojiCountJoined = emojiCount.join("")
+					if (email === "everyone") {
+						return <Mention name="tbd_everyone" />
+					}
 
-				if (emojiCountJoined.length !== message.inner.message.trim().length) {
-					emojiSize = 20
+					if (!email.includes("@")) {
+						return <Mention name="tbd_unknown" />
+					}
+
+					const foundParticipant = chat.participants.find(p => p.email === email)
+
+					if (!foundParticipant) {
+						return <Mention name="tbd_unknown" />
+					}
+
+					return (
+						<Mention
+							name={contactDisplayName(foundParticipant)}
+							participant={foundParticipant}
+						/>
+					)
 				}
-			}
 
-			const regexed = regexifyString({
-				pattern: REGEX,
-				decorator: match => {
-					if (match.startsWith("@") && (match.split("@").length === 3 || match.startsWith("@everyone"))) {
-						const email = match.slice(1).trim()
+				if (match.split("```").length >= 3) {
+					return (
+						<CodeBlock
+							match={match}
+							fromSelf={fromSelf}
+						/>
+					)
+				}
 
-						if (email === "everyone") {
-							return <Mention name="tbd_everyone" />
-						}
+				if (match.startsWith("https://") || match.startsWith("http://")) {
+					return (
+						<Link
+							match={match}
+							fromSelf={fromSelf}
+							inflight={isInflight}
+						/>
+					)
+				}
 
-						if (!email.includes("@")) {
-							return <Mention name="tbd_unknown" />
-						}
+				if (match.includes("\n")) {
+					return <View className="flex-1 w-full h-2 basis-full shrink-0 bg-transparent" />
+				}
 
-						const foundParticipant = chat.participants.find(p => p.email === email)
+				const customEmoji = match.split(":").join("").trim()
 
-						if (!foundParticipant) {
-							return <Mention name="tbd_unknown" />
-						}
+				if (customEmojisSet.has(customEmoji) && customEmojisListRecord[customEmoji]) {
+					return (
+						<Image
+							cachePolicy="dataCache"
+							resizeMode="contain"
+							style={{
+								width: emojiSize,
+								height: emojiSize
+							}}
+							source={{
+								uri: customEmojisListRecord[customEmoji]
+							}}
+							className="shrink-0 bg-transparent"
+						/>
+					)
+				}
 
-						return (
-							<Mention
-								name={contactDisplayName(foundParticipant)}
-								participant={foundParticipant}
-							/>
-						)
-					}
+				return match
+			},
+			input: message.inner.message
+		}) as (string | React.ReactElement)[]
 
-					if (match.split("```").length >= 3) {
-						return (
-							<CodeBlock
-								match={match}
-								fromSelf={fromSelf}
-							/>
-						)
-					}
+		return regexed
+	}, [message.inner.message, chat.participants, fromSelf, isInflight])
 
-					if (match.startsWith("https://") || match.startsWith("http://")) {
-						return (
-							<Link
-								match={match}
-								fromSelf={fromSelf}
-								inflight={isInflight}
-							/>
-						)
-					}
-
-					if (match.includes("\n")) {
-						return <View className="flex-1 w-full h-2 basis-full shrink-0 bg-transparent" />
-					}
-
-					const customEmoji = match.split(":").join("").trim()
-
-					if (customEmojisSet.has(customEmoji) && customEmojisListRecord[customEmoji]) {
-						return (
-							<Image
-								cachePolicy="disk"
-								contentFit="contain"
-								style={{
-									width: emojiSize,
-									height: emojiSize
-								}}
-								source={{
-									uri: customEmojisListRecord[customEmoji]
-								}}
-								className="shrink-0 bg-transparent"
-							/>
-						)
-					}
-
-					return match
-				},
-				input: message.inner.message
-			}) as (string | React.ReactElement)[]
-
-			return regexed
-		}, [message.inner.message, chat.participants, fromSelf, isInflight])
-
-		if (replaced.length === 0) {
-			return null
-		}
-
-		return (
-			<View className="flex-row flex-wrap text-wrap break-all items-center bg-transparent">
-				{replaced.map((item, index) => {
-					if (typeof item === "string") {
-						if (item.length === 0) {
-							return null
-						}
-
-						return (
-							<Text
-								key={index}
-								className={cn(
-									"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
-									fromSelf
-										? isInflight
-											? "text-gray-200"
-											: "text-white"
-										: isInflight
-											? "text-muted-foreground"
-											: "text-foreground"
-								)}
-							>
-								{item}
-							</Text>
-						)
-					}
-
-					return <Fragment key={index}>{item}</Fragment>
-				})}
-			</View>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return (
-				isEqual(prevProps.chat.participants, nextProps.chat.participants) &&
-				prevProps.chat.uuid === nextProps.chat.uuid &&
-				prevProps.message.inner.message === nextProps.message.inner.message &&
-				prevProps.message.inflightId === nextProps.message.inflightId &&
-				prevProps.fromSelf === nextProps.fromSelf
-			)
-		}
+	if (replaced.length === 0) {
+		return null
 	}
-)
+
+	return (
+		<View className="flex-row flex-wrap text-wrap break-all items-center bg-transparent">
+			{replaced.map((item, index) => {
+				if (typeof item === "string") {
+					if (item.length === 0) {
+						return null
+					}
+
+					return (
+						<Text
+							key={index}
+							className={cn(
+								"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
+								fromSelf
+									? isInflight
+										? "text-gray-200"
+										: "text-white"
+									: isInflight
+										? "text-muted-foreground"
+										: "text-foreground"
+							)}
+						>
+							{item}
+						</Text>
+					)
+				}
+
+				return <Fragment key={index}>{item}</Fragment>
+			})}
+		</View>
+	)
+})
 
 export default Regexed

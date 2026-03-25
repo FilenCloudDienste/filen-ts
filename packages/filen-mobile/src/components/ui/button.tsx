@@ -1,8 +1,8 @@
 import { type ButtonProps, Button as RNButton } from "react-native"
 import { useResolveClassNames } from "uniwind"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 
-export const Button = memo(
+const Button = memo(
 	(
 		props: Omit<ButtonProps, "title"> & {
 			children: string

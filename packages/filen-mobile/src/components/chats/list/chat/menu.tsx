@@ -1,8 +1,7 @@
 import type { Chat as TChat, ChatParticipant } from "@filen/sdk-rs"
-import { memo, useMemo } from "@/lib/memo"
+import { memo, useMemo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
-import isEqual from "react-fast-compare"
 import { useStringifiedClient } from "@/lib/auth"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
@@ -426,16 +425,6 @@ export const Menu = memo(
 				{children}
 			</MenuComponent>
 		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return (
-				isEqual(prevProps.info.item, nextProps.info.item) &&
-				isEqual(prevProps.children, nextProps.children) &&
-				prevProps.className === nextProps.className &&
-				prevProps.isAnchoredToRight === nextProps.isAnchoredToRight
-			)
-		}
 	}
 )
 

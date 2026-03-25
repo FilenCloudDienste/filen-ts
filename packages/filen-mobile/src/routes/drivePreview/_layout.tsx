@@ -1,5 +1,5 @@
 import { Stack } from "expo-router"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 
 const Layout = memo(() => {
 	return (

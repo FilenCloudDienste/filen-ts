@@ -3,8 +3,7 @@ import "@/global"
 import "@/queries/onlineStatus"
 
 import StyleProvider from "@/providers/style.provider"
-import { useState, Fragment } from "react"
-import { memo, useCallback } from "@/lib/memo"
+import { useState, Fragment, memo } from "react"
 import { Stack } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import View from "@/components/ui/view"
@@ -36,13 +35,13 @@ SplashScreen.setOptions({
 
 SplashScreen.preventAutoHideAsync().catch(console.error)
 
-export const RootLayout = memo(() => {
+const RootLayout = memo(() => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const [isSetupDone, setIsSetupDone] = useState<boolean>(false)
 	const isAuthed = useIsAuthed()
 
-	const runSetup = useCallback(async () => {
+	const runSetup = async () => {
 		const result = await run(async () => {
 			setIsSetupDone(false)
 
@@ -62,7 +61,7 @@ export const RootLayout = memo(() => {
 		setTimeout(() => {
 			SplashScreen.hideAsync().catch(console.error)
 		}, 1)
-	}, [])
+	}
 
 	useEffectOnce(() => {
 		runSetup()

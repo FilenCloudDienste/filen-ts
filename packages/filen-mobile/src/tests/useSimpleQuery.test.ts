@@ -14,10 +14,6 @@ vi.mock("uniffi-bindgen-react-native", () => ({
 	}
 }))
 
-vi.mock("@/lib/memo", () => ({
-	useCallback: (fn: unknown) => fn
-}))
-
 vi.mock("@/lib/alerts", () => ({
 	default: { error: mockAlertsError }
 }))
@@ -45,9 +41,7 @@ afterEach(() => {
 describe("useSimpleQuery", () => {
 	describe("initial execution", () => {
 		it("transitions to success with data", async () => {
-			const { result } = renderHook(() =>
-				useSimpleQuery(async () => "data")
-			)
+			const { result } = renderHook(() => useSimpleQuery(async () => "data"))
 
 			await waitFor(() => {
 				expect(result.current.status).toBe("success")

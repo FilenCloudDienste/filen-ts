@@ -48,7 +48,6 @@ const packr = new Packr({
 	int64AsType: "bigint",
 	moreTypes: true,
 	copyBuffers: true,
-	structuredClone: true,
 	bundleStrings: true,
 	variableMapSize: true
 })

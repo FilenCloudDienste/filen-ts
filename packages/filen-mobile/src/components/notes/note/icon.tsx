@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { type Note, NoteType } from "@filen/sdk-rs"
-import { useMemo, memo } from "@/lib/memo"
+import { useMemo, memo } from "react"
 import { useResolveClassNames } from "uniwind"
 
 export enum NoteTypeExtended {
@@ -10,7 +10,7 @@ export enum NoteTypeExtended {
 
 export type IconKey = NoteType | NoteTypeExtended
 
-export const ICON_PROPS = {
+const ICON_PROPS = {
 	[NoteType.Text]: {
 		name: "text-outline",
 		color: "#3b82f6"
@@ -41,45 +41,32 @@ export const ICON_PROPS = {
 	}
 } as const
 
-export const Icon = memo(
-	({ note, iconSize }: { note: Note; iconSize: number }) => {
-		const textForeground = useResolveClassNames("text-foreground")
+const Icon = memo(({ note, iconSize }: { note: Note; iconSize: number }) => {
+	const textForeground = useResolveClassNames("text-foreground")
 
-		const { color, name } = useMemo(() => {
-			let iconKey: IconKey
+	const { color, name } = useMemo(() => {
+		let iconKey: IconKey
 
-			if (note.trash) {
-				iconKey = NoteTypeExtended.Trash
-			}
-
-			if (note.archive) {
-				iconKey = NoteTypeExtended.Archive
-			}
-
-			iconKey = note.noteType
-
-			return ICON_PROPS[iconKey]
-		}, [note.trash, note.archive, note.noteType])
-
-		return (
-			<Ionicons
-				name={name}
-				color={color ?? textForeground.color}
-				size={iconSize}
-			/>
-		)
-	},
-	{
-		propsAreEqual(prevProps, nextProps) {
-			return (
-				prevProps.note.uuid === nextProps.note.uuid &&
-				prevProps.note.trash === nextProps.note.trash &&
-				prevProps.note.archive === nextProps.note.archive &&
-				prevProps.note.noteType === nextProps.note.noteType &&
-				prevProps.iconSize === nextProps.iconSize
-			)
+		if (note.trash) {
+			iconKey = NoteTypeExtended.Trash
 		}
-	}
-)
+
+		if (note.archive) {
+			iconKey = NoteTypeExtended.Archive
+		}
+
+		iconKey = note.noteType
+
+		return ICON_PROPS[iconKey]
+	}, [note.trash, note.archive, note.noteType])
+
+	return (
+		<Ionicons
+			name={name}
+			color={color ?? textForeground.color}
+			size={iconSize}
+		/>
+	)
+})
 
 export default Icon

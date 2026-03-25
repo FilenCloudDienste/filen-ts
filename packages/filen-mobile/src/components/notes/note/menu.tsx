@@ -1,6 +1,6 @@
 import { type Note as TNote, NoteType, type NoteTag, type NoteParticipant, type NoteHistory } from "@filen/sdk-rs"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
-import { memo, useMemo, useCallback } from "@/lib/memo"
+import { memo, useMemo, useCallback } from "react"
 import View from "@/components/ui/view"
 import { useStringifiedClient } from "@/lib/auth"
 import useNotesStore from "@/stores/useNotes.store"
@@ -741,7 +741,8 @@ export function createMenuButtons({
 	return buttons
 }
 
-export const Menu = memo(
+// TODO: Fix memoization
+const Menu = memo(
 	({
 		children,
 		origin,

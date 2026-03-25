@@ -1,4 +1,4 @@
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import View from "@/components/ui/view"
 import DocxPreview from "@/components/docxPreview"
 import { Buffer } from "react-native-quick-crypto"
@@ -9,16 +9,30 @@ import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import fileCache from "@/lib/fileCache"
 import type { DriveItemFileExtracted } from "@/types"
 import { ActivityIndicator } from "react-native"
+import offline from "@/lib/offline"
+import type { File } from "expo-file-system"
 
 const PreviewDocx = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 
 	const query = useSimpleQuery(async signal => {
-		const file = await fileCache.get({
-			item,
-			signal
-		})
+		const isStoredOffline = await offline.isItemStored(item)
+
+		let file: File | null = null
+
+		if (isStoredOffline) {
+			file = await offline.getLocalFile(item)
+		} else {
+			file = await fileCache.get({
+				item,
+				signal
+			})
+		}
+
+		if (!file) {
+			throw new Error("File not found")
+		}
 
 		return Buffer.from(await file.bytes()).toString("base64")
 	})

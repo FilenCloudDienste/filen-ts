@@ -68,12 +68,6 @@ vi.mock("@/constants", () => ({
 	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
 }))
 
-vi.mock("@/lib/memo", () => ({
-	useCallback: (fn: unknown) => fn,
-	useMemo: (fn: () => unknown) => fn(),
-	memo: (component: unknown) => component
-}))
-
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))

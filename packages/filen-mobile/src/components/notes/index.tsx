@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react"
+import { Fragment, useState, memo, useCallback, useMemo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
@@ -10,7 +10,6 @@ import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
 import { useResolveClassNames } from "uniwind"
-import { memo, useCallback, useMemo } from "@/lib/memo"
 import Note, { type ListItem as NoteListItem } from "@/components/notes/note"
 import useNotesStore from "@/stores/useNotes.store"
 import { useShallow } from "zustand/shallow"
@@ -27,6 +26,7 @@ import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import * as Sharing from "expo-sharing"
 
+// TODO: Fix memoization
 const Header = memo(() => {
 	const stringifiedClient = useStringifiedClient()
 	const textForeground = useResolveClassNames("text-foreground")

@@ -2,10 +2,10 @@ import * as Burnt from "burnt"
 import { Notifier, NotifierComponents } from "react-native-notifier"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import { FilenSdkError } from "@filen/sdk-rs"
 
-export const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }) => {
+const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }) => {
 	const insets = useSafeAreaInsets()
 
 	return (

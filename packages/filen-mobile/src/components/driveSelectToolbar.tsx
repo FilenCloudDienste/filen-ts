@@ -1,5 +1,4 @@
-import { memo, useCallback, useMemo } from "@/lib/memo"
-import { Fragment } from "react"
+import { Fragment, memo, useCallback, useMemo } from "react"
 import { CrossGlassContainerView } from "@/components/ui/view"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 import { useResolveClassNames } from "uniwind"
@@ -21,6 +20,7 @@ import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
 import { router } from "expo-router"
 
+// TODO: Fix memoization
 const DriveSelectToolbar = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()

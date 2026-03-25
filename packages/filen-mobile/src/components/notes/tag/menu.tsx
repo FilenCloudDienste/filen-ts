@@ -1,6 +1,6 @@
 import { type NoteTag, NoteType } from "@filen/sdk-rs"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
-import { memo, useMemo, useCallback } from "@/lib/memo"
+import { memo, useMemo, useCallback } from "react"
 import View from "@/components/ui/view"
 import useNotesStore from "@/stores/useNotes.store"
 import { useShallow } from "zustand/shallow"
@@ -14,7 +14,7 @@ import { Paths } from "expo-file-system"
 
 export type TagMenuOrigin = "tags"
 
-export const Menu = memo(
+const Menu = memo(
 	({
 		children,
 		origin,

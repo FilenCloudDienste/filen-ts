@@ -1,7 +1,7 @@
 import { NativeView } from "react-native-boost/runtime"
 import { withUniwind } from "uniwind"
 import { type ViewProps, type View as RNView, Platform, type StyleProp, type ViewStyle, StyleSheet } from "react-native"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import { cn } from "@filen/utils"
 import {
 	KeyboardAvoidingView as RNKeyboardControllerKeyboardAvoidingView,

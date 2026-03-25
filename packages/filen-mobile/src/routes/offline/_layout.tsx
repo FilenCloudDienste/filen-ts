@@ -1,5 +1,5 @@
 import { Stack } from "expo-router"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useOfflineStore from "@/stores/useOffline.store"

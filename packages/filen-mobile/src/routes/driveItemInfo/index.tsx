@@ -1,4 +1,3 @@
-import { memo, useMemo } from "@/lib/memo"
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
@@ -10,7 +9,7 @@ import View from "@/components/ui/view"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import Header from "@/components/ui/header"
-import { Fragment } from "react"
+import { Fragment, memo, useMemo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { cn, formatBytes } from "@filen/utils"
 import useDirectorySizeQuery from "@/queries/useDirectorySize.query"
@@ -27,8 +26,11 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
 			uuid: item?.data.uuid ?? "",
-			// TODO: Fix type for shared items
-			type: "normal"
+			// TODO: Fix type for shared in/out based on sharing role
+			type:
+				item.type === "sharedDirectory" || item.type === "sharedFile" || item.type === "sharedRootDirectory"
+					? "sharedOut"
+					: "normal"
 		},
 		{
 			enabled: item !== null && (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory")
@@ -45,266 +47,257 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 		}
 	)
 
-	const info = useMemo((): {
+	// TODO: extract to function and clean up
+	const info: {
 		type: string
 		title: string
 		value: string | React.ReactNode
-	}[] => {
-		return (
-			[
-				{
-					type: "type",
-					title: "tbd_type",
-					value:
-						item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-							? "tbd_directory"
-							: "tbd_file"
-				},
-				...(item.type === "file" || item.type === "sharedFile"
-					? [
-							{
-								type: "mime",
-								title: "tbd_mime",
-								value: item.data.decryptedMeta?.mime ?? "application/octet-stream"
-							},
-							{
-								type: "previewType",
-								title: "tbd_preview_type",
-								value: (() => {
-									const previewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
+	}[] = (
+		[
+			{
+				type: "type",
+				title: "tbd_type",
+				value:
+					item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+						? "tbd_directory"
+						: "tbd_file"
+			},
+			...(item.type === "file" || item.type === "sharedFile"
+				? [
+						{
+							type: "mime",
+							title: "tbd_mime",
+							value: item.data.decryptedMeta?.mime ?? "application/octet-stream"
+						},
+						{
+							type: "previewType",
+							title: "tbd_preview_type",
+							value: (() => {
+								const previewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
 
-									switch (previewType) {
-										case "audio": {
-											return "tbd_preview_type_audio"
-										}
-
-										case "code": {
-											return "tbd_preview_type_code"
-										}
-
-										case "docx": {
-											return "tbd_preview_type_docx"
-										}
-
-										case "pdf": {
-											return "tbd_preview_type_pdf"
-										}
-
-										case "image": {
-											return "tbd_preview_type_image"
-										}
-
-										case "text": {
-											return "tbd_preview_type_text"
-										}
-
-										case "video": {
-											return "tbd_preview_type_video"
-										}
-
-										case "unknown": {
-											return "tbd_preview_type_unknown"
-										}
+								switch (previewType) {
+									case "audio": {
+										return "tbd_preview_type_audio"
 									}
-								})()
-							}
-						]
-					: []),
-				{
-					type: "size",
-					title: "tbd_size",
-					value: (() => {
-						switch (item.type) {
-							case "file":
-							case "sharedFile": {
-								return formatBytes(Number(item.data.size))
-							}
 
-							case "directory":
-							case "sharedDirectory":
-							case "sharedRootDirectory": {
-								if (directorySizeQuery.status !== "success") {
-									return "..."
+									case "code": {
+										return "tbd_preview_type_code"
+									}
+
+									case "docx": {
+										return "tbd_preview_type_docx"
+									}
+
+									case "pdf": {
+										return "tbd_preview_type_pdf"
+									}
+
+									case "image": {
+										return "tbd_preview_type_image"
+									}
+
+									case "text": {
+										return "tbd_preview_type_text"
+									}
+
+									case "video": {
+										return "tbd_preview_type_video"
+									}
+
+									case "unknown": {
+										return "tbd_preview_type_unknown"
+									}
 								}
-
-								return formatBytes(directorySizeQuery.data.size)
-							}
+							})()
 						}
-					})()
-				},
-				...(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-					? [
-							{
-								type: "files",
-								title: "tbd_files",
-								value: directorySizeQuery.status === "success" ? directorySizeQuery.data.files.toString() : "..."
-							},
-							{
-								type: "directories",
-								title: "tbd_directories",
-								value: directorySizeQuery.status === "success" ? directorySizeQuery.data.dirs.toString() : "..."
-							}
-						]
-					: []),
-				{
-					type: "created",
-					title: "tbd_created",
-					value: (() => {
-						if (!item.data.decryptedMeta) {
-							return null
+					]
+				: []),
+			{
+				type: "size",
+				title: "tbd_size",
+				value: (() => {
+					switch (item.type) {
+						case "file":
+						case "sharedFile": {
+							return formatBytes(Number(item.data.size))
 						}
 
-						switch (item.type) {
-							case "file": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
+						case "directory":
+						case "sharedDirectory":
+						case "sharedRootDirectory": {
+							if (directorySizeQuery.status !== "success") {
+								return "..."
 							}
 
-							case "sharedFile": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
-							}
-
-							case "directory": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
-							}
-
-							case "sharedDirectory": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.inner.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
-							}
-
-							case "sharedRootDirectory": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.inner.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
-							}
+							return formatBytes(directorySizeQuery.data.size)
 						}
-					})()
-				},
-				{
-					type: "modified",
-					title: "tbd_modified",
-					value: (() => {
-						if (!item.data.decryptedMeta) {
-							return null
+					}
+				})()
+			},
+			...(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+				? [
+						{
+							type: "files",
+							title: "tbd_files",
+							value: directorySizeQuery.status === "success" ? directorySizeQuery.data.files.toString() : "..."
+						},
+						{
+							type: "directories",
+							title: "tbd_directories",
+							value: directorySizeQuery.status === "success" ? directorySizeQuery.data.dirs.toString() : "..."
 						}
+					]
+				: []),
+			{
+				type: "created",
+				title: "tbd_created",
+				value: (() => {
+					if (!item.data.decryptedMeta) {
+						return null
+					}
 
-						switch (item.type) {
-							case "file": {
-								if (!item.data.decryptedMeta.modified) {
-									return simpleDate(Number(item.data.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.modified))
-							}
-
-							case "sharedFile": {
-								if (!item.data.decryptedMeta.modified) {
-									return simpleDate(Number(item.data.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.modified))
-							}
-
-							case "directory": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
-							}
-
-							case "sharedDirectory": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.inner.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
-							}
-
-							case "sharedRootDirectory": {
-								if (!item.data.decryptedMeta.created) {
-									return simpleDate(Number(item.data.inner.timestamp))
-								}
-
-								return simpleDate(Number(item.data.decryptedMeta.created))
-							}
-						}
-					})()
-				},
-				{
-					type: "uploaded",
-					title: "tbd_uploaded",
-					value: (() => {
-						if (!item.data.decryptedMeta) {
-							return null
-						}
-
-						switch (item.type) {
-							case "file": {
+					switch (item.type) {
+						case "file": {
+							if (!item.data.decryptedMeta.created) {
 								return simpleDate(Number(item.data.timestamp))
 							}
 
-							case "sharedFile": {
+							return simpleDate(Number(item.data.decryptedMeta.created))
+						}
+
+						case "sharedFile": {
+							if (!item.data.decryptedMeta.created) {
 								return simpleDate(Number(item.data.timestamp))
 							}
 
-							case "directory": {
+							return simpleDate(Number(item.data.decryptedMeta.created))
+						}
+
+						case "directory": {
+							if (!item.data.decryptedMeta.created) {
 								return simpleDate(Number(item.data.timestamp))
 							}
 
-							case "sharedDirectory": {
+							return simpleDate(Number(item.data.decryptedMeta.created))
+						}
+
+						case "sharedDirectory": {
+							if (!item.data.decryptedMeta.created) {
 								return simpleDate(Number(item.data.inner.timestamp))
 							}
 
-							case "sharedRootDirectory": {
+							return simpleDate(Number(item.data.decryptedMeta.created))
+						}
+
+						case "sharedRootDirectory": {
+							if (!item.data.decryptedMeta.created) {
 								return simpleDate(Number(item.data.inner.timestamp))
 							}
+
+							return simpleDate(Number(item.data.decryptedMeta.created))
 						}
-					})()
-				},
-				{
-					type: "offline",
-					title: "tbd_offline",
-					value: (
-						<Ionicons
-							name="cloud-download-outline"
-							size={16}
-							color={
-								driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data
-									? textGreen500.color
-									: textRed500.color
+					}
+				})()
+			},
+			{
+				type: "modified",
+				title: "tbd_modified",
+				value: (() => {
+					if (!item.data.decryptedMeta) {
+						return null
+					}
+
+					switch (item.type) {
+						case "file": {
+							if (!item.data.decryptedMeta.modified) {
+								return simpleDate(Number(item.data.timestamp))
 							}
-						/>
-					)
-				}
-			] as const
-		).filter(info => info.value !== null)
-	}, [
-		item,
-		directorySizeQuery.data,
-		directorySizeQuery.status,
-		driveItemStoredOfflineQuery.data,
-		driveItemStoredOfflineQuery.status,
-		textGreen500.color,
-		textRed500.color
-	])
+
+							return simpleDate(Number(item.data.decryptedMeta.modified))
+						}
+
+						case "sharedFile": {
+							if (!item.data.decryptedMeta.modified) {
+								return simpleDate(Number(item.data.timestamp))
+							}
+
+							return simpleDate(Number(item.data.decryptedMeta.modified))
+						}
+
+						case "directory": {
+							if (!item.data.decryptedMeta.created) {
+								return simpleDate(Number(item.data.timestamp))
+							}
+
+							return simpleDate(Number(item.data.decryptedMeta.created))
+						}
+
+						case "sharedDirectory": {
+							if (!item.data.decryptedMeta.created) {
+								return simpleDate(Number(item.data.inner.timestamp))
+							}
+
+							return simpleDate(Number(item.data.decryptedMeta.created))
+						}
+
+						case "sharedRootDirectory": {
+							if (!item.data.decryptedMeta.created) {
+								return simpleDate(Number(item.data.inner.timestamp))
+							}
+
+							return simpleDate(Number(item.data.decryptedMeta.created))
+						}
+					}
+				})()
+			},
+			{
+				type: "uploaded",
+				title: "tbd_uploaded",
+				value: (() => {
+					if (!item.data.decryptedMeta) {
+						return null
+					}
+
+					switch (item.type) {
+						case "file": {
+							return simpleDate(Number(item.data.timestamp))
+						}
+
+						case "sharedFile": {
+							return simpleDate(Number(item.data.timestamp))
+						}
+
+						case "directory": {
+							return simpleDate(Number(item.data.timestamp))
+						}
+
+						case "sharedDirectory": {
+							return simpleDate(Number(item.data.inner.timestamp))
+						}
+
+						case "sharedRootDirectory": {
+							return simpleDate(Number(item.data.inner.timestamp))
+						}
+					}
+				})()
+			},
+			{
+				type: "offline",
+				title: "tbd_offline",
+				value: (
+					<Ionicons
+						name="cloud-download-outline"
+						size={16}
+						color={
+							driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data
+								? textGreen500.color
+								: textRed500.color
+						}
+					/>
+				)
+			}
+		] as const
+	).filter(info => info.value !== null)
 
 	return (
 		<View className="bg-transparent flex-col gap-2">

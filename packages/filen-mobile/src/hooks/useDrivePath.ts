@@ -1,9 +1,11 @@
 import { useLocalSearchParams, useNavigation } from "expo-router"
-import { useMemo } from "@/lib/memo"
 import { validate as validateUuid } from "uuid"
 import type { DriveItem } from "@/types"
 import { Buffer } from "react-native-quick-crypto"
 import { unpack } from "@/lib/msgpack"
+import { useCameraUpload } from "@/lib/cameraUpload"
+import { unwrapDirMeta } from "@/lib/utils"
+import { useMemo } from "react"
 
 export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links", "photos"] as const
 export type DrivePathType = (typeof DRIVE_PATH_TYPES)[number]
@@ -29,12 +31,14 @@ export type DrivePath =
 			selectOptions?: SelectOptions
 	  }
 
+// TODO: Fix memo
 export default function useDrivePath(): DrivePath {
 	const searchParams = useLocalSearchParams<{
 		uuid?: string
 		selectOptions?: string
 	}>()
-	const navigation = useNavigation()
+	const { getId: getNavigationId } = useNavigation()
+	const { config: cameraUploadConfig } = useCameraUpload()
 
 	const selectOptions = useMemo((): SelectOptions | null => {
 		if (searchParams && searchParams.selectOptions) {
@@ -58,7 +62,7 @@ export default function useDrivePath(): DrivePath {
 	}, [searchParams])
 
 	const drivePath = useMemo((): DrivePath => {
-		const navigationId = navigation.getId() ?? ""
+		const navigationId = getNavigationId() ?? ""
 		const isDriveSelectScreen = navigationId.startsWith("/driveSelect")
 
 		if (isDriveSelectScreen && selectOptions) {
@@ -104,7 +108,13 @@ export default function useDrivePath(): DrivePath {
 
 			return {
 				type,
-				uuid: searchParams && searchParams.uuid && validateUuid(searchParams.uuid) ? searchParams.uuid : null
+				uuid: isPhotosScreen
+					? cameraUploadConfig.enabled && cameraUploadConfig.remoteDir
+						? unwrapDirMeta(cameraUploadConfig.remoteDir).uuid
+						: null
+					: searchParams && searchParams.uuid && validateUuid(searchParams.uuid)
+						? searchParams.uuid
+						: null
 			}
 		} else if (isTrashScreen) {
 			return {
@@ -122,7 +132,7 @@ export default function useDrivePath(): DrivePath {
 			type: null,
 			uuid: null
 		}
-	}, [searchParams, navigation, selectOptions])
+	}, [searchParams, getNavigationId, selectOptions, cameraUploadConfig.enabled, cameraUploadConfig.remoteDir])
 
 	return drivePath
 }

@@ -1,6 +1,5 @@
-import { useRef, useState } from "react"
+import { useRef, useState, memo, useMemo, useCallback } from "react"
 import type { Chat as TChat } from "@filen/sdk-rs"
-import { memo, useMemo, useCallback } from "@/lib/memo"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useChatMessagesQuery from "@/queries/useChatMessages.query"
@@ -83,17 +82,14 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 			return undefined
 		}
 
-		// eslint-disable-next-line react/display-name
-		return () => {
-			return (
-				<View className="w-full h-auto items-center justify-center pt-4">
-					<ActivityIndicator
-						size="small"
-						color={textMutedForeground.color}
-					/>
-				</View>
-			)
-		}
+		return (
+			<View className="w-full h-auto items-center justify-center pt-4">
+				<ActivityIndicator
+					size="small"
+					color={textMutedForeground.color}
+				/>
+			</View>
+		)
 	}, [isFetchingMore, textMutedForeground.color])
 
 	const headerComponent = useCallback(() => {
@@ -187,7 +183,7 @@ export const Messages = memo(({ chat }: { chat: TChat }) => {
 				renderItem={renderItem}
 				onEndReachedThreshold={0.5}
 				loading={chatMessagesQuery.status !== "success"}
-				footerComponent={footerComponent}
+				footerComponent={() => footerComponent}
 				onEndReached={onEndReached}
 				maintainVisibleContentPosition={{
 					disabled: true

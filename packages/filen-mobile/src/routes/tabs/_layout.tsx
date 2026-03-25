@@ -4,11 +4,11 @@ import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { useIsAuthed } from "@/lib/auth"
 import { Redirect } from "expo-router"
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import useChatsUnreadCount from "@/hooks/useChatsUnreadCount"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 
-export const TabsLayout = memo(() => {
+const TabsLayout = memo(() => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")

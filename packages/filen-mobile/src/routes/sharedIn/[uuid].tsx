@@ -1,4 +1,4 @@
-import { memo } from "@/lib/memo"
+import { memo } from "react"
 import Drive from "@/components/drive"
 
 const SharedIn = memo(() => {

@@ -4,7 +4,7 @@ import "@uiw/react-md-editor/markdown-editor.css"
 import "@uiw/react-markdown-preview/markdown.css"
 
 import { type DOMProps, useDOMImperativeHandle } from "expo/dom"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react"
 import type { Platform } from "react-native"
 import CodeMirror, { EditorView, type ReactCodeMirrorRef } from "@uiw/react-codemirror"
 import { xcodeLight, xcodeDark } from "@uiw/codemirror-theme-xcode"
@@ -18,7 +18,6 @@ import rehypeSanitize from "rehype-sanitize"
 import { visit } from "unist-util-visit"
 import type { Plugin } from "unified"
 import type { Root, Element } from "hast"
-import { memo, useCallback, useMemo } from "@/lib/memo"
 
 const rehypeExternalLinks: Plugin<[], Root> = () => {
 	return tree => {
