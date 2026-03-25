@@ -18,8 +18,6 @@ export default function useRefreshOnFocus({
 			}
 
 			if (enabledRef.current) {
-				console.log("[useRefreshOnFocus] Refetching on focus")
-
 				refetch().catch(() => {})
 			} else {
 				enabledRef.current = true
