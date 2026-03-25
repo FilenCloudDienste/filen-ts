@@ -17,7 +17,7 @@ import { run } from "@filen/utils"
 import chats from "@/lib/chats"
 import alerts from "@/lib/alerts"
 
-export const Messages = memo(({ chat }: { chat: TChat }) => {
+const Messages = memo(({ chat }: { chat: TChat }) => {
 	const insets = useSafeAreaInsets()
 	const keyboardAnimation = useReanimatedKeyboardAnimation()
 	const inputViewLayout = useChatsStore(useShallow(state => state.inputViewLayout))

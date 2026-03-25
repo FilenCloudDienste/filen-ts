@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, memo } from "react"
+import { Fragment, useRef, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import View from "@/components/ui/view"
@@ -27,6 +27,7 @@ import { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
 import { useResolveClassNames } from "uniwind"
+import { useRecyclingState } from "@shopify/flash-list"
 
 const Photo = memo(
 	({
@@ -40,7 +41,7 @@ const Photo = memo(
 		drivePath: DrivePath
 		parent?: AnyDirWithContext
 	}) => {
-		const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
+		const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
 		const netInfo = useNetInfo()
 		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
 

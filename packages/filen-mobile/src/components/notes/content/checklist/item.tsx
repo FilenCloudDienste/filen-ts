@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, memo } from "react"
+import { useRef, useEffect, memo, useState } from "react"
 import { TextInput, type TextInputKeyPressEvent, type TextInputSubmitEditingEvent } from "react-native"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import { useResolveClassNames } from "uniwind"
@@ -9,7 +9,7 @@ import useChecklistStore from "@/stores/useChecklist.store"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 
-export const Item = memo(
+const Item = memo(
 	({
 		id,
 		onContentChange,

@@ -888,7 +888,7 @@ const Header = memo(() => {
 	)
 })
 
-export const Notes = memo(() => {
+const Notes = memo(() => {
 	const notesQuery = useNotesWithContentQuery()
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
 	const { tagUuid } = useLocalSearchParams<{

@@ -7,7 +7,7 @@ import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 import Toolbar from "@/components/notes/content/checklist/toolbar"
 
-export const Checklist = memo(
+const Checklist = memo(
 	({
 		initialValue,
 		onChange,
