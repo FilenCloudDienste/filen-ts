@@ -1,0 +1,30 @@
+diff --git a/node_modules/@op-engineering/op-sqlite/android/build.gradle b/node_modules/@op-engineering/op-sqlite/android/build.gradle
+index 08631df..fff6505 100644
+--- a/node_modules/@op-engineering/op-sqlite/android/build.gradle
++++ b/node_modules/@op-engineering/op-sqlite/android/build.gradle
+@@ -112,6 +112,14 @@ if(!tokenizers.isEmpty()) {
+   println "[OP-SQLITE] Tokenizers enabled. Detected tokenizers: " + tokenizers
+ }
+
++def reactNativeArchitectures() {
++  def value = project.findProperty("reactNativeArchitectures")
++  if (value != null && value.trim()) {
++    return value.split(",").collect { it.trim() }.findAll { it }
++  }
++  return ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
++}
++
+ android {
+   namespace "com.op.sqlite"
+
+@@ -123,6 +131,10 @@ android {
+
+     buildConfigField "boolean", "USE_LIBSQL", "${useLibsql}"
+
++    ndk {
++      abiFilters(*reactNativeArchitectures())
++    }
++
+     externalNativeBuild {
+       cmake {
+         if(useSQLCipher) {

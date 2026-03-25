@@ -63,8 +63,9 @@ export default [
 			"@typescript-eslint/ban-types": "off",
 			"react/react-in-jsx-scope": "off",
 			"react/prop-types": "off",
-			"react/display-name": "warn",
+			"react/display-name": "off",
 			"react-compiler/react-compiler": "error",
+			"react-hooks/preserve-manual-memoization": "error",
 			"@typescript-eslint/no-unused-vars": [
 				"error",
 				{
