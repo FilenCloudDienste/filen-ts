@@ -1,4 +1,4 @@
-import { memo, useState, useRef } from "react"
+import { memo, useRef } from "react"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
@@ -12,6 +12,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import offline from "@/lib/offline"
+import { useRecyclingState } from "@shopify/flash-list"
 
 const pdfViewStyle = {
 	flex: 1,
@@ -19,7 +20,7 @@ const pdfViewStyle = {
 }
 
 const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
-	const [password, setPassword] = useState<string | null>(null)
+	const [password, setPassword] = useRecyclingState<string | null>(null, [item.data.uuid])
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 	const onErrorWorkingRef = useRef<boolean>(false)

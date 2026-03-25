@@ -5,7 +5,7 @@ import { Platform } from "react-native"
 import crypto from "crypto"
 import { pack, unpack } from "@/lib/msgpack"
 import { run, Semaphore, runEffect } from "@filen/utils"
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useRef, useEffect, useCallback, useState } from "react"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
 import { Buffer } from "react-native-quick-crypto"
@@ -382,15 +382,18 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	const isLocalUpdateRef = useRef<boolean>(false)
 	const initialValueRef = useRef<T>(initialValue)
 
-	const setStateChecked = useCallback((value: T) => {
-		if (isEqual(value, lastValueRef.current)) {
-			return
-		}
+	const setStateChecked = useCallback(
+		(value: T) => {
+			if (isEqual(value, lastValueRef.current)) {
+				return
+			}
 
-		lastValueRef.current = value
+			lastValueRef.current = value
 
-		setState(value)
-	}, [])
+			setState(value)
+		},
+		[setState]
+	)
 
 	const retrieve = async () => {
 		const result = await run(async defer => {

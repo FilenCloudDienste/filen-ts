@@ -9,7 +9,7 @@ import { ActivityIndicator } from "react-native"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import fileCache from "@/lib/fileCache"
 import type { DriveItemFileExtracted } from "@/types"
-import { useState, memo } from "react"
+import { memo } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import transfers from "@/lib/transfers"
@@ -19,6 +19,7 @@ import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import { type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import offline from "@/lib/offline"
+import { useRecyclingState } from "@shopify/flash-list"
 
 const PreviewTextInner = memo(
 	({
@@ -36,7 +37,7 @@ const PreviewTextInner = memo(
 		const { theme } = useUniwind()
 		const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 		const insets = useSafeAreaInsets()
-		const [editedText, setEditedText] = useState<string | null>(null)
+		const [editedText, setEditedText] = useRecyclingState<string | null>(null, [item.data.uuid])
 		const textPrimary = useResolveClassNames("text-primary")
 		const readOnly = item.type !== "file" || !item.data.decryptedMeta || !parent
 

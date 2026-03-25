@@ -1,4 +1,4 @@
-import { useState, Fragment, memo } from "react"
+import { Fragment, memo } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
@@ -17,6 +17,7 @@ import { Paths } from "expo-file-system"
 import type { DriveItemFileExtracted } from "@/types"
 import { type Metadata } from "@/lib/audioCache"
 import useEffectOnce from "@/hooks/useEffectOnce"
+import { useRecyclingState } from "@shopify/flash-list"
 
 const FONT_TABULAR_NUMS: TextStyle = {
 	fontVariant: ["tabular-nums"]
@@ -168,8 +169,18 @@ function buildSliderTapGesture(sv: SliderSharedValues, trackWidth: number, seekT
 }
 
 const AudioSlider = memo(
-	({ currentTime, duration, onSeek }: { currentTime: number; duration: number; onSeek: (seconds: number) => void }) => {
-		const [trackWidth, setTrackWidth] = useState<number>(0)
+	({
+		currentTime,
+		duration,
+		onSeek,
+		item
+	}: {
+		currentTime: number
+		duration: number
+		onSeek: (seconds: number) => void
+		item: DriveItemFileExtracted
+	}) => {
+		const [trackWidth, setTrackWidth] = useRecyclingState<number>(0, [item.data.uuid])
 		const isSeeking = useSharedValue<boolean>(false)
 		const seekProgress = useSharedValue<number>(0)
 		const thumbScale = useSharedValue<number>(1)
@@ -367,6 +378,7 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 			</PressableScale>
 			<View className="bg-transparent px-4 w-full">
 				<AudioSlider
+					item={item}
 					currentTime={status["preview"]?.currentTime ?? 0}
 					duration={status["preview"]?.duration ?? 0}
 					onSeek={onSeek}
