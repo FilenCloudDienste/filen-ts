@@ -39,13 +39,13 @@ const GalleryHeader = memo(
 		const netInfo = useNetInfo()
 		const textForeground = useResolveClassNames("text-foreground")
 
-		const { currentItem, currentItemPreviewType } = useDrivePreviewStore(
+		const { currentItem } = useDrivePreviewStore(
 			useShallow(state => ({
-				currentItem: state.currentItem,
-				currentItemPreviewType: getPreviewType(state.currentItem?.data.decryptedMeta?.name ?? "")
+				currentItem: state.currentItem
 			}))
 		)
 
+		const currentItemPreviewType = getPreviewType(currentItem?.data.decryptedMeta?.name ?? "")
 		const solidHeader = currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
@@ -70,6 +70,10 @@ const GalleryHeader = memo(
 				})
 			)
 		}, [layout.height, insets.top])
+
+		if (!currentItem) {
+			return null
+		}
 
 		return (
 			<AnimatedView

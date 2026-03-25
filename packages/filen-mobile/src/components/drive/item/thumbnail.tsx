@@ -9,6 +9,7 @@ import { DirColor } from "@filen/sdk-rs"
 import { useRecyclingState } from "@shopify/flash-list"
 import { AppState } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
+import { useFocusEffect } from "expo-router"
 
 const MAX_ERROR_RETRIES = 3
 const MAX_GENERATE_RETRIES = 3
@@ -31,7 +32,7 @@ const DirectoryThumbnail = memo(
 	}
 )
 
-const FileThumbnail = memo(
+const FileThumbnailWithGenerate = memo(
 	({
 		item,
 		size,
@@ -226,6 +227,18 @@ const FileThumbnail = memo(
 			}
 		}, [])
 
+		useFocusEffect(
+			useCallback(() => {
+				return () => {
+					abortControllerRef.current?.abort()
+
+					abortControllerRef.current = null
+					errorRetryCountRef.current = 0
+					isGeneratingRef.current = false
+				}
+			}, [])
+		)
+
 		const source = !localPath
 			? null
 			: {
@@ -256,6 +269,67 @@ const FileThumbnail = memo(
 				resizeMode={resizeMode ?? "contain"}
 				cachePolicy={undefined}
 				onFailure={onFailure}
+			/>
+		)
+	}
+)
+
+const FileThumbnail = memo(
+	({
+		item,
+		size,
+		className,
+		resizeMode
+	}: {
+		item: DriveItemFileExtracted
+		size: ThumbnailSize
+		className?: string
+		resizeMode?: React.ComponentProps<typeof Image>["resizeMode"]
+	}) => {
+		const [localPath] = useRecyclingState<string | null>(() => {
+			const available = cache.availableThumbnails.get(item.data.uuid)
+
+			if (!available) {
+				return null
+			}
+
+			const exists = thumbnails.exists(item)
+
+			return exists.exists ? exists.path : null
+		}, [item.data.uuid])
+
+		const [didFail, setDidFail] = useRecyclingState<boolean>(false, [item.data.uuid])
+
+		const source = !localPath
+			? null
+			: {
+					uri: localPath
+				}
+
+		const imageStyle = {
+			width: size.thumbnail,
+			height: size.thumbnail
+		}
+
+		if (source && !didFail) {
+			return (
+				<Image
+					className={className}
+					source={source}
+					style={imageStyle}
+					resizeMode={resizeMode ?? "contain"}
+					cachePolicy={undefined}
+					onFailure={() => setDidFail(true)}
+				/>
+			)
+		}
+
+		return (
+			<FileThumbnailWithGenerate
+				item={item}
+				size={size}
+				className={className}
+				resizeMode={resizeMode}
 			/>
 		)
 	}
