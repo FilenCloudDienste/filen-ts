@@ -1,4 +1,4 @@
-import { Fragment, useEffect, memo, useMemo, useCallback } from "react"
+import { Fragment, useEffect, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { useLocalSearchParams, Redirect, useRouter } from "expo-router"
@@ -30,13 +30,12 @@ import { simpleDateNoTime } from "@/lib/time"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
 import useChatsStore from "@/stores/useChats.store"
 
-// TODO: Fix memoization
 const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 	const stringifiedClient = useStringifiedClient()
 
 	const participantsWithoutSelf = chat.participants.filter(p => p.userId !== stringifiedClient?.userId)
 
-	const title = useMemo(() => {
+	const title = (() => {
 		if (chat.name && chat.name.length > 0) {
 			return chat.name
 		}
@@ -53,7 +52,7 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
 			.map(p => contactDisplayName(p))
 			.join(", ")
-	}, [chat.name, participantsWithoutSelf])
+	})()
 
 	const participantsWithAvatars = participantsWithoutSelf
 		.filter(p => p.avatar && p.avatar.startsWith("http"))
@@ -114,7 +113,7 @@ const Header = memo(({ chat }: { chat: TChat }) => {
 	const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === chat.uuid)))
 	const unreadCount = useChatUnreadCount(chat)
 
-	const headerRightItems = useMemo(() => {
+	const headerRightItems = (() => {
 		if (!stringigiedClient) {
 			return []
 		}
@@ -143,7 +142,7 @@ const Header = memo(({ chat }: { chat: TChat }) => {
 				}
 			}
 		] satisfies HeaderItem[]
-	}, [stringigiedClient, chat, isSelected, unreadCount, textForeground.color])
+	})()
 
 	return (
 		<StackHeader
@@ -161,7 +160,7 @@ const Header = memo(({ chat }: { chat: TChat }) => {
 const Unread = memo(({ chat }: { chat: TChat }) => {
 	const unreadCount = useChatUnreadCount(chat)
 
-	const markAsRead = useCallback(async () => {
+	const markAsRead = async () => {
 		if (!chat) {
 			return
 		}
@@ -183,7 +182,7 @@ const Unread = memo(({ chat }: { chat: TChat }) => {
 
 			return
 		}
-	}, [chat])
+	}
 
 	if (unreadCount === 0) {
 		return null
@@ -224,9 +223,7 @@ const Chat = memo(() => {
 		enabled: false
 	})
 
-	const chat = useMemo(() => {
-		return chatsQuery.data?.find(c => c.uuid === uuid) as TChat
-	}, [chatsQuery.data, uuid])
+	const chat = chatsQuery.data?.find(c => c.uuid === uuid) as TChat
 
 	const containerStyle = useAnimatedStyle(() => {
 		return {

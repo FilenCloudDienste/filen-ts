@@ -24,7 +24,6 @@ import events from "@/lib/events"
 import { LRUCache } from "lru-cache"
 import { parseExifDate } from "@/lib/exif"
 import drive from "@/lib/drive"
-import { useCallback } from "react"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
 import { getPermissionsAsync } from "expo-media-library"
@@ -692,10 +691,10 @@ export function useCameraUpload() {
 	const errors = useCameraUploadStore(useShallow(state => state.errors))
 	const [config, setConfig] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
 
-	const sync = useCallback((params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params), [])
-	const cancel = useCallback(() => cameraUpload.cancel(), [])
-	const pause = useCallback(() => cameraUpload.pause(), [])
-	const resume = useCallback(() => cameraUpload.resume(), [])
+	const sync = (params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params)
+	const cancel = () => cameraUpload.cancel()
+	const pause = () => cameraUpload.pause()
+	const resume = () => cameraUpload.resume()
 
 	return {
 		syncing,

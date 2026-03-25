@@ -1,4 +1,4 @@
-import { Fragment, useState, memo, useCallback, useMemo } from "react"
+import { Fragment, useState, memo, useCallback } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
@@ -26,7 +26,6 @@ import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import * as Sharing from "expo-sharing"
 
-// TODO: Fix memoization
 const Header = memo(() => {
 	const stringifiedClient = useStringifiedClient()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -70,107 +69,88 @@ const Header = memo(() => {
 		enabled: false
 	})
 
-	const tag = useMemo(() => {
+	const tag = (() => {
 		if (notesTagsQuery.status !== "success" || !tagUuid) {
 			return null
 		}
 
 		return notesTagsQuery.data.find(t => t.uuid === tagUuid) ?? null
-	}, [tagUuid, notesTagsQuery.status, notesTagsQuery.data])
+	})()
 
-	const viewMode = useMemo(() => {
-		if (tag) {
-			return "notes"
-		}
+	const viewMode = tag ? "notes" : notesViewMode
 
-		return notesViewMode
-	}, [tag, notesViewMode])
+	const notes =
+		notesQuery.status === "success"
+			? notesSorter.group({
+					notes: notesQuery.data,
+					groupArchived: true,
+					groupTrashed: true,
+					groupFavorited: true,
+					groupPinned: true,
+					tag: tag ?? undefined
+				})
+			: []
 
-	const notes = useMemo((): NoteListItem[] => {
-		if (notesQuery.status !== "success") {
-			return []
-		}
+	const onlyNotes = notes.filter(n => n.type === "note")
 
-		return notesSorter.group({
-			notes: notesQuery.data,
-			groupArchived: true,
-			groupTrashed: true,
-			groupFavorited: true,
-			groupPinned: true,
-			tag: tag ?? undefined
+	const notesTags =
+		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid)) : []
+
+	const createNote = async (type: NoteType) => {
+		const result = await run(async () => {
+			return await prompts.input({
+				title: "tbd_create_note",
+				message: "tbd_enter_note_name",
+				cancelText: "tbd_cancel",
+				okText: "tbd_create"
+			})
 		})
-	}, [notesQuery.data, notesQuery.status, tag])
 
-	const onlyNotes = useMemo(() => {
-		return notes.filter(n => n.type === "note")
-	}, [notes])
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
 
-	const notesTags = useMemo(() => {
-		if (notesTagsQuery.status !== "success") {
-			return []
+			return
 		}
 
-		return notesTagsQuery.data.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
-	}, [notesTagsQuery.data, notesTagsQuery.status])
+		if (result.data.cancelled || result.data.type !== "string") {
+			return
+		}
 
-	const createNote = useCallback(
-		async (type: NoteType) => {
-			const result = await run(async () => {
-				return await prompts.input({
-					title: "tbd_create_note",
-					message: "tbd_enter_note_name",
-					cancelText: "tbd_cancel",
-					okText: "tbd_create"
-				})
+		const title = result.data.value.trim()
+
+		if (title.length === 0) {
+			return
+		}
+
+		const createResult = await runWithLoading(async () => {
+			const newNote = await notesLib.create({
+				title,
+				content: "",
+				type
 			})
 
-			if (!result.success) {
-				console.error(result.error)
-				alerts.error(result.error)
-
-				return
-			}
-
-			if (result.data.cancelled || result.data.type !== "string") {
-				return
-			}
-
-			const title = result.data.value.trim()
-
-			if (title.length === 0) {
-				return
-			}
-
-			const createResult = await runWithLoading(async () => {
-				const newNote = await notesLib.create({
-					title,
-					content: "",
-					type
+			if (tag) {
+				await notesLib.addTag({
+					note: newNote,
+					tag
 				})
-
-				if (tag) {
-					await notesLib.addTag({
-						note: newNote,
-						tag
-					})
-				}
-
-				return newNote
-			})
-
-			if (!createResult.success) {
-				console.error(createResult.error)
-				alerts.error(createResult.error)
-
-				return
 			}
 
-			router.push(Paths.join("/", "note", createResult.data.uuid))
-		},
-		[tag]
-	)
+			return newNote
+		})
 
-	const headerRightItems = useMemo(() => {
+		if (!createResult.success) {
+			console.error(createResult.error)
+			alerts.error(createResult.error)
+
+			return
+		}
+
+		router.push(Paths.join("/", "note", createResult.data.uuid))
+	}
+
+	const headerRightItems = (() => {
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
 
@@ -857,29 +837,9 @@ const Header = memo(() => {
 		}
 
 		return items
-	}, [
-		tag,
-		textForeground.color,
-		viewMode,
-		onlyNotes,
-		createNote,
-		notesTags,
-		notesViewMode,
-		setNotesViewMode,
-		selectedNotes,
-		selectedNotesIncludesPinned,
-		selectedTags,
-		selectedTagsIncludesFavorited,
-		selectedNotesIncludesFavorited,
-		hasWriteAccessToAllSelectedNotes,
-		everySelectedNoteTrashed,
-		everySelectedNoteArchived,
-		everySelectedNoteOwned,
-		selectedNotesIncludesTrashed,
-		participantOfEverySelectedNote
-	])
+	})()
 
-	const headerLeftItems = useMemo(() => {
+	const headerLeftItems = (() => {
 		if (selectedNotes.length === 0 && selectedTags.length === 0) {
 			return []
 		}
@@ -900,9 +860,9 @@ const Header = memo(() => {
 				}
 			}
 		] satisfies HeaderItem[]
-	}, [selectedNotes, selectedTags, textForeground.color])
+	})()
 
-	const title = useMemo(() => {
+	const title = (() => {
 		if (viewMode === "notes") {
 			if (selectedNotes.length > 0) {
 				return `${selectedNotes.length} tbd_selected`
@@ -916,7 +876,7 @@ const Header = memo(() => {
 
 			return "tbd_tags"
 		}
-	}, [viewMode, selectedNotes.length, selectedTags.length])
+	})()
 
 	return (
 		<StackHeader
@@ -937,15 +897,15 @@ export const Notes = memo(() => {
 	const notesTagsQuery = useNotesTagsQuery()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 
-	const tag = useMemo(() => {
+	const tag = (() => {
 		if (notesTagsQuery.status !== "success" || !tagUuid) {
 			return null
 		}
 
 		return notesTagsQuery.data.find(t => t.uuid === tagUuid) ?? null
-	}, [tagUuid, notesTagsQuery.status, notesTagsQuery.data])
+	})()
 
-	const notes = useMemo((): NoteListItem[] => {
+	const notes = ((): NoteListItem[] => {
 		if (notesQuery.status !== "success") {
 			return []
 		}
@@ -980,9 +940,9 @@ export const Notes = memo(() => {
 		}
 
 		return notes
-	}, [notesQuery.data, notesQuery.status, tag, searchQuery])
+	})()
 
-	const notesTags = useMemo(() => {
+	const notesTags = (() => {
 		if (notesTagsQuery.status !== "success") {
 			return []
 		}
@@ -1002,9 +962,9 @@ export const Notes = memo(() => {
 		}
 
 		return notesTags
-	}, [notesTagsQuery.data, notesTagsQuery.status, searchQuery])
+	})()
 
-	const notesForTag = useMemo<Record<string, TNote[]>>(() => {
+	const notesForTag = (() => {
 		if (notesQuery.status !== "success" || notesTagsQuery.status !== "success") {
 			return {}
 		}
@@ -1026,42 +986,36 @@ export const Notes = memo(() => {
 		}
 
 		return index
-	}, [notesQuery.data, notesQuery.status, notesTagsQuery.data, notesTagsQuery.status])
+	})()
 
-	const renderItemNotesView = useCallback(
-		(info: ListRenderItemInfo<NoteListItem>) => {
-			return (
-				<Note
-					info={info}
-					nextNote={notes[info.index + 1]}
-					prevNote={notes[info.index - 1]}
-				/>
-			)
-		},
-		[notes]
-	)
+	const renderItemNotesView = (info: ListRenderItemInfo<NoteListItem>) => {
+		return (
+			<Note
+				info={info}
+				nextNote={notes[info.index + 1]}
+				prevNote={notes[info.index - 1]}
+			/>
+		)
+	}
 
-	const renderItemTagsView = useCallback(
-		(info: ListRenderItemInfo<NoteTag>) => {
-			return (
-				<Tag
-					info={info}
-					notesForTag={notesForTag[info.item.uuid] ?? []}
-				/>
-			)
-		},
-		[notesForTag]
-	)
+	const renderItemTagsView = (info: ListRenderItemInfo<NoteTag>) => {
+		return (
+			<Tag
+				info={info}
+				notesForTag={notesForTag[info.item.uuid] ?? []}
+			/>
+		)
+	}
 
-	const keyExtractorNotesView = useCallback((note: NoteListItem) => {
+	const keyExtractorNotesView = (note: NoteListItem) => {
 		return note.type === "header" ? note.id : note.uuid
-	}, [])
+	}
 
-	const keyExtractorTagsView = useCallback((tag: NoteTag) => {
+	const keyExtractorTagsView = (tag: NoteTag) => {
 		return tag.uuid
-	}, [])
+	}
 
-	const onRefresh = useCallback(async () => {
+	const onRefresh = async () => {
 		const result = await run(async () => {
 			await notesQuery.refetch()
 		})
@@ -1070,15 +1024,9 @@ export const Notes = memo(() => {
 			console.error(result.error)
 			alerts.error(result.error)
 		}
-	}, [notesQuery])
+	}
 
-	const viewMode = useMemo(() => {
-		if (tag) {
-			return "notes"
-		}
-
-		return notesViewMode
-	}, [tag, notesViewMode])
+	const viewMode = tag ? "notes" : notesViewMode
 
 	useFocusEffect(
 		useCallback(() => {
@@ -1092,35 +1040,31 @@ export const Notes = memo(() => {
 		}, [])
 	)
 
-	const notesEmptyComponent = useCallback(() => {
+	const notesEmptyComponent = () => {
 		return (
 			<View className="flex-1 items-center justify-center">
 				<Text>tbd</Text>
 			</View>
 		)
-	}, [])
+	}
 
-	const notesSearchBar = useMemo(() => {
-		return {
-			onChangeText: setSearchQuery,
-			placeholder: "tbd_search_notes"
-		}
-	}, [setSearchQuery])
+	const notesSearchBar = {
+		onChangeText: setSearchQuery,
+		placeholder: "tbd_search_notes"
+	}
 
-	const tagsEmptyComponent = useCallback(() => {
+	const tagsEmptyComponent = () => {
 		return (
 			<View className="flex-1 items-center justify-center">
 				<Text>tbd</Text>
 			</View>
 		)
-	}, [])
+	}
 
-	const tagsSearchBar = useMemo(() => {
-		return {
-			onChangeText: setSearchQuery,
-			placeholder: "tbd_search_notes_tags"
-		}
-	}, [setSearchQuery])
+	const tagsSearchBar = {
+		onChangeText: setSearchQuery,
+		placeholder: "tbd_search_notes_tags"
+	}
 
 	return (
 		<Fragment>

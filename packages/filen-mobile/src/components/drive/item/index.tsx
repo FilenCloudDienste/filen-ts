@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from "react"
+import { memo } from "react"
 import View from "@/components/ui/view"
 import { PressableScale } from "@/components/ui/pressables"
 import Menu, { type DriveItemMenuOrigin } from "@/components/drive/item/menu"
@@ -28,7 +28,6 @@ import useDriveSelectStore from "@/stores/useDriveSelect.store"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import { useRecyclingState } from "@shopify/flash-list"
 
-// TODO: Fix memoization
 const Item = memo(
 	({
 		info,
@@ -56,15 +55,10 @@ const Item = memo(
 		)
 		const selectedItemsFromDriveSelectLength = useDriveSelectStore(useShallow(state => state.selectedItems.length))
 
-		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery(
-			{
-				uuid: info.item.item.data.uuid,
-				type: info.item.item.type
-			},
-			{
-				enabled: origin !== "offline"
-			}
-		)
+		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
+			uuid: info.item.item.data.uuid,
+			type: info.item.item.type
+		})
 
 		const driveItemVersionsQuery = useDriveItemVersionsQuery(
 			{
@@ -75,7 +69,7 @@ const Item = memo(
 			}
 		)
 
-		const disabled = useMemo(() => {
+		const disabled = (() => {
 			if (!drivePath.selectOptions) {
 				return false
 			}
@@ -120,9 +114,9 @@ const Item = memo(
 					}
 				}
 			}
-		}, [drivePath.selectOptions, info.item, isSelectedFromDriveSelect, selectedItemsFromDriveSelectLength])
+		})()
 
-		const onPressSelectForDriveSelect = useCallback(() => {
+		const onPressSelectForDriveSelect = () => {
 			if (disabled) {
 				return
 			}
@@ -143,9 +137,9 @@ const Item = memo(
 
 				return
 			}
-		}, [disabled, drivePath.selectOptions, info.item])
+		}
 
-		const onPress = useCallback(() => {
+		const onPress = () => {
 			if (disabled) {
 				return
 			}
@@ -268,7 +262,7 @@ const Item = memo(
 
 				return
 			}
-		}, [info.item, origin, areDriveItemsSelected, isSelectedFromDriveSelect, onPressSelectForDriveSelect, disabled, drivePath])
+		}
 
 		return (
 			<View

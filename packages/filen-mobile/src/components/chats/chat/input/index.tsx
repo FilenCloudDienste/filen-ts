@@ -1,5 +1,5 @@
 import { type Chat, type ChatParticipant, ChatTypingType } from "@filen/sdk-rs"
-import { useRef, useEffect, Fragment, memo, useCallback, useMemo } from "react"
+import { useRef, useEffect, Fragment, memo, useCallback } from "react"
 import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent } from "react-native"
 import View, { KeyboardStickyView, CrossGlassContainerView, GestureHandlerScrollView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -76,7 +76,6 @@ export const PopupContainerView = memo(
 	}
 )
 
-// TODO: Fix memoization
 export const MentionSuggestions = memo(({ chat }: { chat: Chat }) => {
 	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
 	const stringifiedClient = useStringifiedClient()
@@ -84,7 +83,7 @@ export const MentionSuggestions = memo(({ chat }: { chat: Chat }) => {
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const inputFocused = useChatsStore(useShallow(state => state.inputFocused))
 
-	const { show, text } = useMemo(() => {
+	const { show, text } = (() => {
 		const valueNormalized = chatInputValue.toLowerCase()
 
 		if (
@@ -117,9 +116,9 @@ export const MentionSuggestions = memo(({ chat }: { chat: Chat }) => {
 						?.startsWith("@")),
 			text: sliced
 		}
-	}, [chatInputValue, inputSelection, suggestionsVisible, inputFocused])
+	})()
 
-	const participants = useMemo(() => {
+	const participants = (() => {
 		const textNormalized = text.toLowerCase().trim().slice(1)
 
 		return chat.participants
@@ -138,7 +137,7 @@ export const MentionSuggestions = memo(({ chat }: { chat: Chat }) => {
 				)
 			})
 			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-	}, [chat.participants, stringifiedClient?.userId, text])
+	})()
 
 	useEffect(() => {
 		if (show) {
@@ -220,7 +219,7 @@ export const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const inputFocused = useChatsStore(useShallow(state => state.inputFocused))
 
-	const { show, text } = useMemo(() => {
+	const { show, text } = (() => {
 		const valueNormalized = chatInputValue.toLowerCase()
 
 		if (
@@ -253,16 +252,16 @@ export const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
 						?.startsWith(":")),
 			text: sliced
 		}
-	}, [chatInputValue, inputSelection, suggestionsVisible, inputFocused])
+	})()
 
-	const emojis = useMemo(() => {
+	const emojis = (() => {
 		const textNormalized = text.toLowerCase().trim().split(":").join("")
 
 		return customEmojis
 			.filter(e => e.name.toLowerCase().trim().includes(textNormalized))
 			.slice(0, 10)
 			.sort((a, b) => fastLocaleCompare(a.name, b.name))
-	}, [text])
+	})()
 
 	useEffect(() => {
 		if (show) {
@@ -343,7 +342,7 @@ export const ReplyTo = memo(({ chat }: { chat: Chat }) => {
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
-	const info = useMemo((): { show: false } | { show: true; participant: ChatParticipant } => {
+	const info = ((): { show: false } | { show: true; participant: ChatParticipant } => {
 		if (!chatReplyTo || suggestionsVisible.filter(s => s !== "reply").length > 0) {
 			return {
 				show: false
@@ -362,7 +361,7 @@ export const ReplyTo = memo(({ chat }: { chat: Chat }) => {
 			show: true,
 			participant
 		}
-	}, [chatReplyTo, suggestionsVisible, chat.participants])
+	})()
 
 	useEffect(() => {
 		if (info.show) {
@@ -451,24 +450,21 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
 	const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
 
-	const onChangeText = useCallback(
-		(text: string) => {
-			setChatInputValue(text)
+	const onChangeText = (text: string) => {
+		setChatInputValue(text)
 
-			if (text.length === 0 && chatEditMessage) {
-				setChatEditMessage(null)
-			}
-		},
-		[setChatInputValue, chatEditMessage, setChatEditMessage]
-	)
+		if (text.length === 0 && chatEditMessage) {
+			setChatEditMessage(null)
+		}
+	}
 
-	const me = useMemo(() => {
+	const me = (() => {
 		if (!stringifiedClient) {
 			return null
 		}
 
 		return chat.participants.find(p => p.userId === stringifiedClient.userId)
-	}, [chat.participants, stringifiedClient])
+	})()
 
 	const sendTypingEvent = useCallback(
 		async (type: ChatTypingType) => {
@@ -494,7 +490,7 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 		[chat]
 	)
 
-	const send = useCallback(async () => {
+	const send = async () => {
 		if (!stringifiedClient || !me) {
 			return
 		}
@@ -622,20 +618,9 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 
 			return
 		}
-	}, [
-		chatInputValue,
-		chat,
-		stringifiedClient,
-		me,
-		setChatInputValue,
-		sendTypingEvent,
-		chatReplyTo,
-		setChatReplyTo,
-		chatEditMessage,
-		setChatEditMessage
-	])
+	}
 
-	const onKeyPress = useCallback(() => {
+	const onKeyPress = () => {
 		sendTypingEvent(ChatTypingType.Down).catch(console.error)
 
 		clearTimeout(typingTimeoutRef.current)
@@ -643,22 +628,22 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 		typingTimeoutRef.current = setTimeout(() => {
 			sendTypingEvent(ChatTypingType.Up).catch(console.error)
 		}, 3000)
-	}, [sendTypingEvent])
+	}
 
-	const onBlur = useCallback(() => {
+	const onBlur = () => {
 		useChatsStore.getState().setInputFocused(false)
 
 		clearTimeout(typingTimeoutRef.current)
 		sendTypingEvent(ChatTypingType.Up).catch(console.error)
-	}, [sendTypingEvent])
+	}
 
-	const onFocus = useCallback(() => {
+	const onFocus = () => {
 		useChatsStore.getState().setInputFocused(true)
-	}, [])
+	}
 
-	const onSelectionChange = useCallback((e: TextInputSelectionChangeEvent) => {
+	const onSelectionChange = (e: TextInputSelectionChangeEvent) => {
 		useChatsStore.getState().setInputSelection(e.nativeEvent.selection)
-	}, [])
+	}
 
 	useEffectOnce(() => {
 		if (chatInputValue.length === 0) {

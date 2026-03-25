@@ -1,6 +1,6 @@
 import useTransfersStore from "@/stores/useTransfers.store"
 import { useShallow } from "zustand/shallow"
-import { Fragment, memo, useCallback } from "react"
+import { Fragment, memo } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -61,9 +61,9 @@ const Transfers = memo(() => {
 	const insets = useSafeAreaInsets()
 	const transfersActive = useTransfersStore(useShallow(state => state.transfers.some(t => !t.finishedAt)))
 
-	const onPress = useCallback(() => {
+	const onPress = () => {
 		router.push("/transfers")
-	}, [])
+	}
 
 	if (!transfersActive) {
 		return null

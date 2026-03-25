@@ -8,15 +8,15 @@ import alerts from "@/lib/alerts"
 import Chat from "@/components/chats/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
-import { useState, memo, useMemo, useCallback } from "react"
+import { useState, memo } from "react"
 import { Platform } from "react-native"
 
-export const List = memo(() => {
+const List = memo(() => {
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 
-	const chats = useMemo(() => {
+	const chats = (() => {
 		if (chatsQuery.status !== "success") {
 			return []
 		}
@@ -65,9 +65,9 @@ export const List = memo(() => {
 		}
 
 		return chats
-	}, [chatsQuery.status, chatsQuery.data, stringigiedClient?.userId, searchQuery])
+	})()
 
-	const onRefresh = useCallback(async () => {
+	const onRefresh = async () => {
 		const result = await run(async () => {
 			await chatsQuery.refetch()
 		})
@@ -76,31 +76,28 @@ export const List = memo(() => {
 			console.error(result.error)
 			alerts.error(result.error)
 		}
-	}, [chatsQuery])
+	}
 
-	const keyExtractor = useCallback((chat: TChat) => {
+	const keyExtractor = (chat: TChat) => {
 		return chat.uuid
-	}, [])
+	}
 
-	const renderItem = useCallback((info: ListRenderItemInfo<TChat>) => {
+	const renderItem = (info: ListRenderItemInfo<TChat>) => {
 		return <Chat info={info} />
-	}, [])
+	}
 
-	const emptyComponent = useCallback(() => {
+	const emptyComponent = () => {
 		return (
 			<View className="flex-1 items-center justify-center">
 				<Text>{searchQuery && searchQuery.length > 0 ? "tbd_no_chats_search" : "tbd_no_chats"}</Text>
 			</View>
 		)
-	}, [searchQuery])
+	}
 
-	const searchBarProps = useMemo(
-		() => ({
-			onChangeText: setSearchQuery,
-			placeholder: "tbd_search_chats"
-		}),
-		[setSearchQuery]
-	)
+	const searchBarProps = {
+		onChangeText: setSearchQuery,
+		placeholder: "tbd_search_chats"
+	}
 
 	return (
 		<VirtualList

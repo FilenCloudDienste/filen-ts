@@ -1,4 +1,4 @@
-import { useEffect, useRef, memo, useCallback, useMemo } from "react"
+import { useEffect, useRef, memo, useCallback } from "react"
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
 import cache from "@/lib/cache"
 import thumbnails from "@/lib/thumbnails"
@@ -145,7 +145,7 @@ const FileThumbnail = memo(
 			generateRef.current = generate
 		}, [generate])
 
-		const onFailure = useCallback(() => {
+		const onFailure = () => {
 			cache.availableThumbnails.set(item.data.uuid, false)
 
 			if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
@@ -163,7 +163,7 @@ const FileThumbnail = memo(
 			setLocalPath(null)
 
 			generateRef.current?.()
-		}, [item, setLocalPath])
+		}
 
 		useEffect(() => {
 			errorRetryCountRef.current = 0
@@ -226,23 +226,16 @@ const FileThumbnail = memo(
 			}
 		}, [])
 
-		const source = useMemo(() => {
-			if (!localPath) {
-				return null
-			}
+		const source = !localPath
+			? null
+			: {
+					uri: localPath
+				}
 
-			return {
-				uri: localPath
-			}
-		}, [localPath])
-
-		const imageStyle = useMemo(
-			() => ({
-				width: size.thumbnail,
-				height: size.thumbnail
-			}),
-			[size.thumbnail]
-		)
+		const imageStyle = {
+			width: size.thumbnail,
+			height: size.thumbnail
+		}
 
 		if (!localPath || !source) {
 			return (

@@ -1,4 +1,3 @@
-import { useCallback } from "react"
 import type { JSONValue } from "expo/build/dom/dom.types"
 
 export type RNWebViewFunctions = {
@@ -12,7 +11,7 @@ const RNWebView = (
 ).ReactNativeWebView
 
 function useDomDomEvents<T>(onMessage?: (message: T, postMessage: (message: T) => void) => void) {
-	const postMessage = useCallback((message: T) => {
+	const postMessage = (message: T) => {
 		if (!RNWebView || !RNWebView.postMessage) {
 			console.error("RNWebView is not available")
 
@@ -24,14 +23,11 @@ function useDomDomEvents<T>(onMessage?: (message: T, postMessage: (message: T) =
 		} catch (e) {
 			console.error(e)
 		}
-	}, [])
+	}
 
-	const onNativeMessage = useCallback(
-		(message: JSONValue) => {
-			onMessage?.(message as T, postMessage)
-		},
-		[onMessage, postMessage]
-	)
+	const onNativeMessage = (message: JSONValue) => {
+		onMessage?.(message as T, postMessage)
+	}
 
 	return {
 		postMessage,

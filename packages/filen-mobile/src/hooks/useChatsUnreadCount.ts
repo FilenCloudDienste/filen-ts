@@ -2,7 +2,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import useChatsQuery from "@/queries/useChats.query"
 import { chatMessagesQueryGet } from "@/queries/useChatMessages.query"
 import chats from "@/lib/chats"
-import { useEffect, useRef, useMemo } from "react"
+import { useEffect, useRef } from "react"
 import { runEffect } from "@filen/utils"
 import { AppState } from "react-native"
 
@@ -14,7 +14,7 @@ export function useChatsUnreadCount() {
 		enabled: false
 	})
 
-	const { unreadCount, hasMissingMessages } = useMemo(() => {
+	const { unreadCount, hasMissingMessages } = (() => {
 		if (chatsQuery.status !== "success" || !stringifiedClient) {
 			return {
 				unreadCount: 0,
@@ -54,7 +54,7 @@ export function useChatsUnreadCount() {
 			unreadCount: count,
 			hasMissingMessages: missing
 		}
-	}, [chatsQuery.status, chatsQuery.data, stringifiedClient])
+	})()
 
 	useEffect(() => {
 		if (hasMissingMessages) {

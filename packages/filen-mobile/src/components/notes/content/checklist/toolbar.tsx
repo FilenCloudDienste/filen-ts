@@ -7,13 +7,13 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { PressableScale } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
-import { memo, useCallback } from "react"
+import { memo } from "react"
 
 const Toolbar = memo(() => {
 	const keyboardState = useKeyboardState()
 	const textPrimary = useResolveClassNames("text-primary")
 
-	const onPress = useCallback(() => {
+	const onPress = () => {
 		if (!keyboardState.isVisible) {
 			return
 		}
@@ -22,7 +22,7 @@ const Toolbar = memo(() => {
 			console.error(err)
 			alerts.error(err)
 		})
-	}, [keyboardState.isVisible])
+	}
 
 	const insets = useSafeAreaInsets()
 

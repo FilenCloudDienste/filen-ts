@@ -2,7 +2,7 @@ import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-aud
 import audioCache, { type Metadata } from "@/lib/audioCache"
 import type { DriveItemFileExtracted } from "@/types"
 import * as FileSystem from "expo-file-system"
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import alerts from "@/lib/alerts"
 import events from "@/lib/events"
 import { Semaphore, run } from "@filen/utils"
@@ -626,93 +626,93 @@ export function useAudio() {
 	})
 	const [loading, setLoadingState] = useState<boolean>(false)
 
-	const play = useCallback((item?: DriveItemFileExtracted) => {
+	const play = (item?: DriveItemFileExtracted) => {
 		audio.play(item).catch(err => {
 			console.error(err)
 			alerts.error(err)
 		})
-	}, [])
+	}
 
-	const pausePlaylist = useCallback(() => {
+	const pausePlaylist = () => {
 		audio.pausePlaylist()
-	}, [])
+	}
 
-	const resumePlaylist = useCallback(() => {
+	const resumePlaylist = () => {
 		audio.resumePlaylist()
-	}, [])
+	}
 
-	const next = useCallback(() => {
+	const next = () => {
 		audio.next()
-	}, [])
+	}
 
-	const previous = useCallback(() => {
+	const previous = () => {
 		audio.previous()
-	}, [])
+	}
 
-	const seekPlaylist = useCallback((seconds: number) => {
+	const seekPlaylist = (seconds: number) => {
 		audio.seekPlaylist(seconds)
-	}, [])
+	}
 
-	const addToQueue = useCallback((params: Parameters<typeof audio.addToQueue>[0]) => {
+	const addToQueue = (params: Parameters<typeof audio.addToQueue>[0]) => {
 		audio.addToQueue(params).catch(err => {
 			console.error(err)
 			alerts.error(err)
 		})
-	}, [])
+	}
 
-	const removeFromQueue = useCallback((index: number) => {
+	const removeFromQueue = (index: number) => {
 		audio.removeFromQueue(index)
-	}, [])
+	}
 
-	const clearQueue = useCallback(() => {
+	const clearQueue = () => {
 		audio.clearQueue()
-	}, [])
+	}
 
-	const setLoopMode = useCallback((mode: LoopMode) => {
+	const setLoopMode = (mode: LoopMode) => {
 		audio.setLoopMode(mode)
-	}, [])
+	}
 
-	const toggleShuffle = useCallback(() => {
+	const toggleShuffle = () => {
 		audio.toggleShuffle()
-	}, [])
+	}
 
-	const skipTo = useCallback((index: number) => {
+	const skipTo = (index: number) => {
 		audio.skipTo(index)
-	}, [])
+	}
 
-	const stopPlaylist = useCallback(() => {
+	const stopPlaylist = () => {
 		audio.stopPlaylist()
-	}, [])
+	}
 
-	const enterPreviewMode = useCallback((params: Parameters<typeof audio.enterPreviewMode>[0]) => {
+	const enterPreviewMode = (params: Parameters<typeof audio.enterPreviewMode>[0]) => {
 		audio.enterPreviewMode(params).catch(err => {
 			console.error(err)
 			alerts.error(err)
 		})
-	}, [])
+	}
 
-	const switchPreviewTrack = useCallback((params: Parameters<typeof audio.switchPreviewTrack>[0]) => {
+	const switchPreviewTrack = (params: Parameters<typeof audio.switchPreviewTrack>[0]) => {
 		audio.switchPreviewTrack(params).catch(err => {
 			console.error(err)
 			alerts.error(err)
 		})
-	}, [])
+	}
 
-	const pausePreview = useCallback(() => {
+	const pausePreview = () => {
 		audio.pausePreview()
-	}, [])
+	}
 
-	const resumePreview = useCallback(() => {
+	const resumePreview = () => {
 		audio.resumePreview()
-	}, [])
+	}
 
-	const seekPreview = useCallback((seconds: number) => {
+	const seekPreview = (seconds: number) => {
 		audio.seekPreview(seconds)
-	}, [])
+	}
 
-	const exitPreviewMode = useCallback(() => {
+	const exitPreviewMode = () => {
 		audio.exitPreviewMode()
-	}, [])
+	}
 
 	useEffect(() => {
 		const statusSubscription = events.subscribe("audioStatus", info => {

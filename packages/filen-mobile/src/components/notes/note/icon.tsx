@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { type Note, NoteType } from "@filen/sdk-rs"
-import { useMemo, memo } from "react"
+import { memo } from "react"
 import { useResolveClassNames } from "uniwind"
 
 export enum NoteTypeExtended {
@@ -44,7 +44,7 @@ const ICON_PROPS = {
 const Icon = memo(({ note, iconSize }: { note: Note; iconSize: number }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 
-	const { color, name } = useMemo(() => {
+	const { color, name } = (() => {
 		let iconKey: IconKey
 
 		if (note.trash) {
@@ -58,7 +58,7 @@ const Icon = memo(({ note, iconSize }: { note: Note; iconSize: number }) => {
 		iconKey = note.noteType
 
 		return ICON_PROPS[iconKey]
-	}, [note.trash, note.archive, note.noteType])
+	})()
 
 	return (
 		<Ionicons

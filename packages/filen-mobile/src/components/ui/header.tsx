@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react"
+import { memo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { Stack } from "expo-router"
 import type { SearchBarProps } from "react-native-screens"
@@ -188,7 +188,7 @@ export const Header = memo(
 		const bgBackground = useResolveClassNames("bg-background")
 		const textForeground = useResolveClassNames("text-foreground")
 
-		const headerRightItems = useMemo(() => {
+		const headerRightItems = (() => {
 			const items = typeof rightItems === "function" ? rightItems() : rightItems
 
 			if (!items || items.length === 0) {
@@ -196,9 +196,9 @@ export const Header = memo(
 			}
 
 			return items
-		}, [rightItems])
+		})()
 
-		const headerLeftItems = useMemo(() => {
+		const headerLeftItems = (() => {
 			const items = typeof leftItems === "function" ? leftItems() : leftItems
 
 			if (!items || items.length === 0) {
@@ -206,7 +206,7 @@ export const Header = memo(
 			}
 
 			return items
-		}, [leftItems])
+		})()
 
 		return (
 			<Stack.Screen

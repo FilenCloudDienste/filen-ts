@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo, useCallback } from "react"
+import { Fragment, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
 import { useLocalSearchParams, Redirect, useRouter } from "expo-router"
@@ -30,16 +30,11 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
 	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === note.uuid))
 
-	const writeAccess = useMemo(() => {
-		return (
-			note.ownerId === stringifiedClient?.userId ||
-			note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
-		)
-	}, [note.ownerId, note.participants, stringifiedClient?.userId])
+	const writeAccess =
+		note.ownerId === stringifiedClient?.userId ||
+		note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
 
-	const isOwner = useMemo(() => {
-		return note.ownerId === stringifiedClient?.userId
-	}, [note.ownerId, stringifiedClient?.userId])
+	const isOwner = note.ownerId === stringifiedClient?.userId
 
 	const notesTagsQuery = useNotesTagsQuery({
 		enabled: false
@@ -54,23 +49,14 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 		}
 	)
 
-	const noteHistory = useMemo(() => {
-		if (noteHistoryQuery.status !== "success") {
-			return []
-		}
+	const noteHistory =
+		noteHistoryQuery.status === "success"
+			? noteHistoryQuery.data.sort((a, b) => Number(b.editedTimestamp) - Number(a.editedTimestamp))
+			: []
 
-		return noteHistoryQuery.data.sort((a, b) => Number(b.editedTimestamp) - Number(a.editedTimestamp))
-	}, [noteHistoryQuery.data, noteHistoryQuery.status])
+	const notesTags = notesTagsQuery.status === "success" ? notesTagsQuery.data : []
 
-	const notesTags = useMemo(() => {
-		if (notesTagsQuery.status !== "success") {
-			return []
-		}
-
-		return notesTagsQuery.data
-	}, [notesTagsQuery.data, notesTagsQuery.status])
-
-	const restoreFromHistory = useCallback(async () => {
+	const restoreFromHistory = async () => {
 		if (!history) {
 			return
 		}
@@ -112,7 +98,7 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 		if (router.canGoBack()) {
 			router.back()
 		}
-	}, [history, note, router])
+	}
 
 	return (
 		<StackHeader
@@ -191,17 +177,22 @@ const Note = memo(() => {
 		enabled: false
 	})
 
-	const note = useMemo(() => {
-		if (notesWithContentQuery.status !== "success") {
-			return null as unknown as TNote
+	const note =
+		notesWithContentQuery.status === "success"
+			? (notesWithContentQuery.data.find(n => n.uuid === uuid) as TNote)
+			: (null as unknown as TNote)
+
+	const history = (() => {
+		if (!historyItemPacked) {
+			return null
 		}
 
-		return notesWithContentQuery.data.find(n => n.uuid === uuid) as TNote
-	}, [notesWithContentQuery.data, uuid, notesWithContentQuery.status])
-
-	const history = useMemo(() => {
-		return historyItemPacked ? (unpack(Buffer.from(historyItemPacked, "base64")) as NoteHistory) : null
-	}, [historyItemPacked])
+		try {
+			return unpack(Buffer.from(historyItemPacked, "base64")) as NoteHistory
+		} catch {
+			return null
+		}
+	})()
 
 	if (!(note as TNote | undefined)) {
 		return <Redirect href="/tabs/notes" />

@@ -8,7 +8,7 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/stores/useNotes.store"
-import { memo, useCallback } from "react"
+import { memo } from "react"
 import { simpleDate } from "@/lib/time"
 import Menu from "@/components/notes/tag/menu"
 import { cn } from "@filen/utils"
@@ -32,7 +32,7 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 		})
 	)
 
-	const onPress = useCallback(() => {
+	const onPress = () => {
 		if (useNotesStore.getState().selectedTags.length > 0) {
 			useNotesStore.getState().setSelectedTags(prev => {
 				const prevSelected = prev.some(t => t.uuid === info.item.uuid)
@@ -53,7 +53,7 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 				tagUuid: info.item.uuid
 			}
 		})
-	}, [router, info.item])
+	}
 
 	return (
 		<View className="w-full h-auto">

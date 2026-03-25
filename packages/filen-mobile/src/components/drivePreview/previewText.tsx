@@ -9,7 +9,7 @@ import { ActivityIndicator } from "react-native"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import fileCache from "@/lib/fileCache"
 import type { DriveItemFileExtracted } from "@/types"
-import { useState, memo, useMemo, useCallback } from "react"
+import { useState, memo } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import transfers from "@/lib/transfers"
@@ -38,13 +38,9 @@ const PreviewTextInner = memo(
 		const insets = useSafeAreaInsets()
 		const [editedText, setEditedText] = useState<string | null>(null)
 		const textPrimary = useResolveClassNames("text-primary")
+		const readOnly = item.type !== "file" || !item.data.decryptedMeta || !parent
 
-		const readOnly = useMemo(() => {
-			// TODO: fix isOwner check
-			return item.type !== "file" || !item.data.decryptedMeta || !parent
-		}, [item, parent])
-
-		const save = useCallback(async () => {
+		const save = async () => {
 			if (editedText === null || readOnly) {
 				return
 			}
@@ -96,7 +92,7 @@ const PreviewTextInner = memo(
 			}
 
 			setEditedText(null)
-		}, [editedText, readOnly, item, parent])
+		}
 
 		return (
 			<View
@@ -148,10 +144,7 @@ const PreviewTextInner = memo(
 const PreviewText = memo(({ item, parent }: { item: DriveItemFileExtracted; parent?: AnyDirWithContext }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
-
-	const previewType = useMemo(() => {
-		return getPreviewType(item.data.decryptedMeta?.name ?? "")
-	}, [item.data.decryptedMeta])
+	const previewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
 
 	const query = useSimpleQuery(async signal => {
 		const isStoredOffline = await offline.isItemStored(item)

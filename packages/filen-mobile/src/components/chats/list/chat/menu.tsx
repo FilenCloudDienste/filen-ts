@@ -1,5 +1,5 @@
 import type { Chat as TChat, ChatParticipant } from "@filen/sdk-rs"
-import { memo, useMemo } from "react"
+import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
@@ -383,7 +383,7 @@ export function createMenuButtons({
 	] satisfies MenuButton[]
 }
 
-export const Menu = memo(
+const Menu = memo(
 	({
 		info,
 		children,
@@ -401,19 +401,15 @@ export const Menu = memo(
 		const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === info.item.uuid)))
 		const chatUnreadCount = useChatUnreadCount(info.item)
 
-		const buttons = useMemo(() => {
-			if (!stringifiedClient) {
-				return []
-			}
-
-			return createMenuButtons({
-				chat: info.item,
-				userId: stringifiedClient.userId,
-				origin,
-				isSelected,
-				unreadCount: chatUnreadCount
-			})
-		}, [info.item, stringifiedClient, origin, isSelected, chatUnreadCount])
+		const buttons = stringifiedClient
+			? createMenuButtons({
+					chat: info.item,
+					userId: stringifiedClient.userId,
+					origin,
+					isSelected,
+					unreadCount: chatUnreadCount
+				})
+			: []
 
 		return (
 			<MenuComponent

@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo, useCallback } from "react"
+import { Fragment, memo } from "react"
 import regexifyString from "regexify-string"
 import { Text } from "@/components/ui/text"
 import View from "@/components/ui/view"
@@ -32,14 +32,14 @@ export const customEmojisListRecord: Record<string, string> = Object.fromEntries
 	customEmojis.map(emoji => [emoji.id, emoji.skins[0] ? emoji.skins[0].src : ""])
 )
 
-export const Mention = memo(({ name, participant, inflight }: { name: string; participant?: ChatParticipant; inflight?: boolean }) => {
-	const onPress = useCallback(() => {
+const Mention = memo(({ name, participant, inflight }: { name: string; participant?: ChatParticipant; inflight?: boolean }) => {
+	const onPress = () => {
 		if (!participant) {
 			return
 		}
 
 		// TODO: profile popup
-	}, [participant])
+	}
 
 	return (
 		<PressableScale
@@ -52,8 +52,8 @@ export const Mention = memo(({ name, participant, inflight }: { name: string; pa
 	)
 })
 
-export const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean }) => {
-	const code = useMemo(() => {
+const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean }) => {
+	const code = (() => {
 		let code = match.split("```").join("").trim()
 
 		while (code.startsWith("\n")) {
@@ -65,7 +65,7 @@ export const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: b
 		}
 
 		return code
-	}, [match])
+	})()
 
 	return (
 		<View className={cn("flex-1 rounded-lg basis-full p-2 shrink-0", fromSelf ? "bg-blue-400" : "bg-background-tertiary")}>
@@ -84,10 +84,10 @@ export const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: b
 	)
 })
 
-export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
+const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
 	const [chatTrustedDomains, setChatTrustedDomains] = useSecureStore<string[]>("chatTrustedDomains", [])
 
-	const parsedDomain = useMemo(() => {
+	const parsedDomain = (() => {
 		try {
 			const url = new URL(match)
 
@@ -95,9 +95,9 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 		} catch {
 			return null
 		}
-	}, [match])
+	})()
 
-	const onPress = useCallback(async () => {
+	const onPress = async () => {
 		if (!parsedDomain) {
 			return
 		}
@@ -157,7 +157,7 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 
 			return
 		}
-	}, [match, parsedDomain, chatTrustedDomains, setChatTrustedDomains])
+	}
 
 	if (!parsedDomain) {
 		return match
@@ -176,13 +176,12 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 	)
 })
 
-// TODO: Fix memo
-export const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMessageWithInflightId; fromSelf: boolean }) => {
+const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMessageWithInflightId; fromSelf: boolean }) => {
 	const isInflight = useChatsStore(
 		useShallow(state => state.inflightMessages[chat.uuid]?.messages.some(m => m.inflightId === message.inflightId))
 	)
 
-	const replaced = useMemo(() => {
+	const replaced = (() => {
 		if (!message.inner.message) {
 			return []
 		}
@@ -274,7 +273,7 @@ export const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message:
 		}) as (string | React.ReactElement)[]
 
 		return regexed
-	}, [message.inner.message, chat.participants, fromSelf, isInflight])
+	})()
 
 	if (replaced.length === 0) {
 		return null

@@ -1,6 +1,6 @@
 "use dom"
 
-import { useRef, useCallback, memo } from "react"
+import { useRef, memo } from "react"
 import { renderAsync } from "docx-preview"
 import { Buffer } from "buffer"
 import useEffectOnce from "@/hooks/useEffectOnce"
@@ -19,7 +19,7 @@ const Dom = memo(
 		const container = useRef<HTMLDivElement>(null)
 		const didLoadRef = useRef<boolean>(false)
 
-		const load = useCallback(async () => {
+		const load = async () => {
 			if (!container.current || didLoadRef.current) {
 				return
 			}
@@ -52,7 +52,7 @@ const Dom = memo(
 
 				didLoadRef.current = false
 			}
-		}, [base64])
+		}
 
 		useEffectOnce(() => {
 			load()

@@ -1,5 +1,5 @@
 import Text from "@/components/ui/text"
-import { memo, useMemo, useCallback } from "react"
+import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { Chat as TChat } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
@@ -19,8 +19,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 
-// TODO: Fix memoization
-export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
+const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
 	const unreadCount = useChatUnreadCount(info.item)
@@ -29,19 +28,15 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === info.item.uuid)))
 	const areChatsSelected = useChatsStore(useShallow(state => state.selectedChats.length > 0))
 
-	const typingUsers = useMemo(() => {
-		return typing
-			.map(t => t.senderId)
-			.map(senderId => info.item.participants.find(p => p.userId === senderId))
-			.filter(Boolean)
-			.map(participant => contactDisplayName(participant!))
-	}, [typing, info.item.participants])
+	const typingUsers = typing
+		.map(t => t.senderId)
+		.map(senderId => info.item.participants.find(p => p.userId === senderId))
+		.filter(Boolean)
+		.map(participant => contactDisplayName(participant!))
 
-	const participantsWithoutSelf = useMemo(() => {
-		return info.item.participants.filter(p => p.userId !== stringifiedClient?.userId)
-	}, [info.item.participants, stringifiedClient?.userId])
+	const participantsWithoutSelf = info.item.participants.filter(p => p.userId !== stringifiedClient?.userId)
 
-	const title = useMemo(() => {
+	const title = (() => {
 		if (info.item.name && info.item.name.length > 0) {
 			return info.item.name
 		}
@@ -58,17 +53,15 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
 			.map(p => contactDisplayName(p))
 			.join(", ")
-	}, [info.item.name, participantsWithoutSelf])
+	})()
 
-	const participantsWithAvatars = useMemo(() => {
-		return participantsWithoutSelf
-			.filter(p => p.avatar && p.avatar.startsWith("http"))
-			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-			.map(p => p.avatar)
-			.slice(0, 5)
-	}, [participantsWithoutSelf])
+	const participantsWithAvatars = participantsWithoutSelf
+		.filter(p => p.avatar && p.avatar.startsWith("http"))
+		.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
+		.map(p => p.avatar)
+		.slice(0, 5)
 
-	const onPress = useCallback(() => {
+	const onPress = () => {
 		if (useChatsStore.getState().selectedChats.length > 0) {
 			useChatsStore.getState().setSelectedChats(prev => {
 				const prevSelected = prev.some(n => n.uuid === info.item.uuid)
@@ -84,7 +77,7 @@ export const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 		}
 
 		router.push(`/chat/${info.item.uuid}`)
-	}, [router, info.item])
+	}
 
 	return (
 		<View className="flex-row w-full h-auto">

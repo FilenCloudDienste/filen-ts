@@ -4,7 +4,7 @@ import "@uiw/react-md-editor/markdown-editor.css"
 import "@uiw/react-markdown-preview/markdown.css"
 
 import { type DOMProps, useDOMImperativeHandle } from "expo/dom"
-import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react"
+import { useEffect, useRef, useState, memo } from "react"
 import type { Platform } from "react-native"
 import CodeMirror, { EditorView, type ReactCodeMirrorRef } from "@uiw/react-codemirror"
 import { xcodeLight, xcodeDark } from "@uiw/codemirror-theme-xcode"
@@ -79,23 +79,18 @@ const TextEditorDOM = memo(
 		const [value, setValue] = useState<string>(initialValue ?? "")
 		const codeMirrorRef = useRef<ReactCodeMirrorRef>(null)
 
-		const onChange = useCallback(
-			(value: string) => {
-				if (!didTypeRef.current) {
-					return
-				}
+		const onChange = (value: string) => {
+			if (!didTypeRef.current) {
+				return
+			}
 
-				onValueChange?.(value)
-				setValue(value)
-			},
-			[onValueChange]
-		)
+			onValueChange?.(value)
+			setValue(value)
+		}
 
-		const isTextFile = useMemo(() => {
-			return type === "text" || parseExtension(fileName ?? "file.tsx") === ".txt"
-		}, [fileName, type])
+		const isTextFile = type === "text" || parseExtension(fileName ?? "file.tsx") === ".txt"
 
-		const theme = useMemo(() => {
+		const theme = (() => {
 			if (isTextFile) {
 				const textThemes = createTextThemes({
 					backgroundColor: colors?.background?.primary ?? (darkMode ? "#0d1118" : "#ffffff"),
@@ -106,9 +101,9 @@ const TextEditorDOM = memo(
 			}
 
 			return platform === "android" ? (darkMode ? materialDark : materialLight) : darkMode ? xcodeDark : xcodeLight
-		}, [darkMode, platform, isTextFile, colors])
+		})()
 
-		const extensions = useMemo(() => {
+		const extensions = (() => {
 			const base = [
 				EditorView.lineWrapping,
 				EditorView.theme({
@@ -144,17 +139,17 @@ const TextEditorDOM = memo(
 								},
 								".cm-line": {
 									lineHeight: `${font?.lineHeight ?? 1.5} !important`,
-									fontSize: type === "text" ? `${font?.size ?? 16}px !important` : `${font?.size ?? 14}px !important`,
+									fontSize: `${font?.size ?? 16}px !important`,
 									fontFamily: `${font?.family ?? "inherit"} !important`
 								}
 							}
 						: {
 								".cm-gutters": {
-									fontSize: type === "text" ? `${font?.size ?? 16}px !important` : `${font?.size ?? 14}px !important`,
+									fontSize: `${font?.size ?? 14}px !important`,
 									fontFamily: `${font?.family ?? "inherit"} !important`
 								},
 								".cm-line": {
-									fontSize: type === "text" ? `${font?.size ?? 16}px !important` : `${font?.size ?? 14}px !important`,
+									fontSize: `${font?.size ?? 14}px !important`,
 									fontFamily: `${font?.family ?? "inherit"} !important`
 								}
 							})
@@ -168,7 +163,7 @@ const TextEditorDOM = memo(
 			}
 
 			return [...base, lang]
-		}, [isTextFile, fileName, font, type, paddingTop, paddingBottom])
+		})()
 
 		const { onNativeMessage, postMessage } = useDomDomEvents<TextEditorEvents>()
 

@@ -5,7 +5,6 @@ import { Buffer } from "react-native-quick-crypto"
 import { unpack } from "@/lib/msgpack"
 import { useCameraUpload } from "@/lib/cameraUpload"
 import { unwrapDirMeta } from "@/lib/utils"
-import { useMemo } from "react"
 
 export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links", "photos"] as const
 export type DrivePathType = (typeof DRIVE_PATH_TYPES)[number]
@@ -31,7 +30,6 @@ export type DrivePath =
 			selectOptions?: SelectOptions
 	  }
 
-// TODO: Fix memo
 export default function useDrivePath(): DrivePath {
 	const searchParams = useLocalSearchParams<{
 		uuid?: string
@@ -40,7 +38,7 @@ export default function useDrivePath(): DrivePath {
 	const { getId: getNavigationId } = useNavigation()
 	const { config: cameraUploadConfig } = useCameraUpload()
 
-	const selectOptions = useMemo((): SelectOptions | null => {
+	const selectOptions = ((): SelectOptions | null => {
 		if (searchParams && searchParams.selectOptions) {
 			try {
 				const parsed = unpack(Buffer.from(searchParams.selectOptions, "base64")) as SelectOptions
@@ -59,9 +57,9 @@ export default function useDrivePath(): DrivePath {
 		}
 
 		return null
-	}, [searchParams])
+	})()
 
-	const drivePath = useMemo((): DrivePath => {
+	const drivePath = ((): DrivePath => {
 		const navigationId = getNavigationId() ?? ""
 		const isDriveSelectScreen = navigationId.startsWith("/driveSelect")
 
@@ -132,7 +130,7 @@ export default function useDrivePath(): DrivePath {
 			type: null,
 			uuid: null
 		}
-	}, [searchParams, getNavigationId, selectOptions, cameraUploadConfig.enabled, cameraUploadConfig.remoteDir])
+	})()
 
 	return drivePath
 }

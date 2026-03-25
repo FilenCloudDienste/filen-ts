@@ -1,4 +1,3 @@
-import { useCallback } from "react"
 import type { DOMImperativeFactory } from "expo/dom"
 import type { WebViewMessageEvent } from "react-native-webview"
 
@@ -10,45 +9,39 @@ export function useNativeDomEvents<T>(params: {
 	onMessage?: (message: T, postMessage: (message: T) => void) => void
 	ref: React.RefObject<DOMRef | null>
 }) {
-	const postMessage = useCallback(
-		(message: T) => {
-			;(async () => {
-				let attempts = 0
+	const postMessage = (message: T) => {
+		;(async () => {
+			let attempts = 0
 
-				while (!params.ref.current && attempts < 100) {
-					await new Promise<void>(resolve => setTimeout(resolve, 100))
+			while (!params.ref.current && attempts < 100) {
+				await new Promise<void>(resolve => setTimeout(resolve, 100))
 
-					attempts++
-				}
+				attempts++
+			}
 
-				if (!params.ref.current) {
-					return
-				}
-
-				try {
-					params.ref.current.postMessage(message)
-				} catch (e) {
-					console.error(e)
-				}
-			})()
-		},
-		[params]
-	)
-
-	const onDomMessage = useCallback(
-		(message: WebViewMessageEvent) => {
-			if (!params.onMessage) {
+			if (!params.ref.current) {
 				return
 			}
 
 			try {
-				params.onMessage(JSON.parse(message.nativeEvent.data) as T, postMessage)
+				params.ref.current.postMessage(message)
 			} catch (e) {
 				console.error(e)
 			}
-		},
-		[params, postMessage]
-	)
+		})()
+	}
+
+	const onDomMessage = (message: WebViewMessageEvent) => {
+		if (!params.onMessage) {
+			return
+		}
+
+		try {
+			params.onMessage(JSON.parse(message.nativeEvent.data) as T, postMessage)
+		} catch (e) {
+			console.error(e)
+		}
+	}
 
 	return {
 		onDomMessage,
