@@ -1,4 +1,4 @@
-import { useState, useEffect, memo } from "react"
+import { useState, memo } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { router } from "expo-router"
@@ -304,18 +304,6 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 	}
 
 	const initialScrollIndex = itemsSorted.findIndex(i => i.data.uuid === item.data.uuid)
-
-	useEffect(() => {
-		if (initialScrollIndex >= 0) {
-			useDrivePreviewStore.getState().setCurrentIndex(initialScrollIndex)
-
-			const initialItem = itemsSorted[initialScrollIndex]
-
-			if (initialItem) {
-				useDrivePreviewStore.getState().setCurrentItem(initialItem)
-			}
-		}
-	}, [initialScrollIndex, itemsSorted])
 
 	return (
 		<View className="flex-1 bg-transparent">
