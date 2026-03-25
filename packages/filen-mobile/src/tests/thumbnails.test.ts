@@ -79,11 +79,7 @@ const {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", () => ({
-	UniffiEnum: class {
-		protected constructor(..._args: any[]) {}
-	}
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
@@ -189,11 +185,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/constants", () => ({
-	EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS: new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"]),
-	EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set([".mp4", ".mov", ".webm", ".mkv"]),
-	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("expo-crypto", () => ({
 	randomUUID: mockRandomUUID

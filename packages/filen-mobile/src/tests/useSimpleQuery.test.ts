@@ -7,12 +7,7 @@ const { mockAlertsError, mockUnwrapSdkError } = vi.hoisted(() => ({
 	mockUnwrapSdkError: vi.fn().mockReturnValue(null)
 }))
 
-vi.mock("uniffi-bindgen-react-native", () => ({
-	NativeEventEmitter: vi.fn(),
-	UniffiEnum: class {
-		protected constructor(..._args: any[]) {}
-	}
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("@/lib/alerts", () => ({
 	default: { error: mockAlertsError }

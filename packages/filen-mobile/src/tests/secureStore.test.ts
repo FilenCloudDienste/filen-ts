@@ -1,53 +1,29 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { UniffiEnum, mockSecureStoreMap, mockEvents, mockExpoSecureStore, mockMmkv } = vi.hoisted(() => {
+const { mockSecureStoreMap, mockEvents } = vi.hoisted(() => {
 	// Must be set before the module-level singleton is constructed
 	process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"] = "test-fallback-key-1234567890abcdef"
 
-	const mockSecureStoreMap = new Map<string, unknown>()
-
 	return {
-		UniffiEnum: class UniffiEnum {
-			protected constructor(..._args: any[]) {}
-		},
-		mockSecureStoreMap,
+		mockSecureStoreMap: new Map<string, unknown>(),
 		mockEvents: {
 			emit: vi.fn(),
 			subscribe: vi.fn().mockReturnValue({ remove: vi.fn() })
-		},
-		mockExpoSecureStore: {
-			isAvailableAsync: vi.fn().mockResolvedValue(true),
-			getItemAsync: vi.fn().mockResolvedValue(null),
-			setItemAsync: vi.fn().mockResolvedValue(undefined)
-		},
-		mockMmkv: {
-			getString: vi.fn().mockReturnValue(undefined),
-			set: vi.fn()
 		}
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", () => ({
-	UniffiEnum
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("expo-secure-store", () => mockExpoSecureStore)
+vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))
 
-vi.mock("react-native-mmkv", () => ({
-	createMMKV: () => mockMmkv
-}))
+vi.mock("react-native-mmkv", async () => await import("@/tests/mocks/reactNativeMMKV"))
 
-vi.mock("react-native-quick-crypto", async () => {
-	const { Buffer } = await import("buffer")
+vi.mock("react-native-quick-crypto", async () => await import("@/tests/mocks/reactNativeQuickCrypto"))
 
-	return { default: {}, Buffer }
-})
-
-vi.mock("react-fast-compare", () => ({
-	default: (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-}))
+vi.mock("react-fast-compare", async () => await import("@/tests/mocks/reactFastCompare"))
 
 vi.mock("@/lib/cache", () => ({
 	default: {
@@ -64,9 +40,7 @@ vi.mock("@/lib/events", () => ({
 	default: mockEvents
 }))
 
-vi.mock("@/constants", () => ({
-	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
@@ -74,6 +48,8 @@ vi.mock("@/lib/utils", () => ({
 
 import secureStore from "@/lib/secureStore"
 import { fs } from "@/tests/mocks/expoFileSystem"
+import { isAvailableAsync, getItemAsync, setItemAsync } from "@/tests/mocks/expoSecureStore"
+import { mockMmkv } from "@/tests/mocks/reactNativeMMKV"
 
 type SecureStoreInstance = any
 
@@ -88,9 +64,9 @@ beforeEach(() => {
 	mockSecureStoreMap.clear()
 	mockEvents.emit.mockClear()
 	mockEvents.subscribe.mockClear()
-	mockExpoSecureStore.isAvailableAsync.mockClear().mockResolvedValue(true)
-	mockExpoSecureStore.getItemAsync.mockClear().mockResolvedValue(null)
-	mockExpoSecureStore.setItemAsync.mockClear().mockResolvedValue(undefined)
+	isAvailableAsync.mockClear().mockResolvedValue(true)
+	getItemAsync.mockClear().mockResolvedValue(null)
+	setItemAsync.mockClear().mockResolvedValue(undefined)
 	mockMmkv.getString.mockClear().mockReturnValue(undefined)
 	mockMmkv.set.mockClear()
 })
@@ -124,7 +100,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(mockExpoSecureStore.setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.any(String))
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.any(String))
 		})
 
 		it("reads existing data from file and populates cache", async () => {
@@ -135,13 +111,13 @@ describe("SecureStore", () => {
 			await store1.set("myKey", "myValue")
 
 			// Get the encryption key that was generated
-			const setCall = mockExpoSecureStore.setItemAsync.mock.calls[0] as [string, string]
+			const setCall = setItemAsync.mock.calls[0] as [string, string]
 			const encryptionKey = setCall[1]
 
 			mockEvents.emit.mockClear()
 
 			// Second store: should read from the file written by store1
-			mockExpoSecureStore.getItemAsync.mockResolvedValue(encryptionKey)
+			getItemAsync.mockResolvedValue(encryptionKey)
 
 			const store2 = createSecureStore()
 
@@ -160,10 +136,10 @@ describe("SecureStore", () => {
 			await store1.set("key1", "val1")
 			await store1.set("key2", "val2")
 
-			const setCall = mockExpoSecureStore.setItemAsync.mock.calls[0] as [string, string]
+			const setCall = setItemAsync.mock.calls[0] as [string, string]
 			const encryptionKey = setCall[1]
 
-			mockExpoSecureStore.getItemAsync.mockResolvedValue(encryptionKey)
+			getItemAsync.mockResolvedValue(encryptionKey)
 			mockEvents.emit.mockClear()
 
 			const store2 = createSecureStore()
@@ -180,13 +156,13 @@ describe("SecureStore", () => {
 
 	describe("getEncryptionKey", () => {
 		it("generates a key if none exists in ExpoSecureStore", async () => {
-			mockExpoSecureStore.getItemAsync.mockResolvedValue(null)
+			getItemAsync.mockResolvedValue(null)
 
 			const store = createSecureStore()
 
 			await store.init()
 
-			expect(mockExpoSecureStore.setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.stringMatching(/^[0-9a-f]{64}$/))
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.stringMatching(/^[0-9a-f]{64}$/))
 		})
 
 		it("reuses cached key on subsequent calls", async () => {
@@ -194,17 +170,17 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			const firstCallCount = mockExpoSecureStore.getItemAsync.mock.calls.length
+			const firstCallCount = getItemAsync.mock.calls.length
 
 			// set triggers another getEncryptionKey internally
 			await store.set("test", "value")
 
 			// getItemAsync should not be called again — key is cached
-			expect(mockExpoSecureStore.getItemAsync.mock.calls.length).toBe(firstCallCount)
+			expect(getItemAsync.mock.calls.length).toBe(firstCallCount)
 		})
 
 		it("falls back to MMKV when ExpoSecureStore is not available", async () => {
-			mockExpoSecureStore.isAvailableAsync.mockResolvedValue(false)
+			isAvailableAsync.mockResolvedValue(false)
 			mockMmkv.getString.mockReturnValue(undefined)
 
 			const store = createSecureStore()
@@ -215,7 +191,7 @@ describe("SecureStore", () => {
 		})
 
 		it("retrieves existing key from MMKV when available", async () => {
-			mockExpoSecureStore.isAvailableAsync.mockResolvedValue(false)
+			isAvailableAsync.mockResolvedValue(false)
 			mockMmkv.getString.mockReturnValue("a".repeat(64))
 
 			const store = createSecureStore()
@@ -460,11 +436,11 @@ describe("SecureStore", () => {
 			await store1.set("secret", "encrypted-data")
 
 			// Get the encryption key that was generated
-			const setCall = mockExpoSecureStore.setItemAsync.mock.calls[0] as [string, string]
+			const setCall = setItemAsync.mock.calls[0] as [string, string]
 			const encryptionKey = setCall[1]
 
 			// Create a new instance that retrieves the same key
-			mockExpoSecureStore.getItemAsync.mockResolvedValue(encryptionKey)
+			getItemAsync.mockResolvedValue(encryptionKey)
 
 			const store2 = createSecureStore()
 
@@ -699,7 +675,7 @@ describe("SecureStore", () => {
 			await store1.init()
 			await store1.set("key", "value")
 
-			const setCall = mockExpoSecureStore.setItemAsync.mock.calls[0] as [string, string]
+			const setCall = setItemAsync.mock.calls[0] as [string, string]
 			const encryptionKey = setCall[1]
 
 			// Corrupt the file
@@ -708,7 +684,7 @@ describe("SecureStore", () => {
 			fs.set(fileUri, new Uint8Array([0xff, 0xfe, 0xfd, 0xfc, 0xfb]))
 
 			// Second store should handle corrupted file gracefully
-			mockExpoSecureStore.getItemAsync.mockResolvedValue(encryptionKey)
+			getItemAsync.mockResolvedValue(encryptionKey)
 
 			const store2 = createSecureStore()
 
@@ -725,7 +701,7 @@ describe("SecureStore", () => {
 			await store1.init()
 			await store1.set("old", "data")
 
-			const setCall = mockExpoSecureStore.setItemAsync.mock.calls[0] as [string, string]
+			const setCall = setItemAsync.mock.calls[0] as [string, string]
 			const encryptionKey = setCall[1]
 
 			// Corrupt the file
@@ -733,7 +709,7 @@ describe("SecureStore", () => {
 
 			fs.set(fileUri, new Uint8Array([0x00, 0x01, 0x02]))
 
-			mockExpoSecureStore.getItemAsync.mockResolvedValue(encryptionKey)
+			getItemAsync.mockResolvedValue(encryptionKey)
 
 			const store2 = createSecureStore()
 
@@ -756,7 +732,7 @@ describe("SecureStore", () => {
 
 			fs.set(fileUri, new Uint8Array(0))
 
-			mockExpoSecureStore.getItemAsync.mockResolvedValue(null)
+			getItemAsync.mockResolvedValue(null)
 
 			const store2 = createSecureStore()
 

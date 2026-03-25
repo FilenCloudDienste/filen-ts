@@ -1,9 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 import pathModule from "path"
 
-vi.mock("uniffi-bindgen-react-native", () => ({
-	NativeEventEmitter: vi.fn()
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
@@ -142,9 +140,7 @@ vi.mock("@/lib/utils", () => ({
 	normalizeModificationTimestampForComparison: (ts: number) => ts
 }))
 
-vi.mock("@/constants", () => ({
-	EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS: new Set([".jpg", ".jpeg", ".png", ".heic", ".webp"])
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cameraUpload, { modifyAssetPathOnCollision, type CollisionParams, type Config } from "@/lib/cameraUpload"
 import secureStore from "@/lib/secureStore"

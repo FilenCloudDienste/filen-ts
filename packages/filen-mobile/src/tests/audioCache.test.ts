@@ -1,14 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { UniffiEnum } = vi.hoisted(() => ({
-	UniffiEnum: class UniffiEnum {
-		protected constructor(..._args: any[]) {}
-	}
-}))
-
-vi.mock("uniffi-bindgen-react-native", () => ({
-	UniffiEnum
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
@@ -43,10 +35,7 @@ vi.mock("expo-image", () => ({
 	}
 }))
 
-vi.mock("@/constants", () => ({
-	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app",
-	MUSIC_METADATA_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus"])
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import { fs, File, Directory } from "@/tests/mocks/expoFileSystem"
 import { pack } from "@/lib/msgpack"
