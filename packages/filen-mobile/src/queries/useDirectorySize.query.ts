@@ -1,7 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams } from "@/queries/client"
 import auth from "@/lib/auth"
-import useRefreshOnFocus from "@/queries/useRefreshOnFocus"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
 import { AnyDirWithContext_Tags, AnyDirWithContext, AnyNormalDir, AnyNormalDir_Tags, ParentUuid } from "@filen/sdk-rs"
@@ -86,11 +85,6 @@ export function useDirectorySizeQuery(
 				...sortedParams,
 				signal
 			})
-	})
-
-	useRefreshOnFocus({
-		isEnabled: query.isEnabled,
-		refetch: query.refetch
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
