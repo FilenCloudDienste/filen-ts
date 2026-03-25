@@ -3,9 +3,10 @@ name: typescript-react-perf
 description: >
     Use when writing/reviewing TypeScript, React, or React Native code. Enforces
     zero-waste patterns: monomorphic shapes, Map/Set for O(1) lookups, pre-allocated arrays,
-    no hidden class mutations. React: memo + useCallback + useMemo, no inline objects in JSX,
+    no hidden class mutations. React: let React Compiler handle memoization — do NOT add
+    manual memo/useCallback/useMemo unless absolutely necessary. No inline objects in JSX,
     stable keys. React Native / Hermes: Reanimated worklets, gesture-handler, FlashList,
-    StyleSheet.create, no generators or Proxy. Check project's existing libs first.
+    no generators or Proxy. Check project's existing libs first.
 ---
 
 # High-Performance TypeScript / React / React Native
@@ -15,6 +16,7 @@ description: >
 - Allocations are expensive — every object, array, closure costs GC time
 - Hot paths are sacred — zero-waste in code that runs frequently
 - Use what the project already has — never introduce duplicate libraries
+- **Let the React Compiler do its job** — it auto-memoizes better than humans
 
 ---
 
@@ -102,23 +104,70 @@ Use `Promise.allSettled` when partial failure is acceptable.
 
 ---
 
-## 5. React Performance
+## 5. React Performance — Let the Compiler Work
 
-### Memoization
+### React Compiler handles memoization — DO NOT add manual memo/useCallback/useMemo
+
+This project uses **React Compiler** (`react-compiler` ESLint plugin enforced). The compiler
+automatically memoizes components, callbacks, and computed values. Manual memoization
+conflicts with the compiler and causes "Compilation skipped because existing memoization
+could not be preserved" errors.
 
 ```typescript
+// ❌ DO NOT — manual memoization conflicts with React Compiler
 const ExpensiveList = memo(({ items }: { items: Item[] }) => {
-	return <ul>{items.map(item => <ListItem key={item.id} item={item} />)}</ul>
+	const sorted = useMemo(() => [...items].sort(compare), [items])
+	const handleClick = useCallback((id: string) => dispatch({ type: "SELECT", id }), [dispatch])
+	return <ul>{sorted.map(item => <ListItem key={item.id} item={item} onClick={handleClick} />)}</ul>
 })
 
-const handleClick = useCallback((id: string) => {
-	dispatch({ type: "SELECT", id })
-}, [dispatch])
+// ✅ DO — plain code, let the compiler auto-memoize
+function ExpensiveList({ items }: { items: Item[] }) {
+	const sorted = [...items].sort(compare)
+	const handleClick = (id: string) => dispatch({ type: "SELECT", id })
+	return <ul>{sorted.map(item => <ListItem key={item.id} item={item} onClick={handleClick} />)}</ul>
+}
+```
 
-const sorted = useMemo(
-	() => [...items].sort((a, b) => fastLocaleCompare(a.name, b.name)),
-	[items]
-)
+### When manual memoization IS needed (rare)
+
+Only use manual memoization when the React Compiler **cannot** handle the case:
+
+1. **Module-scope functions** that the compiler doesn't analyze (not React components/hooks)
+2. **Reanimated worklets** — the compiler doesn't understand `"worklet"` directives
+3. **Third-party libraries** that explicitly require stable references (e.g., gesture handler configs)
+4. **Truly expensive computations** where profiling proves the compiler's auto-memoization is insufficient
+
+When you must use manual memoization, prefer extracting logic to module-scope functions
+(invisible to the compiler) rather than fighting it with `useMemo`/`useCallback`:
+
+```typescript
+// ✅ Module-scope function — compiler doesn't analyze, no conflict
+function buildGesture(sv: SharedValues, callbacks: Callbacks) {
+	return Gesture.Pinch()
+		.onStart(() => { "worklet"; /* ... */ })
+		.onUpdate(e => { "worklet"; /* ... */ })
+}
+
+// Inside component — just call it
+function ZoomableView() {
+	const gesture = buildGesture(sharedValues, callbacks)
+	return <GestureDetector gesture={gesture}>...</GestureDetector>
+}
+```
+
+### Avoid mutating props — compiler enforces this
+
+```typescript
+// ❌ Compiler error: "This value cannot be modified"
+function Component({ items }: { items: Item[] }) {
+	items.push(newItem) // Mutating prop!
+}
+
+// ✅ Create a local copy
+function Component({ items }: { items: Item[] }) {
+	const allItems = [...items, newItem]
+}
 ```
 
 ### Keys — stable and unique, never index
@@ -128,13 +177,16 @@ const sorted = useMemo(
 // ✅ items.map(item => <Item key={item.id} {...item} />)
 ```
 
-### No inline objects/arrays in JSX
+### No inline objects/arrays in JSX (still matters)
+
+Even with the compiler, inline objects create new references that the compiler may
+not optimize in all cases. Prefer module-level constants:
 
 ```typescript
-// ❌ New reference every render — breaks memo
+// ⚠️ May cause extra work for the compiler
 <Component style={{ margin: 0 }} options={["a", "b"]} />
 
-// ✅ Stable references
+// ✅ Module-level constants — zero cost
 const STYLE = { margin: 0 } as const
 const OPTIONS = ["a", "b"] as const
 <Component style={STYLE} options={OPTIONS} />
@@ -203,15 +255,14 @@ Always use `react-native-gesture-handler` for interactive elements during scroll
 ### Lists — FlashList (project uses @shopify/flash-list)
 
 ```typescript
-const renderItem = useCallback(
-	({ item }: { item: Item }) => <ItemRow item={item} />,
-	[]
-)
-const ItemRow = memo(({ item }: { item: Item }) => <View>...</View>)
+// ✅ Plain function — React Compiler auto-memoizes renderItem
+function ItemRow({ item }: { item: Item }) {
+	return <View>...</View>
+}
 
 <FlashList
 	data={items}
-	renderItem={renderItem}
+	renderItem={({ item }) => <ItemRow item={item} />}
 	estimatedItemSize={72}
 	keyExtractor={item => item.id}
 />
@@ -225,11 +276,8 @@ Always set explicit `width` and `height`. Use `cachePolicy`.
 
 ### Styling — tailwindcss + uniwind (project uses it)
 
-Use className strings via uniwind. For dynamic styles, use `useMemo`:
-
-```typescript
-const dynamicStyle = useMemo(() => ({ opacity: isActive ? 1 : 0.5 }), [isActive])
-```
+Use className strings via uniwind. For dynamic styles that depend on props/state,
+just compute them inline — the React Compiler will memoize automatically.
 
 ### Hermes-specific — always apply
 
@@ -275,3 +323,4 @@ Cancel async ops on unmount. Remove all event listeners.
 - Regex in hot path — pre-compile at module level
 - `try/catch` in tight loops — extract to wrapper function
 - Optional chaining in hot paths — validate shape once at boundary
+- `memo()`, `useMemo()`, `useCallback()` — let React Compiler handle it unless profiling proves otherwise
