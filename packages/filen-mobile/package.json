@@ -179,6 +179,7 @@
 		"@types/mime-types": "^3.0.1",
 		"@types/react": "~19.2.10",
 		"@types/uuid": "^11.0.0",
+		"babel-plugin-transform-remove-console": "^6.9.4",
 		"eslint": "^9.39.2",
 		"eslint-config-expo": "~55.0.0",
 		"eslint-import-resolver-typescript": "^4.4.4",
