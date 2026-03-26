@@ -8,7 +8,7 @@
 		"android": "expo run:android",
 		"android:device": "expo run:android --device",
 		"android:release": "expo run:android --variant release",
-		"android:release:device": "expo run:android --variant release --device",
+		"android:device:release": "expo run:android --variant release --device",
 		"android:eas:dev": "eas build --platform android --profile development",
 		"android:eas:release": "eas build --platform android --profile production",
 		"ios": "expo run:ios",
