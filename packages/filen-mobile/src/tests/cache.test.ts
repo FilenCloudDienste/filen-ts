@@ -1,9 +1,15 @@
-import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest"
+import { vi, describe, it, expect, beforeAll, beforeEach } from "vitest"
 
 const { mockDb, open } = vi.hoisted(() => {
 	const mockDb = {
 		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
+		executeRaw: vi.fn().mockResolvedValue([]),
 		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
+		prepareStatement: vi.fn(() => ({
+			bind: vi.fn(),
+			bindSync: vi.fn(),
+			execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 })
+		})),
 		close: vi.fn()
 	}
 
@@ -87,19 +93,6 @@ function setupMockDb(): void {
 			return { rows: [], insertId: undefined, rowsAffected: 0 }
 		}
 
-		if (query.startsWith("SELECT key, value FROM kv WHERE") && query.includes("LIKE")) {
-			const pattern = params![0] as string
-			const rows: { key: string; value: ArrayBuffer }[] = []
-
-			for (const [key, value] of kvStore) {
-				if (matchesLike(key, pattern)) {
-					rows.push({ key, value: value.buffer as ArrayBuffer })
-				}
-			}
-
-			return { rows, insertId: undefined, rowsAffected: 0 }
-		}
-
 		if (query.startsWith("SELECT value FROM kv")) {
 			const key = params![0] as string
 			const value = kvStore.get(key)
@@ -131,6 +124,40 @@ function setupMockDb(): void {
 		}
 
 		return { rows: [], insertId: undefined, rowsAffected: 0 }
+	})
+
+	mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
+		if (query.startsWith("SELECT key, value FROM kv WHERE") && query.includes("LIKE")) {
+			const pattern = params![0] as string
+			const rows: [string, ArrayBuffer][] = []
+
+			for (const [key, value] of kvStore) {
+				if (matchesLike(key, pattern)) {
+					rows.push([key, value.buffer as ArrayBuffer])
+				}
+			}
+
+			return rows
+		}
+
+		if (query.startsWith("SELECT key FROM kv WHERE") && query.includes("LIKE")) {
+			const pattern = params![0] as string
+			const rows: [string][] = []
+
+			for (const key of kvStore.keys()) {
+				if (matchesLike(key, pattern)) {
+					rows.push([key])
+				}
+			}
+
+			return rows
+		}
+
+		if (query.startsWith("SELECT key FROM kv")) {
+			return [...kvStore.keys()].map(key => [key])
+		}
+
+		return []
 	})
 
 	mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
@@ -359,11 +386,6 @@ describe("Cache", () => {
 	beforeEach(() => {
 		kvStore.clear()
 		setupMockDb()
-		vi.useFakeTimers()
-	})
-
-	afterEach(() => {
-		vi.useRealTimers()
 	})
 
 	describe("constructor", () => {
@@ -496,8 +518,7 @@ describe("Cache", () => {
 
 			await cache2.restore()
 
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 			expect((cache2[name] as PersistentMap<unknown>).get("key-1")).toBe("value-1")
@@ -516,8 +537,7 @@ describe("Cache", () => {
 			map.set("uuid-2", "Photos")
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			const stored1 = kvStore.get(kvKey(name, "uuid-1"))
 			const stored2 = kvStore.get(kvKey(name, "uuid-2"))
@@ -540,8 +560,7 @@ describe("Cache", () => {
 			}
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			for (const [mapName] of maps) {
 				const stored = kvStore.get(kvKey(mapName, "test-key"))
@@ -551,7 +570,7 @@ describe("Cache", () => {
 			}
 		})
 
-		it("debounces multiple mutations into a single batch write", async () => {
+		it("batches multiple mutations into a single write", async () => {
 			const cache = await createCache()
 
 			await cache.restore()
@@ -567,8 +586,7 @@ describe("Cache", () => {
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
 		})
@@ -584,8 +602,7 @@ describe("Cache", () => {
 			map.set("b", "2")
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			mockDb.executeBatch.mockClear()
 
@@ -593,8 +610,7 @@ describe("Cache", () => {
 			map.set("a", "updated")
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
 
@@ -615,8 +631,7 @@ describe("Cache", () => {
 			map.set("round-trip-key", "round-trip-value")
 
 			cache1.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			const cache2 = await createCache()
 
@@ -655,15 +670,14 @@ describe("Cache", () => {
 			}
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			for (const [mapName] of maps) {
 				expect(kvStore.has(kvKey(mapName, "key"))).toBe(true)
 			}
 
 			cache.clear()
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			for (const [mapName] of maps) {
 				expect(kvStore.has(kvKey(mapName, "key"))).toBe(false)
@@ -700,8 +714,7 @@ describe("Cache", () => {
 
 			cache.clear()
 
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			expect(kvStore.has(kvKey(name, "key"))).toBe(false)
 		})
@@ -715,15 +728,13 @@ describe("Cache", () => {
 
 			map.set("key", "value")
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			kvStore.delete(kvKey(name, "key"))
 
 			cache.clear()
 
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			expect(kvStore.has(kvKey(name, "key"))).toBe(false)
 		})
@@ -742,8 +753,7 @@ describe("Cache", () => {
 			}
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			for (const [mapName] of maps) {
 				const stored = kvStore.get(kvKey(mapName, "test-key"))
@@ -765,8 +775,7 @@ describe("Cache", () => {
 			cache._testField = "should not persist"
 
 			cache.flush()
-			vi.advanceTimersByTime(5000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+			await Promise.resolve()
 
 			expect(kvStore.has("cache:v1:_testField")).toBe(false)
 		})

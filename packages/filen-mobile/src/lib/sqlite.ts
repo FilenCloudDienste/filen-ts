@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system"
-import { open, type DB } from "@op-engineering/op-sqlite"
+import { open, type DB, type PreparedStatement } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/utils"
 import { Platform } from "react-native"
 import { pack, unpack } from "@/lib/msgpack"
@@ -13,7 +13,6 @@ const INIT_QUERIES: string[] = [
 	"PRAGMA mmap_size = 67108864",
 	"PRAGMA page_size = 4096",
 	"PRAGMA cache_size = -16000",
-	"PRAGMA foreign_keys = ON",
 	"PRAGMA busy_timeout = 15000",
 	"PRAGMA auto_vacuum = INCREMENTAL",
 	"PRAGMA wal_autocheckpoint = 1000",
@@ -31,6 +30,11 @@ class Sqlite {
 	private initDone: boolean = false
 
 	private initMutex: Semaphore = new Semaphore(1)
+
+	private stmtGet: PreparedStatement | null = null
+	private stmtSet: PreparedStatement | null = null
+	private stmtRemove: PreparedStatement | null = null
+	private stmtContains: PreparedStatement | null = null
 
 	public readonly version: number = 1
 	public readonly dbFileName: string = "sqlite.db"
@@ -85,6 +89,11 @@ class Sqlite {
 
 			await this.db.execute(INIT_QUERIES.join("; "))
 
+			this.stmtGet = this.db.prepareStatement("SELECT value FROM kv WHERE key = ?")
+			this.stmtSet = this.db.prepareStatement("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)")
+			this.stmtRemove = this.db.prepareStatement("DELETE FROM kv WHERE key = ?")
+			this.stmtContains = this.db.prepareStatement("SELECT EXISTS(SELECT 1 FROM kv WHERE key = ?) AS found")
+
 			this.initDone = true
 		})
 
@@ -101,31 +110,55 @@ class Sqlite {
 
 	public kvAsync = {
 		get: async <T>(key: string): Promise<T | null> => {
-			const db = await this.openDb()
-			const result = await db.execute("SELECT value FROM kv WHERE key = ?", [key])
+			await this.openDb()
+
+			await this.stmtGet!.bind([key])
+
+			const result = await this.stmtGet!.execute()
 			const row = result.rows[0]
 
 			if (!row) {
 				return null
 			}
 
-			return unpack(new Uint8Array(row["value"] as ArrayBuffer)) as T
+			return await new Promise<T>((resolve, reject) => {
+				queueMicrotask(() => {
+					try {
+						resolve(unpack(new Uint8Array(row["value"] as ArrayBuffer)) as T)
+					} catch (err) {
+						reject(err)
+					}
+				})
+			})
 		},
 		set: async <T>(key: string, value: T): Promise<number | null> => {
 			if (value == null) {
 				return null
 			}
 
-			const db = await this.openDb()
-			const result = await db.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [key, new Uint8Array(pack(value))])
+			await this.openDb()
+
+			await new Promise<void>((resolve, reject) => {
+				queueMicrotask(() => {
+					try {
+						this.stmtSet!.bind([key, new Uint8Array(pack(value))])
+							.then(resolve)
+							.catch(reject)
+					} catch (err) {
+						reject(err)
+					}
+				})
+			})
+
+			const result = await this.stmtSet!.execute()
 
 			return result.insertId ?? null
 		},
 		keys: async (): Promise<string[]> => {
 			const db = await this.openDb()
-			const result = await db.execute("SELECT key FROM kv")
+			const result = await db.executeRaw("SELECT key FROM kv")
 
-			return result.rows.map(row => row["key"] as string)
+			return result.map(row => row[0] as string)
 		},
 		clear: async (): Promise<void> => {
 			const db = await this.openDb()
@@ -133,15 +166,19 @@ class Sqlite {
 			await db.execute("DELETE FROM kv")
 		},
 		contains: async (key: string): Promise<boolean> => {
-			const db = await this.openDb()
-			const result = await db.execute("SELECT key FROM kv WHERE key = ?", [key])
+			await this.openDb()
 
-			return result.rows.length > 0
+			await this.stmtContains!.bind([key])
+
+			const result = await this.stmtContains!.execute()
+
+			return (result.rows[0]?.["found"] as number) === 1
 		},
 		remove: async (key: string): Promise<void> => {
-			const db = await this.openDb()
+			await this.openDb()
 
-			await db.execute("DELETE FROM kv WHERE key = ?", [key])
+			await this.stmtRemove!.bind([key])
+			await this.stmtRemove!.execute()
 		},
 		removeByPrefix: async (prefix: string): Promise<void> => {
 			const db = await this.openDb()
@@ -150,18 +187,31 @@ class Sqlite {
 		},
 		keysByPrefix: async (prefix: string): Promise<string[]> => {
 			const db = await this.openDb()
-			const result = await db.execute("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])
+			const result = await db.executeRaw("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])
 
-			return result.rows.map(row => row["key"] as string)
+			return result.map(row => row[0] as string)
 		},
 		getByPrefix: async <T>(prefix: string): Promise<Map<string, T>> => {
 			const db = await this.openDb()
-			const result = await db.execute("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
+			const result = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
 			const map = new Map<string, T>()
 
-			for (const row of result.rows) {
-				map.set(row["key"] as string, unpack(new Uint8Array(row["value"] as ArrayBuffer)) as T)
-			}
+			await Promise.allSettled(
+				result.map(
+					row =>
+						new Promise<void>((resolve, reject) => {
+							queueMicrotask(() => {
+								try {
+									map.set(row[0] as string, unpack(new Uint8Array(row[1] as ArrayBuffer)) as T)
+
+									resolve()
+								} catch (err) {
+									reject(err)
+								}
+							})
+						})
+				)
+			)
 
 			return map
 		}

@@ -3,7 +3,6 @@ import { experimental_createQueryPersister, type PersistedQuery } from "@tanstac
 import useNetInfo from "@/hooks/useNetInfo"
 import sqlite from "@/lib/sqlite"
 import { Semaphore, run } from "@filen/utils"
-import { pack } from "@/lib/msgpack"
 import alerts from "@/lib/alerts"
 import { unwrapSdkError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
@@ -175,7 +174,7 @@ export const queryClient = new QueryClient({
 		queries: {
 			...DEFAULT_QUERY_OPTIONS,
 			persister: queryClientPersister.persisterFn,
-			queryKeyHashFn: queryKey => pack(queryKey).toString("base64")
+			queryKeyHashFn: queryKey => JSON.stringify(queryKey, (_, v) => (typeof v === "bigint" ? `__bigint_${v}` : v))
 		}
 	}
 })
