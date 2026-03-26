@@ -388,165 +388,165 @@ function toIosMenuConfig({
 	} satisfies MenuConfig
 }
 
-const MenuInner = memo(
-	({
-		buttons,
-		type,
-		children,
-		title,
-		disabled,
-		style,
-		isAnchoredToRight,
-		onOpenMenu,
-		onCloseMenu,
-		testID,
-		renderPreview,
-		hitSlop,
-		previewConfig
-	}: {
-		children: React.ReactNode
-		type?: "dropdown" | "context"
-		style?: StyleProp<ViewStyle>
-		title?: string
-		buttons?: MenuButton[]
-		className?: string
-		disabled?: boolean
-		onOpenMenu?: () => void
-		onCloseMenu?: () => void
-		isAnchoredToRight?: boolean
-		testID?: string
-		renderPreview?: () => React.ReactElement
-		hitSlop?:
-			| number
-			| {
-					top?: number
-					bottom?: number
-					left?: number
-					right?: number
-			  }
-		previewConfig?: MenuPreviewConfig
-	}) => {
-		const textForeground = useResolveClassNames("text-foreground")
-		const textRed500 = useResolveClassNames("text-red-500")
-		const textMutedForeground = useResolveClassNames("text-muted-foreground")
+export type MenuProps = {
+	children: React.ReactNode
+	type?: "dropdown" | "context"
+	style?: StyleProp<ViewStyle>
+	title?: string
+	buttons?: MenuButton[]
+	className?: string
+	disabled?: boolean
+	onOpenMenu?: () => void
+	onCloseMenu?: () => void
+	isAnchoredToRight?: boolean
+	testID?: string
+	renderPreview?: () => React.ReactElement
+	hitSlop?:
+		| number
+		| {
+				top?: number
+				bottom?: number
+				left?: number
+				right?: number
+		  }
+	previewConfig?: MenuPreviewConfig
+}
 
-		const uniqueButtons = buttons && checkIfButtonIdsAreUnique(buttons) ? buttons : []
+const MenuInnerIos = memo(({ children, ...props }: MenuProps) => {
+	const uniqueButtons = props.buttons && checkIfButtonIdsAreUnique(props.buttons) ? props.buttons : []
 
-		const onPressAction = (e: NativeActionEvent) => {
-			const button = findButtonById(uniqueButtons, e.nativeEvent.event)
+	const onPressMenuItem = (e: OnPressMenuItemEventObject) => {
+		const button = findButtonById(uniqueButtons, e.nativeEvent.actionKey)
 
-			if (!button) {
-				return
-			}
-
-			button?.onPress?.()
+		if (!button) {
+			return
 		}
 
-		const onPressMenuItem = (e: OnPressMenuItemEventObject) => {
-			const button = findButtonById(uniqueButtons, e.nativeEvent.actionKey)
+		button?.onPress?.()
+	}
 
-			if (!button) {
-				return
-			}
+	const menuConfig = toIosMenuConfig({
+		buttons: uniqueButtons,
+		title: props.title
+	})
 
-			button?.onPress?.()
-		}
-
-		const menuConfig = toIosMenuConfig({
-			buttons: uniqueButtons,
-			title
-		})
-
-		const actions = toReactNativeMenuActions({
-			buttons: uniqueButtons,
-			colors: {
-				normal: (textForeground.color as string) ?? "white",
-				destructive: (textRed500.color as string) ?? "white",
-				disabled: (textMutedForeground.color as string) ?? "white"
-			}
-		})
-
-		if (disabled) {
-			return children
-		}
-
-		if (Platform.OS === "ios") {
-			if (type === "dropdown") {
-				return (
-					<ContextMenuButton
-						hitSlop={hitSlop}
-						style={style}
-						testID={testID}
-						onMenuWillShow={onOpenMenu}
-						onMenuWillHide={onCloseMenu}
-						onPressMenuItem={onPressMenuItem}
-						menuConfig={menuConfig}
-					>
-						{children}
-					</ContextMenuButton>
-				)
-			}
-
-			return (
-				<ContextMenuView
-					hitSlop={hitSlop}
-					style={style}
-					testID={testID}
-					onMenuWillShow={onOpenMenu}
-					onMenuWillHide={onCloseMenu}
-					renderPreview={renderPreview}
-					lazyPreview={!!renderPreview}
-					previewConfig={
-						renderPreview && !previewConfig
-							? {
-									previewSize: "INHERIT",
-									preferredCommitStyle: "dismiss",
-									isResizeAnimated: true,
-									previewType: "CUSTOM"
-								}
-							: previewConfig
-					}
-					onPressMenuItem={onPressMenuItem}
-					shouldWaitForMenuToHideBeforeFiringOnPressMenuItem={false}
-					menuConfig={menuConfig}
-				>
-					{children}
-				</ContextMenuView>
-			)
-		}
-
+	if (props.type === "dropdown") {
 		return (
-			<MenuView
-				shouldOpenOnLongPress={type === "context"}
-				actions={actions}
-				onPressAction={onPressAction}
-				style={style}
-				isAnchoredToRight={isAnchoredToRight}
-				onOpenMenu={onOpenMenu}
-				onCloseMenu={onCloseMenu}
-				title={title}
-				testID={testID}
-				hitSlop={
-					typeof hitSlop === "number"
-						? {
-								top: hitSlop,
-								bottom: hitSlop,
-								left: hitSlop,
-								right: hitSlop
-							}
-						: {
-								top: hitSlop?.top ?? 0,
-								bottom: hitSlop?.bottom ?? 0,
-								left: hitSlop?.left ?? 0,
-								right: hitSlop?.right ?? 0
-							}
-				}
+			<ContextMenuButton
+				hitSlop={props.hitSlop}
+				style={props.style}
+				testID={props.testID}
+				onMenuWillShow={props.onOpenMenu}
+				onMenuWillHide={props.onCloseMenu}
+				onPressMenuItem={onPressMenuItem}
+				menuConfig={menuConfig}
 			>
 				{children}
-			</MenuView>
+			</ContextMenuButton>
 		)
 	}
-)
+
+	return (
+		<ContextMenuView
+			hitSlop={props.hitSlop}
+			style={props.style}
+			testID={props.testID}
+			onMenuWillShow={props.onOpenMenu}
+			onMenuWillHide={props.onCloseMenu}
+			renderPreview={props.renderPreview}
+			lazyPreview={!!props.renderPreview}
+			previewConfig={
+				props.renderPreview && !props.previewConfig
+					? {
+							previewSize: "INHERIT",
+							preferredCommitStyle: "dismiss",
+							isResizeAnimated: true,
+							previewType: "CUSTOM"
+						}
+					: props.previewConfig
+			}
+			onPressMenuItem={onPressMenuItem}
+			shouldWaitForMenuToHideBeforeFiringOnPressMenuItem={false}
+			shouldEnableAggressiveCleanup={true}
+			shouldPreventLongPressGestureFromPropagating={true}
+			shouldCleanupOnComponentWillUnmountForAuxPreview={true}
+			shouldCleanupOnComponentWillUnmountForMenuPreview={true}
+			menuConfig={menuConfig}
+		>
+			{children}
+		</ContextMenuView>
+	)
+})
+
+const MenuInnerAndroid = memo(({ children, ...props }: MenuProps) => {
+	const textForeground = useResolveClassNames("text-foreground")
+	const textRed500 = useResolveClassNames("text-red-500")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+
+	const uniqueButtons = props.buttons && checkIfButtonIdsAreUnique(props.buttons) ? props.buttons : []
+
+	const onPressAction = (e: NativeActionEvent) => {
+		const button = findButtonById(uniqueButtons, e.nativeEvent.event)
+
+		if (!button) {
+			return
+		}
+
+		button?.onPress?.()
+	}
+
+	const actions = toReactNativeMenuActions({
+		buttons: uniqueButtons,
+		colors: {
+			normal: (textForeground.color as string) ?? "white",
+			destructive: (textRed500.color as string) ?? "white",
+			disabled: (textMutedForeground.color as string) ?? "white"
+		}
+	})
+
+	return (
+		<MenuView
+			shouldOpenOnLongPress={props.type === "context"}
+			actions={actions}
+			onPressAction={onPressAction}
+			style={props.style}
+			isAnchoredToRight={props.isAnchoredToRight}
+			onOpenMenu={props.onOpenMenu}
+			onCloseMenu={props.onCloseMenu}
+			title={props.title}
+			testID={props.testID}
+			hitSlop={
+				typeof props.hitSlop === "number"
+					? {
+							top: props.hitSlop,
+							bottom: props.hitSlop,
+							left: props.hitSlop,
+							right: props.hitSlop
+						}
+					: {
+							top: props.hitSlop?.top ?? 0,
+							bottom: props.hitSlop?.bottom ?? 0,
+							left: props.hitSlop?.left ?? 0,
+							right: props.hitSlop?.right ?? 0
+						}
+			}
+		>
+			{children}
+		</MenuView>
+	)
+})
+
+const MenuInner = memo(({ children, ...props }: MenuProps) => {
+	if (props.disabled) {
+		return children
+	}
+
+	if (Platform.OS === "ios") {
+		return <MenuInnerIos {...props}>{children}</MenuInnerIos>
+	}
+
+	return <MenuInnerAndroid {...props}>{children}</MenuInnerAndroid>
+})
 
 export const Menu = memo(withUniwind(MenuInner) as typeof MenuInner)
 

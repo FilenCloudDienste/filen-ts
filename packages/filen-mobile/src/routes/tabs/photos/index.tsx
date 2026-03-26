@@ -14,7 +14,7 @@ import { getPreviewType } from "@/lib/utils"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
-import { PressableScale } from "@/components/ui/pressables"
+import { PressableWithoutFeedback } from "@/components/ui/pressables"
 import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
 import { router } from "expo-router"
 import { Buffer } from "react-native-quick-crypto"
@@ -100,7 +100,7 @@ const Photo = memo(
 					versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 				>
 					<View style={viewStyle}>
-						<PressableScale
+						<PressableWithoutFeedback
 							className="items-center justify-center flex-1 overflow-hidden"
 							onPress={onPress}
 							style={viewStyle}
@@ -134,10 +134,10 @@ const Photo = memo(
 							)}
 							<Thumbnail
 								item={info.item}
-								resizeMode="cover"
+								contentFit="cover"
 								size={thumbnailSize}
 							/>
-						</PressableScale>
+						</PressableWithoutFeedback>
 					</View>
 				</Menu>
 			</View>
@@ -161,7 +161,7 @@ const Photos = memo(() => {
 		}
 	)
 
-	const size = !layout ? 0 : layout.width / 5
+	const size = !layout ? 0 : layout.width / 4
 
 	const renderItem = (info: ListRenderItemInfo<DriveItemFileExtracted>) => {
 		return (

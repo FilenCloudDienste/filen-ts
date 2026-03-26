@@ -253,8 +253,8 @@ const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMe
 				if (customEmojisSet.has(customEmoji) && customEmojisListRecord[customEmoji]) {
 					return (
 						<Image
-							cachePolicy="dataCache"
-							resizeMode="contain"
+							cachePolicy="disk"
+							contentFit="contain"
 							style={{
 								width: emojiSize,
 								height: emojiSize

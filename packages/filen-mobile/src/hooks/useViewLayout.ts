@@ -1,5 +1,5 @@
 import type { View, LayoutChangeEvent } from "react-native"
-import { useState, useLayoutEffect, useCallback } from "react"
+import { useState, useCallback } from "react"
 
 export default function useViewLayout(ref: React.RefObject<View | null>) {
 	const [layout, setLayout] = useState<{
@@ -40,11 +40,6 @@ export default function useViewLayout(ref: React.RefObject<View | null>) {
 		},
 		[ref]
 	)
-
-	useLayoutEffect(() => {
-		// eslint-disable-next-line react-hooks/set-state-in-effect
-		onLayout()
-	}, [onLayout])
 
 	return {
 		layout,

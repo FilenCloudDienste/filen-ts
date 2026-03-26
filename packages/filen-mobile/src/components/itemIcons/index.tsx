@@ -4,40 +4,90 @@ import { Paths } from "expo-file-system"
 import { isValidHexColor, cn } from "@filen/utils"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
+import { getPreviewType } from "@/lib/utils"
+
+const FILE_ICONS = {
+	dmg: require("@/components/itemIcons/svg/iso.svg"),
+	iso: require("@/components/itemIcons/svg/iso.svg"),
+	cad: require("@/components/itemIcons/svg/cad.svg"),
+	psd: require("@/components/itemIcons/svg/psd.svg"),
+	apk: require("@/components/itemIcons/svg/android.svg"),
+	ipa: require("@/components/itemIcons/svg/apple.svg"),
+	txt: require("@/components/itemIcons/svg/txt.svg"),
+	pdf: require("@/components/itemIcons/svg/pdf.svg"),
+	image: require("@/components/itemIcons/svg/image.svg"),
+	archive: require("@/components/itemIcons/svg/archive.svg"),
+	video: require("@/components/itemIcons/svg/video.svg"),
+	audio: require("@/components/itemIcons/svg/audio.svg"),
+	code: require("@/components/itemIcons/svg/code.svg"),
+	exe: require("@/components/itemIcons/svg/exe.svg"),
+	doc: require("@/components/itemIcons/svg/doc.svg"),
+	ppt: require("@/components/itemIcons/svg/ppt.svg"),
+	xls: require("@/components/itemIcons/svg/xls.svg"),
+	other: require("@/components/itemIcons/svg/other.svg")
+}
 
 export const FileIcon = memo(
 	({ name, width, height, className }: { name: string; width?: number; height?: number; className?: string }) => {
 		const source = (() => {
+			const previewType = getPreviewType(name)
+
+			switch (previewType) {
+				case "audio": {
+					return FILE_ICONS.audio
+				}
+
+				case "video": {
+					return FILE_ICONS.video
+				}
+
+				case "image": {
+					return FILE_ICONS.image
+				}
+
+				case "pdf": {
+					return FILE_ICONS.pdf
+				}
+
+				case "text": {
+					return FILE_ICONS.txt
+				}
+
+				case "docx": {
+					return FILE_ICONS.doc
+				}
+			}
+
 			const extname = Paths.extname(name.trim().toLowerCase())
 
 			switch (extname) {
 				case ".dmg":
 				case ".iso": {
-					return require("@/components/itemIcons/svg/iso.svg")
+					return FILE_ICONS.iso
 				}
 
 				case ".cad": {
-					return require("@/components/itemIcons/svg/cad.svg")
+					return FILE_ICONS.cad
 				}
 
 				case ".psd": {
-					return require("@/components/itemIcons/svg/psd.svg")
+					return FILE_ICONS.psd
 				}
 
 				case ".apk": {
-					return require("@/components/itemIcons/svg/android.svg")
+					return FILE_ICONS.apk
 				}
 
 				case ".ipa": {
-					return require("@/components/itemIcons/svg/apple.svg")
+					return FILE_ICONS.ipa
 				}
 
 				case ".txt": {
-					return require("@/components/itemIcons/svg/txt.svg")
+					return FILE_ICONS.txt
 				}
 
 				case ".pdf": {
-					return require("@/components/itemIcons/svg/pdf.svg")
+					return FILE_ICONS.pdf
 				}
 
 				case ".gif":
@@ -51,7 +101,7 @@ export const FileIcon = memo(
 				case ".jfif":
 				case ".jpe":
 				case ".svg": {
-					return require("@/components/itemIcons/svg/image.svg")
+					return FILE_ICONS.image
 				}
 
 				case ".pkg":
@@ -59,7 +109,7 @@ export const FileIcon = memo(
 				case ".tar":
 				case ".zip":
 				case ".7zip": {
-					return require("@/components/itemIcons/svg/archive.svg")
+					return FILE_ICONS.archive
 				}
 
 				case ".wmv":
@@ -68,11 +118,11 @@ export const FileIcon = memo(
 				case ".mkv":
 				case ".webm":
 				case ".mp4": {
-					return require("@/components/itemIcons/svg/video.svg")
+					return FILE_ICONS.video
 				}
 
 				case ".mp3": {
-					return require("@/components/itemIcons/svg/audio.svg")
+					return FILE_ICONS.audio
 				}
 
 				case ".js":
@@ -123,32 +173,32 @@ export const FileIcon = memo(
 				case ".litcoffee":
 				case ".coffee":
 				case ".proto": {
-					return require("@/components/itemIcons/svg/code.svg")
+					return FILE_ICONS.code
 				}
 
 				case ".jar":
 				case ".exe":
 				case ".bin": {
-					return require("@/components/itemIcons/svg/exe.svg")
+					return FILE_ICONS.exe
 				}
 
 				case ".doc":
 				case ".docx": {
-					return require("@/components/itemIcons/svg/doc.svg")
+					return FILE_ICONS.doc
 				}
 
 				case ".ppt":
 				case ".pptx": {
-					return require("@/components/itemIcons/svg/ppt.svg")
+					return FILE_ICONS.ppt
 				}
 
 				case ".xls":
 				case ".xlsx": {
-					return require("@/components/itemIcons/svg/xls.svg")
+					return FILE_ICONS.xls
 				}
 
 				default: {
-					return require("@/components/itemIcons/svg/other.svg")
+					return FILE_ICONS.other
 				}
 			}
 		})()
@@ -300,23 +350,24 @@ export const directorySvg = memoize(
     `.trim()
 
 		return `data:image/svg+xml;base64,${btoa(svgTemplateString)}`
+	},
+	{
+		getCacheKey: ({ color, width, height }) => `${color ?? "default"}-${width ?? "32"}-${height ?? "32"}`
 	}
 )
 
 export const DirectoryIcon = memo(
 	({ color, width, height, className }: { color?: DirColor; width?: number; height?: number; className?: string }) => {
-		const source = {
-			uri: directorySvg({
-				color: unwrapDirColor(color),
-				width,
-				height
-			})
-		}
-
 		return (
 			<ExpoImage
 				className={cn("shrink-0", className)}
-				source={source}
+				source={{
+					uri: directorySvg({
+						color: unwrapDirColor(color),
+						width,
+						height
+					})
+				}}
 				style={{
 					width: width ?? 32,
 					height: height ?? 32

@@ -79,6 +79,8 @@ export function useDirectorySizeQuery(
 		...DEFAULT_QUERY_OPTIONS,
 		...defaultParams,
 		...options,
+		// TODO: Change with API v4
+		staleTime: 15 * 60 * 1000, // 15 minutes
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
 			fetchData({
