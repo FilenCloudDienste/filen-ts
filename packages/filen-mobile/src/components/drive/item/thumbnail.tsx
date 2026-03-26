@@ -177,9 +177,7 @@ const FileThumbnailWithGenerate = memo(
 		useEffect(() => {
 			const { cleanup } = runEffect(defer => {
 				const appStateSubscription = AppState.addEventListener("change", nextAppState => {
-					if (nextAppState === "active") {
-						generate()
-					} else if (nextAppState === "background") {
+					if (nextAppState === "background") {
 						abortControllerRef.current?.abort()
 
 						abortControllerRef.current = null
