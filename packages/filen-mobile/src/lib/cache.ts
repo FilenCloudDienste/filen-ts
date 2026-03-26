@@ -1,13 +1,10 @@
 import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { debounce } from "es-toolkit/function"
 import sqlite from "@/lib/sqlite"
-import { AppState } from "react-native"
 import { pack } from "@/lib/msgpack"
 
 const VERSION = 1
 const GLOBAL_PREFIX = `cache:v${VERSION}`
-const PERSIST_DEBOUNCE_MS = 100
 
 type Mutation =
 	| {
@@ -177,15 +174,21 @@ class Cache {
 		return map
 	}
 
-	private readonly schedulePersist = debounce(
-		() => {
-			this.persistDirty()
-		},
-		PERSIST_DEBOUNCE_MS,
-		{
-			edges: ["trailing"]
+	private persistScheduled = false
+
+	private schedulePersist(): void {
+		if (this.persistScheduled) {
+			return
 		}
-	)
+
+		this.persistScheduled = true
+
+		queueMicrotask(() => {
+			this.persistScheduled = false
+
+			this.persistDirty()
+		})
+	}
 
 	private persistDirty(): void {
 		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
@@ -275,16 +278,10 @@ class Cache {
 		for (const { map } of this.registry) {
 			map.ready = true
 		}
-
-		AppState.addEventListener("change", state => {
-			if (state === "background" || state === "inactive") {
-				this.flush()
-			}
-		})
 	}
 
 	public flush(): void {
-		this.schedulePersist.cancel()
+		this.persistScheduled = false
 
 		this.persistDirty()
 	}
@@ -296,7 +293,7 @@ class Cache {
 			Map.prototype.clear.call(map)
 		}
 
-		this.schedulePersist.cancel()
+		this.persistScheduled = false
 
 		this.dirtyUpserts.clear()
 		this.dirtyDeletes.clear()

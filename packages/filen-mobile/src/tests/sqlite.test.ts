@@ -1,14 +1,60 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockDb, open } = vi.hoisted(() => ({
-	mockDb: {
+const store = new Map<string, Uint8Array>()
+
+const { mockDb, open } = vi.hoisted(() => {
+	const stmtStore = new Map<string, Uint8Array>()
+
+	function createStmt(query: string) {
+		let params: unknown[] = []
+
+		return {
+			bind: vi.fn(async (p: unknown[]) => {
+				params = p
+			}),
+			bindSync: vi.fn((p: unknown[]) => {
+				params = p
+			}),
+			execute: vi.fn(async () => {
+				if (query.startsWith("SELECT value")) {
+					const value = stmtStore.get(params[0] as string)
+
+					return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
+				}
+
+				if (query.startsWith("INSERT")) {
+					stmtStore.set(params[0] as string, params[1] as Uint8Array)
+
+					return { rows: [], insertId: 1, rowsAffected: 1 }
+				}
+
+				if (query.startsWith("DELETE")) {
+					stmtStore.delete(params[0] as string)
+
+					return { rows: [], insertId: undefined, rowsAffected: 1 }
+				}
+
+				if (query.startsWith("SELECT EXISTS")) {
+					return { rows: [{ found: stmtStore.has(params[0] as string) ? 1 : 0 }], insertId: undefined, rowsAffected: 0 }
+				}
+
+				return { rows: [], insertId: undefined, rowsAffected: 0 }
+			}),
+			_getStore: () => stmtStore
+		}
+	}
+
+	const mockDb = {
 		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
 		executeSync: vi.fn().mockReturnValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
+		executeRaw: vi.fn().mockResolvedValue([]),
 		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
+		prepareStatement: vi.fn((query: string) => createStmt(query)),
 		close: vi.fn()
-	},
-	open: vi.fn()
-}))
+	}
+
+	return { mockDb, open: vi.fn(() => mockDb) }
+})
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
@@ -40,13 +86,15 @@ describe("Sqlite", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.resetModules()
+		store.clear()
 		open.mockReturnValue(mockDb)
 		mockDb.execute.mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 })
+		mockDb.executeRaw.mockResolvedValue([])
 		mockDb.executeBatch.mockResolvedValue({ rowsAffected: 0 })
 	})
 
 	describe("init", () => {
-		it("calls open and runs INIT_QUERIES via execute", async () => {
+		it("calls open, runs INIT_QUERIES, and prepares statements", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.init()
@@ -56,13 +104,15 @@ describe("Sqlite", () => {
 				name: "sqlite.db",
 				location: expect.any(String)
 			})
-			expect(mockDb.execute).toHaveBeenCalledTimes(1)
 
 			const execArg = mockDb.execute.mock.calls[0]![0] as string
 
 			expect(execArg).toContain("PRAGMA journal_mode = WAL")
 			expect(execArg).toContain("CREATE TABLE IF NOT EXISTS kv")
 			expect(execArg).toContain("PRAGMA optimize")
+			expect(execArg).not.toContain("foreign_keys")
+
+			expect(mockDb.prepareStatement).toHaveBeenCalledTimes(4)
 		})
 
 		it("is idempotent — calling init twice only opens db once", async () => {
@@ -72,7 +122,6 @@ describe("Sqlite", () => {
 			await sqlite.init()
 
 			expect(open).toHaveBeenCalledTimes(1)
-			expect(mockDb.execute).toHaveBeenCalledTimes(1)
 		})
 	})
 
@@ -95,21 +144,11 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.set", () => {
-		it("calls execute with INSERT OR REPLACE and returns insertId", async () => {
+		it("uses prepared statement and returns insertId", async () => {
 			const sqlite = await createSqlite()
-
-			mockDb.execute.mockResolvedValue({ rows: [], insertId: 42, rowsAffected: 1 })
-
 			const result = await sqlite.kvAsync.set("test-key", "test-value")
 
-			expect(result).toBe(42)
-
-			const calls = mockDb.execute.mock.calls
-			const [query, params] = calls[calls.length - 1] as [string, unknown[]]
-
-			expect(query).toBe("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)")
-			expect(params[0]).toBe("test-key")
-			expect(params[1]).toBeInstanceOf(Uint8Array)
+			expect(result).toBe(1)
 		})
 
 		it("returns null for null value", async () => {
@@ -117,7 +156,6 @@ describe("Sqlite", () => {
 			const result = await sqlite.kvAsync.set("key", null)
 
 			expect(result).toBeNull()
-			expect(mockDb.execute).not.toHaveBeenCalled()
 		})
 
 		it("returns null for undefined value", async () => {
@@ -125,26 +163,11 @@ describe("Sqlite", () => {
 			const result = await sqlite.kvAsync.set("key", undefined)
 
 			expect(result).toBeNull()
-			expect(mockDb.execute).not.toHaveBeenCalled()
 		})
 	})
 
 	describe("kvAsync.get", () => {
-		it("calls execute and unpacks result", async () => {
-			const packed = new Uint8Array(pack({ hello: "world" }))
-
-			mockDb.execute.mockResolvedValue({ rows: [{ value: packed.buffer }], insertId: undefined, rowsAffected: 0 })
-
-			const sqlite = await createSqlite()
-			const result = await sqlite.kvAsync.get("test-key")
-
-			expect(result).toEqual({ hello: "world" })
-			expect(mockDb.execute).toHaveBeenCalledWith("SELECT value FROM kv WHERE key = ?", ["test-key"])
-		})
-
 		it("returns null for missing key", async () => {
-			mockDb.execute.mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 })
-
 			const sqlite = await createSqlite()
 			const result = await sqlite.kvAsync.get("nonexistent")
 
@@ -153,18 +176,14 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.keys", () => {
-		it("returns array of keys", async () => {
-			mockDb.execute.mockResolvedValue({
-				rows: [{ key: "alpha" }, { key: "beta" }, { key: "gamma" }],
-				insertId: undefined,
-				rowsAffected: 0
-			})
+		it("uses executeRaw and returns array of keys", async () => {
+			mockDb.executeRaw.mockResolvedValue([["alpha"], ["beta"], ["gamma"]])
 
 			const sqlite = await createSqlite()
 			const keys = await sqlite.kvAsync.keys()
 
 			expect(keys).toEqual(["alpha", "beta", "gamma"])
-			expect(mockDb.execute).toHaveBeenCalledWith("SELECT key FROM kv")
+			expect(mockDb.executeRaw).toHaveBeenCalledWith("SELECT key FROM kv")
 		})
 
 		it("returns empty array when no rows", async () => {
@@ -177,13 +196,13 @@ describe("Sqlite", () => {
 
 	describe("kvAsync.contains", () => {
 		it("returns true when key exists", async () => {
-			mockDb.execute.mockResolvedValue({ rows: [{ key: "existing" }], insertId: undefined, rowsAffected: 0 })
-
 			const sqlite = await createSqlite()
+
+			await sqlite.kvAsync.set("existing", "value")
+
 			const result = await sqlite.kvAsync.contains("existing")
 
 			expect(result).toBe(true)
-			expect(mockDb.execute).toHaveBeenCalledWith("SELECT key FROM kv WHERE key = ?", ["existing"])
 		})
 
 		it("returns false when key does not exist", async () => {
@@ -195,12 +214,15 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.remove", () => {
-		it("calls execute with DELETE WHERE", async () => {
+		it("uses prepared statement for removal", async () => {
 			const sqlite = await createSqlite()
 
+			await sqlite.kvAsync.set("doomed-key", "value")
 			await sqlite.kvAsync.remove("doomed-key")
 
-			expect(mockDb.execute).toHaveBeenCalledWith("DELETE FROM kv WHERE key = ?", ["doomed-key"])
+			const result = await sqlite.kvAsync.contains("doomed-key")
+
+			expect(result).toBe(false)
 		})
 	})
 
@@ -214,6 +236,31 @@ describe("Sqlite", () => {
 		})
 	})
 
+	describe("kvAsync.keysByPrefix", () => {
+		it("uses executeRaw with LIKE query", async () => {
+			mockDb.executeRaw.mockResolvedValue([["cache:v1:map:a"], ["cache:v1:map:b"]])
+
+			const sqlite = await createSqlite()
+			const keys = await sqlite.kvAsync.keysByPrefix("cache:v1:map:")
+
+			expect(keys).toEqual(["cache:v1:map:a", "cache:v1:map:b"])
+			expect(mockDb.executeRaw).toHaveBeenCalledWith("SELECT key FROM kv WHERE key LIKE ?", ["cache:v1:map:%"])
+		})
+	})
+
+	describe("kvAsync.getByPrefix", () => {
+		it("uses executeRaw and returns map of entries", async () => {
+			const packed = new Uint8Array(pack("value"))
+
+			mockDb.executeRaw.mockResolvedValue([["cache:v1:map:a", packed.buffer]])
+
+			const sqlite = await createSqlite()
+			const result = await sqlite.kvAsync.getByPrefix("cache:v1:map:")
+
+			expect(result.get("cache:v1:map:a")).toBe("value")
+		})
+	})
+
 	describe("clearAsync", () => {
 		it("calls execute with DELETE FROM kv", async () => {
 			const sqlite = await createSqlite()
@@ -224,55 +271,17 @@ describe("Sqlite", () => {
 		})
 	})
 
-	describe("round-trip via pack/unpack", () => {
+	describe("round-trip via prepared statements", () => {
 		it("set then get preserves the value through msgpack", async () => {
-			const store = new Map<string, Uint8Array>()
-
-			mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
-				if (query.startsWith("INSERT")) {
-					store.set(params![0] as string, params![1] as Uint8Array)
-
-					return { rows: [], insertId: 1, rowsAffected: 1 }
-				}
-
-				if (query.startsWith("SELECT value")) {
-					const value = store.get(params![0] as string)
-
-					return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
-				}
-
-				return { rows: [], insertId: undefined, rowsAffected: 0 }
-			})
-
 			const sqlite = await createSqlite()
 
-			const data = { numbers: [1, 2, 3], nested: { ok: true } }
-
-			await sqlite.kvAsync.set("roundtrip", data)
+			await sqlite.kvAsync.set("roundtrip", { numbers: [1, 2, 3], nested: { ok: true } })
 			const result = await sqlite.kvAsync.get("roundtrip")
 
-			expect(result).toEqual(data)
+			expect(result).toEqual({ numbers: [1, 2, 3], nested: { ok: true } })
 		})
 
 		it("set then get preserves string values", async () => {
-			const store = new Map<string, Uint8Array>()
-
-			mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
-				if (query.startsWith("INSERT")) {
-					store.set(params![0] as string, params![1] as Uint8Array)
-
-					return { rows: [], insertId: 1, rowsAffected: 1 }
-				}
-
-				if (query.startsWith("SELECT value")) {
-					const value = store.get(params![0] as string)
-
-					return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
-				}
-
-				return { rows: [], insertId: undefined, rowsAffected: 0 }
-			})
-
 			const sqlite = await createSqlite()
 
 			await sqlite.kvAsync.set("greeting", "hello world")
