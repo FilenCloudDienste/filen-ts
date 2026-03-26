@@ -9,6 +9,7 @@ export type UseChatPublicLinkQueryParams = {
 	link: string
 }
 
+// TODO: implement
 export async function fetchData(
 	params: UseChatPublicLinkQueryParams & {
 		signal?: AbortSignal

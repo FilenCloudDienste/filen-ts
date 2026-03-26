@@ -21,21 +21,14 @@ const Avatar = memo(
 		const textMutedForeground = useResolveClassNames("text-muted-foreground")
 		const size = props.size ?? 32
 
-		const isOnline = !props.lastActive ? false : props.lastActive > new Date().getTime() - 300000
-
-		const onFailure = () => {
-			setHasError(true)
-		}
-
-		const onCompletion = () => {
-			setHasError(false)
-		}
-
 		return (
 			<View className="bg-transparent flex-row items-center justify-center shrink-0">
 				{props.lastActive && (
 					<View
-						className={cn("size-3 absolute rounded-full z-100 bottom-0 right-0", isOnline ? "bg-green-500" : "bg-gray-500")}
+						className={cn(
+							"size-3 absolute rounded-full z-100 bottom-0 right-0",
+							!props.lastActive ? false : props.lastActive > new Date().getTime() - 300000 ? "bg-green-500" : "bg-gray-500"
+						)}
 					/>
 				)}
 				<View
@@ -69,14 +62,14 @@ const Avatar = memo(
 							source={{
 								uri: props.source
 							}}
-							onFailure={onFailure}
-							onCompletion={onCompletion}
+							onError={() => setHasError(true)}
+							onLoad={() => setHasError(false)}
 							style={{
 								width: size,
 								height: size
 							}}
-							resizeMode="cover"
-							cachePolicy="dataCache"
+							contentFit="cover"
+							cachePolicy="disk"
 						/>
 					)}
 				</View>

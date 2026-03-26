@@ -42,7 +42,7 @@ function abortError(signal?: AbortSignal): Error {
 }
 
 class Thumbnails {
-	private readonly directory = new FileSystem.Directory(
+	public readonly directory = new FileSystem.Directory(
 		FileSystem.Paths.join(
 			Platform.select({
 				ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,

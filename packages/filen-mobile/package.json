@@ -58,6 +58,7 @@
 		"@expo/vector-icons": "^15.1.1",
 		"@filen/sdk-rs": "^0.4.6",
 		"@filen/utils": "^0.0.11",
+		"@getlimelight/sdk": "^0.7.10",
 		"@kishannareshpal/expo-pdf": "^0.3.1",
 		"@op-engineering/op-sqlite": "^15.2.7",
 		"@react-native-community/netinfo": "11.5.2",

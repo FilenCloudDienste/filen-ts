@@ -1,13 +1,11 @@
-import { useStringifiedClient } from "@/lib/auth"
 import useChatsQuery from "@/queries/useChats.query"
 import { chatMessagesQueryGet } from "@/queries/useChatMessages.query"
 import chats from "@/lib/chats"
-import { useEffect, useRef } from "react"
-import { runEffect } from "@filen/utils"
-import { AppState } from "react-native"
+import { useEffect } from "react"
+import { useStringifiedClient } from "@/lib/auth"
+import useEffectOnce from "@/hooks/useEffectOnce"
 
 export function useChatsUnreadCount() {
-	const didFetchOnStartRef = useRef<boolean>(false)
 	const stringifiedClient = useStringifiedClient()
 
 	const chatsQuery = useChatsQuery({
@@ -57,42 +55,20 @@ export function useChatsUnreadCount() {
 	})()
 
 	useEffect(() => {
-		if (hasMissingMessages) {
+		if (hasMissingMessages && stringifiedClient) {
 			chats.refetchChatsAndMessages().catch(console.error)
 		}
-	}, [hasMissingMessages])
+	}, [hasMissingMessages, stringifiedClient])
 
-	useEffect(() => {
-		const { cleanup } = runEffect(defer => {
-			const appStateSubscription = AppState.addEventListener("change", nextAppState => {
-				if (nextAppState === "active") {
-					chats.refetchChatsAndMessages().catch(console.error)
-				}
-			})
-
-			defer(() => {
-				appStateSubscription.remove()
-			})
-		})
-
-		return () => {
-			cleanup()
-		}
-	}, [])
-
-	useEffect(() => {
-		if (!stringifiedClient || didFetchOnStartRef.current) {
+	useEffectOnce(() => {
+		if (!stringifiedClient) {
 			return
 		}
 
-		didFetchOnStartRef.current = true
-
 		chats.refetchChatsAndMessages().catch(err => {
 			console.error(err)
-
-			didFetchOnStartRef.current = false
 		})
-	}, [stringifiedClient])
+	})
 
 	return unreadCount
 }

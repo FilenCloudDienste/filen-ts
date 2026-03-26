@@ -1,6 +1,9 @@
 import NetInfo from "@react-native-community/netinfo"
 import QuickCrypto, { Buffer } from "react-native-quick-crypto"
 import { NETINFO_CONFIG } from "@/constants"
+import { enableFreeze } from "react-native-screens"
+
+enableFreeze(true)
 
 globalThis.crypto = {
 	...globalThis.crypto,

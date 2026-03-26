@@ -47,8 +47,8 @@ const PreviewImage = memo(
 				<Image
 					className="flex-1 bg-transparent"
 					source={imageSource}
-					resizeMode="contain"
-					cachePolicy={undefined}
+					contentFit="contain"
+					cachePolicy="disk"
 					style={imageStyle}
 				/>
 			</ZoomableView>

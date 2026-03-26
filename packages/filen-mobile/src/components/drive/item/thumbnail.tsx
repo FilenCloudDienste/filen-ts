@@ -10,6 +10,7 @@ import { useRecyclingState } from "@shopify/flash-list"
 import { AppState } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
 import { useFocusEffect } from "expo-router"
+import * as FileSystem from "expo-file-system"
 
 const MAX_ERROR_RETRIES = 3
 const MAX_GENERATE_RETRIES = 3
@@ -37,12 +38,12 @@ const FileThumbnailWithGenerate = memo(
 		item,
 		size,
 		className,
-		resizeMode
+		contentFit
 	}: {
 		item: DriveItemFileExtracted
 		size: ThumbnailSize
 		className?: string
-		resizeMode?: React.ComponentProps<typeof Image>["resizeMode"]
+		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
 	}) => {
 		const abortControllerRef = useRef<AbortController | null>(null)
 		const errorRetryCountRef = useRef<number>(0)
@@ -56,9 +57,7 @@ const FileThumbnailWithGenerate = memo(
 					return null
 				}
 
-				const exists = thumbnails.exists(item)
-
-				return exists.exists ? exists.path : null
+				return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.png`)
 			},
 			[item.data.uuid],
 			() => {
@@ -130,7 +129,7 @@ const FileThumbnailWithGenerate = memo(
 
 				console.error(lastError)
 
-				cache.availableThumbnails.set(item.data.uuid, false)
+				cache.availableThumbnails.delete(item.data.uuid)
 			})
 
 			if (!result.success) {
@@ -147,7 +146,7 @@ const FileThumbnailWithGenerate = memo(
 		}, [generate])
 
 		const onFailure = () => {
-			cache.availableThumbnails.set(item.data.uuid, false)
+			cache.availableThumbnails.delete(item.data.uuid)
 
 			if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
 				setLocalPath(null)
@@ -193,9 +192,7 @@ const FileThumbnailWithGenerate = memo(
 				const httpStoreUnsub = useHttpStore.subscribe(
 					state => state.port,
 					port => {
-						if (port) {
-							generate()
-						} else {
+						if (!port) {
 							abortControllerRef.current?.abort()
 
 							abortControllerRef.current = null
@@ -213,7 +210,7 @@ const FileThumbnailWithGenerate = memo(
 			return () => {
 				cleanup()
 			}
-		}, [generate])
+		}, [])
 
 		useEffect(() => {
 			return () => {
@@ -264,9 +261,9 @@ const FileThumbnailWithGenerate = memo(
 				className={className}
 				source={source}
 				style={imageStyle}
-				resizeMode={resizeMode ?? "contain"}
-				cachePolicy={undefined}
-				onFailure={onFailure}
+				contentFit={contentFit ?? "contain"}
+				cachePolicy="none"
+				onError={onFailure}
 			/>
 		)
 	}
@@ -277,12 +274,12 @@ const FileThumbnail = memo(
 		item,
 		size,
 		className,
-		resizeMode
+		contentFit
 	}: {
 		item: DriveItemFileExtracted
 		size: ThumbnailSize
 		className?: string
-		resizeMode?: React.ComponentProps<typeof Image>["resizeMode"]
+		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
 	}) => {
 		const [localPath] = useRecyclingState<string | null>(() => {
 			const available = cache.availableThumbnails.get(item.data.uuid)
@@ -291,9 +288,7 @@ const FileThumbnail = memo(
 				return null
 			}
 
-			const exists = thumbnails.exists(item)
-
-			return exists.exists ? exists.path : null
+			return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.png`)
 		}, [item.data.uuid])
 
 		const [didFail, setDidFail] = useRecyclingState<boolean>(false, [item.data.uuid])
@@ -315,9 +310,9 @@ const FileThumbnail = memo(
 					className={className}
 					source={source}
 					style={imageStyle}
-					resizeMode={resizeMode ?? "contain"}
-					cachePolicy={undefined}
-					onFailure={() => setDidFail(true)}
+					contentFit={contentFit ?? "contain"}
+					cachePolicy="none"
+					onError={() => setDidFail(true)}
 				/>
 			)
 		}
@@ -327,7 +322,7 @@ const FileThumbnail = memo(
 				item={item}
 				size={size}
 				className={className}
-				resizeMode={resizeMode}
+				contentFit={contentFit}
 			/>
 		)
 	}
@@ -338,12 +333,12 @@ const Thumbnail = memo(
 		item,
 		size,
 		className,
-		resizeMode
+		contentFit
 	}: {
 		item: DriveItem
 		size: ThumbnailSize
 		className?: string
-		resizeMode?: React.ComponentProps<typeof Image>["resizeMode"]
+		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
 	}) => {
 		if (item.type === "file" || item.type === "sharedFile") {
 			return (
@@ -351,7 +346,7 @@ const Thumbnail = memo(
 					item={item}
 					size={size}
 					className={className}
-					resizeMode={resizeMode}
+					contentFit={contentFit}
 				/>
 			)
 		}

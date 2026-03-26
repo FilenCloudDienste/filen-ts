@@ -548,6 +548,10 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 
 	const onAppStateChange = useCallback(
 		async (nextAppState: AppStateStatus) => {
+			if (nextAppState !== "active" && nextAppState !== "background") {
+				return
+			}
+
 			const result = await run(async defer => {
 				await mutex.acquire()
 
@@ -631,7 +635,7 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	}, [onAppStateChange])
 
 	useEffectOnce(() => {
-		onAppStateChange(AppState.currentState).catch(console.error)
+		onAppStateChange("active").catch(console.error)
 	})
 
 	return null
