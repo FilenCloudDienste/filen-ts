@@ -205,7 +205,7 @@ export const FileIcon = memo(
 
 		return (
 			<ExpoImage
-				className={cn("shrink-0", className)}
+				className={cn("shrink-0 bg-transparent", className, "rounded-none")}
 				source={source}
 				style={{
 					width: width ?? 32,
@@ -360,7 +360,7 @@ export const DirectoryIcon = memo(
 	({ color, width, height, className }: { color?: DirColor; width?: number; height?: number; className?: string }) => {
 		return (
 			<ExpoImage
-				className={cn("shrink-0", className)}
+				className={cn("shrink-0 bg-transparent", className, "rounded-none")}
 				source={{
 					uri: directorySvg({
 						color: unwrapDirColor(color),

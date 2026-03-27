@@ -1,4 +1,4 @@
-import { type Note as TNote, NoteType, type NoteTag, type NoteParticipant, type NoteHistory } from "@filen/sdk-rs"
+import { type Note as TNote, NoteType } from "@filen/sdk-rs"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
 import { memo } from "react"
 import View from "@/components/ui/view"
@@ -8,18 +8,10 @@ import { useShallow } from "zustand/shallow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import notes from "@/lib/notes"
 import prompts from "@/lib/prompts"
-import { run, fastLocaleCompare } from "@filen/utils"
+import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import useNotesTagsQuery from "@/queries/useNotesTags.query"
-import useNoteHistoryQuery from "@/queries/useNoteHistory.query"
-import { simpleDate } from "@/lib/time"
 import { router } from "expo-router"
-import { actionSheet } from "@/providers/actionSheet.provider"
-import { Paths } from "expo-file-system"
-import { pack } from "@/lib/msgpack"
-import { Buffer } from "react-native-quick-crypto"
 import { Platform } from "react-native"
-import { contactDisplayName } from "@/lib/utils"
 import useAppStore from "@/stores/useApp.store"
 import * as Sharing from "expo-sharing"
 
@@ -30,18 +22,12 @@ export function createMenuButtons({
 	isSelected,
 	writeAccess,
 	origin,
-	noteHistory,
-	userId,
-	notesTags,
 	isOwner
 }: {
 	note: TNote
 	isSelected: boolean
 	writeAccess: boolean
 	origin: NoteMenuOrigin
-	noteHistory: NoteHistory[]
-	userId: bigint
-	notesTags: NoteTag[]
 	isOwner: boolean
 }): MenuButton[] {
 	const buttons: MenuButton[] = []
@@ -64,27 +50,19 @@ export function createMenuButtons({
 		})
 	}
 
-	if (writeAccess && noteHistory.length > 0) {
+	if (writeAccess) {
 		buttons.push({
 			id: "history",
 			title: "tbd_history",
 			icon: "clock",
-			subButtons: noteHistory.map(
-				historyItem =>
-					({
-						id: `history_${historyItem.id}`,
-						title: simpleDate(Number(historyItem.editedTimestamp)),
-						keepMenuOpenOnPress: Platform.OS === "android",
-						onPress: () => {
-							router.push({
-								pathname: Paths.join("/", "note", note.uuid),
-								params: {
-									historyItemPacked: Buffer.from(pack(historyItem)).toString("base64")
-								}
-							})
-						}
-					}) satisfies MenuButton
-			)
+			onPress: () => {
+				router.push({
+					pathname: "/noteHistory/[uuid]",
+					params: {
+						uuid: note.uuid
+					}
+				})
+			}
 		})
 	}
 
@@ -93,120 +71,14 @@ export function createMenuButtons({
 			id: "participants",
 			title: "tbd_participants",
 			icon: "users",
-			subButtons: (
-				[
-					{
-						type: "add" as const
-					},
-					...note.participants
-						.filter(participant => participant.userId !== userId)
-						.map(participant => ({
-							type: "participant" as const,
-							participant
-						}))
-						.sort((a, b) => fastLocaleCompare(a.participant.email, b.participant.email))
-				] satisfies (
-					| {
-							type: "add"
-					  }
-					| {
-							type: "participant"
-							participant: NoteParticipant
-					  }
-				)[]
-			).map(subButton => {
-				if (subButton.type === "add") {
-					return {
-						id: "addParticipant",
-						title: "tbd_addParticipant",
-						keepMenuOpenOnPress: Platform.OS === "android",
-						icon: "plus",
-						onPress: async () => {
-							// TODO: Add participant
-						}
-					} satisfies MenuButton
-				}
-
-				return {
-					id: `participant_${subButton.participant.userId}`,
-					title: Platform.select({
-						ios: contactDisplayName(subButton.participant),
-						default: subButton.participant.email
-					}),
-					subTitle: subButton.participant.email,
-					keepMenuOpenOnPress: Platform.OS === "android",
-					icon: subButton.participant.permissionsWrite ? "edit" : "eye",
-					destructive: note.ownerId === subButton.participant.userId,
-					onPress: () => {
-						actionSheet.show({
-							buttons: [
-								{
-									title: subButton.participant.permissionsWrite ? "tbd_set_read_only" : "tbd_set_read_write",
-									onPress: async () => {
-										const result = await runWithLoading(async () => {
-											await notes.setParticipantPermission({
-												note,
-												participant: subButton.participant,
-												permissionsWrite: !subButton.participant.permissionsWrite
-											})
-										})
-
-										if (!result.success) {
-											console.error(result.error)
-											alerts.error(result.error)
-
-											return
-										}
-									}
-								},
-								{
-									title: "tbd_remove_participant",
-									destructive: true,
-									onPress: async () => {
-										const promptResult = await run(async () => {
-											return await prompts.alert({
-												title: "tbd_remove_participant",
-												message: "tbd_are_you_sure_remove_participant",
-												cancelText: "tbd_cancel",
-												okText: "tbd_remove"
-											})
-										})
-
-										if (!promptResult.success) {
-											console.error(promptResult.error)
-											alerts.error(promptResult.error)
-
-											return
-										}
-
-										if (promptResult.data.cancelled) {
-											return
-										}
-
-										const result = await runWithLoading(async () => {
-											await notes.removeParticipant({
-												note,
-												participantUserId: subButton.participant.userId
-											})
-										})
-
-										if (!result.success) {
-											console.error(result.error)
-											alerts.error(result.error)
-
-											return
-										}
-									}
-								},
-								{
-									title: "tbd_cancel",
-									cancel: true
-								}
-							]
-						})
+			onPress: () => {
+				router.push({
+					pathname: "/noteParticipants/[uuid]",
+					params: {
+						uuid: note.uuid
 					}
-				} satisfies MenuButton
-			})
+				})
+			}
 		})
 	}
 
@@ -338,108 +210,9 @@ export function createMenuButtons({
 		id: "tags",
 		title: "tbd_tags",
 		icon: "tag",
-		subButtons: (
-			[
-				{
-					type: "create" as const
-				},
-				...notesTags.map(tag => ({
-					type: "tag" as const,
-					tag
-				}))
-			] satisfies (
-				| {
-						type: "create"
-				  }
-				| {
-						type: "tag"
-						tag: NoteTag
-				  }
-			)[]
-		).map(subButton => {
-			if (subButton.type === "create") {
-				return {
-					id: "createTag",
-					title: "tbd_createTag",
-					icon: "plus",
-					keepMenuOpenOnPress: Platform.OS === "android",
-					onPress: async () => {
-						const promptResult = await run(async () => {
-							return await prompts.input({
-								title: "tbd_create_tag",
-								message: "tbd_enter_tag_name",
-								cancelText: "tbd_cancel",
-								okText: "tbd_create"
-							})
-						})
-
-						if (!promptResult.success) {
-							console.error(promptResult.error)
-							alerts.error(promptResult.error)
-
-							return
-						}
-
-						if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-							return
-						}
-
-						const newName = promptResult.data.value.trim()
-
-						if (newName.length === 0) {
-							return
-						}
-
-						const result = await runWithLoading(async () => {
-							await notes.createTag({
-								name: newName
-							})
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
-					}
-				} satisfies MenuButton
-			}
-
-			const tagged = note.tags.some(t => t.uuid === subButton.tag.uuid)
-
-			return {
-				id: `tag_${subButton.tag.uuid}`,
-				title: subButton.tag.name ?? subButton.tag.uuid,
-				checked: tagged,
-				icon: "tag",
-				keepMenuOpenOnPress: Platform.OS === "android",
-				onPress: async () => {
-					const result = await runWithLoading(async () => {
-						if (tagged) {
-							await notes.removeTag({
-								note,
-								tag: subButton.tag
-							})
-
-							return
-						}
-
-						await notes.addTag({
-							note,
-							tag: subButton.tag
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			} satisfies MenuButton
-		})
+		onPress: () => {
+			// TODO: open bottom sheet to show tags with ability to add/remove tags from note
+		}
 	})
 
 	if (writeAccess) {
@@ -754,28 +527,7 @@ const Menu = memo(
 	} & React.ComponentPropsWithoutRef<typeof MenuComponent>) => {
 		const stringifiedClient = useStringifiedClient()
 		const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
-		const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === note.uuid))
 		const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
-
-		const notesTagsQuery = useNotesTagsQuery({
-			enabled: false
-		})
-
-		const noteHistoryQuery = useNoteHistoryQuery(
-			{
-				uuid: note.uuid
-			},
-			{
-				enabled: isActive
-			}
-		)
-
-		const noteHistory =
-			noteHistoryQuery.status === "success"
-				? noteHistoryQuery.data.sort((a, b) => Number(b.editedTimestamp) - Number(a.editedTimestamp))
-				: []
-
-		const notesTags = notesTagsQuery.status === "success" ? notesTagsQuery.data : []
 
 		const writeAccess =
 			note.ownerId === stringifiedClient?.userId ||
@@ -799,9 +551,6 @@ const Menu = memo(
 						isSelected,
 						writeAccess,
 						origin,
-						noteHistory,
-						userId: stringifiedClient?.userId ?? BigInt(0),
-						notesTags,
 						isOwner
 					})
 

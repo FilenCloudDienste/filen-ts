@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeAll, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest"
 
 const { mockDb, open } = vi.hoisted(() => {
 	const mockDb = {
@@ -386,6 +386,11 @@ describe("Cache", () => {
 	beforeEach(() => {
 		kvStore.clear()
 		setupMockDb()
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
 	})
 
 	describe("constructor", () => {
@@ -518,7 +523,8 @@ describe("Cache", () => {
 
 			await cache2.restore()
 
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 			expect((cache2[name] as PersistentMap<unknown>).get("key-1")).toBe("value-1")
@@ -537,7 +543,8 @@ describe("Cache", () => {
 			map.set("uuid-2", "Photos")
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			const stored1 = kvStore.get(kvKey(name, "uuid-1"))
 			const stored2 = kvStore.get(kvKey(name, "uuid-2"))
@@ -560,7 +567,8 @@ describe("Cache", () => {
 			}
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			for (const [mapName] of maps) {
 				const stored = kvStore.get(kvKey(mapName, "test-key"))
@@ -586,7 +594,8 @@ describe("Cache", () => {
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
 		})
@@ -602,7 +611,8 @@ describe("Cache", () => {
 			map.set("b", "2")
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			mockDb.executeBatch.mockClear()
 
@@ -610,7 +620,8 @@ describe("Cache", () => {
 			map.set("a", "updated")
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
 
@@ -631,7 +642,8 @@ describe("Cache", () => {
 			map.set("round-trip-key", "round-trip-value")
 
 			cache1.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			const cache2 = await createCache()
 
@@ -670,14 +682,16 @@ describe("Cache", () => {
 			}
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			for (const [mapName] of maps) {
 				expect(kvStore.has(kvKey(mapName, "key"))).toBe(true)
 			}
 
 			cache.clear()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			for (const [mapName] of maps) {
 				expect(kvStore.has(kvKey(mapName, "key"))).toBe(false)
@@ -714,7 +728,8 @@ describe("Cache", () => {
 
 			cache.clear()
 
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(kvStore.has(kvKey(name, "key"))).toBe(false)
 		})
@@ -728,13 +743,15 @@ describe("Cache", () => {
 
 			map.set("key", "value")
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			kvStore.delete(kvKey(name, "key"))
 
 			cache.clear()
 
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(kvStore.has(kvKey(name, "key"))).toBe(false)
 		})
@@ -753,7 +770,8 @@ describe("Cache", () => {
 			}
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			for (const [mapName] of maps) {
 				const stored = kvStore.get(kvKey(mapName, "test-key"))
@@ -775,7 +793,8 @@ describe("Cache", () => {
 			cache._testField = "should not persist"
 
 			cache.flush()
-			await Promise.resolve()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(kvStore.has("cache:v1:_testField")).toBe(false)
 		})

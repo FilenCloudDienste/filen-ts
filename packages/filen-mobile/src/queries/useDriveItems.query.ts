@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams, queryUpdater } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { sortParams } from "@filen/utils"
@@ -526,12 +526,10 @@ export function useDriveItemsQuery(
 	params: UseDriveItemsQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const defaultParams = useDefaultQueryParams(options)
 	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
-		...defaultParams,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
@@ -595,6 +593,25 @@ export function driveItemsQueryUpdateGlobal({
 			updater
 		})
 	}
+
+	cameraUpload
+		.getConfig()
+		.then(config => {
+			if (!config.remoteDir) {
+				return
+			}
+
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "photos",
+						uuid: config.remoteDir.uuid
+					}
+				},
+				updater
+			})
+		})
+		.catch(console.error)
 }
 
 export function driveItemsQueryGet(params: UseDriveItemsQueryParams) {

@@ -15,9 +15,7 @@ import { type AnyDirWithContext } from "@filen/sdk-rs"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { cn } from "@filen/utils"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
-import useNetInfo from "@/hooks/useNetInfo"
 import useDriveStore from "@/stores/useDrive.store"
-import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import { useShallow } from "zustand/shallow"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
@@ -45,7 +43,6 @@ const Item = memo(
 		const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.item.data.uuid])
 		const textGreen500 = useResolveClassNames("text-green-500")
 		const textRed500 = useResolveClassNames("text-red-500")
-		const netInfo = useNetInfo()
 		const isSelected = useDriveStore(
 			useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.item.data.uuid && i.type === info.item.item.type))
 		)
@@ -59,15 +56,6 @@ const Item = memo(
 			uuid: info.item.item.data.uuid,
 			type: info.item.item.type
 		})
-
-		const driveItemVersionsQuery = useDriveItemVersionsQuery(
-			{
-				uuid: info.item.item.data.uuid
-			},
-			{
-				enabled: info.item.item.type === "file" && origin !== "offline" && isMenuOpen
-			}
-		)
 
 		const disabled = (() => {
 			if (!drivePath.selectOptions) {
@@ -284,8 +272,6 @@ const Item = memo(
 					onOpenMenu={() => setIsMenuOpen(true)}
 					drivePath={drivePath}
 					isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
-					isOnline={netInfo.hasInternet}
-					versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 				>
 					<View
 						className={cn(
@@ -391,8 +377,6 @@ const Item = memo(
 											isStoredOffline={
 												driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false
 											}
-											isOnline={netInfo.hasInternet}
-											versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 										>
 											<View className="pl-4 h-full items-center justify-center flex-row bg-transparent">
 												<Ionicons

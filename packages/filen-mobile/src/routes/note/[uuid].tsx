@@ -19,8 +19,6 @@ import { Buffer } from "react-native-quick-crypto"
 import { unpack } from "@/lib/msgpack"
 import { createMenuButtons } from "@/components/notes/note/menu"
 import { useStringifiedClient } from "@/lib/auth"
-import useNotesTagsQuery from "@/queries/useNotesTags.query"
-import useNoteHistoryQuery from "@/queries/useNoteHistory.query"
 
 const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
@@ -28,33 +26,12 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
-	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === note.uuid))
 
 	const writeAccess =
 		note.ownerId === stringifiedClient?.userId ||
 		note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
 
 	const isOwner = note.ownerId === stringifiedClient?.userId
-
-	const notesTagsQuery = useNotesTagsQuery({
-		enabled: false
-	})
-
-	const noteHistoryQuery = useNoteHistoryQuery(
-		{
-			uuid: note.uuid
-		},
-		{
-			enabled: isActive
-		}
-	)
-
-	const noteHistory =
-		noteHistoryQuery.status === "success"
-			? noteHistoryQuery.data.sort((a, b) => Number(b.editedTimestamp) - Number(a.editedTimestamp))
-			: []
-
-	const notesTags = notesTagsQuery.status === "success" ? notesTagsQuery.data : []
 
 	const restoreFromHistory = async () => {
 		if (!history) {
@@ -135,9 +112,6 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 									isSelected,
 									writeAccess,
 									origin: "content",
-									noteHistory,
-									userId: stringifiedClient?.userId ?? BigInt(0),
-									notesTags,
 									isOwner
 								})
 							},

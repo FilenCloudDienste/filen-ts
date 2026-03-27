@@ -6,7 +6,7 @@ import { unpack } from "@/lib/msgpack"
 import { Buffer } from "react-native-quick-crypto"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
-import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
+import { DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
@@ -18,6 +18,7 @@ import { simpleDate } from "@/lib/time"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { getPreviewType } from "@/lib/utils"
 import { useStringifiedClient } from "@/lib/auth"
+import Thumbnail from "@/components/drive/item/thumbnail"
 
 export const Information = memo(({ item }: { item: DriveItem }) => {
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -395,10 +396,7 @@ const DriveItemInfo = memo(() => {
 			/>
 			<SafeAreaView
 				className="flex-1 bg-background-secondary"
-				edges={Platform.select({
-					ios: ["left", "right"],
-					default: ["left", "right"]
-				})}
+				edges={["left", "right"]}
 			>
 				<ScrollView
 					contentContainerClassName={cn("bg-transparent px-4 flex-col pb-40 pt-10", Platform.OS === "ios" && "pt-24")}
@@ -413,10 +411,14 @@ const DriveItemInfo = memo(() => {
 								height={128}
 							/>
 						) : (
-							<FileIcon
-								name={item.data.decryptedMeta?.name ?? ""}
-								width={128}
-								height={128}
+							<Thumbnail
+								item={item}
+								size={{
+									icon: 128,
+									thumbnail: 128
+								}}
+								contentFit="cover"
+								className="rounded-3xl"
 							/>
 						)}
 						<Text
