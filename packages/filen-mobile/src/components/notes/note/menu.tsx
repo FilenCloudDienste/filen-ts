@@ -14,6 +14,8 @@ import { router } from "expo-router"
 import { Platform } from "react-native"
 import useAppStore from "@/stores/useApp.store"
 import * as Sharing from "expo-sharing"
+import { Buffer } from "react-native-quick-crypto"
+import { pack } from "@/lib/msgpack"
 
 export type NoteMenuOrigin = "notes" | "search" | "content"
 
@@ -57,9 +59,9 @@ export function createMenuButtons({
 			icon: "clock",
 			onPress: () => {
 				router.push({
-					pathname: "/noteHistory/[uuid]",
+					pathname: "/noteHistory",
 					params: {
-						uuid: note.uuid
+						notePackedBase64: Buffer.from(pack(note)).toString("base64")
 					}
 				})
 			}
@@ -73,9 +75,9 @@ export function createMenuButtons({
 			icon: "users",
 			onPress: () => {
 				router.push({
-					pathname: "/noteParticipants/[uuid]",
+					pathname: "/noteParticipants",
 					params: {
-						uuid: note.uuid
+						notePackedBase64: Buffer.from(pack(note)).toString("base64")
 					}
 				})
 			}

@@ -112,27 +112,6 @@ function setHeaderOpacityValue(headerOpacity: SharedValue<number>, visible: bool
 	headerOpacity.value = withSpring(visible ? 1 : 0, SPRING_HEADER)
 }
 
-function handleSingleTap(headerOpacity: SharedValue<number>) {
-	headerOpacity.value = withSpring(headerOpacity.value > 0.5 ? 0 : 1, SPRING_HEADER)
-}
-
-function handleZoomChange(zoomScale: SharedValue<number>, zoom: number, setScrollEnabled: (enabled: boolean) => void) {
-	zoomScale.value = zoom
-
-	setScrollEnabled(zoom <= 1)
-}
-
-function back(isDismissing: SharedValue<number>, headerOpacity: SharedValue<number>) {
-	isDismissing.value = 1
-	headerOpacity.value = 0
-
-	if (!router.canGoBack()) {
-		return
-	}
-
-	router.back()
-}
-
 const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracted; drivePath: DrivePath; parent?: AnyDirWithContext }) => {
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
@@ -156,11 +135,20 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 	)
 
 	const goBack = () => {
-		back(isDismissing, headerOpacity)
+		isDismissing.value = 1
+		headerOpacity.value = 0
+
+		if (!router.canGoBack()) {
+			return
+		}
+
+		router.back()
 	}
 
 	const onZoomChange = (zoom: number) => {
-		handleZoomChange(zoomScale, zoom, setScrollEnabled)
+		zoomScale.value = zoom
+
+		setScrollEnabled(zoom <= 1)
 	}
 
 	const { isImage, isVideo, isAudio } = useDrivePreviewStore(
@@ -188,7 +176,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 			return
 		}
 
-		handleSingleTap(headerOpacity)
+		headerOpacity.value = withSpring(headerOpacity.value > 0.5 ? 0 : 1, SPRING_HEADER)
 	}
 
 	const headerAnimatedStyle = useAnimatedStyle(() => {
@@ -320,7 +308,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 						drawDistance={dimensions.width}
 						horizontal={true}
 						pagingEnabled={itemsSorted.length > 1}
-						scrollEnabled={scrollEnabled && itemsSorted.length > 1}
+						scrollEnabled={scrollEnabled && itemsSorted.length > 1 && (isImage || isVideo || isAudio)}
 						bounces={itemsSorted.length > 1}
 						maxItemsInRecyclePool={0}
 						showsHorizontalScrollIndicator={false}
