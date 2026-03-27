@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: packages/filen-web/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --package-lock-only && npm ci
+        run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
         env:
           NODE_OPTIONS: --max-old-space-size=6144
       - name: Build

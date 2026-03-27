@@ -3,6 +3,7 @@ import type { DriveItem } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { pack } from "@/lib/msgpack"
 import { debounce } from "es-toolkit/function"
+import { AppState } from "react-native"
 
 const VERSION = 1
 const GLOBAL_PREFIX = `cache:v${VERSION}`
@@ -116,6 +117,12 @@ class Cache {
 		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
 		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
 		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
+
+		AppState.addEventListener("change", nextAppState => {
+			if (nextAppState === "background") {
+				this.flushNow()
+			}
+		})
 	}
 
 	private createMap<V>(name: string): PersistentMap<V> {
@@ -176,60 +183,64 @@ class Cache {
 		return map
 	}
 
+	private persistNow(): void {
+		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
+			return
+		}
+
+		const commands: [string, (string | Uint8Array)[]][] = []
+
+		for (const mapKey of this.dirtyClears) {
+			commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
+		}
+
+		for (const [mapKey, entryKeys] of this.dirtyDeletes) {
+			for (const entryKey of entryKeys) {
+				commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
+			}
+		}
+
+		for (const entry of this.registry) {
+			const upsertKeys = this.dirtyUpserts.get(entry.key)
+
+			if (!upsertKeys) {
+				continue
+			}
+
+			for (const entryKey of upsertKeys) {
+				const value = entry.map.get(entryKey)
+
+				if (value !== undefined) {
+					commands.push([
+						"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
+						[entry.key + ":" + entryKey, new Uint8Array(pack(value))]
+					])
+				}
+			}
+		}
+
+		this.dirtyClears.clear()
+		this.dirtyDeletes.clear()
+		this.dirtyUpserts.clear()
+
+		if (commands.length === 0) {
+			return
+		}
+
+		console.log(`[Cache] Persisting ${commands.length} changes`)
+
+		sqlite
+			.openDb()
+			.then(db => db.executeBatch(commands))
+			.catch(err => {
+				console.error("[Cache] Failed to batch persist", err)
+			})
+	}
+
 	private persistDirty = debounce(
 		() => {
 			queueMicrotask(() => {
-				if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
-					return
-				}
-
-				const commands: [string, (string | Uint8Array)[]][] = []
-
-				for (const mapKey of this.dirtyClears) {
-					commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
-				}
-
-				for (const [mapKey, entryKeys] of this.dirtyDeletes) {
-					for (const entryKey of entryKeys) {
-						commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
-					}
-				}
-
-				for (const entry of this.registry) {
-					const upsertKeys = this.dirtyUpserts.get(entry.key)
-
-					if (!upsertKeys) {
-						continue
-					}
-
-					for (const entryKey of upsertKeys) {
-						const value = entry.map.get(entryKey)
-
-						if (value !== undefined) {
-							commands.push([
-								"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
-								[entry.key + ":" + entryKey, new Uint8Array(pack(value))]
-							])
-						}
-					}
-				}
-
-				this.dirtyClears.clear()
-				this.dirtyDeletes.clear()
-				this.dirtyUpserts.clear()
-
-				if (commands.length === 0) {
-					return
-				}
-
-				console.log(`[Cache] Persisting ${commands.length} changes`)
-
-				sqlite
-					.openDb()
-					.then(db => db.executeBatch(commands))
-					.catch(err => {
-						console.error("[Cache] Failed to batch persist", err)
-					})
+				this.persistNow()
 			})
 		},
 		PERSIST_DEBOUNCE,
@@ -278,6 +289,11 @@ class Cache {
 
 	public flush(): void {
 		this.persistDirty()
+	}
+
+	public flushNow(): void {
+		this.persistDirty.cancel()
+		this.persistNow()
 	}
 
 	public clear(): void {

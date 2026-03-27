@@ -481,7 +481,10 @@ const Drive = memo(() => {
 		return item.data.uuid
 	}
 
-	const itemsSorted = itemSorter.sortItems([...(driveItemsQuery.data ?? []), ...globalSearchResult], "nameAsc")
+	const itemsSorted = itemSorter.sortItems(
+		[...(driveItemsQuery.status === "success" ? driveItemsQuery.data : []), ...globalSearchResult],
+		"nameAsc"
+	)
 
 	const items = (() => {
 		if (driveItemsQuery.status !== "success") {
