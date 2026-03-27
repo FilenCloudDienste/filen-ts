@@ -1,6 +1,5 @@
 import { QueryClient, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
-import useNetInfo from "@/hooks/useNetInfo"
 import sqlite from "@/lib/sqlite"
 import { Semaphore, run } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -178,29 +177,6 @@ export const queryClient = new QueryClient({
 		}
 	}
 })
-
-export function useDefaultQueryParams(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): Omit<UseQueryOptions, "queryKey" | "queryFn"> {
-	const { hasInternet } = useNetInfo()
-
-	const enabled = (() => {
-		if (!hasInternet) {
-			return false
-		}
-
-		if (typeof options?.enabled === "boolean") {
-			return options.enabled
-		}
-
-		return true
-	})()
-
-	return {
-		enabled
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
-}
 
 export class QueryUpdater {
 	public get<T>(queryKey: unknown[]): T | undefined {

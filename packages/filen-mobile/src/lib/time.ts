@@ -61,12 +61,7 @@ function detectLocaleInfo() {
 		dateSeparator = "-"
 	}
 	// MDY format (MM/DD/YYYY) + 12-hour time
-	else if (
-		lang.startsWith("en-us") ||
-		lang.startsWith("en-ph") ||
-		lang.startsWith("en-ca") ||
-		lang.startsWith("es-us")
-	) {
+	else if (lang.startsWith("en-us") || lang.startsWith("en-ph") || lang.startsWith("en-ca") || lang.startsWith("es-us")) {
 		dateFormat = "MDY"
 		dateSeparator = "/"
 		use24Hour = false

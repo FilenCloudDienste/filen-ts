@@ -12,7 +12,6 @@ import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { router, useFocusEffect } from "expo-router"
-import useNetInfo from "@/hooks/useNetInfo"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/lib/drive"
@@ -27,7 +26,6 @@ import { debounce } from "es-toolkit/function"
 const Header = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const netInfo = useNetInfo()
 	const selectedDriveItems = useDriveStore(useShallow(state => state.selectedItems))
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
@@ -175,7 +173,7 @@ const Header = memo(() => {
 			})
 		}
 
-		if (netInfo.hasInternet && drivePath.type === "trash") {
+		if (drivePath.type === "trash") {
 			menuButtons.push({
 				id: "empty",
 				title: "tbd_empty_trash",

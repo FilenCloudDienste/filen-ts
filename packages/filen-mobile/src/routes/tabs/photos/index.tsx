@@ -20,14 +20,11 @@ import { router } from "expo-router"
 import { Buffer } from "react-native-quick-crypto"
 import { pack } from "@/lib/msgpack"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
-import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import Menu from "@/components/drive/item/menu"
-import useNetInfo from "@/hooks/useNetInfo"
 import { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
 import { useResolveClassNames } from "uniwind"
-import { useRecyclingState } from "@shopify/flash-list"
 
 const Photo = memo(
 	({
@@ -41,23 +38,12 @@ const Photo = memo(
 		drivePath: DrivePath
 		parent?: AnyDirWithContext
 	}) => {
-		const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
-		const netInfo = useNetInfo()
 		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
 			uuid: info.item.data.uuid,
 			type: info.item.type
 		})
-
-		const driveItemVersionsQuery = useDriveItemVersionsQuery(
-			{
-				uuid: info.item.data.uuid
-			},
-			{
-				enabled: info.item.type === "file" && isMenuOpen
-			}
-		)
 
 		const viewStyle: ViewStyle = {
 			width: size,
@@ -92,12 +78,8 @@ const Photo = memo(
 					item={info.item}
 					parent={parent}
 					origin="photos"
-					onCloseMenu={() => setIsMenuOpen(false)}
-					onOpenMenu={() => setIsMenuOpen(true)}
 					drivePath={drivePath}
 					isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
-					isOnline={netInfo.hasInternet}
-					versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 				>
 					<View style={viewStyle}>
 						<PressableWithoutFeedback

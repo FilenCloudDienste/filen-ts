@@ -7,7 +7,7 @@ import { getPreviewType } from "@/lib/utils"
 import { useWindowDimensions, type ViewabilityConfig } from "react-native"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
 import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring } from "react-native-reanimated"
-import { FlashList, type ListRenderItemInfo, type ViewToken } from "@shopify/flash-list"
+import { FlashList, type ViewToken } from "@shopify/flash-list"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import { itemSorter } from "@/lib/sort"
 import type { DrivePath } from "@/hooks/useDrivePath"
@@ -283,26 +283,6 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}) as DriveItemFileExtracted[]
 	})()
 
-	const renderItem = (info: ListRenderItemInfo<DriveItemFileExtracted>) => {
-		return (
-			<GalleryItem
-				info={info}
-				galleryZoomScale={zoomScale}
-				dismissTranslateY={dismissTranslateY}
-				isDismissing={isDismissing}
-				fadeRange={fadeRange}
-				goBack={goBack}
-				onZoomChange={onZoomChange}
-				onSingleTap={onSingleTap}
-				parent={parent}
-			/>
-		)
-	}
-
-	const keyExtractor = (driveItem: DriveItemFileExtracted) => {
-		return driveItem.data.uuid
-	}
-
 	const initialScrollIndex = itemsSorted.findIndex(i => i.data.uuid === item.data.uuid)
 
 	return (
@@ -321,8 +301,22 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 				<AnimatedView className="flex-1 bg-transparent">
 					<FlashList<DriveItemFileExtracted>
 						data={itemsSorted}
-						keyExtractor={keyExtractor}
-						renderItem={renderItem}
+						keyExtractor={item => item.data.uuid}
+						renderItem={info => {
+							return (
+								<GalleryItem
+									info={info}
+									galleryZoomScale={zoomScale}
+									dismissTranslateY={dismissTranslateY}
+									isDismissing={isDismissing}
+									fadeRange={fadeRange}
+									goBack={goBack}
+									onZoomChange={onZoomChange}
+									onSingleTap={onSingleTap}
+									parent={parent}
+								/>
+							)
+						}}
 						drawDistance={dimensions.width}
 						horizontal={true}
 						pagingEnabled={itemsSorted.length > 1}
@@ -330,7 +324,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 						bounces={itemsSorted.length > 1}
 						maxItemsInRecyclePool={0}
 						showsHorizontalScrollIndicator={false}
-						initialScrollIndex={initialScrollIndex >= 0 ? initialScrollIndex : 0}
+						initialScrollIndex={initialScrollIndex >= 0 && initialScrollIndex < itemsSorted.length ? initialScrollIndex : 0}
 						onViewableItemsChanged={onViewableItemsChanged}
 						viewabilityConfig={VIEWABILITY_CONFIG}
 					/>

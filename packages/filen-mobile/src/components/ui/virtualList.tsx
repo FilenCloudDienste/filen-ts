@@ -248,7 +248,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 					refreshing={refreshing}
 					refreshControl={refreshControl}
 					numColumns={itemsPerRow}
-					drawDistance={layout.height > 0 ? layout.height : undefined}
+					drawDistance={0}
 					maintainVisibleContentPosition={{
 						disabled: false,
 						autoscrollToTopThreshold: undefined,

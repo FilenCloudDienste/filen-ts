@@ -14,6 +14,7 @@ export type AlertPromptOptions = {
 	cancellable?: boolean
 	okText?: string
 	cancelText?: string
+	destructive?: boolean
 }
 
 export type InputPromptResult =
@@ -41,6 +42,7 @@ export type InputPromptOptions = {
 	okText?: string
 	cancelText?: string
 	placeholder?: string
+	destructive?: boolean
 }
 
 class Prompts {
@@ -61,7 +63,7 @@ class Prompts {
 					},
 					{
 						text: options?.okText ?? "OK",
-						style: "default",
+						style: options?.destructive ? "destructive" : "default",
 						onPress: () => {
 							resolve({
 								cancelled: false
@@ -102,7 +104,7 @@ class Prompts {
 					},
 					{
 						text: options?.okText ?? "OK",
-						style: "default",
+						style: options?.destructive ? "destructive" : "default",
 						onPress: (
 							value?:
 								| string

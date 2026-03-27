@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
 import audioCache from "@/lib/audioCache"
@@ -31,12 +31,10 @@ export function useAudioMetadataQuery(
 	params: UseAudioMetadataQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const defaultParams = useDefaultQueryParams(options)
 	const sortedParams = sortParams(params)
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
-		...defaultParams,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>

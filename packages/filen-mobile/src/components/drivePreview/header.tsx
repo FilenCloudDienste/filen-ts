@@ -11,13 +11,12 @@ import { type View as TView, Platform } from "react-native"
 import Menu from "@/components/drive/item/menu"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
 import type { DrivePath } from "@/hooks/useDrivePath"
-import useNetInfo from "@/hooks/useNetInfo"
-import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { useShallow } from "zustand/shallow"
 import { getPreviewType } from "@/lib/utils"
 import { cn } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
+import useDriveItemsQuery from "@/queries/useDriveItems.query"
 
 const GalleryHeader = memo(
 	({
@@ -36,14 +35,25 @@ const GalleryHeader = memo(
 		const insets = useSafeAreaInsets()
 		const viewRef = useRef<TView>(null)
 		const { onLayout, layout } = useViewLayout(viewRef)
-		const netInfo = useNetInfo()
 		const textForeground = useResolveClassNames("text-foreground")
 
-		const { currentItem } = useDrivePreviewStore(
+		const { currentItemUuid } = useDrivePreviewStore(
 			useShallow(state => ({
-				currentItem: state.currentItem
+				currentItemUuid: state.currentItem?.data.uuid
 			}))
 		)
+
+		const driveItemsQuery = useDriveItemsQuery(
+			{
+				path: drivePath
+			},
+			{
+				enabled: false
+			}
+		)
+
+		const currentItem =
+			driveItemsQuery.status === "success" ? (driveItemsQuery.data.find(item => item.data.uuid === currentItemUuid) ?? null) : null
 
 		const currentItemPreviewType = getPreviewType(currentItem?.data.decryptedMeta?.name ?? "")
 		const solidHeader = currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
@@ -52,15 +62,6 @@ const GalleryHeader = memo(
 			uuid: currentItem?.data.uuid ?? "",
 			type: "file"
 		})
-
-		const driveItemVersionsQuery = useDriveItemVersionsQuery(
-			{
-				uuid: currentItem?.data.uuid ?? ""
-			},
-			{
-				enabled: !!currentItem
-			}
-		)
 
 		useEffect(() => {
 			useDrivePreviewStore.getState().setHeaderHeight(
@@ -131,8 +132,6 @@ const GalleryHeader = memo(
 							origin="preview"
 							drivePath={drivePath}
 							isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
-							isOnline={netInfo.hasInternet}
-							versions={driveItemVersionsQuery.status === "success" ? driveItemVersionsQuery.data : []}
 						>
 							{currentItemPreviewType === "audio" ? (
 								<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">

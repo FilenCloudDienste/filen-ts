@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, useDefaultQueryParams, queryUpdater } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 
 export const BASE_QUERY_KEY = "useContactsQuery"
@@ -33,11 +33,8 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 export function useContactsQuery(
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const defaultParams = useDefaultQueryParams(options)
-
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
-		...defaultParams,
 		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) =>

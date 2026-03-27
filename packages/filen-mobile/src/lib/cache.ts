@@ -2,9 +2,11 @@ import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithConte
 import type { DriveItem } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { pack } from "@/lib/msgpack"
+import { debounce } from "es-toolkit/function"
 
 const VERSION = 1
 const GLOBAL_PREFIX = `cache:v${VERSION}`
+const PERSIST_DEBOUNCE = 1000
 
 type Mutation =
 	| {
@@ -163,7 +165,7 @@ class Cache {
 				}
 			}
 
-			this.schedulePersist()
+			this.persistDirty()
 		})
 
 		this.registry.push({
@@ -174,73 +176,67 @@ class Cache {
 		return map
 	}
 
-	private persistScheduled = false
-
-	private schedulePersist(): void {
-		if (this.persistScheduled) {
-			return
-		}
-
-		this.persistScheduled = true
-
-		queueMicrotask(() => {
-			this.persistScheduled = false
-
-			this.persistDirty()
-		})
-	}
-
-	private persistDirty(): void {
-		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
-			return
-		}
-
-		const commands: [string, (string | Uint8Array)[]][] = []
-
-		for (const mapKey of this.dirtyClears) {
-			commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
-		}
-
-		for (const [mapKey, entryKeys] of this.dirtyDeletes) {
-			for (const entryKey of entryKeys) {
-				commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
-			}
-		}
-
-		for (const entry of this.registry) {
-			const upsertKeys = this.dirtyUpserts.get(entry.key)
-
-			if (!upsertKeys) {
-				continue
-			}
-
-			for (const entryKey of upsertKeys) {
-				const value = entry.map.get(entryKey)
-
-				if (value !== undefined) {
-					commands.push([
-						"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
-						[entry.key + ":" + entryKey, new Uint8Array(pack(value))]
-					])
+	private persistDirty = debounce(
+		() => {
+			queueMicrotask(() => {
+				if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
+					return
 				}
-			}
-		}
 
-		this.dirtyClears.clear()
-		this.dirtyDeletes.clear()
-		this.dirtyUpserts.clear()
+				const commands: [string, (string | Uint8Array)[]][] = []
 
-		if (commands.length === 0) {
-			return
-		}
+				for (const mapKey of this.dirtyClears) {
+					commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
+				}
 
-		sqlite
-			.openDb()
-			.then(db => db.executeBatch(commands))
-			.catch(err => {
-				console.error("[Cache] Failed to batch persist", err)
+				for (const [mapKey, entryKeys] of this.dirtyDeletes) {
+					for (const entryKey of entryKeys) {
+						commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
+					}
+				}
+
+				for (const entry of this.registry) {
+					const upsertKeys = this.dirtyUpserts.get(entry.key)
+
+					if (!upsertKeys) {
+						continue
+					}
+
+					for (const entryKey of upsertKeys) {
+						const value = entry.map.get(entryKey)
+
+						if (value !== undefined) {
+							commands.push([
+								"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
+								[entry.key + ":" + entryKey, new Uint8Array(pack(value))]
+							])
+						}
+					}
+				}
+
+				this.dirtyClears.clear()
+				this.dirtyDeletes.clear()
+				this.dirtyUpserts.clear()
+
+				if (commands.length === 0) {
+					return
+				}
+
+				console.log(`[Cache] Persisting ${commands.length} changes`)
+
+				sqlite
+					.openDb()
+					.then(db => db.executeBatch(commands))
+					.catch(err => {
+						console.error("[Cache] Failed to batch persist", err)
+					})
 			})
-	}
+		},
+		PERSIST_DEBOUNCE,
+		{
+			edges: ["trailing"]
+		}
+	)
 
 	/**
 	 * Populate maps from SQLite. Uses Map.prototype.set to bypass
@@ -281,8 +277,6 @@ class Cache {
 	}
 
 	public flush(): void {
-		this.persistScheduled = false
-
 		this.persistDirty()
 	}
 
@@ -292,8 +286,6 @@ class Cache {
 		for (const { map } of this.registry) {
 			Map.prototype.clear.call(map)
 		}
-
-		this.persistScheduled = false
 
 		this.dirtyUpserts.clear()
 		this.dirtyDeletes.clear()

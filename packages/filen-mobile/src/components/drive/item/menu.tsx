@@ -7,7 +7,7 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
-import { SharingRole_Tags, type FileVersion, type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
+import { SharingRole_Tags, type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
@@ -20,8 +20,6 @@ import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
 import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
 import { pack } from "@/lib/msgpack"
-import { simpleDate } from "@/lib/time"
-import { actionSheet } from "@/providers/actionSheet.provider"
 import auth from "@/lib/auth"
 import { Buffer } from "react-native-quick-crypto"
 import { selectContacts } from "@/routes/contacts"
@@ -44,17 +42,13 @@ export function createMenuButtons({
 	origin,
 	parent,
 	drivePath,
-	isStoredOffline,
-	isOnline,
-	versions
+	isStoredOffline
 }: {
 	item: DriveItem
 	origin: DriveItemMenuOrigin
 	parent?: AnyDirWithContext
 	drivePath: DrivePath
 	isStoredOffline: boolean
-	isOnline: boolean
-	versions: FileVersion[]
 }): MenuButton[] {
 	const menuButtons: MenuButton[] = []
 	const previewType = item.type === "file" || item.type === "sharedFile" ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
@@ -394,8 +388,7 @@ export function createMenuButtons({
 	if (
 		downloadSubButtons.length > 0 &&
 		origin !== "offline" &&
-		(item.type === "file" || item.type === "sharedFile" ? (item.data.decryptedMeta?.size ?? 0) > 0 : true) &&
-		isOnline
+		(item.type === "file" || item.type === "sharedFile" ? (item.data.decryptedMeta?.size ?? 0) > 0 : true)
 	) {
 		menuButtons.push({
 			id: "download",
@@ -412,8 +405,8 @@ export function createMenuButtons({
 			origin === "favorites" ||
 			origin === "links" ||
 			origin === "recents" ||
-			origin === "search") &&
-		isOnline
+			origin === "search" ||
+			origin === "photos")
 	) {
 		menuButtons.push({
 			id: "share",
@@ -447,8 +440,8 @@ export function createMenuButtons({
 			origin === "favorites" ||
 			origin === "links" ||
 			origin === "recents" ||
-			origin === "search") &&
-		isOnline
+			origin === "search" ||
+			origin === "photos")
 	) {
 		menuButtons.push({
 			id: "favorite",
@@ -480,7 +473,9 @@ export function createMenuButtons({
 		origin === "links" ||
 		origin === "recents" ||
 		origin === "search" ||
-		origin === "offline"
+		origin === "offline" ||
+		origin === "photos" ||
+		origin === "preview"
 	) {
 		menuButtons.push({
 			id: "info",
@@ -495,106 +490,19 @@ export function createMenuButtons({
 			}
 		})
 
-		if (item.type === "file" && origin !== "offline" && versions.length > 0 && isOnline) {
+		if (item.type === "file" && origin !== "offline" && origin !== "preview") {
 			menuButtons.push({
 				id: "versions",
 				title: "tbd_versions",
 				icon: "clock",
-				subButtons: versions.map(
-					version =>
-						({
-							id: `version_${version.uuid}`,
-							title: simpleDate(Number(version.timestamp)),
-							keepMenuOpenOnPress: Platform.OS === "android",
-							onPress: () => {
-								actionSheet.show({
-									buttons: [
-										{
-											title: "tbd_restore_version",
-											onPress: async () => {
-												const promptResult = await run(async () => {
-													return await prompts.alert({
-														title: "tbd_restore_version",
-														message: "tbd_are_you_sure_restore_version",
-														cancelText: "tbd_cancel",
-														okText: "tbd_restore"
-													})
-												})
-
-												if (!promptResult.success) {
-													console.error(promptResult.error)
-													alerts.error(promptResult.error)
-
-													return
-												}
-
-												if (promptResult.data.cancelled) {
-													return
-												}
-
-												const result = await runWithLoading(async () => {
-													await drive.restoreFileVersion({
-														item,
-														version
-													})
-												})
-
-												if (!result.success) {
-													console.error(result.error)
-													alerts.error(result.error)
-
-													return
-												}
-											}
-										},
-										{
-											title: "tbd_delete_version",
-											destructive: true,
-											onPress: async () => {
-												const promptResult = await run(async () => {
-													return await prompts.alert({
-														title: "tbd_delete_version",
-														message: "tbd_are_you_sure_delete_version",
-														cancelText: "tbd_cancel",
-														okText: "tbd_delete"
-													})
-												})
-
-												if (!promptResult.success) {
-													console.error(promptResult.error)
-													alerts.error(promptResult.error)
-
-													return
-												}
-
-												if (promptResult.data.cancelled) {
-													return
-												}
-
-												const result = await runWithLoading(async () => {
-													await drive.deleteVersion({
-														item,
-														version
-													})
-												})
-
-												if (!result.success) {
-													console.error(result.error)
-													alerts.error(result.error)
-
-													return
-												}
-											}
-										},
-										{
-											title: "tbd_cancel",
-											cancel: true
-										}
-									]
-								})
-							}
-						}) satisfies MenuButton
-				)
+				onPress: () => {
+					router.push({
+						pathname: "/fileVersions",
+						params: {
+							itemPackedBase64: Buffer.from(pack(item)).toString("base64")
+						}
+					})
+				}
 			})
 		}
 	}
@@ -606,8 +514,7 @@ export function createMenuButtons({
 			origin === "favorites" ||
 			origin === "links" ||
 			origin === "recents" ||
-			origin === "search") &&
-		isOnline
+			origin === "search")
 	) {
 		menuButtons.push({
 			id: "color",
@@ -630,8 +537,9 @@ export function createMenuButtons({
 			origin === "favorites" ||
 			origin === "links" ||
 			origin === "recents" ||
-			origin === "search") &&
-		isOnline
+			origin === "search" ||
+			origin === "photos" ||
+			origin === "preview")
 	) {
 		menuButtons.push({
 			id: "rename",
@@ -681,42 +589,44 @@ export function createMenuButtons({
 			}
 		})
 
-		menuButtons.push({
-			id: "move",
-			title: "tbd_move",
-			icon: "edit",
-			onPress: async () => {
-				const driveRootUuidResult = await run(async () => {
-					const { authedSdkClient } = await auth.getSdkClients()
+		if (origin !== "photos") {
+			menuButtons.push({
+				id: "move",
+				title: "tbd_move",
+				icon: "edit",
+				onPress: async () => {
+					const driveRootUuidResult = await run(async () => {
+						const { authedSdkClient } = await auth.getSdkClients()
 
-					return authedSdkClient.root().uuid
-				})
+						return authedSdkClient.root().uuid
+					})
 
-				if (!driveRootUuidResult.success) {
-					console.error(driveRootUuidResult.error)
-					alerts.error(driveRootUuidResult.error)
+					if (!driveRootUuidResult.success) {
+						console.error(driveRootUuidResult.error)
+						alerts.error(driveRootUuidResult.error)
 
-					return
-				}
-
-				router.push({
-					pathname: "/driveSelect/[uuid]",
-					params: {
-						uuid: driveRootUuidResult.data,
-						selectOptions: Buffer.from(
-							pack({
-								type: "single",
-								files: false,
-								directories: true,
-								intention: "move",
-								items: [item],
-								id: randomUUID()
-							} satisfies SelectOptions)
-						).toString("base64")
+						return
 					}
-				})
-			}
-		})
+
+					router.push({
+						pathname: "/driveSelect/[uuid]",
+						params: {
+							uuid: driveRootUuidResult.data,
+							selectOptions: Buffer.from(
+								pack({
+									type: "single",
+									files: false,
+									directories: true,
+									intention: "move",
+									items: [item],
+									id: randomUUID()
+								} satisfies SelectOptions)
+							).toString("base64")
+						}
+					})
+				}
+			})
+		}
 	}
 
 	// Removing offline files should only be allowed when inside the root of the offline view or when it is already stored offline
@@ -761,7 +671,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (origin === "links" && (item.type === "file" || item.type === "directory") && isOnline && !parent) {
+	if (origin === "links" && (item.type === "file" || item.type === "directory") && !parent) {
 		menuButtons.push({
 			id: "removeLink",
 			title: "tbd_remove_link",
@@ -810,7 +720,6 @@ export function createMenuButtons({
 			(origin === "preview" &&
 				!isOwner &&
 				(item.type === "sharedFile" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"))) &&
-		isOnline &&
 		!parent
 	) {
 		menuButtons.push({
@@ -865,7 +774,6 @@ export function createMenuButtons({
 			(origin === "preview" &&
 				isOwner &&
 				(item.type === "sharedFile" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"))) &&
-		isOnline &&
 		!parent
 	) {
 		menuButtons.push({
@@ -914,7 +822,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (origin !== "trash" && origin !== "sharedIn" && origin !== "offline" && origin !== "recents" && isOnline) {
+	if (origin !== "trash" && origin !== "sharedIn" && origin !== "offline" && origin !== "recents") {
 		menuButtons.push({
 			id: "trash",
 			title: "tbd_trash",
@@ -961,7 +869,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if ((item.type === "file" || item.type === "directory") && origin === "trash" && isOnline) {
+	if ((item.type === "file" || item.type === "directory") && origin === "trash") {
 		menuButtons.push({
 			id: "restore",
 			title: "tbd_restore",
@@ -983,7 +891,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if ((item.type === "file" || item.type === "directory") && (origin === "trash" || origin === "preview") && isOnline) {
+	if ((item.type === "file" || item.type === "directory") && origin === "trash") {
 		menuButtons.push({
 			id: "deletePermanently",
 			title: "tbd_delete_permanently",
@@ -1023,7 +931,7 @@ export function createMenuButtons({
 					return
 				}
 
-				if (item.type === "file" && origin === "preview" && router.canGoBack()) {
+				if (item.type === "file" && router.canGoBack()) {
 					router.back()
 				}
 			}
@@ -1046,8 +954,6 @@ const Menu = memo(
 		onCloseMenu,
 		drivePath,
 		isStoredOffline,
-		isOnline,
-		versions,
 		disabled,
 		style
 	}: {
@@ -1062,8 +968,6 @@ const Menu = memo(
 		onCloseMenu?: () => void
 		drivePath: DrivePath
 		isStoredOffline: boolean
-		isOnline: boolean
-		versions: FileVersion[]
 		disabled?: boolean
 		style?: StyleProp<ViewStyle>
 	}) => {
@@ -1074,9 +978,7 @@ const Menu = memo(
 					origin,
 					parent,
 					drivePath,
-					isStoredOffline,
-					isOnline,
-					versions
+					isStoredOffline
 				})
 
 		return (

@@ -1,7 +1,7 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import { Platform } from "react-native"
-import { useResolveClassNames } from "uniwind"
+import { useResolveClassNames, useUniwind } from "uniwind"
 import { useIsAuthed } from "@/lib/auth"
 import { Redirect } from "expo-router"
 import { memo } from "react"
@@ -16,6 +16,7 @@ const TabsLayout = memo(() => {
 	const isAuthed = useIsAuthed()
 	const chatsUnreadCount = useChatsUnreadCount()
 	const contactRequestsQuery = useContactRequestsQuery()
+	const { theme } = useUniwind()
 
 	if (!isAuthed) {
 		return <Redirect href="/auth/login" />
@@ -23,12 +24,27 @@ const TabsLayout = memo(() => {
 
 	return (
 		<NativeTabs
-			backgroundColor={bgBackground.backgroundColor}
-			iconColor={textForeground.color}
+			backgroundColor={Platform.select({
+				ios: undefined,
+				default: bgBackground.backgroundColor
+			})}
+			iconColor={Platform.select({
+				ios: theme === "dark" ? "white" : "black",
+				default: textForeground.color
+			})}
 			badgeBackgroundColor={textRed500.color}
 			rippleColor={bgBackgroundSecondary.backgroundColor}
 			indicatorColor={bgBackgroundSecondary.backgroundColor}
-			tintColor={textForeground.color}
+			labelStyle={{
+				color: Platform.select({
+					ios: theme === "dark" ? "white" : "black",
+					default: textForeground.color
+				})
+			}}
+			tintColor={Platform.select({
+				ios: theme === "dark" ? "white" : "black",
+				default: textForeground.color
+			})}
 		>
 			<NativeTabs.Trigger name="drive">
 				<NativeTabs.Trigger.Label>tbd_drive</NativeTabs.Trigger.Label>

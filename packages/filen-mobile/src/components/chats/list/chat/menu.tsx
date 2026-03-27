@@ -1,23 +1,18 @@
-import type { Chat as TChat, ChatParticipant } from "@filen/sdk-rs"
+import type { Chat as TChat } from "@filen/sdk-rs"
 import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
-import { run, fastLocaleCompare } from "@filen/utils"
+import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import chats from "@/lib/chats"
-import { Platform } from "react-native"
-import { actionSheet } from "@/providers/actionSheet.provider"
-import { randomUUID } from "expo-crypto"
-import { contactDisplayName } from "@/lib/utils"
 import { router } from "expo-router"
 import useAppStore from "@/stores/useApp.store"
 import useChatsStore from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
-import { selectContacts } from "@/routes/contacts"
 
 export type ChatMenuOrigin = "chats" | "search" | "chat"
 
@@ -87,139 +82,14 @@ export function createMenuButtons({
 			id: "participants",
 			title: "tbd_participants",
 			icon: "users",
-			subButtons: (
-				[
-					{
-						type: "add" as const
-					},
-					...chat.participants
-						.filter(participant => participant.userId !== userId)
-						.map(participant => ({
-							type: "participant" as const,
-							participant
-						}))
-						.sort((a, b) => fastLocaleCompare(a.participant.email, b.participant.email))
-				] satisfies (
-					| {
-							type: "add"
-					  }
-					| {
-							type: "participant"
-							participant: ChatParticipant
-					  }
-				)[]
-			).map(subButton => {
-				if (subButton.type === "add") {
-					return {
-						id: "addParticipant",
-						title: "tbd_addParticipant",
-						keepMenuOpenOnPress: Platform.OS === "android",
-						icon: "plus",
-						onPress: async () => {
-							const selectContactsResult = await selectContacts({
-								multiple: true,
-								userIdsToExclude: chat.participants.map(participant => Number(participant.userId))
-							})
-
-							if (selectContactsResult.cancelled) {
-								return
-							}
-
-							const result = await runWithLoading(async () => {
-								return await Promise.all(
-									selectContactsResult.selectedContacts.map(async contact => {
-										return await chats.addParticipant({
-											chat,
-											contact
-										})
-									})
-								)
-							})
-
-							if (!result.success) {
-								console.error(result.error)
-								alerts.error(result.error)
-
-								return
-							}
-						}
-					} satisfies MenuButton
-				}
-
-				return {
-					id: `participant_${subButton.participant.userId}`,
-					title: Platform.select({
-						ios: contactDisplayName(subButton.participant),
-						default: subButton.participant.email
-					}),
-					subTitle: subButton.participant.email,
-					keepMenuOpenOnPress: Platform.OS === "android",
-					icon: "user",
-					destructive: chat.ownerId === subButton.participant.userId,
-					onPress: () => {
-						if (userId === subButton.participant.userId || chat.ownerId !== userId) {
-							return
-						}
-
-						actionSheet.show({
-							buttons: [
-								{
-									title: "tbd_remove_participant",
-									destructive: true,
-									onPress: async () => {
-										const promptResult = await run(async () => {
-											return await prompts.alert({
-												title: "tbd_remove_participant",
-												message: "tbd_are_you_sure_remove_participant",
-												cancelText: "tbd_cancel",
-												okText: "tbd_remove"
-											})
-										})
-
-										if (!promptResult.success) {
-											console.error(promptResult.error)
-											alerts.error(promptResult.error)
-
-											return
-										}
-
-										if (promptResult.data.cancelled) {
-											return
-										}
-
-										const result = await runWithLoading(async () => {
-											await chats.removeParticipant({
-												chat,
-												contact: {
-													uuid: randomUUID(),
-													userId: subButton.participant.userId,
-													email: subButton.participant.email,
-													avatar: subButton.participant.avatar,
-													nickName: subButton.participant.nickName,
-													lastActive: subButton.participant.lastActive,
-													timestamp: subButton.participant.lastActive,
-													publicKey: randomUUID()
-												}
-											})
-										})
-
-										if (!result.success) {
-											console.error(result.error)
-											alerts.error(result.error)
-
-											return
-										}
-									}
-								},
-								{
-									title: "tbd_cancel",
-									cancel: true
-								}
-							]
-						})
+			onPress: () => {
+				router.push({
+					pathname: "/chatParticipants/[uuid]",
+					params: {
+						uuid: chat.uuid
 					}
-				} satisfies MenuButton
-			})
+				})
+			}
 		},
 		{
 			id: "muted",

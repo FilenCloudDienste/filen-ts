@@ -218,6 +218,15 @@ const RootLayout = memo(() => {
 												}}
 											/>
 											<Stack.Screen
+												name="fileVersions"
+												options={{
+													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
+													contentStyle: {
+														backgroundColor: bgBackgroundSecondary.backgroundColor
+													}
+												}}
+											/>
+											<Stack.Screen
 												name="drivePreview"
 												options={{
 													presentation: "transparentModal",
