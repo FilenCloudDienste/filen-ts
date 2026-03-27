@@ -1,16 +1,20 @@
 import { QueryClient, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite from "@/lib/sqlite"
-import { Semaphore, run } from "@filen/utils"
+import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
+import { pack } from "@/lib/msgpack"
+import { debounce } from "es-toolkit/function"
 import { unwrapSdkError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
+import { AppState } from "react-native"
 
-export const VERSION = 1
-export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
-export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000
+const VERSION = 1
+const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
+const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000
+const PERSIST_DEBOUNCE = 1000
 
-export const UNCACHED_QUERY_KEYS = new Map<string, true>([])
+const UNCACHED_QUERY_KEYS = new Map<string, true>([])
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
 	const shouldNotPersist = (query.queryKey as unknown[]).some(
@@ -20,66 +24,126 @@ export const shouldPersistQuery = (query: PersistedQuery): boolean => {
 	return !shouldNotPersist && query.state.status === "success"
 }
 
-const persisterMutex = new Semaphore(1)
+export class QueryPersisterKv {
+	private readonly buffer = new Map<string, unknown>()
+	private readonly dirtyUpserts = new Set<string>()
+	private readonly dirtyDeletes = new Set<string>()
 
-export const queryClientPersisterKv = {
-	getItem: async <T>(key: string): Promise<T | null> => {
-		const result = await run(async defer => {
-			await persisterMutex.acquire()
-
-			defer(() => {
-				persisterMutex.release()
-			})
-
-			return await sqlite.kvAsync.get<T>(`${QUERY_CLIENT_PERSISTER_PREFIX}:${key}`)
+	public constructor() {
+		AppState.addEventListener("change", nextAppState => {
+			if (nextAppState === "background") {
+				this.flushNow()
+			}
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
-	},
-	setItem: async (key: string, value: unknown): Promise<void> => {
-		const result = await run(async defer => {
-			await persisterMutex.acquire()
-
-			defer(() => {
-				persisterMutex.release()
-			})
-
-			await sqlite.kvAsync.set(`${QUERY_CLIENT_PERSISTER_PREFIX}:${key}`, value)
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
-	},
-	removeItem: async (key: string): Promise<void> => {
-		const result = await run(async defer => {
-			await persisterMutex.acquire()
-
-			defer(() => {
-				persisterMutex.release()
-			})
-
-			return await sqlite.kvAsync.remove(`${QUERY_CLIENT_PERSISTER_PREFIX}:${key}`)
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
-	},
-	keys: async (): Promise<string[]> => {
-		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
-		const keys = await sqlite.kvAsync.keysByPrefix(prefix)
-
-		return keys.map(key => key.slice(prefix.length))
-	},
-	clear: async (): Promise<void> => {
-		await sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`)
 	}
-} as const
+
+	public getItem<T>(key: string): T | null {
+		const value = this.buffer.get(key)
+
+		return value !== undefined ? (value as T) : null
+	}
+
+	public setItem(key: string, value: unknown): void {
+		this.buffer.set(key, value)
+
+		this.dirtyUpserts.add(key)
+		this.dirtyDeletes.delete(key)
+
+		this.persistDirty()
+	}
+
+	public removeItem(key: string): void {
+		this.buffer.delete(key)
+
+		this.dirtyDeletes.add(key)
+		this.dirtyUpserts.delete(key)
+
+		this.persistDirty()
+	}
+
+	public keys(): string[] {
+		return Array.from(this.buffer.keys())
+	}
+
+	public clear(): void {
+		this.buffer.clear()
+		this.dirtyUpserts.clear()
+		this.dirtyDeletes.clear()
+
+		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
+			console.error("[QueryPersisterKv] Failed to clear", err)
+		})
+	}
+
+	public async restore(): Promise<void> {
+		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
+		const entries = await sqlite.kvAsync.getByPrefix<unknown>(prefix)
+
+		for (const [fullKey, value] of entries) {
+			this.buffer.set(fullKey.slice(prefix.length), value)
+		}
+	}
+
+	public flush(): void {
+		this.persistDirty()
+	}
+
+	public flushNow(): void {
+		this.persistDirty.cancel()
+		this.persistNow()
+	}
+
+	private persistNow(): void {
+		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
+			return
+		}
+
+		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
+		const commands: [string, (string | Uint8Array)[]][] = []
+
+		for (const key of this.dirtyDeletes) {
+			commands.push(["DELETE FROM kv WHERE key = ?", [prefix + key]])
+		}
+
+		for (const key of this.dirtyUpserts) {
+			const value = this.buffer.get(key)
+
+			if (value !== undefined) {
+				commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [prefix + key, new Uint8Array(pack(value))]])
+			}
+		}
+
+		this.dirtyUpserts.clear()
+		this.dirtyDeletes.clear()
+
+		if (commands.length === 0) {
+			return
+		}
+
+		console.log(`[QueryPersisterKv] Persisting ${commands.length} changes`)
+
+		sqlite
+			.openDb()
+			.then(db => db.executeBatch(commands))
+			.catch(err => {
+				console.error("[QueryPersisterKv] Failed to batch persist", err)
+			})
+	}
+
+	private persistDirty = debounce(
+		() => {
+			queueMicrotask(() => {
+				this.persistNow()
+			})
+		},
+		PERSIST_DEBOUNCE,
+		{
+			edges: ["trailing"]
+		}
+	)
+}
+
+export const queryClientPersisterKv = new QueryPersisterKv()
 
 export const queryClientPersister = experimental_createQueryPersister({
 	storage: queryClientPersisterKv,
@@ -88,8 +152,6 @@ export const queryClientPersister = experimental_createQueryPersister({
 		if (query.state.status !== "success" || !shouldPersistQuery(query)) {
 			return undefined
 		}
-
-		console.log("[Query Persister] Persisting query with key:", query.queryKey)
 
 		return query
 	},
@@ -102,34 +164,26 @@ export const queryClientPersister = experimental_createQueryPersister({
 
 export async function restoreQueries(): Promise<void> {
 	try {
-		const keys = await queryClientPersisterKv.keys()
+		await queryClientPersisterKv.restore()
 
-		const results = await Promise.allSettled(
-			keys.map(async key => {
-				const persistedQuery = await queryClientPersisterKv.getItem<PersistedQuery>(key)
+		for (const key of queryClientPersisterKv.keys()) {
+			const persistedQuery = queryClientPersisterKv.getItem<PersistedQuery>(key)
 
-				if (
-					!persistedQuery ||
-					!persistedQuery.state ||
-					!shouldPersistQuery(persistedQuery) ||
-					persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now() ||
-					persistedQuery.state.status !== "success"
-				) {
-					await queryClientPersisterKv.removeItem(key)
+			if (
+				!persistedQuery ||
+				!persistedQuery.state ||
+				!shouldPersistQuery(persistedQuery) ||
+				persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now() ||
+				persistedQuery.state.status !== "success"
+			) {
+				queryClientPersisterKv.removeItem(key)
 
-					return
-				}
-
-				queryClient.setQueryData(persistedQuery.queryKey, persistedQuery.state.data, {
-					updatedAt: persistedQuery.state.dataUpdatedAt
-				})
-			})
-		)
-
-		for (const result of results) {
-			if (result.status === "rejected") {
-				console.error("[restoreQueries] Failed to restore query", result.reason)
+				continue
 			}
+
+			queryClient.setQueryData(persistedQuery.queryKey, persistedQuery.state.data, {
+				updatedAt: persistedQuery.state.dataUpdatedAt
+			})
 		}
 	} catch (e) {
 		console.error(e)
