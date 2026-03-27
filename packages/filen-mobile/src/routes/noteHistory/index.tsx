@@ -3,27 +3,27 @@ import { Platform } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
 import { unpack } from "@/lib/msgpack"
 import { Buffer } from "react-native-quick-crypto"
-import type { DriveItem } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
-import { run, formatBytes } from "@filen/utils"
+import { run } from "@filen/utils"
 import { useStringifiedClient } from "@/lib/auth"
-import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
-import drive from "@/lib/drive"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import type { FileVersion } from "@filen/sdk-rs"
+import type { NoteHistory as TNoteHistory, Note } from "@filen/sdk-rs"
 import Menu from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
+import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
+import useNoteHistoryQuery from "@/queries/useNoteHistory.query"
+import notes from "@/lib/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
-const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem }) => {
+const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
@@ -35,14 +35,14 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{simpleDate(Number(version.timestamp))}
+						{simpleDate(Number(history.editedTimestamp))}
 					</Text>
 					<Text
 						className="text-muted-foreground text-xs"
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{formatBytes(Number(version.size))}
+						{history.preview ?? "tbd_no_preview"}
 					</Text>
 				</View>
 				<View className="flex-row items-center gap-4 bg-transparent">
@@ -55,8 +55,8 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 								onPress: async () => {
 									const promptResponse = await run(async () => {
 										return await prompts.alert({
-											title: "tbd_restore_version",
-											message: "tbd_restore_version_confirmation",
+											title: "tbd_restore_history",
+											message: "tbd_restore_history_confirmation",
 											cancelText: "tbd_cancel",
 											okText: "tbd_restore",
 											destructive: true
@@ -75,50 +75,9 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 									}
 
 									const result = await runWithLoading(async () => {
-										await drive.restoreFileVersion({
-											item,
-											version
-										})
-									})
-
-									if (!result.success) {
-										console.error(result.error)
-										alerts.error(result.error)
-
-										return
-									}
-								}
-							},
-							{
-								id: "delete",
-								title: "tbd_delete",
-								destructive: true,
-								onPress: async () => {
-									const promptResponse = await run(async () => {
-										return await prompts.alert({
-											title: "tbd_delete_version",
-											message: "tbd_delete_version_confirmation",
-											cancelText: "tbd_cancel",
-											okText: "tbd_delete",
-											destructive: true
-										})
-									})
-
-									if (!promptResponse.success) {
-										console.error(promptResponse.error)
-										alerts.error(promptResponse.error)
-
-										return
-									}
-
-									if (promptResponse.data.cancelled) {
-										return
-									}
-
-									const result = await runWithLoading(async () => {
-										await drive.deleteVersion({
-											item,
-											version
+										await notes.restoreFromHistory({
+											note,
+											history
 										})
 									})
 
@@ -148,9 +107,9 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 	)
 })
 
-const FileVersions = memo(() => {
-	const { itemPackedBase64 } = useLocalSearchParams<{
-		itemPackedBase64?: string
+const NoteHistory = memo(() => {
+	const { notePackedBase64 } = useLocalSearchParams<{
+		notePackedBase64?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -158,33 +117,39 @@ const FileVersions = memo(() => {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
 
-	const item = (() => {
-		if (!itemPackedBase64) {
+	const noteParsed = (() => {
+		if (!notePackedBase64) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(itemPackedBase64, "base64")) as DriveItem
+			return unpack(Buffer.from(notePackedBase64, "base64")) as Note
 		} catch {
 			return null
 		}
 	})()
 
-	const driveItemVersionsQuery = useDriveItemVersionsQuery(
+	const notesWithContentQuery = useNotesWithContentQuery({
+		enabled: false
+	})
+
+	const note =
+		noteParsed && notesWithContentQuery.status === "success"
+			? (notesWithContentQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null)
+			: null
+
+	const noteHistoryQuery = useNoteHistoryQuery(
 		{
-			uuid: item?.data.uuid ?? ""
+			uuid: note?.uuid ?? ""
 		},
 		{
-			enabled: !!item && item.type === "file"
+			enabled: !!note
 		}
 	)
 
-	const versions =
-		driveItemVersionsQuery.status === "success" && item
-			? driveItemVersionsQuery.data.filter(version => version.uuid !== item.data.uuid)
-			: []
+	const history = noteHistoryQuery.status === "success" && note ? noteHistoryQuery.data : []
 
-	if (!item || item.type !== "file") {
+	if (!note) {
 		return (
 			<Redirect
 				href={{
@@ -200,7 +165,7 @@ const FileVersions = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_file_versions"
+				title="tbd_note_history"
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -226,73 +191,17 @@ const FileVersions = memo(() => {
 					],
 					default: undefined
 				})}
-				rightItems={
-					versions.length > 0
-						? [
-								{
-									type: "button",
-									icon: {
-										name: "trash-bin-outline",
-										color: textForeground.color,
-										size: 20
-									},
-									props: {
-										onPress: async () => {
-											const promptResponse = await run(async () => {
-												return await prompts.alert({
-													title: "tbd_delete__all_cversion",
-													message: "tbd_delete_version_c_all_confirmation",
-													cancelText: "tbd_cancel",
-													okText: "tbd_delete_all_c",
-													destructive: true
-												})
-											})
-
-											if (!promptResponse.success) {
-												console.error(promptResponse.error)
-												alerts.error(promptResponse.error)
-
-												return
-											}
-
-											if (promptResponse.data.cancelled) {
-												return
-											}
-
-											const result = await runWithLoading(async () => {
-												await Promise.all(
-													versions.map(version => {
-														return drive.deleteVersion({
-															item,
-															version
-														})
-													})
-												)
-											})
-
-											if (!result.success) {
-												console.error(result.error)
-												alerts.error(result.error)
-
-												return
-											}
-										}
-									}
-								}
-							]
-						: undefined
-				}
 			/>
 			<VirtualList
-				data={versions}
-				loading={driveItemVersionsQuery.status !== "success"}
+				data={history}
+				loading={noteHistoryQuery.status !== "success"}
 				contentInsetAdjustmentBehavior="automatic"
 				contentContainerStyle={{
 					paddingBottom: insets.bottom
 				}}
 				onRefresh={async () => {
 					const result = await run(async () => {
-						return await driveItemVersionsQuery.refetch()
+						return await noteHistoryQuery.refetch()
 					})
 
 					if (!result.success) {
@@ -308,22 +217,22 @@ const FileVersions = memo(() => {
 								size={64}
 								color={textMutedForeground.color}
 							/>
-							<Text>tbd_no_file_versions</Text>
+							<Text>tbd_no_note_history</Text>
 						</View>
 					)
 				}}
-				renderItem={({ item: version }) => {
+				renderItem={({ item: history }) => {
 					return (
-						<Version
-							version={version}
-							item={item}
+						<History
+							history={history}
+							note={note}
 						/>
 					)
 				}}
-				keyExtractor={version => version.uuid}
+				keyExtractor={history => history.id.toString()}
 			/>
 		</Fragment>
 	)
 })
 
-export default FileVersions
+export default NoteHistory

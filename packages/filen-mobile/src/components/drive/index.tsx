@@ -506,17 +506,6 @@ const Drive = memo(() => {
 		return itemsSorted
 	})()
 
-	const onRefresh = async () => {
-		const result = await run(async () => {
-			return await driveItemsQuery.refetch()
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-		}
-	}
-
 	const debouncedSearch = (() => {
 		return debounce(async (value: string) => {
 			const normalized = value.trim().toLowerCase()
@@ -605,7 +594,16 @@ const Drive = memo(() => {
 					keyExtractor={keyExtractor}
 					data={items}
 					renderItem={renderItem}
-					onRefresh={onRefresh}
+					onRefresh={async () => {
+						const result = await run(async () => {
+							return await driveItemsQuery.refetch()
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+						}
+					}}
 					loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
 					searchBar={searchBarProps}
 				/>
