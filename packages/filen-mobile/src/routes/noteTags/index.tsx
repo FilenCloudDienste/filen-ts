@@ -1,5 +1,5 @@
 import Text from "@/components/ui/text"
-import { Platform } from "react-native"
+import { Platform, ActivityIndicator } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
 import { unpack } from "@/lib/msgpack"
 import { Buffer } from "react-native-quick-crypto"
@@ -301,7 +301,14 @@ const NoteTags = memo(() => {
 					] satisfies HeaderItem[]
 				}
 			/>
-			{tags.length === 0 ? (
+			{notesTagsQuery.status !== "success" ? (
+				<View className="flex-1 bg-transparent items-center justify-center">
+					<ActivityIndicator
+						size="large"
+						color={textForeground.color as string}
+					/>
+				</View>
+			) : tags.length === 0 ? (
 				<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
 					<Ionicons
 						name="pricetag-outline"
