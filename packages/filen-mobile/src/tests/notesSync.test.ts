@@ -109,6 +109,8 @@ function mockNote(uuid: string) {
 async function createSync(): Promise<Sync> {
 	const sync = new Sync()
 
+	sync.start()
+
 	await (sync as unknown as { initPromise: Promise<void> }).initPromise
 
 	return sync
@@ -250,9 +252,11 @@ describe("Sync (Notes)", () => {
 		})
 
 		it("waits for init before flushing", async () => {
-			// Create sync but don't await init — flushToDisk should still work
-			// because it awaits initPromise internally
+			// flushToDisk awaits initPromise — start() must be called first
 			const sync = new Sync()
+
+			sync.start()
+
 			const data = {
 				"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
 			}

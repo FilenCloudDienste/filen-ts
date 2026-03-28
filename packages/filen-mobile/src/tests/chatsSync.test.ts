@@ -135,6 +135,8 @@ function mockMessage(inflightId: string, message: string, sentTimestamp: number)
 async function createSync(): Promise<Sync> {
 	const sync = new Sync()
 
+	sync.start()
+
 	await (sync as unknown as { initPromise: Promise<void> }).initPromise
 
 	return sync
@@ -280,6 +282,9 @@ describe("Sync (Chats)", () => {
 
 		it("waits for init before flushing", async () => {
 			const sync = new Sync()
+
+			sync.start()
+
 			const data = {
 				"chat-1": {
 					chat: mockChat("chat-1"),
