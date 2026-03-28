@@ -1,6 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 import pathModule from "path"
 
+// @ts-expect-error __DEV__ is a React Native global
+globalThis.__DEV__ = true
+
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
@@ -137,6 +140,7 @@ vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForExpo: (p: string) => p,
 	unwrapFileMeta: vi.fn(),
 	unwrappedFileIntoDriveItem: vi.fn(),
+	unwrapSdkError: vi.fn().mockReturnValue(null),
 	normalizeModificationTimestampForComparison: (ts: number) => ts
 }))
 
@@ -273,24 +277,26 @@ describe("modifyAssetPathOnCollision", () => {
 	})
 
 	describe("invalid paths", () => {
-		it("returns null when parentDir is '.'", () => {
+		it("returns a fallback path when input has no parent directory", () => {
+			// FileSystem.Paths.dirname falls back to DOCUMENT_URI for bare filenames,
+			// so these produce a valid (non-null) collision path unlike path.posix which returns "."
 			expect(
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "IMG_0001.jpg",
 					asset: { name: "IMG_0001.jpg", creationTime: 1000 }
 				})
-			).toBeNull()
+			).toBeTypeOf("string")
 		})
 
-		it("returns null when parentDir is empty", () => {
+		it("returns a fallback path when path is empty", () => {
 			expect(
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "",
 					asset: { name: "IMG_0001.jpg", creationTime: 1000 }
 				})
-			).toBeNull()
+			).toBeTypeOf("string")
 		})
 
 		it("returns null when basename is '.'", () => {

@@ -9,7 +9,6 @@ import {
 	unwrappedFileIntoDriveItem,
 	normalizeModificationTimestampForComparison
 } from "@/lib/utils"
-import pathModule from "path"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
 import { run, Semaphore, fastLocaleCompare } from "@filen/utils"
@@ -32,6 +31,7 @@ export type LocalFile = {
 	asset: MediaLibrary.Asset
 	info: MediaLibrary.AssetInfo
 	path: string
+	originalPath: string
 }
 
 export type RemoteFile = FileWithPath
@@ -95,9 +95,9 @@ export const DEFAULT_CONFIG: Config = {
  * Returns null when all iterations are exhausted or the path is invalid.
  */
 export function modifyAssetPathOnCollision({ iteration, path, asset }: CollisionParams): string | null {
-	const ext = pathModule.posix.extname(asset.name)
-	const basename = pathModule.posix.basename(asset.name, ext)
-	const parentDir = pathModule.posix.dirname(path)
+	const ext = FileSystem.Paths.extname(asset.name)
+	const basename = FileSystem.Paths.basename(asset.name, ext)
+	const parentDir = FileSystem.Paths.dirname(path)
 
 	if (parentDir === "." || basename.length === 0 || parentDir.length === 0 || basename === ".") {
 		return null
@@ -105,14 +105,14 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 
 	switch (iteration) {
 		case 0: {
-			return normalizeFilePathForSdk(pathModule.posix.join(parentDir, `${basename}_${asset.creationTime}${ext}`))
+			return normalizeFilePathForSdk(FileSystem.Paths.join(parentDir, `${basename}_${asset.creationTime}${ext}`))
 				.toLowerCase()
 				.trim()
 		}
 
 		case 1: {
 			return normalizeFilePathForSdk(
-				pathModule.posix.join(parentDir, `${basename}_${xxHash32(`${asset.name}_${asset.creationTime}`).toString(16)}${ext}`)
+				FileSystem.Paths.join(parentDir, `${basename}_${xxHash32(`${asset.name}_${asset.creationTime}`).toString(16)}${ext}`)
 			)
 				.toLowerCase()
 				.trim()
@@ -127,13 +127,11 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 class CameraUpload {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
-	private syncMutex: Semaphore = new Semaphore(1)
+	private syncing: boolean = false
 	public secureStoreKey: string = "cameraUploadConfig"
 	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
 	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, Dir>({
 		max: 100,
-		maxEntrySize: Number.MAX_SAFE_INTEGER,
-		maxSize: Number.MAX_SAFE_INTEGER,
 		ttl: 60000,
 		allowStale: false,
 		updateAgeOnGet: false,
@@ -182,7 +180,7 @@ class CameraUpload {
 	}
 
 	private async compress(file: FileSystem.File): Promise<FileSystem.File> {
-		const extname = pathModule.posix.extname(file.uri).toLowerCase()
+		const extname = FileSystem.Paths.extname(file.uri).toLowerCase()
 
 		if (!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(extname)) {
 			return file
@@ -316,7 +314,8 @@ class CameraUpload {
 
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
 				for (const { asset, info } of infos) {
-					let path = normalizeFilePathForSdk(pathModule.posix.join(title, info.filename)).toLowerCase().trim()
+					const originalPath = normalizeFilePathForSdk(FileSystem.Paths.join(title, info.filename)).trim()
+					let path = normalizeFilePathForSdk(FileSystem.Paths.join(title, info.filename)).toLowerCase().trim()
 					let iteration = 0
 
 					while (tree[path]) {
@@ -344,7 +343,8 @@ class CameraUpload {
 					tree[path] = {
 						asset,
 						info,
-						path
+						path,
+						originalPath
 					}
 				}
 			})
@@ -403,7 +403,7 @@ class CameraUpload {
 						iteration,
 						path,
 						asset: {
-							name: meta?.name ?? pathModule.posix.basename(path),
+							name: meta?.name ?? FileSystem.Paths.basename(path),
 							creationTime: meta ? Number(meta.created) : 0
 						}
 					}) ?? ""
@@ -485,13 +485,31 @@ class CameraUpload {
 		await secureStore.set(this.secureStoreKey, newConfig)
 	}
 
-	private async ensureParentDirectoryExists({ path, config, signal }: { path: string; config: Config; signal: AbortSignal }) {
+	private async ensureParentDirectoryExists({
+		config,
+		signal,
+		originalPath
+	}: {
+		config: Config
+		signal: AbortSignal
+		originalPath: string
+	}) {
 		if (!config.remoteDir) {
 			throw new Error("Remote directory is not set in config")
 		}
 
-		const parentDirName = pathModule.posix.dirname(path)
-		const cacheKey = `${config.remoteDir.uuid}:${parentDirName}`
+		const slashCount = originalPath.split("/").length - 1
+
+		if (slashCount <= 1) {
+			return config.remoteDir
+		}
+
+		if (slashCount !== 2) {
+			throw new Error(`Unexpected path structure: ${originalPath}`)
+		}
+
+		const parentDirName = FileSystem.Paths.dirname(originalPath).replace(/\//g, "")
+		const cacheKey = `${config.remoteDir.uuid}:${parentDirName.toLowerCase().trim()}`
 		const fromCache = this.ensureParentDirectoryExistsCache.get(cacheKey)
 
 		if (fromCache) {
@@ -513,11 +531,32 @@ class CameraUpload {
 		return dir
 	}
 
-	public async sync(params?: { maxUploads?: number }): Promise<void> {
+	public async sync(params?: { maxUploads?: number; background?: boolean }): Promise<void> {
+		if (this.syncing) {
+			return
+		}
+
+		this.syncing = true
+
+		// Capture both signals once so that cancel() — which aborts the current
+		// controller and creates fresh instances for future syncs — reliably
+		// stops every operation in this sync via the captured references,
+		// regardless of when during execution cancel() fires.
+		const abortController = this.globalAbortController
+		const pauseSignal = this.globalPauseSignal
+
 		const result = await run(async defer => {
+			defer(() => {
+				this.syncing = false
+			})
+
 			const config = await this.getConfig()
 
 			if (!config.enabled || config.albumIds.length === 0 || !config.remoteDir) {
+				return
+			}
+
+			if (params?.background && !config.background) {
 				return
 			}
 
@@ -539,25 +578,19 @@ class CameraUpload {
 				}
 			}
 
-			await this.syncMutex.acquire()
-
 			useCameraUploadStore.getState().setSyncing(true)
 
 			defer(() => {
 				useCameraUploadStore.getState().setSyncing(false)
-
-				this.syncMutex.release()
 			})
 
-			// Capture both signals once so that cancel() — which aborts the current
-			// controller and creates fresh instances for future syncs — reliably
-			// stops every operation in this sync via the captured references,
-			// regardless of when during execution cancel() fires.
-			const abortController = this.globalAbortController
-			const pauseSignal = this.globalPauseSignal
-
 			const allDeltas = await this.deltas({
-				config,
+				config: params?.background
+					? {
+							...config,
+							includeVideos: false
+						}
+					: config,
 				signal: abortController.signal
 			})
 
@@ -586,14 +619,21 @@ class CameraUpload {
 								}
 
 								const tmpFile = new FileSystem.File(
-									FileSystem.Paths.join(FileSystem.Paths.cache, `${randomUUID()}${assetFile.extension}`)
+									FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), assetFile.name)
 								)
 
 								defer(() => {
-									if (tmpFile.exists) {
-										tmpFile.delete()
+									if (tmpFile.parentDirectory.exists) {
+										tmpFile.parentDirectory.delete()
 									}
 								})
+
+								if (!tmpFile.parentDirectory.exists) {
+									tmpFile.parentDirectory.create({
+										idempotent: true,
+										intermediates: true
+									})
+								}
 
 								if (tmpFile.exists) {
 									tmpFile.delete()
@@ -608,9 +648,9 @@ class CameraUpload {
 								}
 
 								const parentDir = await this.ensureParentDirectoryExists({
-									path: delta.file.path,
 									config,
-									signal: abortController.signal
+									signal: abortController.signal,
+									originalPath: delta.file.originalPath
 								})
 
 								const parentDirEnum = new AnyNormalDir.Dir(parentDir)
@@ -664,6 +704,10 @@ class CameraUpload {
 					})
 
 					if (!result.success) {
+						if (abortController.signal.aborted) {
+							return
+						}
+
 						console.error(result.error)
 
 						useCameraUploadStore.getState().setErrors(errors => [...errors, result.error])
@@ -675,6 +719,10 @@ class CameraUpload {
 		})
 
 		if (!result.success) {
+			if (abortController.signal.aborted) {
+				return
+			}
+
 			console.error(result.error)
 
 			useCameraUploadStore.getState().setErrors(errors => [...errors, result.error])

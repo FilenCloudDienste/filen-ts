@@ -256,18 +256,29 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 
 		const items = driveItemsQuery.status === "success" && driveItemsQuery.data.length > 0 ? driveItemsQuery.data : [item]
 
-		return itemSorter.sortItems(items, "nameAsc").filter(i => {
-			const type = getPreviewType(i.data.decryptedMeta?.name ?? "")
+		if (drivePath.type === "photos") {
+			return itemSorter.sortItems(
+				items.filter(item => {
+					if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+						return false
+					}
 
-			if (drivePath.type === "photos") {
-				return (i.type === "file" || i.type === "sharedFile") && (type === "image" || type === "video")
+					const previewType = getPreviewType(item.data.decryptedMeta.name)
+
+					return previewType === "image" || previewType === "video"
+				}),
+				"creationDesc"
+			) as DriveItemFileExtracted[]
+		}
+
+		return itemSorter.sortItems(items, "nameAsc").filter(i => {
+			if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+				return false
 			}
 
-			return (
-				type !== "unknown" &&
-				(i.type === "file" || i.type === "sharedFile") &&
-				(type === "image" || type === "video" || type === "audio")
-			)
+			const type = getPreviewType(i.data.decryptedMeta?.name ?? "")
+
+			return type === "image" || type === "video" || type === "audio"
 		}) as DriveItemFileExtracted[]
 	})()
 

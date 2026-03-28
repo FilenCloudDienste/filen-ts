@@ -1,5 +1,4 @@
 import "react-native-reanimated"
-import "@/global"
 import "@/queries/onlineStatus"
 
 import StyleProvider from "@/providers/style.provider"
@@ -27,6 +26,7 @@ import Pathname from "@/components/pathname"
 import { Platform } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Http from "@/components/http"
+import CameraUploadSync from "@/components/cameraUpload/sync"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -197,6 +197,7 @@ const RootLayout = memo(() => {
 												<Http />
 												<NotesSync />
 												<ChatsSync />
+												<CameraUploadSync />
 											</Fragment>
 										)}
 										<Pathname />
