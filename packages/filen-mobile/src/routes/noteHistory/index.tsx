@@ -22,6 +22,7 @@ import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import useNoteHistoryQuery from "@/queries/useNoteHistory.query"
 import notes from "@/lib/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import Icon from "@/components/notes/note/icon"
 
 const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -29,6 +30,17 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 	return (
 		<View className="flex-row items-center px-4 bg-transparent">
 			<View className="flex-row items-center gap-4 py-2 bg-transparent border-b border-border">
+				<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
+					<Icon
+						note={{
+							...note,
+							trash: false,
+							archive: false,
+							noteType: history.noteType
+						}}
+						iconSize={18}
+					/>
+				</View>
 				<View className="flex-col bg-transparent flex-1 gap-0.5">
 					<Text
 						className="text-foreground"
@@ -40,35 +52,28 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 					<Text
 						className="text-muted-foreground text-xs"
 						numberOfLines={1}
-						ellipsizeMode="middle"
+						ellipsizeMode="tail"
 					>
 						{history.preview ?? "tbd_no_preview"}
 					</Text>
 				</View>
 				<View className="flex-row items-center gap-2 bg-transparent">
-					<CrossGlassContainerView>
-						<PressableScale
-							className="size-9 items-center justify-center"
-							onPress={() => {
-								router.push({
-									pathname: "/note/[uuid]",
-									params: {
-										uuid: note.uuid,
-										historyPackedBase64: Buffer.from(pack(history)).toString("base64")
-									}
-								})
-							}}
-						>
-							<Ionicons
-								name="eye-outline"
-								size={20}
-								color={textForeground.color}
-							/>
-						</PressableScale>
-					</CrossGlassContainerView>
 					<Menu
 						type="dropdown"
 						buttons={[
+							{
+								id: "view",
+								title: "tbd_view",
+								onPress: () => {
+									router.push({
+										pathname: "/note/[uuid]",
+										params: {
+											uuid: note.uuid,
+											historyPackedBase64: Buffer.from(pack(history)).toString("base64")
+										}
+									})
+								}
+							},
 							{
 								id: "restore",
 								title: "tbd_restore",

@@ -211,7 +211,12 @@ export function createMenuButtons({
 		title: "tbd_tags",
 		icon: "tag",
 		onPress: () => {
-			// TODO: open bottom sheet to show tags with ability to add/remove tags from note
+			router.push({
+				pathname: "/noteTags",
+				params: {
+					notePackedBase64: Buffer.from(pack(note)).toString("base64")
+				}
+			})
 		}
 	})
 

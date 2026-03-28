@@ -3,7 +3,6 @@ import View from "@/components/ui/view"
 import type { NoteTag, Note } from "@filen/sdk-rs"
 import { Platform, ActivityIndicator } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
-import { Paths } from "expo-file-system"
 import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
@@ -48,7 +47,7 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 		}
 
 		router.push({
-			pathname: Paths.join("/", "notesTags"),
+			pathname: "/notesTags",
 			params: {
 				tagUuid: info.item.uuid
 			}
