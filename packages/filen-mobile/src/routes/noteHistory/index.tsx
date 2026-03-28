@@ -1,7 +1,7 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
-import { unpack } from "@/lib/msgpack"
+import { unpack, pack } from "@/lib/msgpack"
 import { Buffer } from "react-native-quick-crypto"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header from "@/components/ui/header"
@@ -45,7 +45,27 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 						{history.preview ?? "tbd_no_preview"}
 					</Text>
 				</View>
-				<View className="flex-row items-center gap-4 bg-transparent">
+				<View className="flex-row items-center gap-2 bg-transparent">
+					<CrossGlassContainerView>
+						<PressableScale
+							className="size-9 items-center justify-center"
+							onPress={() => {
+								router.push({
+									pathname: "/note/[uuid]",
+									params: {
+										uuid: note.uuid,
+										historyPackedBase64: Buffer.from(pack(history)).toString("base64")
+									}
+								})
+							}}
+						>
+							<Ionicons
+								name="eye-outline"
+								size={20}
+								color={textForeground.color}
+							/>
+						</PressableScale>
+					</CrossGlassContainerView>
 					<Menu
 						type="dropdown"
 						buttons={[

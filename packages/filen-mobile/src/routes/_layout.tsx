@@ -41,6 +41,14 @@ const RootLayout = memo(() => {
 	const [isSetupDone, setIsSetupDone] = useState<boolean>(false)
 	const isAuthed = useIsAuthed()
 
+	const modalOptions = {
+		presentation: Platform.OS === "ios" ? "pageSheet" : "modal",
+		animation: "slide_from_bottom",
+		contentStyle: {
+			backgroundColor: bgBackgroundSecondary.backgroundColor
+		}
+	} satisfies React.ComponentProps<typeof Stack.Screen>["options"]
+
 	const runSetup = async () => {
 		const result = await run(async () => {
 			setIsSetupDone(false)
@@ -102,138 +110,71 @@ const RootLayout = memo(() => {
 										>
 											<Stack.Screen
 												name="transfers"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="offline"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="driveItemInfo"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="changeDirectoryColor"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="trash"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="recents"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="favorites"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="sharedIn"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="sharedOut"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="links"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="driveSelect"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="contacts"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="cameraUpload"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="fileVersions"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="noteHistory"
-												options={{
-													presentation: Platform.OS === "ios" ? "pageSheet" : "formSheet",
-													contentStyle: {
-														backgroundColor: bgBackgroundSecondary.backgroundColor
-													}
-												}}
+												options={modalOptions}
+											/>
+											<Stack.Screen
+												name="noteParticipants"
+												options={modalOptions}
+											/>
+											<Stack.Screen
+												name="chatParticipants"
+												options={modalOptions}
 											/>
 											<Stack.Screen
 												name="drivePreview"

@@ -1,7 +1,7 @@
 import { Fragment, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
-import { useLocalSearchParams, Redirect, useRouter } from "expo-router"
+import { useLocalSearchParams, Redirect, router } from "expo-router"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import type { Note as TNote, NoteHistory } from "@filen/sdk-rs"
 import Content from "@/components/notes/content"
@@ -23,7 +23,6 @@ import { useStringifiedClient } from "@/lib/auth"
 const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const textForeground = useResolveClassNames("text-foreground")
-	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
 
@@ -33,62 +32,78 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 
 	const isOwner = note.ownerId === stringifiedClient?.userId
 
-	const restoreFromHistory = async () => {
-		if (!history) {
-			return
-		}
-
-		const result = await run(async () => {
-			return await prompts.alert({
-				title: "tbd_restore_note",
-				message: "tbd_are_you_sure_restore_note",
-				cancelText: "tbd_cancel",
-				okText: "tbd_drestore"
-			})
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
-		}
-
-		if (result.data.cancelled) {
-			return
-		}
-
-		const restoreResult = await runWithLoading(async () => {
-			return await notes.restoreFromHistory({
-				note,
-				history
-			})
-		})
-
-		if (!restoreResult.success) {
-			console.error(restoreResult.error)
-			alerts.error(restoreResult.error)
-
-			return
-		}
-
-		if (router.canGoBack()) {
-			router.back()
-		}
-	}
-
 	return (
 		<StackHeader
 			title={history ? simpleDate(Number(history.editedTimestamp)) : (note.title ?? note.uuid)}
 			backVisible={true}
 			transparent={Platform.OS === "ios"}
+			leftItems={Platform.select({
+				ios: [
+					{
+						type: "button",
+						icon: {
+							name: "close",
+							color: textForeground.color,
+							size: 20
+						},
+						props: {
+							onPress: () => {
+								router.back()
+							}
+						}
+					}
+				],
+				default: undefined
+			})}
 			rightItems={() => {
 				if (history) {
 					return [
 						{
 							type: "button",
 							props: {
-								onPress: restoreFromHistory,
+								onPress: async () => {
+									if (!history) {
+										return
+									}
+
+									const result = await run(async () => {
+										return await prompts.alert({
+											title: "tbd_restore_note",
+											message: "tbd_are_you_sure_restore_note",
+											cancelText: "tbd_cancel",
+											okText: "tbd_drestore"
+										})
+									})
+
+									if (!result.success) {
+										console.error(result.error)
+										alerts.error(result.error)
+
+										return
+									}
+
+									if (result.data.cancelled) {
+										return
+									}
+
+									const restoreResult = await runWithLoading(async () => {
+										return await notes.restoreFromHistory({
+											note,
+											history
+										})
+									})
+
+									if (!restoreResult.success) {
+										console.error(restoreResult.error)
+										alerts.error(restoreResult.error)
+
+										return
+									}
+
+									if (router.canGoBack()) {
+										router.back()
+									}
+								},
 								hitSlop: 32
 							},
 							icon: {
@@ -142,9 +157,9 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 })
 
 const Note = memo(() => {
-	const { uuid, historyItemPacked } = useLocalSearchParams<{
+	const { uuid, historyPackedBase64 } = useLocalSearchParams<{
 		uuid: string
-		historyItemPacked?: string
+		historyPackedBase64?: string
 	}>()
 
 	const notesWithContentQuery = useNotesWithContentQuery({
@@ -157,12 +172,12 @@ const Note = memo(() => {
 			: (null as unknown as TNote)
 
 	const history = (() => {
-		if (!historyItemPacked) {
+		if (!historyPackedBase64) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(historyItemPacked, "base64")) as NoteHistory
+			return unpack(Buffer.from(historyPackedBase64, "base64")) as NoteHistory
 		} catch {
 			return null
 		}
