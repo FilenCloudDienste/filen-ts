@@ -10,7 +10,7 @@ import alerts from "@/lib/alerts"
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
 
-	public async setup(): Promise<{
+	public async setup(options?: { background?: boolean }): Promise<{
 		isAuthed: boolean
 	}> {
 		const result = await run(async defer => {
@@ -26,13 +26,17 @@ class Setup {
 				await auth.setSdkClients(isAuthed.stringifiedClient)
 			}
 
-			await Promise.all([secureStore.init(), sqlite.init(), restoreQueries(), cache.restore()])
+			if (options?.background) {
+				await Promise.all([secureStore.init(), sqlite.init(), cache.restore()])
+			} else {
+				await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
 
-			if (isAuthed.isAuthed) {
-				Promise.allSettled([offline.updateIndex(), offline.sync()]).catch(err => {
-					console.error(err)
-					alerts.error(err)
-				})
+				if (isAuthed.isAuthed) {
+					Promise.allSettled([offline.updateIndex(), offline.sync()]).catch(err => {
+						console.error(err)
+						alerts.error(err)
+					})
+				}
 			}
 
 			return {

@@ -1,9 +1,9 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/routes/tabs/more"
-import { useCameraUpload, DEFAULT_CONFIG } from "@/lib/cameraUpload"
+import cameraUpload, { useCameraUpload, DEFAULT_CONFIG } from "@/lib/cameraUpload"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
-import { Fragment, memo, useEffect } from "react"
-import { router } from "expo-router"
+import { Fragment, memo, useEffect, useCallback } from "react"
+import { router, useFocusEffect } from "expo-router"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import alerts from "@/lib/alerts"
 import { run } from "@filen/utils"
@@ -56,6 +56,16 @@ const CameraUpload = memo(() => {
 			subscription.remove()
 		}
 	}, [permissionsQuery])
+
+	useFocusEffect(
+		useCallback(() => {
+			return () => {
+				console.log("[CameraUpload] Screen unfocused, syncing camera uploads...")
+
+				cameraUpload.sync().catch(console.error)
+			}
+		}, [])
+	)
 
 	return (
 		<Fragment>

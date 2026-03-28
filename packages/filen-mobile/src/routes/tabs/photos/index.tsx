@@ -21,7 +21,7 @@ import { Buffer } from "react-native-quick-crypto"
 import { pack } from "@/lib/msgpack"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import Menu from "@/components/drive/item/menu"
-import { useCameraUpload } from "@/lib/cameraUpload"
+import cameraUpload, { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
 import { useResolveClassNames } from "uniwind"
@@ -145,46 +145,6 @@ const Photos = memo(() => {
 
 	const size = !layout ? 0 : layout.width / 4
 
-	const renderItem = (info: ListRenderItemInfo<DriveItemFileExtracted>) => {
-		return (
-			<Photo
-				info={info}
-				size={size}
-				drivePath={drivePath}
-			/>
-		)
-	}
-
-	const keyExtractor = (item: DriveItemFileExtracted) => {
-		return item.data.uuid
-	}
-
-	const data = driveItemsQuery.data
-		? itemSorter.sortItems(
-				driveItemsQuery.data.filter(item => {
-					if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
-						return false
-					}
-
-					const previewType = getPreviewType(item.data.decryptedMeta.name)
-
-					return previewType === "image" || previewType === "video"
-				}),
-				"creationDesc"
-			)
-		: []
-
-	const onRefresh = async () => {
-		const result = await run(async () => {
-			await driveItemsQuery.refetch()
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-		}
-	}
-
 	return (
 		<Fragment>
 			<Header
@@ -230,10 +190,44 @@ const Photos = memo(() => {
 							itemHeight={size}
 							grid={true}
 							itemWidth={size}
-							keyExtractor={keyExtractor}
-							data={data as DriveItemFileExtracted[]}
-							renderItem={renderItem}
-							onRefresh={onRefresh}
+							keyExtractor={item => item.data.uuid}
+							data={
+								(driveItemsQuery.data
+									? itemSorter.sortItems(
+											driveItemsQuery.data.filter(item => {
+												if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+													return false
+												}
+
+												const previewType = getPreviewType(item.data.decryptedMeta.name)
+
+												return previewType === "image" || previewType === "video"
+											}),
+											"creationDesc"
+										)
+									: []) as DriveItemFileExtracted[]
+							}
+							renderItem={info => {
+								return (
+									<Photo
+										info={info}
+										size={size}
+										drivePath={drivePath}
+									/>
+								)
+							}}
+							onRefresh={async () => {
+								const result = await run(async () => {
+									await driveItemsQuery.refetch()
+								})
+
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
+								}
+
+								cameraUpload.sync().catch(console.error)
+							}}
 							loading={driveItemsQuery.status !== "success"}
 						/>
 					) : (
