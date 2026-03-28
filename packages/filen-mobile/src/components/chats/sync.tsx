@@ -18,7 +18,9 @@ export class Sync {
 		this.initPromise = new Promise(resolve => {
 			this.resolveInit = resolve
 		})
+	}
 
+	public start(): void {
 		this.restoreFromDisk()
 	}
 
@@ -194,6 +196,8 @@ export const sync = new Sync()
 
 export const SyncHost = memo(() => {
 	useEffect(() => {
+		sync.start()
+
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
 				sync.syncNow()
