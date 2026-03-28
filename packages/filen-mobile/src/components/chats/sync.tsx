@@ -10,27 +10,24 @@ import { FilenSdkError } from "@filen/sdk-rs"
 
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
-	private readonly storageMutex: Semaphore = new Semaphore(1)
 	public readonly sqliteKvKey: string = "inflightChatMessages"
-	private initDone: boolean = false
+	private readonly initPromise: Promise<void>
+	private resolveInit!: () => void
 
 	public constructor() {
-		this.restoreFromDisk()
-	}
+		this.initPromise = new Promise(resolve => {
+			this.resolveInit = resolve
+		})
 
-	private async waitForInit(): Promise<void> {
-		while (!this.initDone) {
-			await new Promise<void>(resolve => setTimeout(resolve, 100))
-		}
+		this.restoreFromDisk()
 	}
 
 	private async restoreFromDisk() {
 		const result = await run(async defer => {
-			await Promise.all([this.mutex.acquire(), this.storageMutex.acquire()])
+			await this.mutex.acquire()
 
 			defer(() => {
 				this.mutex.release()
-				this.storageMutex.release()
 			})
 
 			const fromDisk = await sqlite.kvAsync.get<InflightChatMessages>(this.sqliteKvKey)
@@ -39,19 +36,11 @@ export class Sync {
 				return {}
 			}
 
-			const chats = await chatsQueryFetch()
-			const existingChatUuids: Record<string, boolean> = chats.reduce(
-				(acc, chat) => {
-					acc[chat.uuid] = true
-
-					return acc
-				},
-				{} as Record<string, boolean>
-			)
+			const chatsList = await chatsQueryFetch()
+			const existingChatUuids = new Set(chatsList.map(chat => chat.uuid))
 
 			for (const chatUuid of Object.keys(fromDisk)) {
-				// If the chat no longer exists, remove its inflight messages
-				if (!existingChatUuids[chatUuid]) {
+				if (!existingChatUuids.has(chatUuid)) {
 					delete fromDisk[chatUuid]
 				}
 			}
@@ -65,40 +54,28 @@ export class Sync {
 			console.error("Error initializing chat sync:", result.error)
 		}
 
-		// We don't really care if it failed, we just proceed
-		this.initDone = true
+		this.resolveInit()
 
 		if (Object.keys(result.data ?? {}).length > 0) {
 			this.sync()
 		}
 	}
 
-	public async flushToDisk(inflightChatMessages: InflightChatMessages, requireMutex: boolean = true): Promise<void> {
-		const result = await run(async defer => {
-			await Promise.all([!requireMutex ? Promise.resolve() : this.storageMutex.acquire(), this.waitForInit()])
+	public async flushToDisk(inflightChatMessages: InflightChatMessages): Promise<void> {
+		await this.initPromise
 
-			defer(() => {
-				if (requireMutex) {
-					this.storageMutex.release()
-				}
-			})
+		const result = await run(async () => {
+			const filtered = Object.fromEntries(
+				Object.entries(inflightChatMessages).filter(([_, { messages }]) => messages.length > 0)
+			)
 
-			if (
-				Object.keys(inflightChatMessages).length === 0 ||
-				Object.values(inflightChatMessages).every(({ messages }) => messages.length === 0)
-			) {
+			if (Object.keys(filtered).length === 0) {
 				await sqlite.kvAsync.remove(this.sqliteKvKey)
 
 				return
 			}
 
-			for (const [chatUuid, { messages }] of Object.entries(inflightChatMessages)) {
-				if (messages.length === 0) {
-					delete inflightChatMessages[chatUuid]
-				}
-			}
-
-			await sqlite.kvAsync.set(this.sqliteKvKey, inflightChatMessages)
+			await sqlite.kvAsync.set(this.sqliteKvKey, filtered)
 		})
 
 		if (!result.success) {
@@ -106,30 +83,28 @@ export class Sync {
 		}
 	}
 
-	public async sync(): Promise<void> {
+	private async sync(): Promise<void> {
 		const result = await run(async defer => {
-			await Promise.all([this.mutex.acquire(), this.waitForInit(), this.storageMutex.acquire()])
+			await Promise.all([this.mutex.acquire(), this.initPromise])
 
 			defer(() => {
 				this.mutex.release()
-				this.storageMutex.release()
 			})
 
-			const fromDisk = await sqlite.kvAsync.get<InflightChatMessages>(this.sqliteKvKey)
+			const inflightMessages = useChatsStore.getState().inflightMessages
 
-			if (!fromDisk || Object.keys(fromDisk).length === 0) {
+			if (Object.keys(inflightMessages).length === 0) {
 				return
 			}
 
-			await Promise.all(
-				Object.entries(fromDisk).map(async ([chatUuid, { chat, messages }]) => {
+			const results = await Promise.allSettled(
+				Object.entries(inflightMessages).map(async ([chatUuid, { chat, messages }]) => {
 					if (messages.length === 0) {
 						return
 					}
 
-					const sorted = messages.sort((a, b) => Number(a.sentTimestamp) - Number(b.sentTimestamp))
+					const sorted = [...messages].sort((a, b) => Number(a.sentTimestamp) - Number(b.sentTimestamp))
 
-					// Process messages in order
 					for (const message of sorted) {
 						if (!message.inner.message) {
 							continue
@@ -159,15 +134,17 @@ export class Sync {
 								}
 
 								updated[message.inflightId] =
-									e instanceof Error ? e : FilenSdkError.hasInner(e) ? FilenSdkError.getInner(e) : new Error(String(e))
+									e instanceof Error
+										? e
+										: FilenSdkError.hasInner(e)
+											? FilenSdkError.getInner(e)
+											: new Error(String(e))
 
 								return updated
 							})
 
-							throw e
+							continue
 						}
-
-						let updatedMessages: InflightChatMessages | null = null
 
 						useChatsStore.getState().setInflightMessages(prev => {
 							const updated = {
@@ -177,31 +154,39 @@ export class Sync {
 							if (updated[chatUuid]) {
 								updated[chatUuid] = {
 									...updated[chatUuid],
-									messages: (updated[chatUuid]?.messages ?? []).filter(m => m.inflightId !== message.inflightId)
+									messages: (updated[chatUuid]?.messages ?? []).filter(
+										m => m.inflightId !== message.inflightId
+									)
 								}
 
 								if (updated[chatUuid].messages.length === 0) {
 									delete updated[chatUuid]
 								}
-
-								updatedMessages = updated
 							}
 
 							return updated
 						})
-
-						if (updatedMessages) {
-							await this.flushToDisk(updatedMessages, false)
-						}
 					}
 				})
 			)
+
+			for (const r of results) {
+				if (r.status === "rejected") {
+					console.error("[ChatsSync] Failed to sync chat:", r.reason)
+				}
+			}
+
+			await this.flushToDisk(useChatsStore.getState().inflightMessages)
 		})
 
 		if (!result.success) {
 			console.error(result.error)
 			alerts.error(result.error)
 		}
+	}
+
+	public syncNow(): void {
+		this.sync().catch(console.error)
 	}
 }
 
@@ -211,7 +196,7 @@ export const SyncHost = memo(() => {
 	useEffect(() => {
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
-				sync.sync()
+				sync.syncNow()
 			}
 		})
 
