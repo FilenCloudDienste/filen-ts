@@ -126,7 +126,7 @@ export const CrossGlassContainerView = memo(
 		if (Platform.OS === "ios" && !disableLiquidGlass) {
 			return (
 				<LiquidGlassView
-					className={cn("rounded-full", className)}
+					className={cn("rounded-full overflow-hidden", className)}
 					isInteractive={!disableInteraction}
 					style={style}
 				>
