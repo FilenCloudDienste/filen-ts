@@ -9,28 +9,25 @@ import { fetchData as notesWithContentQueryFetch } from "@/queries/useNotesWithC
 
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
-	private readonly storageMutex: Semaphore = new Semaphore(1)
 	private syncTimeout: ReturnType<typeof createExecutableTimeout> | null = null
 	public readonly sqliteKvKey: string = "inflightNoteContent"
-	private initDone: boolean = false
+	private readonly initPromise: Promise<void>
+	private resolveInit!: () => void
 
 	public constructor() {
-		this.restoreFromDisk()
-	}
+		this.initPromise = new Promise(resolve => {
+			this.resolveInit = resolve
+		})
 
-	private async waitForInit(): Promise<void> {
-		while (!this.initDone) {
-			await new Promise<void>(resolve => setTimeout(resolve, 100))
-		}
+		this.restoreFromDisk()
 	}
 
 	private async restoreFromDisk() {
 		const result = await run(async defer => {
-			await Promise.all([this.mutex.acquire(), this.storageMutex.acquire()])
+			await this.mutex.acquire()
 
 			defer(() => {
 				this.mutex.release()
-				this.storageMutex.release()
 			})
 
 			const fromDisk = await sqlite.kvAsync.get<InflightContent>(this.sqliteKvKey)
@@ -40,32 +37,25 @@ export class Sync {
 			}
 
 			const fromCloud = await notesWithContentQueryFetch()
-			const fromCloudEditedTimestamp: Record<string, number> = fromCloud.reduce(
-				(acc, note) => {
-					acc[note.uuid] = Number(note.editedTimestamp)
+			const fromCloudEditedTimestamp: Record<string, number> = {}
 
-					return acc
-				},
-				{} as Record<string, number>
-			)
+			for (const note of fromCloud) {
+				fromCloudEditedTimestamp[note.uuid] = Number(note.editedTimestamp)
+			}
 
 			for (const noteUuid of Object.keys(fromDisk)) {
-				// If the note no longer exists in the cloud, remove its inflight contents
-				if (!fromCloudEditedTimestamp[noteUuid]) {
+				const editedTimestamp = fromCloudEditedTimestamp[noteUuid]
+
+				if (!editedTimestamp) {
 					delete fromDisk[noteUuid]
-				} else {
-					const editedTimestamp = fromCloudEditedTimestamp[noteUuid]
 
-					for (const [uuid, contents] of Object.entries(fromDisk)) {
-						if (noteUuid === uuid) {
-							// Remove any contents that are older than the cloud note's edited timestamp
-							fromDisk[noteUuid] = contents.filter(c => c.timestamp > editedTimestamp)
-						}
+					continue
+				}
 
-						if (fromDisk[noteUuid] && fromDisk[noteUuid].length === 0) {
-							delete fromDisk[noteUuid]
-						}
-					}
+				fromDisk[noteUuid] = fromDisk[noteUuid]!.filter(c => c.timestamp > editedTimestamp)
+
+				if (fromDisk[noteUuid]!.length === 0) {
+					delete fromDisk[noteUuid]
 				}
 			}
 
@@ -78,24 +68,17 @@ export class Sync {
 			console.error("Error initializing note sync:", result.error)
 		}
 
-		// We don't really care if it failed, we just proceed
-		this.initDone = true
+		this.resolveInit()
 
 		if (Object.keys(result.data ?? {}).length > 0) {
 			this.sync()
 		}
 	}
 
-	public async flushToDisk(inflightContent: InflightContent, requireMutex: boolean = true): Promise<void> {
-		const result = await run(async defer => {
-			await Promise.all([!requireMutex ? Promise.resolve() : this.storageMutex.acquire(), this.waitForInit()])
+	public async flushToDisk(inflightContent: InflightContent): Promise<void> {
+		await this.initPromise
 
-			defer(() => {
-				if (requireMutex) {
-					this.storageMutex.release()
-				}
-			})
-
+		const result = await run(async () => {
 			if (Object.keys(inflightContent).length === 0) {
 				await sqlite.kvAsync.remove(this.sqliteKvKey)
 
@@ -112,26 +95,25 @@ export class Sync {
 
 	private async sync(): Promise<void> {
 		const result = await run(async defer => {
-			await Promise.all([this.mutex.acquire(), this.waitForInit(), this.storageMutex.acquire()])
+			await Promise.all([this.mutex.acquire(), this.initPromise])
 
 			defer(() => {
 				this.mutex.release()
-				this.storageMutex.release()
 			})
 
-			const fromDisk = await sqlite.kvAsync.get<InflightContent>(this.sqliteKvKey)
+			const inflightContent = useNotesStore.getState().inflightContent
 
-			if (!fromDisk || Object.keys(fromDisk).length === 0) {
+			if (Object.keys(inflightContent).length === 0) {
 				return
 			}
 
-			await Promise.all(
-				Object.entries(fromDisk).map(async ([_, contents]) => {
+			const results = await Promise.allSettled(
+				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
 					if (contents.length === 0) {
 						return
 					}
 
-					const mostRecentContent = contents.sort((a, b) => b.timestamp - a.timestamp).at(0)
+					const mostRecentContent = [...contents].sort((a, b) => b.timestamp - a.timestamp).at(0)
 
 					if (!mostRecentContent) {
 						return
@@ -142,34 +124,31 @@ export class Sync {
 						content: mostRecentContent.content
 					})
 
-					let updatedContent: InflightContent | null = null
-
 					useNotesStore.getState().setInflightContent(prev => {
 						const updated = {
 							...prev
 						}
 
-						for (const [noteUuid, contents] of Object.entries(updated)) {
-							if (noteUuid === mostRecentContent.note.uuid) {
-								// Remove contents that have been synced
-								updated[noteUuid] = contents.filter(c => c.timestamp > Number(updatedNote.editedTimestamp))
-							}
+						if (updated[noteUuid]) {
+							updated[noteUuid] = updated[noteUuid].filter(c => c.timestamp > Number(updatedNote.editedTimestamp))
 
-							if (updated[noteUuid] && updated[noteUuid].length === 0) {
+							if (updated[noteUuid].length === 0) {
 								delete updated[noteUuid]
 							}
 						}
 
-						updatedContent = updated
-
 						return updated
 					})
-
-					if (updatedContent) {
-						await this.flushToDisk(updatedContent, false)
-					}
 				})
 			)
+
+			for (const r of results) {
+				if (r.status === "rejected") {
+					console.error("[NotesSync] Failed to sync note:", r.reason)
+				}
+			}
+
+			await this.flushToDisk(useNotesStore.getState().inflightContent)
 		})
 
 		if (!result.success) {

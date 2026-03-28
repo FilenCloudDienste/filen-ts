@@ -86,43 +86,21 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 		}
 
 		const now = Date.now()
-		let didFlushToDisk = false
-		let flushToDiskError: Error | null = null
 
-		useNotesStore.getState().setInflightContent(prev => {
-			const updated = {
-				...prev,
-				[note.uuid]: [
-					{
-						timestamp: now,
-						note,
-						content: value
-					},
-					...(prev[note.uuid] ?? []).filter(c => c.timestamp > now)
-				]
-			}
-
-			sync.flushToDisk(updated)
-				.then(() => {
-					didFlushToDisk = true
-
-					sync.syncDebounced()
-				})
-				.catch(err => {
-					flushToDiskError = err
-				})
-
-			return updated
-		})
+		useNotesStore.getState().setInflightContent(prev => ({
+			...prev,
+			[note.uuid]: [
+				{
+					timestamp: now,
+					note,
+					content: value
+				},
+				...(prev[note.uuid] ?? []).filter(c => c.timestamp > now)
+			]
+		}))
 
 		const result = await run(async () => {
-			while (!didFlushToDisk) {
-				if (flushToDiskError) {
-					throw flushToDiskError
-				}
-
-				await new Promise<void>(resolve => setTimeout(resolve, 100))
-			}
+			await sync.flushToDisk(useNotesStore.getState().inflightContent)
 		})
 
 		if (!result.success) {
@@ -131,6 +109,8 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 
 			return
 		}
+
+		sync.syncDebounced()
 	}
 
 	const onContentEditedRemotely = useCallback(

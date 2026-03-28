@@ -543,8 +543,6 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 		}
 
 		const sentTimestamp = Date.now()
-		let flushedToDisk = false
-		let flushToDiskError: Error | null = null
 		const inflightId = randomUUID()
 		const inflightMessage: ChatMessageWithInflightId = {
 			inflightId,
@@ -580,36 +578,16 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 			updater: messages => [...messages.filter(m => m.inflightId !== inflightMessage.inflightId), inflightMessage]
 		})
 
-		useChatsStore.getState().setInflightMessages(prev => {
-			const updated = {
-				...prev,
-				[chat.uuid]: {
-					chat,
-					messages: [...(prev[chat.uuid]?.messages ?? []), inflightMessage]
-				}
+		useChatsStore.getState().setInflightMessages(prev => ({
+			...prev,
+			[chat.uuid]: {
+				chat,
+				messages: [...(prev[chat.uuid]?.messages ?? []), inflightMessage]
 			}
-
-			sync.flushToDisk(updated)
-				.then(() => {
-					flushedToDisk = true
-
-					sync.sync()
-				})
-				.catch(err => {
-					flushToDiskError = err
-				})
-
-			return updated
-		})
+		}))
 
 		const result = await run(async () => {
-			while (!flushedToDisk) {
-				if (flushToDiskError) {
-					throw flushToDiskError
-				}
-
-				await new Promise<void>(resolve => setTimeout(resolve, 100))
-			}
+			await sync.flushToDisk(useChatsStore.getState().inflightMessages)
 		})
 
 		if (!result.success) {
@@ -618,6 +596,8 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 
 			return
 		}
+
+		sync.syncNow()
 	}
 
 	const onKeyPress = () => {
