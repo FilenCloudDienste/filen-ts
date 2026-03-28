@@ -3,7 +3,6 @@ import View from "@/components/ui/view"
 import type { Note as TNote } from "@filen/sdk-rs"
 import { ActivityIndicator, Platform } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
-import { Paths } from "expo-file-system"
 import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
@@ -82,7 +81,7 @@ const Note = memo(
 				return
 			}
 
-			router.push(Paths.join("/", "note", itemUuid))
+			router.push(`/note/${itemUuid}`)
 		}
 
 		const participantsWithoutCurrentUser =

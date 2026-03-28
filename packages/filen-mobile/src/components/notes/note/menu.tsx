@@ -68,21 +68,19 @@ export function createMenuButtons({
 		})
 	}
 
-	if (writeAccess) {
-		buttons.push({
-			id: "participants",
-			title: "tbd_participants",
-			icon: "users",
-			onPress: () => {
-				router.push({
-					pathname: "/noteParticipants",
-					params: {
-						notePackedBase64: Buffer.from(pack(note)).toString("base64")
-					}
-				})
-			}
-		})
-	}
+	buttons.push({
+		id: "participants",
+		title: "tbd_participants",
+		icon: "users",
+		onPress: () => {
+			router.push({
+				pathname: "/noteParticipants",
+				params: {
+					notePackedBase64: Buffer.from(pack(note)).toString("base64")
+				}
+			})
+		}
+	})
 
 	if (writeAccess) {
 		buttons.push({

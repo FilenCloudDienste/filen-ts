@@ -13,6 +13,7 @@ import useAppStore from "@/stores/useApp.store"
 import useChatsStore from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
+import { pack } from "@/lib/msgpack"
 
 export type ChatMenuOrigin = "chats" | "search" | "chat"
 
@@ -84,9 +85,9 @@ export function createMenuButtons({
 			icon: "users",
 			onPress: () => {
 				router.push({
-					pathname: "/chatParticipants/[uuid]",
+					pathname: "/chatParticipants",
 					params: {
-						uuid: chat.uuid
+						chatPackedBase64: Buffer.from(pack(chat)).toString("base64")
 					}
 				})
 			}
