@@ -21,7 +21,7 @@ export type Button = {
 	iconSize?: number
 	title: string
 	subTitle?: string
-	badge?: string
+	badge?: string | React.ReactNode
 	badgeColor?: string
 	onPress?: () => void
 	rightItem?:
@@ -47,7 +47,7 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 
 	return (
 		<View className={cn("bg-background-secondary rounded-3xl overflow-hidden", className)}>
-			{buttons.map(({ onPress, icon, iconSize, iconColor, title, subTitle, rightItem }, index) => {
+			{buttons.map(({ onPress, icon, iconSize, iconColor, title, subTitle, rightItem, badge, badgeColor }, index) => {
 				return (
 					<PressableOpacity
 						key={index}
@@ -97,6 +97,33 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 								</Text>
 							)}
 							<View className="flex-row items-center gap-2 shrink-0 bg-transparent">
+								{badge && (
+									<View
+										className={cn(
+											"rounded-full size-5 flex-row items-center justify-center",
+											!badgeColor && "bg-red-500"
+										)}
+										style={
+											badgeColor
+												? {
+														backgroundColor: badgeColor
+													}
+												: undefined
+										}
+									>
+										{typeof badge === "string" ? (
+											<Text
+												className="text-white text-xs"
+												numberOfLines={1}
+												ellipsizeMode="middle"
+											>
+												{badge}
+											</Text>
+										) : (
+											badge
+										)}
+									</View>
+								)}
 								{rightItem?.type === "text" && (
 									<View className="items-center flex-row bg-transparent max-w-32">
 										<Text
