@@ -1,0 +1,24 @@
+diff --git a/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift b/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift
+index 49f8d2c..7e84b59 100644
+--- a/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift
++++ b/node_modules/expo-media-library/ios/next/extensions/PHAssetExtensions.swift
+@@ -4,6 +4,7 @@ extension PHAsset {
+   func requestContentEditingInput() async throws -> PHContentEditingInput {
+     return try await withCheckedThrowingContinuation { continuation in
+       let options = PHContentEditingInputRequestOptions()
++      options.isNetworkAccessAllowed = true
+       self.requestContentEditingInput(with: options) { contentInput, _ in
+         if let contentInput {
+           continuation.resume(returning: contentInput)
+diff --git a/node_modules/expo-media-library/ios/next/objects/asset/UriExtractor.swift b/node_modules/expo-media-library/ios/next/objects/asset/UriExtractor.swift
+index 42ca59b..ca900d5 100644
+--- a/node_modules/expo-media-library/ios/next/objects/asset/UriExtractor.swift
++++ b/node_modules/expo-media-library/ios/next/objects/asset/UriExtractor.swift
+@@ -24,6 +24,7 @@ class UriExtractor {
+   private static func extract(fromVideo phAsset: PHAsset) async throws -> URL {
+     let options = PHVideoRequestOptions()
+     options.version = .original
++    options.isNetworkAccessAllowed = true
+     let avAsset = try await PHImageManager.default()
+       .requestAVAsset(forVideo: phAsset, options: options)
+ 

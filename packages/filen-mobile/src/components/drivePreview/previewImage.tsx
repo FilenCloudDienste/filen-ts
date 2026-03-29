@@ -50,6 +50,7 @@ const PreviewImage = memo(
 					contentFit="contain"
 					cachePolicy="disk"
 					style={imageStyle}
+					recyclingKey={`preview-image-${fileUrl}`}
 				/>
 			</ZoomableView>
 		)

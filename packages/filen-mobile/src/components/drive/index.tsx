@@ -483,7 +483,7 @@ const Drive = memo(() => {
 
 	const itemsSorted = itemSorter.sortItems(
 		[...(driveItemsQuery.status === "success" ? driveItemsQuery.data : []), ...globalSearchResult],
-		"nameAsc"
+		drivePath.type === "recents" ? "uploadDateDesc" : "nameAsc"
 	)
 
 	const items = (() => {

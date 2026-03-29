@@ -70,6 +70,7 @@ const Avatar = memo(
 							}}
 							contentFit="cover"
 							cachePolicy="disk"
+							recyclingKey={`avatar-${props.source}`}
 						/>
 					)}
 				</View>

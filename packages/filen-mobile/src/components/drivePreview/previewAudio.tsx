@@ -8,7 +8,7 @@ import audio, { useAudio } from "@/lib/audio"
 import alerts from "@/lib/alerts"
 import { type TextStyle, type LayoutChangeEvent, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
-import { ImageBackground, ExpoImage } from "@/components/ui/image"
+import { ImageBackground, Image } from "@/components/ui/image"
 import { useResolveClassNames } from "uniwind"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
 import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDerivedValue } from "react-native-reanimated"
@@ -44,6 +44,7 @@ const Background = memo(({ children, blurhash }: { children: React.ReactNode; bl
 			className="bg-transparent flex-1 items-center justify-center px-4"
 			contentFit="cover"
 			cachePolicy="disk"
+			recyclingKey={`preview-audio-bg-${blurhash}`}
 			source={{
 				blurhash
 			}}
@@ -67,13 +68,14 @@ const Picture = memo(({ blurhash, pictureBase64 }: { blurhash?: string; pictureB
 				}}
 			>
 				{pictureBase64 ? (
-					<ExpoImage
+					<Image
 						className="size-full rounded-2xl"
 						source={{
 							uri: pictureBase64
 						}}
 						contentFit="contain"
 						cachePolicy="disk"
+						recyclingKey={`preview-audio-picture-${pictureBase64}`}
 					/>
 				) : (
 					<Ionicons
@@ -98,12 +100,14 @@ const Picture = memo(({ blurhash, pictureBase64 }: { blurhash?: string; pictureB
 			}}
 			contentFit="cover"
 			cachePolicy="disk"
+			recyclingKey={`preview-audio-bg-${blurhash}`}
 		>
-			<ExpoImage
+			<Image
 				className="size-full rounded-2xl"
 				source={pictureBase64}
 				contentFit="contain"
 				cachePolicy="disk"
+				recyclingKey={`preview-audio-picture-${blurhash}`}
 			/>
 		</ImageBackground>
 	)

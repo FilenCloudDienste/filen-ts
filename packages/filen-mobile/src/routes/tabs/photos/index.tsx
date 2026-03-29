@@ -1,6 +1,6 @@
 import { Fragment, useRef, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import Header from "@/components/ui/header"
+import StackHeader from "@/components/ui/header"
 import View from "@/components/ui/view"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import type { DriveItemFileExtracted } from "@/types"
@@ -25,6 +25,8 @@ import cameraUpload, { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
 import { useResolveClassNames } from "uniwind"
+import useCameraUploadStore from "@/stores/useCameraUpload.store"
+import { useShallow } from "zustand/shallow"
 
 const Photo = memo(
 	({
@@ -127,11 +129,82 @@ const Photo = memo(
 	}
 )
 
+const Header = memo(() => {
+	const textForeground = useResolveClassNames("text-foreground")
+	const syncing = useCameraUploadStore(useShallow(state => state.syncing))
+	const hasErrors = useCameraUploadStore(useShallow(state => state.errors.length > 0))
+	const textRed500 = useResolveClassNames("text-red-500")
+
+	return (
+		<StackHeader
+			title="tbd_photos"
+			transparent={Platform.OS === "ios"}
+			leftItems={() => {
+				if (hasErrors) {
+					return [
+						{
+							type: "button",
+							icon: {
+								name: "warning-outline",
+								color: textRed500.color,
+								size: 20
+							},
+							props: {
+								onPress: () => {
+									router.push("/cameraUploadErrors")
+								}
+							}
+						}
+					]
+				}
+
+				if (syncing) {
+					return [
+						{
+							type: "loader",
+							props: {
+								color: textForeground.color,
+								size: "small"
+							}
+						}
+					]
+				}
+
+				return undefined
+			}}
+			rightItems={[
+				{
+					type: "menu",
+					props: {
+						type: "dropdown",
+						hitSlop: 20,
+						buttons: [
+							{
+								id: "settings",
+								title: "tbd_settings",
+								onPress: () => router.push("/cameraUpload"),
+								icon: "edit"
+							}
+						]
+					},
+					triggerProps: {
+						hitSlop: 20
+					},
+					icon: {
+						name: "ellipsis-horizontal",
+						size: 24,
+						color: textForeground.color
+					}
+				}
+			]}
+		/>
+	)
+})
+
 const Photos = memo(() => {
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
 	const { config } = useCameraUpload()
-	const textForeground = useResolveClassNames("text-foreground")
 	const drivePath = useDrivePath()
 
 	const driveItemsQuery = useDriveItemsQuery(
@@ -147,35 +220,7 @@ const Photos = memo(() => {
 
 	return (
 		<Fragment>
-			<Header
-				title="tbd_photos"
-				transparent={Platform.OS === "ios"}
-				rightItems={[
-					{
-						type: "menu",
-						props: {
-							type: "dropdown",
-							hitSlop: 20,
-							buttons: [
-								{
-									id: "settings",
-									title: "tbd_settings",
-									onPress: () => router.push("/cameraUpload"),
-									icon: "edit"
-								}
-							]
-						},
-						triggerProps: {
-							hitSlop: 20
-						},
-						icon: {
-							name: "ellipsis-horizontal",
-							size: 24,
-							color: textForeground.color
-						}
-					}
-				]}
-			/>
+			<Header />
 			<SafeAreaView edges={["left", "right"]}>
 				<View
 					ref={viewRef}

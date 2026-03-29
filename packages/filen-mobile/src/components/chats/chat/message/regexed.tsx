@@ -263,6 +263,7 @@ const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMe
 								uri: customEmojisListRecord[customEmoji]
 							}}
 							className="shrink-0 bg-transparent"
+							recyclingKey={`emoji-${customEmoji}-${emojiSize}`}
 						/>
 					)
 				}

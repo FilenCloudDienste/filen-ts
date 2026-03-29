@@ -1,10 +1,18 @@
 import { create } from "zustand"
+import type { Asset } from "expo-media-library/next"
+
+export type CameraUploadError = {
+	id: string
+	timestamp: number
+	asset?: Asset
+	error?: unknown
+}
 
 export type CameraUploadStore = {
 	syncing: boolean
-	errors: unknown[]
+	errors: CameraUploadError[]
 	setSyncing: (fn: boolean | ((prev: boolean) => boolean)) => void
-	setErrors: (fn: unknown[] | ((prev: unknown[]) => unknown[])) => void
+	setErrors: (fn: CameraUploadError[] | ((prev: CameraUploadError[]) => CameraUploadError[])) => void
 }
 
 export const useCameraUploadStore = create<CameraUploadStore>(set => ({

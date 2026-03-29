@@ -62,15 +62,9 @@ export function parseExifDate(exif: Record<string, unknown>): number | null {
 	}
 
 	// iOS groups fields under "{Exif}" and "{TIFF}"; Android uses a flat layout.
-	const exifGroup =
-		typeof exif["{Exif}"] === "object" && exif["{Exif}"] !== null
-			? (exif["{Exif}"] as Record<string, unknown>)
-			: exif
+	const exifGroup = typeof exif["{Exif}"] === "object" && exif["{Exif}"] !== null ? (exif["{Exif}"] as Record<string, unknown>) : exif
 
-	const tiffGroup =
-		typeof exif["{TIFF}"] === "object" && exif["{TIFF}"] !== null
-			? (exif["{TIFF}"] as Record<string, unknown>)
-			: {}
+	const tiffGroup = typeof exif["{TIFF}"] === "object" && exif["{TIFF}"] !== null ? (exif["{TIFF}"] as Record<string, unknown>) : {}
 
 	// Returns the first string value found in the group, falling back to the top-level object.
 	const str = (group: Record<string, unknown>, key: string): string | undefined => {
@@ -304,7 +298,7 @@ export function parseExifOrientationFromBytes(bytes: Uint8Array): number {
 	// TIFF: starts with "II" (little-endian) or "MM" (big-endian) + magic 42
 	if (
 		((bytes[0] === 0x49 && bytes[1] === 0x49) || (bytes[0] === 0x4d && bytes[1] === 0x4d)) &&
-		(read16(bytes, 2, bytes[0] === 0x49) === 0x002a)
+		read16(bytes, 2, bytes[0] === 0x49) === 0x002a
 	) {
 		return parseTiffOrientation(bytes, 0)
 	}
