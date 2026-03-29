@@ -186,19 +186,44 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				}
 			}
 		],
-		"expo-video",
-		"expo-sqlite",
-		"expo-localization",
-		"expo-background-task",
+		[
+			"expo-video",
+			{
+				supportsBackgroundPlayback: false,
+				supportsPictureInPicture: false
+			}
+		],
 		[
 			"expo-audio",
 			{
-				microphonePermission: "Allow Filen to access your microphone.",
-				enableBackgroundPlayback: true,
-				enableBackgroundRecording: false,
-				recordAudioAndroid: true
+				microphonePermission: "Please allow access to your microphone so that Filen can capture audio when recording videos."
 			}
 		],
+		[
+			"expo-media-library",
+			{
+				photosPermission: "Please allow access to your camera so that Filen can upload photos you take inside the app.",
+				savePhotosPermission: "Please allow access to your photo library so that Filen can save photos on your device.",
+				isAccessMediaLocationEnabled: true
+			}
+		],
+		[
+			"expo-document-picker",
+			{
+				iCloudContainerEnvironment: "Production"
+			}
+		],
+		[
+			"expo-image-picker",
+			{
+				photosPermission: "Please allow access to your photos so that Filen can back them up automatically.",
+				cameraPermission: "Please allow access to your camera so that Filen can take photos.",
+				microphonePermission: "Please allow access to your microphone so that Filen can capture audio when recording videos."
+			}
+		],
+		"expo-sqlite",
+		"expo-localization",
+		"expo-background-task",
 		"expo-secure-store",
 		"expo-navigation-bar",
 		"expo-asset",

@@ -29,7 +29,13 @@ import { getPermissionsAsync } from "expo-media-library"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
-	info: MediaLibrary.AssetInfo
+	info: {
+		mediaType: MediaLibrary.MediaType
+		filename: string
+		creationTime: number | null
+		modificationTime: number | null
+		id: string
+	}
 	path: string
 	originalPath: string
 }
@@ -236,18 +242,16 @@ class CameraUpload {
 		const tree: LocalTree = {}
 		const albums = config.albumIds.map(id => new MediaLibrary.Album(id))
 
-		await Promise.all(
+		await Promise.allSettled(
 			albums.map(async album => {
 				// Phase 1: query assets with native-level filters to avoid fetching
 				// info for assets that would be discarded by includeVideos/afterActivation.
 				let query = new MediaLibrary.Query().album(album)
 
 				if (!config.includeVideos) {
-					query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [
-						MediaLibrary.MediaType.IMAGE,
-						MediaLibrary.MediaType.AUDIO,
-						MediaLibrary.MediaType.UNKNOWN
-					])
+					query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE])
+				} else {
+					query = query.within(MediaLibrary.AssetField.MEDIA_TYPE, [MediaLibrary.MediaType.IMAGE, MediaLibrary.MediaType.VIDEO])
 				}
 
 				if (config.afterActivation) {
@@ -257,10 +261,10 @@ class CameraUpload {
 				const [title, assets] = await Promise.all([album.getTitle(), query.exe()])
 
 				// Phase 1.5: fetch asset infos concurrently (rate-limited by semaphore).
-				const infos = await Promise.all(
-					assets.map(async asset => {
-						const result = await run(
-							async defer => {
+				const infos = (
+					await Promise.allSettled(
+						assets.map(async asset => {
+							const result = await run(async defer => {
 								if (signal.aborted) {
 									throw new Error("Aborted")
 								}
@@ -275,23 +279,35 @@ class CameraUpload {
 									throw new Error("Aborted")
 								}
 
+								const [filename, creationTime, modificationTime, mediaType] = await Promise.all([
+									asset.getFilename(),
+									asset.getCreationTime(),
+									asset.getModificationTime(),
+									asset.getMediaType()
+								])
+
 								return {
 									asset,
-									info: await asset.getInfo()
+									info: {
+										id: asset.id,
+										filename,
+										creationTime,
+										modificationTime,
+										mediaType
+									}
 								}
-							},
-							{
-								throw: true
+							})
+
+							if (!result.success) {
+								throw result.error
 							}
-						)
 
-						if (!result.success) {
-							throw result.error
-						}
-
-						return result.data
-					})
+							return result.data
+						})
+					)
 				)
+					.filter(result => result.status === "fulfilled")
+					.map(result => result.value)
 
 				// Phase 2: sort by creationTime ascending before building the tree.
 				// On iOS, asset filenames cycle (IMG_0001 … IMG_9999 → IMG_0001 …), so multiple
@@ -578,6 +594,7 @@ class CameraUpload {
 				}
 			}
 
+			// Update UI state
 			useCameraUploadStore.getState().setSyncing(true)
 
 			defer(() => {
@@ -612,14 +629,15 @@ class CameraUpload {
 					const result = await run(async defer => {
 						switch (delta.type) {
 							case "upload": {
-								const assetFile = new FileSystem.File(delta.file.info.uri)
+								const uri = await delta.file.asset.getUri()
+								const assetFile = new FileSystem.File(uri)
 
 								if (!assetFile.exists) {
-									throw new Error(`File does not exist at path: ${delta.file.info.uri}`)
+									throw new Error(`File does not exist at path: ${uri}`)
 								}
 
 								const tmpFile = new FileSystem.File(
-									FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), assetFile.name)
+									FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), delta.file.info.filename)
 								)
 
 								defer(() => {
@@ -663,7 +681,7 @@ class CameraUpload {
 									pauseSignal
 								})
 
-								await Promise.all(
+								await Promise.allSettled(
 									files.map(async file =>
 										run(async () => {
 											// Images use EXIF for the most accurate capture timestamp.
@@ -710,7 +728,15 @@ class CameraUpload {
 
 						console.error(result.error)
 
-						useCameraUploadStore.getState().setErrors(errors => [...errors, result.error])
+						useCameraUploadStore.getState().setErrors(errors => [
+							...errors,
+							{
+								id: randomUUID(),
+								timestamp: Date.now(),
+								error: result.error,
+								asset: delta.file.asset
+							}
+						])
 
 						return
 					}
@@ -725,7 +751,14 @@ class CameraUpload {
 
 			console.error(result.error)
 
-			useCameraUploadStore.getState().setErrors(errors => [...errors, result.error])
+			useCameraUploadStore.getState().setErrors(errors => [
+				...errors,
+				{
+					id: randomUUID(),
+					timestamp: Date.now(),
+					error: result.error
+				}
+			])
 
 			return
 		}

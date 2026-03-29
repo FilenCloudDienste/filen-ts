@@ -264,6 +264,7 @@ const FileThumbnailWithGenerate = memo(
 				contentFit={contentFit ?? "contain"}
 				cachePolicy="none"
 				onError={onFailure}
+				recyclingKey={`thumbnail-${item.data.uuid}`}
 			/>
 		)
 	}
@@ -313,6 +314,7 @@ const FileThumbnail = memo(
 					contentFit={contentFit ?? "contain"}
 					cachePolicy="none"
 					onError={() => setDidFail(true)}
+					recyclingKey={`thumbnail-${item.data.uuid}`}
 				/>
 			)
 		}

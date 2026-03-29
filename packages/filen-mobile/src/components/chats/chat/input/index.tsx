@@ -309,6 +309,7 @@ export const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
 						<View className="flex-row items-center gap-3 bg-transparent py-1.5">
 							<Image
 								className="shrink-0 w-7 h-7"
+								recyclingKey={`emoji-${emoji.id}`}
 								source={{
 									uri: emoji.skins[0]!.src
 								}}
