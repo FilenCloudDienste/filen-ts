@@ -243,6 +243,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			{
 				appGroupId: IOS_APP_GROUP_ID
 			}
+		],
+		[
+			"react-native-document-scanner-plugin",
+			{
+				cameraPermission: "Please allow access to your camera so that Filen can take photos."
+			}
 		]
 	],
 	experiments: {
