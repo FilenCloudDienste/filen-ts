@@ -121,6 +121,7 @@ class Transfers {
 							bytesTransferred: 0,
 							startedAt: Date.now(),
 							abortController: transferAbortController,
+							aborted: false,
 							errors: {
 								unknown: [],
 								scan: [],
@@ -318,6 +319,25 @@ class Transfers {
 			})
 
 			if (!result.success) {
+				if (transferAbortController.signal.aborted) {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "uploadDirectory"
+								? {
+										...t,
+										aborted: true
+									}
+								: t
+						)
+					)
+
+					// Don't treat abort errors as actual errors to be shown in the UI
+					return {
+						files: [],
+						directories: []
+					}
+				}
+
 				if (!hideProgress) {
 					useTransfersStore.getState().setTransfers(prev =>
 						prev.map(t =>
@@ -381,6 +401,7 @@ class Transfers {
 						bytesTransferred: 0,
 						startedAt: Date.now(),
 						abortController: transferAbortController,
+						aborted: false,
 						errors: {
 							unknown: [],
 							scan: [],
@@ -452,6 +473,25 @@ class Transfers {
 		})
 
 		if (!result.success) {
+			if (transferAbortController.signal.aborted) {
+				useTransfersStore.getState().setTransfers(prev =>
+					prev.map(t =>
+						t.id === id && t.type === "uploadFile"
+							? {
+									...t,
+									aborted: true
+								}
+							: t
+					)
+				)
+
+				// Don't treat abort errors as actual errors to be shown in the UI
+				return {
+					files: [],
+					directories: []
+				}
+			}
+
 			if (!hideProgress) {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
@@ -577,6 +617,7 @@ class Transfers {
 							bytesTransferred: 0,
 							startedAt: Date.now(),
 							abortController: transferAbortController,
+							aborted: false,
 							directoryQueryProgress: {
 								totalBytes: 0,
 								bytesTransferred: 0
@@ -784,6 +825,25 @@ class Transfers {
 			})
 
 			if (!result.success) {
+				if (transferAbortController.signal.aborted) {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === itemUuid && t.type === "downloadDirectory"
+								? {
+										...t,
+										aborted: true
+									}
+								: t
+						)
+					)
+
+					// Don't treat abort errors as actual errors to be shown in the UI
+					return {
+						files: [],
+						directories: []
+					}
+				}
+
 				if (!hideProgress) {
 					useTransfersStore.getState().setTransfers(prev =>
 						prev.map(t =>
@@ -856,6 +916,7 @@ class Transfers {
 						bytesTransferred: 0,
 						startedAt: Date.now(),
 						abortController: transferAbortController,
+						aborted: false,
 						errors: {
 							unknown: [],
 							scan: [],
@@ -970,6 +1031,25 @@ class Transfers {
 		})
 
 		if (!result.success) {
+			if (transferAbortController.signal.aborted) {
+				useTransfersStore.getState().setTransfers(prev =>
+					prev.map(t =>
+						t.id === itemUuid && t.type === "downloadFile"
+							? {
+									...t,
+									aborted: true
+								}
+							: t
+					)
+				)
+
+				// Don't treat abort errors as actual errors to be shown in the UI
+				return {
+					files: [],
+					directories: []
+				}
+			}
+
 			if (!hideProgress) {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
