@@ -142,6 +142,7 @@ function setHeaderOpacityValue(headerOpacity: SharedValue<number>, visible: bool
 const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracted; drivePath: DrivePath; parent?: AnyDirWithContext }) => {
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
+	const [isDismissGestureActive, setIsDismissGestureActive] = useState<boolean>(false)
 	const headerOpacity = useSharedValue<number>(1)
 	const zoomScale = useSharedValue<number>(1)
 	const dismissTranslateY = useSharedValue<number>(0)
@@ -163,12 +164,16 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}
 	)
 
-	const lockOrientation = () => {
+	const onDismissGestureStart = () => {
 		lockToCurrentOrientation().catch(console.error)
+
+		setIsDismissGestureActive(true)
 	}
 
-	const unlockOrientation = () => {
+	const onDismissGestureEnd = () => {
 		ScreenOrientation.unlockAsync().catch(console.error)
+
+		setIsDismissGestureActive(false)
 	}
 
 	const goBack = () => {
@@ -188,9 +193,9 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		setScrollEnabled(zoom <= 1)
 
 		if (zoom > 1) {
-			lockOrientation()
+			lockToCurrentOrientation().catch(console.error)
 		} else {
-			unlockOrientation()
+			ScreenOrientation.unlockAsync().catch(console.error)
 		}
 	}
 
@@ -287,9 +292,26 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		},
 		dimensions.height,
 		goBack,
-		lockOrientation,
-		unlockOrientation
+		onDismissGestureStart,
+		onDismissGestureEnd
 	).enabled(isImage || isVideo || isAudio)
+
+	const dismissAnimatedStyle = useAnimatedStyle(() => {
+		"worklet"
+
+		const progress = Math.max(0, Math.min(1, Math.abs(dismissTranslateY.value) / fadeRange))
+
+		return {
+			transform: [
+				{
+					translateY: dismissTranslateY.value
+				},
+				{
+					scale: 1 - progress * 0.15
+				}
+			]
+		}
+	})
 
 	const backgroundAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
@@ -359,7 +381,10 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 				parent={parent}
 			/>
 			<GestureDetector gesture={dismissGesture}>
-				<AnimatedView className="flex-1 bg-transparent">
+				<AnimatedView
+					className="flex-1 bg-transparent"
+					style={dismissAnimatedStyle}
+				>
 					<FlashList<DriveItemFileExtracted>
 						ref={listRef}
 						data={itemsSorted}
@@ -369,9 +394,6 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 								<GalleryItem
 									info={info}
 									galleryZoomScale={zoomScale}
-									dismissTranslateY={dismissTranslateY}
-									isDismissing={isDismissing}
-									fadeRange={fadeRange}
 									goBack={goBack}
 									onZoomChange={onZoomChange}
 									onSingleTap={onSingleTap}
@@ -381,10 +403,9 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 						}}
 						drawDistance={dimensions.width}
 						horizontal={true}
-						pagingEnabled={itemsSorted.length > 1}
-						scrollEnabled={scrollEnabled && itemsSorted.length > 1 && (isImage || isVideo || isAudio)}
+						pagingEnabled={itemsSorted.length > 1 && !isDismissGestureActive}
+						scrollEnabled={scrollEnabled && !isDismissGestureActive && itemsSorted.length > 1 && (isImage || isVideo || isAudio)}
 						bounces={itemsSorted.length > 1}
-						maxItemsInRecyclePool={0}
 						showsHorizontalScrollIndicator={false}
 						initialScrollIndex={initialScrollIndex >= 0 && initialScrollIndex < itemsSorted.length ? initialScrollIndex : 0}
 						onViewableItemsChanged={onViewableItemsChanged}

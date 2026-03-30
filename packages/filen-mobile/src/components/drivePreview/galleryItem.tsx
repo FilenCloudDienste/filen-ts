@@ -1,10 +1,9 @@
 import { memo } from "react"
-import { AnimatedView } from "@/components/ui/animated"
 import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType } from "@/lib/utils"
 import useHttpStore from "@/stores/useHttp.store"
 import { useWindowDimensions, ActivityIndicator } from "react-native"
-import { type SharedValue, useAnimatedStyle } from "react-native-reanimated"
+import { type SharedValue } from "react-native-reanimated"
 import { type ListRenderItemInfo } from "@shopify/flash-list"
 import PreviewImage from "@/components/drivePreview/previewImage"
 import PreviewVideo from "@/components/drivePreview/previewVideo"
@@ -39,9 +38,6 @@ const GalleryItem = memo(
 	({
 		info,
 		galleryZoomScale,
-		dismissTranslateY,
-		isDismissing,
-		fadeRange,
 		goBack,
 		onZoomChange,
 		onSingleTap,
@@ -49,9 +45,6 @@ const GalleryItem = memo(
 	}: {
 		info: ListRenderItemInfo<DriveItemFileExtracted>
 		galleryZoomScale: SharedValue<number>
-		dismissTranslateY: SharedValue<number>
-		isDismissing: SharedValue<number>
-		fadeRange: number
 		goBack: () => void
 		onZoomChange?: (zoom: number) => void
 		onSingleTap?: () => void
@@ -69,32 +62,11 @@ const GalleryItem = memo(
 			height: dimensions.height
 		}
 
-		const dismissAnimatedStyle = useAnimatedStyle(() => {
-			"worklet"
-
-			if (!isActive && isDismissing.value !== 1) {
-				return {}
-			}
-
-			const progress = Math.max(0, Math.min(1, Math.abs(dismissTranslateY.value) / fadeRange))
-
-			return {
-				transform: [
-					{
-						translateY: dismissTranslateY.value
-					},
-					{
-						scale: 1 - progress * 0.15
-					}
-				]
-			}
-		})
-
 		if (!fileUrl || !previewType || previewType === "unknown") {
 			return (
-				<AnimatedView
+				<View
 					className="bg-transparent"
-					style={[itemStyle, dismissAnimatedStyle]}
+					style={itemStyle}
 				/>
 			)
 		}
@@ -102,9 +74,9 @@ const GalleryItem = memo(
 		switch (previewType) {
 			case "image": {
 				return (
-					<AnimatedView
+					<View
 						className="bg-transparent"
-						style={[itemStyle, dismissAnimatedStyle]}
+						style={itemStyle}
 					>
 						<PreviewImage
 							fileUrl={fileUrl}
@@ -113,15 +85,15 @@ const GalleryItem = memo(
 							onZoomChange={onZoomChange}
 							onSingleTap={onSingleTap}
 						/>
-					</AnimatedView>
+					</View>
 				)
 			}
 
 			case "pdf": {
 				return (
-					<AnimatedView
+					<View
 						className="bg-transparent"
-						style={[itemStyle, dismissAnimatedStyle]}
+						style={itemStyle}
 					>
 						{isActive ? (
 							<PreviewPdf item={info.item} />
@@ -133,15 +105,15 @@ const GalleryItem = memo(
 								/>
 							</View>
 						)}
-					</AnimatedView>
+					</View>
 				)
 			}
 
 			case "docx": {
 				return (
-					<AnimatedView
+					<View
 						className="bg-transparent"
-						style={[itemStyle, dismissAnimatedStyle]}
+						style={itemStyle}
 					>
 						{isActive ? (
 							<PreviewDocx item={info.item} />
@@ -153,15 +125,15 @@ const GalleryItem = memo(
 								/>
 							</View>
 						)}
-					</AnimatedView>
+					</View>
 				)
 			}
 
 			case "video": {
 				return (
-					<AnimatedView
+					<View
 						className="bg-transparent"
-						style={[itemStyle, dismissAnimatedStyle]}
+						style={itemStyle}
 					>
 						{isActive ? (
 							<PreviewVideo fileUrl={fileUrl} />
@@ -173,15 +145,15 @@ const GalleryItem = memo(
 								/>
 							</View>
 						)}
-					</AnimatedView>
+					</View>
 				)
 			}
 
 			case "audio": {
 				return (
-					<AnimatedView
+					<View
 						className="bg-transparent"
-						style={[itemStyle, dismissAnimatedStyle]}
+						style={itemStyle}
 					>
 						{isActive ? (
 							<PreviewAudio item={info.item} />
@@ -193,16 +165,16 @@ const GalleryItem = memo(
 								/>
 							</View>
 						)}
-					</AnimatedView>
+					</View>
 				)
 			}
 
 			case "text":
 			case "code": {
 				return (
-					<AnimatedView
+					<View
 						className="bg-transparent"
-						style={[itemStyle, dismissAnimatedStyle]}
+						style={itemStyle}
 					>
 						{isActive ? (
 							<PreviewText
@@ -217,15 +189,15 @@ const GalleryItem = memo(
 								/>
 							</View>
 						)}
-					</AnimatedView>
+					</View>
 				)
 			}
 
 			default: {
 				return (
-					<AnimatedView
+					<View
 						className="bg-transparent"
-						style={[itemStyle, dismissAnimatedStyle]}
+						style={itemStyle}
 					/>
 				)
 			}
