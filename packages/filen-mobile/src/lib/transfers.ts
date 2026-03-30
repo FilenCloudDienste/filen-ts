@@ -31,6 +31,7 @@ import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
+import drive from "@/lib/drive"
 
 class Transfers {
 	private globalAbortController = new AbortController()
@@ -86,8 +87,12 @@ class Transfers {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
-		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
-		const compositeAbortSignal = createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
+		const compositePauseSignal = hideProgress
+			? createCompositePauseSignal(transferPauseSignal)
+			: createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
+		const compositeAbortSignal = hideProgress
+			? createCompositeAbortSignal(transferAbortController.signal)
+			: createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
 		if (localFileOrDir instanceof FileSystem.Directory) {
 			const result = await run(async defer => {
@@ -98,10 +103,6 @@ class Transfers {
 					this.activeUploadIds.delete(id)
 					this.activeUploadUris.delete(localFileOrDir.uri)
 				})
-
-				if (parent.tag === AnyNormalDir_Tags.Root) {
-					throw new Error("Cannot upload to root directory.")
-				}
 
 				if (!localFileOrDir.exists) {
 					throw new Error("Local directory does not exist or is empty.")
@@ -165,6 +166,19 @@ class Transfers {
 							.catch(console.error)
 					})
 				}
+
+				const parentDir = await (async () => {
+					const created = await drive.createDirectory({
+						parent:
+							parent.tag === AnyNormalDir_Tags.Root
+								? new AnyNormalDir.Root(parent.inner[0])
+								: new AnyNormalDir.Dir(parent.inner[0]),
+						signal: compositeAbortSignal,
+						name: localFileOrDir.name
+					})
+
+					return created.data
+				})()
 
 				const transferred: {
 					files: File[]
@@ -305,7 +319,7 @@ class Transfers {
 							}
 						}
 					},
-					parent.inner[0],
+					parentDir,
 					ManagedFuture.new({
 						pauseSignal: compositePauseSignal.getSignal(),
 						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
@@ -588,8 +602,12 @@ class Transfers {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
-		const compositePauseSignal = createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
-		const compositeAbortSignal = createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
+		const compositePauseSignal = hideProgress
+			? createCompositePauseSignal(transferPauseSignal)
+			: createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
+		const compositeAbortSignal = hideProgress
+			? createCompositeAbortSignal(transferAbortController.signal)
+			: createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
 		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 			const result = await run(async defer => {
