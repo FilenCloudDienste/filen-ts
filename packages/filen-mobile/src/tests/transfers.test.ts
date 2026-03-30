@@ -121,11 +121,7 @@ const {
 	}
 })
 
-vi.mock("uniffi-bindgen-react-native", () => ({
-	UniffiEnum: class {
-		protected constructor(..._args: any[]) {}
-	}
-}))
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
@@ -230,6 +226,24 @@ vi.mock("@/queries/useDriveItems.query", () => ({
 vi.mock("@/lib/cache", () => ({
 	default: {
 		directoryUuidToAnySharedDirWithContext: new Map()
+	}
+}))
+
+vi.mock("@/lib/fileCache", () => ({
+	default: {
+		get: vi.fn(),
+		set: vi.fn(),
+		remove: vi.fn()
+	}
+}))
+
+vi.mock("@op-engineering/op-sqlite", async () => await import("@/tests/mocks/opSqlite"))
+
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
+
+vi.mock("@/lib/drive", () => ({
+	default: {
+		createDirectory: vi.fn().mockResolvedValue({ data: { uuid: "dir-uuid" } })
 	}
 }))
 
@@ -568,6 +582,29 @@ describe("Transfers", () => {
 				).rejects.toThrow("Local file does not exist")
 			})
 
+			it("does not throw when aborted", async () => {
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+				const controller = new AbortController()
+
+				mockUploadFile.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				const result = await transfers.upload({
+					id: "upload-1",
+					localFileOrDir: file,
+					parent,
+					hideProgress: true,
+					abortController: controller
+				})
+
+				expect(result).toEqual({ files: [], directories: [] })
+			})
+
 			it("skips query cache update for shared files", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
@@ -591,19 +628,21 @@ describe("Transfers", () => {
 		})
 
 		describe("directory", () => {
-			it("rejects upload to root directory", async () => {
+			it("creates directory in root before uploading", async () => {
 				const dir = new FsDirectory("file:///document/testdir")
 				fs.set(dir.uri, "dir")
 				const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
 
-				await expect(
-					transfers.upload({
-						id: "upload-1",
-						localFileOrDir: dir,
-						parent,
-						hideProgress: true
-					})
-				).rejects.toThrow("Cannot upload to root directory")
+				const { default: drive } = await import("@/lib/drive")
+
+				await transfers.upload({
+					id: "upload-1",
+					localFileOrDir: dir,
+					parent,
+					hideProgress: true
+				})
+
+				expect(drive.createDirectory).toHaveBeenCalled()
 			})
 
 			it("throws when local directory does not exist", async () => {
@@ -729,6 +768,29 @@ describe("Transfers", () => {
 
 				expect(result.directories).toHaveLength(1)
 				expect(result.files).toHaveLength(1)
+			})
+
+			it("does not throw when aborted", async () => {
+				const dir = new FsDirectory("file:///document/testdir")
+				fs.set(dir.uri, "dir")
+				const parent = makeParentDir("parent-uuid")
+				const controller = new AbortController()
+
+				mockUploadDirRecursively.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				const result = await transfers.upload({
+					id: "upload-1",
+					localFileOrDir: dir,
+					parent,
+					hideProgress: true,
+					abortController: controller
+				})
+
+				expect(result).toEqual({ files: [], directories: [] })
 			})
 		})
 	})
@@ -871,6 +933,27 @@ describe("Transfers", () => {
 					hideProgress: true
 				})
 			})
+			it("does not throw when aborted", async () => {
+				const dest = new FsFile("file:///document/dest.txt")
+				const item = makeFileItem("file-uuid")
+				const controller = new AbortController()
+
+				mockDownloadFileToPath.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				await expect(
+					transfers.download({
+						itemUuid: "file-uuid",
+						item,
+						destination: dest,
+						hideProgress: true,
+						abortController: controller
+					})
+				).resolves.not.toThrow()
+			})
 		})
 
 		describe("directory", () => {
@@ -902,6 +985,28 @@ describe("Transfers", () => {
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
 				expect(result.files).toHaveLength(0)
 				expect(result.directories).toHaveLength(0)
+			})
+
+			it("does not throw when aborted", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				const item = makeDirItem("dir-uuid")
+				const controller = new AbortController()
+
+				mockDownloadDirRecursively.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				await expect(
+					transfers.download({
+						itemUuid: "dir-uuid",
+						item,
+						destination: dest,
+						hideProgress: true,
+						abortController: controller
+					})
+				).resolves.not.toThrow()
 			})
 		})
 	})
