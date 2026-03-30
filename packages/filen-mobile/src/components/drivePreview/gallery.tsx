@@ -1,4 +1,4 @@
-import { useState, memo } from "react"
+import { useState, useRef, useEffect, memo } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { router } from "expo-router"
@@ -7,7 +7,7 @@ import { getPreviewType } from "@/lib/utils"
 import { useWindowDimensions, type ViewabilityConfig } from "react-native"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
 import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring } from "react-native-reanimated"
-import { FlashList, type ViewToken } from "@shopify/flash-list"
+import { FlashList, type FlashListRef, type ViewToken } from "@shopify/flash-list"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import { itemSorter } from "@/lib/sort"
 import type { DrivePath } from "@/hooks/useDrivePath"
@@ -17,6 +17,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { runOnJS } from "react-native-worklets"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { useShallow } from "zustand/shallow"
+import * as ScreenOrientation from "expo-screen-orientation"
 
 const DISMISS_POSITION_RATIO = 0.25
 const DISMISS_VELOCITY_THRESHOLD = 1000
@@ -35,6 +36,22 @@ const VIEWABILITY_CONFIG: ViewabilityConfig = {
 	itemVisiblePercentThreshold: 50
 }
 
+const ORIENTATION_TO_LOCK: Record<number, ScreenOrientation.OrientationLock | undefined> = {
+	[ScreenOrientation.Orientation.PORTRAIT_UP]: ScreenOrientation.OrientationLock.PORTRAIT_UP,
+	[ScreenOrientation.Orientation.PORTRAIT_DOWN]: ScreenOrientation.OrientationLock.PORTRAIT_DOWN,
+	[ScreenOrientation.Orientation.LANDSCAPE_LEFT]: ScreenOrientation.OrientationLock.LANDSCAPE_LEFT,
+	[ScreenOrientation.Orientation.LANDSCAPE_RIGHT]: ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT
+}
+
+async function lockToCurrentOrientation(): Promise<void> {
+	const orientation = await ScreenOrientation.getOrientationAsync()
+	const lock = ORIENTATION_TO_LOCK[orientation]
+
+	if (lock !== undefined) {
+		await ScreenOrientation.lockAsync(lock)
+	}
+}
+
 type DismissSharedValues = {
 	zoomScale: SharedValue<number>
 	dismissTranslateY: SharedValue<number>
@@ -43,7 +60,13 @@ type DismissSharedValues = {
 	startTouchY: SharedValue<number>
 }
 
-function buildDismissGesture(sv: DismissSharedValues, screenHeight: number, goBack: () => void) {
+function buildDismissGesture(
+	sv: DismissSharedValues,
+	screenHeight: number,
+	goBack: () => void,
+	onDismissStart: () => void,
+	onDismissCancel: () => void
+) {
 	return Gesture.Pan()
 		.manualActivation(true)
 		.onTouchesDown((e, _stateManager) => {
@@ -86,6 +109,8 @@ function buildDismissGesture(sv: DismissSharedValues, screenHeight: number, goBa
 			"worklet"
 
 			sv.savedDismissTranslateY.value = sv.dismissTranslateY.value
+
+			runOnJS(onDismissStart)()
 		})
 		.onUpdate(e => {
 			"worklet"
@@ -104,6 +129,8 @@ function buildDismissGesture(sv: DismissSharedValues, screenHeight: number, goBa
 					...SPRING_SNAPPY,
 					velocity: e.velocityY
 				})
+
+				runOnJS(onDismissCancel)()
 			}
 		})
 }
@@ -122,6 +149,8 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 	const startTouchX = useSharedValue<number>(0)
 	const startTouchY = useSharedValue<number>(0)
 	const isDismissing = useSharedValue<number>(0)
+	const listRef = useRef<FlashListRef<DriveItemFileExtracted>>(null)
+	const currentIndexRef = useRef<number>(0)
 
 	const fadeRange = dimensions.height * 0.5
 
@@ -133,6 +162,14 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 			enabled: false
 		}
 	)
+
+	const lockOrientation = () => {
+		lockToCurrentOrientation().catch(console.error)
+	}
+
+	const unlockOrientation = () => {
+		ScreenOrientation.unlockAsync().catch(console.error)
+	}
 
 	const goBack = () => {
 		isDismissing.value = 1
@@ -149,7 +186,28 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		zoomScale.value = zoom
 
 		setScrollEnabled(zoom <= 1)
+
+		if (zoom > 1) {
+			lockOrientation()
+		} else {
+			unlockOrientation()
+		}
 	}
+
+	useEffect(() => {
+		return () => {
+			ScreenOrientation.unlockAsync().catch(console.error)
+		}
+	}, [])
+
+	useEffect(() => {
+		if (currentIndexRef.current >= 0) {
+			listRef.current?.scrollToIndex({
+				index: currentIndexRef.current,
+				animated: false
+			})
+		}
+	}, [dimensions.width])
 
 	const { isImage, isVideo, isAudio } = useDrivePreviewStore(
 		useShallow(state => {
@@ -213,6 +271,8 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 			useDrivePreviewStore.getState().setCurrentItem(first.item)
 			useDrivePreviewStore.getState().setCurrentIndex(first.index ?? -1)
 
+			currentIndexRef.current = first.index ?? 0
+
 			setHeaderOpacityValue(headerOpacity, true)
 		}
 	}
@@ -226,7 +286,9 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 			startTouchY
 		},
 		dimensions.height,
-		goBack
+		goBack,
+		lockOrientation,
+		unlockOrientation
 	).enabled(isImage || isVideo || isAudio)
 
 	const backgroundAnimatedStyle = useAnimatedStyle(() => {
@@ -299,6 +361,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 			<GestureDetector gesture={dismissGesture}>
 				<AnimatedView className="flex-1 bg-transparent">
 					<FlashList<DriveItemFileExtracted>
+						ref={listRef}
 						data={itemsSorted}
 						keyExtractor={item => item.data.uuid}
 						renderItem={info => {
