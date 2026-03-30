@@ -10,11 +10,11 @@ const VERSION: string = "3.1.0"
 const APPLE_TEAM_ID: string = "7YTW5D2K7P"
 const IOS_APP_GROUP_ID: string = "group.io.filen.app"
 const JS_ENGINE: "hermes" | "jsc" = "hermes"
-const ANDROID_MIN_SDK_VERSION: number = 31
+const ANDROID_MIN_SDK_VERSION: number = 33
 const ANDROID_TARGET_SDK_VERSION: number = 36
 const ANDROID_COMPILE_SDK_VERSION: number = 36
 const ANDROID_BUILD_TOOLS_VERSION: string = "36.0.0"
-const IOS_DEPLOYMENT_TARGET: string = "18.0"
+const IOS_DEPLOYMENT_TARGET: string = "26.0"
 const NAME: string = "Filen"
 const IDENTIFIER: string = "com.anonymous.filenmobile" // "io.filen.app"
 
