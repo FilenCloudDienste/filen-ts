@@ -130,12 +130,16 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 	}
 }
 
+const MAX_UPLOAD_FAILURES = 3
+
 class CameraUpload {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
 	private syncing: boolean = false
-	public secureStoreKey: string = "cameraUploadConfig"
 	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
+	private readonly uploadFailures = new Map<string, number>()
+	public secureStoreKey: string = "cameraUploadConfig"
+
 	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, Dir>({
 		max: 100,
 		ttl: 60000,
@@ -175,6 +179,7 @@ class CameraUpload {
 		// controller above will already stop any in-flight transfers before they
 		// can block on the old (possibly paused) signal.
 		this.globalPauseSignal = new PauseSignal()
+		this.uploadFailures.clear()
 	}
 
 	public pause(): void {
@@ -626,6 +631,12 @@ class CameraUpload {
 
 			await Promise.allSettled(
 				deltas.map(async delta => {
+					const assetId = delta.file.info.id
+
+					if ((this.uploadFailures.get(assetId) ?? 0) >= MAX_UPLOAD_FAILURES) {
+						return
+					}
+
 					const result = await run(async defer => {
 						switch (delta.type) {
 							case "upload": {
@@ -725,6 +736,8 @@ class CameraUpload {
 						if (abortController.signal.aborted) {
 							return
 						}
+
+						this.uploadFailures.set(assetId, (this.uploadFailures.get(assetId) ?? 0) + 1)
 
 						console.error(result.error)
 
