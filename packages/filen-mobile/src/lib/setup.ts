@@ -32,7 +32,8 @@ class Setup {
 				await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
 
 				if (isAuthed.isAuthed) {
-					Promise.allSettled([offline.updateIndex(), offline.sync()]).catch(err => {
+					// TODO: Move to host component like camera upload
+					Promise.all([offline.updateIndex(), offline.sync()]).catch(err => {
 						console.error(err)
 						alerts.error(err)
 					})

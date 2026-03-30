@@ -20,10 +20,22 @@ import { useShallow } from "zustand/shallow"
 import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
-import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyNormalDir, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { debounce } from "es-toolkit/function"
+import * as ImagePicker from "expo-image-picker"
+import transfers from "@/lib/transfers"
+import * as FileSystem from "expo-file-system"
+import { randomUUID } from "expo-crypto"
+import { pack } from "@/lib/msgpack"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, normalizeFilePathForExpo } from "@/lib/utils"
+import { Buffer } from "react-native-quick-crypto"
+import DocumentScanner, {
+	ResponseType as DocumentScannerResponseType,
+	ScanDocumentResponseStatus
+} from "react-native-document-scanner-plugin"
+import * as DocumentPicker from "expo-document-picker"
 
-const Header = memo(() => {
+const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const selectedDriveItems = useDriveStore(useShallow(state => state.selectedItems))
@@ -39,7 +51,7 @@ const Header = memo(() => {
 		}
 	)
 
-	const driveItems = driveItemsQuery.data ?? []
+	const driveItems = driveItemsQuery.status === "success" ? driveItemsQuery.data : []
 
 	const rightItems = (() => {
 		if (drivePath.selectOptions) {
@@ -83,6 +95,593 @@ const Header = memo(() => {
 					}
 				})
 			}
+		}
+
+		if (
+			parent &&
+			parent.tag === AnyDirWithContext_Tags.Normal &&
+			(drivePath.type === "drive" ||
+				drivePath.type === "links" ||
+				drivePath.type === "favorites" ||
+				drivePath.type === "sharedOut") &&
+			!drivePath.selectOptions
+		) {
+			menuButtons.push({
+				id: "createFolder",
+				title: "tbd_create_folder",
+				icon: "plus",
+				onPress: async () => {
+					const promptResult = await run(async () => {
+						return await prompts.input({
+							title: "tbd_create_folder",
+							message: "tbd_enter_folder_name",
+							cancelText: "tbd_cancel",
+							okText: "tbd_create",
+							placeholder: "tbd_folder_name"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+						return
+					}
+
+					const folderName = promptResult.data.value.trim()
+
+					if (folderName.length === 0) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await drive.createDirectory({
+							name: folderName,
+							parent: parent.inner[0]
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+					}
+				}
+			})
+
+			menuButtons.push({
+				id: "upload",
+				title: "tbd_upload",
+				icon: "plus",
+				subButtons: [
+					{
+						id: "uploadFiles",
+						title: "tbd_upload_files",
+						icon: "plus",
+						onPress: async () => {
+							const documentPickerResult = await run(async () => {
+								return await DocumentPicker.getDocumentAsync({
+									type: "*/*",
+									multiple: true,
+									copyToCacheDirectory: true,
+									base64: false
+								})
+							})
+
+							if (!documentPickerResult.success) {
+								console.error(documentPickerResult.error)
+								alerts.error(documentPickerResult.error)
+
+								return
+							}
+
+							if (documentPickerResult.data.canceled) {
+								return
+							}
+
+							const assets = documentPickerResult.data.assets
+
+							const transferResult = await run(async () => {
+								return await Promise.allSettled(
+									assets.map(async asset => {
+										return await run(
+											async defer => {
+												const assetFile = new FileSystem.File(asset.uri)
+
+												defer(() => {
+													if (assetFile.exists) {
+														assetFile.delete()
+													}
+												})
+
+												if (!assetFile.exists) {
+													throw new Error("Asset file does not exist")
+												}
+
+												const tmpFile = new FileSystem.File(
+													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), asset.name)
+												)
+
+												defer(() => {
+													if (tmpFile.parentDirectory.exists) {
+														tmpFile.parentDirectory.delete()
+													}
+												})
+
+												if (!tmpFile.parentDirectory.exists) {
+													tmpFile.parentDirectory.create({
+														idempotent: true,
+														intermediates: true
+													})
+												}
+
+												if (tmpFile.exists) {
+													tmpFile.delete()
+												}
+
+												assetFile.move(tmpFile)
+
+												// TODO: mod times
+												return await transfers.upload({
+													id: tmpFile.uri,
+													localFileOrDir: tmpFile,
+													parent: parent.inner[0]
+												})
+											},
+											{
+												throw: true
+											}
+										)
+									})
+								)
+							})
+
+							if (!transferResult.success) {
+								console.error(transferResult.error)
+								alerts.error(transferResult.error)
+
+								return
+							}
+
+							for (const r of transferResult.data) {
+								if (r.status === "rejected") {
+									console.error(r.reason)
+									alerts.error(r.reason)
+								}
+							}
+
+							// TODO: display toast on upload success with number of successfully uploaded files and number of failed uploads
+						}
+					},
+					{
+						id: "uploadPhotosOrVideos",
+						title: "tbd_upload_photos_or_videos",
+						icon: "plus",
+						onPress: async () => {
+							const permissionsResult = await run(async () => {
+								return await ImagePicker.requestMediaLibraryPermissionsAsync()
+							})
+
+							if (!permissionsResult.success) {
+								console.error(permissionsResult.error)
+								alerts.error(permissionsResult.error)
+
+								return
+							}
+
+							if (!permissionsResult.data.granted) {
+								return
+							}
+
+							const imagePickerResult = await run(async () => {
+								return await ImagePicker.launchImageLibraryAsync({
+									mediaTypes: ["images", "videos"],
+									exif: true,
+									base64: false,
+									quality: 1,
+									allowsMultipleSelection: true,
+									presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+									shouldDownloadFromNetwork: true
+								})
+							})
+
+							if (!imagePickerResult.success) {
+								console.error(imagePickerResult.error)
+								alerts.error(imagePickerResult.error)
+
+								return
+							}
+
+							if (imagePickerResult.data.canceled) {
+								return
+							}
+
+							const assets = imagePickerResult.data.assets
+
+							const transferResult = await run(async () => {
+								return await Promise.allSettled(
+									assets.map(async asset => {
+										return await run(
+											async defer => {
+												if (!asset.fileName) {
+													throw new Error("Asset is missing fileName")
+												}
+
+												const assetFile = new FileSystem.File(asset.uri)
+
+												defer(() => {
+													if (assetFile.exists) {
+														assetFile.delete()
+													}
+												})
+
+												if (!assetFile.exists) {
+													throw new Error("Asset file does not exist")
+												}
+
+												const tmpFile = new FileSystem.File(
+													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), asset.fileName)
+												)
+
+												defer(() => {
+													if (tmpFile.parentDirectory.exists) {
+														tmpFile.parentDirectory.delete()
+													}
+												})
+
+												if (!tmpFile.parentDirectory.exists) {
+													tmpFile.parentDirectory.create({
+														idempotent: true,
+														intermediates: true
+													})
+												}
+
+												if (tmpFile.exists) {
+													tmpFile.delete()
+												}
+
+												assetFile.move(tmpFile)
+
+												return await transfers.upload({
+													id: tmpFile.uri,
+													localFileOrDir: tmpFile,
+													parent: parent.inner[0]
+												})
+											},
+											{
+												throw: true
+											}
+										)
+									})
+								)
+							})
+
+							if (!transferResult.success) {
+								console.error(transferResult.error)
+								alerts.error(transferResult.error)
+
+								return
+							}
+
+							for (const r of transferResult.data) {
+								if (r.status === "rejected") {
+									console.error(r.reason)
+									alerts.error(r.reason)
+								}
+							}
+
+							// TODO: display toast on upload success with number of successfully uploaded files and number of failed uploads
+						}
+					},
+					{
+						id: "takePhotoOrVideo",
+						title: "tbd_take_photo_or_video",
+						icon: "plus",
+						onPress: async () => {
+							const permissionsResult = await run(async () => {
+								return await ImagePicker.requestCameraPermissionsAsync()
+							})
+
+							if (!permissionsResult.success) {
+								console.error(permissionsResult.error)
+								alerts.error(permissionsResult.error)
+
+								return
+							}
+
+							if (!permissionsResult.data.granted) {
+								return
+							}
+
+							const imagePickerResult = await run(async () => {
+								return await ImagePicker.launchCameraAsync({
+									mediaTypes: ["images", "videos"],
+									exif: true,
+									base64: false,
+									quality: 1,
+									allowsMultipleSelection: true,
+									presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+									shouldDownloadFromNetwork: true
+								})
+							})
+
+							if (!imagePickerResult.success) {
+								console.error(imagePickerResult.error)
+								alerts.error(imagePickerResult.error)
+
+								return
+							}
+
+							if (imagePickerResult.data.canceled) {
+								return
+							}
+
+							const assets = imagePickerResult.data.assets
+
+							const transferResult = await run(async () => {
+								return await Promise.allSettled(
+									assets.map(async asset => {
+										return await run(
+											async defer => {
+												if (!asset.fileName) {
+													throw new Error("Asset is missing fileName")
+												}
+
+												const assetFile = new FileSystem.File(asset.uri)
+
+												defer(() => {
+													if (assetFile.exists) {
+														assetFile.delete()
+													}
+												})
+
+												if (!assetFile.exists) {
+													throw new Error("Asset file does not exist")
+												}
+
+												const tmpFile = new FileSystem.File(
+													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), asset.fileName)
+												)
+
+												defer(() => {
+													if (tmpFile.parentDirectory.exists) {
+														tmpFile.parentDirectory.delete()
+													}
+												})
+
+												if (!tmpFile.parentDirectory.exists) {
+													tmpFile.parentDirectory.create({
+														idempotent: true,
+														intermediates: true
+													})
+												}
+
+												if (tmpFile.exists) {
+													tmpFile.delete()
+												}
+
+												assetFile.move(tmpFile)
+
+												return await transfers.upload({
+													id: tmpFile.uri,
+													localFileOrDir: tmpFile,
+													parent: parent.inner[0]
+												})
+											},
+											{
+												throw: true
+											}
+										)
+									})
+								)
+							})
+
+							if (!transferResult.success) {
+								console.error(transferResult.error)
+								alerts.error(transferResult.error)
+
+								return
+							}
+
+							for (const r of transferResult.data) {
+								if (r.status === "rejected") {
+									console.error(r.reason)
+									alerts.error(r.reason)
+								}
+							}
+
+							// TODO: display toast on upload success with number of successfully uploaded files and number of failed uploads
+						}
+					},
+					{
+						id: "scanDocument",
+						title: "tbd_scan_document",
+						icon: "plus",
+						onPress: async () => {
+							const permissionsResult = await run(async () => {
+								return await ImagePicker.requestCameraPermissionsAsync()
+							})
+
+							if (!permissionsResult.success) {
+								console.error(permissionsResult.error)
+								alerts.error(permissionsResult.error)
+
+								return
+							}
+
+							if (!permissionsResult.data.granted) {
+								return
+							}
+
+							const scannerResult = await run(async () => {
+								return await DocumentScanner.scanDocument({
+									maxNumDocuments: undefined,
+									croppedImageQuality: 100,
+									responseType: DocumentScannerResponseType.ImageFilePath
+								})
+							})
+
+							if (!scannerResult.success) {
+								console.error(scannerResult.error)
+								alerts.error(scannerResult.error)
+
+								return
+							}
+
+							if (scannerResult.data.status !== ScanDocumentResponseStatus.Success) {
+								return
+							}
+
+							const scans = scannerResult.data.scannedImages
+
+							if (!scans || scans.length === 0) {
+								return
+							}
+
+							const transferResult = await run(async () => {
+								return await Promise.allSettled(
+									scans.map(async scan => {
+										return await run(
+											async defer => {
+												const scanFile = new FileSystem.File(normalizeFilePathForExpo(scan))
+
+												defer(() => {
+													if (scanFile.exists) {
+														scanFile.delete()
+													}
+												})
+
+												return await transfers.upload({
+													id: scanFile.uri,
+													localFileOrDir: scanFile,
+													parent: parent.inner[0]
+												})
+											},
+											{
+												throw: true
+											}
+										)
+									})
+								)
+							})
+
+							if (!transferResult.success) {
+								console.error(transferResult.error)
+								alerts.error(transferResult.error)
+
+								return
+							}
+
+							for (const r of transferResult.data) {
+								if (r.status === "rejected") {
+									console.error(r.reason)
+									alerts.error(r.reason)
+								}
+							}
+
+							// TODO: display toast on upload success with number of successfully uploaded files and number of failed uploads
+						}
+					},
+					{
+						id: "createTextFile",
+						title: "tbd_create_text_file",
+						icon: "plus",
+						onPress: async () => {
+							const promptResult = await run(async () => {
+								return await prompts.input({
+									title: "tbd_create_text_file",
+									message: "tbd_enter_text_file_name",
+									cancelText: "tbd_cancel",
+									okText: "tbd_create",
+									placeholder: "tbd_text_file_name"
+								})
+							})
+
+							if (!promptResult.success) {
+								console.error(promptResult.error)
+								alerts.error(promptResult.error)
+
+								return
+							}
+
+							if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+								return
+							}
+
+							let fileName = promptResult.data.value.trim()
+
+							if (fileName.length === 0) {
+								return
+							}
+
+							const extname = FileSystem.Paths.extname(fileName)
+
+							if (extname.length === 0) {
+								fileName += ".txt"
+							}
+
+							const result = await runWithLoading(async defer => {
+								const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), fileName))
+
+								defer(() => {
+									if (tmpFile.parentDirectory.exists) {
+										tmpFile.parentDirectory.delete()
+									}
+								})
+
+								if (!tmpFile.parentDirectory.exists) {
+									tmpFile.parentDirectory.create({
+										idempotent: true,
+										intermediates: true
+									})
+								}
+
+								if (tmpFile.exists) {
+									tmpFile.delete()
+								}
+
+								tmpFile.write("", {
+									encoding: "utf8"
+								})
+
+								return await transfers.upload({
+									id: tmpFile.uri,
+									localFileOrDir: tmpFile,
+									parent: parent.inner[0],
+									hideProgress: true
+								})
+							})
+
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
+
+								return
+							}
+
+							const file = result.data.files.at(0)
+
+							if (!file) {
+								return
+							}
+
+							const item = unwrappedFileIntoDriveItem(unwrapFileMeta(file))
+
+							router.push({
+								pathname: "/drivePreview",
+								params: {
+									item: Buffer.from(pack(item)).toString("base64"),
+									drivePath: Buffer.from(pack(drivePath)).toString("base64"),
+									parent: Buffer.from(pack(parent)).toString("base64")
+								}
+							})
+						}
+					}
+				]
+			})
 		}
 
 		if (selectedDriveItems.length > 0 && drivePath.type === "trash") {
@@ -408,54 +1007,10 @@ const Drive = memo(() => {
 			)
 		}
 
-		switch (drivePath.type) {
-			case "drive":
-			case "favorites":
-			case "recents":
-			case "trash": {
-				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
+		const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
 
-				if (fromCache) {
-					return fromCache
-				}
-
-				break
-			}
-
-			case "sharedIn":
-			case "sharedOut": {
-				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
-
-				if (fromCache) {
-					return fromCache
-				}
-
-				break
-			}
-
-			case "links": {
-				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
-
-				if (fromCache) {
-					return fromCache
-				}
-
-				break
-			}
-
-			case "offline": {
-				const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
-
-				if (fromCache) {
-					return fromCache
-				}
-
-				break
-			}
-
-			default: {
-				return undefined
-			}
+		if (fromCache) {
+			return fromCache
 		}
 
 		return undefined
@@ -576,7 +1131,7 @@ const Drive = memo(() => {
 
 	return (
 		<Fragment>
-			<Header />
+			<Header parent={parent} />
 			<SafeAreaView
 				className={cn(
 					"flex-1",

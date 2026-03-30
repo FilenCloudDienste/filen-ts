@@ -63,7 +63,6 @@ export function parseExifDate(exif: Record<string, unknown>): number | null {
 
 	// iOS groups fields under "{Exif}" and "{TIFF}"; Android uses a flat layout.
 	const exifGroup = typeof exif["{Exif}"] === "object" && exif["{Exif}"] !== null ? (exif["{Exif}"] as Record<string, unknown>) : exif
-
 	const tiffGroup = typeof exif["{TIFF}"] === "object" && exif["{TIFF}"] !== null ? (exif["{TIFF}"] as Record<string, unknown>) : {}
 
 	// Returns the first string value found in the group, falling back to the top-level object.
