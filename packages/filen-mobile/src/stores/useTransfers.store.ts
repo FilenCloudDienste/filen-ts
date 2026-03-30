@@ -16,6 +16,7 @@ export type Transfer = {
 	startedAt: number
 	finishedAt?: number
 	abortController: AbortController
+	aborted: boolean
 	abort: () => void
 	pause: () => void
 	resume: () => void
