@@ -485,6 +485,10 @@ class Thumbnails {
 		})
 
 		if (!result.success) {
+			if (params.signal?.aborted) {
+				throw abortError(params.signal)
+			}
+
 			throw result.error
 		}
 
