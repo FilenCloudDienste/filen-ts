@@ -201,34 +201,13 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 													throw new Error("Asset file does not exist")
 												}
 
-												const tmpFile = new FileSystem.File(
-													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), asset.name)
-												)
-
-												defer(() => {
-													if (tmpFile.parentDirectory.exists) {
-														tmpFile.parentDirectory.delete()
-													}
-												})
-
-												if (!tmpFile.parentDirectory.exists) {
-													tmpFile.parentDirectory.create({
-														idempotent: true,
-														intermediates: true
-													})
-												}
-
-												if (tmpFile.exists) {
-													tmpFile.delete()
-												}
-
-												assetFile.move(tmpFile)
-
-												// TODO: mod times
 												return await transfers.upload({
-													id: tmpFile.uri,
-													localFileOrDir: tmpFile,
-													parent: parent.inner[0]
+													id: assetFile.uri,
+													localFileOrDir: assetFile,
+													parent: parent.inner[0],
+													name: asset.name,
+													modified: asset.lastModified,
+													mime: asset.mimeType
 												})
 											},
 											{
@@ -320,33 +299,13 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 												const extname = FileSystem.Paths.extname(asset.uri)
 												const fileName = asset.fileName ?? `${randomUUID()}${extname}`
-												const tmpFile = new FileSystem.File(
-													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), fileName)
-												)
-
-												defer(() => {
-													if (tmpFile.parentDirectory.exists) {
-														tmpFile.parentDirectory.delete()
-													}
-												})
-
-												if (!tmpFile.parentDirectory.exists) {
-													tmpFile.parentDirectory.create({
-														idempotent: true,
-														intermediates: true
-													})
-												}
-
-												if (tmpFile.exists) {
-													tmpFile.delete()
-												}
-
-												assetFile.move(tmpFile)
 
 												return await transfers.upload({
-													id: tmpFile.uri,
-													localFileOrDir: tmpFile,
-													parent: parent.inner[0]
+													id: assetFile.uri,
+													localFileOrDir: assetFile,
+													parent: parent.inner[0],
+													name: fileName,
+													mime: asset.mimeType
 												})
 											},
 											{
@@ -438,33 +397,15 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 												const extname = FileSystem.Paths.extname(asset.uri)
 												const fileName = asset.fileName ?? `${randomUUID()}${extname}`
-												const tmpFile = new FileSystem.File(
-													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), fileName)
-												)
-
-												defer(() => {
-													if (tmpFile.parentDirectory.exists) {
-														tmpFile.parentDirectory.delete()
-													}
-												})
-
-												if (!tmpFile.parentDirectory.exists) {
-													tmpFile.parentDirectory.create({
-														idempotent: true,
-														intermediates: true
-													})
-												}
-
-												if (tmpFile.exists) {
-													tmpFile.delete()
-												}
-
-												assetFile.move(tmpFile)
 
 												return await transfers.upload({
-													id: tmpFile.uri,
-													localFileOrDir: tmpFile,
-													parent: parent.inner[0]
+													id: assetFile.uri,
+													localFileOrDir: assetFile,
+													parent: parent.inner[0],
+													name: fileName,
+													mime: asset.mimeType,
+													modified: Date.now(),
+													created: Date.now()
 												})
 											},
 											{
@@ -553,7 +494,11 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 												return await transfers.upload({
 													id: scanFile.uri,
 													localFileOrDir: scanFile,
-													parent: parent.inner[0]
+													parent: parent.inner[0],
+													modified: Date.now(),
+													created: Date.now(),
+													name: `tbd_scanned_document_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`,
+													mime: "image/jpeg"
 												})
 											},
 											{
@@ -647,7 +592,11 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 									id: tmpFile.uri,
 									localFileOrDir: tmpFile,
 									parent: parent.inner[0],
-									hideProgress: true
+									hideProgress: true,
+									name: fileName,
+									mime: "text/plain",
+									modified: Date.now(),
+									created: Date.now()
 								})
 							})
 

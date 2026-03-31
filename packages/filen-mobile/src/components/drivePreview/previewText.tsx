@@ -59,21 +59,16 @@ const PreviewTextInner = memo(
 					throw new Error("Parent is not a normal directory")
 				}
 
-				const tmpFile = new FileSystem.File(
-					FileSystem.Paths.join(FileSystem.Paths.cache.uri, randomUUID(), item.data.decryptedMeta.name)
-				)
+				const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache.uri, randomUUID()))
 
 				defer(() => {
-					if (tmpFile.parentDirectory.exists) {
-						tmpFile.parentDirectory.delete()
+					if (tmpFile.exists) {
+						tmpFile.delete()
 					}
 				})
 
-				if (!tmpFile.parentDirectory.exists) {
-					tmpFile.parentDirectory.create({
-						idempotent: true,
-						intermediates: true
-					})
+				if (tmpFile.exists) {
+					tmpFile.delete()
 				}
 
 				tmpFile.write(new TextEncoder().encode(editedText))
@@ -81,7 +76,11 @@ const PreviewTextInner = memo(
 				return await transfers.upload({
 					id: tmpFile.uri,
 					localFileOrDir: tmpFile,
-					parent: parent.inner[0]
+					parent: parent.inner[0],
+					name: item.data.decryptedMeta.name,
+					modified: Date.now(),
+					created: item.data.decryptedMeta.created ? Number(item.data.decryptedMeta.created) : undefined,
+					mime: item.data.decryptedMeta.mime
 				})
 			})
 

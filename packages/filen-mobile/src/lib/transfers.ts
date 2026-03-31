@@ -64,7 +64,11 @@ class Transfers {
 		hideProgress,
 		awaitExternalCompletionBeforeMarkingAsFinished,
 		abortController,
-		pauseSignal
+		pauseSignal,
+		name,
+		created,
+		modified,
+		mime
 	}: {
 		id: string
 		localFileOrDir: FileSystem.File | FileSystem.Directory
@@ -73,6 +77,10 @@ class Transfers {
 		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 		abortController?: AbortController
 		pauseSignal?: PauseSignal
+		name?: string
+		created?: number
+		modified?: number
+		mime?: string
 	}): Promise<{
 		files: File[]
 		directories: Dir[]
@@ -458,7 +466,13 @@ class Transfers {
 			}
 
 			const transferred = await authedSdkClient.uploadFile(
-				parent,
+				{
+					parent,
+					name: name ?? localFileOrDir.name ?? undefined,
+					created: created ? BigInt(created) : undefined,
+					modified: modified ? BigInt(modified) : undefined,
+					mime: mime ?? undefined
+				},
 				normalizeFilePathForSdk(localFileOrDir.uri),
 				{
 					onUpdate(uploadedBytes) {
