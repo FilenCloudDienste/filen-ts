@@ -123,6 +123,7 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
+
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
@@ -239,6 +240,8 @@ vi.mock("@/lib/fileCache", () => ({
 
 vi.mock("@op-engineering/op-sqlite", async () => await import("@/tests/mocks/opSqlite"))
 
+vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
+
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("@/lib/drive", () => ({
@@ -343,103 +346,7 @@ describe("Transfers", () => {
 		mockUnwrapParentUuid.mockReturnValue("parent-uuid")
 	})
 
-	describe("cancelAll", () => {
-		it("allows previously blocked uploads after clearing tracking sets", async () => {
-			const file = new FsFile("file:///document/test.txt")
-			fs.set(file.uri, new Uint8Array([1, 2, 3]))
-			const parent = makeParentDir("parent-uuid")
-
-			await transfers.upload({
-				id: "upload-1",
-				localFileOrDir: file,
-				parent,
-				hideProgress: true
-			})
-
-			transfers.cancelAll()
-
-			await transfers.upload({
-				id: "upload-1",
-				localFileOrDir: file,
-				parent,
-				hideProgress: true
-			})
-		})
-	})
-
 	describe("upload", () => {
-		describe("deduplication", () => {
-			it("rejects upload with duplicate ID", async () => {
-				const file1 = new FsFile("file:///document/file1.txt")
-				const file2 = new FsFile("file:///document/file2.txt")
-				fs.set(file1.uri, new Uint8Array([1]))
-				fs.set(file2.uri, new Uint8Array([2]))
-				const parent = makeParentDir("parent-uuid")
-
-				mockGetSdkClients.mockReturnValue(new Promise(() => {}))
-
-				transfers.upload({
-					id: "same-id",
-					localFileOrDir: file1,
-					parent,
-					hideProgress: true
-				})
-
-				await expect(
-					transfers.upload({
-						id: "same-id",
-						localFileOrDir: file2,
-						parent,
-						hideProgress: true
-					})
-				).rejects.toThrow("already in progress")
-			})
-
-			it("rejects upload with duplicate URI", async () => {
-				const file = new FsFile("file:///document/same-file.txt")
-				fs.set(file.uri, new Uint8Array([1]))
-				const parent = makeParentDir("parent-uuid")
-
-				mockGetSdkClients.mockReturnValue(new Promise(() => {}))
-
-				transfers.upload({
-					id: "id-1",
-					localFileOrDir: file,
-					parent,
-					hideProgress: true
-				})
-
-				await expect(
-					transfers.upload({
-						id: "id-2",
-						localFileOrDir: file,
-						parent,
-						hideProgress: true
-					})
-				).rejects.toThrow("already in progress")
-			})
-
-			it("allows upload after previous completes", async () => {
-				const file = new FsFile("file:///document/test.txt")
-				fs.set(file.uri, new Uint8Array([1]))
-				const parent = makeParentDir("parent-uuid")
-
-				await transfers.upload({
-					id: "upload-1",
-					localFileOrDir: file,
-					parent,
-					hideProgress: true
-				})
-
-				await transfers.upload({
-					id: "upload-1",
-					localFileOrDir: file,
-					parent,
-					hideProgress: true
-				})
-			})
-		})
-
 		describe("file", () => {
 			it("uploads file and updates query cache", async () => {
 				const file = new FsFile("file:///document/test.txt")
@@ -447,7 +354,6 @@ describe("Transfers", () => {
 				const parent = makeParentDir("parent-uuid")
 
 				const result = await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true
@@ -474,7 +380,6 @@ describe("Transfers", () => {
 				const parent = makeParentDir("parent-uuid")
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent
 				})
@@ -486,7 +391,7 @@ describe("Transfers", () => {
 
 				const added = (firstCall[0] as (prev: unknown[]) => unknown[])([] as unknown[])
 				expect(added).toHaveLength(1)
-				expect((added[0] as { id: string }).id).toBe("upload-1")
+				expect((added[0] as { id: string }).id).toBeTypeOf("string")
 				expect((added[0] as { type: string }).type).toBe("uploadFile")
 			})
 
@@ -496,7 +401,6 @@ describe("Transfers", () => {
 				const parent = makeParentDir("parent-uuid")
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true
@@ -511,14 +415,12 @@ describe("Transfers", () => {
 				const parent = makeParentDir("parent-uuid")
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true
 				})
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true
@@ -534,7 +436,6 @@ describe("Transfers", () => {
 
 				await expect(
 					transfers.upload({
-						id: "upload-1",
 						localFileOrDir: file,
 						parent,
 						hideProgress: true
@@ -542,7 +443,6 @@ describe("Transfers", () => {
 				).rejects.toThrow("upload failed")
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true
@@ -555,7 +455,6 @@ describe("Transfers", () => {
 				const parent = makeParentDir("parent-uuid")
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true
@@ -574,7 +473,6 @@ describe("Transfers", () => {
 
 				await expect(
 					transfers.upload({
-						id: "upload-1",
 						localFileOrDir: file,
 						parent,
 						hideProgress: true
@@ -595,7 +493,6 @@ describe("Transfers", () => {
 				})
 
 				const result = await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true,
@@ -617,7 +514,6 @@ describe("Transfers", () => {
 				})
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: file,
 					parent,
 					hideProgress: true
@@ -636,7 +532,6 @@ describe("Transfers", () => {
 				const { default: drive } = await import("@/lib/drive")
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: dir,
 					parent,
 					hideProgress: true
@@ -651,7 +546,6 @@ describe("Transfers", () => {
 
 				await expect(
 					transfers.upload({
-						id: "upload-1",
 						localFileOrDir: dir,
 						parent,
 						hideProgress: true
@@ -698,7 +592,6 @@ describe("Transfers", () => {
 				)
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: dir,
 					parent,
 					hideProgress: true
@@ -736,7 +629,6 @@ describe("Transfers", () => {
 				)
 
 				await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: dir,
 					parent,
 					hideProgress: true
@@ -760,7 +652,6 @@ describe("Transfers", () => {
 				)
 
 				const result = await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: dir,
 					parent,
 					hideProgress: true
@@ -783,7 +674,6 @@ describe("Transfers", () => {
 				})
 
 				const result = await transfers.upload({
-					id: "upload-1",
 					localFileOrDir: dir,
 					parent,
 					hideProgress: true,
@@ -796,60 +686,12 @@ describe("Transfers", () => {
 	})
 
 	describe("download", () => {
-		describe("deduplication", () => {
-			it("rejects download with duplicate key", async () => {
-				const dest = new FsFile("file:///document/dest.txt")
-				const item = makeFileItem("file-uuid")
-
-				mockGetSdkClients.mockReturnValue(new Promise(() => {}))
-
-				transfers.download({
-					itemUuid: "file-uuid",
-					item,
-					destination: dest,
-					hideProgress: true
-				})
-
-				await expect(
-					transfers.download({
-						itemUuid: "file-uuid",
-						item,
-						destination: dest,
-						hideProgress: true
-					})
-				).rejects.toThrow("already in progress")
-			})
-
-			it("allows same item to different destinations", async () => {
-				const dest1 = new FsFile("file:///document/dest1.txt")
-				const dest2 = new FsFile("file:///document/dest2.txt")
-				const item = makeFileItem("file-uuid")
-
-				await transfers.download({
-					itemUuid: "file-uuid",
-					item,
-					destination: dest1,
-					hideProgress: true
-				})
-
-				await transfers.download({
-					itemUuid: "file-uuid",
-					item,
-					destination: dest2,
-					hideProgress: true
-				})
-
-				expect(mockDownloadFileToPath).toHaveBeenCalledTimes(2)
-			})
-		})
-
 		describe("file", () => {
 			it("downloads file to destination", async () => {
-				const dest = new FsFile("file:///document/dest.txt")
+				const dest = new FsFile("file:///document/dest1.txt")
 				const item = makeFileItem("file-uuid")
 
 				const result = await transfers.download({
-					itemUuid: "file-uuid",
 					item,
 					destination: dest,
 					hideProgress: true
@@ -865,7 +707,6 @@ describe("Transfers", () => {
 				const item = makeFileItem("file-uuid")
 
 				await transfers.download({
-					itemUuid: "file-uuid",
 					item,
 					destination: dest,
 					hideProgress: true
@@ -879,14 +720,12 @@ describe("Transfers", () => {
 				const item = makeFileItem("file-uuid")
 
 				await transfers.download({
-					itemUuid: "file-uuid",
 					item,
 					destination: dest,
 					hideProgress: true
 				})
 
 				await transfers.download({
-					itemUuid: "file-uuid",
 					item,
 					destination: dest,
 					hideProgress: true
@@ -898,7 +737,6 @@ describe("Transfers", () => {
 				const item = makeFileItem("file-uuid")
 
 				await transfers.download({
-					itemUuid: "file-uuid",
 					item,
 					destination: dest,
 					hideProgress: true
@@ -919,7 +757,6 @@ describe("Transfers", () => {
 
 				await expect(
 					transfers.download({
-						itemUuid: "file-uuid",
 						item,
 						destination: dest,
 						hideProgress: true
@@ -927,7 +764,6 @@ describe("Transfers", () => {
 				).rejects.toThrow("download failed")
 
 				await transfers.download({
-					itemUuid: "file-uuid",
 					item,
 					destination: dest,
 					hideProgress: true
@@ -946,7 +782,6 @@ describe("Transfers", () => {
 
 				await expect(
 					transfers.download({
-						itemUuid: "file-uuid",
 						item,
 						destination: dest,
 						hideProgress: true,
@@ -963,7 +798,6 @@ describe("Transfers", () => {
 
 				await expect(
 					transfers.download({
-						itemUuid: "dir-uuid",
 						item,
 						destination: dest,
 						hideProgress: true
@@ -976,7 +810,6 @@ describe("Transfers", () => {
 				const item = makeDirItem("dir-uuid")
 
 				const result = await transfers.download({
-					itemUuid: "dir-uuid",
 					item,
 					destination: dest,
 					hideProgress: true
@@ -1000,7 +833,6 @@ describe("Transfers", () => {
 
 				await expect(
 					transfers.download({
-						itemUuid: "dir-uuid",
 						item,
 						destination: dest,
 						hideProgress: true,

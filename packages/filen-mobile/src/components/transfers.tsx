@@ -25,7 +25,7 @@ const TransfersInner = memo(() => {
 					numberOfLines={1}
 					ellipsizeMode="middle"
 				>
-					{count} active transfer{count !== 1 ? "s" : ""}
+					{count} tbd_active tbd_transfer{count !== 1 ? "s" : ""}
 				</Text>
 				{speed === 0 ? (
 					<ActivityIndicator
@@ -39,7 +39,7 @@ const TransfersInner = memo(() => {
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{bpsToReadable(speed)}/s
+						{bpsToReadable(speed)}
 					</Text>
 				)}
 			</View>
@@ -61,10 +61,6 @@ const Transfers = memo(() => {
 	const insets = useSafeAreaInsets()
 	const transfersActive = useTransfersStore(useShallow(state => state.transfers.some(t => !t.finishedAt)))
 
-	const onPress = () => {
-		router.push("/transfers")
-	}
-
 	if (!transfersActive) {
 		return null
 	}
@@ -83,7 +79,9 @@ const Transfers = memo(() => {
 		>
 			<PressableScale
 				rippleColor="transparent"
-				onPress={onPress}
+				onPress={() => {
+					router.push("/transfers")
+				}}
 			>
 				<CrossGlassContainerView
 					disableBlur={Platform.OS === "android"}

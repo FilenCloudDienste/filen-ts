@@ -165,6 +165,19 @@ export class PauseSignal {
 			}
 		}
 	}
+
+	public removeAllListeners(): void {
+		this.pauseListeners.clear()
+		this.resumeListeners.clear()
+	}
+
+	public removeEventListener<T extends "pause" | "resume">(event: T, callback: () => void): void {
+		if (event === "resume") {
+			this.resumeListeners.delete(callback)
+		} else {
+			this.pauseListeners.delete(callback)
+		}
+	}
 }
 
 export function createCompositePauseSignal(...signals: PauseSignal[]): PauseSignal & {
