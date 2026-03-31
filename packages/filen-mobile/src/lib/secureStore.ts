@@ -34,10 +34,10 @@ class SecureStore {
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
 		Platform.select({
 			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
+				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 				this.secureStoreFileName
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document.uri, this.secureStoreFileName)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, this.secureStoreFileName)
 		})
 	)
 
@@ -51,10 +51,10 @@ class SecureStore {
 		const mmkvDirectory = new FileSystem.Directory(
 			Platform.select({
 				ios: FileSystem.Paths.join(
-					FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
+					FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 					"mmkv"
 				),
-				default: FileSystem.Paths.join(FileSystem.Paths.document.uri, "mmkv")
+				default: FileSystem.Paths.join(FileSystem.Paths.document, "mmkv")
 			})
 		)
 
@@ -227,9 +227,7 @@ class SecureStore {
 			const final = cipher.final()
 			const authTag = cipher.getAuthTag()
 
-			const tmpFile = new FileSystem.File(
-				FileSystem.Paths.join(FileSystem.Paths.cache.uri, `.securestore.tmp.${crypto.randomUUID()}`)
-			)
+			const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, `.securestore.tmp.${crypto.randomUUID()}`))
 
 			try {
 				tmpFile.write(new Uint8Array(Buffer.concat([iv, encrypted, final, authTag])))

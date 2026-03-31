@@ -78,11 +78,11 @@ export class Offline {
 	private readonly directory: FileSystem.Directory = new FileSystem.Directory(
 		Platform.select({
 			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
+				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 				"offline",
 				`v${this.version}`
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document.uri, "offline", `v${this.version}`)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "offline", `v${this.version}`)
 		})
 	)
 	private readonly filesDirectory: FileSystem.Directory = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, "files"))

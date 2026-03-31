@@ -59,7 +59,7 @@ const PreviewTextInner = memo(
 					throw new Error("Parent is not a normal directory")
 				}
 
-				const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache.uri, randomUUID()))
+				const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
 
 				defer(() => {
 					if (tmpFile.exists) {

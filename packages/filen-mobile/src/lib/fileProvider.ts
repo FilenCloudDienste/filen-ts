@@ -26,8 +26,8 @@ class FileProvider {
 	private readonly authFile: FileSystem.File = new FileSystem.File(
 		FileSystem.Paths.join(
 			Platform.select({
-				ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
-				default: FileSystem.Paths.document.uri
+				ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+				default: FileSystem.Paths.document
 			}),
 			"auth.json"
 		)
