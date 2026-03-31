@@ -279,7 +279,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 							const imagePickerResult = await run(async () => {
 								return await ImagePicker.launchImageLibraryAsync({
 									mediaTypes: ["images", "videos"],
-									exif: true,
+									exif: false,
 									base64: false,
 									quality: 1,
 									allowsMultipleSelection: true,
@@ -306,10 +306,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 									assets.map(async asset => {
 										return await run(
 											async defer => {
-												if (!asset.fileName) {
-													throw new Error("Asset is missing fileName")
-												}
-
 												const assetFile = new FileSystem.File(asset.uri)
 
 												defer(() => {
@@ -322,8 +318,10 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 													throw new Error("Asset file does not exist")
 												}
 
+												const extname = FileSystem.Paths.extname(asset.uri)
+												const fileName = asset.fileName ?? `${randomUUID()}${extname}`
 												const tmpFile = new FileSystem.File(
-													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), asset.fileName)
+													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), fileName)
 												)
 
 												defer(() => {
@@ -399,7 +397,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 							const imagePickerResult = await run(async () => {
 								return await ImagePicker.launchCameraAsync({
 									mediaTypes: ["images", "videos"],
-									exif: true,
+									exif: false,
 									base64: false,
 									quality: 1,
 									allowsMultipleSelection: true,
@@ -426,10 +424,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 									assets.map(async asset => {
 										return await run(
 											async defer => {
-												if (!asset.fileName) {
-													throw new Error("Asset is missing fileName")
-												}
-
 												const assetFile = new FileSystem.File(asset.uri)
 
 												defer(() => {
@@ -442,8 +436,10 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 													throw new Error("Asset file does not exist")
 												}
 
+												const extname = FileSystem.Paths.extname(asset.uri)
+												const fileName = asset.fileName ?? `${randomUUID()}${extname}`
 												const tmpFile = new FileSystem.File(
-													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), asset.fileName)
+													FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), fileName)
 												)
 
 												defer(() => {
