@@ -32,21 +32,16 @@ import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import drive from "@/lib/drive"
+import { randomUUID } from "expo-crypto"
 
 class Transfers {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
-	private readonly activeUploadIds = new Set<string>()
-	private readonly activeUploadUris = new Set<string>()
-	private readonly activeDownloadKeys = new Set<string>()
 
 	public cancelAll(): void {
 		this.globalAbortController.abort()
 		this.globalAbortController = new AbortController()
 		this.globalPauseSignal = new PauseSignal()
-		this.activeUploadIds.clear()
-		this.activeUploadUris.clear()
-		this.activeDownloadKeys.clear()
 	}
 
 	public pauseAll(): void {
@@ -58,7 +53,6 @@ class Transfers {
 	}
 
 	public async upload({
-		id,
 		localFileOrDir,
 		parent,
 		hideProgress,
@@ -70,7 +64,6 @@ class Transfers {
 		modified,
 		mime
 	}: {
-		id: string
 		localFileOrDir: FileSystem.File | FileSystem.Directory
 		parent: AnyNormalDir
 		hideProgress?: boolean
@@ -85,13 +78,7 @@ class Transfers {
 		files: File[]
 		directories: Dir[]
 	}> {
-		if (this.activeUploadIds.has(id) || this.activeUploadUris.has(localFileOrDir.uri)) {
-			throw new Error("A transfer with the same ID or local URI is already in progress.")
-		}
-
-		this.activeUploadIds.add(id)
-		this.activeUploadUris.add(localFileOrDir.uri)
-
+		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
@@ -107,9 +94,6 @@ class Transfers {
 				defer(() => {
 					compositePauseSignal.dispose()
 					compositeAbortSignal.dispose()
-
-					this.activeUploadIds.delete(id)
-					this.activeUploadUris.delete(localFileOrDir.uri)
 				})
 
 				if (!localFileOrDir.exists) {
@@ -129,8 +113,8 @@ class Transfers {
 							knownFiles: 0,
 							bytesTransferred: 0,
 							startedAt: Date.now(),
-							abortController: transferAbortController,
 							aborted: false,
+							paused: false,
 							errors: {
 								unknown: [],
 								scan: [],
@@ -151,6 +135,55 @@ class Transfers {
 							}
 						}
 					])
+
+					const transferPauseSignalOnPause = () => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === id && t.type === "uploadDirectory"
+									? {
+											...t,
+											paused: true
+										}
+									: t
+							)
+						)
+					}
+
+					const transferPauseSignalOnResume = () => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === id && t.type === "uploadDirectory"
+									? {
+											...t,
+											paused: false
+										}
+									: t
+							)
+						)
+					}
+
+					const transferAbortControllerOnAbort = () => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === id && t.type === "uploadDirectory"
+									? {
+											...t,
+											aborted: true
+										}
+									: t
+							)
+						)
+					}
+
+					transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+					transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+					transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+					defer(() => {
+						transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+						transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+						transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+					})
 				}
 
 				if (!hideProgress) {
@@ -162,7 +195,7 @@ class Transfers {
 							.then(() => {
 								useTransfersStore.getState().setTransfers(prev =>
 									prev.map(t =>
-										t.id === id
+										t.id === id && t.type === "uploadDirectory"
 											? {
 													...t,
 													finishedAt: Date.now()
@@ -260,7 +293,7 @@ class Transfers {
 						onUploadUpdate(uploadedDirs, uploadedFiles, uploadedBytes) {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === id
+									t.id === id && t.type === "uploadDirectory"
 										? {
 												...t,
 												bytesTransferred: t.bytesTransferred + Number(uploadedBytes)
@@ -397,14 +430,10 @@ class Transfers {
 			return result.data
 		}
 
-		// TODO: Add metadata timestamps before upload to copied file
 		const result = await run(async defer => {
 			defer(() => {
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
-
-				this.activeUploadIds.delete(id)
-				this.activeUploadUris.delete(localFileOrDir.uri)
 			})
 
 			if (!localFileOrDir.exists) {
@@ -422,7 +451,7 @@ class Transfers {
 						size: localFileOrDir.size,
 						bytesTransferred: 0,
 						startedAt: Date.now(),
-						abortController: transferAbortController,
+						paused: false,
 						aborted: false,
 						errors: {
 							unknown: [],
@@ -444,6 +473,55 @@ class Transfers {
 						}
 					}
 				])
+
+				const transferPauseSignalOnPause = () => {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "uploadFile"
+								? {
+										...t,
+										paused: true
+									}
+								: t
+						)
+					)
+				}
+
+				const transferPauseSignalOnResume = () => {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "uploadFile"
+								? {
+										...t,
+										paused: false
+									}
+								: t
+						)
+					)
+				}
+
+				const transferAbortControllerOnAbort = () => {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "uploadFile"
+								? {
+										...t,
+										aborted: true
+									}
+								: t
+						)
+					)
+				}
+
+				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+				transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+				defer(() => {
+					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+					transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+				})
 			}
 
 			if (!hideProgress) {
@@ -452,7 +530,7 @@ class Transfers {
 						.then(() => {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === id
+									t.id === id && t.type === "uploadFile"
 										? {
 												...t,
 												finishedAt: Date.now()
@@ -478,7 +556,7 @@ class Transfers {
 					onUpdate(uploadedBytes) {
 						useTransfersStore.getState().setTransfers(prev =>
 							prev.map(t =>
-								t.id === id
+								t.id === id && t.type === "uploadFile"
 									? {
 											...t,
 											bytesTransferred: t.bytesTransferred + Number(uploadedBytes)
@@ -584,7 +662,6 @@ class Transfers {
 	}
 
 	public async download({
-		itemUuid,
 		item,
 		destination,
 		hideProgress,
@@ -592,7 +669,6 @@ class Transfers {
 		abortController,
 		pauseSignal
 	}: {
-		itemUuid: string
 		item: DriveItem
 		destination: FileSystem.File | FileSystem.Directory
 		hideProgress?: boolean
@@ -605,14 +681,7 @@ class Transfers {
 		})[]
 		directories: DirWithPath[]
 	}> {
-		const downloadKey = `${itemUuid}:${destination.uri}`
-
-		if (this.activeDownloadKeys.has(downloadKey)) {
-			throw new Error("A transfer with the same ID and destination URI is already in progress.")
-		}
-
-		this.activeDownloadKeys.add(downloadKey)
-
+		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
@@ -628,8 +697,6 @@ class Transfers {
 				defer(() => {
 					compositePauseSignal.dispose()
 					compositeAbortSignal.dispose()
-
-					this.activeDownloadKeys.delete(downloadKey)
 				})
 
 				if (destination instanceof FileSystem.File) {
@@ -640,7 +707,7 @@ class Transfers {
 					useTransfersStore.getState().setTransfers(prev => [
 						...prev,
 						{
-							id: itemUuid,
+							id,
 							item: item.data,
 							type: "downloadDirectory",
 							size: 0,
@@ -648,8 +715,8 @@ class Transfers {
 							knownFiles: 0,
 							bytesTransferred: 0,
 							startedAt: Date.now(),
-							abortController: transferAbortController,
 							aborted: false,
+							paused: false,
 							directoryQueryProgress: {
 								totalBytes: 0,
 								bytesTransferred: 0
@@ -675,6 +742,55 @@ class Transfers {
 							}
 						}
 					])
+
+					const transferPauseSignalOnPause = () => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === id && t.type === "downloadDirectory"
+									? {
+											...t,
+											paused: true
+										}
+									: t
+							)
+						)
+					}
+
+					const transferPauseSignalOnResume = () => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === id && t.type === "downloadDirectory"
+									? {
+											...t,
+											paused: false
+										}
+									: t
+							)
+						)
+					}
+
+					const transferAbortControllerOnAbort = () => {
+						useTransfersStore.getState().setTransfers(prev =>
+							prev.map(t =>
+								t.id === id && t.type === "downloadDirectory"
+									? {
+											...t,
+											aborted: true
+										}
+									: t
+							)
+						)
+					}
+
+					transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+					transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+					transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+					defer(() => {
+						transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+						transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+						transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+					})
 				}
 
 				if (!hideProgress) {
@@ -686,7 +802,7 @@ class Transfers {
 							.then(() => {
 								useTransfersStore.getState().setTransfers(prev =>
 									prev.map(t =>
-										t.id === itemUuid
+										t.id === id && t.type === "downloadDirectory"
 											? {
 													...t,
 													finishedAt: Date.now()
@@ -752,7 +868,7 @@ class Transfers {
 						onDownloadErrors(errors) {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid && t.type === "downloadDirectory"
+									t.id === id && t.type === "downloadDirectory"
 										? {
 												...t,
 												errors: {
@@ -775,7 +891,7 @@ class Transfers {
 
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid
+									t.id === id && t.type === "downloadDirectory"
 										? {
 												...t,
 												bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
@@ -787,7 +903,7 @@ class Transfers {
 						onQueryDownloadProgress(knownBytes, totalBytes) {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid && t.type === "downloadDirectory"
+									t.id === id && t.type === "downloadDirectory"
 										? {
 												...t,
 												directoryQueryProgress: {
@@ -802,7 +918,7 @@ class Transfers {
 						onScanComplete(totalDirs, totalFiles, totalBytes) {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid && t.type === "downloadDirectory"
+									t.id === id && t.type === "downloadDirectory"
 										? {
 												...t,
 												size: Number(totalBytes),
@@ -816,7 +932,7 @@ class Transfers {
 						onScanErrors(errors) {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid && t.type === "downloadDirectory"
+									t.id === id && t.type === "downloadDirectory"
 										? {
 												...t,
 												errors: {
@@ -831,7 +947,7 @@ class Transfers {
 						onScanProgress(knownDirs, knownFiles, knownBytes) {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid && t.type === "downloadDirectory"
+									t.id === id && t.type === "downloadDirectory"
 										? {
 												...t,
 												size: Number(knownBytes),
@@ -860,7 +976,7 @@ class Transfers {
 				if (transferAbortController.signal.aborted) {
 					useTransfersStore.getState().setTransfers(prev =>
 						prev.map(t =>
-							t.id === itemUuid && t.type === "downloadDirectory"
+							t.id === id && t.type === "downloadDirectory"
 								? {
 										...t,
 										aborted: true
@@ -879,7 +995,7 @@ class Transfers {
 				if (!hideProgress) {
 					useTransfersStore.getState().setTransfers(prev =>
 						prev.map(t =>
-							t.id === itemUuid && t.type === "downloadDirectory"
+							t.id === id && t.type === "downloadDirectory"
 								? {
 										...t,
 										errors: {
@@ -917,8 +1033,6 @@ class Transfers {
 			defer(() => {
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
-
-				this.activeDownloadKeys.delete(downloadKey)
 			})
 
 			if (!(destination instanceof FileSystem.File)) {
@@ -941,14 +1055,14 @@ class Transfers {
 				useTransfersStore.getState().setTransfers(prev => [
 					...prev,
 					{
-						id: itemUuid,
+						id,
 						item: item.data,
 						type: "downloadFile",
 						size: Number(item.data.size),
 						bytesTransferred: 0,
 						startedAt: Date.now(),
-						abortController: transferAbortController,
 						aborted: false,
+						paused: false,
 						errors: {
 							unknown: [],
 							scan: [],
@@ -970,6 +1084,55 @@ class Transfers {
 						}
 					}
 				])
+
+				const transferPauseSignalOnPause = () => {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "downloadFile"
+								? {
+										...t,
+										paused: true
+									}
+								: t
+						)
+					)
+				}
+
+				const transferPauseSignalOnResume = () => {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "downloadFile"
+								? {
+										...t,
+										paused: false
+									}
+								: t
+						)
+					)
+				}
+
+				const transferAbortControllerOnAbort = () => {
+					useTransfersStore.getState().setTransfers(prev =>
+						prev.map(t =>
+							t.id === id && t.type === "downloadFile"
+								? {
+										...t,
+										aborted: true
+									}
+								: t
+						)
+					)
+				}
+
+				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+				transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+				defer(() => {
+					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+					transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+				})
 			}
 
 			if (!hideProgress) {
@@ -978,7 +1141,7 @@ class Transfers {
 						.then(() => {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid
+									t.id === id && t.type === "downloadFile"
 										? {
 												...t,
 												finishedAt: Date.now()
@@ -1012,7 +1175,7 @@ class Transfers {
 				if (!hideProgress) {
 					useTransfersStore.getState().setTransfers(prev =>
 						prev.map(t =>
-							t.id === itemUuid
+							t.id === id && t.type === "downloadFile"
 								? {
 										...t,
 										bytesTransferred: Number(item.data.size)
@@ -1029,7 +1192,7 @@ class Transfers {
 						onUpdate(downloadedBytes) {
 							useTransfersStore.getState().setTransfers(prev =>
 								prev.map(t =>
-									t.id === itemUuid
+									t.id === id && t.type === "downloadFile"
 										? {
 												...t,
 												bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
@@ -1066,7 +1229,7 @@ class Transfers {
 			if (transferAbortController.signal.aborted) {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
-						t.id === itemUuid && t.type === "downloadFile"
+						t.id === id && t.type === "downloadFile"
 							? {
 									...t,
 									aborted: true
@@ -1085,7 +1248,7 @@ class Transfers {
 			if (!hideProgress) {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
-						t.id === itemUuid && t.type === "downloadFile"
+						t.id === id && t.type === "downloadFile"
 							? {
 									...t,
 									errors: {

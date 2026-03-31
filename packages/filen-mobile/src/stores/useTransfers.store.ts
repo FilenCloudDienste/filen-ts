@@ -15,7 +15,7 @@ export type Transfer = {
 	bytesTransferred: number
 	startedAt: number
 	finishedAt?: number
-	abortController: AbortController
+	paused: boolean
 	aborted: boolean
 	abort: () => void
 	pause: () => void
