@@ -14,9 +14,7 @@ export type Transfer = {
 	size: number
 	bytesTransferred: number
 	startedAt: number
-	finishedAt?: number
 	paused: boolean
-	aborted: boolean
 	abort: () => void
 	pause: () => void
 	resume: () => void
@@ -79,25 +77,6 @@ function updateTransfers({ transfers, state }: { transfers: Transfer[]; state: T
 	transfers: Transfer[]
 	stats: TransfersStore["stats"]
 } {
-	const activeTransfers = transfers.filter(t => !t.finishedAt)
-
-	if (activeTransfers.length === 0) {
-		clearInterval(state.stats.interval)
-
-		return {
-			transfers,
-			stats: {
-				speed: 0,
-				progress: 0,
-				lastBytesTransferred: 0,
-				lastUpdateTime: 0,
-				count: 0,
-				interval: undefined,
-				nextUpdateAt: 0
-			}
-		}
-	}
-
 	const now = Date.now()
 
 	if (now < state.stats.nextUpdateAt) {
@@ -110,7 +89,7 @@ function updateTransfers({ transfers, state }: { transfers: Transfer[]; state: T
 	let activeTransfersTotalBytesTransferred = 0
 	let activeTransfersTotalSize = 0
 
-	for (const transfer of activeTransfers) {
+	for (const transfer of transfers) {
 		activeTransfersTotalBytesTransferred += transfer.bytesTransferred
 		activeTransfersTotalSize += transfer.size
 	}
@@ -120,7 +99,13 @@ function updateTransfers({ transfers, state }: { transfers: Transfer[]; state: T
 
 	let interval = state.stats.interval
 
-	if (!interval) {
+	if (transfers.length === 0 && interval) {
+		clearInterval(interval)
+
+		interval = undefined
+	}
+
+	if (!interval && transfers.length > 0) {
 		interval = setInterval(() => {
 			useTransfersStore.setState(state =>
 				updateTransfers({
@@ -141,7 +126,7 @@ function updateTransfers({ transfers, state }: { transfers: Transfer[]; state: T
 				activeTransfersTotalSize > 0
 					? Math.min(1, Math.max(0, activeTransfersTotalBytesTransferred / activeTransfersTotalSize))
 					: 0,
-			count: activeTransfers.length,
+			count: transfers.length,
 			interval,
 			nextUpdateAt: now + 500
 		}
