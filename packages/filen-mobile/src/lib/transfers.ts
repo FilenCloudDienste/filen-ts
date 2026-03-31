@@ -113,7 +113,6 @@ class Transfers {
 							knownFiles: 0,
 							bytesTransferred: 0,
 							startedAt: Date.now(),
-							aborted: false,
 							paused: false,
 							errors: {
 								unknown: [],
@@ -162,27 +161,18 @@ class Transfers {
 						)
 					}
 
-					const transferAbortControllerOnAbort = () => {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "uploadDirectory"
-									? {
-											...t,
-											aborted: true
-										}
-									: t
-							)
-						)
-					}
-
 					transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-					transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+					this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+					this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 					defer(() => {
 						transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 						transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-						transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+
+						this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+						this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 					})
 				}
 
@@ -193,16 +183,9 @@ class Transfers {
 							: Promise.resolve()
 						)
 							.then(() => {
-								useTransfersStore.getState().setTransfers(prev =>
-									prev.map(t =>
-										t.id === id && t.type === "uploadDirectory"
-											? {
-													...t,
-													finishedAt: Date.now()
-												}
-											: t
-									)
-								)
+								useTransfersStore
+									.getState()
+									.setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "uploadDirectory")))
 							})
 							.catch(console.error)
 					})
@@ -374,18 +357,7 @@ class Transfers {
 			})
 
 			if (!result.success) {
-				if (transferAbortController.signal.aborted) {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "uploadDirectory"
-								? {
-										...t,
-										aborted: true
-									}
-								: t
-						)
-					)
-
+				if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
 					return {
 						files: [],
@@ -452,7 +424,6 @@ class Transfers {
 						bytesTransferred: 0,
 						startedAt: Date.now(),
 						paused: false,
-						aborted: false,
 						errors: {
 							unknown: [],
 							scan: [],
@@ -500,27 +471,18 @@ class Transfers {
 					)
 				}
 
-				const transferAbortControllerOnAbort = () => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "uploadFile"
-								? {
-										...t,
-										aborted: true
-									}
-								: t
-						)
-					)
-				}
-
 				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-				transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+				this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+				this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 				defer(() => {
 					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-					transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+
+					this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+					this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 				})
 			}
 
@@ -528,16 +490,7 @@ class Transfers {
 				defer(() => {
 					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
 						.then(() => {
-							useTransfersStore.getState().setTransfers(prev =>
-								prev.map(t =>
-									t.id === id && t.type === "uploadFile"
-										? {
-												...t,
-												finishedAt: Date.now()
-											}
-										: t
-								)
-							)
+							useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "uploadFile")))
 						})
 						.catch(console.error)
 				})
@@ -579,18 +532,7 @@ class Transfers {
 		})
 
 		if (!result.success) {
-			if (transferAbortController.signal.aborted) {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "uploadFile"
-							? {
-									...t,
-									aborted: true
-								}
-							: t
-					)
-				)
-
+			if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return {
 					files: [],
@@ -708,14 +650,13 @@ class Transfers {
 						...prev,
 						{
 							id,
-							item: item.data,
+							item,
 							type: "downloadDirectory",
 							size: 0,
 							knownDirectories: 0,
 							knownFiles: 0,
 							bytesTransferred: 0,
 							startedAt: Date.now(),
-							aborted: false,
 							paused: false,
 							directoryQueryProgress: {
 								totalBytes: 0,
@@ -769,27 +710,18 @@ class Transfers {
 						)
 					}
 
-					const transferAbortControllerOnAbort = () => {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadDirectory"
-									? {
-											...t,
-											aborted: true
-										}
-									: t
-							)
-						)
-					}
-
 					transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-					transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+					this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+					this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 					defer(() => {
 						transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 						transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-						transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+
+						this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+						this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 					})
 				}
 
@@ -800,16 +732,9 @@ class Transfers {
 							: Promise.resolve()
 						)
 							.then(() => {
-								useTransfersStore.getState().setTransfers(prev =>
-									prev.map(t =>
-										t.id === id && t.type === "downloadDirectory"
-											? {
-													...t,
-													finishedAt: Date.now()
-												}
-											: t
-									)
-								)
+								useTransfersStore
+									.getState()
+									.setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "downloadDirectory")))
 							})
 							.catch(console.error)
 					})
@@ -973,18 +898,11 @@ class Transfers {
 			})
 
 			if (!result.success) {
-				if (transferAbortController.signal.aborted) {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "downloadDirectory"
-								? {
-										...t,
-										aborted: true
-									}
-								: t
-						)
-					)
+				if (destination.exists) {
+					destination.delete()
+				}
 
+				if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
 					return {
 						files: [],
@@ -1056,12 +974,11 @@ class Transfers {
 					...prev,
 					{
 						id,
-						item: item.data,
+						item,
 						type: "downloadFile",
 						size: Number(item.data.size),
 						bytesTransferred: 0,
 						startedAt: Date.now(),
-						aborted: false,
 						paused: false,
 						errors: {
 							unknown: [],
@@ -1111,27 +1028,18 @@ class Transfers {
 					)
 				}
 
-				const transferAbortControllerOnAbort = () => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "downloadFile"
-								? {
-										...t,
-										aborted: true
-									}
-								: t
-						)
-					)
-				}
-
 				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-				transferAbortController.signal.addEventListener("abort", transferAbortControllerOnAbort)
+
+				this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+				this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 				defer(() => {
 					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-					transferAbortController.signal.removeEventListener("abort", transferAbortControllerOnAbort)
+
+					this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+					this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 				})
 			}
 
@@ -1139,16 +1047,7 @@ class Transfers {
 				defer(() => {
 					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
 						.then(() => {
-							useTransfersStore.getState().setTransfers(prev =>
-								prev.map(t =>
-									t.id === id && t.type === "downloadFile"
-										? {
-												...t,
-												finishedAt: Date.now()
-											}
-										: t
-								)
-							)
+							useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "downloadFile")))
 						})
 						.catch(console.error)
 				})
@@ -1226,18 +1125,11 @@ class Transfers {
 		})
 
 		if (!result.success) {
-			if (transferAbortController.signal.aborted) {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "downloadFile"
-							? {
-									...t,
-									aborted: true
-								}
-							: t
-					)
-				)
+			if (destination.exists) {
+				destination.delete()
+			}
 
+			if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return {
 					files: [],

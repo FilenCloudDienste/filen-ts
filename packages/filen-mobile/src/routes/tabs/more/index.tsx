@@ -9,10 +9,8 @@ import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
 import { cn } from "@filen/utils"
 import { router } from "expo-router"
-import useTransfersStore from "@/stores/useTransfers.store"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
-import { useShallow } from "zustand/shallow"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 
 export type Button = {
@@ -188,9 +186,6 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 })
 
 const More = memo(() => {
-	const transfersActiveCount = useTransfersStore(
-		useShallow(state => state.transfers.reduce((count, t) => count + (t.finishedAt ? 0 : 1), 0))
-	)
 	const stringifiedClient = useStringifiedClient()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
@@ -333,25 +328,6 @@ const More = memo(() => {
 								title: "tbd_trash",
 								onPress: () => {
 									router.push("/trash")
-								}
-							}
-						]}
-					/>
-					<Group
-						buttons={[
-							{
-								icon: "sync-outline",
-								title: "tbd_transfers",
-								badge: transfersActiveCount > 0 ? transfersActiveCount.toString() : undefined,
-								onPress: () => {
-									router.push("/transfers")
-								}
-							},
-							{
-								icon: "settings-outline",
-								title: "tbd_settings",
-								onPress: () => {
-									router.push("/settings")
 								}
 							}
 						]}

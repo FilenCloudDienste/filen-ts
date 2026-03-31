@@ -1,13 +1,7 @@
 import { create } from "zustand"
 import * as FileSystem from "expo-file-system"
 import type { AnyNormalDir, FilenSdkErrorInterface, UploadError, DownloadError, NonRootItem } from "@filen/sdk-rs"
-import type {
-	DriveItemDirectory,
-	DriveItemFileShared,
-	DriveItemFile,
-	DriveItemDirectorySharedNonRoot,
-	DriveItemDirectorySharedRoot
-} from "@/types"
+import type { DriveItem } from "@/types"
 
 export type Transfer = {
 	id: string
@@ -50,7 +44,7 @@ export type Transfer = {
 				scan: FilenSdkErrorInterface[]
 				unknown: Error[]
 			}
-			item: DriveItemFile | DriveItemFileShared
+			item: DriveItem
 			destination: FileSystem.File
 	  }
 	| {
@@ -68,36 +62,26 @@ export type Transfer = {
 				scan: FilenSdkErrorInterface[]
 				unknown: Error[]
 			}
-			item: DriveItemDirectory | DriveItemDirectorySharedNonRoot | DriveItemDirectorySharedRoot
+			item: DriveItem
 			destination: FileSystem.Directory
 	  }
 )
 
-function updateTransfers({ transfers, state }: { transfers: Transfer[]; state: TransfersStore }): {
+let interval: ReturnType<typeof setInterval> | undefined
+
+function updateTransfers({
+	transfers,
+	state,
+	addToNextUpdateAt
+}: {
+	transfers: Transfer[]
+	state: TransfersStore
+	addToNextUpdateAt: boolean
+}): {
 	transfers: Transfer[]
 	stats: TransfersStore["stats"]
 } {
 	const now = Date.now()
-
-	if (now < state.stats.nextUpdateAt) {
-		return {
-			transfers,
-			stats: state.stats
-		}
-	}
-
-	let activeTransfersTotalBytesTransferred = 0
-	let activeTransfersTotalSize = 0
-
-	for (const transfer of transfers) {
-		activeTransfersTotalBytesTransferred += transfer.bytesTransferred
-		activeTransfersTotalSize += transfer.size
-	}
-
-	const bytesDelta = activeTransfersTotalBytesTransferred - state.stats.lastBytesTransferred
-	const timeDelta = now - (state.stats.lastUpdateTime === 0 ? now - 1000 : state.stats.lastUpdateTime)
-
-	let interval = state.stats.interval
 
 	if (transfers.length === 0 && interval) {
 		clearInterval(interval)
@@ -110,16 +94,40 @@ function updateTransfers({ transfers, state }: { transfers: Transfer[]; state: T
 			useTransfersStore.setState(state =>
 				updateTransfers({
 					transfers: state.transfers,
-					state
+					state,
+					addToNextUpdateAt: false
 				})
 			)
 		}, 1000)
 	}
 
+	if (now < state.stats.nextUpdateAt) {
+		return {
+			transfers,
+			stats: state.stats
+		}
+	}
+
+	let activeTransfersTotalBytesTransferred = 0
+	let activeTransfersTotalSize = 0
+	let pausedTransfersCount = 0
+
+	for (const transfer of transfers) {
+		activeTransfersTotalBytesTransferred += transfer.bytesTransferred
+		activeTransfersTotalSize += transfer.size
+
+		if (transfer.paused) {
+			pausedTransfersCount++
+		}
+	}
+
+	const bytesDelta = activeTransfersTotalBytesTransferred - state.stats.lastBytesTransferred
+	const timeDelta = now - (state.stats.lastUpdateTime === 0 ? now - 1000 : state.stats.lastUpdateTime)
+
 	return {
 		transfers,
 		stats: {
-			speed: timeDelta > 0 ? Math.max(0, bytesDelta / timeDelta) : 0,
+			speed: pausedTransfersCount === transfers.length ? 0 : timeDelta > 0 ? Math.max(0, bytesDelta / timeDelta) : 0,
 			lastBytesTransferred: activeTransfersTotalBytesTransferred,
 			lastUpdateTime: now,
 			progress:
@@ -127,8 +135,7 @@ function updateTransfers({ transfers, state }: { transfers: Transfer[]; state: T
 					? Math.min(1, Math.max(0, activeTransfersTotalBytesTransferred / activeTransfersTotalSize))
 					: 0,
 			count: transfers.length,
-			interval,
-			nextUpdateAt: now + 500
+			nextUpdateAt: addToNextUpdateAt ? now + 500 : state.stats.nextUpdateAt
 		}
 	}
 }
@@ -141,7 +148,6 @@ export type TransfersStore = {
 		lastBytesTransferred: number
 		lastUpdateTime: number
 		count: number
-		interval: ReturnType<typeof setInterval> | undefined
 		nextUpdateAt: number
 	}
 	setTransfers: (fn: Transfer[] | ((prev: Transfer[]) => Transfer[])) => void
@@ -155,7 +161,6 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 		lastBytesTransferred: 0,
 		lastUpdateTime: 0,
 		count: 0,
-		interval: undefined,
 		nextUpdateAt: 0
 	} satisfies TransfersStore["stats"],
 	setTransfers(fn) {
@@ -164,7 +169,8 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 
 			return updateTransfers({
 				transfers,
-				state
+				state,
+				addToNextUpdateAt: true
 			})
 		})
 	}
