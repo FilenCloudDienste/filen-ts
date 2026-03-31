@@ -1224,7 +1224,6 @@ export class Offline {
 				await transfers.download({
 					item: file,
 					destination: dataFile,
-					itemUuid: file.data.uuid,
 					hideProgress,
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
 				})
@@ -1325,7 +1324,6 @@ export class Offline {
 				const transferred = await transfers.download({
 					item: directory,
 					destination: dataDirectory,
-					itemUuid: directory.data.uuid,
 					hideProgress,
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
 				})
