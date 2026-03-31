@@ -202,7 +202,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 												}
 
 												return await transfers.upload({
-													id: assetFile.uri,
 													localFileOrDir: assetFile,
 													parent: parent.inner[0],
 													name: asset.name,
@@ -301,7 +300,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 												const fileName = asset.fileName ?? `${randomUUID()}${extname}`
 
 												return await transfers.upload({
-													id: assetFile.uri,
 													localFileOrDir: assetFile,
 													parent: parent.inner[0],
 													name: fileName,
@@ -399,7 +397,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 												const fileName = asset.fileName ?? `${randomUUID()}${extname}`
 
 												return await transfers.upload({
-													id: assetFile.uri,
 													localFileOrDir: assetFile,
 													parent: parent.inner[0],
 													name: fileName,
@@ -492,7 +489,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 												})
 
 												return await transfers.upload({
-													id: scanFile.uri,
 													localFileOrDir: scanFile,
 													parent: parent.inner[0],
 													modified: Date.now(),
@@ -589,7 +585,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 								})
 
 								return await transfers.upload({
-									id: tmpFile.uri,
 									localFileOrDir: tmpFile,
 									parent: parent.inner[0],
 									hideProgress: true,
@@ -628,6 +623,15 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 				]
 			})
 		}
+
+		menuButtons.push({
+			id: "transfers",
+			title: "tbd_transfers",
+			icon: "list",
+			onPress: () => {
+				router.push("/transfers")
+			}
+		})
 
 		if (selectedDriveItems.length > 0 && drivePath.type === "trash") {
 			menuButtons.push({

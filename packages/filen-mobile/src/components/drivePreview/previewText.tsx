@@ -74,7 +74,6 @@ const PreviewTextInner = memo(
 				tmpFile.write(new TextEncoder().encode(editedText))
 
 				return await transfers.upload({
-					id: tmpFile.uri,
 					localFileOrDir: tmpFile,
 					parent: parent.inner[0],
 					name: item.data.decryptedMeta.name,
