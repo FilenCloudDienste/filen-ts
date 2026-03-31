@@ -51,7 +51,7 @@ const TransfersInner = memo(() => {
 				borderWidth={0}
 				borderRadius={0}
 				unfilledColor={bgBackgroundTertiary.color as string | undefined}
-				animated={true}
+				animated={false}
 			/>
 		</Fragment>
 	)
@@ -59,7 +59,7 @@ const TransfersInner = memo(() => {
 
 const Transfers = memo(() => {
 	const insets = useSafeAreaInsets()
-	const transfersActive = useTransfersStore(useShallow(state => state.transfers.some(t => !t.finishedAt)))
+	const transfersActive = useTransfersStore(useShallow(state => state.transfers.length > 0))
 
 	if (!transfersActive) {
 		return null
@@ -67,29 +67,27 @@ const Transfers = memo(() => {
 
 	return (
 		<View
-			className="absolute left-0 right-0 bg-transparent px-4"
+			className="absolute left-0 right-0 bg-transparent"
 			style={{
-				bottom:
-					insets.bottom +
-					Platform.select({
-						ios: 60,
-						default: 90
-					})
+				bottom: Platform.select({
+					ios: insets.bottom + 8,
+					default: 8
+				}),
+				paddingLeft: insets.left > 0 ? insets.left : 16,
+				paddingRight: insets.right > 0 ? insets.right : 16
 			}}
 		>
-			<PressableScale
-				rippleColor="transparent"
-				onPress={() => {
-					router.push("/transfers")
-				}}
-			>
-				<CrossGlassContainerView
-					disableBlur={Platform.OS === "android"}
-					className="flex-col overflow-hidden"
+			<CrossGlassContainerView className="overflow-hidden">
+				<PressableScale
+					className="flex-col overflow-hidden flex-1"
+					rippleColor="transparent"
+					onPress={() => {
+						router.push("/transfers")
+					}}
 				>
 					<TransfersInner />
-				</CrossGlassContainerView>
-			</PressableScale>
+				</PressableScale>
+			</CrossGlassContainerView>
 		</View>
 	)
 })
