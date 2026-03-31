@@ -18,11 +18,11 @@ export class FileCache {
 	private readonly parentDirectory = new FileSystem.Directory(
 		Platform.select({
 			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
+				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 				"fileCache",
 				`v${this.version}`
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document.uri, "fileCache", `v${this.version}`)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "fileCache", `v${this.version}`)
 		})
 	)
 	private readonly mutexes = new Map<string, Semaphore>()

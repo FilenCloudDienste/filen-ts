@@ -24,11 +24,11 @@ export class AudioCache {
 	private readonly parentDirectory = new FileSystem.Directory(
 		Platform.select({
 			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]?.uri ?? FileSystem.Paths.document.uri,
+				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 				"audioCache",
 				`v${this.version}`
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document.uri, "audioCache", `v${this.version}`)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "audioCache", `v${this.version}`)
 		})
 	)
 	private readonly mutexes = new Map<string, Semaphore>()
