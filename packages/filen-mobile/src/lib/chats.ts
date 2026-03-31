@@ -1,5 +1,5 @@
 import auth from "@/lib/auth"
-import { type Chat, type ChatMessagePartial, ChatTypingType, type ChatMessage, type Contact } from "@filen/sdk-rs"
+import { type Chat, type ChatMessagePartial, ChatTypingType, type ChatMessage, type Contact, type ChatParticipant } from "@filen/sdk-rs"
 import { chatsQueryUpdate, chatsQueryGet, fetchData as chatsQueryFetch } from "@/queries/useChats.query"
 import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/queries/useChatMessages.query"
 import { Semaphore, run } from "@filen/utils"
@@ -383,8 +383,8 @@ class Chats {
 		return chat
 	}
 
-	public async removeParticipant({ chat, contact, signal }: { chat: Chat; contact: Contact; signal?: AbortSignal }) {
-		if (!chat.participants.find(p => p.userId === contact.userId)) {
+	public async removeParticipant({ chat, participant, signal }: { chat: Chat; participant: ChatParticipant; signal?: AbortSignal }) {
+		if (!chat.participants.find(p => p.userId === participant.userId)) {
 			return chat
 		}
 
@@ -392,7 +392,7 @@ class Chats {
 
 		chat = await authedSdkClient.removeChatParticipant(
 			chat,
-			contact,
+			participant.userId,
 			signal
 				? {
 						signal

@@ -125,7 +125,6 @@
     "expo-web-browser": "~55.0.10",
     "js-xxhash": "^5.0.1",
     "jszip": "^3.10.1",
-    "lodash": "^4.17.23",
     "lru-cache": "^11.2.7",
     "mime-types": "^3.0.2",
     "msgpackr": "^1.11.9",

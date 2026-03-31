@@ -647,22 +647,13 @@ class CameraUpload {
 									throw new Error(`File does not exist at path: ${uri}`)
 								}
 
-								const tmpFile = new FileSystem.File(
-									FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), delta.file.info.filename)
-								)
+								const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
 
 								defer(() => {
-									if (tmpFile.parentDirectory.exists) {
-										tmpFile.parentDirectory.delete()
+									if (tmpFile.exists) {
+										tmpFile.delete()
 									}
 								})
-
-								if (!tmpFile.parentDirectory.exists) {
-									tmpFile.parentDirectory.create({
-										idempotent: true,
-										intermediates: true
-									})
-								}
 
 								if (tmpFile.exists) {
 									tmpFile.delete()
@@ -689,7 +680,11 @@ class CameraUpload {
 									localFileOrDir: uploadFile,
 									parent: parentDirEnum,
 									abortController,
-									pauseSignal
+									pauseSignal,
+									name: delta.file.info.filename,
+									// TODO: Remove when exif parsing hits the rust sdk
+									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
+									created: delta.file.info.creationTime ?? delta.file.info.modificationTime ?? undefined
 								})
 
 								await Promise.allSettled(
