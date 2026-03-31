@@ -123,12 +123,8 @@ export function createMenuButtons({
 									),
 						default:
 							item.type === "file" || item.type === "sharedFile"
-								? new FileSystem.File(
-										FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
-									)
-								: new FileSystem.Directory(
-										FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
-									)
+								? new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
+								: new FileSystem.Directory(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
 					})
 
 					defer(() => {
@@ -150,7 +146,6 @@ export function createMenuButtons({
 
 					await transfers.download({
 						item,
-						itemUuid: item.data.uuid,
 						destination
 					})
 
@@ -158,7 +153,7 @@ export function createMenuButtons({
 						if ((item.type === "file" || item.type === "sharedFile") && destination instanceof FileSystem.File) {
 							await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
 								{
-									name: item.data.decryptedMeta.name,
+									name: decodeURIComponent(item.data.decryptedMeta.name),
 									parentFolder: "Filen",
 									mimeType: item.data.decryptedMeta.mime
 								},
@@ -291,8 +286,8 @@ export function createMenuButtons({
 
 					await transfers.download({
 						item,
-						itemUuid: item.data.uuid,
-						destination
+						destination,
+						hideProgress: true
 					})
 
 					// TODO: Add NSPhotoLibraryAddUsageDescription to Info.plist and ask for permissions on both iOS and Android
@@ -336,7 +331,6 @@ export function createMenuButtons({
 
 					const downloadResult = await transfers.download({
 						item,
-						itemUuid: item.data.uuid,
 						destination
 					})
 
