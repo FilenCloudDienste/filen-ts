@@ -968,7 +968,8 @@ class Transfers {
 						return new AnyFile.File(item.data)
 					}
 
-					case "sharedFile": {
+					case "sharedFile":
+					case "sharedRootFile": {
 						return new AnyFile.Shared(item.data)
 					}
 				}

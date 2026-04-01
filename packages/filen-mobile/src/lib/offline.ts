@@ -421,7 +421,8 @@ export class Offline {
 			}
 
 			case "file":
-			case "sharedFile": {
+			case "sharedFile":
+			case "sharedRootFile": {
 				const storedFile = Boolean(index.files[item.data.uuid])
 
 				this.isItemStoredCache.set(item.data.uuid, storedFile)
@@ -667,7 +668,10 @@ export class Offline {
 				await Promise.all([
 					...files.map(({ item, parent }) =>
 						run(async () => {
-							if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+							if (
+								!item.data.decryptedMeta ||
+								(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
+							) {
 								return
 							}
 
@@ -975,7 +979,8 @@ export class Offline {
 									}
 
 									case "file":
-									case "sharedFile": {
+									case "sharedFile":
+									case "sharedRootFile": {
 										const file = new FileSystem.File(
 											FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
 										)
@@ -1034,7 +1039,9 @@ export class Offline {
 									remoteFile &&
 									localFile &&
 									localFile.item.data.decryptedMeta &&
-									(localFile.item.type === "file" || localFile.item.type === "sharedFile")
+									(localFile.item.type === "file" ||
+										localFile.item.type === "sharedFile" ||
+										localFile.item.type === "sharedRootFile")
 								) {
 									const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
 
@@ -1144,7 +1151,7 @@ export class Offline {
 
 						const meta = readResult.data
 
-						if (meta.item.type !== "file" && meta.item.type !== "sharedFile") {
+						if (meta.item.type !== "file" && meta.item.type !== "sharedFile" && meta.item.type !== "sharedRootFile") {
 							return
 						}
 
@@ -1174,7 +1181,7 @@ export class Offline {
 		skipIndexUpdate?: boolean
 	}): Promise<void> {
 		const result = await run(async defer => {
-			if (file.type !== "file" && file.type !== "sharedFile") {
+			if (file.type !== "file" && file.type !== "sharedFile" && file.type !== "sharedRootFile") {
 				throw new Error("Item not of type file")
 			}
 
@@ -1615,7 +1622,8 @@ export class Offline {
 				}
 
 				case "file":
-				case "sharedFile": {
+				case "sharedFile":
+				case "sharedRootFile": {
 					const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
 					if (!parent) {
@@ -1731,7 +1739,8 @@ export class Offline {
 						}
 
 						case "file":
-						case "sharedFile": {
+						case "sharedFile":
+						case "sharedRootFile": {
 							const parent = this.findParentAnyDirWithContext(pathToItem, dirname)
 
 							if (!parent) {
@@ -1775,11 +1784,15 @@ export class Offline {
 
 		switch (item.type) {
 			case "file":
-			case "sharedFile": {
+			case "sharedFile":
+			case "sharedRootFile": {
 				const index = await this.readIndex()
 				const fileEntry = index.files[item.data.uuid]
 
-				if (!fileEntry || (fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile")) {
+				if (
+					!fileEntry ||
+					(fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile" && fileEntry.item.type !== "sharedRootFile")
+				) {
 					return {
 						size: 0,
 						files: 0,
@@ -1882,7 +1895,8 @@ export class Offline {
 						}
 
 						case "file":
-						case "sharedFile": {
+						case "sharedFile":
+						case "sharedRootFile": {
 							size += Number(entryMeta.item.data.decryptedMeta?.size ?? 0)
 							files += 1
 
@@ -1916,7 +1930,7 @@ export class Offline {
 
 			let didDelete = false
 
-			if (item.type === "file" || item.type === "sharedFile") {
+			if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
 				const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid))
 
 				if (parentDirectory.exists) {
@@ -1998,7 +2012,7 @@ export class Offline {
 			return cachedLocalFile
 		}
 
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			return null
 		}
 
@@ -2007,7 +2021,10 @@ export class Offline {
 		const index = await this.readIndex()
 		const fileEntry = index.files[item.data.uuid]
 
-		if (!fileEntry || (fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile")) {
+		if (
+			!fileEntry ||
+			(fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile" && fileEntry.item.type !== "sharedRootFile")
+		) {
 			return null
 		}
 
@@ -2037,7 +2054,10 @@ export class Offline {
 		for (const path in directoryMeta.entries) {
 			const entryMeta = directoryMeta.entries[path]
 
-			if (!entryMeta || (entryMeta.item.type !== "file" && entryMeta.item.type !== "sharedFile")) {
+			if (
+				!entryMeta ||
+				(entryMeta.item.type !== "file" && entryMeta.item.type !== "sharedFile" && entryMeta.item.type !== "sharedRootFile")
+			) {
 				continue
 			}
 

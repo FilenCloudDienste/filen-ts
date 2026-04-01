@@ -71,7 +71,7 @@ export class AudioCache {
 	}
 
 	public async has(item: DriveItem): Promise<boolean> {
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			return false
 		}
 
@@ -91,7 +91,7 @@ export class AudioCache {
 	}
 
 	public async getMetadata({ item, signal }: { item: DriveItem; signal?: AbortSignal }): Promise<Metadata> {
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 
@@ -107,7 +107,7 @@ export class AudioCache {
 		audio: FileSystem.File
 		metadata: Metadata
 	}> {
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 
@@ -229,7 +229,7 @@ export class AudioCache {
 	}
 
 	public async remove(item: DriveItem): Promise<void> {
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 

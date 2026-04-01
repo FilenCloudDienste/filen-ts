@@ -79,7 +79,8 @@ class Thumbnails {
 				return new AnyFile.File(item.data)
 			}
 
-			case "sharedFile": {
+			case "sharedFile":
+			case "sharedRootFile": {
 				return new AnyFile.Shared(item.data)
 			}
 
@@ -92,7 +93,8 @@ class Thumbnails {
 	private getExtension(item: DriveItem): string | null {
 		switch (item.type) {
 			case "file":
-			case "sharedFile": {
+			case "sharedFile":
+			case "sharedRootFile": {
 				const name = item.data.decryptedMeta?.name
 
 				if (!name) {
