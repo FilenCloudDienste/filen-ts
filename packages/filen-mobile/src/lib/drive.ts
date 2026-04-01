@@ -60,7 +60,7 @@ class Drive {
 		if (unwrappedParentUuid) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
 			})
 		}
 
@@ -71,7 +71,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 		})
 
 		return item
@@ -133,7 +133,7 @@ class Drive {
 		if (unwrappedParentUuid) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
 			})
 		}
 
@@ -171,7 +171,7 @@ class Drive {
 		if (unwrappedParentUuidPrevious) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuidPrevious,
-				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 			})
 		}
 
@@ -215,11 +215,11 @@ class Drive {
 		if (unwrappedParentUuidPrevious) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuidPrevious,
-				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 			})
 		}
 
-		// We have to add it to recents again after removing it above
+		// We have to add it to recents again after removing it above in the global call
 		driveItemsQueryUpdate({
 			params: {
 				path: {
@@ -227,7 +227,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
+			updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
 		})
 
 		driveItemsQueryUpdate({
@@ -237,7 +237,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
+			updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
 		})
 
 		return item
@@ -270,7 +270,7 @@ class Drive {
 		if (unwrappedParentUuid) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
 			})
 		}
 
@@ -302,9 +302,21 @@ class Drive {
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "drive",
+						uuid: unwrappedParentUuid
+					}
+				},
+				updater: prev => [
+					...prev.filter(
+						i =>
+							i.data.uuid !== item.data.uuid &&
+							i.data.decryptedMeta?.name.toLowerCase().trim() !== item.data.decryptedMeta?.name.toLowerCase().trim()
+					),
+					item
+				]
 			})
 		}
 
@@ -396,9 +408,21 @@ class Drive {
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuid,
-				updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "drive",
+						uuid: unwrappedParentUuid
+					}
+				},
+				updater: prev => [
+					...prev.filter(
+						i =>
+							i.data.uuid === item.data.uuid &&
+							i.data.decryptedMeta?.name.toLowerCase().trim() !== item.data.decryptedMeta?.name.toLowerCase().trim()
+					),
+					item
+				]
 			})
 		}
 
@@ -409,7 +433,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 		})
 	}
 
@@ -437,7 +461,7 @@ class Drive {
 						uuid: parentUuid
 					}
 				},
-				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 			})
 
 			driveItemsQueryUpdate({
@@ -447,7 +471,7 @@ class Drive {
 						uuid: parentUuid
 					}
 				},
-				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 			})
 		}
 
@@ -458,7 +482,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 		})
 
 		driveItemsQueryUpdate({
@@ -468,7 +492,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 		})
 	}
 
@@ -495,7 +519,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 		})
 	}
 
@@ -523,7 +547,7 @@ class Drive {
 					uuid: null
 				}
 			},
-			updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 		})
 	}
 
@@ -577,10 +601,19 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
-		driveItemsQueryUpdateGlobal({
-			parentUuid: parentDir.inner[0].uuid,
+		driveItemsQueryUpdate({
+			params: {
+				path: {
+					type: "drive",
+					uuid: parentDir.inner[0].uuid
+				}
+			},
 			updater: prev => [
-				...prev.filter(i => !(i.data.uuid === createdDriveItem.data.uuid && i.type === createdDriveItem.type)),
+				...prev.filter(
+					i =>
+						i.data.uuid !== createdDriveItem.data.uuid &&
+						i.data.decryptedMeta?.name.toLowerCase().trim() !== createdDriveItem.data.decryptedMeta?.name.toLowerCase().trim()
+				),
 				createdDriveItem
 			]
 		})
@@ -606,6 +639,7 @@ class Drive {
 		}
 
 		const unwrappedParentUuidPrevious = unwrapParentUuid(item.data.parent)
+		const oldItemUuid = `${item.data.uuid}`
 		const { authedSdkClient } = await auth.getSdkClients()
 		let newParentDir: AnyNormalDir | null = AnyNormalDir.instanceOf(newParent) ? newParent : null
 
@@ -664,18 +698,35 @@ class Drive {
 		}
 
 		if (unwrappedParentUuidPrevious) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuidPrevious,
-				updater: prev => prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "drive",
+						uuid: unwrappedParentUuidPrevious
+					}
+				},
+				updater: prev => prev.filter(i => i.data.uuid !== oldItemUuid)
 			})
 		}
 
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuid,
-				updater: prev => [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "drive",
+						uuid: unwrappedParentUuid
+					}
+				},
+				updater: prev => [
+					...prev.filter(
+						i =>
+							i.data.uuid !== item.data.uuid &&
+							i.data.decryptedMeta?.name.toLowerCase().trim() !== item.data.decryptedMeta?.name.toLowerCase().trim()
+					),
+					item
+				]
 			})
 		}
 
@@ -780,7 +831,7 @@ class Drive {
 		if (unwrappedParentUuid) {
 			driveItemsQueryUpdateGlobal({
 				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid && i.type === item.type ? item : i))
+				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
 			})
 		}
 

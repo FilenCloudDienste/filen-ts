@@ -24,6 +24,8 @@ class Setup {
 
 			if (isAuthed.isAuthed && isAuthed.stringifiedClient) {
 				await auth.setSdkClients(isAuthed.stringifiedClient)
+
+				cache.rootUuid = isAuthed.stringifiedClient.rootUuid
 			}
 
 			if (options?.background) {
