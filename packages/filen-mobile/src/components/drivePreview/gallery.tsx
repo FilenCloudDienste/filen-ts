@@ -18,6 +18,7 @@ import { runOnJS } from "react-native-worklets"
 import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
+import Text from "@/components/ui/text"
 
 const DISMISS_POSITION_RATIO = 0.25
 const DISMISS_VELOCITY_THRESHOLD = 1000
@@ -199,21 +200,6 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}
 	}
 
-	useEffect(() => {
-		return () => {
-			ScreenOrientation.unlockAsync().catch(console.error)
-		}
-	}, [])
-
-	useEffect(() => {
-		if (currentIndexRef.current >= 0) {
-			listRef.current?.scrollToIndex({
-				index: currentIndexRef.current,
-				animated: false
-			})
-		}
-	}, [dimensions.width])
-
 	const { isImage, isVideo, isAudio } = useDrivePreviewStore(
 		useShallow(state => {
 			if (!state.currentItem) {
@@ -281,20 +267,6 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 			setHeaderOpacityValue(headerOpacity, true)
 		}
 	}
-
-	const dismissGesture = buildDismissGesture(
-		{
-			zoomScale,
-			dismissTranslateY,
-			savedDismissTranslateY,
-			startTouchX,
-			startTouchY
-		},
-		dimensions.height,
-		goBack,
-		onDismissGestureStart,
-		onDismissGestureEnd
-	).enabled(isImage || isVideo || isAudio)
 
 	const dismissAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
@@ -366,7 +338,38 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}) as DriveItemFileExtracted[]
 	})()
 
+	const dismissGesture = buildDismissGesture(
+		{
+			zoomScale,
+			dismissTranslateY,
+			savedDismissTranslateY,
+			startTouchX,
+			startTouchY
+		},
+		dimensions.height,
+		goBack,
+		onDismissGestureStart,
+		onDismissGestureEnd
+	).enabled(isImage || isVideo || isAudio || itemsSorted.length === 0)
+
 	const initialScrollIndex = itemsSorted.findIndex(i => i.data.uuid === item.data.uuid)
+
+	useEffect(() => {
+		return () => {
+			useDrivePreviewStore.getState().reset()
+
+			ScreenOrientation.unlockAsync().catch(console.error)
+		}
+	}, [])
+
+	useEffect(() => {
+		if (currentIndexRef.current >= 0) {
+			listRef.current?.scrollToIndex({
+				index: currentIndexRef.current,
+				animated: false
+			})
+		}
+	}, [dimensions.width])
 
 	return (
 		<View className="flex-1 bg-transparent">
@@ -404,12 +407,27 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 						drawDistance={dimensions.width}
 						horizontal={true}
 						pagingEnabled={itemsSorted.length > 1 && !isDismissGestureActive}
-						scrollEnabled={scrollEnabled && !isDismissGestureActive && itemsSorted.length > 1 && (isImage || isVideo || isAudio)}
+						scrollEnabled={
+							scrollEnabled && !isDismissGestureActive && itemsSorted.length > 1 && (isImage || isVideo || isAudio)
+						}
 						bounces={itemsSorted.length > 1}
 						showsHorizontalScrollIndicator={false}
 						initialScrollIndex={initialScrollIndex >= 0 && initialScrollIndex < itemsSorted.length ? initialScrollIndex : 0}
 						onViewableItemsChanged={onViewableItemsChanged}
 						viewabilityConfig={VIEWABILITY_CONFIG}
+						ListEmptyComponent={() => {
+							return (
+								<View
+									className="flex-1 items-center justify-center bg-transparent"
+									style={{
+										width: dimensions.width,
+										height: dimensions.height
+									}}
+								>
+									<Text className="text-base text-foreground">tbd_no_preview</Text>
+								</View>
+							)
+						}}
 					/>
 				</AnimatedView>
 			</GestureDetector>

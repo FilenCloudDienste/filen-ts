@@ -9,6 +9,10 @@ export type DrivePreviewStore = {
 	reset: () => void
 	currentItem: DriveItemFileExtracted | null
 	setCurrentItem: (fn: DriveItemFileExtracted | null | ((prev: DriveItemFileExtracted | null) => DriveItemFileExtracted | null)) => void
+	currentItemEdited: DriveItemFileExtracted | null
+	setCurrentItemEdited: (
+		fn: DriveItemFileExtracted | null | ((prev: DriveItemFileExtracted | null) => DriveItemFileExtracted | null)
+	) => void
 }
 
 export const useDrivePreviewStore = create<DrivePreviewStore>(set => ({
@@ -26,14 +30,22 @@ export const useDrivePreviewStore = create<DrivePreviewStore>(set => ({
 	},
 	reset() {
 		set({
-			headerHeight: null,
-			currentIndex: null
+			// headerHeight: null,
+			currentIndex: null,
+			currentItem: null,
+			currentItemEdited: null
 		})
 	},
 	currentItem: null,
 	setCurrentItem(fn) {
 		set(state => ({
 			currentItem: typeof fn === "function" ? fn(state.currentItem) : fn
+		}))
+	},
+	currentItemEdited: null,
+	setCurrentItemEdited(fn) {
+		set(state => ({
+			currentItemEdited: typeof fn === "function" ? fn(state.currentItemEdited) : fn
 		}))
 	}
 }))

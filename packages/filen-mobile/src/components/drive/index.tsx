@@ -602,6 +602,10 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 								return
 							}
 
+							if (!result.data) {
+								return
+							}
+
 							const file = result.data.files.at(0)
 
 							if (!file) {
@@ -956,34 +960,42 @@ const Drive = memo(() => {
 			)
 		}
 
-		const fromCache = cache.directoryUuidToAnyDirWithContext.get(drivePath.uuid ?? "")
+		if (drivePath.type === "sharedIn" || drivePath.type === "sharedOut") {
+			const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(drivePath.uuid ?? "")
+
+			if (fromCache) {
+				return new AnyDirWithContext.Shared(fromCache)
+			}
+
+			return undefined
+		}
+
+		// Offline parent can be either normal dir or shared dir, so we need to check both caches
+		// We prio normal dirs over shared dirs
+		if (drivePath.type === "offline") {
+			const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
+
+			if (fromCache) {
+				return new AnyDirWithContext.Normal(fromCache)
+			}
+
+			const fromCacheShared = cache.directoryUuidToAnySharedDirWithContext.get(drivePath.uuid ?? "")
+
+			if (fromCacheShared) {
+				return new AnyDirWithContext.Shared(fromCacheShared)
+			}
+
+			return undefined
+		}
+
+		const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
 
 		if (fromCache) {
-			return fromCache
+			return new AnyDirWithContext.Normal(fromCache)
 		}
 
 		return undefined
 	})()
-
-	const renderItem = (info: ListRenderItemInfo<DriveItem>) => {
-		return (
-			<Item
-				info={{
-					...info,
-					item: {
-						item: info.item,
-						parent
-					}
-				}}
-				origin={drivePath.type ?? "drive"}
-				drivePath={drivePath}
-			/>
-		)
-	}
-
-	const keyExtractor = (item: DriveItem) => {
-		return item.data.uuid
-	}
 
 	const itemsSorted = itemSorter.sortItems(
 		[...(driveItemsQuery.status === "success" ? driveItemsQuery.data : []), ...globalSearchResult],
@@ -1095,9 +1107,25 @@ const Drive = memo(() => {
 					)}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-					keyExtractor={keyExtractor}
+					keyExtractor={(item: DriveItem) => {
+						return item.data.uuid
+					}}
 					data={items}
-					renderItem={renderItem}
+					renderItem={(info: ListRenderItemInfo<DriveItem>) => {
+						return (
+							<Item
+								info={{
+									...info,
+									item: {
+										item: info.item,
+										parent
+									}
+								}}
+								origin={drivePath.type ?? "drive"}
+								drivePath={drivePath}
+							/>
+						)
+					}}
 					onRefresh={async () => {
 						const result = await run(async () => {
 							return await driveItemsQuery.refetch()
