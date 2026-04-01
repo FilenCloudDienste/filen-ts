@@ -5,7 +5,9 @@ import {
 	ChatTypingType,
 	ListenerHandle,
 	MaybeEncryptedUniffi_Tags,
-	type SocketEvent
+	type SocketEvent,
+	NonRootItem_Tags,
+	AnyNormalDir_Tags
 } from "@filen/sdk-rs"
 import { useEffect, useRef, memo, useCallback } from "react"
 import { runEffect, run, Semaphore } from "@filen/utils"
@@ -24,6 +26,9 @@ import {
 	notesWithContentQueryGet
 } from "@/queries/useNotesWithContent.query"
 import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
+import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
+import cache from "@/lib/cache"
 
 const chatTypingTimeoutsRef: Record<number, NodeJS.Timeout> = {}
 
@@ -54,6 +59,470 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 					// Refetch chats and messages to ensure we have the latest data after reconnect + to update unread counts
 					chats.refetchChatsAndMessages().catch(console.error)
 				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FileArchiveRestored:
+			case SocketEvent_Tags.FileRestore:
+			case SocketEvent_Tags.FileNew: {
+				const [inner] = event.inner
+
+				const unwrappedParentUuid = unwrapParentUuid(inner.file.parent)
+				const unwrappedFileMeta = unwrapFileMeta(inner.file)
+
+				if (unwrappedParentUuid) {
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "drive",
+								uuid: unwrappedParentUuid
+							}
+						},
+						updater: prev => [
+							...prev.filter(
+								i =>
+									i.data.uuid !== unwrappedFileMeta.file.uuid &&
+									i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
+							),
+							unwrappedFileIntoDriveItem(unwrappedFileMeta)
+						]
+					})
+				}
+
+				if (event.tag === SocketEvent_Tags.FileRestore) {
+					// In case of a restore from trash, we need to remove the item from the trash list
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "trash",
+								uuid: null
+							}
+						},
+						updater: prev => prev.filter(i => i.data.uuid !== unwrappedFileMeta.file.uuid)
+					})
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FileArchived:
+			case SocketEvent_Tags.FileDeletedPermanent:
+			case SocketEvent_Tags.FolderDeletedPermanent: {
+				const [inner] = event.inner
+
+				const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
+
+				if (fromCache) {
+					const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
+
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev => prev.filter(i => i.data.uuid !== fromCache.uuid)
+						})
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FileRename:
+			case SocketEvent_Tags.FileMetadataChanged: {
+				const [inner] = event.inner
+
+				const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
+
+				if (fromCache) {
+					const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
+					const unwrappedFileMeta = unwrapFileMeta({
+						...fromCache,
+						meta: inner.metadata
+					})
+
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev =>
+								prev.map(i =>
+									i.data.uuid === unwrappedFileMeta.file.uuid ? unwrappedFileIntoDriveItem(unwrappedFileMeta) : i
+								)
+						})
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FileMove: {
+				const [inner] = event.inner
+
+				const fromCacheOld = cache.fileUuidToNormalFile.get(inner.file.uuid)
+
+				if (fromCacheOld) {
+					const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.parent)
+					const unwrappedParentUuidNew = unwrapParentUuid(inner.file.parent)
+					const unwrappedFileMeta = unwrapFileMeta(inner.file)
+
+					if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
+						driveItemsQueryUpdate({
+							params: {
+								path: {
+									type: "drive",
+									uuid: unwrappedParentUuidOld
+								}
+							},
+							updater: prev => prev.filter(i => i.data.uuid !== fromCacheOld.uuid)
+						})
+
+						driveItemsQueryUpdate({
+							params: {
+								path: {
+									type: "drive",
+									uuid: unwrappedParentUuidNew
+								}
+							},
+							updater: prev => [
+								...prev.filter(
+									i =>
+										i.data.uuid !== unwrappedFileMeta.file.uuid &&
+										i.data.decryptedMeta?.name.toLowerCase().trim() !==
+											unwrappedFileMeta.meta?.name.toLowerCase().trim()
+								),
+								unwrappedFileIntoDriveItem(unwrappedFileMeta)
+							]
+						})
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FolderMove: {
+				const [inner] = event.inner
+
+				const fromCacheOld = cache.directoryUuidToAnyNormalDir.get(inner.dir.uuid)
+
+				if (fromCacheOld && fromCacheOld.tag === AnyNormalDir_Tags.Dir) {
+					const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.inner[0].parent)
+					const unwrappedParentUuidNew = unwrapParentUuid(inner.dir.parent)
+					const unwrappedDirMeta = unwrapDirMeta(inner.dir)
+
+					if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
+						driveItemsQueryUpdate({
+							params: {
+								path: {
+									type: "drive",
+									uuid: unwrappedParentUuidOld
+								}
+							},
+							updater: prev => prev.filter(i => i.data.uuid !== fromCacheOld.inner[0].uuid)
+						})
+
+						driveItemsQueryUpdate({
+							params: {
+								path: {
+									type: "drive",
+									uuid: unwrappedParentUuidNew
+								}
+							},
+							updater: prev => [
+								...prev.filter(
+									i =>
+										i.data.uuid !== unwrappedDirMeta.uuid &&
+										i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedDirMeta.meta?.name.toLowerCase().trim()
+								),
+								unwrappedDirIntoDriveItem(unwrappedDirMeta)
+							]
+						})
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FolderMetadataChanged: {
+				const [inner] = event.inner
+
+				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+
+				if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
+					const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+					const unwrappedDirMeta = unwrapDirMeta({
+						...fromCache.inner[0],
+						meta: inner.meta
+					})
+
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev =>
+								prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i))
+						})
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FolderRename: {
+				const [inner] = event.inner
+
+				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+
+				if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
+					const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+					const name = inner.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? inner.name.inner[0] : null
+
+					if (name && unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev =>
+								prev.map(i =>
+									i.data.uuid === fromCache.inner[0].uuid && i.type === "directory"
+										? {
+												...i,
+												data: {
+													...i.data,
+													decryptedMeta: i.data.decryptedMeta
+														? {
+																...i.data.decryptedMeta,
+																name
+															}
+														: i.data.decryptedMeta
+												}
+											}
+										: i
+								)
+						})
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FileTrash: {
+				const [inner] = event.inner
+
+				const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
+
+				if (fromCache) {
+					const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
+
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev => prev.filter(i => i.data.uuid !== fromCache.uuid)
+						})
+					}
+
+					const item = unwrappedFileIntoDriveItem(unwrapFileMeta(fromCache))
+
+					// We have to add it to recents again after removing it above in the global call
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "recents",
+								uuid: null
+							}
+						},
+						updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.uuid), item]
+					})
+
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "trash",
+								uuid: null
+							}
+						},
+						updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.uuid), item]
+					})
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FolderTrash: {
+				const [inner] = event.inner
+
+				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+
+				if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
+					const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev => prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid)
+						})
+					}
+
+					const item = unwrappedDirIntoDriveItem(unwrapDirMeta(fromCache.inner[0]))
+
+					// We have to add it to recents again after removing it above in the global call
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "recents",
+								uuid: null
+							}
+						},
+						updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid), item]
+					})
+
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "trash",
+								uuid: null
+							}
+						},
+						updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid), item]
+					})
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FolderColorChanged: {
+				const [inner] = event.inner
+
+				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+
+				if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
+					const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+
+					if (unwrappedParentUuid) {
+						driveItemsQueryUpdateGlobal({
+							parentUuid: unwrappedParentUuid,
+							updater: prev =>
+								prev.map(i =>
+									i.data.uuid === fromCache.inner[0].uuid && i.type === "directory"
+										? {
+												...i,
+												data: {
+													...i.data,
+													color: inner.color
+												}
+											}
+										: i
+								)
+						})
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.FolderRestore:
+			case SocketEvent_Tags.FolderSubCreated: {
+				const [inner] = event.inner
+
+				const unwrappedParentUuid = unwrapParentUuid(inner.dir.parent)
+				const unwrappedDirMeta = unwrapDirMeta(inner.dir)
+
+				if (unwrappedParentUuid) {
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "drive",
+								uuid: unwrappedParentUuid
+							}
+						},
+						updater: prev => [
+							...prev.filter(
+								i =>
+									i.data.uuid !== unwrappedDirMeta.uuid &&
+									i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedDirMeta.meta?.name.toLowerCase().trim()
+							),
+							unwrappedDirIntoDriveItem(unwrappedDirMeta)
+						]
+					})
+				}
+
+				if (event.tag === SocketEvent_Tags.FolderRestore) {
+					// In case of a restore from trash, we need to remove the item from the trash list
+					driveItemsQueryUpdate({
+						params: {
+							path: {
+								type: "trash",
+								uuid: null
+							}
+						},
+						updater: prev => prev.filter(i => i.data.uuid !== unwrappedDirMeta.uuid)
+					})
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.ItemFavorite: {
+				const [inner] = event.inner
+
+				switch (inner.item.tag) {
+					case NonRootItem_Tags.File: {
+						const fromCache = cache.fileUuidToNormalFile.get(inner.item.inner[0].uuid)
+
+						if (fromCache) {
+							const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
+							const unwrappedFileMeta = unwrapFileMeta(inner.item.inner[0])
+
+							if (unwrappedParentUuid) {
+								driveItemsQueryUpdateGlobal({
+									parentUuid: unwrappedParentUuid,
+									updater: prev =>
+										prev.map(i =>
+											i.data.uuid === unwrappedFileMeta.file.uuid ? unwrappedFileIntoDriveItem(unwrappedFileMeta) : i
+										)
+								})
+							}
+						}
+
+						break
+					}
+
+					case NonRootItem_Tags.NormalDir: {
+						const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.item.inner[0].uuid)
+
+						if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
+							const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+							const unwrappedDirMeta = unwrapDirMeta(inner.item.inner[0])
+
+							if (unwrappedParentUuid) {
+								driveItemsQueryUpdateGlobal({
+									parentUuid: unwrappedParentUuid,
+									updater: prev =>
+										prev.map(i =>
+											i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i
+										)
+								})
+							}
+						}
+
+						break
+					}
+				}
+
+				break
+			}
+
+			case SocketEvent_Tags.PasswordChanged: {
+				// TODO: Logout
+
+				break
+			}
+
+			case SocketEvent_Tags.TrashEmpty: {
+				driveItemsQueryUpdate({
+					params: {
+						path: {
+							type: "trash",
+							uuid: null
+						}
+					},
+					updater: () => []
+				})
 
 				break
 			}
