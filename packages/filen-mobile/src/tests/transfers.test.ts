@@ -360,8 +360,8 @@ describe("Transfers", () => {
 				})
 
 				expect(mockUploadFile).toHaveBeenCalledTimes(1)
-				expect(result.files).toHaveLength(1)
-				expect(result.directories).toHaveLength(0)
+				expect(result!.files).toHaveLength(1)
+				expect(result!.directories).toHaveLength(0)
 				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledWith(
 					expect.objectContaining({
 						params: {
@@ -499,7 +499,7 @@ describe("Transfers", () => {
 					abortController: controller
 				})
 
-				expect(result).toEqual({ files: [], directories: [] })
+				expect(result).toBeNull()
 			})
 
 			it("skips query cache update for shared files", async () => {
@@ -657,8 +657,8 @@ describe("Transfers", () => {
 					hideProgress: true
 				})
 
-				expect(result.directories).toHaveLength(1)
-				expect(result.files).toHaveLength(1)
+				expect(result!.directories).toHaveLength(1)
+				expect(result!.files).toHaveLength(1)
 			})
 
 			it("does not throw when aborted", async () => {
@@ -680,7 +680,7 @@ describe("Transfers", () => {
 					abortController: controller
 				})
 
-				expect(result).toEqual({ files: [], directories: [] })
+				expect(result).toBeNull()
 			})
 		})
 	})
@@ -698,8 +698,8 @@ describe("Transfers", () => {
 				})
 
 				expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-				expect(result.files).toHaveLength(1)
-				expect(result.directories).toHaveLength(0)
+				expect(result!.files).toHaveLength(1)
+				expect(result!.directories).toHaveLength(0)
 			})
 
 			it("does not update store when hideProgress is true", async () => {
@@ -816,8 +816,8 @@ describe("Transfers", () => {
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
-				expect(result.files).toHaveLength(0)
-				expect(result.directories).toHaveLength(0)
+				expect(result!.files).toHaveLength(0)
+				expect(result!.directories).toHaveLength(0)
 			})
 
 			it("does not throw when aborted", async () => {
