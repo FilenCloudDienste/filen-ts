@@ -15,7 +15,6 @@ import GalleryHeader from "@/components/drivePreview/header"
 import GalleryItem from "@/components/drivePreview/galleryItem"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { runOnJS } from "react-native-worklets"
-import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
 import Text from "@/components/ui/text"
@@ -140,7 +139,7 @@ function setHeaderOpacityValue(headerOpacity: SharedValue<number>, visible: bool
 	headerOpacity.value = withSpring(visible ? 1 : 0, SPRING_HEADER)
 }
 
-const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracted; drivePath: DrivePath; parent?: AnyDirWithContext }) => {
+const Gallery = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drivePath: DrivePath }) => {
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
 	const [isDismissGestureActive, setIsDismissGestureActive] = useState<boolean>(false)
@@ -315,7 +314,10 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		if (drivePath.type === "photos") {
 			return itemSorter.sortItems(
 				items.filter(item => {
-					if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+					if (
+						!item.data.decryptedMeta ||
+						(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
+					) {
 						return false
 					}
 
@@ -328,7 +330,7 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 		}
 
 		return itemSorter.sortItems(items, "nameAsc").filter(i => {
-			if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+			if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
 				return false
 			}
 
@@ -381,7 +383,6 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 				animatedStyle={headerAnimatedStyle}
 				goBack={goBack}
 				drivePath={drivePath}
-				parent={parent}
 			/>
 			<GestureDetector gesture={dismissGesture}>
 				<AnimatedView
@@ -400,7 +401,6 @@ const Gallery = memo(({ item, drivePath, parent }: { item: DriveItemFileExtracte
 									goBack={goBack}
 									onZoomChange={onZoomChange}
 									onSingleTap={onSingleTap}
-									parent={parent}
 								/>
 							)
 						}}
