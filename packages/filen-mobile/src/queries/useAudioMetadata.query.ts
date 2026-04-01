@@ -17,7 +17,7 @@ export async function fetchData(
 ) {
 	const item = cache.uuidToAnyDriveItem.get(params.uuid)
 
-	if (!item || (item.type !== "file" && item.type !== "sharedFile")) {
+	if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
 		throw new Error("Drive item not found or is not a file")
 	}
 

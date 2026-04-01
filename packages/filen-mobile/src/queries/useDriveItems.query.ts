@@ -368,7 +368,7 @@ export async function fetchData(
 
 				if (parent && offlineDirectories.files.length > 0) {
 					for (const { item } of offlineDirectories.files) {
-						if (item.type !== "file" && item.type !== "sharedFile") {
+						if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 							continue
 						}
 
@@ -384,7 +384,7 @@ export async function fetchData(
 
 				if (!parent && offlineFiles.length > 0) {
 					for (const { item } of offlineFiles) {
-						if (item.type !== "file" && item.type !== "sharedFile") {
+						if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 							continue
 						}
 
