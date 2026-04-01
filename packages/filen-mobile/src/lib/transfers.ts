@@ -77,7 +77,7 @@ class Transfers {
 	}): Promise<{
 		files: File[]
 		directories: Dir[]
-	}> {
+	} | null> {
 		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
@@ -300,7 +300,12 @@ class Transfers {
 											}
 										},
 										updater: prev => [
-											...prev.filter(item => item.data.uuid !== uploadedDir.uuid),
+											...prev.filter(
+												item =>
+													item.data.uuid !== unwrappedDirMeta.uuid &&
+													item.data.decryptedMeta?.name.toLowerCase().trim() !==
+														unwrappedDirMeta.meta?.name.toLowerCase().trim()
+											),
 											{
 												type: "directory",
 												data: {
@@ -329,7 +334,12 @@ class Transfers {
 											}
 										},
 										updater: prev => [
-											...prev.filter(item => item.data.uuid !== uploadedFile.uuid),
+											...prev.filter(
+												item =>
+													item.data.uuid !== unwrappedFileMeta.file.uuid &&
+													item.data.decryptedMeta?.name.toLowerCase().trim() !==
+														unwrappedFileMeta.meta?.name.toLowerCase().trim()
+											),
 											{
 												type: "file",
 												data: {
@@ -359,10 +369,7 @@ class Transfers {
 			if (!result.success) {
 				if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
-					return {
-						files: [],
-						directories: []
-					}
+					return null
 				}
 
 				if (!hideProgress) {
@@ -534,10 +541,7 @@ class Transfers {
 		if (!result.success) {
 			if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
-				return {
-					files: [],
-					directories: []
-				}
+				return null
 			}
 
 			if (!hideProgress) {
@@ -585,7 +589,11 @@ class Transfers {
 					}
 				},
 				updater: prev => [
-					...prev.filter(item => item.data.uuid !== result.data.uuid),
+					...prev.filter(
+						item =>
+							item.data.uuid !== result.data.uuid &&
+							item.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
+					),
 					{
 						type: "file",
 						data: {
@@ -622,7 +630,7 @@ class Transfers {
 			file: File | SharedFile
 		})[]
 		directories: DirWithPath[]
-	}> {
+	} | null> {
 		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
@@ -904,10 +912,7 @@ class Transfers {
 
 				if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
-					return {
-						files: [],
-						directories: []
-					}
+					return null
 				}
 
 				if (!hideProgress) {
@@ -1131,10 +1136,7 @@ class Transfers {
 
 			if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
-				return {
-					files: [],
-					directories: []
-				}
+				return null
 			}
 
 			if (!hideProgress) {
