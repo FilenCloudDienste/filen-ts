@@ -1,36 +1,58 @@
 import type { File, Dir, DecryptedFileMeta, DecryptedDirMeta, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk-rs"
 
+export type Prettify<T> = {
+	[K in keyof T]: T[K]
+} & {}
+
 export type ExtraData = {
 	size: bigint
 	uuid: string
 }
 
-export type DriveItemFile = File &
-	ExtraData & {
-		decryptedMeta: DecryptedFileMeta | null
-	}
+export type DriveItemFile = Prettify<
+	File &
+		ExtraData & {
+			decryptedMeta: DecryptedFileMeta | null
+		}
+>
 
-export type DriveItemDirectory = Dir &
-	ExtraData & {
-		decryptedMeta: DecryptedDirMeta | null
-	}
+export type DriveItemDirectory = Prettify<
+	Dir &
+		ExtraData & {
+			decryptedMeta: DecryptedDirMeta | null
+		}
+>
 
-export type DriveItemFileShared = SharedFile &
-	ExtraData & {
-		decryptedMeta: DecryptedFileMeta | null
-	}
+export type DriveItemFileSharedNonRoot = Prettify<
+	File &
+		SharedFile &
+		ExtraData & {
+			decryptedMeta: DecryptedFileMeta | null
+		}
+>
 
-export type DriveItemDirectorySharedNonRoot = SharedDir &
-	ExtraData & {
-		decryptedMeta: DecryptedDirMeta | null
-	}
+export type DriveItemFileSharedRoot = Prettify<
+	SharedFile &
+		ExtraData & {
+			decryptedMeta: DecryptedFileMeta | null
+		}
+>
 
-export type DriveItemDirectorySharedRoot = SharedRootDir &
-	ExtraData & {
-		decryptedMeta: DecryptedDirMeta | null
-	}
+export type DriveItemDirectorySharedNonRoot = Prettify<
+	SharedDir &
+		ExtraData & {
+			decryptedMeta: DecryptedDirMeta | null
+		}
+>
 
-export type DriveItem =
+export type DriveItemDirectorySharedRoot = Prettify<
+	SharedRootDir &
+		ExtraData & {
+			decryptedMeta: DecryptedDirMeta | null
+		}
+>
+
+export type DriveItem = Prettify<
 	| {
 			type: "directory"
 			data: DriveItemDirectory
@@ -49,10 +71,15 @@ export type DriveItem =
 	  }
 	| {
 			type: "sharedFile"
-			data: DriveItemFileShared
+			data: DriveItemFileSharedNonRoot
 	  }
+	| {
+			type: "sharedRootFile"
+			data: DriveItemFileSharedRoot
+	  }
+>
 
-export type DriveItemFileExtracted =
+export type DriveItemFileExtracted = Prettify<
 	| Extract<
 			DriveItem,
 			{
@@ -65,5 +92,12 @@ export type DriveItemFileExtracted =
 				type: "sharedFile"
 			}
 	  >
+	| Extract<
+			DriveItem,
+			{
+				type: "sharedRootFile"
+			}
+	  >
+>
 
-export type DriveItemDirectoryExtracted = Exclude<DriveItem, DriveItemFileExtracted>
+export type DriveItemDirectoryExtracted = Prettify<Exclude<DriveItem, DriveItemFileExtracted>>
