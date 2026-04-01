@@ -7,14 +7,14 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
-import { SharingRole_Tags, type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
 import { Platform, type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import offline from "@/lib/offline"
-import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, unwrapAnyDirUuid } from "@/lib/utils"
+import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, unwrapAnyDirUuid, unwrapParentUuid } from "@/lib/utils"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
@@ -23,50 +23,93 @@ import { pack } from "@/lib/msgpack"
 import auth from "@/lib/auth"
 import { Buffer } from "react-native-quick-crypto"
 import { selectContacts } from "@/routes/contacts"
-
-export type DriveItemMenuOrigin =
-	| "drive"
-	| "preview"
-	| "trash"
-	| "sharedIn"
-	| "sharedOut"
-	| "favorites"
-	| "recents"
-	| "links"
-	| "offline"
-	| "search"
-	| "photos"
+import cache from "@/lib/cache"
 
 export function createMenuButtons({
 	item,
-	origin,
-	parent,
 	drivePath,
 	isStoredOffline
 }: {
 	item: DriveItem
-	origin: DriveItemMenuOrigin
-	parent?: AnyDirWithContext
 	drivePath: DrivePath
 	isStoredOffline: boolean
 }): MenuButton[] {
 	const menuButtons: MenuButton[] = []
-	const previewType = item.type === "file" || item.type === "sharedFile" ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
-	// TODO: Fix isOwner check
-	const isOwner =
-		parent &&
-		(parent.tag === AnyDirWithContext_Tags.Normal ||
-			(parent.tag === AnyDirWithContext_Tags.Shared && parent.inner[0].shareInfo.tag === SharingRole_Tags.Sharer))
+	const previewType =
+		item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+			? getPreviewType(item.data.decryptedMeta?.name ?? "")
+			: null
+
+	const parent = (() => {
+		switch (item.type) {
+			case "directory":
+			case "file": {
+				const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+				if (unwrappedParentUuid) {
+					if (unwrappedParentUuid === cache.rootUuid) {
+						return new AnyDirWithContext.Normal(
+							new AnyNormalDir.Root({
+								uuid: cache.rootUuid
+							})
+						)
+					}
+
+					const fromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
+
+					if (fromCache) {
+						return new AnyDirWithContext.Normal(fromCache)
+					}
+				}
+
+				return null
+			}
+
+			case "sharedDirectory": {
+				const unwrappedParentUuid = unwrapParentUuid(item.data.inner.parent)
+
+				if (unwrappedParentUuid) {
+					const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(unwrappedParentUuid)
+
+					if (fromCache) {
+						return new AnyDirWithContext.Shared(fromCache)
+					}
+				}
+
+				return null
+			}
+
+			case "sharedFile": {
+				const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+				if (unwrappedParentUuid) {
+					const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(unwrappedParentUuid)
+
+					if (fromCache) {
+						return new AnyDirWithContext.Shared(fromCache)
+					}
+				}
+
+				return null
+			}
+
+			case "sharedRootDirectory":
+			case "sharedRootFile": {
+				return null
+			}
+		}
+	})()
+
+	const isOwner = drivePath.type !== "sharedIn"
 
 	if (
 		(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") &&
-		(origin === "drive" ||
-			origin === "sharedIn" ||
-			origin === "sharedOut" ||
-			origin === "favorites" ||
-			origin === "links" ||
-			origin === "search" ||
-			origin === "offline")
+		(drivePath.type === "drive" ||
+			drivePath.type === "sharedIn" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "links" ||
+			drivePath.type === "offline")
 	) {
 		menuButtons.push({
 			id: "open",
@@ -75,13 +118,13 @@ export function createMenuButtons({
 				router.push({
 					pathname: drivePath.selectOptions
 						? "/driveSelect/[uuid]"
-						: origin === "offline"
+						: drivePath.type === "offline"
 							? "/offline/[uuid]"
-							: origin === "links"
+							: drivePath.type === "links"
 								? "/links/[uuid]"
 								: item.type === "directory"
 									? "/tabs/drive/[uuid]"
-									: !isOwner
+									: drivePath.type === "sharedIn"
 										? "/sharedIn/[uuid]"
 										: "/sharedOut/[uuid]",
 					params: {
@@ -99,6 +142,7 @@ export function createMenuButtons({
 		(item.type === "file" ||
 			item.type === "directory" ||
 			item.type === "sharedFile" ||
+			item.type === "sharedRootFile" ||
 			item.type === "sharedDirectory" ||
 			item.type === "sharedRootDirectory") &&
 		item.data.decryptedMeta
@@ -114,7 +158,7 @@ export function createMenuButtons({
 
 					const destination = Platform.select({
 						ios:
-							item.type === "file" || item.type === "sharedFile"
+							item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
 								? new FileSystem.File(
 										FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name)
 									)
@@ -122,7 +166,7 @@ export function createMenuButtons({
 										FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name)
 									),
 						default:
-							item.type === "file" || item.type === "sharedFile"
+							item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
 								? new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
 								: new FileSystem.Directory(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
 					})
@@ -150,7 +194,10 @@ export function createMenuButtons({
 					})
 
 					if (Platform.OS === "android") {
-						if ((item.type === "file" || item.type === "sharedFile") && destination instanceof FileSystem.File) {
+						if (
+							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+							destination instanceof FileSystem.File
+						) {
 							await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
 								{
 									name: decodeURIComponent(item.data.decryptedMeta.name),
@@ -216,7 +263,7 @@ export function createMenuButtons({
 			id: "makeAvailableOffline",
 			title: "tbd_make_available_offline",
 			onPress: async () => {
-				if (item.type === "file") {
+				if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
 					const result = await run(async () => {
 						return await offline.storeFile({
 							file: item,
@@ -250,7 +297,7 @@ export function createMenuButtons({
 	}
 
 	if (
-		(item.type === "file" || item.type === "sharedFile") &&
+		(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
 		(previewType === "image" || previewType === "video") &&
 		item.data.decryptedMeta
 	) {
@@ -304,7 +351,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if ((item.type === "file" || item.type === "sharedFile") && item.data.decryptedMeta) {
+	if ((item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") && item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "export",
 			title: "tbd_export",
@@ -386,8 +433,10 @@ export function createMenuButtons({
 
 	if (
 		downloadSubButtons.length > 0 &&
-		origin !== "offline" &&
-		(item.type === "file" || item.type === "sharedFile" ? (item.data.decryptedMeta?.size ?? 0) > 0 : true)
+		drivePath.type !== "offline" &&
+		(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+			? (item.data.decryptedMeta?.size ?? 0) > 0
+			: true)
 	) {
 		menuButtons.push({
 			id: "download",
@@ -399,13 +448,12 @@ export function createMenuButtons({
 
 	if (
 		(item.type === "file" || item.type === "directory") &&
-		(origin === "drive" ||
-			origin === "sharedOut" ||
-			origin === "favorites" ||
-			origin === "links" ||
-			origin === "recents" ||
-			origin === "search" ||
-			origin === "photos")
+		(drivePath.type === "drive" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "links" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "photos")
 	) {
 		menuButtons.push({
 			id: "share",
@@ -434,13 +482,12 @@ export function createMenuButtons({
 
 	if (
 		(item.type === "file" || item.type === "directory") &&
-		(origin === "drive" ||
-			origin === "sharedOut" ||
-			origin === "favorites" ||
-			origin === "links" ||
-			origin === "recents" ||
-			origin === "search" ||
-			origin === "photos")
+		(drivePath.type === "drive" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "links" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "photos")
 	) {
 		menuButtons.push({
 			id: "favorite",
@@ -466,15 +513,13 @@ export function createMenuButtons({
 	}
 
 	if (
-		origin === "drive" ||
-		origin === "sharedOut" ||
-		origin === "favorites" ||
-		origin === "links" ||
-		origin === "recents" ||
-		origin === "search" ||
-		origin === "offline" ||
-		origin === "photos" ||
-		origin === "preview"
+		drivePath.type === "drive" ||
+		drivePath.type === "sharedOut" ||
+		drivePath.type === "favorites" ||
+		drivePath.type === "links" ||
+		drivePath.type === "recents" ||
+		drivePath.type === "offline" ||
+		drivePath.type === "photos"
 	) {
 		menuButtons.push({
 			id: "info",
@@ -489,7 +534,7 @@ export function createMenuButtons({
 			}
 		})
 
-		if (item.type === "file" && origin !== "offline" && origin !== "preview") {
+		if (item.type === "file" && drivePath.type !== "offline") {
 			menuButtons.push({
 				id: "versions",
 				title: "tbd_versions",
@@ -508,12 +553,11 @@ export function createMenuButtons({
 
 	if (
 		item.type === "directory" &&
-		(origin === "drive" ||
-			origin === "sharedOut" ||
-			origin === "favorites" ||
-			origin === "links" ||
-			origin === "recents" ||
-			origin === "search")
+		(drivePath.type === "drive" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "links" ||
+			drivePath.type === "recents")
 	) {
 		menuButtons.push({
 			id: "color",
@@ -531,14 +575,12 @@ export function createMenuButtons({
 
 	if (
 		(item.type === "file" || item.type === "directory") &&
-		(origin === "drive" ||
-			origin === "sharedOut" ||
-			origin === "favorites" ||
-			origin === "links" ||
-			origin === "recents" ||
-			origin === "search" ||
-			origin === "photos" ||
-			origin === "preview")
+		(drivePath.type === "drive" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "links" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "photos")
 	) {
 		menuButtons.push({
 			id: "rename",
@@ -588,7 +630,7 @@ export function createMenuButtons({
 			}
 		})
 
-		if (origin !== "photos") {
+		if (drivePath.type !== "photos") {
 			menuButtons.push({
 				id: "move",
 				title: "tbd_move",
@@ -629,7 +671,7 @@ export function createMenuButtons({
 	}
 
 	// Removing offline files should only be allowed when inside the root of the offline view or when it is already stored offline
-	if ((origin === "offline" && !drivePath.uuid) || isStoredOffline) {
+	if ((drivePath.type === "offline" && !drivePath.uuid) || isStoredOffline) {
 		menuButtons.push({
 			id: "removeOffline",
 			title: "tbd_remove_offline",
@@ -670,7 +712,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (origin === "links" && (item.type === "file" || item.type === "directory") && !parent) {
+	if (drivePath.type === "links" && (item.type === "file" || item.type === "directory") && !parent) {
 		menuButtons.push({
 			id: "removeLink",
 			title: "tbd_remove_link",
@@ -715,10 +757,12 @@ export function createMenuButtons({
 	}
 
 	if (
-		((origin === "sharedIn" && !parent) ||
-			(origin === "preview" &&
-				!isOwner &&
-				(item.type === "sharedFile" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"))) &&
+		((drivePath.type === "sharedIn" && !parent) ||
+			(!isOwner &&
+				(item.type === "sharedFile" ||
+					item.type === "sharedRootFile" ||
+					item.type === "sharedDirectory" ||
+					item.type === "sharedRootDirectory"))) &&
 		!parent
 	) {
 		menuButtons.push({
@@ -761,18 +805,18 @@ export function createMenuButtons({
 					return
 				}
 
-				if ((item.type === "file" || item.type === "sharedFile") && origin === "preview" && router.canGoBack()) {
-					router.back()
-				}
+				// TODO: if we are in a preview, close the preview after removing the share
 			}
 		})
 	}
 
 	if (
-		((origin === "sharedOut" && !parent) ||
-			(origin === "preview" &&
-				isOwner &&
-				(item.type === "sharedFile" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"))) &&
+		((drivePath.type === "sharedOut" && !parent) ||
+			(isOwner &&
+				(item.type === "sharedFile" ||
+					item.type === "sharedRootFile" ||
+					item.type === "sharedDirectory" ||
+					item.type === "sharedRootDirectory"))) &&
 		!parent
 	) {
 		menuButtons.push({
@@ -814,14 +858,12 @@ export function createMenuButtons({
 					return
 				}
 
-				if ((item.type === "file" || item.type === "sharedFile") && origin === "preview" && router.canGoBack()) {
-					router.back()
-				}
+				// TODO: if we are in a preview, close the preview after stopping sharing the item
 			}
 		})
 	}
 
-	if (origin !== "trash" && origin !== "sharedIn" && origin !== "offline" && origin !== "recents") {
+	if (drivePath.type !== "trash" && drivePath.type !== "sharedIn" && drivePath.type !== "offline" && drivePath.type !== "recents") {
 		menuButtons.push({
 			id: "trash",
 			title: "tbd_trash",
@@ -861,14 +903,12 @@ export function createMenuButtons({
 					return
 				}
 
-				if (item.type === "file" && origin === "preview" && router.canGoBack()) {
-					router.back()
-				}
+				// TODO: if we are in a preview, close the preview after trashing the item
 			}
 		})
 	}
 
-	if ((item.type === "file" || item.type === "directory") && origin === "trash") {
+	if ((item.type === "file" || item.type === "directory") && drivePath.type === "trash") {
 		menuButtons.push({
 			id: "restore",
 			title: "tbd_restore",
@@ -890,7 +930,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if ((item.type === "file" || item.type === "directory") && origin === "trash") {
+	if ((item.type === "file" || item.type === "directory") && drivePath.type === "trash") {
 		menuButtons.push({
 			id: "deletePermanently",
 			title: "tbd_delete_permanently",
@@ -944,11 +984,9 @@ const Menu = memo(
 	({
 		item,
 		children,
-		origin,
 		type,
 		className,
 		isAnchoredToRight,
-		parent,
 		onOpenMenu,
 		onCloseMenu,
 		drivePath,
@@ -958,11 +996,9 @@ const Menu = memo(
 	}: {
 		item: DriveItem
 		children: React.ReactNode
-		origin: DriveItemMenuOrigin
 		type: React.ComponentPropsWithoutRef<typeof MenuComponent>["type"]
 		className?: string
 		isAnchoredToRight?: boolean
-		parent?: AnyDirWithContext
 		onOpenMenu?: () => void
 		onCloseMenu?: () => void
 		drivePath: DrivePath
@@ -974,8 +1010,6 @@ const Menu = memo(
 			? []
 			: createMenuButtons({
 					item,
-					origin,
-					parent,
 					drivePath,
 					isStoredOffline
 				})

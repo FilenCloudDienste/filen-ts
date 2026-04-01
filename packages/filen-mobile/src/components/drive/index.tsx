@@ -20,7 +20,7 @@ import { useShallow } from "zustand/shallow"
 import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
-import { AnyDirWithContext, AnyNormalDir, AnyDirWithContext_Tags } from "@filen/sdk-rs"
+import { AnyNormalDir } from "@filen/sdk-rs"
 import { debounce } from "es-toolkit/function"
 import * as ImagePicker from "expo-image-picker"
 import transfers from "@/lib/transfers"
@@ -35,7 +35,7 @@ import DocumentScanner, {
 } from "react-native-document-scanner-plugin"
 import * as DocumentPicker from "expo-document-picker"
 
-const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
+const Header = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const selectedDriveItems = useDriveStore(useShallow(state => state.selectedItems))
@@ -52,6 +52,12 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 	)
 
 	const driveItems = driveItemsQuery.status === "success" ? driveItemsQuery.data : []
+
+	const parent: AnyNormalDir | null = (() => {
+		const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
+
+		return fromCache ?? null
+	})()
 
 	const rightItems = (() => {
 		if (drivePath.selectOptions) {
@@ -99,7 +105,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 		if (
 			parent &&
-			parent.tag === AnyDirWithContext_Tags.Normal &&
 			(drivePath.type === "drive" ||
 				drivePath.type === "links" ||
 				drivePath.type === "favorites" ||
@@ -141,7 +146,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 					const result = await runWithLoading(async () => {
 						await drive.createDirectory({
 							name: folderName,
-							parent: parent.inner[0]
+							parent
 						})
 					})
 
@@ -203,7 +208,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 												return await transfers.upload({
 													localFileOrDir: assetFile,
-													parent: parent.inner[0],
+													parent,
 													name: asset.name,
 													modified: asset.lastModified,
 													mime: asset.mimeType
@@ -301,7 +306,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 												return await transfers.upload({
 													localFileOrDir: assetFile,
-													parent: parent.inner[0],
+													parent,
 													name: fileName,
 													mime: asset.mimeType
 												})
@@ -398,7 +403,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 												return await transfers.upload({
 													localFileOrDir: assetFile,
-													parent: parent.inner[0],
+													parent,
 													name: fileName,
 													mime: asset.mimeType,
 													modified: Date.now(),
@@ -490,7 +495,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 												return await transfers.upload({
 													localFileOrDir: scanFile,
-													parent: parent.inner[0],
+													parent,
 													modified: Date.now(),
 													created: Date.now(),
 													name: `tbd_scanned_document_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`,
@@ -586,7 +591,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 								return await transfers.upload({
 									localFileOrDir: tmpFile,
-									parent: parent.inner[0],
+									parent,
 									hideProgress: true,
 									name: fileName,
 									mime: "text/plain",
@@ -618,8 +623,7 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 								pathname: "/drivePreview",
 								params: {
 									item: Buffer.from(pack(item)).toString("base64"),
-									drivePath: Buffer.from(pack(drivePath)).toString("base64"),
-									parent: Buffer.from(pack(parent)).toString("base64")
+									drivePath: Buffer.from(pack(drivePath)).toString("base64")
 								}
 							})
 						}
@@ -937,7 +941,6 @@ const Header = memo(({ parent }: { parent?: AnyDirWithContext }) => {
 
 const Drive = memo(() => {
 	const drivePath = useDrivePath()
-	const stringifiedClient = useStringifiedClient()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const [globalSearchResult, setGlobalSearchResult] = useState<DriveItem[]>([])
 	const [queryingGlobalSearch, setQueryingGlobalSearch] = useState<boolean>(false)
@@ -950,52 +953,6 @@ const Drive = memo(() => {
 			enabled: drivePath.type !== null
 		}
 	)
-
-	const parent = ((): AnyDirWithContext | undefined => {
-		if (drivePath.type === "drive" && stringifiedClient && (!drivePath.uuid || (drivePath.uuid ?? "") === stringifiedClient.rootUuid)) {
-			return new AnyDirWithContext.Normal(
-				new AnyNormalDir.Root({
-					uuid: stringifiedClient.rootUuid
-				})
-			)
-		}
-
-		if (drivePath.type === "sharedIn" || drivePath.type === "sharedOut") {
-			const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(drivePath.uuid ?? "")
-
-			if (fromCache) {
-				return new AnyDirWithContext.Shared(fromCache)
-			}
-
-			return undefined
-		}
-
-		// Offline parent can be either normal dir or shared dir, so we need to check both caches
-		// We prio normal dirs over shared dirs
-		if (drivePath.type === "offline") {
-			const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
-
-			if (fromCache) {
-				return new AnyDirWithContext.Normal(fromCache)
-			}
-
-			const fromCacheShared = cache.directoryUuidToAnySharedDirWithContext.get(drivePath.uuid ?? "")
-
-			if (fromCacheShared) {
-				return new AnyDirWithContext.Shared(fromCacheShared)
-			}
-
-			return undefined
-		}
-
-		const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
-
-		if (fromCache) {
-			return new AnyDirWithContext.Normal(fromCache)
-		}
-
-		return undefined
-	})()
 
 	const itemsSorted = itemSorter.sortItems(
 		[...(driveItemsQuery.status === "success" ? driveItemsQuery.data : []), ...globalSearchResult],
@@ -1092,7 +1049,7 @@ const Drive = memo(() => {
 
 	return (
 		<Fragment>
-			<Header parent={parent} />
+			<Header />
 			<SafeAreaView
 				className={cn(
 					"flex-1",
@@ -1114,14 +1071,7 @@ const Drive = memo(() => {
 					renderItem={(info: ListRenderItemInfo<DriveItem>) => {
 						return (
 							<Item
-								info={{
-									...info,
-									item: {
-										item: info.item,
-										parent
-									}
-								}}
-								origin={drivePath.type ?? "drive"}
+								info={info}
 								drivePath={drivePath}
 							/>
 						)

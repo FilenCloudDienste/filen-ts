@@ -342,7 +342,7 @@ const Thumbnail = memo(
 		className?: string
 		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
 	}) => {
-		if (item.type === "file" || item.type === "sharedFile") {
+		if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
 			return (
 				<FileThumbnail
 					item={item}

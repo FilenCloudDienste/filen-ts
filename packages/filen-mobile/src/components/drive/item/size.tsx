@@ -3,42 +3,35 @@ import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import useDirectorySizeQuery from "@/queries/useDirectorySize.query"
 import { formatBytes } from "@filen/utils"
-import { type AnyDirWithContext } from "@filen/sdk-rs"
-import type { DriveItemMenuOrigin } from "@/components/drive/item/menu"
+import type { DrivePath } from "@/hooks/useDrivePath"
 
 type Props = {
-	info: ListRenderItemInfo<{
-		item: DriveItem
-		parent?: AnyDirWithContext
-	}>
-	origin: DriveItemMenuOrigin
+	info: ListRenderItemInfo<DriveItem>
+	drivePath: DrivePath
 }
 
-const Size = memo(({ info, origin }: Props) => {
+const Size = memo(({ info, drivePath }: Props) => {
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
-			uuid: info.item.item.data.uuid,
+			uuid: info.item.data.uuid,
 			type:
-				origin === "sharedIn"
+				drivePath.type === "sharedIn"
 					? "sharedIn"
-					: origin === "sharedOut"
+					: drivePath.type === "sharedOut"
 						? "sharedOut"
-						: origin === "trash"
+						: drivePath.type === "trash"
 							? "trash"
-							: origin === "offline"
+							: drivePath.type === "offline"
 								? "offline"
 								: "normal"
 		},
 		{
-			enabled:
-				info.item.item.type === "directory" ||
-				info.item.item.type === "sharedDirectory" ||
-				info.item.item.type === "sharedRootDirectory"
+			enabled: info.item.type === "directory" || info.item.type === "sharedDirectory" || info.item.type === "sharedRootDirectory"
 		}
 	)
 
-	if (info.item.item.type === "file" || info.item.item.type === "sharedFile") {
-		return ` • ${formatBytes(Number(info.item.item.data.size))}`
+	if (info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile") {
+		return ` • ${formatBytes(Number(info.item.data.size))}`
 	}
 
 	if (directorySizeQuery.status !== "success") {
