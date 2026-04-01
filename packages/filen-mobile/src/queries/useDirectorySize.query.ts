@@ -23,7 +23,35 @@ export async function fetchData(
 	files: number
 	dirs: number
 }> {
-	let anyDirWithContext = cache.directoryUuidToAnyDirWithContext.get(params.uuid) ?? null
+	let anyDirWithContext = (() => {
+		switch (params.type) {
+			case "normal":
+			case "trash": {
+				const fromCache = cache.directoryUuidToAnyNormalDir.get(params.uuid)
+
+				if (fromCache) {
+					return new AnyDirWithContext.Normal(fromCache)
+				}
+
+				return null
+			}
+
+			case "sharedIn":
+			case "sharedOut": {
+				const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(params.uuid)
+
+				if (fromCache) {
+					return new AnyDirWithContext.Shared(fromCache)
+				}
+
+				return null
+			}
+
+			case "offline": {
+				return cache.directoryUuidToAnyDirWithContext.get(params.uuid) ?? null
+			}
+		}
+	})()
 
 	if (!anyDirWithContext) {
 		return {
@@ -37,7 +65,7 @@ export async function fetchData(
 		return await offline.itemSize(unwrappedDirIntoDriveItem(unwrapDirMeta(anyDirWithContext)))
 	}
 
-	// Hack so we can get the size of items in the trash
+	// Hack so we can get the size of items in the trash, pretty ugly but it works for now
 	if (
 		params.type === "trash" &&
 		anyDirWithContext.tag === AnyDirWithContext_Tags.Normal &&

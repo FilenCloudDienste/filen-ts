@@ -11,7 +11,7 @@ import { AppState } from "react-native"
 
 const VERSION = 1
 const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
-const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000
+const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000 * 10 // 10 years, effectively infinite for our use case
 const PERSIST_DEBOUNCE = 1000
 
 const UNCACHED_QUERY_KEYS = new Map<string, true>([])

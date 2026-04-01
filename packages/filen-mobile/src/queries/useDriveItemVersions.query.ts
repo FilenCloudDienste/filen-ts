@@ -15,16 +15,16 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	const item = cache.uuidToDriveItem.get(params.uuid)
+	const fromCache = cache.fileUuidToNormalFile.get(params.uuid)
 
-	if (!item || item.type !== "file") {
+	if (!fromCache) {
 		return []
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	return await authedSdkClient.listFileVersions(
-		item.data,
+		fromCache,
 		params?.signal
 			? {
 					signal: params.signal

@@ -15,7 +15,7 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	const item = cache.uuidToDriveItem.get(params.uuid)
+	const item = cache.uuidToAnyDriveItem.get(params.uuid)
 
 	if (!item || (item.type !== "file" && item.type !== "sharedFile")) {
 		throw new Error("Drive item not found or is not a file")
