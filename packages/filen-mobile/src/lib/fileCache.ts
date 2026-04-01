@@ -87,7 +87,7 @@ export class FileCache {
 	}
 
 	public async has(item: DriveItem): Promise<boolean> {
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			return false
 		}
 
@@ -109,7 +109,7 @@ export class FileCache {
 	}
 
 	public async get({ item, signal }: { item: DriveItem; signal?: AbortSignal }): Promise<FileSystem.File> {
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 
@@ -201,7 +201,7 @@ export class FileCache {
 	}
 
 	public async remove(item: DriveItem): Promise<void> {
-		if (item.type !== "file" && item.type !== "sharedFile") {
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 

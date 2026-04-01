@@ -174,7 +174,7 @@ class ItemSorter {
 		const aLower = this.getLowerName(
 			a.type === "file"
 				? (a.data.decryptedMeta?.mime ?? a.data.decryptedMeta?.name ?? a.data.uuid)
-				: a.type === "sharedFile"
+				: a.type === "sharedFile" || a.type === "sharedRootFile"
 					? (a.data.decryptedMeta?.mime ?? a.data.decryptedMeta?.name ?? a.data.uuid)
 					: (a.data.decryptedMeta?.name ?? a.data.uuid)
 		)
@@ -182,7 +182,7 @@ class ItemSorter {
 		const bLower = this.getLowerName(
 			b.type === "file"
 				? (b.data.decryptedMeta?.mime ?? b.data.decryptedMeta?.name ?? b.data.uuid)
-				: b.type === "sharedFile"
+				: b.type === "sharedFile" || b.type === "sharedRootFile"
 					? (b.data.decryptedMeta?.mime ?? b.data.decryptedMeta?.name ?? b.data.uuid)
 					: (b.data.decryptedMeta?.name ?? b.data.uuid)
 		)
@@ -216,7 +216,7 @@ class ItemSorter {
 				? a.data.timestamp
 				: a.type === "directory"
 					? a.data.timestamp
-					: a.type === "sharedFile"
+					: a.type === "sharedFile" || a.type === "sharedRootFile"
 						? (a.data.decryptedMeta?.created ?? a.data.decryptedMeta?.modified ?? 0)
 						: (a.data.decryptedMeta?.created ?? 0)
 		)
@@ -226,7 +226,7 @@ class ItemSorter {
 				? b.data.timestamp
 				: b.type === "directory"
 					? b.data.timestamp
-					: b.type === "sharedFile"
+					: b.type === "sharedFile" || b.type === "sharedRootFile"
 						? (b.data.decryptedMeta?.created ?? b.data.decryptedMeta?.modified ?? 0)
 						: (b.data.decryptedMeta?.created ?? 0)
 		)
@@ -256,7 +256,7 @@ class ItemSorter {
 				? (a.data.decryptedMeta?.modified ?? a.data.timestamp)
 				: a.type === "directory"
 					? (a.data.decryptedMeta?.created ?? a.data.timestamp)
-					: a.type === "sharedFile"
+					: a.type === "sharedFile" || a.type === "sharedRootFile"
 						? (a.data.decryptedMeta?.modified ?? a.data.decryptedMeta?.created ?? 0)
 						: (a.data.decryptedMeta?.created ?? 0)
 		)
@@ -266,7 +266,7 @@ class ItemSorter {
 				? (b.data.decryptedMeta?.modified ?? b.data.timestamp)
 				: b.type === "directory"
 					? (b.data.decryptedMeta?.created ?? b.data.timestamp)
-					: b.type === "sharedFile"
+					: b.type === "sharedFile" || b.type === "sharedRootFile"
 						? (b.data.decryptedMeta?.modified ?? b.data.decryptedMeta?.created ?? 0)
 						: (b.data.decryptedMeta?.created ?? 0)
 		)
@@ -296,7 +296,7 @@ class ItemSorter {
 				? (a.data.decryptedMeta?.created ?? a.data.timestamp)
 				: a.type === "directory"
 					? (a.data.decryptedMeta?.created ?? a.data.timestamp)
-					: a.type === "sharedFile"
+					: a.type === "sharedFile" || a.type === "sharedRootFile"
 						? (a.data.decryptedMeta?.created ?? a.data.decryptedMeta?.modified ?? 0)
 						: (a.data.decryptedMeta?.created ?? 0)
 		)
@@ -306,7 +306,7 @@ class ItemSorter {
 				? (b.data.decryptedMeta?.created ?? b.data.timestamp)
 				: b.type === "directory"
 					? (b.data.decryptedMeta?.created ?? b.data.timestamp)
-					: b.type === "sharedFile"
+					: b.type === "sharedFile" || b.type === "sharedRootFile"
 						? (b.data.decryptedMeta?.created ?? b.data.decryptedMeta?.modified ?? 0)
 						: (b.data.decryptedMeta?.created ?? 0)
 		)

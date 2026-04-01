@@ -438,7 +438,7 @@ class Drive {
 	}
 
 	public async removeShare({ item, signal, parentUuid }: { item: DriveItem; signal?: AbortSignal; parentUuid?: string }) {
-		if (item.type !== "sharedRootDirectory" && item.type !== "sharedFile") {
+		if (item.type !== "sharedRootDirectory" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			throw new Error("Invalid item type")
 		}
 

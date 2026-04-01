@@ -34,7 +34,7 @@ import * as FileSystem from "expo-file-system"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import mimeTypes from "mime-types"
 import pathModule from "path"
-import type { DriveItem } from "@/types"
+import type { DriveItem, Prettify } from "@/types"
 
 export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
 	const abortController = new ManagedAbortController()
@@ -502,19 +502,41 @@ export type UnwrapFileMetaBase = {
 	meta: DecryptedFileMeta | null
 }
 
-export type UnwrapFileMetaRegular = UnwrapFileMetaBase & {
-	shared: false
-	file: File
-}
+export type UnwrapFileMetaRegular = Prettify<
+	UnwrapFileMetaBase & {
+		shared: false
+		root: false
+		file: File
+	}
+>
 
-export type UnwrapFileMetaShared = UnwrapFileMetaBase & {
-	shared: true
-	file: SharedFile
-}
+export type UnwrapFileMetaShared = Prettify<
+	UnwrapFileMetaBase & {
+		shared: true
+		root: false
+		file: Prettify<File & SharedFile>
+	}
+>
 
-export type UnwrapFileMetaResult = UnwrapFileMetaRegular | UnwrapFileMetaShared
+export type UnwrapFileMetaSharedRoot = Prettify<
+	UnwrapFileMetaBase & {
+		shared: true
+		root: true
+		file: SharedFile
+	}
+>
 
-export function unwrapFileMeta(file: File | SharedFile | AnyFile): UnwrapFileMetaResult {
+export type UnwrapFileMetaResult = UnwrapFileMetaRegular | UnwrapFileMetaShared | UnwrapFileMetaSharedRoot
+
+export function unwrapFileMeta(
+	file:
+		| File
+		| SharedFile
+		| AnyFile
+		| (File & {
+				sharingRole: SharingRole
+		  })
+): UnwrapFileMetaResult {
 	if (AnyFile.instanceOf(file)) {
 		switch (file.tag) {
 			case AnyFile_Tags.File:
@@ -528,14 +550,15 @@ export function unwrapFileMeta(file: File | SharedFile | AnyFile): UnwrapFileMet
 		}
 	}
 
-	if ("favorited" in file) {
+	if (!("favorited" in file)) {
 		switch (file.meta.tag) {
 			case FileMeta_Tags.Decoded: {
 				const [decoded] = file.meta.inner
 
 				return {
 					meta: decoded,
-					shared: false,
+					shared: true,
+					root: true,
 					file
 				}
 			}
@@ -543,8 +566,39 @@ export function unwrapFileMeta(file: File | SharedFile | AnyFile): UnwrapFileMet
 			default: {
 				return {
 					meta: null,
-					shared: false,
+					shared: true,
+					root: true,
 					file
+				}
+			}
+		}
+	}
+
+	if ("sharingRole" in file) {
+		switch (file.meta.tag) {
+			case FileMeta_Tags.Decoded: {
+				const [decoded] = file.meta.inner
+
+				return {
+					meta: decoded,
+					shared: true,
+					root: false,
+					file: {
+						...file,
+						sharedTag: true
+					}
+				}
+			}
+
+			default: {
+				return {
+					meta: null,
+					shared: true,
+					root: false,
+					file: {
+						...file,
+						sharedTag: true
+					}
 				}
 			}
 		}
@@ -556,7 +610,8 @@ export function unwrapFileMeta(file: File | SharedFile | AnyFile): UnwrapFileMet
 
 			return {
 				meta: decoded,
-				shared: true,
+				shared: false,
+				root: false,
 				file
 			}
 		}
@@ -564,7 +619,8 @@ export function unwrapFileMeta(file: File | SharedFile | AnyFile): UnwrapFileMet
 		default: {
 			return {
 				meta: null,
-				shared: true,
+				shared: false,
+				root: false,
 				file
 			}
 		}
@@ -573,6 +629,18 @@ export function unwrapFileMeta(file: File | SharedFile | AnyFile): UnwrapFileMet
 
 export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwrapFileMeta>): DriveItem {
 	if (unwrappedFile.shared) {
+		if (unwrappedFile.root) {
+			return {
+				type: "sharedRootFile",
+				data: {
+					...unwrappedFile.file,
+					size: unwrappedFile.meta?.size ?? 0n,
+					decryptedMeta: unwrappedFile.meta,
+					uuid: unwrappedFile.file.uuid
+				}
+			}
+		}
+
 		return {
 			type: "sharedFile",
 			data: {
