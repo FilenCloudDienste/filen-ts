@@ -17,7 +17,7 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ) {
-	const item = cache.uuidToDriveItem.get(params.uuid)
+	const item = cache.uuidToAnyDriveItem.get(params.uuid)
 
 	if (!item || item.type !== params.type) {
 		return false

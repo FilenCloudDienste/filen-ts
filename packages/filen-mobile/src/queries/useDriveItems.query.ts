@@ -425,12 +425,16 @@ export async function fetchData(
 					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
 				}
 
-				cache.uuidToDriveItem.set(unwrappedDir.uuid, driveItem)
+				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
 
 				const withContext = new AnyNormalDir.Dir(resultDir)
 
 				cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, withContext)
 				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(withContext))
+			}
+
+			for (const resultFile of result.files) {
+				cache.fileUuidToNormalFile.set(resultFile.uuid, resultFile)
 			}
 
 			break
@@ -447,7 +451,7 @@ export async function fetchData(
 					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
 				}
 
-				cache.uuidToDriveItem.set(unwrappedDir.uuid, driveItem)
+				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
 
 				const withContext = AnySharedDirWithContext.new({
 					dir: new AnySharedDir.Dir(resultDir),
@@ -472,7 +476,7 @@ export async function fetchData(
 					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
 				}
 
-				cache.uuidToDriveItem.set(unwrappedDir.uuid, driveItem)
+				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
 
 				const withContext = AnySharedDirWithContext.new({
 					dir: new AnySharedDir.Root(resultDir),
@@ -504,7 +508,7 @@ export async function fetchData(
 
 		items.push(driveItem)
 
-		cache.uuidToDriveItem.set(unwrappedFile.file.uuid, driveItem)
+		cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
 	}
 
 	return items
@@ -573,15 +577,17 @@ export function driveItemsQueryUpdateGlobal({
 	parentUuid: string
 }): void {
 	for (const pathType of DRIVE_PATH_TYPES_EXTENDED) {
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: pathType,
-					uuid: parentUuid
-				} as DrivePath
-			},
-			updater
-		})
+		if (parentUuid) {
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: pathType,
+						uuid: parentUuid
+					} as DrivePath
+				},
+				updater
+			})
+		}
 
 		driveItemsQueryUpdate({
 			params: {
