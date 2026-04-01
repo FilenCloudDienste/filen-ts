@@ -748,7 +748,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 					uuid: inner.uuid
 				})
 
-				// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
+				// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack if we are inside the chat when this happen.
+				// This is a bit of a band-aid solution, ideally we would have a more robust way to handle this, but it works for now and the delay is short enough that it shouldn't cause any issues.
 				setTimeout(() => {
 					chatMessagesQueryUpdate({
 						params: {

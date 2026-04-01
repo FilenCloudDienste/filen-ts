@@ -1,5 +1,5 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
-import { getPreviewType, unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import { getPreviewType, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/utils"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
@@ -19,20 +19,11 @@ import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import offline from "@/lib/offline"
 import { useRecyclingState } from "@shopify/flash-list"
-import { type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
+import cache from "@/lib/cache"
 
 const PreviewTextInner = memo(
-	({
-		previewType,
-		text,
-		item,
-		parent
-	}: {
-		previewType: "text" | "code"
-		text: string
-		item: DriveItemFileExtracted
-		parent?: AnyDirWithContext
-	}) => {
+	({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: DriveItemFileExtracted }) => {
 		const bgBackground = useResolveClassNames("bg-background")
 		const { theme } = useUniwind()
 		const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
@@ -41,14 +32,43 @@ const PreviewTextInner = memo(
 		const textPrimary = useResolveClassNames("text-primary")
 		const currentItemEdited = useDrivePreviewStore(useShallow(state => state.currentItemEdited))
 
+		const parent = (() => {
+			switch (item.type) {
+				case "file": {
+					const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+					if (unwrappedParentUuid) {
+						if (unwrappedParentUuid === cache.rootUuid) {
+							return new AnyDirWithContext.Normal(
+								new AnyNormalDir.Root({
+									uuid: cache.rootUuid
+								})
+							)
+						}
+
+						const fromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
+
+						if (fromCache) {
+							return new AnyDirWithContext.Normal(fromCache)
+						}
+					}
+
+					return null
+				}
+
+				default: {
+					return null
+				}
+			}
+		})()
+
 		const itemToUse =
 			currentItemEdited &&
 			currentItemEdited.data.decryptedMeta?.name.toLowerCase().trim() === item.data.decryptedMeta?.name.toLowerCase().trim()
 				? currentItemEdited
 				: item
 
-		const readOnly =
-			itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent.tag !== AnyDirWithContext_Tags.Normal
+		const readOnly = itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent
 
 		const save = async () => {
 			if (editedText === null || readOnly) {
@@ -62,10 +82,6 @@ const PreviewTextInner = memo(
 
 				if (!parent) {
 					throw new Error("Missing parent directory")
-				}
-
-				if (parent.tag !== AnyDirWithContext_Tags.Normal) {
-					throw new Error("Parent is not a normal directory")
 				}
 
 				const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
@@ -162,7 +178,7 @@ const PreviewTextInner = memo(
 	}
 )
 
-const PreviewText = memo(({ item, parent }: { item: DriveItemFileExtracted; parent?: AnyDirWithContext }) => {
+const PreviewText = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 	const previewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
@@ -210,7 +226,6 @@ const PreviewText = memo(({ item, parent }: { item: DriveItemFileExtracted; pare
 			previewType={previewType === "code" ? "code" : "text"}
 			text={query.data}
 			item={item}
-			parent={parent}
 		/>
 	)
 })

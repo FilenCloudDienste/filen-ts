@@ -11,7 +11,6 @@ import { type View as TView, Platform } from "react-native"
 import Menu from "@/components/drive/item/menu"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
 import type { DrivePath } from "@/hooks/useDrivePath"
-import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { useShallow } from "zustand/shallow"
 import { getPreviewType } from "@/lib/utils"
 import { cn } from "@filen/utils"
@@ -22,15 +21,13 @@ const GalleryHeader = memo(
 	({
 		animatedStyle,
 		goBack,
-		drivePath,
-		parent
+		drivePath
 	}: {
 		animatedStyle: {
 			opacity: number
 		}
 		goBack: () => void
 		drivePath: DrivePath
-		parent?: AnyDirWithContext
 	}) => {
 		const insets = useSafeAreaInsets()
 		const viewRef = useRef<TView>(null)
@@ -123,8 +120,6 @@ const GalleryHeader = memo(
 						<Menu
 							type="dropdown"
 							item={currentItem}
-							parent={parent}
-							origin="preview"
 							drivePath={drivePath}
 							isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
 						>
