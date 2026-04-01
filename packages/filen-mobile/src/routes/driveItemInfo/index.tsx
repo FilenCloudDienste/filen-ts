@@ -29,7 +29,10 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 			uuid: item?.data.uuid ?? "",
 			// TODO: Fix type for shared in/out based on sharing role
 			type:
-				item.type === "sharedDirectory" || item.type === "sharedFile" || item.type === "sharedRootDirectory"
+				item.type === "sharedDirectory" ||
+				item.type === "sharedFile" ||
+				item.type === "sharedRootFile" ||
+				item.type === "sharedRootDirectory"
 					? "sharedOut"
 					: "normal"
 		},
@@ -58,7 +61,7 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 						? "tbd_directory"
 						: "tbd_file"
 			},
-			...(item.type === "file" || item.type === "sharedFile"
+			...(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
 				? [
 						{
 							type: "mime",
@@ -114,7 +117,8 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 				value: (() => {
 					switch (item.type) {
 						case "file":
-						case "sharedFile": {
+						case "sharedFile":
+						case "sharedRootFile": {
 							return formatBytes(Number(item.data.size))
 						}
 
@@ -161,7 +165,8 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 							return simpleDate(Number(item.data.decryptedMeta.created))
 						}
 
-						case "sharedFile": {
+						case "sharedFile":
+						case "sharedRootFile": {
 							if (!item.data.decryptedMeta.created) {
 								return simpleDate(Number(item.data.timestamp))
 							}
@@ -212,7 +217,8 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 							return simpleDate(Number(item.data.decryptedMeta.modified))
 						}
 
-						case "sharedFile": {
+						case "sharedFile":
+						case "sharedRootFile": {
 							if (!item.data.decryptedMeta.modified) {
 								return simpleDate(Number(item.data.timestamp))
 							}
@@ -255,11 +261,9 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 					}
 
 					switch (item.type) {
-						case "file": {
-							return simpleDate(Number(item.data.timestamp))
-						}
-
-						case "sharedFile": {
+						case "file":
+						case "sharedFile":
+						case "sharedRootFile": {
 							return simpleDate(Number(item.data.timestamp))
 						}
 
@@ -267,11 +271,8 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 							return simpleDate(Number(item.data.timestamp))
 						}
 
+						case "sharedRootDirectory":
 						case "sharedDirectory": {
-							return simpleDate(Number(item.data.inner.timestamp))
-						}
-
-						case "sharedRootDirectory": {
 							return simpleDate(Number(item.data.inner.timestamp))
 						}
 					}

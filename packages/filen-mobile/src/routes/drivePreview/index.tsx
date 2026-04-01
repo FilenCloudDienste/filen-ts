@@ -7,7 +7,6 @@ import { type DrivePath } from "@/hooks/useDrivePath"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { getPreviewType } from "@/lib/utils"
 import Gallery from "@/components/drivePreview/gallery"
-import type { AnyDirWithContext } from "@filen/sdk-rs"
 
 const Return = memo(() => {
 	useEffectOnce(() => {
@@ -20,25 +19,21 @@ const Return = memo(() => {
 type SearchParams = {
 	drivePath?: string
 	item?: string
-	parent?: string
 }
 
 function parseParams(searchParams: SearchParams): {
 	drivePath: DrivePath | null
 	item: DriveItemFileExtracted | null
-	parent: AnyDirWithContext | null
 } {
 	if (!searchParams.item || !searchParams.drivePath) {
 		return {
 			drivePath: null,
-			item: null,
-			parent: null
+			item: null
 		}
 	}
 
 	let item: DriveItem | null = null
 	let drivePath: DrivePath | null = null
-	let parent: AnyDirWithContext | null = null
 
 	try {
 		if (searchParams.item) {
@@ -48,38 +43,31 @@ function parseParams(searchParams: SearchParams): {
 		if (searchParams.drivePath) {
 			drivePath = unpack(Buffer.from(searchParams.drivePath, "base64")) as DrivePath
 		}
-
-		if (searchParams.parent) {
-			parent = unpack(Buffer.from(searchParams.parent, "base64")) as AnyDirWithContext
-		}
 	} catch (e) {
 		console.error(e)
 
 		return {
 			item: null,
-			drivePath: null,
-			parent: null
+			drivePath: null
 		}
 	}
 
-	if (item?.type !== "file" && item?.type !== "sharedFile") {
+	if (item?.type !== "file" && item?.type !== "sharedFile" && item?.type !== "sharedRootFile") {
 		return {
 			item: null,
-			drivePath: null,
-			parent: null
+			drivePath: null
 		}
 	}
 
 	return {
 		item,
-		drivePath,
-		parent
+		drivePath
 	}
 }
 
 const DrivePreview = memo(() => {
 	const searchParams = useLocalSearchParams<SearchParams>()
-	const { drivePath, item, parent } = parseParams(searchParams)
+	const { drivePath, item } = parseParams(searchParams)
 	const previewType = getPreviewType(item?.data.decryptedMeta?.name ?? "")
 
 	if (!drivePath || !item || previewType === "unknown") {
@@ -90,7 +78,6 @@ const DrivePreview = memo(() => {
 		<Gallery
 			item={item}
 			drivePath={drivePath}
-			parent={parent ?? undefined}
 		/>
 	)
 })

@@ -19,7 +19,6 @@ import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
 import { router } from "expo-router"
 import { Buffer } from "react-native-quick-crypto"
 import { pack } from "@/lib/msgpack"
-import type { AnyDirWithContext } from "@filen/sdk-rs"
 import Menu from "@/components/drive/item/menu"
 import cameraUpload, { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
@@ -29,17 +28,7 @@ import useCameraUploadStore from "@/stores/useCameraUpload.store"
 import { useShallow } from "zustand/shallow"
 
 const Photo = memo(
-	({
-		info,
-		size,
-		drivePath,
-		parent
-	}: {
-		info: ListRenderItemInfo<DriveItemFileExtracted>
-		size: number
-		drivePath: DrivePath
-		parent?: AnyDirWithContext
-	}) => {
+	({ info, size, drivePath }: { info: ListRenderItemInfo<DriveItemFileExtracted>; size: number; drivePath: DrivePath }) => {
 		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
@@ -62,8 +51,7 @@ const Photo = memo(
 				pathname: "/drivePreview",
 				params: {
 					item: Buffer.from(pack(info.item)).toString("base64"),
-					drivePath: Buffer.from(pack(drivePath)).toString("base64"),
-					parent: parent ? Buffer.from(pack(parent)).toString("base64") : undefined
+					drivePath: Buffer.from(pack(drivePath)).toString("base64")
 				}
 			})
 		}
@@ -78,8 +66,6 @@ const Photo = memo(
 					type="context"
 					isAnchoredToRight={true}
 					item={info.item}
-					parent={parent}
-					origin="photos"
 					drivePath={drivePath}
 					isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
 				>
@@ -240,7 +226,10 @@ const Photos = memo(() => {
 								(driveItemsQuery.data
 									? itemSorter.sortItems(
 											driveItemsQuery.data.filter(item => {
-												if (!item.data.decryptedMeta || (item.type !== "file" && item.type !== "sharedFile")) {
+												if (
+													!item.data.decryptedMeta ||
+													(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
+												) {
 													return false
 												}
 
