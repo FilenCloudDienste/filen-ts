@@ -331,8 +331,13 @@ export function createMenuButtons({
 
 					const downloadResult = await transfers.download({
 						item,
-						destination
+						destination,
+						hideProgress: true
 					})
+
+					if (!downloadResult) {
+						throw new Error("Download failed")
+					}
 
 					if (
 						downloadResult.files.length === 0 ||

@@ -1,5 +1,5 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType, unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
@@ -17,9 +17,9 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
-import { type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import offline from "@/lib/offline"
 import { useRecyclingState } from "@shopify/flash-list"
+import { type AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 
 const PreviewTextInner = memo(
 	({
@@ -39,7 +39,16 @@ const PreviewTextInner = memo(
 		const insets = useSafeAreaInsets()
 		const [editedText, setEditedText] = useRecyclingState<string | null>(null, [item.data.uuid])
 		const textPrimary = useResolveClassNames("text-primary")
-		const readOnly = item.type !== "file" || !item.data.decryptedMeta || !parent
+		const currentItemEdited = useDrivePreviewStore(useShallow(state => state.currentItemEdited))
+
+		const itemToUse =
+			currentItemEdited &&
+			currentItemEdited.data.decryptedMeta?.name.toLowerCase().trim() === item.data.decryptedMeta?.name.toLowerCase().trim()
+				? currentItemEdited
+				: item
+
+		const readOnly =
+			itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent.tag !== AnyDirWithContext_Tags.Normal
 
 		const save = async () => {
 			if (editedText === null || readOnly) {
@@ -47,7 +56,7 @@ const PreviewTextInner = memo(
 			}
 
 			const result = await runWithLoading(async defer => {
-				if (!item.data.decryptedMeta) {
+				if (!itemToUse.data.decryptedMeta) {
 					throw new Error("Missing decryptedMeta")
 				}
 
@@ -76,10 +85,10 @@ const PreviewTextInner = memo(
 				return await transfers.upload({
 					localFileOrDir: tmpFile,
 					parent: parent.inner[0],
-					name: item.data.decryptedMeta.name,
+					name: itemToUse.data.decryptedMeta.name,
 					modified: Date.now(),
-					created: item.data.decryptedMeta.created ? Number(item.data.decryptedMeta.created) : undefined,
-					mime: item.data.decryptedMeta.mime
+					created: itemToUse.data.decryptedMeta.created ? Number(itemToUse.data.decryptedMeta.created) : undefined,
+					mime: itemToUse.data.decryptedMeta.mime
 				})
 			})
 
@@ -88,6 +97,19 @@ const PreviewTextInner = memo(
 				alerts.error(result.error)
 
 				return
+			}
+
+			if (result.data) {
+				const newFile = result.data.files[0]
+
+				if (newFile) {
+					const newDriveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(newFile))
+
+					if (newDriveItem.type === "file") {
+						useDrivePreviewStore.getState().setCurrentItemEdited(newDriveItem)
+						useDrivePreviewStore.getState().setCurrentItem(newDriveItem)
+					}
+				}
 			}
 
 			setEditedText(null)

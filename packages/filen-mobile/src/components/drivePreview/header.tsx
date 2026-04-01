@@ -54,7 +54,6 @@ const GalleryHeader = memo(
 
 		const currentItem =
 			driveItemsQuery.status === "success" ? (driveItemsQuery.data.find(item => item.data.uuid === currentItemUuid) ?? null) : null
-
 		const currentItemPreviewType = getPreviewType(currentItem?.data.decryptedMeta?.name ?? "")
 		const solidHeader = currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
 
@@ -71,10 +70,6 @@ const GalleryHeader = memo(
 				})
 			)
 		}, [layout.height, insets.top])
-
-		if (!currentItem) {
-			return null
-		}
 
 		return (
 			<AnimatedView
