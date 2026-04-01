@@ -675,7 +675,7 @@ class CameraUpload {
 
 								const parentDirEnum = new AnyNormalDir.Dir(parentDir)
 
-								const { files } = await transfers.upload({
+								const transferResult = await transfers.upload({
 									localFileOrDir: uploadFile,
 									parent: parentDirEnum,
 									abortController,
@@ -687,8 +687,12 @@ class CameraUpload {
 									hideProgress: params?.background ?? undefined
 								})
 
+								if (!transferResult) {
+									break
+								}
+
 								await Promise.allSettled(
-									files.map(async file =>
+									transferResult.files.map(async file =>
 										run(async () => {
 											// Images use EXIF for the most accurate capture timestamp.
 											// Videos don't carry standard EXIF; use media library metadata instead.
@@ -715,10 +719,7 @@ class CameraUpload {
 									)
 								)
 
-								return {
-									type: "upload" as const,
-									files
-								}
+								break
 							}
 
 							default: {

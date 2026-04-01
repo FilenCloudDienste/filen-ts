@@ -1328,42 +1328,44 @@ export class Offline {
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
 				})
 
-				const entries: DirectoryOfflineMeta["entries"] = {}
-				const dataDirectoryUriNormalized = normalizeFilePathForSdk(dataDirectory.uri)
+				if (transferred) {
+					const entries: DirectoryOfflineMeta["entries"] = {}
+					const dataDirectoryUriNormalized = normalizeFilePathForSdk(dataDirectory.uri)
 
-				for (const { dir, path } of transferred.directories) {
-					if (dir.tag === NonRootDir_Tags.Linked) {
-						continue
+					for (const { dir, path } of transferred.directories) {
+						if (dir.tag === NonRootDir_Tags.Linked) {
+							continue
+						}
+
+						const normalizedPath = normalizeFilePathForSdk(path.slice(dataDirectoryUriNormalized.length))
+
+						entries[normalizedPath] = {
+							item: unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner[0]))
+						}
 					}
 
-					const normalizedPath = normalizeFilePathForSdk(path.slice(dataDirectoryUriNormalized.length))
+					for (const { file, path } of transferred.files) {
+						const normalizedPath = normalizeFilePathForSdk(path.slice(dataDirectoryUriNormalized.length))
 
-					entries[normalizedPath] = {
-						item: unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner[0]))
+						entries[normalizedPath] = {
+							item: unwrappedFileIntoDriveItem(unwrapFileMeta(file))
+						}
 					}
-				}
 
-				for (const { file, path } of transferred.files) {
-					const normalizedPath = normalizeFilePathForSdk(path.slice(dataDirectoryUriNormalized.length))
-
-					entries[normalizedPath] = {
-						item: unwrappedFileIntoDriveItem(unwrapFileMeta(file))
-					}
-				}
-
-				this.atomicWrite(
-					metaFile,
-					Uint8Array.from(
-						pack({
-							item: directory,
-							parent,
-							entries
-						} satisfies DirectoryOfflineMeta)
+					this.atomicWrite(
+						metaFile,
+						Uint8Array.from(
+							pack({
+								item: directory,
+								parent,
+								entries
+							} satisfies DirectoryOfflineMeta)
+						)
 					)
-				)
 
-				if (!skipIndexUpdate) {
-					await this.updateIndex()
+					if (!skipIndexUpdate) {
+						await this.updateIndex()
+					}
 				}
 			})
 

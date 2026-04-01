@@ -1,4 +1,4 @@
-import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext } from "@filen/sdk-rs"
+import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext, File } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { pack } from "@/lib/msgpack"
@@ -94,6 +94,9 @@ class Cache {
 	private readonly dirtyDeletes = new Map<string, Set<string>>()
 	private readonly dirtyClears = new Set<string>()
 
+	// Not persisted — in-memory only, cleared on app restart
+	public rootUuid: string | null = null
+
 	// Not persisted — managed separately by secureStore.ts with its own encryption
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	public readonly secureStore = new Map<string, any>()
@@ -102,7 +105,8 @@ class Cache {
 	public readonly directoryUuidToName: PersistentMap<string>
 	public readonly noteUuidToNote: PersistentMap<Note>
 	public readonly chatUuidToChat: PersistentMap<Chat>
-	public readonly uuidToDriveItem: PersistentMap<DriveItem>
+	public readonly uuidToAnyDriveItem: PersistentMap<DriveItem>
+	public readonly fileUuidToNormalFile: PersistentMap<File>
 	public readonly directoryUuidToAnySharedDirWithContext: PersistentMap<AnySharedDirWithContext>
 	public readonly directoryUuidToAnyNormalDir: PersistentMap<AnyNormalDir>
 	public readonly directoryUuidToAnyDirWithContext: PersistentMap<AnyDirWithContext>
@@ -112,7 +116,8 @@ class Cache {
 		this.directoryUuidToName = this.createMap<string>("directoryUuidToName")
 		this.noteUuidToNote = this.createMap<Note>("noteUuidToNote")
 		this.chatUuidToChat = this.createMap<Chat>("chatUuidToChat")
-		this.uuidToDriveItem = this.createMap<DriveItem>("uuidToDriveItem")
+		this.uuidToAnyDriveItem = this.createMap<DriveItem>("uuidToAnyDriveItem")
+		this.fileUuidToNormalFile = this.createMap<File>("fileUuidToNormalFile")
 		this.directoryUuidToAnySharedDirWithContext = this.createMap<AnySharedDirWithContext>("directoryUuidToAnySharedDirWithContext")
 		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
 		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
