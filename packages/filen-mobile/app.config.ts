@@ -244,6 +244,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				appGroupId: IOS_APP_GROUP_ID
 			}
 		],
+		"./plugins/withAndroidNetworkSecurityConfig",
+		"./plugins/withAndroidLargeHeapAndHardwareAcceleration",
+		"./plugins/withGradleMemory",
 		[
 			"react-native-document-scanner-plugin",
 			{
