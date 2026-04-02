@@ -5,12 +5,7 @@ import useDirectorySizeQuery from "@/queries/useDirectorySize.query"
 import { formatBytes } from "@filen/utils"
 import type { DrivePath } from "@/hooks/useDrivePath"
 
-type Props = {
-	info: ListRenderItemInfo<DriveItem>
-	drivePath: DrivePath
-}
-
-const Size = memo(({ info, drivePath }: Props) => {
+const Size = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath }) => {
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
 			uuid: info.item.data.uuid,

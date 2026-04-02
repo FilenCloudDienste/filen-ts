@@ -15,6 +15,7 @@ import { AnyFile } from "@filen/sdk-rs"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import View from "@/components/ui/view"
+import type { DrivePath } from "@/hooks/useDrivePath"
 
 function getFileUrlForItem(item: DriveItemFileExtracted, getFileUrl: (file: AnyFile) => string): string | null {
 	try {
@@ -41,13 +42,15 @@ const GalleryItem = memo(
 		galleryZoomScale,
 		goBack,
 		onZoomChange,
-		onSingleTap
+		onSingleTap,
+		drivePath
 	}: {
 		info: ListRenderItemInfo<DriveItemFileExtracted>
 		galleryZoomScale: SharedValue<number>
 		goBack: () => void
 		onZoomChange?: (zoom: number) => void
 		onSingleTap?: () => void
+		drivePath: DrivePath
 	}) => {
 		const dimensions = useWindowDimensions()
 		const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
@@ -176,7 +179,10 @@ const GalleryItem = memo(
 						style={itemStyle}
 					>
 						{isActive ? (
-							<PreviewText item={info.item} />
+							<PreviewText
+								item={info.item}
+								drivePath={drivePath}
+							/>
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">
 								<ActivityIndicator

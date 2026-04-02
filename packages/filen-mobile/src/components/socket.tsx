@@ -1,7 +1,7 @@
 import { useSdkClients, useStringifiedClient } from "@/lib/auth"
 import {
 	type JsClientInterface,
-	SocketEvent_Tags,
+	SocketEventType_Tags,
 	ChatTypingType,
 	ListenerHandle,
 	MaybeEncryptedUniffi_Tags,
@@ -34,11 +34,13 @@ const chatTypingTimeoutsRef: Record<number, NodeJS.Timeout> = {}
 
 async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }) {
 	try {
-		switch (event.tag) {
-			case SocketEvent_Tags.Reconnecting:
-			case SocketEvent_Tags.AuthSuccess:
-			case SocketEvent_Tags.AuthFailed:
-			case SocketEvent_Tags.Unsubscribed: {
+		const eventInner = event.inner
+
+		switch (eventInner.tag) {
+			case SocketEventType_Tags.Reconnecting:
+			case SocketEventType_Tags.AuthSuccess:
+			case SocketEventType_Tags.AuthFailed:
+			case SocketEventType_Tags.Unsubscribed: {
 				for (const timeout of Object.values(chatTypingTimeoutsRef)) {
 					clearTimeout(timeout)
 				}
@@ -48,14 +50,14 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				useSocketStore
 					.getState()
 					.setState(
-						event.tag === SocketEvent_Tags.Reconnecting
+						eventInner.tag === SocketEventType_Tags.Reconnecting
 							? "reconnecting"
-							: event.tag === SocketEvent_Tags.AuthSuccess
+							: eventInner.tag === SocketEventType_Tags.AuthSuccess
 								? "connected"
 								: "disconnected"
 					)
 
-				if (event.tag === SocketEvent_Tags.AuthSuccess) {
+				if (eventInner.tag === SocketEventType_Tags.AuthSuccess) {
 					// Refetch chats and messages to ensure we have the latest data after reconnect + to update unread counts
 					chats.refetchChatsAndMessages().catch(console.error)
 				}
@@ -63,10 +65,10 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FileArchiveRestored:
-			case SocketEvent_Tags.FileRestore:
-			case SocketEvent_Tags.FileNew: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FileArchiveRestored:
+			case SocketEventType_Tags.FileRestore:
+			case SocketEventType_Tags.FileNew: {
+				const [inner] = eventInner.inner
 
 				const unwrappedParentUuid = unwrapParentUuid(inner.file.parent)
 				const unwrappedFileMeta = unwrapFileMeta(inner.file)
@@ -90,7 +92,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 					})
 				}
 
-				if (event.tag === SocketEvent_Tags.FileRestore) {
+				if (eventInner.tag === SocketEventType_Tags.FileRestore) {
 					// In case of a restore from trash, we need to remove the item from the trash list
 					driveItemsQueryUpdate({
 						params: {
@@ -106,10 +108,10 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FileArchived:
-			case SocketEvent_Tags.FileDeletedPermanent:
-			case SocketEvent_Tags.FolderDeletedPermanent: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FileArchived:
+			case SocketEventType_Tags.FileDeletedPermanent:
+			case SocketEventType_Tags.FolderDeletedPermanent: {
+				const [inner] = eventInner.inner
 
 				const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
@@ -127,9 +129,9 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FileRename:
-			case SocketEvent_Tags.FileMetadataChanged: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FileRename:
+			case SocketEventType_Tags.FileMetadataChanged: {
+				const [inner] = eventInner.inner
 
 				const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
@@ -154,8 +156,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FileMove: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FileMove: {
+				const [inner] = eventInner.inner
 
 				const fromCacheOld = cache.fileUuidToNormalFile.get(inner.file.uuid)
 
@@ -198,8 +200,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FolderMove: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FolderMove: {
+				const [inner] = eventInner.inner
 
 				const fromCacheOld = cache.directoryUuidToAnyNormalDir.get(inner.dir.uuid)
 
@@ -241,8 +243,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FolderMetadataChanged: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FolderMetadataChanged: {
+				const [inner] = eventInner.inner
 
 				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
@@ -265,8 +267,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FolderRename: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FolderRename: {
+				const [inner] = eventInner.inner
 
 				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
@@ -301,8 +303,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FileTrash: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FileTrash: {
+				const [inner] = eventInner.inner
 
 				const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
@@ -343,8 +345,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FolderTrash: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FolderTrash: {
+				const [inner] = eventInner.inner
 
 				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
@@ -385,8 +387,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FolderColorChanged: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FolderColorChanged: {
+				const [inner] = eventInner.inner
 
 				const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
@@ -415,9 +417,9 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.FolderRestore:
-			case SocketEvent_Tags.FolderSubCreated: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.FolderRestore:
+			case SocketEventType_Tags.FolderSubCreated: {
+				const [inner] = eventInner.inner
 
 				const unwrappedParentUuid = unwrapParentUuid(inner.dir.parent)
 				const unwrappedDirMeta = unwrapDirMeta(inner.dir)
@@ -441,7 +443,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 					})
 				}
 
-				if (event.tag === SocketEvent_Tags.FolderRestore) {
+				if (eventInner.tag === SocketEventType_Tags.FolderRestore) {
 					// In case of a restore from trash, we need to remove the item from the trash list
 					driveItemsQueryUpdate({
 						params: {
@@ -457,8 +459,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ItemFavorite: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ItemFavorite: {
+				const [inner] = eventInner.inner
 
 				switch (inner.item.tag) {
 					case NonRootItem_Tags.File: {
@@ -507,13 +509,13 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.PasswordChanged: {
+			case SocketEventType_Tags.PasswordChanged: {
 				// TODO: Logout
 
 				break
 			}
 
-			case SocketEvent_Tags.TrashEmpty: {
+			case SocketEventType_Tags.TrashEmpty: {
 				driveItemsQueryUpdate({
 					params: {
 						path: {
@@ -527,8 +529,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatTyping: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatTyping: {
+				const [inner] = eventInner.inner
 
 				clearTimeout(chatTypingTimeoutsRef[Number(inner.senderId)])
 
@@ -560,8 +562,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatMessageNew: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatMessageNew: {
+				const [inner] = eventInner.inner
 
 				clearTimeout(chatTypingTimeoutsRef[Number(inner.msg.inner.senderId)])
 
@@ -607,8 +609,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatConversationNameEdited: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatConversationNameEdited: {
+				const [inner] = eventInner.inner
 
 				switch (inner.newName.tag) {
 					case MaybeEncryptedUniffi_Tags.Decrypted: {
@@ -631,8 +633,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatMessageEdited: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatMessageEdited: {
+				const [inner] = eventInner.inner
 
 				switch (inner.newContent.tag) {
 					case MaybeEncryptedUniffi_Tags.Decrypted: {
@@ -661,8 +663,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatMessageDelete: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatMessageDelete: {
+				const [inner] = eventInner.inner
 
 				const chats = chatsQueryGet()
 				const chat = chats?.find(c => {
@@ -687,8 +689,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatMessageEmbedDisabled: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatMessageEmbedDisabled: {
+				const [inner] = eventInner.inner
 
 				const chats = chatsQueryGet()
 				const chat = chats?.find(c => {
@@ -724,8 +726,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatConversationsNew: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatConversationsNew: {
+				const [inner] = eventInner.inner
 
 				chatsQueryUpdate({
 					updater: prev => [...(prev ?? []).filter(c => c.uuid !== inner.chat.uuid), inner.chat]
@@ -734,8 +736,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatConversationDeleted: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatConversationDeleted: {
+				const [inner] = eventInner.inner
 
 				const chats = chatsQueryGet()
 				const chat = chats?.find(c => c.uuid === inner.uuid)
@@ -766,8 +768,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatConversationParticipantLeft: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatConversationParticipantLeft: {
+				const [inner] = eventInner.inner
 
 				const chats = chatsQueryGet()
 				const chat = chats?.find(c => c.uuid === inner.uuid)
@@ -791,8 +793,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ChatConversationParticipantNew: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ChatConversationParticipantNew: {
+				const [inner] = eventInner.inner
 
 				const chats = chatsQueryGet()
 				const chat = chats?.find(c => c.uuid === inner.chat)
@@ -819,8 +821,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteArchived: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteArchived: {
+				const [inner] = eventInner.inner
 
 				notesWithContentQueryUpdate({
 					updater: prev =>
@@ -837,8 +839,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteDeleted: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteDeleted: {
+				const [inner] = eventInner.inner
 
 				notesWithContentQueryUpdate({
 					updater: prev => prev.filter(n => n.uuid !== inner.note)
@@ -847,8 +849,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteRestored: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteRestored: {
+				const [inner] = eventInner.inner
 
 				notesWithContentQueryUpdate({
 					updater: prev =>
@@ -866,8 +868,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteTitleEdited: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteTitleEdited: {
+				const [inner] = eventInner.inner
 
 				switch (inner.newTitle.tag) {
 					case MaybeEncryptedUniffi_Tags.Decrypted: {
@@ -890,8 +892,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteParticipantNew: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteParticipantNew: {
+				const [inner] = eventInner.inner
 
 				notesWithContentQueryUpdate({
 					updater: prev =>
@@ -911,8 +913,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteParticipantRemoved: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteParticipantRemoved: {
+				const [inner] = eventInner.inner
 
 				notesWithContentQueryUpdate({
 					updater: prev =>
@@ -929,8 +931,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteParticipantPermissions: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteParticipantPermissions: {
+				const [inner] = eventInner.inner
 
 				notesWithContentQueryUpdate({
 					updater: prev =>
@@ -954,7 +956,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteNew: {
+			case SocketEventType_Tags.NoteNew: {
 				// TODO: Don't refetch the query, build from socket event once added
 				const notesWithContent = await notesWithContentQueryFetch()
 
@@ -965,8 +967,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.NoteContentEdited: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.NoteContentEdited: {
+				const [inner] = eventInner.inner
 
 				const notes = notesWithContentQueryGet()
 				const note = notes?.find(n => n.uuid === inner.note)
@@ -983,8 +985,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 				break
 			}
 
-			case SocketEvent_Tags.ContactRequestReceived: {
-				const [inner] = event.inner
+			case SocketEventType_Tags.ContactRequestReceived: {
+				const [inner] = eventInner.inner
 
 				contactRequestsQueryUpdate({
 					updater: prev => ({

@@ -3,36 +3,68 @@ import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import { simpleDate } from "@/lib/time"
 
-type Props = {
-	info: ListRenderItemInfo<DriveItem>
-}
+const DateComponent = memo(({ info }: { info: ListRenderItemInfo<DriveItem> }) => {
+	switch (info.item.type) {
+		case "file": {
+			if (info.item.data.decryptedMeta?.modified) {
+				return simpleDate(Number(info.item.data.decryptedMeta.modified))
+			}
 
-export const DateComponent = memo(({ info }: Props) => {
-	if (info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile") {
-		if (info.item.data.decryptedMeta?.modified) {
-			return simpleDate(Number(info.item.data.decryptedMeta.modified))
-		}
+			if (info.item.data.decryptedMeta?.created) {
+				return simpleDate(Number(info.item.data.decryptedMeta.created))
+			}
 
-		if (info.item.data.decryptedMeta?.created) {
-			return simpleDate(Number(info.item.data.decryptedMeta.created))
-		}
-
-		if (info.item.type === "file") {
 			return simpleDate(Number(info.item.data.timestamp))
 		}
 
-		return simpleDate(new Date().getTime())
-	}
+		case "directory": {
+			if (info.item.data.decryptedMeta?.created) {
+				return simpleDate(Number(info.item.data.decryptedMeta.created))
+			}
 
-	if (info.item.data.decryptedMeta?.created) {
-		return simpleDate(Number(info.item.data.decryptedMeta.created))
-	}
+			return simpleDate(Number(info.item.data.timestamp))
+		}
 
-	if (info.item.type === "directory") {
-		return simpleDate(Number(info.item.data.timestamp))
-	}
+		case "sharedFile": {
+			if (info.item.data.decryptedMeta?.modified) {
+				return simpleDate(Number(info.item.data.decryptedMeta.modified))
+			}
 
-	return simpleDate(new Date().getTime())
+			if (info.item.data.decryptedMeta?.created) {
+				return simpleDate(Number(info.item.data.decryptedMeta.created))
+			}
+
+			return simpleDate(Number(info.item.data.timestamp))
+		}
+
+		case "sharedDirectory": {
+			if (info.item.data.decryptedMeta?.created) {
+				return simpleDate(Number(info.item.data.decryptedMeta.created))
+			}
+
+			return simpleDate(Number(info.item.data.inner.timestamp))
+		}
+
+		case "sharedRootFile": {
+			if (info.item.data.decryptedMeta?.modified) {
+				return simpleDate(Number(info.item.data.decryptedMeta.modified))
+			}
+
+			if (info.item.data.decryptedMeta?.created) {
+				return simpleDate(Number(info.item.data.decryptedMeta.created))
+			}
+
+			return simpleDate(Number(info.item.data.timestamp))
+		}
+
+		case "sharedRootDirectory": {
+			if (info.item.data.decryptedMeta?.created) {
+				return simpleDate(Number(info.item.data.decryptedMeta.created))
+			}
+
+			return simpleDate(Number(info.item.data.inner.timestamp))
+		}
+	}
 })
 
 export default DateComponent
