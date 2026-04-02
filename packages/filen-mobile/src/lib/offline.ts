@@ -39,6 +39,7 @@ import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
 
+// "sharedInRoot" means the item lives at the top level of Shared In (no parent dir, just the shared root listing).
 export type OfflineParent = AnyDirWithContext | "sharedInRoot"
 
 export type FileOrDirectoryOfflineMeta = {
@@ -74,6 +75,19 @@ export type Index = {
 	>
 }
 
+// Manages offline file/directory storage on device.
+//
+// Storage layout:
+//   offline/v{N}/files/{uuid}/{filename}        — standalone files (one data file + one .filenmeta)
+//   offline/v{N}/directories/{uuid}/...         — directory trees (recursive download + one .filenmeta with entries map)
+//   offline/v{N}/index                          — msgpack'd Index of all stored items (rebuilt on mutation)
+//
+// Key concepts:
+//   - "Standalone" items are stored individually under files/ or as a top-level directory.
+//   - When a directory is stored, its subtree is flattened into entries in the .filenmeta. Any standalone
+//     items that overlap (same UUID already in the directory tree) are removed (overlap dedup).
+//   - The Index is the source of truth for "is this item offline?" queries and is rebuilt atomically.
+//   - sync() compares local offline state against remote, re-downloading changed/new files and pruning deleted ones.
 export class Offline {
 	private readonly version = 1
 	private readonly directory: FileSystem.Directory = new FileSystem.Directory(
@@ -91,9 +105,12 @@ export class Offline {
 		FileSystem.Paths.join(this.directory.uri, "directories")
 	)
 	private readonly indexFile = new FileSystem.File(FileSystem.Paths.join(this.directory.uri, "index"))
+	// indexMutex(1): serializes index read/write to prevent concurrent corruption.
 	private readonly indexMutex = new Semaphore(1)
 	private indexCache: Index | null = null
+	// syncMutex(1): only one sync() runs at a time (compares local vs remote state).
 	private readonly syncMutex = new Semaphore(1)
+	// storeMutex(3): allows up to 3 concurrent file/directory downloads while still bounding I/O.
 	private readonly storeMutex = new Semaphore(3)
 	private readonly listDirectoriesCache = new Map<string, Awaited<ReturnType<Offline["listDirectories"]>>>()
 	private listFilesCache: Awaited<ReturnType<Offline["listFiles"]>> | null = null
@@ -172,6 +189,7 @@ export class Offline {
 		}
 	}
 
+	// Called after any mutation to offline storage. Must be aggressive because the filesystem changed.
 	private invalidateCaches(): void {
 		this.listFilesCache = null
 		this.listDirectoriesCache.clear()
@@ -433,6 +451,8 @@ export class Offline {
 		}
 	}
 
+	// Produces a stable string key from the deeply-nested AnyDirWithContext tagged union.
+	// Used to dedup parent listings in sync() and for the listDirectories cache.
 	private parentCacheKey(parent: OfflineParent): string {
 		if (typeof parent === "string") {
 			return parent
@@ -493,6 +513,11 @@ export class Offline {
 		}
 	}
 
+	// Compares local offline items against remote server state and reconciles:
+	// 1. Collects unique parents from all stored files/dirs, fetches their remote listings in parallel.
+	// 2. For each stored file: deletes if removed remotely, re-downloads if modified, or re-stores under a new UUID if renamed.
+	// 3. For each stored directory: recursively compares entries; sets needsFullResync=true if any diff, then re-downloads.
+	// 4. Rebuilds the index at the end.
 	public async sync(): Promise<void> {
 		await run(
 			async defer => {
@@ -514,6 +539,7 @@ export class Offline {
 					auth.getSdkClients()
 				])
 
+				// Dedup parents: multiple offline items may share a parent dir. We only need to list each parent once.
 				const uniqueParents = new Map<string, OfflineParent>()
 
 				for (const { parent } of files) {
@@ -590,6 +616,7 @@ export class Offline {
 					})
 				)
 
+				// Build byUuid + byName indexes for O(1) lookup during file comparison below.
 				const parentListingIndexes = new Map<
 					string,
 					{
@@ -754,6 +781,8 @@ export class Offline {
 								return
 							}
 
+							// UUID gone from remote but a file with the same name exists — likely re-uploaded.
+							// Re-store under the new UUID so offline stays in sync.
 							let updatedFile: File | SharedFile | undefined = undefined
 							const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
 							const nameMatch = index?.byName.get(normalizedName)
@@ -1018,6 +1047,7 @@ export class Offline {
 								}
 							}
 
+							// If any file was updated/added/removed in the directory tree, re-download the whole thing.
 							let needsFullResync = false
 
 							for (const [path, localFile] of localFiles) {
@@ -1070,6 +1100,7 @@ export class Offline {
 								}
 							}
 
+							// force: true bypasses the isItemStored check, since we know it's stored but stale.
 							if (needsFullResync) {
 								await this.storeDirectory({
 									directory: item,
@@ -1195,6 +1226,13 @@ export class Offline {
 				return
 			}
 
+			// Skip if this file already exists inside a stored directory tree (overlap guard).
+			const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+
+			if (uuidToTopLevel.has(file.data.uuid)) {
+				return
+			}
+
 			const dataFile = new FileSystem.File(
 				FileSystem.Paths.join(this.filesDirectory.uri, file.data.uuid, file.data.decryptedMeta.name)
 			)
@@ -1295,7 +1333,16 @@ export class Offline {
 
 			this.ensureDirectories()
 
+			// force skips this check — used by sync() when we know the item is stored but needs re-download.
 			if (!force && (await this.isItemStored(directory))) {
+				return
+			}
+
+			// Skip if this dir is already nested inside another stored directory (but not if it IS a top-level entry).
+			const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+			const topLevelUuid = uuidToTopLevel.get(directory.data.uuid)
+
+			if (topLevelUuid && topLevelUuid !== directory.data.uuid) {
 				return
 			}
 
@@ -1353,6 +1400,44 @@ export class Offline {
 						}
 					}
 
+					// Overlap dedup: if any entry in this directory tree was previously stored standalone,
+					// delete the standalone copy — the directory tree now subsumes it.
+					const currentIndex = await this.readIndex()
+
+					for (const entryPath in entries) {
+						const entry = entries[entryPath]
+
+						if (!entry) {
+							continue
+						}
+
+						const entryUuid = entry.item.data.uuid
+
+						if (currentIndex.files[entryUuid]) {
+							const standaloneFileDir = new FileSystem.Directory(
+								FileSystem.Paths.join(this.filesDirectory.uri, entryUuid)
+							)
+
+							if (standaloneFileDir.exists) {
+								standaloneFileDir.delete()
+							}
+						}
+
+						// Don't delete ourselves — we're storing this directory, not a nested one.
+						if (currentIndex.directories[entryUuid] && entryUuid !== directory.data.uuid) {
+							const standaloneDirDir = new FileSystem.Directory(
+								FileSystem.Paths.join(this.directoriesDirectory.uri, entryUuid)
+							)
+
+							if (standaloneDirDir.exists) {
+								standaloneDirDir.delete()
+							}
+						}
+					}
+
+					// Must invalidate before writing meta — the dedup above changed the filesystem.
+					this.invalidateCaches()
+
 					this.atomicWrite(
 						metaFile,
 						Uint8Array.from(
@@ -1391,6 +1476,8 @@ export class Offline {
 		}
 	}
 
+	// Converts a directory DriveItem at the given path into an AnyDirWithContext for SDK calls.
+	// Needed because listDirectories returns DriveItems but SDK listing APIs require AnyDirWithContext.
 	private findParentAnyDirWithContext(pathToItem: Record<string, DriveItem>, dirname: string): OfflineParent | null {
 		const item = pathToItem[dirname]
 
@@ -1435,6 +1522,8 @@ export class Offline {
 		}
 	}
 
+	// Lists offline directories (and their files). Without parent: returns top-level stored directories.
+	// With parent: navigates into a stored directory tree and returns only the immediate children of that parent.
 	public async listDirectories(parent?: OfflineParent): Promise<{
 		files: {
 			item: DriveItem
@@ -1648,6 +1737,8 @@ export class Offline {
 		return parentResult
 	}
 
+	// Flattens all stored directory trees into a single list of files + directories.
+	// Deduplicates by UUID because the same item could appear in overlapping trees.
 	public async listDirectoriesRecursive(): Promise<Awaited<ReturnType<typeof this.listDirectories>>> {
 		if (this.listDirectoriesRecursiveCache) {
 			return this.listDirectoriesRecursiveCache
@@ -1657,6 +1748,7 @@ export class Offline {
 
 		const directories: Awaited<ReturnType<typeof this.listDirectories>>["directories"] = []
 		const files: Awaited<ReturnType<typeof this.listDirectories>>["files"] = []
+		const seenUuids = new Set<string>()
 		const topLevelEntries = this.directoriesDirectory.list()
 
 		await Promise.all(
@@ -1678,6 +1770,12 @@ export class Offline {
 				) {
 					return
 				}
+
+				if (seenUuids.has(directoryMeta.item.data.uuid)) {
+					return
+				}
+
+				seenUuids.add(directoryMeta.item.data.uuid)
 
 				directories.push({
 					item: directoryMeta.item,
@@ -1718,6 +1816,10 @@ export class Offline {
 						dirname = "/"
 					}
 
+					if (seenUuids.has(entryMeta.item.data.uuid)) {
+						continue
+					}
+
 					switch (entryMeta.item.type) {
 						case "directory":
 						case "sharedRootDirectory":
@@ -1727,6 +1829,8 @@ export class Offline {
 							if (!parent) {
 								continue
 							}
+
+							seenUuids.add(entryMeta.item.data.uuid)
 
 							directories.push({
 								item: entryMeta.item,
@@ -1744,6 +1848,8 @@ export class Offline {
 							if (!parent) {
 								continue
 							}
+
+							seenUuids.add(entryMeta.item.data.uuid)
 
 							files.push({
 								item: entryMeta.item,
@@ -2003,6 +2109,7 @@ export class Offline {
 		}
 	}
 
+	// Looks up a file's local path: first checks standalone files/, then searches inside directory trees.
 	public async getLocalFile(item: DriveItem): Promise<FileSystem.File | null> {
 		const cachedLocalFile = this.getLocalFileCache.get(item.data.uuid)
 

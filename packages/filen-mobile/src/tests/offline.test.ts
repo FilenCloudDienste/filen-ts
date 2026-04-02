@@ -4698,4 +4698,363 @@ describe("Offline", () => {
 			expect(fs.has(`${FILES_DIR_URI}/${uuid}/linked-root-file.txt`)).toBe(true)
 		})
 	})
+
+	describe("overlap deduplication", () => {
+		beforeEach(() => {
+			fs.clear()
+			vi.clearAllMocks()
+		})
+
+		it("removes standalone directory when parent is stored", async () => {
+			const parentDirUuid = "11111111-1111-1111-1111-111111111111"
+			const childDirUuid = "22222222-2222-2222-2222-222222222222"
+			const parentDirItem = makeDirItem(parentDirUuid, "ParentDir")
+			const childDirItem = makeDirItem(childDirUuid, "ChildDir")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+			const parentDataUri = `${DIRECTORIES_DIR_URI}/${parentDirUuid}`
+
+			// Store child directory standalone first
+			writeDirectoryMeta(childDirUuid, {
+				item: childDirItem,
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(childDirItem)).toBe(true)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${childDirUuid}`)).toBe(true)
+
+			// Now store the parent directory, which contains the child in its entries
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/ChildDir`, "dir")
+
+				return {
+					files: [],
+					directories: [
+						{
+							dir: { tag: NonRootDir_Tags.Normal, inner: [{ uuid: childDirUuid }] },
+							path: `${destUri}/ChildDir`
+						}
+					]
+				}
+			})
+
+			await offline.storeDirectory({ directory: parentDirItem, parent })
+
+			// Standalone child directory should be deleted
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${childDirUuid}/${childDirUuid}.filenmeta`)).toBe(false)
+
+			// Parent should exist
+			expect(fs.has(`${parentDataUri}/${parentDirUuid}.filenmeta`)).toBe(true)
+		})
+
+		it("removes standalone file when parent is stored", async () => {
+			const parentDirUuid = "11111111-1111-1111-1111-111111111111"
+			const childFileUuid = "22222222-2222-2222-2222-222222222222"
+			const parentDirItem = makeDirItem(parentDirUuid, "ParentDir")
+			const childFileItem = makeFileItem(childFileUuid, "child.txt")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			// Store file standalone first
+			writeFileData(childFileUuid, "child.txt")
+			writeFileMeta(childFileUuid, { item: childFileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(childFileItem)).toBe(true)
+			expect(fs.has(`${FILES_DIR_URI}/${childFileUuid}`)).toBe(true)
+
+			// Now store the parent directory, which contains the file in its entries
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/child.txt`, new Uint8Array([1, 2, 3]))
+
+				return {
+					files: [
+						{
+							file: { uuid: childFileUuid },
+							path: `${destUri}/child.txt`
+						}
+					],
+					directories: []
+				}
+			})
+
+			await offline.storeDirectory({ directory: parentDirItem, parent })
+
+			// Standalone file directory should be deleted
+			expect(fs.has(`${FILES_DIR_URI}/${childFileUuid}`)).toBe(false)
+		})
+
+		it("index reflects deduplicated state after parent store", async () => {
+			const parentDirUuid = "11111111-1111-1111-1111-111111111111"
+			const childDirUuid = "22222222-2222-2222-2222-222222222222"
+			const childFileUuid = "33333333-3333-3333-3333-333333333333"
+			const parentDirItem = makeDirItem(parentDirUuid, "ParentDir")
+			const childDirItem = makeDirItem(childDirUuid, "ChildDir")
+			const childFileItem = makeFileItem(childFileUuid, "child.txt")
+			const parent = makeParent("44444444-4444-4444-4444-444444444444")
+
+			// Store child dir and file standalone
+			writeDirectoryMeta(childDirUuid, {
+				item: childDirItem,
+				parent,
+				entries: {}
+			})
+
+			writeFileData(childFileUuid, "child.txt")
+			writeFileMeta(childFileUuid, { item: childFileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Now store parent which contains both
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/ChildDir`, "dir")
+				fs.set(`${destUri}/child.txt`, new Uint8Array([1, 2, 3]))
+
+				return {
+					files: [
+						{
+							file: { uuid: childFileUuid },
+							path: `${destUri}/child.txt`
+						}
+					],
+					directories: [
+						{
+							dir: { tag: NonRootDir_Tags.Normal, inner: [{ uuid: childDirUuid }] },
+							path: `${destUri}/ChildDir`
+						}
+					]
+				}
+			})
+
+			await offline.storeDirectory({ directory: parentDirItem, parent })
+
+			// Standalone copies should be gone
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${childDirUuid}/${childDirUuid}.filenmeta`)).toBe(false)
+			expect(fs.has(`${FILES_DIR_URI}/${childFileUuid}`)).toBe(false)
+
+			// Index should have the parent directory
+			const index = readIndex()
+
+			expect(index.directories[parentDirUuid]).toBeDefined()
+
+			// Parent meta should contain both child entries
+			const metaUri = `${DIRECTORIES_DIR_URI}/${parentDirUuid}/${parentDirUuid}.filenmeta`
+			const meta = unpack(fs.get(metaUri) as Uint8Array) as DirectoryOfflineMeta
+			const entryUuids = Object.values(meta.entries).map(e => e.item.data.uuid)
+
+			expect(entryUuids).toContain(childDirUuid)
+			expect(entryUuids).toContain(childFileUuid)
+		})
+
+		it("deeply nested: all standalone copies removed", async () => {
+			const dirAUuid = "11111111-1111-1111-1111-111111111111"
+			const dirBUuid = "22222222-2222-2222-2222-222222222222"
+			const dirCUuid = "33333333-3333-3333-3333-333333333333"
+			const dirA = makeDirItem(dirAUuid, "A")
+			const dirB = makeDirItem(dirBUuid, "B")
+			const dirC = makeDirItem(dirCUuid, "C")
+			const parent = makeParent("44444444-4444-4444-4444-444444444444")
+
+			// Store C standalone
+			writeDirectoryMeta(dirCUuid, {
+				item: dirC,
+				parent,
+				entries: {}
+			})
+
+			// Store B standalone
+			writeDirectoryMeta(dirBUuid, {
+				item: dirB,
+				parent,
+				entries: {
+					"/C": { item: dirC }
+				}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirCUuid}/${dirCUuid}.filenmeta`)).toBe(true)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirBUuid}/${dirBUuid}.filenmeta`)).toBe(true)
+
+			// Now store A which contains B > C
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/B`, "dir")
+				fs.set(`${destUri}/B/C`, "dir")
+
+				return {
+					files: [],
+					directories: [
+						{
+							dir: { tag: NonRootDir_Tags.Normal, inner: [{ uuid: dirBUuid }] },
+							path: `${destUri}/B`
+						},
+						{
+							dir: { tag: NonRootDir_Tags.Normal, inner: [{ uuid: dirCUuid }] },
+							path: `${destUri}/B/C`
+						}
+					]
+				}
+			})
+
+			await offline.storeDirectory({ directory: dirA, parent })
+
+			// Both standalone copies should be removed
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirBUuid}/${dirBUuid}.filenmeta`)).toBe(false)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirCUuid}/${dirCUuid}.filenmeta`)).toBe(false)
+
+			// A should exist
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirAUuid}/${dirAUuid}.filenmeta`)).toBe(true)
+		})
+
+		it("listDirectoriesRecursive returns no duplicates with overlapping data", async () => {
+			const dirAUuid = "11111111-1111-1111-1111-111111111111"
+			const dirBUuid = "22222222-2222-2222-2222-222222222222"
+			const fileUuid = "33333333-3333-3333-3333-333333333333"
+			const dirA = makeDirItem(dirAUuid, "A")
+			const dirB = makeDirItem(dirBUuid, "B")
+			const fileItem = makeFileItem(fileUuid, "data.txt")
+			const parent = makeParent("44444444-4444-4444-4444-444444444444")
+
+			// Simulate legacy state: both A and B are top-level, A contains B as a nested entry
+			writeDirectoryMeta(dirAUuid, {
+				item: dirA,
+				parent,
+				entries: {
+					"/B": { item: dirB },
+					"/B/data.txt": { item: fileItem }
+				}
+			})
+
+			writeDirectoryMeta(dirBUuid, {
+				item: dirB,
+				parent,
+				entries: {
+					"/data.txt": { item: fileItem }
+				}
+			})
+
+			const offline = await createOffline()
+			const result = await offline.listDirectoriesRecursive()
+
+			// B should appear only once (dedup)
+			const dirBEntries = result.directories.filter((d: { item: DriveItem }) => d.item.data.uuid === dirBUuid)
+
+			expect(dirBEntries).toHaveLength(1)
+
+			// data.txt should appear only once (dedup)
+			const fileEntries = result.files.filter((f: { item: DriveItem }) => f.item.data.uuid === fileUuid)
+
+			expect(fileEntries).toHaveLength(1)
+		})
+
+		it("listDirectoriesRecursive returns no duplicates after cleanup", async () => {
+			const dirAUuid = "11111111-1111-1111-1111-111111111111"
+			const dirBUuid = "22222222-2222-2222-2222-222222222222"
+			const dirA = makeDirItem(dirAUuid, "A")
+			const dirB = makeDirItem(dirBUuid, "B")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			// After cleanup, only A exists on disk as top-level, with B as an entry
+			// Write A with B as a nested entry (using properly formatted paths)
+			writeDirectoryMeta(dirAUuid, {
+				item: dirA,
+				parent,
+				entries: {
+					"/B": { item: dirB }
+				}
+			})
+
+			const offline = await createOffline()
+			const result = await offline.listDirectoriesRecursive()
+
+			// A appears once as top-level, B appears once as nested entry
+			const dirAEntries = result.directories.filter((d: { item: DriveItem }) => d.item.data.uuid === dirAUuid)
+			const dirBEntries = result.directories.filter((d: { item: DriveItem }) => d.item.data.uuid === dirBUuid)
+
+			expect(dirAEntries).toHaveLength(1)
+			expect(dirBEntries).toHaveLength(1)
+		})
+
+		it("storeFile is no-op when file is inside stored parent", async () => {
+			const parentDirUuid = "11111111-1111-1111-1111-111111111111"
+			const childFileUuid = "22222222-2222-2222-2222-222222222222"
+			const parentDirItem = makeDirItem(parentDirUuid, "ParentDir")
+			const childFileItem = makeFileItem(childFileUuid, "child.txt")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			// Store parent directory with child file in entries
+			writeDirectoryMeta(parentDirUuid, {
+				item: parentDirItem,
+				parent,
+				entries: {
+					"/child.txt": { item: childFileItem }
+				}
+			})
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${parentDirUuid}/child.txt`, new Uint8Array([1, 2, 3]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			vi.mocked(transfers.download).mockClear()
+
+			// Try to store the child file standalone — should be a no-op
+			await offline.storeFile({ file: childFileItem, parent })
+
+			expect(transfers.download).not.toHaveBeenCalled()
+		})
+
+		it("storeDirectory is no-op when dir is inside stored parent", async () => {
+			const parentDirUuid = "11111111-1111-1111-1111-111111111111"
+			const childDirUuid = "22222222-2222-2222-2222-222222222222"
+			const parentDirItem = makeDirItem(parentDirUuid, "ParentDir")
+			const childDirItem = makeDirItem(childDirUuid, "ChildDir")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			// Store parent directory with child dir in entries
+			writeDirectoryMeta(parentDirUuid, {
+				item: parentDirItem,
+				parent,
+				entries: {
+					"/ChildDir": { item: childDirItem }
+				}
+			})
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${parentDirUuid}/ChildDir`, "dir")
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			vi.mocked(transfers.download).mockClear()
+
+			// Try to store the child directory standalone — should be a no-op
+			await offline.storeDirectory({ directory: childDirItem, parent })
+
+			expect(transfers.download).not.toHaveBeenCalled()
+		})
+	})
 })
