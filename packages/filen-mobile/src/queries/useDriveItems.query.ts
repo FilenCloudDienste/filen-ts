@@ -446,6 +446,12 @@ export async function fetchData(
 			}
 
 			for (const resultFile of result.files) {
+				const unwrappedFile = unwrapFileMeta(resultFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+
+				items.push(driveItem)
+
+				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
 				cache.fileUuidToNormalFile.set(resultFile.uuid, resultFile)
 			}
 
@@ -473,17 +479,25 @@ export async function fetchData(
 				cache.directoryUuidToAnySharedDirWithContext.set(unwrappedDir.uuid, withContext)
 				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Shared(withContext))
 
-				// TODO: If it's a shared out item, we should also cache it in the normal dir caches since that's where it actually lives
-				// cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid,  new AnyNormalDir.Dir(resultDir.inner))
+				if (params.path.type === "sharedOut") {
+					cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, new AnyNormalDir.Dir(resultDir.inner))
+				}
 			}
 
-			// TODO: ^ same for files, if it's a shared out file we should cache it in the normal file cache as well
-			/*for(const resultFile of result.files) {
+			for (const resultFile of result.files) {
 				const unwrappedFile = unwrapFileMeta(resultFile)
-				const { sharingRole:_, ...file } = resultFile
+				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
 
-				cache.fileUuidToNormalFile.set(unwrappedFile.file.uuid, file)
-			}*/
+				items.push(driveItem)
+
+				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
+
+				if (params.path.type === "sharedOut") {
+					const { sharingRole: _, ...file } = resultFile
+
+					cache.fileUuidToNormalFile.set(unwrappedFile.file.uuid, file)
+				}
+			}
 
 			break
 		}
@@ -510,6 +524,15 @@ export async function fetchData(
 				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Shared(withContext))
 			}
 
+			for (const resultFile of result.files) {
+				const unwrappedFile = unwrapFileMeta(resultFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+
+				items.push(driveItem)
+
+				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
+			}
+
 			break
 		}
 
@@ -521,17 +544,17 @@ export async function fetchData(
 				items.push(driveItem)
 			}
 
+			for (const resultFile of result.files) {
+				const unwrappedFile = unwrapFileMeta(resultFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+
+				items.push(driveItem)
+
+				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
+			}
+
 			break
 		}
-	}
-
-	for (const resultFile of result.files) {
-		const unwrappedFile = unwrapFileMeta(resultFile)
-		const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
-
-		items.push(driveItem)
-
-		cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
 	}
 
 	return items

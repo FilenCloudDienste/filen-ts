@@ -12,6 +12,24 @@ export type UseDriveItemStoredOfflineQueryParams = {
 	type: DriveItem["type"]
 }
 
+// Normalize type to base form so "file"/"sharedFile"/"sharedRootFile" all share the same query key.
+// Without this, items stored offline as "file" wouldn't match UI queries using "sharedFile".
+function normalizeTypeForKey(type: DriveItem["type"]): "file" | "directory" {
+	switch (type) {
+		case "file":
+		case "sharedFile":
+		case "sharedRootFile": {
+			return "file"
+		}
+
+		case "directory":
+		case "sharedDirectory":
+		case "sharedRootDirectory": {
+			return "directory"
+		}
+	}
+}
+
 export async function fetchData(
 	params: UseDriveItemStoredOfflineQueryParams & {
 		signal?: AbortSignal
@@ -19,7 +37,7 @@ export async function fetchData(
 ) {
 	const item = cache.uuidToAnyDriveItem.get(params.uuid)
 
-	if (!item || item.type !== params.type) {
+	if (!item) {
 		return false
 	}
 
@@ -30,7 +48,10 @@ export function useDriveItemStoredOfflineQuery(
 	params: UseDriveItemStoredOfflineQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = sortParams(params)
+	const normalizedParams = sortParams({
+		uuid: params.uuid,
+		type: normalizeTypeForKey(params.type)
+	})
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
@@ -38,10 +59,10 @@ export function useDriveItemStoredOfflineQuery(
 		// Query is updated through setup() indexing
 		enabled: false,
 		staleTime: Infinity,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		queryKey: [BASE_QUERY_KEY, normalizedParams],
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...normalizedParams,
 				signal
 			})
 	})
@@ -61,10 +82,13 @@ export function driveItemStoredOfflineQueryUpdate({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 	dataUpdatedAt?: number
 }): void {
-	const sortedParams = sortParams(params)
+	const normalizedParams = sortParams({
+		uuid: params.uuid,
+		type: normalizeTypeForKey(params.type)
+	})
 
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
-		[BASE_QUERY_KEY, sortedParams],
+		[BASE_QUERY_KEY, normalizedParams],
 		prev => {
 			const currentData = prev ?? (false satisfies Awaited<ReturnType<typeof fetchData>>)
 
