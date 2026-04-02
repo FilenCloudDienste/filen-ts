@@ -111,7 +111,7 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 									>
 										{typeof badge === "string" ? (
 											<Text
-												className="text-white text-xs"
+												className="text-xs"
 												numberOfLines={1}
 												ellipsizeMode="middle"
 											>
