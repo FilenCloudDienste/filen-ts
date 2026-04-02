@@ -2,7 +2,7 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/routes/tabs/more"
 import cameraUpload, { useCameraUpload, DEFAULT_CONFIG } from "@/lib/cameraUpload"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
-import { Fragment, memo, useEffect, useCallback } from "react"
+import { Fragment, memo, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import alerts from "@/lib/alerts"
@@ -13,11 +13,10 @@ import { unwrapDirMeta } from "@/lib/utils"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
-import { Platform, ActivityIndicator, AppState } from "react-native"
-import { useSimpleQuery } from "@/hooks/useSimpleQuery"
-import * as MediaLibraryLegacy from "expo-media-library"
+import { Platform, ActivityIndicator } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
+import useMediaPermissions from "@/hooks/useMediaPermissions"
 
 const CameraUpload = memo(() => {
 	const { config, setConfig } = useCameraUpload()
@@ -27,35 +26,9 @@ const CameraUpload = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 
-	const permissionsQuery = useSimpleQuery(async () => {
-		const permissions = await MediaLibraryLegacy.getPermissionsAsync()
-
-		if (!permissions.granted) {
-			if (!permissions.canAskAgain) {
-				return false
-			}
-
-			const requestResult = await MediaLibraryLegacy.requestPermissionsAsync()
-
-			if (!requestResult.granted) {
-				return false
-			}
-		}
-
-		return true
+	const mediaPermissions = useMediaPermissions({
+		shouldRequest: true
 	})
-
-	useEffect(() => {
-		const subscription = AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "active" || nextAppState === "background") {
-				permissionsQuery.refetch()
-			}
-		})
-
-		return () => {
-			subscription.remove()
-		}
-	}, [permissionsQuery])
 
 	useFocusEffect(
 		useCallback(() => {
@@ -81,14 +54,14 @@ const CameraUpload = memo(() => {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				{permissionsQuery.status === "loading" ? (
+				{mediaPermissions.loading ? (
 					<View className="flex-1 bg-transparent items-center justify-center">
 						<ActivityIndicator
 							size="large"
 							color={textForeground.color as string}
 						/>
 					</View>
-				) : permissionsQuery.data ? (
+				) : mediaPermissions.granted ? (
 					<GestureHandlerScrollView
 						className="bg-transparent flex-1"
 						contentInsetAdjustmentBehavior="automatic"
@@ -358,7 +331,7 @@ const CameraUpload = memo(() => {
 							size={64}
 							color={textMutedForeground.color}
 						/>
-						<Text>tbd_no_permissions</Text>
+						<Text>tbd_no_permissions_enable_manually</Text>
 					</View>
 				)}
 			</SafeAreaView>
