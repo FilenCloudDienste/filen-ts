@@ -10,7 +10,6 @@ import { randomUUID } from "expo-crypto"
 import {
 	type File,
 	type Dir,
-	SharingRole_Tags,
 	type SharedFile,
 	type SharedDir,
 	type SharedRootDir,
@@ -40,9 +39,11 @@ import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
 
+export type OfflineParent = AnyDirWithContext | "sharedInRoot"
+
 export type FileOrDirectoryOfflineMeta = {
 	item: DriveItem
-	parent: AnyDirWithContext
+	parent: OfflineParent
 }
 
 export type DirectoryOfflineMeta = FileOrDirectoryOfflineMeta & {
@@ -61,14 +62,14 @@ export type Index = {
 		Uuid,
 		{
 			item: DriveItem
-			parent: AnyDirWithContext
+			parent: OfflineParent
 		}
 	>
 	directories: Record<
 		Uuid,
 		{
 			item: DriveItem
-			parent: AnyDirWithContext
+			parent: OfflineParent
 		}
 	>
 }
@@ -432,7 +433,11 @@ export class Offline {
 		}
 	}
 
-	private parentCacheKey(parent: AnyDirWithContext): string {
+	private parentCacheKey(parent: OfflineParent): string {
+		if (typeof parent === "string") {
+			return parent
+		}
+
 		switch (parent.tag) {
 			case AnyDirWithContext_Tags.Normal: {
 				switch (parent.inner[0].tag) {
@@ -509,7 +514,7 @@ export class Offline {
 					auth.getSdkClients()
 				])
 
-				const uniqueParents = new Map<string, AnyDirWithContext>()
+				const uniqueParents = new Map<string, OfflineParent>()
 
 				for (const { parent } of files) {
 					const key = this.parentCacheKey(parent)
@@ -539,6 +544,10 @@ export class Offline {
 				await Promise.all(
 					Array.from(uniqueParents.entries()).map(async ([key, parent]) => {
 						const listResult = await run(async () => {
+							if (typeof parent === "string") {
+								return await authedSdkClient.listInSharedRoot()
+							}
+
 							switch (parent.tag) {
 								case AnyDirWithContext_Tags.Normal: {
 									return await authedSdkClient.listDir(parent.inner[0])
@@ -546,34 +555,19 @@ export class Offline {
 
 								case AnyDirWithContext_Tags.Shared: {
 									switch (parent.inner[0].dir.tag) {
-										case AnySharedDir_Tags.Dir: {
-											const parentUuid = unwrapParentUuid(parent.inner[0].dir.inner[0].inner.parent)
-
-											if (!parentUuid) {
-												throw new Error("Shared directory is missing parent information.")
-											}
-
-											const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
-
-											if (!parentDirFromCache) {
-												throw new Error("Parent directory of shared directory not found in cache.")
-											}
-
-											return await authedSdkClient.listSharedDir(parent.inner[0].dir, parentDirFromCache.shareInfo)
-										}
-
+										case AnySharedDir_Tags.Dir:
 										case AnySharedDir_Tags.Root: {
-											if (parent.inner[0].shareInfo.tag === SharingRole_Tags.Sharer) {
-												return await authedSdkClient.listOutShared(undefined)
-											}
-
-											return await authedSdkClient.listInSharedRoot()
+											return await authedSdkClient.listSharedDir(parent.inner[0].dir, parent.inner[0].shareInfo)
 										}
 
 										default: {
 											throw new Error("Unsupported shared directory type for listing")
 										}
 									}
+								}
+
+								case AnyDirWithContext_Tags.Linked: {
+									throw new Error("Linked directories are not supported for listing in sync")
 								}
 
 								default: {
@@ -1100,7 +1094,7 @@ export class Offline {
 	public async listFiles(): Promise<
 		{
 			item: DriveItem
-			parent: AnyDirWithContext
+			parent: OfflineParent
 		}[]
 	> {
 		if (this.listFilesCache) {
@@ -1176,7 +1170,7 @@ export class Offline {
 		skipIndexUpdate
 	}: {
 		file: DriveItem
-		parent: AnyDirWithContext
+		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 	}): Promise<void> {
@@ -1279,7 +1273,7 @@ export class Offline {
 		force
 	}: {
 		directory: DriveItem
-		parent: AnyDirWithContext
+		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		force?: boolean
@@ -1397,7 +1391,7 @@ export class Offline {
 		}
 	}
 
-	private findParentAnyDirWithContext(pathToItem: Record<string, DriveItem>, dirname: string): AnyDirWithContext | null {
+	private findParentAnyDirWithContext(pathToItem: Record<string, DriveItem>, dirname: string): OfflineParent | null {
 		const item = pathToItem[dirname]
 
 		if (!item || (item.type !== "directory" && item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory")) {
@@ -1441,14 +1435,14 @@ export class Offline {
 		}
 	}
 
-	public async listDirectories(parent?: AnyDirWithContext): Promise<{
+	public async listDirectories(parent?: OfflineParent): Promise<{
 		files: {
 			item: DriveItem
-			parent: AnyDirWithContext
+			parent: OfflineParent
 		}[]
 		directories: {
 			item: DriveItem
-			parent: AnyDirWithContext
+			parent: OfflineParent
 		}[]
 	}> {
 		const cacheKey: string = parent ? this.parentCacheKey(parent) : "root"
@@ -1503,6 +1497,10 @@ export class Offline {
 		}
 
 		const parentUuid: string | null = (() => {
+			if (typeof parent === "string") {
+				return null
+			}
+
 			let parentUuid: string | null = null
 
 			switch (parent.tag) {

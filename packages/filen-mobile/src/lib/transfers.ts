@@ -642,6 +642,10 @@ class Transfers {
 			? createCompositeAbortSignal(transferAbortController.signal)
 			: createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
+		if (item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
+			console.log(item.data)
+		}
+
 		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 			const result = await run(async defer => {
 				defer(() => {
@@ -772,12 +776,7 @@ class Transfers {
 								throw new Error("Parent directory of shared directory not found in cache.")
 							}
 
-							return new AnyDirWithContext.Shared(
-								AnySharedDirWithContext.new({
-									dir: new AnySharedDir.Dir(item.data),
-									shareInfo: parentDirFromCache.shareInfo
-								})
-							)
+							return new AnyDirWithContext.Shared(parentDirFromCache)
 						}
 
 						case "sharedRootDirectory": {
