@@ -2,16 +2,13 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
-const { mockAlertsError, mockUnwrapSdkError } = vi.hoisted(() => ({
-	mockAlertsError: vi.fn(),
+const { mockUnwrapSdkError } = vi.hoisted(() => ({
 	mockUnwrapSdkError: vi.fn().mockReturnValue(null)
 }))
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("@/lib/alerts", () => ({
-	default: { error: mockAlertsError }
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("@/lib/utils", () => ({
 	unwrapSdkError: (...args: unknown[]) => mockUnwrapSdkError(...args)
@@ -23,6 +20,7 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { renderHook, waitFor, act } from "@testing-library/react"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
+import alerts from "@/lib/alerts"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -106,7 +104,7 @@ describe("useSimpleQuery", () => {
 			expect(result.current.isError).toBe(true)
 			expect(result.current.error).toBe(error)
 			expect(result.current.data).toBeNull()
-			expect(mockAlertsError).toHaveBeenCalledWith(error)
+			expect(alerts.error).toHaveBeenCalledWith(error)
 
 			consoleError.mockRestore()
 		})
@@ -164,7 +162,7 @@ describe("useSimpleQuery", () => {
 
 			// Stopped retrying after success on attempt 3
 			expect(callCount).toBe(3)
-			expect(mockAlertsError).not.toHaveBeenCalled()
+			expect(alerts.error).not.toHaveBeenCalled()
 		})
 
 		it("does not retry on auth errors", async () => {
@@ -271,6 +269,61 @@ describe("useSimpleQuery", () => {
 
 			expect(firstSignal.aborted).toBe(true)
 			expect(signals[1]!.aborted).toBe(false)
+		})
+	})
+
+	describe("loading state", () => {
+		it("isLoading is true during execution", async () => {
+			let resolveQuery: ((value: string) => void) | null = null
+
+			const { result } = renderHook(() =>
+				useSimpleQuery(async () => {
+					return new Promise<string>(resolve => {
+						resolveQuery = resolve
+					})
+				})
+			)
+
+			await waitFor(() => {
+				expect(result.current.isLoading).toBe(true)
+			})
+
+			expect(result.current.status).toBe("loading")
+			expect(result.current.data).toBeNull()
+
+			await act(async () => {
+				resolveQuery!("done")
+			})
+
+			await waitFor(() => {
+				expect(result.current.isSuccess).toBe(true)
+			})
+
+			expect(result.current.data).toBe("done")
+		})
+	})
+
+	describe("default retry", () => {
+		it("uses default retry count when option omitted", async () => {
+			vi.useFakeTimers()
+
+			let callCount = 0
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			renderHook(() =>
+				useSimpleQuery(async () => {
+					callCount++
+
+					throw new Error("fail")
+				})
+			)
+
+			await vi.runAllTimersAsync()
+
+			// 1 initial + 5 default retries = 6 total
+			expect(callCount).toBe(6)
+
+			consoleError.mockRestore()
 		})
 	})
 })

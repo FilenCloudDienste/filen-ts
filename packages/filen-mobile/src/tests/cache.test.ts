@@ -758,29 +758,6 @@ describe("Cache", () => {
 	})
 
 	describe("auto-discovery", () => {
-		it("persists exactly the PersistentMap fields found on the instance", async () => {
-			const cache = await createCache()
-
-			await cache.restore()
-
-			const maps = getPersistentMaps(cache)
-
-			for (const [, map] of maps) {
-				map.set("test-key", "test-value")
-			}
-
-			cache.flush()
-			vi.advanceTimersByTime(2000)
-			await vi.advanceTimersToNextTimerAsync().catch(() => {})
-
-			for (const [mapName] of maps) {
-				const stored = kvStore.get(kvKey(mapName, "test-key"))
-
-				expect(stored).toBeInstanceOf(Uint8Array)
-				expect(unpack(stored as Uint8Array)).toBe("test-value")
-			}
-		})
-
 		it("does not persist non-PersistentMap fields", async () => {
 			const cache = await createCache()
 

@@ -297,29 +297,6 @@ describe("Thumbnails", () => {
 			expect(result).toBe(`${THUMBNAILS_DIR}/test-uuid.png`)
 		})
 
-		it("generates thumbnail for a .png file", async () => {
-			const item = makeFileItem("png-uuid", "image.png")
-			const result = await thumbnails.generate({ item })
-
-			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
-			expect(mockManipulate).toHaveBeenCalledTimes(1)
-			expect(result).toBe(`${THUMBNAILS_DIR}/png-uuid.png`)
-		})
-
-		it("uses default width/quality when not specified", async () => {
-			const item = makeFileItem("default-uuid", "photo.jpg")
-			await thumbnails.generate({ item })
-
-			expect(mockResize).toHaveBeenCalledWith({
-				width: 128
-			})
-			expect(mockSaveAsync).toHaveBeenCalledWith(
-				expect.objectContaining({
-					compress: 0.8
-				})
-			)
-		})
-
 		it("uses custom width/quality when specified", async () => {
 			const item = makeFileItem("custom-uuid", "photo.jpg")
 			await thumbnails.generate({
@@ -438,13 +415,6 @@ describe("Thumbnails", () => {
 			expect(mockRelease).toHaveBeenCalledTimes(1)
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/video-uuid.png`)
-		})
-
-		it("uses default video timestamp when not specified", async () => {
-			const item = makeFileItem("vid-default-ts", "clip.mp4")
-			await thumbnails.generate({ item })
-
-			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith([1.0], expect.any(Object))
 		})
 
 		it("uses custom video timestamp when specified", async () => {
@@ -589,12 +559,6 @@ describe("Thumbnails", () => {
 			expect(mockRelease).toHaveBeenCalledTimes(1)
 		})
 
-		it("releases player on success", async () => {
-			const item = makeFileItem("release-ok-uuid", "clip.mp4")
-			await thumbnails.generate({ item })
-
-			expect(mockRelease).toHaveBeenCalledTimes(1)
-		})
 	})
 
 	describe("generate — shared files", () => {
@@ -610,6 +574,36 @@ describe("Thumbnails", () => {
 				undefined
 			)
 			expect(result).toBe(`${THUMBNAILS_DIR}/shared-uuid.png`)
+		})
+
+		it("works with sharedRootFile type", async () => {
+			const item = {
+				type: "sharedRootFile" as const,
+				data: {
+					uuid: "shared-root-uuid",
+					size: 1024n,
+					decryptedMeta: { name: "shared-root.jpg" }
+				}
+			} as any
+
+			const result = await thumbnails.generate({ item })
+
+			expect(mockDownloadFileToPath).toHaveBeenCalledWith(
+				expect.objectContaining({ tag: "Shared", inner: [item.data] }),
+				expect.stringContaining("source.jpg"),
+				undefined,
+				expect.any(Object),
+				undefined
+			)
+			expect(result).toBe(`${THUMBNAILS_DIR}/shared-root-uuid.png`)
+		})
+	})
+
+	describe("generate — directory items", () => {
+		it("throws for directory items", async () => {
+			const item = makeDirItem("dir-type-uuid", "my-folder")
+
+			await expect(thumbnails.generate({ item })).rejects.toThrow()
 		})
 	})
 

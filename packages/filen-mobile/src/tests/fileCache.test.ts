@@ -26,42 +26,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-vi.mock("@filen/utils", () => {
-	class Semaphore {
-		async acquire(): Promise<void> {}
-		release(): void {}
-	}
-
-	async function run(fn: (defer: (cleanup: () => void) => void) => Promise<any>, opts?: { throw?: boolean }): Promise<any> {
-		const cleanups: (() => void)[] = []
-
-		const defer = (cleanup: () => void) => {
-			cleanups.push(cleanup)
-		}
-
-		try {
-			const data = await fn(defer)
-
-			for (const cleanup of cleanups) {
-				cleanup()
-			}
-
-			return opts?.throw ? data : { success: true, data }
-		} catch (error) {
-			for (const cleanup of cleanups) {
-				cleanup()
-			}
-
-			if (opts?.throw) {
-				throw error
-			}
-
-			return { success: false, error }
-		}
-	}
-
-	return { Semaphore, run }
-})
+vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 
 vi.mock("@/lib/auth", () => ({
 	default: {

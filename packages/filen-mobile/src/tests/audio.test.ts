@@ -62,48 +62,9 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: {
-		error: vi.fn()
-	}
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-vi.mock("@filen/utils", () => {
-	class Semaphore {
-		async acquire(): Promise<void> {}
-		release(): void {}
-	}
-
-	async function run(fn: (defer: (cleanup: () => void) => void) => Promise<any>, opts?: { throw?: boolean }): Promise<any> {
-		const cleanups: (() => void)[] = []
-
-		const defer = (cleanup: () => void) => {
-			cleanups.push(cleanup)
-		}
-
-		try {
-			const data = await fn(defer)
-
-			for (const cleanup of cleanups) {
-				cleanup()
-			}
-
-			return opts?.throw ? data : { success: true, data }
-		} catch (error) {
-			for (const cleanup of cleanups) {
-				cleanup()
-			}
-
-			if (opts?.throw) {
-				throw error
-			}
-
-			return { success: false, error }
-		}
-	}
-
-	return { Semaphore, run }
-})
+vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 
 vi.mock("expo-file-system", () => ({
 	Paths: {
@@ -343,6 +304,38 @@ describe("Audio", () => {
 			expect(playlist.seekTo).toHaveBeenCalledWith(0)
 			expect(playlist.clearLockScreenControls).toHaveBeenCalled()
 		})
+
+		it("ignores out-of-bounds negative index", async () => {
+			const { audio } = await createAudio()
+
+			await audio.addToQueue({ item: makeFileItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeFileItem("b", "b.mp3") })
+
+			const queueBefore = audio.getQueue().slice()
+
+			audio.removeFromQueue(-1)
+
+			expect(audio.getQueue()).toHaveLength(2)
+			expect(audio.getQueue()[0]!.item).toBe(queueBefore[0]!.item)
+			expect(audio.getQueue()[1]!.item).toBe(queueBefore[1]!.item)
+		})
+
+		it("adjusts queuePosition when removing current at last position", async () => {
+			const { audio } = await createAudio()
+
+			await audio.addToQueue({ item: makeFileItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeFileItem("b", "b.mp3") })
+			await audio.addToQueue({ item: makeFileItem("c", "c.mp3") })
+
+			audio.skipTo(2)
+
+			expect(audio.getQueuePosition()).toBe(2)
+
+			audio.removeFromQueue(2)
+
+			expect(audio.getQueue()).toHaveLength(2)
+			expect(audio.getQueuePosition()).toBe(1)
+		})
 	})
 
 	describe("clearQueue", () => {
@@ -460,6 +453,18 @@ describe("Audio", () => {
 
 			expect(audio.getQueue()).toHaveLength(0)
 		})
+
+		it("does nothing when no item given and queue is empty", async () => {
+			const { audio, playlist } = await createAudio()
+
+			playlist.play.mockClear()
+			playlist.replace.mockClear()
+
+			await audio.play()
+
+			expect(playlist.play).not.toHaveBeenCalled()
+			expect(playlist.replace).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("pausePlaylist / resumePlaylist", () => {
@@ -546,18 +551,6 @@ describe("Audio", () => {
 			expect(playlist.replace).not.toHaveBeenCalled()
 		})
 
-		it("bumps operationId", async () => {
-			const { audio } = await createAudio()
-
-			await audio.addToQueue({ item: makeFileItem("a", "a.mp3") })
-			await audio.addToQueue({ item: makeFileItem("b", "b.mp3") })
-
-			const beforeQueue = audio.getQueue().length
-
-			audio.next()
-
-			expect(audio.getQueue().length).toBe(beforeQueue)
-		})
 	})
 
 	describe("previous", () => {
@@ -630,22 +623,6 @@ describe("Audio", () => {
 			expect(audio.getQueuePosition()).toBe(0)
 		})
 
-		it("bumps operationId", async () => {
-			const { audio, playlist } = await createAudio()
-
-			await audio.addToQueue({ item: makeFileItem("a", "a.mp3") })
-			await audio.addToQueue({ item: makeFileItem("b", "b.mp3") })
-
-			audio.skipTo(1)
-
-			const beforeQueue = audio.getQueue().length
-
-			playlist.currentTime = 0
-
-			audio.previous()
-
-			expect(audio.getQueue().length).toBe(beforeQueue)
-		})
 	})
 
 	describe("seekPlaylist / stopPlaylist", () => {
@@ -673,15 +650,6 @@ describe("Audio", () => {
 			expect(playlist.clearLockScreenControls).toHaveBeenCalled()
 		})
 
-		it("stop bumps operationId", async () => {
-			const { audio, playlist } = await createAudio()
-
-			await audio.addToQueue({ item: makeFileItem("a", "a.mp3") })
-
-			audio.stopPlaylist()
-
-			expect(playlist.pause).toHaveBeenCalled()
-		})
 	})
 
 	describe("setLoopMode", () => {
@@ -800,16 +768,6 @@ describe("Audio", () => {
 			expect(playlist.replace).not.toHaveBeenCalled()
 		})
 
-		it("bumps operationId", async () => {
-			const { audio } = await createAudio()
-
-			await audio.addToQueue({ item: makeFileItem("a", "a.mp3") })
-			await audio.addToQueue({ item: makeFileItem("b", "b.mp3") })
-
-			audio.skipTo(1)
-
-			expect(audio.getQueuePosition()).toBe(1)
-		})
 	})
 
 	describe("enterPreviewMode", () => {
@@ -991,16 +949,6 @@ describe("Audio", () => {
 			expect(audio.getPreviewItem()).toBeNull()
 		})
 
-		it("bumps operationId", async () => {
-			const { audio } = await createAudio()
-			const item = makeFileItem("prev", "preview.mp3")
-
-			await audio.enterPreviewMode({ item })
-
-			audio.exitPreviewMode()
-
-			expect(audio.getMode()).toBe("queue")
-		})
 	})
 
 	describe("handlePlaylistTrackEnd", () => {
@@ -1156,6 +1104,12 @@ describe("Audio", () => {
 			audio.skipTo(1)
 
 			expect(audio.getCurrentQueueItem()!.item).toBe(itemB)
+		})
+
+		it("getCurrentQueueItem returns null when queue is empty", async () => {
+			const { audio } = await createAudio()
+
+			expect(audio.getCurrentQueueItem()).toBeNull()
 		})
 	})
 })

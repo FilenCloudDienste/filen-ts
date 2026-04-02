@@ -4117,4 +4117,585 @@ describe("Offline", () => {
 			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(false)
 		})
 	})
+
+	describe("sharedInRoot parent integration", () => {
+		beforeEach(() => {
+			fs.clear()
+			vi.clearAllMocks()
+		})
+
+		it("storeFile persists sharedInRoot parent in meta", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "shared-root-file.txt")
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }) => {
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([10, 20, 30]))
+				}
+
+				return { files: [], directories: [] }
+			})
+
+			const offline = await createOffline()
+
+			await offline.storeFile({ file: fileItem, parent: "sharedInRoot" })
+
+			// Meta file should exist
+			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
+
+			expect(fs.get(metaUri)).toBeInstanceOf(Uint8Array)
+
+			const meta = unpack(fs.get(metaUri) as Uint8Array) as FileOrDirectoryOfflineMeta
+
+			expect(meta.parent).toBe("sharedInRoot")
+
+			// Index should be updated
+			expect(fs.get(INDEX_FILE_URI)).toBeInstanceOf(Uint8Array)
+
+			const index = unpack(fs.get(INDEX_FILE_URI) as Uint8Array) as Index
+
+			expect(index.files[uuid]).toBeDefined()
+			expect(index.files[uuid]!.parent).toBe("sharedInRoot")
+		})
+
+		it("storeDirectory persists sharedInRoot parent in meta", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const dirItem = makeDirItem(uuid, "shared-root-dir")
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/readme.md`, new Uint8Array([1, 2]))
+
+				return {
+					files: [
+						{
+							file: { uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
+							path: `${destUri}/readme.md`
+						}
+					],
+					directories: []
+				}
+			})
+
+			const offline = await createOffline()
+
+			await offline.storeDirectory({ directory: dirItem, parent: "sharedInRoot" })
+
+			// Meta file should exist
+			const metaUri = `${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`
+
+			expect(fs.get(metaUri)).toBeInstanceOf(Uint8Array)
+
+			const meta = unpack(fs.get(metaUri) as Uint8Array) as DirectoryOfflineMeta
+
+			expect(meta.parent).toBe("sharedInRoot")
+		})
+
+		it("listFiles returns sharedInRoot as the parent", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "shared-listed.txt")
+
+			writeFileData(uuid, "shared-listed.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: "sharedInRoot" })
+
+			const offline = await createOffline()
+			const files = await offline.listFiles()
+
+			expect(files).toHaveLength(1)
+			expect(files[0].item.data.uuid).toBe(uuid)
+			expect(files[0].parent).toBe("sharedInRoot")
+		})
+
+		it("listDirectories with sharedInRoot parent returns empty results", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "shared-file.txt")
+
+			writeFileData(uuid, "shared-file.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: "sharedInRoot" })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const result = await offline.listDirectories("sharedInRoot")
+
+			expect(result.files).toEqual([])
+			expect(result.directories).toEqual([])
+		})
+
+		it("sync removes file when no longer in sharedInRoot remote listing", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "gone-shared.txt")
+
+			writeFileData(uuid, "gone-shared.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: "sharedInRoot" })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(fileItem)).toBe(true)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listInSharedRoot: vi.fn().mockResolvedValue({ files: [], dirs: [] })
+				}
+			} as any)
+
+			await offline.sync()
+
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/gone-shared.txt`)).toBe(false)
+		})
+
+		it("sync keeps file when still present in sharedInRoot remote listing", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "kept-shared.txt")
+
+			writeFileData(uuid, "kept-shared.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: "sharedInRoot" })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(fileItem)).toBe(true)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listInSharedRoot: vi.fn().mockResolvedValue({
+						files: [
+							{
+								uuid,
+								meta: { tag: "Decoded", inner: [{ name: "kept-shared.txt", size: 100n, modified: 1000, created: 900 }] }
+							}
+						],
+						dirs: []
+					})
+				}
+			} as any)
+
+			await offline.sync()
+
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/kept-shared.txt`)).toBe(true)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(true)
+		})
+	})
+
+	describe("sync coverage gaps", () => {
+		it("sync removes directory when parent folder is not found remotely (FolderNotFound)", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "orphaned-dir")
+			const parent = makeParent(parentUuid)
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(dirItem)).toBe(true)
+
+			// Mock SDK to throw FolderNotFound
+			const folderNotFoundError = new Error("Folder not found")
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockRejectedValue(folderNotFoundError)
+				}
+			} as any)
+
+			// Make unwrapSdkError return an error with kind() === FolderNotFound
+			const { unwrapSdkError } = await import("@/lib/utils")
+
+			vi.mocked(unwrapSdkError).mockReturnValueOnce({
+				kind: () => "FolderNotFound"
+			} as any)
+
+			await offline.sync()
+
+			// Directory data should be cleaned up since parent folder doesn't exist
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}`)).toBe(false)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`)).toBe(false)
+		})
+
+		it("sync cleans up directory when directoryMeta unpacks to empty object", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "EmptyMeta")
+			const parent = makeParent(parentUuid)
+
+			// Store the directory normally first
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(dirItem)).toBe(true)
+
+			// Overwrite the .filenmeta with a valid msgpack encoding of {} (empty object)
+			const metaUri = `${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`
+
+			fs.set(metaUri, new Uint8Array(pack({})))
+
+			// Remote listing: directory still exists
+			const remoteDir = {
+				uuid: dirUuid,
+				meta: { tag: "Decoded", inner: [{ name: "EmptyMeta" }] }
+			}
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [remoteDir]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: []
+					})
+				}
+			} as any)
+
+			await offline.sync()
+
+			// Directory should be cleaned up because directoryMeta unpacks to empty object
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}`)).toBe(false)
+		})
+
+		it("sync handles file with missing decryptedMeta gracefully", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const parent = makeParent(parentUuid)
+
+			// Create a file item with null decryptedMeta
+			const fileItem = {
+				type: "file",
+				data: {
+					uuid,
+					decryptedMeta: null
+				}
+			} as unknown as DriveItem
+
+			// Write data and meta for this null-meta file
+			const dirUri = `${FILES_DIR_URI}/${uuid}`
+			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
+
+			fs.set(dirUri, "dir")
+			fs.set(`${dirUri}/somefile.txt`, new Uint8Array([1, 2, 3]))
+			fs.set(metaUri, new Uint8Array(pack({ item: fileItem, parent })))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Mock SDK to return the file in the listing
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [
+							{
+								uuid,
+								meta: { tag: "Decoded", inner: [{ name: "somefile.txt", size: 100n, modified: 1000, created: 900 }] }
+							}
+						],
+						dirs: []
+					})
+				}
+			} as any)
+
+			// Sync should not crash
+			await expect(offline.sync()).resolves.not.toThrow()
+
+			// File should still exist (skipped, not deleted or re-downloaded)
+			expect(fs.has(dirUri)).toBe(true)
+		})
+
+		it("sync handles directory with missing meta file gracefully", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "MissingMeta")
+			const parent = makeParent(parentUuid)
+
+			// Store the directory normally
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(dirItem)).toBe(true)
+
+			// Delete the .filenmeta but keep the data directory
+			const metaUri = `${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`
+
+			fs.delete(metaUri)
+
+			// Mock SDK to return the directory in the listing
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [{ uuid: dirUuid, meta: { tag: "Decoded", inner: [{ name: "MissingMeta" }] } }]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: []
+					})
+				}
+			} as any)
+
+			// Sync should not crash — it should return early for this directory
+			await expect(offline.sync()).resolves.not.toThrow()
+		})
+
+		it("sync skips linked directories in recursive content comparison", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "WithLinked")
+			const parent = makeParent(parentUuid)
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(dirItem)).toBe(true)
+
+			// Remote listing: directory exists, recursive listing includes a Linked directory entry
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [{ uuid: dirUuid, meta: { tag: "Decoded", inner: [{ name: "WithLinked" }] } }]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [
+							{
+								dir: { tag: NonRootDir_Tags.Linked, inner: [{ uuid: "linked-uuid" }] },
+								path: "/linked-dir"
+							}
+						]
+					})
+				}
+			} as any)
+
+			// Sync should not crash and linked dir should be skipped
+			await expect(offline.sync()).resolves.not.toThrow()
+
+			// The directory should still be intact (not deleted)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`)).toBe(true)
+		})
+	})
+
+	describe("edge case coverage", () => {
+		it("isItemStored returns true for sharedRootFile type", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const sharedRootFileItem = {
+				type: "sharedRootFile",
+				data: {
+					uuid,
+					decryptedMeta: { name: "shared-root.txt", size: 50n, modified: 1000, created: 900 }
+				}
+			} as unknown as DriveItem
+
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeFileData(uuid, "shared-root.txt")
+			writeFileMeta(uuid, { item: sharedRootFileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(sharedRootFileItem)).toBe(true)
+		})
+
+		it("storeDirectory handles null download result gracefully", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const dirItem = makeDirItem(uuid, "NullDownload")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			// Mock download to return undefined (null result)
+			vi.mocked(transfers.download).mockImplementationOnce(async () => {
+				return undefined as any
+			})
+
+			const offline = await createOffline()
+
+			await offline.storeDirectory({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			// Meta file should NOT be written because the `if (transferred)` guard skips it
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(false)
+		})
+
+		it("listFiles skips entries where meta file is missing but data file exists", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			// Write only the data file — no meta file
+			writeFileData(uuid, "orphan-data.txt")
+
+			const offline = await createOffline()
+			const files = await offline.listFiles()
+
+			expect(files).toHaveLength(0)
+		})
+
+		it("listFiles skips entries where meta file has zero size", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			// Write data file
+			writeFileData(uuid, "zero-meta.txt")
+
+			// Write zero-byte meta file
+			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
+
+			fs.set(`${FILES_DIR_URI}/${uuid}`, "dir")
+			fs.set(metaUri, new Uint8Array([]))
+
+			const offline = await createOffline()
+			const files = await offline.listFiles()
+
+			expect(files).toHaveLength(0)
+		})
+
+		it("readDirectoryMeta returns null for valid msgpack of empty object", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			// Write a valid msgpack encoding of {} (empty object)
+			// This triggers the Object.keys(meta).length === 0 check
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`, new Uint8Array(pack({})))
+
+			const offline = await createOffline()
+			const result = await offline.listDirectories()
+
+			// Empty object meta should be skipped — directory should not appear
+			expect(result.directories).toHaveLength(0)
+		})
+
+		it("readIndex handles zero-byte index file", async () => {
+			// Write a zero-byte file at the index file path
+			fs.set(BASE_DIR_URI, "dir")
+			fs.set(FILES_DIR_URI, "dir")
+			fs.set(DIRECTORIES_DIR_URI, "dir")
+			fs.set(INDEX_FILE_URI, new Uint8Array([]))
+
+			const offline = await createOffline()
+
+			// Should not crash — zero-byte index triggers early return with empty index
+			const stored = await offline.isItemStored(makeFileItem("11111111-1111-1111-1111-111111111111", "test.txt"))
+
+			expect(stored).toBe(false)
+		})
+
+		it("findParentAnyDirWithContext returns null for file-type item in path", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+			const childFileUuid = "22222222-2222-2222-2222-222222222222"
+			const nestedFileUuid = "33333333-3333-3333-3333-333333333333"
+			const parent = makeParent("44444444-4444-4444-4444-444444444444")
+
+			// Create a directory where one of the entries at a dirname position is a file, not a directory.
+			// Put a file at path "/fakedir" and a file at path "/fakedir/nested.txt".
+			// When listDirectories tries to find the parent for "/fakedir/nested.txt" it looks up
+			// pathToItem["/fakedir"] — which is a file item. findParentAnyDirWithContext returns null,
+			// so the nested entry is skipped.
+			const fakeDir = makeFileItem(childFileUuid, "fakedir")
+			const nestedFile = makeFileItem(nestedFileUuid, "nested.txt")
+
+			writeDirectoryMeta(topUuid, {
+				item: makeDirItem(topUuid, "Root"),
+				parent,
+				entries: {
+					"/fakedir": { item: fakeDir },
+					"/fakedir/nested.txt": { item: nestedFile }
+				}
+			})
+
+			const offline = await createOffline()
+
+			// List children of the top-level directory
+			const topParent = new AnyDirWithContext.Normal(new AnyNormalDir.Dir({ uuid: topUuid } as unknown as Dir))
+			const result = await offline.listDirectories(topParent)
+
+			// "/fakedir" is a file type, so it appears in files but does NOT populate pathToItem.
+			// "/fakedir/nested.txt" has dirname "/fakedir" which matches targetPath "/" => no,
+			// its dirname is "/fakedir" not "/". But the direct children are at dirname "/".
+			// Since "/fakedir" is a file type at the top level (dirname "/"), it shows as a file.
+			// "/fakedir/nested.txt" has dirname "/fakedir" != "/" so it won't be a direct child.
+			// The key test: if we list the children of the sub-level...
+			// Actually the file at "/fakedir" won't be put into pathToItem (only dirs go there).
+			// So if we try listing children of childFileUuid, no path maps to it => empty result.
+			expect(result.files).toHaveLength(1)
+			expect(result.files[0].item.data.uuid).toBe(childFileUuid)
+			expect(result.directories).toHaveLength(0)
+
+			// Now try listing children of the fake "directory" which is actually a file.
+			// Since it's a file, it has no entry in pathToItem, so targetPath is undefined => empty.
+			const fakeParent = new AnyDirWithContext.Normal(new AnyNormalDir.Dir({ uuid: childFileUuid } as unknown as Dir))
+			const nestedResult = await offline.listDirectories(fakeParent)
+
+			// The nested file under "/fakedir/nested.txt" should be skipped because
+			// pathToItem["/fakedir"] doesn't exist (only dir types are added to pathToItem)
+			expect(nestedResult.files).toHaveLength(0)
+			expect(nestedResult.directories).toHaveLength(0)
+		})
+
+		it("parentCacheKey returns correct key for Linked Root parent", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "linked-root-file.txt")
+
+			// Create a Linked Root parent context
+			const linkedRootParent = {
+				tag: "Linked",
+				inner: [
+					{
+						dir: { tag: "Root", inner: [{ inner: { uuid: parentUuid } }] }
+					}
+				]
+			}
+
+			writeFileData(uuid, "linked-root-file.txt")
+			writeFileMeta(uuid, { item: fileItem, parent: linkedRootParent as any })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Sync will call parentCacheKey (Linked Root branch) producing "linked-root:{uuid}"
+			// Then it hits "Linked directories are not supported for listing in sync" error
+			// which is caught and the parent is skipped
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {}
+			} as any)
+
+			await expect(offline.sync()).resolves.not.toThrow()
+
+			// File should be preserved since the parent listing was skipped (error caught)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/linked-root-file.txt`)).toBe(true)
+		})
+	})
 })

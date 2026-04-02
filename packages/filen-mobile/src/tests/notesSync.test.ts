@@ -14,52 +14,12 @@ const { kvStore, notesState, mockNotesSetContent, mockFetchNotesWithContent, moc
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/utils", () => ({
-	run: vi.fn(async (fn: Function) => {
-		const defers: Function[] = []
-
-		try {
-			const data = await fn((cb: Function) => {
-				defers.push(cb)
-			})
-
-			for (const d of defers.reverse()) {
-				await d()
-			}
-
-			return { success: true, data }
-		} catch (error) {
-			for (const d of defers.reverse()) {
-				try {
-					await d()
-				} catch {}
-			}
-
-			return { success: false, error }
-		}
-	}),
-	Semaphore: class {
-		acquire() {
-			return Promise.resolve()
-		}
-		release() {}
-	},
+vi.mock("@filen/utils", async () => ({
+	...await import("@/tests/mocks/filenUtils"),
 	createExecutableTimeout: (...args: unknown[]) => mockCreateExecutableTimeout(...args)
 }))
 
-vi.mock("@/lib/sqlite", () => ({
-	default: {
-		kvAsync: {
-			get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
-			set: vi.fn(async (key: string, value: unknown) => {
-				kvStore.set(key, value)
-			}),
-			remove: vi.fn(async (key: string) => {
-				kvStore.delete(key)
-			})
-		}
-	}
-}))
+vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
 vi.mock("@/stores/useNotes.store", () => {
 	const mockSetInflightContent = vi.fn((fn: unknown) => {
@@ -90,11 +50,7 @@ vi.mock("@/queries/useNotesWithContent.query", () => ({
 	fetchData: mockFetchNotesWithContent
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: {
-		error: vi.fn()
-	}
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 import { Sync } from "@/components/notes/sync"
 import sqlite from "@/lib/sqlite"
@@ -274,6 +230,16 @@ describe("Sync (Notes)", () => {
 			await sync.flushToDisk({})
 
 			expect(kvStore.has(KV_KEY)).toBe(false)
+		})
+
+		it("catches write errors", async () => {
+			const sync = await createSync()
+
+			vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
+
+			await sync.flushToDisk({
+				"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
+			})
 		})
 	})
 

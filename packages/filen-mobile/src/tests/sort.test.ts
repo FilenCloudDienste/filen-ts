@@ -78,7 +78,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([file10, file2, file1], "nameAsc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["file1.txt", "file2.txt", "file10.txt"])
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["file1.txt", "file2.txt", "file10.txt"])
 		})
 
 		it("sorts nameDesc in reverse natural order", () => {
@@ -88,7 +88,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([file1, file10, file2], "nameDesc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["file10.txt", "file2.txt", "file1.txt"])
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["file10.txt", "file2.txt", "file1.txt"])
 		})
 
 		it("places directories before files regardless of sort direction", () => {
@@ -109,7 +109,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([large, small, medium], "sizeAsc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["s.txt", "m.txt", "l.txt"])
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["s.txt", "m.txt", "l.txt"])
 		})
 
 		it("sorts sizeDesc by file size descending", () => {
@@ -118,7 +118,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([small, large], "sizeDesc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["l.txt", "s.txt"])
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["l.txt", "s.txt"])
 		})
 
 		it("sorts lastModifiedAsc by modification timestamp", () => {
@@ -127,7 +127,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([recent, old], "lastModifiedAsc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
 		})
 
 		it("sorts lastModifiedDesc by modification timestamp descending", () => {
@@ -136,7 +136,7 @@ describe("itemSorter", () => {
 
 			const result = itemSorter.sortItems([old, recent], "lastModifiedDesc")
 
-			expect(result.map(i => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
 		})
 
 		it("treats file and sharedFile as equal rank (both non-directory)", () => {
@@ -275,6 +275,82 @@ describe("notesSorter", () => {
 			const result2 = notesSorter.sort([noteC, noteA, noteB])
 
 			expect(result1.map(n => n.uuid)).toEqual(result2.map(n => n.uuid))
+		})
+	})
+
+	describe("additional sort modes", () => {
+		it("sorts by mime type ascending", () => {
+			const text = makeItem("file", "readme.txt", { mime: "text/plain" })
+			const image = makeItem("file", "photo.png", { mime: "image/png" })
+			const app = makeItem("file", "data.bin", { mime: "application/octet-stream" })
+
+			const result = itemSorter.sortItems([text, image, app], "mimeAsc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["data.bin", "photo.png", "readme.txt"])
+		})
+
+		it("sorts by mime type descending", () => {
+			const text = makeItem("file", "readme.txt", { mime: "text/plain" })
+			const image = makeItem("file", "photo.png", { mime: "image/png" })
+			const app = makeItem("file", "data.bin", { mime: "application/octet-stream" })
+
+			const result = itemSorter.sortItems([text, image, app], "mimeDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["readme.txt", "photo.png", "data.bin"])
+		})
+
+		it("sorts by upload date ascending", () => {
+			const older = makeItem("file", "old.txt", { timestamp: 1000 })
+			const newer = makeItem("file", "new.txt", { timestamp: 5000 })
+
+			const result = itemSorter.sortItems([newer, older], "uploadDateAsc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
+		})
+
+		it("sorts by upload date descending", () => {
+			const older = makeItem("file", "old.txt", { timestamp: 1000 })
+			const newer = makeItem("file", "new.txt", { timestamp: 5000 })
+
+			const result = itemSorter.sortItems([newer, older], "uploadDateDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
+		})
+
+		it("sorts by creation date ascending", () => {
+			const older = makeItem("file", "old.txt", { created: 1000, timestamp: 9000 })
+			const newer = makeItem("file", "new.txt", { created: 5000, timestamp: 1000 })
+
+			const result = itemSorter.sortItems([newer, older], "creationAsc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
+		})
+
+		it("sorts by creation date descending", () => {
+			const older = makeItem("file", "old.txt", { created: 1000, timestamp: 9000 })
+			const newer = makeItem("file", "new.txt", { created: 5000, timestamp: 1000 })
+
+			const result = itemSorter.sortItems([newer, older], "creationDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
+		})
+
+		it("uses uuid as tiebreaker for equal upload dates", () => {
+			const a = makeItem("file", "a.txt", { uuid: "00000000-0000-0000-0000-000000000001", timestamp: 1000 })
+			const b = makeItem("file", "b.txt", { uuid: "00000000-0000-0000-0000-000000000099", timestamp: 1000 })
+
+			const resultAsc = itemSorter.sortItems([b, a], "uploadDateAsc")
+			const resultDesc = itemSorter.sortItems([a, b], "uploadDateDesc")
+
+			// Both items have equal timestamps, so uuid determines order
+			// Ascending and descending should produce opposite orders
+			const ascNames = resultAsc.map((i: DriveItem) => i.data.decryptedMeta?.name)
+			const descNames = resultDesc.map((i: DriveItem) => i.data.decryptedMeta?.name)
+
+			expect(ascNames).toHaveLength(2)
+			expect(descNames).toHaveLength(2)
+			expect(ascNames[0]).toBe(descNames[1])
+			expect(ascNames[1]).toBe(descNames[0])
 		})
 	})
 })

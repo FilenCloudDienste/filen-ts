@@ -377,6 +377,70 @@ describe("AudioCache", () => {
 
 			expect(result.metadata).toBeNull()
 		})
+
+		it("returns null metadata when audio file does not exist after download", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-dl-noexist"
+			const name = "song.mp3"
+			const item = makeFileItem(uuid, name)
+
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
+
+			// Return a File that does NOT exist in the mock FS
+			vi.mocked(fileCache.get).mockImplementationOnce(async () => mockAudioFile as any)
+
+			const result = await cache.get({ item })
+
+			expect(result.metadata).toBeNull()
+
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			expect(fs.has(metaPath)).toBe(false)
+		})
+
+		it("works with sharedFile type items", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-shared"
+			const name = "shared-song.mp3"
+			const item = {
+				type: "sharedFile" as const,
+				data: {
+					uuid,
+					decryptedMeta: {
+						name,
+						size: 100n,
+						modified: 1000,
+						created: 900,
+						mime: "audio/mpeg"
+					},
+					size: 100n
+				}
+			} as unknown as DriveItem
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+
+			const metadata: Metadata = {
+				artist: "Shared Artist",
+				title: "Shared Song",
+				album: null,
+				date: null,
+				duration: 150,
+				pictureBase64: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			fs.set(metaPath, new Uint8Array(pack(metadata)))
+
+			const result = await cache.get({ item })
+
+			expect(result.audio.uri).toBe(audioPath)
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.artist).toBe("Shared Artist")
+		})
 	})
 
 	describe("getMetadata", () => {
