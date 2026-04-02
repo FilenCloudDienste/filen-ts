@@ -3324,16 +3324,12 @@ describe("Offline", () => {
 	})
 
 	describe("sync with shared directory listing paths (test 20)", () => {
-		it("calls listInSharedRoot for a shared root receiver parent", async () => {
+		it("calls listInSharedRoot for a sharedInRoot parent", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
-			const parentUuid = "22222222-2222-2222-2222-222222222222"
 			const fileItem = makeFileItem(uuid, "shared-file.txt")
 
-			// Create a shared root receiver parent
-			const sharedRootParent = makeSharedRootParent(parentUuid, "Receiver")
-
 			writeFileData(uuid, "shared-file.txt")
-			writeFileMeta(uuid, { item: fileItem, parent: sharedRootParent })
+			writeFileMeta(uuid, { item: fileItem, parent: "sharedInRoot" })
 
 			const offline = await createOffline()
 
@@ -3360,7 +3356,7 @@ describe("Offline", () => {
 			expect(listInSharedRoot).toHaveBeenCalled()
 		})
 
-		it("calls listOutShared for a shared root sharer parent", async () => {
+		it("calls listSharedDir for a shared root sharer parent", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 			const parentUuid = "22222222-2222-2222-2222-222222222222"
 			const fileItem = makeFileItem(uuid, "shared-out.txt")
@@ -3374,7 +3370,7 @@ describe("Offline", () => {
 
 			await offline.updateIndex()
 
-			const listOutShared = vi.fn().mockResolvedValue({
+			const listSharedDir = vi.fn().mockResolvedValue({
 				files: [
 					{
 						uuid,
@@ -3386,13 +3382,13 @@ describe("Offline", () => {
 
 			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
 				authedSdkClient: {
-					listOutShared
+					listSharedDir
 				}
 			} as any)
 
 			await offline.sync()
 
-			expect(listOutShared).toHaveBeenCalled()
+			expect(listSharedDir).toHaveBeenCalled()
 		})
 
 		it("calls listSharedDir for a shared non-root directory parent", async () => {
@@ -4045,6 +4041,80 @@ describe("Offline", () => {
 			// File should NOT be deleted — parent listing failed, so item was skipped
 			expect(fs.has(`${FILES_DIR_URI}/${uuid}/preserved.txt`)).toBe(true)
 			expect(fs.has(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(true)
+		})
+	})
+
+	describe("parentCacheKey with sharedInRoot", () => {
+		it("returns the string literal for sharedInRoot parent", async () => {
+			const uuid1 = "11111111-1111-1111-1111-111111111111"
+			const uuid2 = "22222222-2222-2222-2222-222222222222"
+			const file1 = makeFileItem(uuid1, "file1.txt")
+			const file2 = makeFileItem(uuid2, "file2.txt")
+
+			writeFileData(uuid1, "file1.txt")
+			writeFileMeta(uuid1, { item: file1, parent: "sharedInRoot" })
+			writeFileData(uuid2, "file2.txt")
+			writeFileMeta(uuid2, { item: file2, parent: "sharedInRoot" })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const listInSharedRoot = vi.fn().mockResolvedValue({
+				files: [
+					{
+						uuid: uuid1,
+						meta: { tag: "Decoded", inner: [{ name: "file1.txt", size: 100n, modified: 1000, created: 900 }] }
+					},
+					{
+						uuid: uuid2,
+						meta: { tag: "Decoded", inner: [{ name: "file2.txt", size: 100n, modified: 1000, created: 900 }] }
+					}
+				],
+				dirs: []
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listInSharedRoot
+				}
+			} as any)
+
+			await offline.sync()
+
+			// Both files share the same "sharedInRoot" parent key, so listInSharedRoot should be called only once
+			expect(listInSharedRoot).toHaveBeenCalledTimes(1)
+
+			// Both files should still exist (they were found in the remote listing)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid1}/file1.txt`)).toBe(true)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid2}/file2.txt`)).toBe(true)
+		})
+	})
+
+	describe("storeDirectory partial download failure", () => {
+		it("cleans up data directory when download fails", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const directory = makeDirItem(uuid, "my-folder")
+			const parent = makeParent("parent-uuid")
+
+			const { default: transfers } = await import("@/lib/transfers")
+
+			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("download failed mid-stream"))
+
+			const offline = await createOffline()
+
+			await expect(
+				offline.storeDirectory({
+					directory,
+					parent
+				})
+			).rejects.toThrow("download failed mid-stream")
+
+			// Data directory should be cleaned up on failure
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(false)
+
+			// Meta file should not exist
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(false)
 		})
 	})
 })

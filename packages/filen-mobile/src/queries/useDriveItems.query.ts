@@ -195,6 +195,9 @@ export async function fetchData(
 				if (!parent) {
 					const result = await authedSdkClient.listInSharedRoot(signal)
 
+					console.log("sharedIn root result", result.dirs.at(0)?.sharingRole)
+					console.log("sharedIn root result", result.files.at(0)?.sharingRole)
+
 					return {
 						...result,
 						type: "sharedRoot"
@@ -206,6 +209,9 @@ export async function fetchData(
 					files: [],
 					type: "shared"
 				}
+
+				console.log("sharedIn parent", parent)
+				console.log("sharedIn parent shareInfo", parent.shareInfo)
 
 				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
 
@@ -244,6 +250,9 @@ export async function fetchData(
 				if (!parent) {
 					const result = await authedSdkClient.listOutShared(undefined, signal)
 
+					console.log("sharedOut root result", result.dirs.at(0)?.sharingRole)
+					console.log("sharedOut root result", result.files.at(0)?.sharingRole)
+
 					return {
 						...result,
 						type: "sharedRoot"
@@ -257,6 +266,9 @@ export async function fetchData(
 				}
 
 				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
+
+				console.log("sharedOut parent", parent)
+				console.log("sharedOut parent shareInfo", parent.shareInfo)
 
 				for (const resultDir of dirs) {
 					result.dirs.push({
@@ -427,10 +439,10 @@ export async function fetchData(
 
 				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
 
-				const withContext = new AnyNormalDir.Dir(resultDir)
+				const normalDir = new AnyNormalDir.Dir(resultDir)
 
-				cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, withContext)
-				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(withContext))
+				cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
+				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
 			}
 
 			for (const resultFile of result.files) {
@@ -460,7 +472,18 @@ export async function fetchData(
 
 				cache.directoryUuidToAnySharedDirWithContext.set(unwrappedDir.uuid, withContext)
 				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Shared(withContext))
+
+				// TODO: If it's a shared out item, we should also cache it in the normal dir caches since that's where it actually lives
+				// cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid,  new AnyNormalDir.Dir(resultDir.inner))
 			}
+
+			// TODO: ^ same for files, if it's a shared out file we should cache it in the normal file cache as well
+			/*for(const resultFile of result.files) {
+				const unwrappedFile = unwrapFileMeta(resultFile)
+				const { sharingRole:_, ...file } = resultFile
+
+				cache.fileUuidToNormalFile.set(unwrappedFile.file.uuid, file)
+			}*/
 
 			break
 		}
@@ -565,8 +588,6 @@ export function driveItemsQueryUpdate({
 	})
 }
 
-const DRIVE_PATH_TYPES_EXTENDED: (string | null)[] = [...DRIVE_PATH_TYPES, null]
-
 export function driveItemsQueryUpdateGlobal({
 	updater,
 	parentUuid
@@ -576,7 +597,7 @@ export function driveItemsQueryUpdateGlobal({
 		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
 	parentUuid: string
 }): void {
-	for (const pathType of DRIVE_PATH_TYPES_EXTENDED) {
+	for (const pathType of DRIVE_PATH_TYPES) {
 		if (parentUuid) {
 			driveItemsQueryUpdate({
 				params: {
