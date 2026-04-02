@@ -70,6 +70,29 @@ vi.mock("@/lib/utils", () => ({
 
 		return { file, meta: { name: "test.txt", size: 100n, modified: 1000, created: 900 } }
 	}),
+	unwrapAnyDirUuid: vi.fn((dir: any) => {
+		if (!dir || typeof dir !== "object" || !("tag" in dir)) {
+			return null
+		}
+
+		if (dir.tag === "Normal" || dir.tag === "Shared" || dir.tag === "Linked") {
+			const innerDir = dir.inner?.[0]
+
+			if (!innerDir) {
+				return null
+			}
+
+			// Normal: inner[0] is AnyNormalDir { tag, inner: [Dir] }
+			if (dir.tag === "Normal") {
+				return innerDir.inner?.[0]?.uuid ?? null
+			}
+
+			// Shared/Linked: inner[0] has .dir which is AnySharedDir/AnyLinkedDir
+			return innerDir.dir?.inner?.[0]?.inner?.uuid ?? innerDir.dir?.inner?.[0]?.uuid ?? null
+		}
+
+		return null
+	}),
 	unwrapDirMeta: vi.fn((dir: unknown) => {
 		const extractMeta = (d: any) => {
 			if (d && typeof d === "object" && "meta" in d && d.meta && typeof d.meta === "object" && d.meta.tag === "Decoded") {

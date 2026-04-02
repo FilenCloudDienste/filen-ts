@@ -7,12 +7,9 @@ import {
 	type File,
 	type Dir,
 	type SharedDir,
-	type SharedFile,
 	SharingRole,
-	type SharedRootDir,
 	AnyNormalDir,
 	AnySharedDir,
-	AnyFile,
 	AnySharedDirWithContext,
 	AnyDirWithContext,
 	type NormalDirsAndFiles,
@@ -50,8 +47,8 @@ export type SharedRootResult = SharedRootDirsAndFiles & {
 }
 
 export type OfflineResult = {
-	dirs: (Dir | SharedDir | SharedRootDir)[]
-	files: (File | SharedFile)[]
+	dirs: DriveItem[]
+	files: DriveItem[]
 	type: "offline"
 }
 
@@ -350,67 +347,18 @@ export async function fetchData(
 					offline.listDirectories(parent ?? undefined)
 				])
 
-				const result: Result = {
-					dirs: [],
-					files: [],
-					type: "offline"
+				// Offline items are already DriveItems (stored as-is in msgpack meta files).
+				// Pass them through directly — no SDK type wrapping needed.
+				const offlineDirs: DriveItem[] = offlineDirectories.directories.map(({ item }) => item)
+				const offlineFileItems: DriveItem[] = parent
+					? offlineDirectories.files.map(({ item }) => item)
+					: offlineFiles.map(({ item }) => item)
+
+				return {
+					dirs: offlineDirs,
+					files: offlineFileItems,
+					type: "offline" as const
 				}
-
-				if (offlineDirectories.directories.length > 0) {
-					for (const { item } of offlineDirectories.directories) {
-						if (item.type !== "directory" && item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory") {
-							continue
-						}
-
-						if (item.type === "directory") {
-							result.dirs.push(new AnyNormalDir.Dir(item.data).inner[0])
-
-							continue
-						}
-
-						if (item.type === "sharedRootDirectory") {
-							result.dirs.push(new AnySharedDir.Root(item.data).inner[0])
-
-							continue
-						}
-
-						result.dirs.push(new AnySharedDir.Dir(item.data).inner[0])
-					}
-				}
-
-				if (parent && offlineDirectories.files.length > 0) {
-					for (const { item } of offlineDirectories.files) {
-						if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
-							continue
-						}
-
-						if (item.type === "file") {
-							result.files.push(new AnyFile.File(item.data).inner[0])
-
-							continue
-						}
-
-						result.files.push(item.data)
-					}
-				}
-
-				if (!parent && offlineFiles.length > 0) {
-					for (const { item } of offlineFiles) {
-						if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
-							continue
-						}
-
-						if (item.type === "file") {
-							result.files.push(new AnyFile.File(item.data).inner[0])
-
-							continue
-						}
-
-						result.files.push(item.data)
-					}
-				}
-
-				return result
 			}
 
 			default: {
@@ -537,20 +485,17 @@ export async function fetchData(
 		}
 
 		case "offline": {
-			for (const resultDir of result.dirs) {
-				const unwrappedDir = unwrapDirMeta(resultDir)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
-
+			// Offline items are already DriveItems — no unwrap/rewrap needed.
+			for (const driveItem of result.dirs) {
 				items.push(driveItem)
+
+				cache.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
 			}
 
-			for (const resultFile of result.files) {
-				const unwrappedFile = unwrapFileMeta(resultFile)
-				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
-
+			for (const driveItem of result.files) {
 				items.push(driveItem)
 
-				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
+				cache.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
 			}
 
 			break

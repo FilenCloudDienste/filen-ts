@@ -29,6 +29,7 @@ import {
 	unwrapFileMeta,
 	normalizeFilePathForSdk,
 	unwrapDirMeta,
+	unwrapAnyDirUuid,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
 	unwrapSdkError,
@@ -1585,33 +1586,9 @@ export class Offline {
 			return noParentResult
 		}
 
-		const parentUuid: string | null = (() => {
-			if (typeof parent === "string") {
-				return null
-			}
-
-			let parentUuid: string | null = null
-
-			switch (parent.tag) {
-				case AnyDirWithContext_Tags.Normal: {
-					parentUuid = unwrapDirMeta(parent.inner[0]).uuid
-
-					break
-				}
-
-				case AnyDirWithContext_Tags.Shared: {
-					parentUuid = unwrapDirMeta(parent.inner[0].dir).uuid
-
-					break
-				}
-
-				default: {
-					return null
-				}
-			}
-
-			return parentUuid
-		})()
+		// Use unwrapAnyDirUuid instead of unwrapDirMeta — the parent may be a deserialized
+		// tagged-union from the PersistentMap cache, not a live SDK instance.
+		const parentUuid: string | null = typeof parent === "string" ? null : unwrapAnyDirUuid(parent)
 
 		if (!parentUuid) {
 			return {
