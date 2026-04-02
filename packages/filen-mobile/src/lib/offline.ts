@@ -544,7 +544,7 @@ export class Offline {
 				await Promise.all(
 					Array.from(uniqueParents.entries()).map(async ([key, parent]) => {
 						const listResult = await run(async () => {
-							if (typeof parent === "string") {
+							if (parent === "sharedInRoot") {
 								return await authedSdkClient.listInSharedRoot()
 							}
 

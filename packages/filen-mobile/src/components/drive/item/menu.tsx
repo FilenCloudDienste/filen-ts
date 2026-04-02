@@ -13,13 +13,7 @@ import { randomUUID } from "expo-crypto"
 import { Platform, type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import offline from "@/lib/offline"
-import {
-	getPreviewType,
-	listLocalDirectoryRecursive,
-	normalizeFilePathForBlobUtil,
-	unwrapAnyDirUuid,
-	getRealDriveItemParent
-} from "@/lib/utils"
+import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, getRealDriveItemParent } from "@/lib/utils"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
@@ -44,7 +38,7 @@ export function createMenuButtons({
 			? getPreviewType(item.data.decryptedMeta?.name ?? "")
 			: null
 
-	const parent = getRealDriveItemParent({
+	const parentForOfflineStorage = getRealDriveItemParent({
 		item,
 		drivePath
 	})
@@ -207,7 +201,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (parent && !isStoredOffline) {
+	if (parentForOfflineStorage && !isStoredOffline) {
 		downloadSubButtons.push({
 			id: "makeAvailableOffline",
 			title: "tbd_make_available_offline",
@@ -216,7 +210,7 @@ export function createMenuButtons({
 					const result = await run(async () => {
 						return await offline.storeFile({
 							file: item,
-							parent
+							parent: parentForOfflineStorage
 						})
 					})
 
@@ -230,7 +224,7 @@ export function createMenuButtons({
 					const result = await run(async () => {
 						return await offline.storeDirectory({
 							directory: item,
-							parent
+							parent: parentForOfflineStorage
 						})
 					})
 
@@ -661,7 +655,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (drivePath.type === "links" && (item.type === "file" || item.type === "directory") && !parent) {
+	if (drivePath.type === "links" && (item.type === "file" || item.type === "directory") && !drivePath.uuid) {
 		menuButtons.push({
 			id: "removeLink",
 			title: "tbd_remove_link",
@@ -691,7 +685,7 @@ export function createMenuButtons({
 				const result = await runWithLoading(async () => {
 					await drive.removeShare({
 						item,
-						parentUuid: parent ? (unwrapAnyDirUuid(parent) ?? undefined) : undefined
+						parentUuid: drivePath.uuid ?? undefined
 					})
 				})
 
@@ -706,13 +700,13 @@ export function createMenuButtons({
 	}
 
 	if (
-		((drivePath.type === "sharedIn" && !parent) ||
+		((drivePath.type === "sharedIn" && !drivePath.uuid) ||
 			(!isOwner &&
 				(item.type === "sharedFile" ||
 					item.type === "sharedRootFile" ||
 					item.type === "sharedDirectory" ||
 					item.type === "sharedRootDirectory"))) &&
-		!parent
+		!drivePath.uuid
 	) {
 		menuButtons.push({
 			id: "removeShare",
@@ -743,7 +737,7 @@ export function createMenuButtons({
 				const result = await runWithLoading(async () => {
 					await drive.removeShare({
 						item,
-						parentUuid: parent ? (unwrapAnyDirUuid(parent) ?? undefined) : undefined
+						parentUuid: drivePath.uuid ?? undefined
 					})
 				})
 
@@ -760,13 +754,13 @@ export function createMenuButtons({
 	}
 
 	if (
-		((drivePath.type === "sharedOut" && !parent) ||
+		((drivePath.type === "sharedOut" && !drivePath.uuid) ||
 			(isOwner &&
 				(item.type === "sharedFile" ||
 					item.type === "sharedRootFile" ||
 					item.type === "sharedDirectory" ||
 					item.type === "sharedRootDirectory"))) &&
-		!parent
+		!drivePath.uuid
 	) {
 		menuButtons.push({
 			id: "stopSharing",
