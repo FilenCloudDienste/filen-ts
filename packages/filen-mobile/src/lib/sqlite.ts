@@ -11,7 +11,7 @@ import { normalizeFilePathForSdk } from "@/lib/utils"
 const INIT_QUERIES: string[] = [
 	"PRAGMA page_size = 8192",
 	"PRAGMA journal_mode = WAL",
-	"PRAGMA locking_mode = EXCLUSIVE",
+	// "PRAGMA locking_mode = EXCLUSIVE",
 	"PRAGMA synchronous = NORMAL",
 	"PRAGMA busy_timeout = 15000",
 	"PRAGMA cache_size = -4000",
