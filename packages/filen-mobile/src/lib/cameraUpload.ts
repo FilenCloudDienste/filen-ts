@@ -25,7 +25,7 @@ import { parseExifDate } from "@/lib/exif"
 import drive from "@/lib/drive"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
-import { getPermissionsAsync } from "expo-media-library"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -581,9 +581,9 @@ class CameraUpload {
 				return
 			}
 
-			const [netState, permissions] = await Promise.all([NetInfo.fetch(), getPermissionsAsync()])
+			const [netState, permissions] = await Promise.all([NetInfo.fetch(), hasAllNeededMediaPermissions()])
 
-			if (!permissions.granted) {
+			if (!permissions) {
 				return
 			}
 

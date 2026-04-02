@@ -21,7 +21,12 @@ vi.mock("expo-battery", () => ({
 }))
 
 vi.mock("expo-media-library", () => ({
-	getPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted" }))
+	getPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true })),
+	requestPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true }))
+}))
+
+vi.mock("@/hooks/useMediaPermissions", () => ({
+	hasAllNeededMediaPermissions: vi.fn(async () => true)
 }))
 
 vi.mock("expo-image-manipulator", () => ({
@@ -131,6 +136,7 @@ import drive from "@/lib/drive"
 import { parseExifDate } from "@/lib/exif"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import events from "@/lib/events"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
@@ -480,7 +486,7 @@ describe("sync pre-flight checks", () => {
 	})
 
 	it("skips when permissions are not granted", async () => {
-		vi.mocked(getPermissionsAsync).mockResolvedValueOnce({ granted: false, status: "denied" } as any)
+		vi.mocked(hasAllNeededMediaPermissions).mockResolvedValueOnce(false)
 
 		await cameraUpload.sync()
 

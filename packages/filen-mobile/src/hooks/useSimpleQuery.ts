@@ -149,3 +149,5 @@ export function useSimpleQuery<T>(
 		refetch
 	}
 }
+
+export default useSimpleQuery

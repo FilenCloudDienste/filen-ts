@@ -34,6 +34,7 @@ import DocumentScanner, {
 	ScanDocumentResponseStatus
 } from "react-native-document-scanner-plugin"
 import * as DocumentPicker from "expo-document-picker"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 
 const Header = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -247,7 +248,9 @@ const Header = memo(() => {
 						icon: "plus",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
-								return await ImagePicker.requestMediaLibraryPermissionsAsync()
+								return await hasAllNeededMediaPermissions({
+									shouldRequest: true
+								})
 							})
 
 							if (!permissionsResult.success) {
@@ -257,7 +260,9 @@ const Header = memo(() => {
 								return
 							}
 
-							if (!permissionsResult.data.granted) {
+							if (!permissionsResult.data) {
+								alerts.error("tbd_no_permissions_enable_manually")
+
 								return
 							}
 
@@ -344,7 +349,9 @@ const Header = memo(() => {
 						icon: "plus",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
-								return await ImagePicker.requestCameraPermissionsAsync()
+								return await hasAllNeededMediaPermissions({
+									shouldRequest: true
+								})
 							})
 
 							if (!permissionsResult.success) {
@@ -354,7 +361,9 @@ const Header = memo(() => {
 								return
 							}
 
-							if (!permissionsResult.data.granted) {
+							if (!permissionsResult.data) {
+								alerts.error("tbd_no_permissions_enable_manually")
+
 								return
 							}
 
@@ -443,7 +452,9 @@ const Header = memo(() => {
 						icon: "plus",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
-								return await ImagePicker.requestCameraPermissionsAsync()
+								return await hasAllNeededMediaPermissions({
+									shouldRequest: true
+								})
 							})
 
 							if (!permissionsResult.success) {
@@ -453,7 +464,9 @@ const Header = memo(() => {
 								return
 							}
 
-							if (!permissionsResult.data.granted) {
+							if (!permissionsResult.data) {
+								alerts.error("tbd_no_permissions_enable_manually")
+
 								return
 							}
 

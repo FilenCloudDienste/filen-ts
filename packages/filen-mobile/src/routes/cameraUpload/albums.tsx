@@ -11,6 +11,7 @@ import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import * as MediaLibraryLegacy from "expo-media-library"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
+import useMediaPermissions, { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 
 const Albums = memo(() => {
 	const { config, setConfig } = useCameraUpload()
@@ -19,31 +20,34 @@ const Albums = memo(() => {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
 
-	const albumsQuery = useSimpleQuery(async () => {
-		const permissions = await MediaLibraryLegacy.getPermissionsAsync()
-
-		if (!permissions.granted) {
-			if (!permissions.canAskAgain) {
-				return []
-			}
-
-			const requestResult = await MediaLibraryLegacy.requestPermissionsAsync()
-
-			if (!requestResult.granted) {
-				return []
-			}
-		}
-
-		const albums = await MediaLibraryLegacy.getAlbumsAsync({
-			includeSmartAlbums: true
-		})
-
-		return albums
+	const mediaPermissions = useMediaPermissions({
+		shouldRequest: true
 	})
+
+	const albumsQuery = useSimpleQuery(
+		async () => {
+			const permissions = await hasAllNeededMediaPermissions({
+				shouldRequest: true
+			})
+
+			if (!permissions) {
+				return []
+			}
+
+			const albums = await MediaLibraryLegacy.getAlbumsAsync({
+				includeSmartAlbums: true
+			})
+
+			return albums
+		},
+		{
+			retry: 0
+		}
+	)
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "active" || nextAppState === "background") {
+			if (nextAppState === "active") {
 				albumsQuery.refetch()
 			}
 		})
@@ -67,66 +71,87 @@ const Albums = memo(() => {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				{albumsQuery.status === "loading" ? (
+				{mediaPermissions.loading ? (
 					<View className="flex-1 bg-transparent items-center justify-center">
 						<ActivityIndicator
 							size="large"
 							color={textForeground.color as string}
 						/>
 					</View>
-				) : albumsQuery.status === "success" && albumsQuery.data.length > 0 ? (
-					<GestureHandlerScrollView
-						className="bg-transparent"
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName="px-4 gap-4"
-						contentContainerStyle={{
-							paddingBottom: insets.bottom
-						}}
-						showsHorizontalScrollIndicator={false}
-					>
-						<Group
-							className="bg-background-tertiary"
-							buttons={albumsQuery.data.map(album => {
-								return {
-									title: album.title,
-									badge: album.assetCount.toString(),
-									rightItem: {
-										type: "switch",
-										value: config.albumIds?.includes(album.id) ?? false,
-										onValueChange: () => {
-											setConfig(prev => {
-												prev = {
-													...DEFAULT_CONFIG,
-													...prev
-												}
+				) : mediaPermissions.granted ? (
+					albumsQuery.status === "loading" ? (
+						<View className="flex-1 bg-transparent items-center justify-center">
+							<ActivityIndicator
+								size="large"
+								color={textForeground.color as string}
+							/>
+						</View>
+					) : albumsQuery.status === "success" && albumsQuery.data.length > 0 ? (
+						<GestureHandlerScrollView
+							className="bg-transparent"
+							contentInsetAdjustmentBehavior="automatic"
+							contentContainerClassName="px-4 gap-4"
+							contentContainerStyle={{
+								paddingBottom: insets.bottom
+							}}
+							showsHorizontalScrollIndicator={false}
+						>
+							<Group
+								className="bg-background-tertiary"
+								buttons={albumsQuery.data
+									.sort((a, b) => b.assetCount - a.assetCount)
+									.map(album => {
+										return {
+											title: album.title,
+											badge: album.assetCount.toString(),
+											badgeColor: bgBackgroundSecondary.color as string | undefined,
+											rightItem: {
+												type: "switch",
+												value: config.albumIds?.includes(album.id) ?? false,
+												onValueChange: () => {
+													setConfig(prev => {
+														prev = {
+															...DEFAULT_CONFIG,
+															...prev
+														}
 
-												const albumIds = new Set(prev.albumIds ?? [])
+														const albumIds = new Set(prev.albumIds ?? [])
 
-												if (albumIds.has(album.id)) {
-													albumIds.delete(album.id)
-												} else {
-													albumIds.add(album.id)
-												}
+														if (albumIds.has(album.id)) {
+															albumIds.delete(album.id)
+														} else {
+															albumIds.add(album.id)
+														}
 
-												return {
-													...prev,
-													albumIds: Array.from(albumIds)
+														return {
+															...prev,
+															albumIds: Array.from(albumIds)
+														}
+													})
 												}
-											})
+											}
 										}
-									}
-								}
-							})}
-						/>
-					</GestureHandlerScrollView>
+									})}
+							/>
+						</GestureHandlerScrollView>
+					) : (
+						<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
+							<Ionicons
+								name="albums-outline"
+								size={64}
+								color={textMutedForeground.color}
+							/>
+							<Text>tbd_no_albums</Text>
+						</View>
+					)
 				) : (
 					<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
 						<Ionicons
-							name="albums-outline"
+							name="lock-closed-outline"
 							size={64}
 							color={textMutedForeground.color}
 						/>
-						<Text>tbd_no_albums</Text>
+						<Text>tbd_no_permissions_enable_manually</Text>
 					</View>
 				)}
 			</SafeAreaView>
