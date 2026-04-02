@@ -259,5 +259,46 @@ describe("useSecureStore", () => {
 			// We can't check state after unmount, but we verify no errors are thrown.
 			mockEventEmitter.emit("secureStoreChange", { key: "testKey", value: "afterUnmount" })
 		})
+
+		it("suppresses external events during local set", async () => {
+			const { result } = renderHook(() => useSecureStore("testKey", "initial"))
+
+			await act(async () => {
+				result.current[1]("localValue")
+
+				mockEventEmitter.emit("secureStoreChange", { key: "testKey", value: "externalValue" })
+			})
+
+			await waitFor(() => {
+				expect(result.current[0]).toBe("localValue")
+			})
+		})
+
+		it("unsubscribes from all event types on unmount", () => {
+			const removeSpy = vi.fn()
+			const originalSubscribe = mockEventEmitter.subscribe.bind(mockEventEmitter)
+
+			vi.spyOn(mockEventEmitter, "subscribe" as any).mockImplementation((...args: unknown[]) => {
+				const subscription = originalSubscribe(args[0] as string, args[1] as (...a: unknown[]) => void)
+
+				return {
+					remove: () => {
+						removeSpy(args[0])
+
+						subscription.remove()
+					}
+				}
+			})
+
+			const { unmount } = renderHook(() => useSecureStore("testKey", "initial"))
+
+			unmount()
+
+			const removedEvents = removeSpy.mock.calls.map((call: unknown[]) => call[0])
+
+			expect(removedEvents).toContain("secureStoreChange")
+			expect(removedEvents).toContain("secureStoreRemove")
+			expect(removedEvents).toContain("secureStoreClear")
+		})
 	})
 })

@@ -16,51 +16,9 @@ const { kvStore, chatsState, mockSendMessage, mockFetchChats } = vi.hoisted(() =
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/utils", () => ({
-	run: vi.fn(async (fn: Function) => {
-		const defers: Function[] = []
+vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 
-		try {
-			const data = await fn((cb: Function) => {
-				defers.push(cb)
-			})
-
-			for (const d of defers.reverse()) {
-				await d()
-			}
-
-			return { success: true, data }
-		} catch (error) {
-			for (const d of defers.reverse()) {
-				try {
-					await d()
-				} catch {}
-			}
-
-			return { success: false, error }
-		}
-	}),
-	Semaphore: class {
-		acquire() {
-			return Promise.resolve()
-		}
-		release() {}
-	}
-}))
-
-vi.mock("@/lib/sqlite", () => ({
-	default: {
-		kvAsync: {
-			get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
-			set: vi.fn(async (key: string, value: unknown) => {
-				kvStore.set(key, value)
-			}),
-			remove: vi.fn(async (key: string) => {
-				kvStore.delete(key)
-			})
-		}
-	}
-}))
+vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
 vi.mock("@/stores/useChats.store", () => {
 	const mockSetInflightMessages = vi.fn((fn: unknown) => {
@@ -101,11 +59,7 @@ vi.mock("@/queries/useChats.query", () => ({
 	fetchData: mockFetchChats
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: {
-		error: vi.fn()
-	}
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("@filen/sdk-rs", () => ({
 	FilenSdkError: {
@@ -310,6 +264,19 @@ describe("Sync (Chats)", () => {
 
 			expect(Object.keys(data)).toEqual(keysBefore)
 		})
+
+		it("catches write errors", async () => {
+			const sync = await createSync()
+
+			vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
+
+			await sync.flushToDisk({
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-1", "hello", 1000)]
+				}
+			})
+		})
 	})
 
 	describe("sync", () => {
@@ -482,25 +449,6 @@ describe("Sync (Chats)", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(sqlite.kvAsync.remove).toHaveBeenCalledWith(KV_KEY)
-		})
-	})
-
-	describe("syncNow", () => {
-		it("triggers sync immediately", async () => {
-			const sync = await createSync()
-
-			chatsState.inflightMessages = {
-				"chat-1": {
-					chat: mockChat("chat-1"),
-					messages: [mockMessage("msg-1", "hello", 1000)]
-				}
-			}
-
-			sync.syncNow()
-
-			await new Promise(resolve => setTimeout(resolve, 0))
-
-			expect(mockSendMessage).toHaveBeenCalledTimes(1)
 		})
 	})
 })

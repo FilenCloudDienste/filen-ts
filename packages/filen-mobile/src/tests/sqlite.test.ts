@@ -290,4 +290,82 @@ describe("Sqlite", () => {
 			expect(result).toBe("hello world")
 		})
 	})
+
+	describe("removeByPrefix", () => {
+		it("removes all entries matching prefix", async () => {
+			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, Uint8Array>
+
+			mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
+				if (query.includes("LIKE") && params?.[0]) {
+					const prefix = (params[0] as string).replace(/%$/, "")
+
+					for (const key of [...stmtStoreRef.keys()]) {
+						if (key.startsWith(prefix)) {
+							stmtStoreRef.delete(key)
+						}
+					}
+				}
+
+				return { rows: [], insertId: undefined, rowsAffected: 1 }
+			})
+
+			const sqlite = await createSqlite()
+
+			await sqlite.kvAsync.set("prefix_a", "one")
+			await sqlite.kvAsync.set("prefix_b", "two")
+			await sqlite.kvAsync.set("other_c", "three")
+
+			await sqlite.kvAsync.removeByPrefix("prefix_")
+
+			expect(await sqlite.kvAsync.get("prefix_a")).toBeNull()
+			expect(await sqlite.kvAsync.get("prefix_b")).toBeNull()
+			expect(await sqlite.kvAsync.get("other_c")).toBe("three")
+		})
+	})
+
+	describe("getByPrefix", () => {
+		it("returns empty Map when no rows match", async () => {
+			mockDb.executeRaw.mockResolvedValue([])
+
+			const sqlite = await createSqlite()
+
+			const result = await sqlite.kvAsync.getByPrefix("nonexistent_")
+
+			expect(result).toBeInstanceOf(Map)
+			expect(result.size).toBe(0)
+		})
+
+		it("returns matching entries as a Map", async () => {
+			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, Uint8Array>
+
+			mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
+				if (query.includes("LIKE") && params?.[0]) {
+					const prefix = (params[0] as string).replace(/%$/, "")
+					const results: [string, ArrayBufferLike][] = []
+
+					for (const [key, value] of stmtStoreRef.entries()) {
+						if (key.startsWith(prefix)) {
+							results.push([key, value.buffer])
+						}
+					}
+
+					return results
+				}
+
+				return []
+			})
+
+			const sqlite = await createSqlite()
+
+			await sqlite.kvAsync.set("data_x", { value: 1 })
+			await sqlite.kvAsync.set("data_y", { value: 2 })
+			await sqlite.kvAsync.set("other_z", { value: 3 })
+
+			const result = await sqlite.kvAsync.getByPrefix("data_") as Map<string, { value: number }>
+
+			expect(result.size).toBe(2)
+			expect(result.get("data_x")).toEqual({ value: 1 })
+			expect(result.get("data_y")).toEqual({ value: 2 })
+		})
+	})
 })

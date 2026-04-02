@@ -37,11 +37,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	ErrorKind: { Unauthenticated: "Unauthenticated" }
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: {
-		error: vi.fn()
-	}
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("@tanstack/react-query", () => ({
 	QueryClient: class {

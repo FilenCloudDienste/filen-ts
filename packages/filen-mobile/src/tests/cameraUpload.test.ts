@@ -34,34 +34,8 @@ vi.mock("@filen/sdk-rs", () => ({
 	AnyDirWithContext: { Normal: vi.fn() }
 }))
 
-vi.mock("@filen/utils", () => ({
-	run: vi.fn(async (fn: Function) => {
-		const defers: Function[] = []
-
-		try {
-			const data = await fn((cb: Function) => {
-				defers.push(cb)
-			})
-
-			for (const d of [...defers].reverse()) {
-				await d()
-			}
-
-			return { success: true, data }
-		} catch (error) {
-			for (const d of [...defers].reverse()) {
-				try {
-					await d()
-				} catch {}
-			}
-
-			return { success: false, error }
-		}
-	}),
-	Semaphore: class {
-		acquire() {}
-		release() {}
-	},
+vi.mock("@filen/utils", async () => ({
+	...await import("@/tests/mocks/filenUtils"),
 	fastLocaleCompare: (a: string, b: string) => a.localeCompare(b)
 }))
 
@@ -360,20 +334,17 @@ describe("modifyAssetPathOnCollision", () => {
 		})
 	})
 
-	describe("all iterations produce unique paths", () => {
-		it("each iteration generates a distinct path for the same asset", () => {
-			const paths = new Set<string>()
+})
 
-			for (let i = 0; i < 2; i++) {
-				const result = collision({ iteration: i })
+describe("iteration uniqueness", () => {
+	it("produces distinct paths for iteration 0 vs iteration 1", () => {
+		const asset = { name: "IMG_0001.jpg", creationTime: 1000 }
+		const path = "/album/img_0001.jpg"
 
-				expect(result).not.toBeNull()
+		const path0 = modifyAssetPathOnCollision({ iteration: 0, path, asset })
+		const path1 = modifyAssetPathOnCollision({ iteration: 1, path, asset })
 
-				paths.add(result as string)
-			}
-
-			expect(paths.size).toBe(2)
-		})
+		expect(path0).not.toBe(path1)
 	})
 })
 
@@ -910,5 +881,57 @@ describe("listLocal filtering", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+})
+
+// ─── Re-entrancy and failure tracking ────────────────────────────────────────
+
+describe("re-entrancy and failure tracking", () => {
+	it("re-entrancy guard prevents concurrent syncs", async () => {
+		;(cameraUpload as any).syncing = true
+
+		await cameraUpload.sync()
+
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+
+		;(cameraUpload as any).syncing = false
+	})
+
+	it("cancel clears uploadFailures", () => {
+		const failures = (cameraUpload as any).uploadFailures as Map<string, number>
+
+		failures.set("asset-1", 2)
+		failures.set("asset-2", 1)
+
+		cameraUpload.cancel()
+
+		expect(failures.size).toBe(0)
+	})
+
+	it("skips assets exceeding MAX_UPLOAD_FAILURES", async () => {
+		const failures = (cameraUpload as any).uploadFailures as Map<string, number>
+
+		failures.set("a1", 3)
+
+		const albumId = "album-1"
+
+		ml.addAlbum({ id: albumId, title: "Camera Roll", assetIds: ["a1"] })
+
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+
+		failures.clear()
 	})
 })

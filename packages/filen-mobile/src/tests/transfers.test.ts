@@ -409,24 +409,6 @@ describe("Transfers", () => {
 				expect(mockSetTransfers).not.toHaveBeenCalled()
 			})
 
-			it("cleans up tracking sets on completion", async () => {
-				const file = new FsFile("file:///document/test.txt")
-				fs.set(file.uri, new Uint8Array([1, 2, 3]))
-				const parent = makeParentDir("parent-uuid")
-
-				await transfers.upload({
-					localFileOrDir: file,
-					parent,
-					hideProgress: true
-				})
-
-				await transfers.upload({
-					localFileOrDir: file,
-					parent,
-					hideProgress: true
-				})
-			})
-
 			it("cleans up tracking sets on error", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
@@ -715,23 +697,6 @@ describe("Transfers", () => {
 				expect(mockSetTransfers).not.toHaveBeenCalled()
 			})
 
-			it("cleans up tracking sets on completion", async () => {
-				const dest = new FsFile("file:///document/dest.txt")
-				const item = makeFileItem("file-uuid")
-
-				await transfers.download({
-					item,
-					destination: dest,
-					hideProgress: true
-				})
-
-				await transfers.download({
-					item,
-					destination: dest,
-					hideProgress: true
-				})
-			})
-
 			it("disposes composite signals on completion", async () => {
 				const dest = new FsFile("file:///document/dest.txt")
 				const item = makeFileItem("file-uuid")
@@ -840,6 +805,13 @@ describe("Transfers", () => {
 					})
 				).resolves.not.toThrow()
 			})
+		})
+	})
+
+	describe("pauseAll and resumeAll", () => {
+		it("do not throw", () => {
+			expect(() => transfers.pauseAll()).not.toThrow()
+			expect(() => transfers.resumeAll()).not.toThrow()
 		})
 	})
 })

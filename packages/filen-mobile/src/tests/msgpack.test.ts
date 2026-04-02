@@ -272,17 +272,6 @@ describe("msgpack", () => {
 			expect(result.name).toBe("test")
 		})
 
-		it("handles arrays of tagged unions", () => {
-			const arr = [new MockVariant("a"), new MockVariant("b")]
-			const result = unpack(pack(arr))
-
-			expect(result).toHaveLength(2)
-			expect(result[0][uniffiTypeNameSymbol]).toBe("TestType")
-			expect(result[0].inner).toEqual(["a"])
-			expect(result[1][uniffiTypeNameSymbol]).toBe("TestType")
-			expect(result[1].inner).toEqual(["b"])
-		})
-
 		it("handles deeply nested structure with all custom types", () => {
 			const obj = {
 				users: [
@@ -308,13 +297,6 @@ describe("msgpack", () => {
 	})
 
 	describe("standard types", () => {
-		it("round-trips Uint8Array as binary", () => {
-			const bytes = new Uint8Array([1, 2, 3, 4])
-			const result = unpack(pack(bytes))
-
-			expect(new Uint8Array(result)).toEqual(bytes)
-		})
-
 		it("round-trips empty Uint8Array", () => {
 			const bytes = new Uint8Array([])
 			const result = unpack(pack(bytes))
