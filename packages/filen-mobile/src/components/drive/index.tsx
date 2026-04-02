@@ -54,6 +54,8 @@ const Header = memo(() => {
 	const driveItems = driveItemsQuery.status === "success" ? driveItemsQuery.data : []
 
 	const parent: AnyNormalDir | null = (() => {
+		// We can check if the parent uuid of the current drive path is in the anyNormalDir cache
+		// If it is, it's a directory that belongs to the user (not shared in)
 		const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
 
 		return fromCache ?? null

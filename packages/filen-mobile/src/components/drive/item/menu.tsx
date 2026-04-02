@@ -7,14 +7,19 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
-import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
 import { Platform, type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import offline from "@/lib/offline"
-import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, unwrapAnyDirUuid, unwrapParentUuid } from "@/lib/utils"
+import {
+	getPreviewType,
+	listLocalDirectoryRecursive,
+	normalizeFilePathForBlobUtil,
+	unwrapAnyDirUuid,
+	getRealDriveItemParent
+} from "@/lib/utils"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
@@ -23,7 +28,6 @@ import { pack } from "@/lib/msgpack"
 import auth from "@/lib/auth"
 import { Buffer } from "react-native-quick-crypto"
 import { selectContacts } from "@/routes/contacts"
-import cache from "@/lib/cache"
 
 export function createMenuButtons({
 	item,
@@ -40,65 +44,10 @@ export function createMenuButtons({
 			? getPreviewType(item.data.decryptedMeta?.name ?? "")
 			: null
 
-	const parent = (() => {
-		switch (item.type) {
-			case "directory":
-			case "file": {
-				const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-				if (unwrappedParentUuid) {
-					if (unwrappedParentUuid === cache.rootUuid) {
-						return new AnyDirWithContext.Normal(
-							new AnyNormalDir.Root({
-								uuid: cache.rootUuid
-							})
-						)
-					}
-
-					const fromCache = cache.directoryUuidToAnyNormalDir.get(unwrappedParentUuid)
-
-					if (fromCache) {
-						return new AnyDirWithContext.Normal(fromCache)
-					}
-				}
-
-				return null
-			}
-
-			case "sharedDirectory": {
-				const unwrappedParentUuid = unwrapParentUuid(item.data.inner.parent)
-
-				if (unwrappedParentUuid) {
-					const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(unwrappedParentUuid)
-
-					if (fromCache) {
-						return new AnyDirWithContext.Shared(fromCache)
-					}
-				}
-
-				return null
-			}
-
-			case "sharedFile": {
-				const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-				if (unwrappedParentUuid) {
-					const fromCache = cache.directoryUuidToAnySharedDirWithContext.get(unwrappedParentUuid)
-
-					if (fromCache) {
-						return new AnyDirWithContext.Shared(fromCache)
-					}
-				}
-
-				return null
-			}
-
-			case "sharedRootDirectory":
-			case "sharedRootFile": {
-				return null
-			}
-		}
-	})()
+	const parent = getRealDriveItemParent({
+		item,
+		drivePath
+	})
 
 	const isOwner = drivePath.type !== "sharedIn"
 

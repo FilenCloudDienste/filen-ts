@@ -401,6 +401,7 @@ const Gallery = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drive
 									goBack={goBack}
 									onZoomChange={onZoomChange}
 									onSingleTap={onSingleTap}
+									drivePath={drivePath}
 								/>
 							)
 						}}
