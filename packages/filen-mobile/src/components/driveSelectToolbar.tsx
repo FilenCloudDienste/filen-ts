@@ -78,6 +78,7 @@ const DriveSelectToolbar = memo(() => {
 		if (!promptResult.success) {
 			console.error(promptResult.error)
 			alerts.error(promptResult.error)
+
 			return
 		}
 
