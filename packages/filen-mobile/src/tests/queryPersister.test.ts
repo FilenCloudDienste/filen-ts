@@ -61,7 +61,7 @@ import { QueryPersisterKv } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 
 // Hardcoded to match client.ts — avoids import issues with mocked module evaluation order
-const QUERY_CLIENT_PERSISTER_PREFIX = "reactQuery_v1"
+const QUERY_CLIENT_PERSISTER_PREFIX = "reactQuery_v2"
 
 /**
  * In-memory KV store that simulates sqlite.kvAsync behavior.
