@@ -90,7 +90,8 @@ export type Index = {
 //   - The Index is the source of truth for "is this item offline?" queries and is rebuilt atomically.
 //   - sync() compares local offline state against remote, re-downloading changed/new files and pruning deleted ones.
 export class Offline {
-	private readonly version = 1
+	// Critical: When changing anything related to offline storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
+	public readonly version = 1
 	private readonly directory: FileSystem.Directory = new FileSystem.Directory(
 		Platform.select({
 			ios: FileSystem.Paths.join(
@@ -1415,9 +1416,7 @@ export class Offline {
 						const entryUuid = entry.item.data.uuid
 
 						if (currentIndex.files[entryUuid]) {
-							const standaloneFileDir = new FileSystem.Directory(
-								FileSystem.Paths.join(this.filesDirectory.uri, entryUuid)
-							)
+							const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(this.filesDirectory.uri, entryUuid))
 
 							if (standaloneFileDir.exists) {
 								standaloneFileDir.delete()

@@ -5,8 +5,10 @@ import { pack } from "@/lib/msgpack"
 import { debounce } from "es-toolkit/function"
 import { AppState } from "react-native"
 
-const VERSION = 1
-const GLOBAL_PREFIX = `cache:v${VERSION}`
+// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = 1
+export const GLOBAL_PREFIX = `cache:v${VERSION}`
+
 const PERSIST_DEBOUNCE = 1000
 
 type Mutation =
