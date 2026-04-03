@@ -22,6 +22,7 @@ import notes from "@/lib/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Avatar from "@/components/ui/avatar"
 import { contactDisplayName } from "@/lib/utils"
+import { selectContacts } from "@/routes/contacts"
 
 const Participant = memo(({ participant, note, isOwner }: { participant: NoteParticipant; note: Note; isOwner: boolean }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -275,7 +276,33 @@ const NoteParticipants = memo(() => {
 									},
 									props: {
 										onPress: async () => {
-											// TODO: implement add participant flow
+											const selectContactsResult = await selectContacts({
+												multiple: true,
+												userIdsToExclude: note.participants.map(p => Number(p.userId))
+											})
+
+											if (selectContactsResult.cancelled) {
+												return
+											}
+
+											const result = await runWithLoading(async () => {
+												return await Promise.all(
+													selectContactsResult.selectedContacts.map(async contact => {
+														return await notes.addParticipant({
+															note,
+															contact,
+															permissionsWrite: true
+														})
+													})
+												)
+											})
+
+											if (!result.success) {
+												console.error(result.error)
+												alerts.error(result.error)
+
+												return
+											}
 										}
 									}
 								}
