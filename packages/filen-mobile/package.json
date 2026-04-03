@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "private": false,
   "scripts": {
+    "postinstall": "sh scripts/postinstall.sh",
     "start": "expo start --clear",
     "android": "expo run:android",
     "android:device": "expo run:android --device",
