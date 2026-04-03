@@ -9,11 +9,12 @@ import { unwrapSdkError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
 
-const VERSION = 1
-const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
-const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000 * 10 // 10 years, effectively infinite for our use case
-const PERSIST_DEBOUNCE = 1000
+// Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = 2
+export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
+export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000 * 10 // 10 years, effectively infinite for our use case
 
+const PERSIST_DEBOUNCE = 1000
 const UNCACHED_QUERY_KEYS = new Map<string, true>([])
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {

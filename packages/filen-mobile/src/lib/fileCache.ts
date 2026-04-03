@@ -14,6 +14,7 @@ export type Metadata = DriveItemFileExtracted & {
 }
 
 export class FileCache {
+	// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 	public readonly version = 1
 	private readonly parentDirectory = new FileSystem.Directory(
 		Platform.select({

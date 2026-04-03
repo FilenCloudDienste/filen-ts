@@ -20,12 +20,14 @@ export type ThumbnailParams = {
 	signal?: AbortSignal
 }
 
-const DEFAULT_WIDTH = 128
-const DEFAULT_QUALITY = 0.8
-const DEFAULT_VIDEO_TIMESTAMP = 1.0
-const MAX_CONCURRENT = 3
-const MAX_FAILURES = 3
-const VERSION = 1
+export const DEFAULT_WIDTH = 128
+export const DEFAULT_QUALITY = 0.8
+export const DEFAULT_VIDEO_TIMESTAMP = 1.0
+export const MAX_CONCURRENT = 3
+export const MAX_FAILURES = 3
+
+// Critical: When changing anything related to storage index/store/persistence/width/height/quality format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = 1
 
 function abortError(signal?: AbortSignal): Error {
 	const reason = signal?.reason
