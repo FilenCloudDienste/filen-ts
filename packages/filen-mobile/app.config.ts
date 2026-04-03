@@ -229,6 +229,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"expo-asset",
 		"expo-sharing",
 		"expo-web-browser",
+		"expo-image",
 		[
 			"react-native-edge-to-edge",
 			{
