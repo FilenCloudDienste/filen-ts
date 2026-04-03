@@ -17,7 +17,7 @@ import useNotesTagsQuery from "@/queries/useNotesTags.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import notesLib from "@/lib/notes"
-import { Paths } from "expo-file-system"
+import * as FileSystem from "expo-file-system"
 import { useSecureStore } from "@/lib/secureStore"
 import Tag from "@/components/notes/tag"
 import View from "@/components/ui/view"
@@ -25,6 +25,7 @@ import Text from "@/components/ui/text"
 import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import * as Sharing from "expo-sharing"
+import * as DocumentPicker from "expo-document-picker"
 
 const Header = memo(() => {
 	const stringifiedClient = useStringifiedClient()
@@ -147,7 +148,7 @@ const Header = memo(() => {
 			return
 		}
 
-		router.push(Paths.join("/", "note", createResult.data.uuid))
+		router.push(`/note/${createResult.data.uuid}`)
 	}
 
 	const headerRightItems = (() => {
@@ -225,9 +226,135 @@ const Header = memo(() => {
 					id: "import",
 					title: "tbd_import_note",
 					icon: "export",
-					onPress: async () => {
-						// TODO: Implement import note for .txt file with type selection
-					}
+					subButtons: [
+						{
+							type: NoteType.Text,
+							typeString: "text"
+						},
+						{
+							type: NoteType.Checklist,
+							typeString: "checklist"
+						},
+						{
+							type: NoteType.Code,
+							typeString: "code"
+						},
+						{
+							type: NoteType.Rich,
+							typeString: "rich"
+						},
+						{
+							type: NoteType.Md,
+							typeString: "md"
+						}
+					].map(
+						({ type, typeString }) =>
+							({
+								id: `type_${typeString}`,
+								title: `tbd_${typeString}`,
+								icon:
+									type === NoteType.Text
+										? "text"
+										: type === NoteType.Checklist
+											? "checklist"
+											: type === NoteType.Code
+												? "code"
+												: type === NoteType.Rich
+													? "richtext"
+													: type === NoteType.Md
+														? "markdown"
+														: undefined,
+								keepMenuOpenOnPress: Platform.OS === "android",
+								onPress: () => {
+									run(async defer => {
+										const documentPickerResult = await run(async () => {
+											return await DocumentPicker.getDocumentAsync({
+												type: "text/plain",
+												multiple: false,
+												copyToCacheDirectory: true,
+												base64: false
+											})
+										})
+
+										if (!documentPickerResult.success) {
+											console.error(documentPickerResult.error)
+											alerts.error(documentPickerResult.error)
+
+											return
+										}
+
+										if (documentPickerResult.data.canceled) {
+											return
+										}
+
+										const asset = documentPickerResult.data.assets[0]
+
+										if (!asset) {
+											alerts.error("tbd_file_not_found")
+
+											return
+										}
+
+										const assetFile = new FileSystem.File(asset.uri)
+
+										if (!assetFile.exists || assetFile.size === 0) {
+											alerts.error("tbd_file_not_found_or_empty")
+
+											return
+										}
+
+										defer(() => {
+											if (assetFile.exists) {
+												assetFile.delete()
+											}
+										})
+
+										const promptResult = await run(async () => {
+											return await prompts.input({
+												title: "tbd_import_note",
+												message: "tbd_enter_note_name",
+												cancelText: "tbd_cancel",
+												okText: "tbd_import"
+											})
+										})
+
+										if (!promptResult.success) {
+											console.error(promptResult.error)
+											alerts.error(promptResult.error)
+
+											return
+										}
+
+										if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+											return
+										}
+
+										const newName = promptResult.data.value.trim()
+
+										if (newName.length === 0) {
+											return
+										}
+
+										const createResult = await runWithLoading(async () => {
+											return await notesLib.create({
+												title: newName,
+												content: await assetFile.text(),
+												type
+											})
+										})
+
+										if (!createResult.success) {
+											console.error(createResult.error)
+											alerts.error(createResult.error)
+
+											return
+										}
+
+										router.push(`/note/${createResult.data.uuid}`)
+									})
+								}
+							}) satisfies MenuButton
+					)
 				})
 			}
 
