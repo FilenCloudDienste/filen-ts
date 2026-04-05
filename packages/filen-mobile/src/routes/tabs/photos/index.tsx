@@ -290,7 +290,7 @@ const Photos = memo(() => {
 					onLayout={onLayout}
 					className="flex-1"
 				>
-					<DateRange />
+					{config.enabled && config.remoteDir && <DateRange />}
 					{config.enabled && config.remoteDir ? (
 						<VirtualList
 							className="flex-1"

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import alerts from "@/lib/alerts"
 import { unwrapSdkError } from "@/lib/utils"
@@ -65,14 +65,22 @@ export function useSimpleQuery<T>(
 		error: null
 	})
 
-	const execute = async () => {
+	const promiseRef = useRef(promise)
+	const optionsRef = useRef(options)
+
+	useEffect(() => {
+		promiseRef.current = promise
+		optionsRef.current = options
+	}, [promise, options])
+
+	const execute = useCallback(async () => {
 		setState({
 			status: "loading",
 			data: null,
 			error: null
 		})
 
-		const maxRetries = options?.retry ?? DEFAULT_RETRY_COUNT
+		const maxRetries = optionsRef.current?.retry ?? DEFAULT_RETRY_COUNT
 		let lastError: unknown = null
 
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -81,7 +89,7 @@ export function useSimpleQuery<T>(
 			}
 
 			try {
-				const data = await promise(abortControllerRef.current.signal)
+				const data = await promiseRef.current(abortControllerRef.current.signal)
 
 				setState({
 					status: "success",
@@ -121,14 +129,14 @@ export function useSimpleQuery<T>(
 			data: null,
 			error: lastError
 		})
-	}
+	}, [])
 
-	const refetch = () => {
+	const refetch = useCallback(() => {
 		abortControllerRef.current.abort()
 		abortControllerRef.current = new AbortController()
 
 		execute()
-	}
+	}, [execute])
 
 	useEffectOnce(() => {
 		if (options?.enabled ?? true) {
