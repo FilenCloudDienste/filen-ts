@@ -54,12 +54,16 @@ vi.mock("@/lib/transfers", () => ({
 
 const mockSetSyncing = vi.fn()
 const mockSetErrors = vi.fn()
+const mockAddSkippedAsset = vi.fn()
+const mockClearSkippedAssets = vi.fn()
 
 vi.mock("@/stores/useCameraUpload.store", () => ({
 	default: {
 		getState: () => ({
 			setSyncing: mockSetSyncing,
-			setErrors: mockSetErrors
+			setErrors: mockSetErrors,
+			addSkippedAsset: mockAddSkippedAsset,
+			clearSkippedAssets: mockClearSkippedAssets
 		})
 	}
 }))
@@ -77,12 +81,10 @@ vi.mock("@/lib/events", () => ({
 	default: { subscribe: vi.fn() }
 }))
 
-vi.mock("@/lib/exif", () => ({
-	parseExifDate: vi.fn()
-}))
-
-vi.mock("@/lib/drive", () => ({
-	default: { updateTimestamps: vi.fn() }
+vi.mock("@/lib/cache", () => ({
+	default: {
+		cameraUploadHashes: new Map()
+	}
 }))
 
 vi.mock("lru-cache", () => ({
@@ -118,13 +120,13 @@ vi.mock("@/lib/utils", () => ({
 	},
 	normalizeFilePathForExpo: (p: string) => p,
 	unwrapFileMeta: vi.fn(),
-	unwrappedFileIntoDriveItem: vi.fn(),
 	unwrapSdkError: vi.fn().mockReturnValue(null),
 	normalizeModificationTimestampForComparison: (ts: number) => ts
 }))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
+import cache from "@/lib/cache"
 import cameraUpload, { modifyAssetPathOnCollision, type CollisionParams, type Config } from "@/lib/cameraUpload"
 import secureStore from "@/lib/secureStore"
 import NetInfo from "@react-native-community/netinfo"
@@ -132,9 +134,7 @@ import * as Battery from "expo-battery"
 import { getPermissionsAsync } from "expo-media-library"
 import auth from "@/lib/auth"
 import transfers from "@/lib/transfers"
-import drive from "@/lib/drive"
-import { parseExifDate } from "@/lib/exif"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import { unwrapFileMeta } from "@/lib/utils"
 import events from "@/lib/events"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
@@ -173,9 +173,6 @@ function setupDefaultMocks() {
 	} as any)
 	vi.mocked(transfers.upload).mockResolvedValue({ files: [] } as any)
 	vi.mocked(unwrapFileMeta).mockReturnValue({ meta: null } as any)
-	vi.mocked(unwrappedFileIntoDriveItem).mockReturnValue({} as any)
-	vi.mocked(drive.updateTimestamps).mockResolvedValue(undefined as any)
-	vi.mocked(parseExifDate).mockReturnValue(null)
 }
 
 function collision(overrides?: Partial<CollisionParams> & { iteration: number }): string | null {
@@ -196,6 +193,7 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	ml.clear()
 	fs.clear()
+	cache.cameraUploadHashes.clear()
 	cameraUpload.cancel()
 	setupDefaultMocks()
 })
@@ -775,34 +773,6 @@ describe("sync flow", () => {
 		expect(transfers.upload).toHaveBeenCalledTimes(2)
 	})
 
-	it("calls updateTimestamps with EXIF date for images", async () => {
-		setupLocalAssets([{ id: "a1", filename: "photo.jpg", mediaType: MediaType.IMAGE }])
-		vi.mocked(transfers.upload).mockResolvedValueOnce({ files: [{ uuid: "uploaded-1" }] } as any)
-		vi.mocked(parseExifDate).mockReturnValueOnce(1600000000000)
-
-		await cameraUpload.sync()
-
-		expect(drive.updateTimestamps).toHaveBeenCalledWith(
-			expect.objectContaining({
-				created: 1600000000000
-			})
-		)
-	})
-
-	it("calls updateTimestamps with media library date for videos", async () => {
-		setupLocalAssets([{ id: "a1", filename: "video.mp4", mediaType: MediaType.VIDEO, creationTime: 1500000000000 }])
-		vi.mocked(transfers.upload).mockResolvedValueOnce({ files: [{ uuid: "uploaded-1" }] } as any)
-
-		await cameraUpload.sync()
-
-		expect(parseExifDate).not.toHaveBeenCalled()
-		expect(drive.updateTimestamps).toHaveBeenCalledWith(
-			expect.objectContaining({
-				created: 1500000000000
-			})
-		)
-	})
-
 	it("cleans up tmp file after upload", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
@@ -811,12 +781,39 @@ describe("sync flow", () => {
 		vi.mocked(transfers.upload).mockImplementationOnce(async (args: any) => {
 			tmpUri = args.localFileOrDir.uri
 
+			expect(fs.has(tmpUri!)).toBe(true)
+
 			return { files: [] } as any
 		})
 
 		await cameraUpload.sync()
 
 		expect(tmpUri).toBeDefined()
+		expect(fs.has(tmpUri!)).toBe(false)
+	})
+
+	it("passes correct arguments to transfers.upload", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg", creationTime: 1000, modificationTime: 2000 }])
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledWith(
+			expect.objectContaining({
+				name: "photo.jpg",
+				created: 1000,
+				modified: 2000
+			})
+		)
+	})
+
+	it("upload returns null (abort) does not update MD5 cache", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		vi.mocked(transfers.upload).mockResolvedValueOnce(null)
+
+		await cameraUpload.sync()
+
+		expect(cache.cameraUploadHashes.size).toBe(0)
 	})
 })
 
@@ -914,7 +911,7 @@ describe("re-entrancy and failure tracking", () => {
 		expect(failures.size).toBe(0)
 	})
 
-	it("skips assets exceeding MAX_UPLOAD_FAILURES", async () => {
+	it("skips assets exceeding MAX_UPLOAD_FAILURES and reports to store", async () => {
 		const failures = (cameraUpload as any).uploadFailures as Map<string, number>
 
 		failures.set("a1", 3)
@@ -937,7 +934,122 @@ describe("re-entrancy and failure tracking", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(mockAddSkippedAsset).toHaveBeenCalledWith("a1")
 
 		failures.clear()
+	})
+
+	it("cancel resets syncing flag", () => {
+		;(cameraUpload as any).syncing = true
+
+		cameraUpload.cancel()
+
+		expect((cameraUpload as any).syncing).toBe(false)
+	})
+
+	it("cancel during sync allows future syncs", async () => {
+		;(cameraUpload as any).syncing = true
+
+		cameraUpload.cancel()
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({ id: "a1", filename: "photo.jpg", uri: "file:///media/a1", mediaType: MediaType.IMAGE, creationTime: 1000 })
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		await cameraUpload.sync()
+
+		expect(mockSetSyncing).toHaveBeenCalledWith(true)
+	})
+
+	it("sync clears skippedAssets at start", async () => {
+		await cameraUpload.sync()
+
+		expect(mockClearSkippedAssets).toHaveBeenCalled()
+	})
+})
+
+// ─── MD5 hash cache ─────────────────────────────────────────────────────────
+
+describe("MD5 hash cache", () => {
+	function setupLocalAssets(
+		assets: Array<{
+			id: string
+			filename: string
+			creationTime?: number
+			modificationTime?: number
+		}>
+	) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: assets.map(a => a.id) })
+
+		for (const asset of assets) {
+			const uri = `file:///media/${asset.id}`
+
+			ml.addAsset({
+				id: asset.id,
+				filename: asset.filename,
+				uri,
+				mediaType: MediaType.IMAGE,
+				creationTime: asset.creationTime ?? 1000,
+				modificationTime: asset.modificationTime ?? 2000
+			})
+
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+		}
+	}
+
+	it("skips upload when MD5 matches cached value", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "mock-md5")
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("proceeds with upload when MD5 differs from cached value", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "old-md5")
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("proceeds with upload when no cached value exists", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("stores MD5 in cache after successful upload", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		await cameraUpload.sync()
+
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toBe("mock-md5")
+	})
+
+	it("does not store MD5 in cache when upload fails", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		vi.mocked(transfers.upload).mockRejectedValueOnce(new Error("Upload failed"))
+
+		await cameraUpload.sync()
+
+		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(false)
+	})
+
+	it("updates cached MD5 when file content changes", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "old-md5")
+
+		await cameraUpload.sync()
+
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toBe("mock-md5")
 	})
 })

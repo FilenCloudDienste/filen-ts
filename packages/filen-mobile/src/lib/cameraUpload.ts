@@ -6,7 +6,6 @@ import {
 	normalizeFilePathForSdk,
 	unwrapFileMeta,
 	normalizeFilePathForExpo,
-	unwrappedFileIntoDriveItem,
 	normalizeModificationTimestampForComparison
 } from "@/lib/utils"
 import transfers from "@/lib/transfers"
@@ -21,11 +20,10 @@ import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import * as ImageManipulator from "expo-image-manipulator"
 import events from "@/lib/events"
 import { LRUCache } from "lru-cache"
-import { parseExifDate } from "@/lib/exif"
-import drive from "@/lib/drive"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import cache from "@/lib/cache"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -179,6 +177,7 @@ class CameraUpload {
 		// controller above will already stop any in-flight transfers before they
 		// can block on the old (possibly paused) signal.
 		this.globalPauseSignal = new PauseSignal()
+		this.syncing = false
 		this.uploadFailures.clear()
 	}
 
@@ -601,6 +600,7 @@ class CameraUpload {
 
 			// Update UI state
 			useCameraUploadStore.getState().setSyncing(true)
+			useCameraUploadStore.getState().clearSkippedAssets()
 
 			defer(() => {
 				useCameraUploadStore.getState().setSyncing(false)
@@ -634,6 +634,8 @@ class CameraUpload {
 					const assetId = delta.file.info.id
 
 					if ((this.uploadFailures.get(assetId) ?? 0) >= MAX_UPLOAD_FAILURES) {
+						useCameraUploadStore.getState().addSkippedAsset(assetId)
+
 						return
 					}
 
@@ -645,6 +647,16 @@ class CameraUpload {
 
 								if (!assetFile.exists) {
 									throw new Error(`File does not exist at path: ${uri}`)
+								}
+
+								const md5 = assetFile.md5
+
+								if (!md5) {
+									throw new Error(`Failed to calculate MD5 for file at path: ${uri}`)
+								}
+
+								if (md5 === cache.cameraUploadHashes.get(delta.file.path)) {
+									break
 								}
 
 								const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
@@ -691,33 +703,7 @@ class CameraUpload {
 									break
 								}
 
-								await Promise.allSettled(
-									transferResult.files.map(async file =>
-										run(async () => {
-											// Images use EXIF for the most accurate capture timestamp.
-											// Videos don't carry standard EXIF; use media library metadata instead.
-											const exifDate =
-												delta.file.info.mediaType === MediaLibrary.MediaType.IMAGE
-													? parseExifDate(await delta.file.asset.getExif())
-													: null
-
-											await drive.updateTimestamps({
-												item: unwrappedFileIntoDriveItem(unwrapFileMeta(file)),
-												created:
-													exifDate ??
-													delta.file.info.creationTime ??
-													delta.file.info.modificationTime ??
-													Date.now(),
-												modified:
-													delta.file.info.modificationTime ??
-													exifDate ??
-													delta.file.info.creationTime ??
-													Date.now(),
-												signal: abortController.signal
-											})
-										})
-									)
-								)
+								cache.cameraUploadHashes.set(delta.file.path, md5)
 
 								break
 							}
