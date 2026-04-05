@@ -113,6 +113,7 @@ class Cache {
 	public readonly directoryUuidToAnyNormalDir: PersistentMap<AnyNormalDir>
 	public readonly directoryUuidToAnyDirWithContext: PersistentMap<AnyDirWithContext>
 	public readonly availableThumbnails: PersistentMap<boolean>
+	public readonly cameraUploadHashes: PersistentMap<string>
 
 	public constructor() {
 		this.directoryUuidToName = this.createMap<string>("directoryUuidToName")
@@ -124,6 +125,7 @@ class Cache {
 		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
 		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
 		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
+		this.cameraUploadHashes = this.createMap<string>("cameraUploadHashes")
 
 		AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
