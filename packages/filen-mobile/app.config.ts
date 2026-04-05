@@ -227,7 +227,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"expo-secure-store",
 		"expo-navigation-bar",
 		"expo-asset",
-		"expo-sharing",
+		[
+			"expo-sharing",
+			{
+				ios: {
+					enabled: true,
+					appGroupId: IOS_APP_GROUP_ID,
+					activationRule: {
+						supportsFileWithMaxCount: 100,
+						supportsImageWithMaxCount: 100,
+						supportsMovieWithMaxCount: 100,
+						supportsText: false,
+						supportsWebUrlWithMaxCount: 0,
+						supportsWebPageWithMaxCount: 0,
+						supportsAttachmentsWithMaxCount: 0
+					}
+				},
+				android: {
+					enabled: true,
+					singleShareMimeTypes: ["*/*"],
+					multipleShareMimeTypes: ["*/*"]
+				}
+			}
+		],
 		"expo-web-browser",
 		"expo-image",
 		[

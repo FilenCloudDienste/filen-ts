@@ -27,6 +27,7 @@ import { Platform } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Http from "@/components/http"
 import CameraUploadSync from "@/components/cameraUpload/sync"
+import IncomingShareHandler from "@/components/incomingShareHandler"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -185,6 +186,10 @@ const RootLayout = memo(() => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="incomingShare"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="drivePreview"
 												options={{
 													presentation: "transparentModal",
@@ -202,6 +207,7 @@ const RootLayout = memo(() => {
 												<NotesSync />
 												<ChatsSync />
 												<CameraUploadSync />
+												<IncomingShareHandler />
 											</Fragment>
 										)}
 										<Pathname />

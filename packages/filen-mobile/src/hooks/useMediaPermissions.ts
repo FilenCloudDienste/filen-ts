@@ -4,7 +4,6 @@ import useSimpleQuery from "@/hooks/useSimpleQuery"
 import { run } from "@filen/utils"
 import { useEffect, useRef, useCallback } from "react"
 import { AppState } from "react-native"
-import { useFocusEffect } from "expo-router"
 
 export type MediaPermissions =
 	| {
@@ -83,10 +82,12 @@ export default function useMediaPermissions(params?: { shouldRequest?: boolean }
 		}
 	)
 
+	const { refetch } = query
+
 	const requestPermissions = useCallback(async () => {
 		const result = await run(async defer => {
 			defer(() => {
-				query.refetch()
+				refetch()
 			})
 
 			return await hasAllNeededMediaPermissions({
@@ -99,13 +100,7 @@ export default function useMediaPermissions(params?: { shouldRequest?: boolean }
 		}
 
 		return result.data
-	}, [query])
-
-	useFocusEffect(
-		useCallback(() => {
-			query.refetch()
-		}, [query])
-	)
+	}, [refetch])
 
 	useEffect(() => {
 		if (params?.shouldRequest && !didRequestRef.current) {
@@ -118,14 +113,14 @@ export default function useMediaPermissions(params?: { shouldRequest?: boolean }
 	useEffect(() => {
 		const listener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "active") {
-				query.refetch()
+				refetch()
 			}
 		})
 
 		return () => {
 			listener.remove()
 		}
-	}, [query])
+	}, [refetch])
 
 	if (query.status === "loading" || query.status === "idle") {
 		return {
