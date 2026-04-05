@@ -4,7 +4,7 @@ import View from "@/components/ui/view"
 import { memo, Fragment, useCallback, useEffect, useRef } from "react"
 import Header from "@/components/ui/header"
 import { useResolveClassNames } from "uniwind"
-import { router, useNavigation } from "expo-router"
+import { router, useNavigation, useFocusEffect } from "expo-router"
 import VirtualList from "@/components/ui/virtualList"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -19,7 +19,6 @@ import { AnyNormalDir_Tags } from "@filen/sdk-rs"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { randomUUID } from "expo-crypto"
 import isEqual from "react-fast-compare"
-import useEffectOnce from "@/hooks/useEffectOnce"
 import useIncomingShareStore from "@/stores/useIncomingShare.store"
 import Image from "@/components/ui/image"
 import { getPreviewType } from "@/lib/utils"
@@ -123,9 +122,15 @@ const IncomingShare = memo(() => {
 		return unsubscribe
 	}, [navigation, clear])
 
-	useEffectOnce(() => {
-		useIncomingShareStore.getState().setProcess(false)
-	})
+	useFocusEffect(
+		useCallback(() => {
+			useIncomingShareStore.getState().setProcess(false)
+
+			return () => {
+				useIncomingShareStore.getState().setProcess(false)
+			}
+		}, [])
+	)
 
 	return (
 		<Fragment>
