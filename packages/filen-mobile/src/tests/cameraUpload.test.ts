@@ -87,13 +87,6 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("lru-cache", () => ({
-	LRUCache: class extends Map {
-		constructor() {
-			super()
-		}
-	}
-}))
 
 vi.mock("@/lib/utils", () => ({
 	PauseSignal: class {
