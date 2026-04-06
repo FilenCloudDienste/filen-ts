@@ -26,7 +26,10 @@ const uniffiTypeNameSymbol = Symbol.for("typeName")
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(BigInt.prototype as any).toJSON = function () {
-	return { __bi: 1, v: this.toString() }
+	return {
+		__bi: 1,
+		v: this.toString()
+	}
 }
 
 // ─── Reviver ────────────────────────────────────────────────────────────────

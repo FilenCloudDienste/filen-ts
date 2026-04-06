@@ -19,7 +19,6 @@ import { xxHash32 } from "js-xxhash"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import * as ImageManipulator from "expo-image-manipulator"
 import events from "@/lib/events"
-import { LRUCache } from "lru-cache"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
@@ -140,13 +139,13 @@ class CameraUpload {
 	private readonly uploadFailures = new Map<string, number>()
 	public secureStoreKey: string = `cameraUploadConfig:v${VERSION}`
 
-	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, AnyNormalDir>({
-		max: 100,
-		ttl: 60000,
-		allowStale: false,
-		updateAgeOnGet: false,
-		updateAgeOnHas: false
-	})
+	private readonly ensureParentDirectoryExistsCache = new Map<
+		string,
+		{
+			value: AnyNormalDir
+			expires: number
+		}
+	>()
 
 	public constructor() {
 		events.subscribe("secureStoreChange", ({ key }) => {
@@ -534,11 +533,13 @@ class CameraUpload {
 
 		const parentDirName = FileSystem.Paths.dirname(originalPath).replace(/\//g, "")
 		const cacheKey = `${config.remoteDir.inner[0].uuid}:${parentDirName.toLowerCase().trim()}`
-		const fromCache = this.ensureParentDirectoryExistsCache.get(cacheKey)
+		const entry = this.ensureParentDirectoryExistsCache.get(cacheKey)
 
-		if (fromCache) {
-			return fromCache
+		if (entry && entry.expires > Date.now()) {
+			return entry.value
 		}
+
+		this.ensureParentDirectoryExistsCache.delete(cacheKey)
 
 		if (parentDirName.length === 0 || parentDirName === ".") {
 			throw new Error(`Invalid parent directory path: ${parentDirName}`)
@@ -551,7 +552,7 @@ class CameraUpload {
 			})
 		)
 
-		this.ensureParentDirectoryExistsCache.set(cacheKey, dir)
+		this.ensureParentDirectoryExistsCache.set(cacheKey, { value: dir, expires: Date.now() + 60000 })
 
 		return dir
 	}
