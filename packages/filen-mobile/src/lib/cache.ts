@@ -197,6 +197,7 @@ class Cache {
 			return
 		}
 
+		const now = performance.now()
 		const commands: [string, (string | Uint8Array)[]][] = []
 
 		for (const mapKey of this.dirtyClears) {
@@ -243,6 +244,11 @@ class Cache {
 			.then(db => db.executeBatch(commands))
 			.catch(err => {
 				console.error("[Cache] Failed to batch persist", err)
+			})
+			.finally(() => {
+				const duration = performance.now() - now
+
+				console.log(`[Cache] Persisted in ${duration.toFixed(2)}ms`)
 			})
 	}
 

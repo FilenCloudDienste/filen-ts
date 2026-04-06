@@ -99,6 +99,7 @@ export class QueryPersisterKv {
 			return
 		}
 
+		const now = performance.now()
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 		const commands: [string, (string | Uint8Array)[]][] = []
 
@@ -128,6 +129,11 @@ export class QueryPersisterKv {
 			.then(db => db.executeBatch(commands))
 			.catch(err => {
 				console.error("[QueryPersisterKv] Failed to batch persist", err)
+			})
+			.finally(() => {
+				const duration = performance.now() - now
+
+				console.log(`[QueryPersisterKv] Persisted in ${duration.toFixed(2)}ms`)
 			})
 	}
 

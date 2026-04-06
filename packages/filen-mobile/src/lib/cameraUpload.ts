@@ -179,6 +179,8 @@ class CameraUpload {
 		this.globalPauseSignal = new PauseSignal()
 		this.syncing = false
 		this.uploadFailures.clear()
+
+		useCameraUploadStore.getState().clearSkippedAssets()
 	}
 
 	public pause(): void {
@@ -552,12 +554,6 @@ class CameraUpload {
 	}
 
 	public async sync(params?: { maxUploads?: number; background?: boolean }): Promise<void> {
-		if (this.syncing) {
-			return
-		}
-
-		this.syncing = true
-
 		// Capture both signals once so that cancel() — which aborts the current
 		// controller and creates fresh instances for future syncs — reliably
 		// stops every operation in this sync via the captured references,
@@ -566,6 +562,12 @@ class CameraUpload {
 		const pauseSignal = this.globalPauseSignal
 
 		const result = await run(async defer => {
+			if (this.syncing) {
+				return
+			}
+
+			this.syncing = true
+
 			defer(() => {
 				this.syncing = false
 			})
@@ -600,7 +602,6 @@ class CameraUpload {
 
 			// Update UI state
 			useCameraUploadStore.getState().setSyncing(true)
-			useCameraUploadStore.getState().clearSkippedAssets()
 
 			defer(() => {
 				useCameraUploadStore.getState().setSyncing(false)
