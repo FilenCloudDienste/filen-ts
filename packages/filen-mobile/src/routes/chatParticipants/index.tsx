@@ -1,8 +1,7 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
-import { unpack } from "@/lib/msgpack"
-import { Buffer } from "react-native-quick-crypto"
+import { deserialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo } from "react"
@@ -122,8 +121,8 @@ const Participant = memo(({ participant, chat, isOwner }: { participant: ChatPar
 })
 
 const ChatParticipants = memo(() => {
-	const { chatPackedBase64 } = useLocalSearchParams<{
-		chatPackedBase64?: string
+	const { chat: chatSerialized } = useLocalSearchParams<{
+		chat?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -132,12 +131,12 @@ const ChatParticipants = memo(() => {
 	const insets = useSafeAreaInsets()
 
 	const chatParsed = (() => {
-		if (!chatPackedBase64) {
+		if (!chatSerialized) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(chatPackedBase64, "base64")) as Note
+			return deserialize(chatSerialized) as Note
 		} catch {
 			return null
 		}

@@ -23,8 +23,7 @@ import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import { randomUUID } from "expo-crypto"
 import events from "@/lib/events"
-import { pack, unpack } from "@/lib/msgpack"
-import { Buffer } from "react-native-quick-crypto"
+import { serialize, deserialize } from "@/lib/serializer"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
@@ -70,12 +69,10 @@ export async function selectContacts(options: Omit<SelectOptions, "id">): Promis
 		router.push({
 			pathname: "/contacts",
 			params: {
-				selectOptions: Buffer.from(
-					pack({
-						...options,
-						id
-					} satisfies SelectOptions)
-				).toString("base64")
+				selectOptions: serialize({
+					...options,
+					id
+				} satisfies SelectOptions)
 			}
 		})
 	})
@@ -89,7 +86,7 @@ function useSelectOptions() {
 	const selectOptions = ((): SelectOptions | null => {
 		if (searchParams && searchParams.selectOptions) {
 			try {
-				const parsed = unpack(Buffer.from(searchParams.selectOptions, "base64")) as SelectOptions
+				const parsed = deserialize(searchParams.selectOptions) as SelectOptions
 
 				return {
 					multiple: parsed.multiple,

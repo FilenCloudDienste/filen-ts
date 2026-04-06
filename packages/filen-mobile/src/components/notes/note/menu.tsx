@@ -14,8 +14,7 @@ import { router } from "expo-router"
 import { Platform } from "react-native"
 import useAppStore from "@/stores/useApp.store"
 import * as Sharing from "expo-sharing"
-import { Buffer } from "react-native-quick-crypto"
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 
 export type NoteMenuOrigin = "notes" | "search" | "content"
 
@@ -61,7 +60,7 @@ export function createMenuButtons({
 				router.push({
 					pathname: "/noteHistory",
 					params: {
-						notePackedBase64: Buffer.from(pack(note)).toString("base64")
+						note: serialize(note)
 					}
 				})
 			}
@@ -76,7 +75,7 @@ export function createMenuButtons({
 			router.push({
 				pathname: "/noteParticipants",
 				params: {
-					notePackedBase64: Buffer.from(pack(note)).toString("base64")
+					note: serialize(note)
 				}
 			})
 		}
@@ -214,7 +213,7 @@ export function createMenuButtons({
 			router.push({
 				pathname: "/noteTags",
 				params: {
-					notePackedBase64: Buffer.from(pack(note)).toString("base64")
+					note: serialize(note)
 				}
 			})
 		}

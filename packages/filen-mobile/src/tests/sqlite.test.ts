@@ -1,9 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const store = new Map<string, Uint8Array>()
+const store = new Map<string, string>()
 
 const { mockDb, open } = vi.hoisted(() => {
-	const stmtStore = new Map<string, Uint8Array>()
+	const stmtStore = new Map<string, string>()
 
 	function createStmt(query: string) {
 		let params: unknown[] = []
@@ -19,11 +19,11 @@ const { mockDb, open } = vi.hoisted(() => {
 				if (query.startsWith("SELECT value")) {
 					const value = stmtStore.get(params[0] as string)
 
-					return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
+					return { rows: value !== undefined ? [{ value }] : [], insertId: undefined, rowsAffected: 0 }
 				}
 
 				if (query.startsWith("INSERT")) {
-					stmtStore.set(params[0] as string, params[1] as Uint8Array)
+					stmtStore.set(params[0] as string, params[1] as string)
 
 					return { rows: [], insertId: 1, rowsAffected: 1 }
 				}
@@ -72,7 +72,7 @@ vi.mock("@/lib/utils", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 
 type Sqlite = any
 
@@ -250,9 +250,9 @@ describe("Sqlite", () => {
 
 	describe("kvAsync.getByPrefix", () => {
 		it("uses executeRaw and returns map of entries", async () => {
-			const packed = new Uint8Array(pack("value"))
+			const serialized = serialize("value")
 
-			mockDb.executeRaw.mockResolvedValue([["cache:v1:map:a", packed.buffer]])
+			mockDb.executeRaw.mockResolvedValue([["cache:v1:map:a", serialized]])
 
 			const sqlite = await createSqlite()
 			const result = await sqlite.kvAsync.getByPrefix("cache:v1:map:")
@@ -272,7 +272,7 @@ describe("Sqlite", () => {
 	})
 
 	describe("round-trip via prepared statements", () => {
-		it("set then get preserves the value through msgpack", async () => {
+		it("set then get preserves the value through serializer", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.kvAsync.set("roundtrip", { numbers: [1, 2, 3], nested: { ok: true } })
@@ -293,7 +293,7 @@ describe("Sqlite", () => {
 
 	describe("removeByPrefix", () => {
 		it("removes all entries matching prefix", async () => {
-			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, Uint8Array>
+			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, string>
 
 			mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
 				if (query.includes("LIKE") && params?.[0]) {
@@ -336,16 +336,16 @@ describe("Sqlite", () => {
 		})
 
 		it("returns matching entries as a Map", async () => {
-			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, Uint8Array>
+			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, string>
 
 			mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
 				if (query.includes("LIKE") && params?.[0]) {
 					const prefix = (params[0] as string).replace(/%$/, "")
-					const results: [string, ArrayBufferLike][] = []
+					const results: [string, string][] = []
 
 					for (const [key, value] of stmtStoreRef.entries()) {
 						if (key.startsWith(prefix)) {
-							results.push([key, value.buffer])
+							results.push([key, value])
 						}
 					}
 

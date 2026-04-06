@@ -18,9 +18,8 @@ import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
 import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 import auth from "@/lib/auth"
-import { Buffer } from "react-native-quick-crypto"
 import { selectContacts } from "@/routes/contacts"
 
 export function createMenuButtons({
@@ -72,7 +71,7 @@ export function createMenuButtons({
 										: "/sharedOut/[uuid]",
 					params: {
 						uuid: item.data.uuid,
-						selectOptions: drivePath.selectOptions ? Buffer.from(pack(drivePath.selectOptions)).toString("base64") : undefined
+						selectOptions: drivePath.selectOptions ? serialize(drivePath.selectOptions) : undefined
 					}
 				})
 			}
@@ -471,7 +470,7 @@ export function createMenuButtons({
 				router.push({
 					pathname: "/driveItemInfo",
 					params: {
-						itemPackedBase64: Buffer.from(pack(item)).toString("base64")
+						item: serialize(item)
 					}
 				})
 			}
@@ -486,7 +485,7 @@ export function createMenuButtons({
 					router.push({
 						pathname: "/fileVersions",
 						params: {
-							itemPackedBase64: Buffer.from(pack(item)).toString("base64")
+							item: serialize(item)
 						}
 					})
 				}
@@ -509,7 +508,7 @@ export function createMenuButtons({
 				router.push({
 					pathname: "/changeDirectoryColor",
 					params: {
-						itemPackedBase64: Buffer.from(pack(item)).toString("base64")
+						item: serialize(item)
 					}
 				})
 			}
@@ -596,16 +595,14 @@ export function createMenuButtons({
 						pathname: "/driveSelect/[uuid]",
 						params: {
 							uuid: driveRootUuidResult.data,
-							selectOptions: Buffer.from(
-								pack({
-									type: "single",
-									files: false,
-									directories: true,
-									intention: "move",
-									items: [item],
-									id: randomUUID()
-								} satisfies SelectOptions)
-							).toString("base64")
+							selectOptions: serialize({
+								type: "single",
+								files: false,
+								directories: true,
+								intention: "move",
+								items: [item],
+								id: randomUUID()
+							} satisfies SelectOptions)
 						}
 					})
 				}

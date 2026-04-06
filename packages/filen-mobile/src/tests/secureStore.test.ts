@@ -88,7 +88,7 @@ describe("SecureStore", () => {
 		it("creates mmkv directory if it does not exist", () => {
 			createSecureStore()
 
-			const mmkvDirUri = "file:///shared/group.io.filen.app/mmkv"
+			const mmkvDirUri = "file:///shared/group.io.filen.app/mmkv/v1"
 
 			expect(fs.get(mmkvDirUri)).toBe("dir")
 		})
@@ -100,7 +100,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.any(String))
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.any(String))
 		})
 
 		it("reads existing data from file and populates cache", async () => {
@@ -162,7 +162,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey.v1", expect.stringMatching(/^[0-9a-f]{64}$/))
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.stringMatching(/^[0-9a-f]{64}$/))
 		})
 
 		it("reuses cached key on subsequent calls", async () => {
@@ -187,7 +187,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(mockMmkv.set).toHaveBeenCalledWith("encryptionKey.v1", expect.stringMatching(/^[0-9a-f]{64}$/))
+			expect(mockMmkv.set).toHaveBeenCalledWith("encryptionKey", expect.stringMatching(/^[0-9a-f]{64}$/))
 		})
 
 		it("retrieves existing key from MMKV when available", async () => {
@@ -364,7 +364,7 @@ describe("SecureStore", () => {
 			await store.set("password", "super-secret-123")
 
 			// Find the secure store file in the in-memory fs
-			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+			const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 			const fileBytes = fs.get(fileUri)
 
 			expect(fileBytes).toBeInstanceOf(Uint8Array)
@@ -382,7 +382,7 @@ describe("SecureStore", () => {
 
 			await store.set("data", "test-value")
 
-			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+			const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 			const fileBytes = fs.get(fileUri) as Uint8Array
 
 			// Must be at least 12 (IV) + 1 (min ciphertext) + 16 (authTag) = 29 bytes
@@ -482,7 +482,7 @@ describe("SecureStore", () => {
 
 			await store.set("key", "value")
 
-			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+			const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 
 			expect(fs.has(fileUri)).toBe(true)
 
@@ -584,7 +584,7 @@ describe("SecureStore", () => {
 			const encryptionKey = setCall[1]
 
 			// Corrupt the file
-			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+			const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 
 			fs.set(fileUri, new Uint8Array([0xff, 0xfe, 0xfd, 0xfc, 0xfb]))
 
@@ -610,7 +610,7 @@ describe("SecureStore", () => {
 			const encryptionKey = setCall[1]
 
 			// Corrupt the file
-			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+			const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 
 			fs.set(fileUri, new Uint8Array([0x00, 0x01, 0x02]))
 
@@ -633,7 +633,7 @@ describe("SecureStore", () => {
 			await store1.init()
 
 			// Overwrite with empty file
-			const fileUri = "file:///shared/group.io.filen.app/securestore.v1.bin"
+			const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 
 			fs.set(fileUri, new Uint8Array(0))
 

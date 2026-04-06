@@ -128,17 +128,17 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 	}
 }
 
-const MAX_UPLOAD_FAILURES = 3
+export const MAX_UPLOAD_FAILURES = 3
+// Critical: When changing the config type/object, increment the version to invalidate old configs and clear caches that may contain entries based on the old config structure.
+export const VERSION = 1
 
 class CameraUpload {
-	// Critical: When changing the config type/object, increment the version to invalidate old configs and clear caches that may contain entries based on the old config structure.
-	public version = 1
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
 	private syncing: boolean = false
 	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
 	private readonly uploadFailures = new Map<string, number>()
-	public secureStoreKey: string = `cameraUploadConfig:v${this.version}`
+	public secureStoreKey: string = `cameraUploadConfig:v${VERSION}`
 
 	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, AnyNormalDir>({
 		max: 100,

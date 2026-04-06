@@ -2,8 +2,7 @@ import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
-import { unpack } from "@/lib/msgpack"
-import { Buffer } from "react-native-quick-crypto"
+import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
 import { DirectoryIcon, unwrapDirColor, directoryColorToHex } from "@/components/itemIcons"
@@ -21,8 +20,8 @@ import { Information } from "@/routes/driveItemInfo"
 import { useStringifiedClient } from "@/lib/auth"
 
 const ChangeDirectoryColor = memo(() => {
-	const { itemPackedBase64 } = useLocalSearchParams<{
-		itemPackedBase64?: string
+	const { item: itemSerialized } = useLocalSearchParams<{
+		item?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -31,12 +30,12 @@ const ChangeDirectoryColor = memo(() => {
 	const stringifiedClient = useStringifiedClient()
 
 	const item = (() => {
-		if (!itemPackedBase64) {
+		if (!itemSerialized) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(itemPackedBase64, "base64")) as DriveItem
+			return deserialize(itemSerialized) as DriveItem
 		} catch {
 			return null
 		}

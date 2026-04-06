@@ -3,18 +3,19 @@ import { experimental_createQueryPersister, type PersistedQuery } from "@tanstac
 import sqlite from "@/lib/sqlite"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import { pack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import { debounce } from "es-toolkit/function"
 import { unwrapSdkError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
 
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 2
+export const VERSION = 1
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
 export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000 * 10 // 10 years, effectively infinite for our use case
 
 const PERSIST_DEBOUNCE = 1000
+const PERSIST_CHUNK_SIZE = 100
 const UNCACHED_QUERY_KEYS = new Map<string, true>([])
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
@@ -78,10 +79,11 @@ export class QueryPersisterKv {
 
 	public async restore(): Promise<void> {
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
-		const entries = await sqlite.kvAsync.getByPrefix<unknown>(prefix)
+		const db = await sqlite.openDb()
+		const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
 
-		for (const [fullKey, value] of entries) {
-			this.buffer.set(fullKey.slice(prefix.length), value)
+		for (const row of rows) {
+			this.buffer.set((row[0] as string).slice(prefix.length), deserialize(row[1] as string))
 		}
 	}
 
@@ -91,8 +93,13 @@ export class QueryPersisterKv {
 
 	public flushNow(): void {
 		this.persistDirty.cancel()
-		this.persistNow()
+
+		if (!this.persisting) {
+			this.persistNow()
+		}
 	}
+
+	private persisting = false
 
 	private persistNow(): void {
 		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
@@ -100,23 +107,7 @@ export class QueryPersisterKv {
 		}
 
 		const now = performance.now()
-		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
-		const commands: [string, (string | Uint8Array)[]][] = []
-
-		for (const key of this.dirtyDeletes) {
-			commands.push(["DELETE FROM kv WHERE key = ?", [prefix + key]])
-		}
-
-		for (const key of this.dirtyUpserts) {
-			const value = this.buffer.get(key)
-
-			if (value !== undefined) {
-				commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [prefix + key, new Uint8Array(pack(value))]])
-			}
-		}
-
-		this.dirtyUpserts.clear()
-		this.dirtyDeletes.clear()
+		const commands = this.buildCommands()
 
 		if (commands.length === 0) {
 			return
@@ -131,17 +122,102 @@ export class QueryPersisterKv {
 				console.error("[QueryPersisterKv] Failed to batch persist", err)
 			})
 			.finally(() => {
-				const duration = performance.now() - now
-
-				console.log(`[QueryPersisterKv] Persisted in ${duration.toFixed(2)}ms`)
+				console.log(`[QueryPersisterKv] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
 			})
+	}
+
+	private async persistAsync(): Promise<void> {
+		if (this.persisting) {
+			return
+		}
+
+		this.persisting = true
+
+		try {
+			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
+				return
+			}
+
+			const now = performance.now()
+
+			const deletes = new Set(this.dirtyDeletes)
+			const upserts = new Set(this.dirtyUpserts)
+
+			this.dirtyDeletes.clear()
+			this.dirtyUpserts.clear()
+
+			const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
+			const commands: [string, (string | Uint8Array)[]][] = []
+
+			for (const key of deletes) {
+				commands.push(["DELETE FROM kv WHERE key = ?", [prefix + key]])
+			}
+
+			let serialized = 0
+
+			for (const key of upserts) {
+				const value = this.buffer.get(key)
+
+				if (value !== undefined) {
+					commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [prefix + key, serialize(value)]])
+
+					serialized++
+
+					if (serialized % PERSIST_CHUNK_SIZE === 0) {
+						await new Promise<void>(resolve => {
+							setImmediate(resolve)
+						})
+					}
+				}
+			}
+
+			if (commands.length === 0) {
+				return
+			}
+
+			console.log(`[QueryPersisterKv] Persisting ${commands.length} changes`)
+
+			const db = await sqlite.openDb()
+
+			await db.executeBatch(commands)
+
+			console.log(`[QueryPersisterKv] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
+		} catch (err) {
+			console.error("[QueryPersisterKv] Failed to persist", err)
+		} finally {
+			this.persisting = false
+
+			if (this.dirtyUpserts.size > 0 || this.dirtyDeletes.size > 0) {
+				this.persistDirty()
+			}
+		}
+	}
+
+	private buildCommands(): [string, (string | Uint8Array)[]][] {
+		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
+		const commands: [string, (string | Uint8Array)[]][] = []
+
+		for (const key of this.dirtyDeletes) {
+			commands.push(["DELETE FROM kv WHERE key = ?", [prefix + key]])
+		}
+
+		for (const key of this.dirtyUpserts) {
+			const value = this.buffer.get(key)
+
+			if (value !== undefined) {
+				commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [prefix + key, serialize(value)]])
+			}
+		}
+
+		this.dirtyUpserts.clear()
+		this.dirtyDeletes.clear()
+
+		return commands
 	}
 
 	private persistDirty = debounce(
 		() => {
-			queueMicrotask(() => {
-				this.persistNow()
-			})
+			this.persistAsync()
 		},
 		PERSIST_DEBOUNCE,
 		{
@@ -234,7 +310,7 @@ export const queryClient = new QueryClient({
 		queries: {
 			...DEFAULT_QUERY_OPTIONS,
 			persister: queryClientPersister.persisterFn,
-			queryKeyHashFn: queryKey => JSON.stringify(queryKey, (_, v) => (typeof v === "bigint" ? `__bigint_${v}` : v))
+			queryKeyHashFn: queryKey => serialize(queryKey)
 		}
 	}
 })

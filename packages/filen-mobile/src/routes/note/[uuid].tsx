@@ -15,8 +15,7 @@ import prompts from "@/lib/prompts"
 import notes from "@/lib/notes"
 import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import { Buffer } from "react-native-quick-crypto"
-import { unpack } from "@/lib/msgpack"
+import { deserialize } from "@/lib/serializer"
 import { createMenuButtons } from "@/components/notes/note/menu"
 import { useStringifiedClient } from "@/lib/auth"
 
@@ -157,9 +156,9 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 })
 
 const Note = memo(() => {
-	const { uuid, historyPackedBase64 } = useLocalSearchParams<{
+	const { uuid, history: historySerialized } = useLocalSearchParams<{
 		uuid: string
-		historyPackedBase64?: string
+		history?: string
 	}>()
 
 	const notesWithContentQuery = useNotesWithContentQuery({
@@ -172,12 +171,12 @@ const Note = memo(() => {
 			: (null as unknown as TNote)
 
 	const history = (() => {
-		if (!historyPackedBase64) {
+		if (!historySerialized) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(historyPackedBase64, "base64")) as NoteHistory
+			return deserialize(historySerialized) as NoteHistory
 		} catch {
 			return null
 		}

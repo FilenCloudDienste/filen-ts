@@ -240,7 +240,7 @@ vi.mock("uuid", () => ({
 }))
 
 import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta } from "@/lib/offline"
-import { pack, unpack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
 import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
@@ -252,7 +252,9 @@ import useOfflineStore from "@/stores/useOffline.store"
 
 type OfflineInstance = any
 
-const BASE_DIR_URI = "file:///shared/group.io.filen.app/offline/v1"
+import { VERSION as OFFLINE_VERSION } from "@/lib/offline"
+
+const BASE_DIR_URI = `file:///shared/group.io.filen.app/offline/v${OFFLINE_VERSION}`
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
 const DIRECTORIES_DIR_URI = `${BASE_DIR_URI}/directories`
 const INDEX_FILE_URI = `${BASE_DIR_URI}/index`
@@ -325,13 +327,13 @@ function makeSharedDirParent(uuid: string, grandparentUuid: string): any {
 }
 
 function writeIndex(index: Index): void {
-	fs.set(INDEX_FILE_URI, new Uint8Array(pack(index)))
+	fs.set(INDEX_FILE_URI, new Uint8Array(new TextEncoder().encode(serialize(index))))
 }
 
 function readIndex(): Index {
 	const bytes = fs.get(INDEX_FILE_URI) as Uint8Array
 
-	return unpack(bytes) as Index
+	return deserialize(new TextDecoder().decode(bytes)) as Index
 }
 
 function writeFileMeta(uuid: string, meta: FileOrDirectoryOfflineMeta): void {
@@ -339,7 +341,7 @@ function writeFileMeta(uuid: string, meta: FileOrDirectoryOfflineMeta): void {
 	const dirUri = `${FILES_DIR_URI}/${uuid}`
 
 	fs.set(dirUri, "dir")
-	fs.set(metaUri, new Uint8Array(pack(meta)))
+	fs.set(metaUri, new Uint8Array(new TextEncoder().encode(serialize(meta))))
 }
 
 function writeFileData(uuid: string, name: string, data: Uint8Array = new Uint8Array([1, 2, 3])): void {
@@ -355,7 +357,7 @@ function writeDirectoryMeta(uuid: string, meta: DirectoryOfflineMeta): void {
 	const dirUri = `${DIRECTORIES_DIR_URI}/${uuid}`
 
 	fs.set(dirUri, "dir")
-	fs.set(metaUri, new Uint8Array(pack(meta)))
+	fs.set(metaUri, new Uint8Array(new TextEncoder().encode(serialize(meta))))
 }
 
 async function createOffline(): Promise<OfflineInstance> {
@@ -1195,7 +1197,7 @@ describe("Offline", () => {
 
 			// Index should contain the file
 			expect(fs.get(INDEX_FILE_URI)).toBeInstanceOf(Uint8Array)
-			const index = unpack(fs.get(INDEX_FILE_URI) as Uint8Array) as Index
+			const index = deserialize(new TextDecoder().decode(fs.get(INDEX_FILE_URI) as Uint8Array)) as Index
 
 			expect(index.files[uuid]).toBeDefined()
 		})
@@ -1327,7 +1329,7 @@ describe("Offline", () => {
 			expect(fs.get(metaUri)).toBeInstanceOf(Uint8Array)
 
 			// Unpack and verify entries were built
-			const meta = unpack(fs.get(metaUri) as Uint8Array) as DirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as DirectoryOfflineMeta
 
 			expect(Object.keys(meta.entries).length).toBeGreaterThanOrEqual(2)
 
@@ -1417,7 +1419,7 @@ describe("Offline", () => {
 			await offline.storeDirectory({ directory: dirItem, parent })
 
 			const metaUri = `${dataDirectoryUri}/${uuid}.filenmeta`
-			const meta = unpack(fs.get(metaUri) as Uint8Array) as DirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as DirectoryOfflineMeta
 
 			// Linked directory should be excluded from entries
 			expect(Object.keys(meta.entries)).toHaveLength(0)
@@ -1967,7 +1969,7 @@ describe("Offline", () => {
 			// The file should have been re-downloaded — new meta should reflect updated modification time
 			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
 			const metaBytes = fs.get(metaUri) as Uint8Array
-			const meta = unpack(metaBytes) as FileOrDirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(metaBytes)) as FileOrDirectoryOfflineMeta
 
 			expect((meta.item.data.decryptedMeta as { modified: number } | null)?.modified).toBe(5000)
 		})
@@ -2095,7 +2097,7 @@ describe("Offline", () => {
 			// Meta file should be updated with the new name
 			const metaUri = `${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`
 			const metaBytes = fs.get(metaUri) as Uint8Array
-			const meta = unpack(metaBytes) as DirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(metaBytes)) as DirectoryOfflineMeta
 
 			expect(meta.item.data.decryptedMeta?.name).toBe("NewName")
 		})
@@ -2230,7 +2232,7 @@ describe("Offline", () => {
 			// Meta should reflect the new name
 			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
 			const metaBytes = fs.get(metaUri) as Uint8Array
-			const meta = unpack(metaBytes) as FileOrDirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(metaBytes)) as FileOrDirectoryOfflineMeta
 
 			expect(meta.item.data.decryptedMeta?.name).toBe("new-name.txt")
 		})
@@ -3133,7 +3135,7 @@ describe("Offline", () => {
 			// File should be re-downloaded with new name and modification time
 			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
 			const metaBytes = fs.get(metaUri) as Uint8Array
-			const meta = unpack(metaBytes) as FileOrDirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(metaBytes)) as FileOrDirectoryOfflineMeta
 
 			expect(meta.item.data.decryptedMeta?.name).toBe("new-name.txt")
 			expect((meta.item.data.decryptedMeta as { modified: number } | null)?.modified).toBe(9000)
@@ -3990,8 +3992,8 @@ describe("Offline", () => {
 			}
 		})
 
-		it("readIndex recovers from a valid msgpack encoding of empty object", async () => {
-			// Write valid msgpack for {} — keys length 0 triggers the "Index file is empty" check
+		it("readIndex recovers from a valid serialized encoding of empty object", async () => {
+			// Write valid serialized form of {} — keys length 0 triggers the "Index file is empty" check
 			fs.set(BASE_DIR_URI, "dir")
 			fs.set(FILES_DIR_URI, "dir")
 			fs.set(DIRECTORIES_DIR_URI, "dir")
@@ -4168,14 +4170,14 @@ describe("Offline", () => {
 
 			expect(fs.get(metaUri)).toBeInstanceOf(Uint8Array)
 
-			const meta = unpack(fs.get(metaUri) as Uint8Array) as FileOrDirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as FileOrDirectoryOfflineMeta
 
 			expect(meta.parent).toBe("sharedInRoot")
 
 			// Index should be updated
 			expect(fs.get(INDEX_FILE_URI)).toBeInstanceOf(Uint8Array)
 
-			const index = unpack(fs.get(INDEX_FILE_URI) as Uint8Array) as Index
+			const index = deserialize(new TextDecoder().decode(fs.get(INDEX_FILE_URI) as Uint8Array)) as Index
 
 			expect(index.files[uuid]).toBeDefined()
 			expect(index.files[uuid]!.parent).toBe("sharedInRoot")
@@ -4211,7 +4213,7 @@ describe("Offline", () => {
 
 			expect(fs.get(metaUri)).toBeInstanceOf(Uint8Array)
 
-			const meta = unpack(fs.get(metaUri) as Uint8Array) as DirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as DirectoryOfflineMeta
 
 			expect(meta.parent).toBe("sharedInRoot")
 		})
@@ -4349,7 +4351,7 @@ describe("Offline", () => {
 			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`)).toBe(false)
 		})
 
-		it("sync cleans up directory when directoryMeta unpacks to empty object", async () => {
+		it("sync cleans up directory when directoryMeta deserializes to empty object", async () => {
 			const dirUuid = "11111111-1111-1111-1111-111111111111"
 			const parentUuid = "22222222-2222-2222-2222-222222222222"
 			const dirItem = makeDirItem(dirUuid, "EmptyMeta")
@@ -4368,10 +4370,10 @@ describe("Offline", () => {
 
 			expect(await offline.isItemStored(dirItem)).toBe(true)
 
-			// Overwrite the .filenmeta with a valid msgpack encoding of {} (empty object)
+			// Overwrite the .filenmeta with a valid serialized encoding of {} (empty object)
 			const metaUri = `${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`
 
-			fs.set(metaUri, new Uint8Array(pack({})))
+			fs.set(metaUri, new Uint8Array(new TextEncoder().encode(serialize({}))))
 
 			// Remote listing: directory still exists
 			const remoteDir = {
@@ -4394,7 +4396,7 @@ describe("Offline", () => {
 
 			await offline.sync()
 
-			// Directory should be cleaned up because directoryMeta unpacks to empty object
+			// Directory should be cleaned up because directoryMeta deserializes to empty object
 			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}`)).toBe(false)
 		})
 
@@ -4418,7 +4420,7 @@ describe("Offline", () => {
 
 			fs.set(dirUri, "dir")
 			fs.set(`${dirUri}/somefile.txt`, new Uint8Array([1, 2, 3]))
-			fs.set(metaUri, new Uint8Array(pack({ item: fileItem, parent })))
+			fs.set(metaUri, new Uint8Array(new TextEncoder().encode(serialize({ item: fileItem, parent }))))
 
 			const offline = await createOffline()
 
@@ -4604,13 +4606,13 @@ describe("Offline", () => {
 			expect(files).toHaveLength(0)
 		})
 
-		it("readDirectoryMeta returns null for valid msgpack of empty object", async () => {
+		it("readDirectoryMeta returns null for valid serialized empty object", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 
-			// Write a valid msgpack encoding of {} (empty object)
+			// Write a valid serialized encoding of {} (empty object)
 			// This triggers the Object.keys(meta).length === 0 check
 			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
-			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`, new Uint8Array(pack({})))
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({}))))
 
 			const offline = await createOffline()
 			const result = await offline.listDirectories()
@@ -4879,7 +4881,7 @@ describe("Offline", () => {
 
 			// Parent meta should contain both child entries
 			const metaUri = `${DIRECTORIES_DIR_URI}/${parentDirUuid}/${parentDirUuid}.filenmeta`
-			const meta = unpack(fs.get(metaUri) as Uint8Array) as DirectoryOfflineMeta
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as DirectoryOfflineMeta
 			const entryUuids = Object.values(meta.entries).map(e => e.item.data.uuid)
 
 			expect(entryUuids).toContain(childDirUuid)

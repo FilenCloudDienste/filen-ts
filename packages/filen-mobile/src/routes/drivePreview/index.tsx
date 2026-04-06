@@ -1,8 +1,7 @@
 import { memo } from "react"
 import { router, useLocalSearchParams } from "expo-router"
 import { type DriveItemFileExtracted, type DriveItem } from "@/types"
-import { Buffer } from "react-native-quick-crypto"
-import { unpack } from "@/lib/msgpack"
+import { deserialize } from "@/lib/serializer"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { getPreviewType } from "@/lib/utils"
@@ -10,7 +9,9 @@ import Gallery from "@/components/drivePreview/gallery"
 
 const Return = memo(() => {
 	useEffectOnce(() => {
-		router.dismissAll()
+		if (router.canDismiss()) {
+			router.dismiss()
+		}
 	})
 
 	return null
@@ -37,11 +38,11 @@ function parseParams(searchParams: SearchParams): {
 
 	try {
 		if (searchParams.item) {
-			item = unpack(Buffer.from(searchParams.item, "base64")) as DriveItem
+			item = deserialize(searchParams.item) as DriveItem
 		}
 
 		if (searchParams.drivePath) {
-			drivePath = unpack(Buffer.from(searchParams.drivePath, "base64")) as DrivePath
+			drivePath = deserialize(searchParams.drivePath) as DrivePath
 		}
 	} catch (e) {
 		console.error(e)

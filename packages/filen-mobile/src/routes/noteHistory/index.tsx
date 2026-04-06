@@ -1,8 +1,7 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
-import { unpack, pack } from "@/lib/msgpack"
-import { Buffer } from "react-native-quick-crypto"
+import { deserialize, serialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
@@ -69,7 +68,7 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 										pathname: "/note/[uuid]",
 										params: {
 											uuid: note.uuid,
-											historyPackedBase64: Buffer.from(pack(history)).toString("base64")
+											history: serialize(history)
 										}
 									})
 								}
@@ -133,8 +132,8 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 })
 
 const NoteHistory = memo(() => {
-	const { notePackedBase64 } = useLocalSearchParams<{
-		notePackedBase64?: string
+	const { note: noteSerialized } = useLocalSearchParams<{
+		note?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -143,12 +142,12 @@ const NoteHistory = memo(() => {
 	const insets = useSafeAreaInsets()
 
 	const noteParsed = (() => {
-		if (!notePackedBase64) {
+		if (!noteSerialized) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(notePackedBase64, "base64")) as Note
+			return deserialize(noteSerialized) as Note
 		} catch {
 			return null
 		}

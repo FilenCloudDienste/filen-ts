@@ -54,7 +54,7 @@ vi.mock("react-fast-compare", () => ({
 		JSON.stringify(b, (_k, v) => (typeof v === "bigint" ? `__bigint__${v.toString()}` : v))
 }))
 
-import { pack, unpack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
 import auth from "@/lib/auth"
@@ -106,7 +106,7 @@ function writeMetadata(uuid: string, item: DriveItem): void {
 	const dir = `${BASE_DIR}/${uuid}`
 
 	fs.set(dir, "dir")
-	fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(pack({ ...item, cachedAt: Date.now() })))
+	fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: Date.now() }))))
 }
 
 async function createFileCache(): Promise<InstanceType<typeof import("@/lib/fileCache").FileCache>> {
@@ -225,7 +225,7 @@ describe("FileCache", () => {
 			const dir = `${BASE_DIR}/empty-meta`
 
 			fs.set(dir, "dir")
-			fs.set(`${dir}/empty-meta.filenmeta`, new Uint8Array(pack({})))
+			fs.set(`${dir}/empty-meta.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({}))))
 
 			const result = await cache.has(item)
 
@@ -283,7 +283,7 @@ describe("FileCache", () => {
 
 			expect(metaFile.exists).toBe(true)
 
-			const meta = unpack(await metaFile.bytes()) as Metadata
+			const meta = deserialize(new TextDecoder().decode(await metaFile.bytes())) as Metadata
 
 			expect(meta.cachedAt).toBeGreaterThan(0)
 		})
@@ -382,7 +382,7 @@ describe("FileCache", () => {
 
 			expect(metaFile.exists).toBe(true)
 
-			const meta = unpack(await metaFile.bytes()) as Metadata
+			const meta = deserialize(new TextDecoder().decode(await metaFile.bytes())) as Metadata
 
 			expect(meta.type).toBe("file")
 			expect(meta.cachedAt).toBeTypeOf("number")
@@ -428,7 +428,7 @@ describe("FileCache", () => {
 
 			fs.set(dir, "dir")
 			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
-			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(pack({ cachedAt: expiredTime })))
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ cachedAt: expiredTime }))))
 
 			await cache.gc()
 
@@ -445,7 +445,7 @@ describe("FileCache", () => {
 
 			fs.set(dir, "dir")
 			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
-			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(pack({ ...item, cachedAt: Date.now() })))
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: Date.now() }))))
 
 			await cache.gc()
 

@@ -38,7 +38,7 @@ vi.mock("expo-image", () => ({
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import { fs, File, Directory } from "@/tests/mocks/expoFileSystem"
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import type { Metadata } from "@/lib/audioCache"
 
@@ -142,7 +142,7 @@ describe("AudioCache", () => {
 				cachedAt: Date.now()
 			}
 
-			fs.set(metaPath, new Uint8Array(pack(metadata)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
 
 			const result = await cache.has(item)
 
@@ -174,7 +174,7 @@ describe("AudioCache", () => {
 				cachedAt: Date.now()
 			}
 
-			fs.set(metaPath, new Uint8Array(pack(metadata)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
 
 			const result = await cache.has(item)
 
@@ -202,7 +202,7 @@ describe("AudioCache", () => {
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-6.filenmeta`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-			fs.set(metaPath, new Uint8Array(pack(null)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(null))))
 
 			const result = await cache.has(item)
 
@@ -231,7 +231,7 @@ describe("AudioCache", () => {
 				cachedAt: Date.now()
 			}
 
-			fs.set(metaPath, new Uint8Array(pack(metadata)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
 
 			const result = await cache.get({ item })
 
@@ -349,7 +349,7 @@ describe("AudioCache", () => {
 				cachedAt: Date.now()
 			}
 
-			fs.set(metaPath, new Uint8Array(pack(existingMeta)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(existingMeta))))
 
 			const result = await cache.get({ item })
 
@@ -371,7 +371,7 @@ describe("AudioCache", () => {
 
 			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
 
-			fs.set(metaPath, new Uint8Array(pack(null)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(null))))
 
 			const result = await cache.get({ item })
 
@@ -433,7 +433,7 @@ describe("AudioCache", () => {
 				cachedAt: Date.now()
 			}
 
-			fs.set(metaPath, new Uint8Array(pack(metadata)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
 
 			const result = await cache.get({ item })
 
@@ -464,7 +464,7 @@ describe("AudioCache", () => {
 				cachedAt: Date.now()
 			}
 
-			fs.set(metaPath, new Uint8Array(pack(metadata)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
 
 			const result = await cache.getMetadata({ item })
 
@@ -483,7 +483,7 @@ describe("AudioCache", () => {
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-16.filenmeta`
 
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-			fs.set(metaPath, new Uint8Array(pack({ artist: "X", cachedAt: Date.now() })))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize({ artist: "X", cachedAt: Date.now() }))))
 
 			await cache.remove(item)
 
@@ -523,7 +523,7 @@ describe("AudioCache", () => {
 
 			const metaPath = `${AUDIO_BASE_DIR}/expired-uuid.filenmeta`
 
-			fs.set(metaPath, new Uint8Array(pack(expiredMeta)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(expiredMeta))))
 
 			await cache.gc()
 
@@ -545,7 +545,7 @@ describe("AudioCache", () => {
 
 			const metaPath = `${AUDIO_BASE_DIR}/fresh-uuid.filenmeta`
 
-			fs.set(metaPath, new Uint8Array(pack(freshMeta)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(freshMeta))))
 
 			await cache.gc()
 
@@ -557,7 +557,7 @@ describe("AudioCache", () => {
 
 			const metaPath = `${AUDIO_BASE_DIR}/empty-uuid.filenmeta`
 
-			fs.set(metaPath, new Uint8Array(pack(null)))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(null))))
 
 			await cache.gc()
 

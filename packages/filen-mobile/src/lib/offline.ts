@@ -4,7 +4,7 @@ import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import type { DriveItem } from "@/types"
 import { run, Semaphore } from "@filen/utils"
 import transfers from "@/lib/transfers"
-import { pack, unpack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import auth from "@/lib/auth"
 import { randomUUID } from "expo-crypto"
 import {
@@ -76,12 +76,15 @@ export type Index = {
 	>
 }
 
+// Critical: When changing anything related to offline storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = 1
+
 // Manages offline file/directory storage on device.
 //
 // Storage layout:
 //   offline/v{N}/files/{uuid}/{filename}        — standalone files (one data file + one .filenmeta)
 //   offline/v{N}/directories/{uuid}/...         — directory trees (recursive download + one .filenmeta with entries map)
-//   offline/v{N}/index                          — msgpack'd Index of all stored items (rebuilt on mutation)
+//   offline/v{N}/index                          — serialized Index of all stored items (rebuilt on mutation)
 //
 // Key concepts:
 //   - "Standalone" items are stored individually under files/ or as a top-level directory.
@@ -90,16 +93,14 @@ export type Index = {
 //   - The Index is the source of truth for "is this item offline?" queries and is rebuilt atomically.
 //   - sync() compares local offline state against remote, re-downloading changed/new files and pruning deleted ones.
 export class Offline {
-	// Critical: When changing anything related to offline storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-	public readonly version = 1
 	private readonly directory: FileSystem.Directory = new FileSystem.Directory(
 		Platform.select({
 			ios: FileSystem.Paths.join(
 				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 				"offline",
-				`v${this.version}`
+				`v${VERSION}`
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "offline", `v${this.version}`)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "offline", `v${VERSION}`)
 		})
 	)
 	private readonly filesDirectory: FileSystem.Directory = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, "files"))
@@ -169,7 +170,7 @@ export class Offline {
 	 * Write data to a file atomically using write-to-temp-then-move.
 	 * Prevents corruption from crashes mid-write.
 	 */
-	private atomicWrite(file: FileSystem.File, data: Uint8Array): FileSystem.File {
+	private atomicWrite(file: FileSystem.File, data: string | Uint8Array): FileSystem.File {
 		const tmp = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, `.tmp-${randomUUID()}`))
 
 		tmp.write(data)
@@ -225,7 +226,7 @@ export class Offline {
 		}
 
 		const readResult = await run(async () => {
-			const meta: DirectoryOfflineMeta = unpack(await metaFile.bytes())
+			const meta: DirectoryOfflineMeta = deserialize(await metaFile.text())
 
 			if (Object.keys(meta).length === 0) {
 				throw new Error("Directory meta file is empty")
@@ -351,7 +352,7 @@ export class Offline {
 					directories: indexDirectories
 				}
 
-				this.atomicWrite(this.indexFile, new Uint8Array(pack(index satisfies Index)))
+				this.atomicWrite(this.indexFile, serialize(index satisfies Index))
 
 				this.indexCache = index
 			},
@@ -387,7 +388,7 @@ export class Offline {
 			}
 
 			const readResult = await run(async () => {
-				const index: Index = unpack(await this.indexFile.bytes())
+				const index: Index = deserialize(await this.indexFile.text())
 
 				if (Object.keys(index).length === 0) {
 					throw new Error("Index file is empty")
@@ -744,12 +745,10 @@ export class Offline {
 
 									this.atomicWrite(
 										metaFile,
-										new Uint8Array(
-											pack({
-												item: unwrappedFileIntoDriveItem(unwrappedFileMeta),
-												parent
-											} satisfies FileOrDirectoryOfflineMeta)
-										)
+										serialize({
+											item: unwrappedFileIntoDriveItem(unwrappedFileMeta),
+											parent
+										} satisfies FileOrDirectoryOfflineMeta)
 									)
 								}
 
@@ -864,12 +863,10 @@ export class Offline {
 								) {
 									this.atomicWrite(
 										metaFile,
-										new Uint8Array(
-											pack({
-												item: unwrappedDirIntoDriveItem(unwrappedRemoteDir),
-												parent
-											} satisfies FileOrDirectoryOfflineMeta)
-										)
+										serialize({
+											item: unwrappedDirIntoDriveItem(unwrappedRemoteDir),
+											parent
+										} satisfies FileOrDirectoryOfflineMeta)
 									)
 								}
 							}
@@ -950,10 +947,10 @@ export class Offline {
 										}
 									}
 								),
-								metaFile.bytes()
+								metaFile.text()
 							])
 
-							const directoryMeta: DirectoryOfflineMeta = unpack(directoryMetaBytes)
+							const directoryMeta: DirectoryOfflineMeta = deserialize(directoryMetaBytes)
 
 							if (Object.keys(directoryMeta).length === 0) {
 								if (metaFile.parentDirectory.exists) {
@@ -1163,7 +1160,7 @@ export class Offline {
 						}
 
 						const readResult = await run(async () => {
-							const meta: FileOrDirectoryOfflineMeta = unpack(await metaFile.bytes())
+							const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
 
 							if (Object.keys(meta).length === 0) {
 								throw new Error("File meta is empty")
@@ -1271,12 +1268,10 @@ export class Offline {
 
 				this.atomicWrite(
 					metaFile,
-					Uint8Array.from(
-						pack({
-							item: file,
-							parent
-						} satisfies FileOrDirectoryOfflineMeta)
-					)
+					serialize({
+						item: file,
+						parent
+					} satisfies FileOrDirectoryOfflineMeta)
 				)
 
 				if (!skipIndexUpdate) {
@@ -1440,13 +1435,11 @@ export class Offline {
 
 					this.atomicWrite(
 						metaFile,
-						Uint8Array.from(
-							pack({
-								item: directory,
-								parent,
-								entries
-							} satisfies DirectoryOfflineMeta)
-						)
+						serialize({
+							item: directory,
+							parent,
+							entries
+						} satisfies DirectoryOfflineMeta)
 					)
 
 					if (!skipIndexUpdate) {

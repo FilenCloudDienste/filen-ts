@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system"
 import { open, type DB, type PreparedStatement } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/utils"
 import { Platform, AppState } from "react-native"
-import { pack, unpack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { normalizeFilePathForSdk } from "@/lib/utils"
 
@@ -25,7 +25,7 @@ const INIT_QUERIES: string[] = [
 	"PRAGMA cell_size_check = OFF",
 	"PRAGMA max_page_count = 2147483646",
 	"PRAGMA encoding = 'UTF-8'",
-	"CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value BLOB NOT NULL) WITHOUT ROWID",
+	"CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID",
 	"PRAGMA optimize = 0x10002"
 ]
 
@@ -154,7 +154,7 @@ class Sqlite {
 			return await new Promise<T>((resolve, reject) => {
 				queueMicrotask(() => {
 					try {
-						resolve(unpack(new Uint8Array(row["value"] as ArrayBuffer)) as T)
+						resolve(deserialize(row["value"] as string) as T)
 					} catch (err) {
 						reject(err)
 					}
@@ -171,7 +171,7 @@ class Sqlite {
 			await new Promise<void>((resolve, reject) => {
 				queueMicrotask(() => {
 					try {
-						this.stmtSet!.bind([key, new Uint8Array(pack(value))])
+						this.stmtSet!.bind([key, serialize(value)])
 							.then(resolve)
 							.catch(reject)
 					} catch (err) {
@@ -232,7 +232,7 @@ class Sqlite {
 						new Promise<void>((resolve, reject) => {
 							queueMicrotask(() => {
 								try {
-									map.set(row[0] as string, unpack(new Uint8Array(row[1] as ArrayBuffer)) as T)
+									map.set(row[0] as string, deserialize(row[1] as string) as T)
 
 									resolve()
 								} catch (err) {

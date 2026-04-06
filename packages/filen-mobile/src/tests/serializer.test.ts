@@ -1,5 +1,4 @@
 import { vi, describe, it, expect } from "vitest"
-import { Packr } from "msgpackr"
 
 // uniffi-bindgen-react-native declares "type": "module" but ships CJS code,
 // breaking Node imports. The real UniffiEnum is just an empty class with a
@@ -8,8 +7,13 @@ import { Packr } from "msgpackr"
 // in Node either, since they require native Rust modules at the top level.
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-// Must import after vi.mock so the mock is active when msgpack.ts loads
-import { pack, unpack } from "@/lib/msgpack"
+// Must import after vi.mock so the mock is active when serializer.ts loads
+import { serialize, deserialize } from "@/lib/serializer"
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function roundtrip(value: unknown): any {
+	return deserialize(serialize(value))
+}
 
 const { UniffiEnum } = await import("@/tests/mocks/uniffiBindgenReactNative")
 
@@ -66,10 +70,10 @@ class MockNamedFieldsVariant extends UniffiEnum {
 	}
 }
 
-describe("msgpack", () => {
+describe("serializer", () => {
 	describe("BigInt", () => {
 		it("round-trips standalone BigInt", () => {
-			const result = unpack(pack(123n))
+			const result = roundtrip(123n)
 
 			expect(result).toBe(123n)
 			expect(typeof result).toBe("bigint")
@@ -77,7 +81,7 @@ describe("msgpack", () => {
 
 		it("round-trips BigInt fields in objects", () => {
 			const obj = { id: 42n, timestamp: 1709000000000n, name: "test" }
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(result.id).toBe(42n)
 			expect(typeof result.id).toBe("bigint")
@@ -87,7 +91,7 @@ describe("msgpack", () => {
 		})
 
 		it("round-trips zero and negative BigInt", () => {
-			const result = unpack(pack({ zero: 0n, neg: -42n }))
+			const result = roundtrip({ zero: 0n, neg: -42n })
 
 			expect(result.zero).toBe(0n)
 			expect(result.neg).toBe(-42n)
@@ -95,7 +99,7 @@ describe("msgpack", () => {
 
 		it("round-trips very large BigInt values", () => {
 			const large = 9007199254740993n // Number.MAX_SAFE_INTEGER + 2
-			const result = unpack(pack(large))
+			const result = roundtrip(large)
 
 			expect(result).toBe(large)
 			expect(typeof result).toBe("bigint")
@@ -112,7 +116,7 @@ describe("msgpack", () => {
 				}
 			}
 
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(result.user.id).toBe(99n)
 			expect(result.user.stats.fileCount).toBe(1000n)
@@ -121,7 +125,7 @@ describe("msgpack", () => {
 
 		it("round-trips BigInt in arrays", () => {
 			const arr = [1n, 2n, 3n]
-			const result = unpack(pack(arr))
+			const result = roundtrip(arr)
 
 			expect(result).toEqual([1n, 2n, 3n])
 
@@ -129,22 +133,12 @@ describe("msgpack", () => {
 				expect(typeof val).toBe("bigint")
 			}
 		})
-
-		it("unpacks standard int64 as bigint (backward compat with old data)", () => {
-			const defaultPackr = new Packr()
-			const oldData = defaultPackr.pack({ id: 42n })
-
-			const result = unpack(oldData)
-
-			expect(typeof result.id).toBe("bigint")
-			expect(result.id).toBe(42n)
-		})
 	})
 
 	describe("UniFFI tagged unions", () => {
 		it("preserves [uniffiTypeNameSymbol] through round-trip", () => {
 			const instance = new MockVariant("hello")
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result.tag).toBe("Variant1")
@@ -154,7 +148,7 @@ describe("msgpack", () => {
 		it("preserves symbols in nested tagged unions", () => {
 			const inner = new MockVariant("nested")
 			const outer = new MockOuter(inner)
-			const result = unpack(pack(outer))
+			const result = roundtrip(outer)
 
 			expect(result[uniffiTypeNameSymbol]).toBe("OuterType")
 			expect(result.tag).toBe("Wrapper")
@@ -165,7 +159,7 @@ describe("msgpack", () => {
 
 		it("does not add symbol to plain objects with tag/inner shape", () => {
 			const plain = { tag: "Foo", inner: ["bar"] }
-			const result = unpack(pack(plain))
+			const result = roundtrip(plain)
 
 			expect(result.tag).toBe("Foo")
 			expect(result[uniffiTypeNameSymbol]).toBeUndefined()
@@ -173,7 +167,7 @@ describe("msgpack", () => {
 
 		it("preserves tagged union with empty inner", () => {
 			const instance = new MockVariant("")
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result.tag).toBe("Variant1")
@@ -186,7 +180,7 @@ describe("msgpack", () => {
 				count: 2
 			}
 
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(result.count).toBe(2)
 			expect(result.items).toHaveLength(2)
@@ -201,7 +195,7 @@ describe("msgpack", () => {
 				id: 42n,
 				meta: new MockVariant("value")
 			}
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(result.id).toBe(42n)
 			expect(typeof result.id).toBe("bigint")
@@ -211,7 +205,7 @@ describe("msgpack", () => {
 
 		it("preserves unit variant without inner property", () => {
 			const instance = new MockUnitVariant()
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result.tag).toBe("UnitTag")
@@ -221,7 +215,7 @@ describe("msgpack", () => {
 
 		it("preserves named-fields variant with object inner", () => {
 			const instance = new MockNamedFieldsVariant("hello", 42)
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result.tag).toBe("NamedFields")
@@ -230,7 +224,7 @@ describe("msgpack", () => {
 
 		it("handles mixed unit and data variants in array", () => {
 			const items = [new MockUnitVariant(), new MockVariant("data"), new MockUnitVariant(), new MockNamedFieldsVariant("test", 1)]
-			const result = unpack(pack(items))
+			const result = roundtrip(items)
 
 			expect(result).toHaveLength(4)
 			expect(result[0].tag).toBe("UnitTag")
@@ -245,7 +239,7 @@ describe("msgpack", () => {
 
 		it("deserialized tagged union passes instanceof UniffiEnum", () => {
 			const instance = new MockVariant("test")
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			expect(result instanceof UniffiEnum).toBe(true)
 			expect(result[uniffiTypeNameSymbol]).toBe("TestType")
@@ -263,7 +257,7 @@ describe("msgpack", () => {
 				name: "test"
 			}
 
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(typeof result.timestamp).toBe("bigint")
 			expect(result.timestamp).toBe(1709000000000n)
@@ -284,7 +278,7 @@ describe("msgpack", () => {
 				total: 100n
 			}
 
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(result.total).toBe(100n)
 			expect(result.users[0].id).toBe(1n)
@@ -297,53 +291,26 @@ describe("msgpack", () => {
 	})
 
 	describe("standard types", () => {
-		it("round-trips empty Uint8Array", () => {
-			const bytes = new Uint8Array([])
-			const result = unpack(pack(bytes))
-
-			expect(new Uint8Array(result)).toEqual(bytes)
-		})
-
-		it("round-trips raw ArrayBuffer", () => {
-			const buffer = new Uint8Array([10, 20, 30]).buffer
-			const result = unpack(pack(buffer))
-
-			expect(new Uint8Array(result)).toEqual(new Uint8Array([10, 20, 30]))
-		})
-
-		it("round-trips empty ArrayBuffer", () => {
-			const buffer = new ArrayBuffer(0)
-			const result = unpack(pack(buffer))
-
-			expect(new Uint8Array(result)).toEqual(new Uint8Array([]))
-		})
-
 		it("round-trips null", () => {
-			expect(unpack(pack(null))).toBeNull()
+			expect(roundtrip(null)).toBeNull()
 		})
 
-		it("round-trips standalone undefined", () => {
-			expect(unpack(pack(undefined))).toBeUndefined()
-		})
-
-		it("preserves undefined object fields as undefined (not null)", () => {
+		it("omits undefined object fields (JSON semantics)", () => {
 			const obj = { name: "test", hash: undefined, size: 42 }
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(result.name).toBe("test")
-			expect(result.hash).toBeUndefined()
 			expect(result.size).toBe(42)
-			expect("hash" in result).toBe(true)
+			expect("hash" in result).toBe(false)
 		})
 
-		it("preserves null and undefined distinctly", () => {
+		it("preserves null but omits undefined (JSON semantics)", () => {
 			const obj = { a: null, b: undefined, c: "yes" }
-			const result = unpack(pack(obj))
+			const result = roundtrip(obj)
 
 			expect(result.a).toBeNull()
 			expect("a" in result).toBe(true)
-			expect(result.b).toBeUndefined()
-			expect("b" in result).toBe(true)
+			expect("b" in result).toBe(false)
 			expect(result.c).toBe("yes")
 		})
 
@@ -358,7 +325,7 @@ describe("msgpack", () => {
 				key: "abc123",
 				version: 2
 			}
-			const result = unpack(pack(fileMeta))
+			const result = roundtrip(fileMeta)
 
 			expect(result.name).toBe("photo.jpg")
 			expect(result.created).toBeUndefined()
@@ -367,57 +334,57 @@ describe("msgpack", () => {
 			expect(result.size).toBe(1024n)
 		})
 
-		it("preserves undefined in array elements", () => {
+		it("converts undefined array elements to null (JSON semantics)", () => {
 			const arr = [1, undefined, 3]
-			const result = unpack(pack(arr))
+			const result = deserialize<(number | null)[]>(serialize(arr))
 
 			expect(result[0]).toBe(1)
-			expect(result[1]).toBeUndefined()
+			expect(result[1]).toBeNull()
 			expect(result[2]).toBe(3)
 			expect(result).toHaveLength(3)
 		})
 
 		it("round-trips strings", () => {
-			expect(unpack(pack("hello"))).toBe("hello")
+			expect(roundtrip("hello")).toBe("hello")
 		})
 
 		it("round-trips empty string", () => {
-			expect(unpack(pack(""))).toBe("")
+			expect(roundtrip("")).toBe("")
 		})
 
 		it("round-trips unicode strings", () => {
 			const str = "Hello \u{1F600} world \u00E9\u00E8\u00EA"
 
-			expect(unpack(pack(str))).toBe(str)
+			expect(roundtrip(str)).toBe(str)
 		})
 
 		it("round-trips booleans", () => {
-			expect(unpack(pack(true))).toBe(true)
-			expect(unpack(pack(false))).toBe(false)
+			expect(roundtrip(true)).toBe(true)
+			expect(roundtrip(false)).toBe(false)
 		})
 
 		it("round-trips numbers", () => {
-			expect(unpack(pack(0))).toBe(0)
-			expect(unpack(pack(-1))).toBe(-1)
-			expect(unpack(pack(3.14))).toBeCloseTo(3.14)
-			expect(unpack(pack(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER)
+			expect(roundtrip(0)).toBe(0)
+			expect(roundtrip(-1)).toBe(-1)
+			expect(roundtrip(3.14)).toBeCloseTo(3.14)
+			expect(roundtrip(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER)
 		})
 
 		it("round-trips empty object", () => {
-			const result = unpack(pack({}))
+			const result = roundtrip({})
 
 			expect(result).toEqual({})
 		})
 
 		it("round-trips empty array", () => {
-			const result = unpack(pack([]))
+			const result = roundtrip([])
 
 			expect(result).toEqual([])
 		})
 
 		it("round-trips arrays with mixed types", () => {
 			const arr = [1, "two", 3n, null, true]
-			const result = unpack(pack(arr))
+			const result = roundtrip(arr)
 
 			expect(result[0]).toBe(1)
 			expect(result[1]).toBe("two")
@@ -432,7 +399,7 @@ describe("msgpack", () => {
 				["b", 2],
 				["c", 3]
 			]
-			const result = unpack(pack(entries))
+			const result = roundtrip(entries)
 
 			expect(result).toEqual(entries)
 
@@ -444,115 +411,24 @@ describe("msgpack", () => {
 		})
 	})
 
-	describe("moreTypes", () => {
-		it("round-trips Set", () => {
-			const set = new Set(["a", "b", "c"])
-			const result = unpack(pack(set))
+	describe("serialize returns string", () => {
+		it("serialize returns a string", () => {
+			const result = serialize({ hello: "world" })
 
-			expect(result).toBeInstanceOf(Set)
-			expect(result.size).toBe(3)
-			expect(result.has("a")).toBe(true)
-			expect(result.has("b")).toBe(true)
-			expect(result.has("c")).toBe(true)
+			expect(typeof result).toBe("string")
 		})
 
-		it("round-trips Map", () => {
-			const map = new Map<string, number>([
-				["x", 1],
-				["y", 2]
-			])
-			const result = unpack(pack(map))
+		it("deserialize accepts a string", () => {
+			const result = roundtrip({ value: 42 })
 
-			expect(result).toBeInstanceOf(Map)
-			expect(result.size).toBe(2)
-			expect(result.get("x")).toBe(1)
-			expect(result.get("y")).toBe(2)
-		})
-
-		it("round-trips Date", () => {
-			const date = new Date("2025-06-15T12:00:00Z")
-			const result = unpack(pack(date))
-
-			expect(result).toBeInstanceOf(Date)
-			expect(result.getTime()).toBe(date.getTime())
-		})
-
-		it("round-trips Uint8Array with identity (not just Buffer)", () => {
-			const bytes = new Uint8Array([10, 20, 30])
-			const result = unpack(pack(bytes))
-
-			expect(result).toBeInstanceOf(Uint8Array)
-			expect(result).toEqual(bytes)
-		})
-
-		it("round-trips Float64Array", () => {
-			const arr = new Float64Array([1.1, 2.2, 3.3])
-			const result = unpack(pack(arr))
-
-			expect(result).toBeInstanceOf(Float64Array)
-			expect(result[0]).toBeCloseTo(1.1)
-			expect(result[1]).toBeCloseTo(2.2)
-			expect(result[2]).toBeCloseTo(3.3)
-		})
-
-		it("round-trips Set with BigInt values", () => {
-			const set = new Set([1n, 2n, 3n])
-			const result = unpack(pack(set))
-
-			expect(result).toBeInstanceOf(Set)
-			expect(result.has(1n)).toBe(true)
-			expect(result.has(2n)).toBe(true)
-		})
-
-		it("round-trips Map with BigInt values", () => {
-			const map = new Map([
-				["size", 1024n],
-				["count", 42n]
-			])
-			const result = unpack(pack(map))
-
-			expect(result).toBeInstanceOf(Map)
-			expect(result.get("size")).toBe(1024n)
-			expect(result.get("count")).toBe(42n)
-		})
-
-		it("round-trips nested moreTypes in objects", () => {
-			const obj = {
-				tags: new Set(["urgent", "draft"]),
-				metadata: new Map([["key", "val"]]),
-				created: new Date("2025-01-01T00:00:00Z"),
-				hash: new Uint8Array([0xff, 0x00])
-			}
-			const result = unpack(pack(obj))
-
-			expect(result.tags).toBeInstanceOf(Set)
-			expect(result.tags.has("urgent")).toBe(true)
-			expect(result.metadata).toBeInstanceOf(Map)
-			expect(result.metadata.get("key")).toBe("val")
-			expect(result.created).toBeInstanceOf(Date)
-			expect(result.hash).toBeInstanceOf(Uint8Array)
-			expect(result.hash).toEqual(new Uint8Array([0xff, 0x00]))
-		})
-	})
-
-	describe("copyBuffers", () => {
-		it("unpacked binary data is independent of source buffer", () => {
-			const original = new Uint8Array([1, 2, 3, 4, 5])
-			const packed = pack(original)
-			const result = unpack(packed)
-
-			// Mutate the packed buffer — result should be unaffected
-			packed.fill(0)
-
-			expect(result).toBeInstanceOf(Uint8Array)
-			expect(result).toEqual(new Uint8Array([1, 2, 3, 4, 5]))
+			expect(result.value).toBe(42)
 		})
 	})
 
 	describe("property descriptors", () => {
 		it("deserialized symbol property is enumerable, writable, configurable", () => {
 			const instance = new MockVariant("test")
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 			const descriptor = Object.getOwnPropertyDescriptor(result, uniffiTypeNameSymbol)
 
 			expect(descriptor).toBeDefined()
@@ -564,21 +440,21 @@ describe("msgpack", () => {
 
 		it("inner array is frozen after deserialization", () => {
 			const instance = new MockVariant("test")
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			expect(Object.isFrozen(result.inner)).toBe(true)
 		})
 
 		it("inner non-array is NOT frozen after deserialization", () => {
 			const instance = new MockNamedFieldsVariant("test", 42)
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			expect(Object.isFrozen(result.inner)).toBe(false)
 		})
 
 		it("SDK instanceOf check pattern works on deserialized objects", () => {
 			const instance = new MockVariant("test")
-			const result = unpack(pack(instance))
+			const result = roundtrip(instance)
 
 			const instanceOf = (obj: unknown): boolean => {
 				return (obj as Record<symbol, unknown>)[uniffiTypeNameSymbol] === "TestType"
@@ -592,7 +468,7 @@ describe("msgpack", () => {
 		it("preserves UniffiEnum fields inside a frozen record", () => {
 			const enumField = new MockVariant("inside-record")
 			const record = Object.freeze({ dir: enumField, name: "test-dir" })
-			const result = unpack(pack(record))
+			const result = roundtrip(record)
 
 			expect(result.name).toBe("test-dir")
 			expect(result.dir instanceof UniffiEnum).toBe(true)
@@ -606,7 +482,7 @@ describe("msgpack", () => {
 				dir: new MockVariant("dir-value"),
 				shareInfo: new MockUnitVariant()
 			})
-			const result = unpack(pack(record))
+			const result = roundtrip(record)
 
 			expect(result.dir[uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result.dir.tag).toBe("Variant1")
@@ -627,7 +503,7 @@ describe("msgpack", () => {
 				item: outerEnum,
 				dirRecord
 			}
-			const result = unpack(pack(structure))
+			const result = roundtrip(structure)
 
 			expect(result.item[uniffiTypeNameSymbol]).toBe("OuterType")
 			expect(result.item.inner[0][uniffiTypeNameSymbol]).toBe("TestType")
@@ -640,7 +516,7 @@ describe("msgpack", () => {
 	describe("multiple variants of same typeName", () => {
 		it("distinguishes unit and data variants of the same enum type", () => {
 			const items = [new MockUnitVariant(), new MockVariant("custom-color")]
-			const result = unpack(pack(items))
+			const result = roundtrip(items)
 
 			expect(result[0][uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result[0].tag).toBe("UnitTag")
@@ -669,7 +545,7 @@ describe("msgpack", () => {
 					}
 				}
 			}
-			const result = unpack(pack(driveItem))
+			const result = roundtrip(driveItem)
 
 			expect(result.type).toBe("file")
 			expect(result.data.uuid).toBe("file-uuid-123")
@@ -690,7 +566,7 @@ describe("msgpack", () => {
 					}
 				}
 			}
-			const result = unpack(pack(driveItem))
+			const result = roundtrip(driveItem)
 
 			expect(result.type).toBe("directory")
 			expect(result.data.uuid).toBe("dir-uuid-456")
@@ -708,7 +584,7 @@ describe("msgpack", () => {
 					decryptedMeta: null
 				}
 			}
-			const result = unpack(pack(driveItem))
+			const result = roundtrip(driveItem)
 
 			expect(result.data.decryptedMeta).toBeNull()
 			expect(result.data.size).toBe(0n)
@@ -723,7 +599,7 @@ describe("msgpack", () => {
 			])
 
 			const entries = [...map.entries()]
-			const result = unpack(pack(entries))
+			const result = roundtrip(entries)
 			const restored = new Map(result)
 
 			expect(restored.size).toBe(2)
@@ -744,7 +620,7 @@ describe("msgpack", () => {
 				["dir-1", new MockVariant("normal-dir")],
 				["dir-2", new MockOuter(new MockVariant("shared-dir"))]
 			]
-			const result = unpack(pack(entries))
+			const result = roundtrip(entries)
 
 			expect(result[0][1][uniffiTypeNameSymbol]).toBe("TestType")
 			expect(result[0][1].inner).toEqual(["normal-dir"])
@@ -874,8 +750,8 @@ describe("msgpack", () => {
 				}
 			}
 
-			// pack → unpack (exactly what atomicWrite + readIndex does)
-			const result = unpack(new Uint8Array(pack(index)))
+			// serialize → deserialize (exactly what atomicWrite + readIndex does)
+			const result = roundtrip(index)
 
 			// Verify top-level structure
 			expect(result.files["file-uuid-456"]).toBeDefined()
@@ -946,7 +822,7 @@ describe("msgpack", () => {
 			expect(dirEntry.item.data.uuid).toBe("dir-uuid-123")
 		})
 
-		it("double pack/unpack of Index preserves all nested enums", () => {
+		it("double serialize/deserialize of Index preserves all nested enums", () => {
 			class SimpleEnum extends UniffiEnum {
 				readonly [uniffiTypeNameSymbol] = "ParentUuid"
 				readonly tag = "Uuid"
@@ -969,8 +845,8 @@ describe("msgpack", () => {
 				directories: {}
 			}
 
-			const first = unpack(new Uint8Array(pack(index)))
-			const second = unpack(new Uint8Array(pack(first)))
+			const first = roundtrip(index)
+			const second = roundtrip(first)
 
 			expect(second.files["uuid-1"].item.data.parent[uniffiTypeNameSymbol]).toBe("ParentUuid")
 			expect(second.files["uuid-1"].item.data.parent.inner[0]).toBe("root")
@@ -981,29 +857,29 @@ describe("msgpack", () => {
 	})
 
 	describe("query key hashing", () => {
-		it("pack produces consistent output for identical query keys", () => {
+		it("serialize produces consistent output for identical query keys", () => {
 			const key1 = ["useDriveItemStoredOfflineQuery", { type: "file", uuid: "abc-123" }]
 			const key2 = ["useDriveItemStoredOfflineQuery", { type: "file", uuid: "abc-123" }]
 
-			const hash1 = pack(key1).toString("base64")
-			const hash2 = pack(key2).toString("base64")
+			const hash1 = serialize(key1)
+			const hash2 = serialize(key2)
 
 			expect(hash1).toBe(hash2)
 		})
 
-		it("pack produces different output for different query keys", () => {
+		it("serialize produces different output for different query keys", () => {
 			const key1 = ["query", { uuid: "aaa" }]
 			const key2 = ["query", { uuid: "bbb" }]
 
-			const hash1 = pack(key1).toString("base64")
-			const hash2 = pack(key2).toString("base64")
+			const hash1 = serialize(key1)
+			const hash2 = serialize(key2)
 
 			expect(hash1).not.toBe(hash2)
 		})
 	})
 
 	describe("idempotency", () => {
-		it("double pack/unpack produces identical result", () => {
+		it("double serialize/deserialize produces identical result", () => {
 			const obj = {
 				id: 42n,
 				meta: new MockVariant("test"),
@@ -1011,8 +887,8 @@ describe("msgpack", () => {
 				name: "hello"
 			}
 
-			const first = unpack(pack(obj))
-			const second = unpack(pack(first))
+			const first = roundtrip(obj)
+			const second = roundtrip(first)
 
 			expect(second.id).toBe(42n)
 			expect(second.name).toBe("hello")
@@ -1023,10 +899,10 @@ describe("msgpack", () => {
 			expect(second.items[0][uniffiTypeNameSymbol]).toBe("TestType")
 		})
 
-		it("double pack/unpack preserves instanceof and symbol", () => {
+		it("double serialize/deserialize preserves instanceof and symbol", () => {
 			const instance = new MockVariant("test")
-			const first = unpack(pack(instance))
-			const second = unpack(pack(first))
+			const first = roundtrip(instance)
+			const second = roundtrip(first)
 
 			expect(second instanceof UniffiEnum).toBe(true)
 			expect(second[uniffiTypeNameSymbol]).toBe("TestType")
@@ -1034,10 +910,10 @@ describe("msgpack", () => {
 			expect(second.inner).toEqual(["test"])
 		})
 
-		it("double pack/unpack preserves unit variant shape", () => {
+		it("double serialize/deserialize preserves unit variant shape", () => {
 			const instance = new MockUnitVariant()
-			const first = unpack(pack(instance))
-			const second = unpack(pack(first))
+			const first = roundtrip(instance)
+			const second = roundtrip(first)
 
 			expect(second instanceof UniffiEnum).toBe(true)
 			expect(second[uniffiTypeNameSymbol]).toBe("TestType")

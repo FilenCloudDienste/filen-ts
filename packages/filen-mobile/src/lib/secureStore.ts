@@ -3,7 +3,7 @@ import { createMMKV, type MMKV } from "react-native-mmkv"
 import * as FileSystem from "expo-file-system"
 import { Platform } from "react-native"
 import crypto from "crypto"
-import { pack, unpack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import { run, Semaphore, runEffect } from "@filen/utils"
 import { useRef, useEffect, useCallback, useState } from "react"
 import cache from "@/lib/cache"
@@ -13,6 +13,8 @@ import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import isEqual from "react-fast-compare"
 import { normalizeFilePathForSdk } from "@/lib/utils"
 import useEffectOnce from "@/hooks/useEffectOnce"
+
+export const VERSION = 1
 
 class SecureStore {
 	private readonly mmkv: MMKV
@@ -27,19 +29,54 @@ class SecureStore {
 	private readonly initMutex: Semaphore = new Semaphore(1)
 	private readonly modMutex: Semaphore = new Semaphore(1)
 
-	public readonly version: number = 1
-	public readonly fallbackMmkvId: string = `securestore.fallback.v${this.version}.mmkv`
-	public readonly secureStoreFileName: string = `securestore.v${this.version}.bin`
-	public readonly secureStoreKeyEncryptionKey: string = `encryptionKey.v${this.version}`
+	public readonly fallbackMmkvId: string = "securestore.fallback.mmkv"
+	public readonly secureStoreFileName: string = "securestore.bin"
+	public readonly secureStoreKeyEncryptionKey: string = "encryptionKey"
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
 		Platform.select({
 			ios: FileSystem.Paths.join(
 				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+				"secureStore",
+				`v${VERSION}`,
 				this.secureStoreFileName
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, this.secureStoreFileName)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "secureStore", `v${VERSION}`, this.secureStoreFileName)
 		})
 	)
+	public readonly mmkvDirectory = new FileSystem.Directory(
+		Platform.select({
+			ios: FileSystem.Paths.join(
+				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+				"mmkv",
+				`v${VERSION}`
+			),
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "mmkv", `v${VERSION}`)
+		})
+	)
+
+	private directoriesEnsured = false
+
+	private ensureDirectories(): void {
+		if (this.directoriesEnsured) {
+			return
+		}
+
+		if (!this.secureStoreFile.parentDirectory.exists) {
+			this.secureStoreFile.parentDirectory.create({
+				idempotent: true,
+				intermediates: true
+			})
+		}
+
+		if (!this.mmkvDirectory.exists) {
+			this.mmkvDirectory.create({
+				idempotent: true,
+				intermediates: true
+			})
+		}
+
+		this.directoriesEnsured = true
+	}
 
 	public constructor() {
 		if (!process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"]) {
@@ -48,28 +85,13 @@ class SecureStore {
 			)
 		}
 
-		const mmkvDirectory = new FileSystem.Directory(
-			Platform.select({
-				ios: FileSystem.Paths.join(
-					FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-					"mmkv"
-				),
-				default: FileSystem.Paths.join(FileSystem.Paths.document, "mmkv")
-			})
-		)
-
-		if (!mmkvDirectory.exists) {
-			mmkvDirectory.create({
-				intermediates: true,
-				idempotent: true
-			})
-		}
+		this.ensureDirectories()
 
 		this.mmkv = createMMKV({
 			id: this.fallbackMmkvId,
 			mode: "single-process",
 			encryptionKey: process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"],
-			path: normalizeFilePathForSdk(mmkvDirectory.uri),
+			path: normalizeFilePathForSdk(this.mmkvDirectory.uri),
 			readOnly: false
 		})
 	}
@@ -89,6 +111,8 @@ class SecureStore {
 			defer(() => {
 				this.initMutex.release()
 			})
+
+			this.ensureDirectories()
 
 			const [encryptionKey, current] = await Promise.all([this.getEncryptionKey(), (await this.read()) ?? {}])
 
@@ -135,6 +159,8 @@ class SecureStore {
 			defer(() => {
 				this.keyMutex.release()
 			})
+
+			this.ensureDirectories()
 
 			if (this.encryptionKey !== null) {
 				return this.encryptionKey
@@ -184,6 +210,8 @@ class SecureStore {
 				this.rwMutex.release()
 			})
 
+			this.ensureDirectories()
+
 			if (!this.secureStoreFile.exists || this.secureStoreFile.size === 0) {
 				return null
 			}
@@ -196,7 +224,7 @@ class SecureStore {
 			const decrypted = cipher.update(bytes.subarray(12, bytes.length - 16))
 			const final = cipher.final()
 
-			const data = unpack(Buffer.concat([decrypted, final])) as Record<string, unknown>
+			const data = deserialize(Buffer.concat([decrypted, final])) as Record<string, unknown>
 
 			this.readCache = data
 
@@ -220,10 +248,12 @@ class SecureStore {
 				this.rwMutex.release()
 			})
 
+			this.ensureDirectories()
+
 			const encryptionKey = await this.getEncryptionKey()
 			const iv = crypto.randomBytes(12)
 			const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(encryptionKey, "hex"), iv)
-			const encrypted = cipher.update(pack(data))
+			const encrypted = cipher.update(Buffer.from(serialize(data)))
 			const final = cipher.final()
 			const authTag = cipher.getAuthTag()
 
@@ -262,6 +292,8 @@ class SecureStore {
 			defer(() => {
 				this.modMutex.release()
 			})
+
+			this.ensureDirectories()
 
 			const current = this.readCache ?? (await this.read()) ?? {}
 			const modified = {
@@ -310,8 +342,9 @@ class SecureStore {
 				this.modMutex.release()
 			})
 
-			const current = this.readCache ?? (await this.read()) ?? {}
+			this.ensureDirectories()
 
+			const current = this.readCache ?? (await this.read()) ?? {}
 			const { [key]: _, ...modified } = current
 
 			await this.write(modified)
@@ -343,6 +376,8 @@ class SecureStore {
 			defer(() => {
 				this.rwMutex.release()
 			})
+
+			this.ensureDirectories()
 
 			this.readCache = null
 

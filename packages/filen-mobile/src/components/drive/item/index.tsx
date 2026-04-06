@@ -19,8 +19,7 @@ import { useShallow } from "zustand/shallow"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Buffer } from "react-native-quick-crypto"
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import { useRecyclingState } from "@shopify/flash-list"
@@ -136,8 +135,8 @@ const Item = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; d
 			router.push({
 				pathname: "/drivePreview",
 				params: {
-					item: Buffer.from(pack(info.item)).toString("base64"),
-					drivePath: Buffer.from(pack(drivePath)).toString("base64")
+					item: serialize(info.item),
+					drivePath: serialize(drivePath)
 				}
 			})
 
@@ -208,7 +207,7 @@ const Item = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; d
 					pathname: "/driveSelect/[uuid]",
 					params: {
 						uuid: info.item.data.uuid,
-						selectOptions: Buffer.from(pack(drivePath.selectOptions)).toString("base64")
+						selectOptions: serialize(drivePath.selectOptions)
 					}
 				})
 

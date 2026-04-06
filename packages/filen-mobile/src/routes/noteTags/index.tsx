@@ -1,8 +1,7 @@
 import Text from "@/components/ui/text"
 import { Platform, ActivityIndicator } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
-import { unpack } from "@/lib/msgpack"
-import { Buffer } from "react-native-quick-crypto"
+import { deserialize } from "@/lib/serializer"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo } from "react"
@@ -169,8 +168,8 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 })
 
 const NoteTags = memo(() => {
-	const { notePackedBase64 } = useLocalSearchParams<{
-		notePackedBase64?: string
+	const { note: noteSerialized } = useLocalSearchParams<{
+		note?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -179,12 +178,12 @@ const NoteTags = memo(() => {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	const noteParsed = (() => {
-		if (!notePackedBase64) {
+		if (!noteSerialized) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(notePackedBase64, "base64")) as Note
+			return deserialize(noteSerialized) as Note
 		} catch {
 			return null
 		}
