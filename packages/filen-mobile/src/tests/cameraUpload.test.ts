@@ -149,7 +149,7 @@ const eventHandlers: Record<string, Function | undefined> = Object.fromEntries(
 
 const ENABLED_CONFIG: Config & { enabled: true } = {
 	enabled: true,
-	remoteDir: { uuid: "remote-uuid" } as any,
+	remoteDir: { inner: [{ uuid: "remote-uuid" }] } as any,
 	albumIds: ["album-1"],
 	activationTimestamp: 0,
 	afterActivation: false,
@@ -446,7 +446,7 @@ describe("config management", () => {
 
 		await cameraUpload.setConfig(ENABLED_CONFIG)
 
-		expect(secureStore.set).toHaveBeenCalledWith("cameraUploadConfig", ENABLED_CONFIG)
+		expect(secureStore.set).toHaveBeenCalledWith("cameraUploadConfig:v1", ENABLED_CONFIG)
 	})
 
 	it("setConfig stores result of function updater", async () => {
@@ -460,7 +460,7 @@ describe("config management", () => {
 			return { ...prev, cellular: false }
 		})
 
-		expect(secureStore.set).toHaveBeenCalledWith("cameraUploadConfig", expect.objectContaining({ cellular: false }))
+		expect(secureStore.set).toHaveBeenCalledWith("cameraUploadConfig:v1", expect.objectContaining({ cellular: false }))
 	})
 })
 
@@ -603,7 +603,7 @@ describe("constructor events", () => {
 	it("secureStoreChange with matching key triggers cancel", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
 
-		eventHandlers["secureStoreChange"]!({ key: "cameraUploadConfig" })
+		eventHandlers["secureStoreChange"]!({ key: "cameraUploadConfig:v1" })
 
 		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
 	})
@@ -961,8 +961,8 @@ describe("re-entrancy and failure tracking", () => {
 		expect(mockSetSyncing).toHaveBeenCalledWith(true)
 	})
 
-	it("sync clears skippedAssets at start", async () => {
-		await cameraUpload.sync()
+	it("cancel clears skippedAssets", () => {
+		cameraUpload.cancel()
 
 		expect(mockClearSkippedAssets).toHaveBeenCalled()
 	})

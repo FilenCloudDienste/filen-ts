@@ -10,6 +10,7 @@ import { Buffer } from "react-native-quick-crypto"
 import { pack } from "@/lib/msgpack"
 import type { DriveItem } from "@/types"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
+import type { AnyNormalDir } from "@filen/sdk-rs"
 
 export async function selectDriveItems(options: Omit<SelectOptions, "intention" | "id">): Promise<
 	| {
@@ -17,7 +18,16 @@ export async function selectDriveItems(options: Omit<SelectOptions, "intention" 
 	  }
 	| {
 			cancelled: false
-			selectedItems: DriveItem[]
+			selectedItems: (
+				| {
+						type: "driveItem"
+						data: DriveItem
+				  }
+				| {
+						type: "root"
+						data: AnyNormalDir
+				  }
+			)[]
 	  }
 > {
 	const { authedSdkClient } = await auth.getSdkClients()

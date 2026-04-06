@@ -33,6 +33,11 @@ const updateBackgroundTask = debounce(
 const CameraUploadSync = memo(() => {
 	const { config } = useCameraUpload()
 
+	const shouldSync = config.enabled && config.remoteDir !== null && config.albumIds.length > 0
+	const shouldRegisterBackground = shouldSync && config.background
+	const albumIdsKey = config.albumIds.join(",")
+	const remoteDirUuid = config.remoteDir?.inner[0].uuid
+
 	useEffect(() => {
 		cameraUpload.sync().catch(console.error)
 
@@ -49,15 +54,11 @@ const CameraUploadSync = memo(() => {
 		}
 	}, [])
 
-	const shouldSync = config.enabled && config.remoteDir !== null && config.albumIds.length > 0
-	const shouldRegisterBackground = shouldSync && config.background
-	const albumIdsKey = config.albumIds.join(",")
-
 	useEffect(() => {
 		if (shouldSync) {
 			syncDebounced()
 		}
-	}, [shouldSync, albumIdsKey, config.remoteDir?.uuid, config.afterActivation, config.activationTimestamp, config.includeVideos])
+	}, [shouldSync, albumIdsKey, remoteDirUuid, config.afterActivation, config.activationTimestamp, config.includeVideos])
 
 	useEffect(() => {
 		lastShouldRegisterBackground = shouldRegisterBackground

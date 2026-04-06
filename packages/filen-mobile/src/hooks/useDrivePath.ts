@@ -4,7 +4,6 @@ import type { DriveItem } from "@/types"
 import { Buffer } from "react-native-quick-crypto"
 import { unpack } from "@/lib/msgpack"
 import { useCameraUpload } from "@/lib/cameraUpload"
-import { unwrapDirMeta } from "@/lib/utils"
 
 export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links", "photos"] as const
 export type DrivePathType = (typeof DRIVE_PATH_TYPES)[number]
@@ -108,7 +107,7 @@ export default function useDrivePath(): DrivePath {
 				type,
 				uuid: isPhotosScreen
 					? cameraUploadConfig.enabled && cameraUploadConfig.remoteDir
-						? unwrapDirMeta(cameraUploadConfig.remoteDir).uuid
+						? cameraUploadConfig.remoteDir.inner[0].uuid
 						: null
 					: searchParams && searchParams.uuid && validateUuid(searchParams.uuid)
 						? searchParams.uuid
