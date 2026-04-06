@@ -17,8 +17,7 @@ import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.
 import { PressableOpacity } from "@/components/ui/pressables"
 import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
 import { router } from "expo-router"
-import { Buffer } from "react-native-quick-crypto"
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 import Menu from "@/components/drive/item/menu"
 import cameraUpload, { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
@@ -54,8 +53,8 @@ const Photo = memo(
 			router.push({
 				pathname: "/drivePreview",
 				params: {
-					item: Buffer.from(pack(info.item)).toString("base64"),
-					drivePath: Buffer.from(pack(drivePath)).toString("base64")
+					item: serialize(info.item),
+					drivePath: serialize(drivePath)
 				}
 			})
 		}

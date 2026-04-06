@@ -1,8 +1,7 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { useLocalSearchParams, Redirect, router } from "expo-router"
-import { unpack } from "@/lib/msgpack"
-import { Buffer } from "react-native-quick-crypto"
+import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header from "@/components/ui/header"
@@ -149,8 +148,8 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 })
 
 const FileVersions = memo(() => {
-	const { itemPackedBase64 } = useLocalSearchParams<{
-		itemPackedBase64?: string
+	const { item: itemSerialized } = useLocalSearchParams<{
+		item?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -159,12 +158,12 @@ const FileVersions = memo(() => {
 	const insets = useSafeAreaInsets()
 
 	const item = (() => {
-		if (!itemPackedBase64) {
+		if (!itemSerialized) {
 			return null
 		}
 
 		try {
-			return unpack(Buffer.from(itemPackedBase64, "base64")) as DriveItem
+			return deserialize(itemSerialized) as DriveItem
 		} catch {
 			return null
 		}

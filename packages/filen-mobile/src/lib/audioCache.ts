@@ -3,7 +3,7 @@ import { Semaphore, run } from "@filen/utils"
 import { IOS_APP_GROUP_IDENTIFIER, MUSIC_METADATA_SUPPORTED_EXTENSIONS } from "@/constants"
 import { Platform } from "react-native"
 import type { DriveItem } from "@/types"
-import { pack, unpack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import fileCache from "@/lib/fileCache"
 import { parseWebStream } from "music-metadata"
 import { Image, type ImageRef } from "expo-image"
@@ -19,17 +19,18 @@ export type Metadata = {
 	cachedAt: number
 } | null
 
+// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = 1
+
 export class AudioCache {
-	// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-	public readonly version = 1
 	private readonly parentDirectory = new FileSystem.Directory(
 		Platform.select({
 			ios: FileSystem.Paths.join(
 				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 				"audioCache",
-				`v${this.version}`
+				`v${VERSION}`
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "audioCache", `v${this.version}`)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "audioCache", `v${VERSION}`)
 		})
 	)
 	private readonly mutexes = new Map<string, Semaphore>()
@@ -82,7 +83,7 @@ export class AudioCache {
 			return false
 		}
 
-		const metadataContent = unpack(await metadata.bytes()) as Metadata
+		const metadataContent = deserialize(await metadata.text()) as Metadata
 
 		if (Object.keys(metadataContent ?? {}).length === 0) {
 			return false
@@ -128,7 +129,7 @@ export class AudioCache {
 			const { audio, metadata: metadataFile } = this.getFiles(item)
 
 			if (audio.exists && metadataFile.exists && metadataFile.size > 0) {
-				const metadata = unpack(await metadataFile.bytes()) as Metadata
+				const metadata = deserialize(await metadataFile.text()) as Metadata
 
 				if (Object.keys(metadata ?? {}).length > 0) {
 					return {
@@ -199,9 +200,9 @@ export class AudioCache {
 							intermediates: true
 						})
 
-						metadataFile.write(new Uint8Array(pack(metadata)))
+						metadataFile.write(serialize(metadata))
 					} else {
-						metadata = unpack(await metadataFile.bytes()) as Metadata
+						metadata = deserialize(await metadataFile.text()) as Metadata
 
 						if (Object.keys(metadata ?? {}).length === 0) {
 							metadata = null
@@ -267,7 +268,7 @@ export class AudioCache {
 							return
 						}
 
-						const metadata = unpack(await entry.bytes()) as Metadata
+						const metadata = deserialize(await entry.text()) as Metadata
 
 						if (Object.keys(metadata ?? {}).length === 0 || now > (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)) {
 							const mutex = this.getMutexForKey(entry.name.replace(".filenmeta", ""))

@@ -1,8 +1,7 @@
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { validate as validateUuid } from "uuid"
 import type { DriveItem } from "@/types"
-import { Buffer } from "react-native-quick-crypto"
-import { unpack } from "@/lib/msgpack"
+import { deserialize } from "@/lib/serializer"
 import { useCameraUpload } from "@/lib/cameraUpload"
 
 export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links", "photos"] as const
@@ -40,7 +39,7 @@ export default function useDrivePath(): DrivePath {
 	const selectOptions = ((): SelectOptions | null => {
 		if (searchParams && searchParams.selectOptions) {
 			try {
-				const parsed = unpack(Buffer.from(searchParams.selectOptions, "base64")) as SelectOptions
+				const parsed = deserialize(searchParams.selectOptions) as SelectOptions
 
 				return {
 					type: parsed.type,

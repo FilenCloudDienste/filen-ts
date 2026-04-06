@@ -56,18 +56,16 @@ vi.mock("@tanstack/query-persist-client-core", () => ({
 	}))
 }))
 
-import { pack, unpack } from "@/lib/msgpack"
-import { QueryPersisterKv } from "@/queries/client"
+import { serialize, deserialize } from "@/lib/serializer"
+import { QueryPersisterKv, QUERY_CLIENT_PERSISTER_PREFIX } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 
-// Hardcoded to match client.ts — avoids import issues with mocked module evaluation order
-const QUERY_CLIENT_PERSISTER_PREFIX = "reactQuery_v2"
 
 /**
  * In-memory KV store that simulates sqlite.kvAsync behavior.
- * Values are stored as msgpack blobs (Uint8Array) just like the real SQLite KV.
+ * Values are stored as serialized strings just like the real SQLite KV.
  */
-const kvStore = new Map<string, Uint8Array>()
+const kvStore = new Map<string, string>()
 
 function likeToPrefix(pattern: string): string {
 	return pattern.endsWith("%") ? pattern.slice(0, -1) : pattern
@@ -83,7 +81,7 @@ function setupMockDb(): void {
 	mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
 		if (query.startsWith("INSERT OR REPLACE")) {
 			const key = params![0] as string
-			const value = params![1] as Uint8Array
+			const value = params![1] as string
 
 			kvStore.set(key, value)
 
@@ -123,7 +121,7 @@ function setupMockDb(): void {
 			const key = params![0] as string
 			const value = kvStore.get(key)
 
-			return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
+			return { rows: value ? [{ value }] : [], insertId: undefined, rowsAffected: 0 }
 		}
 
 		if (query.startsWith("SELECT key FROM kv WHERE") && query.includes("LIKE")) {
@@ -155,11 +153,11 @@ function setupMockDb(): void {
 	mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
 		if (query.startsWith("SELECT key, value FROM kv WHERE") && query.includes("LIKE")) {
 			const pattern = params![0] as string
-			const rows: [string, ArrayBuffer][] = []
+			const rows: [string, string][] = []
 
 			for (const [key, value] of kvStore) {
 				if (matchesLike(key, pattern)) {
-					rows.push([key, value.buffer as ArrayBuffer])
+					rows.push([key, value])
 				}
 			}
 
@@ -189,7 +187,7 @@ function setupMockDb(): void {
 	mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
 		for (const [query, params] of commands) {
 			if (query.startsWith("INSERT OR REPLACE")) {
-				kvStore.set(params[0] as string, params[1] as Uint8Array)
+				kvStore.set(params[0] as string, params[1] as string)
 			}
 
 			if (query.startsWith("DELETE FROM kv WHERE") && query.includes("LIKE")) {
@@ -222,10 +220,10 @@ function kvKey(key: string): string {
 
 /** Seeds the kvStore with a value as if it was previously persisted. */
 function seedKvStore(key: string, value: unknown): void {
-	kvStore.set(kvKey(key), new Uint8Array(pack(value)))
+	kvStore.set(kvKey(key), serialize(value))
 }
 
-/** Reads and unpacks a value from the kvStore. */
+/** Reads and deserializes a value from the kvStore. */
 function readKvStore<T>(key: string): T | undefined {
 	const raw = kvStore.get(kvKey(key))
 
@@ -233,7 +231,7 @@ function readKvStore<T>(key: string): T | undefined {
 		return undefined
 	}
 
-	return unpack(raw) as T
+	return deserialize(raw) as T
 }
 
 /** Advances fake timers past the debounce window and drains all microtasks/Promises. */

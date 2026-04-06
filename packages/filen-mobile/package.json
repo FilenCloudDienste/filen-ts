@@ -128,7 +128,6 @@
     "jszip": "^3.10.1",
     "lru-cache": "^11.2.7",
     "mime-types": "^3.0.2",
-    "msgpackr": "^1.11.9",
     "music-metadata": "^11.12.3",
     "npm": "^11.12.1",
     "path-browserify": "^1.0.1",

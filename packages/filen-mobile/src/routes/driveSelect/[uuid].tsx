@@ -6,8 +6,7 @@ import events from "@/lib/events"
 import { randomUUID } from "expo-crypto"
 import { router, useFocusEffect } from "expo-router"
 import useDrivePath, { type SelectOptions } from "@/hooks/useDrivePath"
-import { Buffer } from "react-native-quick-crypto"
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
 import type { AnyNormalDir } from "@filen/sdk-rs"
@@ -59,13 +58,11 @@ export async function selectDriveItems(options: Omit<SelectOptions, "intention" 
 			pathname: "/driveSelect/[uuid]",
 			params: {
 				uuid: rootUuid,
-				selectOptions: Buffer.from(
-					pack({
-						...options,
-						intention: "select",
-						id
-					} satisfies SelectOptions)
-				).toString("base64")
+				selectOptions: serialize({
+					...options,
+					intention: "select",
+					id
+				} satisfies SelectOptions)
 			}
 		})
 	})

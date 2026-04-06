@@ -346,7 +346,7 @@ export async function fetchData(
 					offline.listDirectories(parent ?? undefined)
 				])
 
-				// Offline items are already DriveItems (stored as-is in msgpack meta files).
+				// Offline items are already DriveItems (stored as-is in serialized meta files).
 				// Pass them through directly — no SDK type wrapping needed.
 				const offlineDirs: DriveItem[] = offlineDirectories.directories.map(({ item }) => item)
 				const offlineFileItems: DriveItem[] = parent
@@ -374,22 +374,25 @@ export async function fetchData(
 
 	switch (result.type) {
 		case "normal": {
-			for (const resultDir of result.dirs) {
-				const unwrappedDir = unwrapDirMeta(resultDir)
-				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+			// Photos and recents should not contain dirs, we can skip the extra work
+			if (params.path.type !== "photos" && params.path.type !== "recents") {
+				for (const resultDir of result.dirs) {
+					const unwrappedDir = unwrapDirMeta(resultDir)
+					const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
 
-				items.push(driveItem)
+					items.push(driveItem)
 
-				if (unwrappedDir.meta?.name) {
-					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+					if (unwrappedDir.meta?.name) {
+						cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+					}
+
+					cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
+
+					const normalDir = new AnyNormalDir.Dir(resultDir)
+
+					cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
+					cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
 				}
-
-				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
-
-				const normalDir = new AnyNormalDir.Dir(resultDir)
-
-				cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
-				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
 			}
 
 			for (const resultFile of result.files) {

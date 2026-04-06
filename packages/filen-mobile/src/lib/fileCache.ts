@@ -4,7 +4,7 @@ import { Semaphore, run } from "@filen/utils"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { Platform } from "react-native"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
-import { pack, unpack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import isEqual from "react-fast-compare"
 import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk, normalizeFilePathForSdk } from "@/lib/utils"
@@ -98,7 +98,7 @@ export class FileCache {
 			return false
 		}
 
-		const metadataContent = unpack(await metadata.bytes()) as Metadata
+		const metadataContent = deserialize(await metadata.text()) as Metadata
 
 		if (Object.keys(metadataContent).length === 0) {
 			return false
@@ -126,7 +126,7 @@ export class FileCache {
 			const { file, metadata: metadataFile, parentDirectory } = this.getFiles(item)
 
 			if (file.exists && metadataFile.exists && metadataFile.size > 0) {
-				const metadata = unpack(await metadataFile.bytes()) as Metadata
+				const metadata = deserialize(await metadataFile.text()) as Metadata
 
 				if (Object.keys(metadata).length > 0) {
 					const { cachedAt: _, ...metadataWithoutCachedAt } = metadata
@@ -176,12 +176,10 @@ export class FileCache {
 				}
 
 				metadataFile.write(
-					new Uint8Array(
-						pack({
-							...item,
-							cachedAt: Date.now()
-						} satisfies Metadata)
-					)
+					serialize({
+						...item,
+						cachedAt: Date.now()
+					} satisfies Metadata)
 				)
 
 				return file
@@ -255,7 +253,7 @@ export class FileCache {
 					return
 				}
 
-				const metadata = unpack(await metadataFile.bytes()) as Metadata
+				const metadata = deserialize(await metadataFile.text()) as Metadata
 
 				if (Object.keys(metadata).length === 0 || now > metadata.cachedAt + (age ?? 86400 * 1000)) {
 					toDelete.push(uuid)

@@ -32,16 +32,16 @@ vi.mock("@/lib/utils", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-import { PersistentMap } from "@/lib/cache"
-import { pack, unpack } from "@/lib/msgpack"
+import { PersistentMap, GLOBAL_PREFIX } from "@/lib/cache"
+import { serialize, deserialize } from "@/lib/serializer"
 
 type Cache = any
 
 /**
  * In-memory KV store that simulates sqlite.kvAsync behavior.
- * Values are stored as msgpack blobs (Uint8Array) just like the real SQLite KV.
+ * Values are stored as serialized strings just like the real SQLite KV.
  */
-const kvStore = new Map<string, Uint8Array>()
+const kvStore = new Map<string, string>()
 
 function likeToPrefix(pattern: string): string {
 	return pattern.endsWith("%") ? pattern.slice(0, -1) : pattern
@@ -57,7 +57,7 @@ function setupMockDb(): void {
 	mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
 		if (query.startsWith("INSERT OR REPLACE")) {
 			const key = params![0] as string
-			const value = params![1] as Uint8Array
+			const value = params![1] as string
 
 			kvStore.set(key, value)
 
@@ -97,7 +97,7 @@ function setupMockDb(): void {
 			const key = params![0] as string
 			const value = kvStore.get(key)
 
-			return { rows: value ? [{ value: value.buffer }] : [], insertId: undefined, rowsAffected: 0 }
+			return { rows: value ? [{ value }] : [], insertId: undefined, rowsAffected: 0 }
 		}
 
 		if (query.startsWith("SELECT key FROM kv WHERE") && query.includes("LIKE")) {
@@ -129,11 +129,11 @@ function setupMockDb(): void {
 	mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
 		if (query.startsWith("SELECT key, value FROM kv WHERE") && query.includes("LIKE")) {
 			const pattern = params![0] as string
-			const rows: [string, ArrayBuffer][] = []
+			const rows: [string, string][] = []
 
 			for (const [key, value] of kvStore) {
 				if (matchesLike(key, pattern)) {
-					rows.push([key, value.buffer as ArrayBuffer])
+					rows.push([key, value])
 				}
 			}
 
@@ -163,7 +163,7 @@ function setupMockDb(): void {
 	mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
 		for (const [query, params] of commands) {
 			if (query.startsWith("INSERT OR REPLACE")) {
-				kvStore.set(params[0] as string, params[1] as Uint8Array)
+				kvStore.set(params[0] as string, params[1] as string)
 			}
 
 			if (query.startsWith("DELETE FROM kv WHERE") && query.includes("LIKE")) {
@@ -222,7 +222,7 @@ function getFirstMap(cache: Cache): { name: string; map: PersistentMap<unknown> 
 
 /** Returns the SQLite KV key for a given map field name + entry key. */
 function kvKey(mapName: string, entryKey: string): string {
-	return `cache:v1:${mapName}:${entryKey}`
+	return `${GLOBAL_PREFIX}:${mapName}:${entryKey}`
 }
 
 /** Creates a ready PersistentMap for unit tests (ready = true so writes are allowed). */
@@ -415,8 +415,8 @@ describe("Cache", () => {
 			const cache = await createCache()
 			const { name } = getFirstMap(cache)
 
-			kvStore.set(kvKey(name, "key-1"), new Uint8Array(pack("value-1")))
-			kvStore.set(kvKey(name, "key-2"), new Uint8Array(pack("value-2")))
+			kvStore.set(kvKey(name, "key-1"), serialize("value-1"))
+			kvStore.set(kvKey(name, "key-2"), serialize("value-2"))
 
 			const cache2 = await createCache()
 
@@ -448,7 +448,7 @@ describe("Cache", () => {
 			const maps = getPersistentMaps(cache)
 
 			for (const [mapName] of maps) {
-				kvStore.set(kvKey(mapName, `${mapName}-key`), new Uint8Array(pack(`${mapName}-value`)))
+				kvStore.set(kvKey(mapName, `${mapName}-key`), serialize(`${mapName}-value`))
 			}
 
 			const cache2 = await createCache()
@@ -477,7 +477,7 @@ describe("Cache", () => {
 			const maps = getPersistentMaps(cache)
 			const firstMap = maps[0] as [string, PersistentMap<unknown>]
 
-			kvStore.set(kvKey(firstMap[0], "k"), new Uint8Array(pack("v")))
+			kvStore.set(kvKey(firstMap[0], "k"), serialize("v"))
 
 			const cache2 = await createCache()
 
@@ -498,10 +498,8 @@ describe("Cache", () => {
 			const firstMap = maps[0] as [string, PersistentMap<unknown>]
 			const secondMap = maps[1] as [string, PersistentMap<unknown>]
 
-			const corruptBlob = new Uint8Array([0xff, 0xfe, 0x00, 0xab, 0xcd])
-
-			kvStore.set(kvKey(firstMap[0], "corrupt"), corruptBlob)
-			kvStore.set(kvKey(secondMap[0], "good-key"), new Uint8Array(pack("good-value")))
+			kvStore.set(kvKey(firstMap[0], "corrupt"), "{invalid json!!")
+			kvStore.set(kvKey(secondMap[0], "good-key"), serialize("good-value"))
 
 			const cache2 = await createCache()
 
@@ -515,7 +513,7 @@ describe("Cache", () => {
 			const cache = await createCache()
 			const { name } = getFirstMap(cache)
 
-			kvStore.set(kvKey(name, "key-1"), new Uint8Array(pack("value-1")))
+			kvStore.set(kvKey(name, "key-1"), serialize("value-1"))
 
 			const cache2 = await createCache()
 
@@ -549,10 +547,10 @@ describe("Cache", () => {
 			const stored1 = kvStore.get(kvKey(name, "uuid-1"))
 			const stored2 = kvStore.get(kvKey(name, "uuid-2"))
 
-			expect(stored1).toBeInstanceOf(Uint8Array)
-			expect(stored2).toBeInstanceOf(Uint8Array)
-			expect(unpack(stored1 as Uint8Array)).toBe("Documents")
-			expect(unpack(stored2 as Uint8Array)).toBe("Photos")
+			expect(typeof stored1).toBe("string")
+			expect(typeof stored2).toBe("string")
+			expect(deserialize(stored1 as string)).toBe("Documents")
+			expect(deserialize(stored2 as string)).toBe("Photos")
 		})
 
 		it("persists entries from each map under its own prefix", async () => {
@@ -573,8 +571,8 @@ describe("Cache", () => {
 			for (const [mapName] of maps) {
 				const stored = kvStore.get(kvKey(mapName, "test-key"))
 
-				expect(stored).toBeInstanceOf(Uint8Array)
-				expect(unpack(stored as Uint8Array)).toBe("test-value")
+				expect(typeof stored).toBe("string")
+				expect(deserialize(stored as string)).toBe("test-value")
 			}
 		})
 
@@ -773,7 +771,7 @@ describe("Cache", () => {
 			vi.advanceTimersByTime(2000)
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(kvStore.has("cache:v1:_testField")).toBe(false)
+			expect(kvStore.has(`${GLOBAL_PREFIX}:_testField`)).toBe(false)
 		})
 	})
 })

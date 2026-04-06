@@ -1,7 +1,7 @@
 import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext, File } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import sqlite from "@/lib/sqlite"
-import { pack } from "@/lib/msgpack"
+import { serialize, deserialize } from "@/lib/serializer"
 import { debounce } from "es-toolkit/function"
 import { AppState } from "react-native"
 
@@ -10,6 +10,7 @@ export const VERSION = 1
 export const GLOBAL_PREFIX = `cache:v${VERSION}`
 
 const PERSIST_DEBOUNCE = 1000
+const PERSIST_CHUNK_SIZE = 100
 
 type Mutation =
 	| {
@@ -46,6 +47,10 @@ export class PersistentMap<V> extends Map<string, V> {
 
 	public override set(key: string, value: V): this {
 		this.assertReady()
+
+		if (super.get(key) === value) {
+			return this
+		}
 
 		super.set(key, value)
 
@@ -192,12 +197,130 @@ class Cache {
 		return map
 	}
 
+	private persisting = false
+
+	/**
+	 * Synchronous persist — used by flushNow() when the app backgrounds.
+	 * Serializes all dirty entries in one go without yielding.
+	 */
 	private persistNow(): void {
 		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
 			return
 		}
 
 		const now = performance.now()
+		const commands = this.buildCommands()
+
+		if (commands.length === 0) {
+			return
+		}
+
+		console.log(`[Cache] Persisting ${commands.length} changes`)
+
+		sqlite
+			.openDb()
+			.then(db => db.executeBatch(commands))
+			.catch(err => {
+				console.error("[Cache] Failed to batch persist", err)
+			})
+			.finally(() => {
+				console.log(`[Cache] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
+			})
+	}
+
+	/**
+	 * Async persist — yields to the event loop every PERSIST_CHUNK_SIZE items
+	 * so the JS thread stays responsive during large directory serialization.
+	 */
+	private async persistAsync(): Promise<void> {
+		if (this.persisting) {
+			return
+		}
+
+		this.persisting = true
+
+		try {
+			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
+				return
+			}
+
+			const now = performance.now()
+
+			const clears = new Set(this.dirtyClears)
+			const deletes = new Map(this.dirtyDeletes)
+			const upserts = new Map(this.dirtyUpserts)
+
+			this.dirtyClears.clear()
+			this.dirtyDeletes.clear()
+			this.dirtyUpserts.clear()
+
+			const commands: [string, (string | Uint8Array)[]][] = []
+
+			for (const mapKey of clears) {
+				commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
+			}
+
+			for (const [mapKey, entryKeys] of deletes) {
+				for (const entryKey of entryKeys) {
+					commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
+				}
+			}
+
+			let serialized = 0
+
+			for (const entry of this.registry) {
+				const upsertKeys = upserts.get(entry.key)
+
+				if (!upsertKeys) {
+					continue
+				}
+
+				for (const entryKey of upsertKeys) {
+					const value = entry.map.get(entryKey)
+
+					if (value !== undefined) {
+						commands.push([
+							"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
+							[entry.key + ":" + entryKey, serialize(value)]
+						])
+
+						serialized++
+
+						if (serialized % PERSIST_CHUNK_SIZE === 0) {
+							await new Promise<void>(resolve => {
+								setImmediate(resolve)
+							})
+						}
+					}
+				}
+			}
+
+			if (commands.length === 0) {
+				return
+			}
+
+			console.log(`[Cache] Persisting ${commands.length} changes`)
+
+			const db = await sqlite.openDb()
+
+			await db.executeBatch(commands)
+
+			console.log(`[Cache] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
+		} catch (err) {
+			console.error("[Cache] Failed to persist", err)
+		} finally {
+			this.persisting = false
+
+			if (this.dirtyUpserts.size > 0 || this.dirtyDeletes.size > 0 || this.dirtyClears.size > 0) {
+				this.persistDirty()
+			}
+		}
+	}
+
+	/**
+	 * Build SQL commands from dirty sets (used by the sync persistNow path).
+	 */
+	private buildCommands(): [string, (string | Uint8Array)[]][] {
 		const commands: [string, (string | Uint8Array)[]][] = []
 
 		for (const mapKey of this.dirtyClears) {
@@ -221,10 +344,7 @@ class Cache {
 				const value = entry.map.get(entryKey)
 
 				if (value !== undefined) {
-					commands.push([
-						"INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
-						[entry.key + ":" + entryKey, new Uint8Array(pack(value))]
-					])
+					commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [entry.key + ":" + entryKey, serialize(value)]])
 				}
 			}
 		}
@@ -233,30 +353,12 @@ class Cache {
 		this.dirtyDeletes.clear()
 		this.dirtyUpserts.clear()
 
-		if (commands.length === 0) {
-			return
-		}
-
-		console.log(`[Cache] Persisting ${commands.length} changes`)
-
-		sqlite
-			.openDb()
-			.then(db => db.executeBatch(commands))
-			.catch(err => {
-				console.error("[Cache] Failed to batch persist", err)
-			})
-			.finally(() => {
-				const duration = performance.now() - now
-
-				console.log(`[Cache] Persisted in ${duration.toFixed(2)}ms`)
-			})
+		return commands
 	}
 
 	private persistDirty = debounce(
 		() => {
-			queueMicrotask(() => {
-				this.persistNow()
-			})
+			this.persistAsync()
 		},
 		PERSIST_DEBOUNCE,
 		{
@@ -270,15 +372,17 @@ class Cache {
 	 * Call during app setup before first render.
 	 */
 	public async restore(): Promise<void> {
+		const db = await sqlite.openDb()
+
 		const results = await Promise.allSettled(
 			this.registry.map(async ({ key, map }) => {
 				const prefix = key + ":"
-				const entries = await sqlite.kvAsync.getByPrefix<unknown>(prefix)
+				const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
 
-				for (const [fullKey, value] of entries) {
-					const entryKey = fullKey.slice(prefix.length)
+				for (const row of rows) {
+					const entryKey = (row[0] as string).slice(prefix.length)
 
-					Map.prototype.set.call(map, entryKey, value)
+					Map.prototype.set.call(map, entryKey, deserialize(row[1] as string))
 				}
 			})
 		)
@@ -308,7 +412,10 @@ class Cache {
 
 	public flushNow(): void {
 		this.persistDirty.cancel()
-		this.persistNow()
+
+		if (!this.persisting) {
+			this.persistNow()
+		}
 	}
 
 	public clear(): void {

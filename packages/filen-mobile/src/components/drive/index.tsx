@@ -26,9 +26,8 @@ import * as ImagePicker from "expo-image-picker"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
-import { pack } from "@/lib/msgpack"
+import { serialize } from "@/lib/serializer"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, normalizeFilePathForExpo } from "@/lib/utils"
-import { Buffer } from "react-native-quick-crypto"
 import DocumentScanner, {
 	ResponseType as DocumentScannerResponseType,
 	ScanDocumentResponseStatus
@@ -637,8 +636,8 @@ const Header = memo(() => {
 							router.push({
 								pathname: "/drivePreview",
 								params: {
-									item: Buffer.from(pack(item)).toString("base64"),
-									drivePath: Buffer.from(pack(drivePath)).toString("base64")
+									item: serialize(item),
+									drivePath: serialize(drivePath)
 								}
 							})
 						}
