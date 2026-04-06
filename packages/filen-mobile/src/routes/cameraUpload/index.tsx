@@ -8,7 +8,6 @@ import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import alerts from "@/lib/alerts"
 import { run } from "@filen/utils"
 import cache from "@/lib/cache"
-import { AnyNormalDir_Tags } from "@filen/sdk-rs"
 import { unwrapDirMeta } from "@/lib/utils"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
@@ -159,13 +158,25 @@ const CameraUpload = memo(() => {
 
 												const selectedItem = result.data.selectedItems[0]
 
-												if (!selectedItem || selectedItem.type !== "directory") {
+												if (!selectedItem) {
 													return
 												}
 
-												const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.uuid)
+												const remoteDir = (() => {
+													if (selectedItem.type === "root") {
+														return selectedItem.data
+													}
 
-												if (!fromCache || fromCache.tag !== AnyNormalDir_Tags.Dir) {
+													const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
+
+													if (!fromCache) {
+														return null
+													}
+
+													return fromCache
+												})()
+
+												if (!remoteDir) {
 													return
 												}
 
@@ -177,7 +188,7 @@ const CameraUpload = memo(() => {
 
 													return {
 														...prev,
-														remoteDir: fromCache.inner[0]
+														remoteDir
 													}
 												})
 											}

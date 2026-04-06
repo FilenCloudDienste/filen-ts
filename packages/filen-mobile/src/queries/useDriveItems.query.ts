@@ -108,9 +108,8 @@ export async function fetchData(
 					} satisfies Result
 				}
 
-				const parent = new AnyNormalDir.Dir(config.remoteDir)
 				const { dirs: resultDirs, files } = await authedSdkClient.listDirRecursive(
-					new AnyDirWithContext.Normal(parent),
+					new AnyDirWithContext.Normal(config.remoteDir),
 					undefined,
 					signal
 				)
@@ -600,7 +599,7 @@ export function driveItemsQueryUpdateGlobal({
 				params: {
 					path: {
 						type: "photos",
-						uuid: config.remoteDir.uuid
+						uuid: config.remoteDir.inner[0].uuid
 					}
 				},
 				updater

@@ -1,6 +1,6 @@
 import * as MediaLibrary from "expo-media-library/next"
 import auth from "@/lib/auth"
-import { type Dir, type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
+import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
 import {
 	PauseSignal,
 	normalizeFilePathForSdk,
@@ -50,7 +50,7 @@ export type Delta = {
 
 export type Config = {
 	enabled: boolean
-	remoteDir: Dir | null
+	remoteDir: AnyNormalDir | null
 	albumIds: string[]
 	activationTimestamp: number
 	afterActivation: boolean
@@ -131,14 +131,16 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 const MAX_UPLOAD_FAILURES = 3
 
 class CameraUpload {
+	// Critical: When changing the config type/object, increment the version to invalidate old configs and clear caches that may contain entries based on the old config structure.
+	public version = 1
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
 	private syncing: boolean = false
 	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
 	private readonly uploadFailures = new Map<string, number>()
-	public secureStoreKey: string = "cameraUploadConfig"
+	public secureStoreKey: string = `cameraUploadConfig:v${this.version}`
 
-	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, Dir>({
+	private readonly ensureParentDirectoryExistsCache = new LRUCache<string, AnyNormalDir>({
 		max: 100,
 		ttl: 60000,
 		allowStale: false,
@@ -375,10 +377,10 @@ class CameraUpload {
 		return tree
 	}
 
-	private async listRemote({ remoteDir, signal }: { remoteDir: Dir; signal: AbortSignal }): Promise<RemoteTree> {
+	private async listRemote({ remoteDir, signal }: { remoteDir: AnyNormalDir; signal: AbortSignal }): Promise<RemoteTree> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
-			new AnyDirWithContext.Normal(new AnyNormalDir.Dir(remoteDir)),
+			new AnyDirWithContext.Normal(remoteDir),
 			{
 				onProgress() {
 					// Noop
@@ -515,7 +517,7 @@ class CameraUpload {
 		config: Config
 		signal: AbortSignal
 		originalPath: string
-	}) {
+	}): Promise<AnyNormalDir> {
 		if (!config.remoteDir) {
 			throw new Error("Remote directory is not set in config")
 		}
@@ -531,7 +533,7 @@ class CameraUpload {
 		}
 
 		const parentDirName = FileSystem.Paths.dirname(originalPath).replace(/\//g, "")
-		const cacheKey = `${config.remoteDir.uuid}:${parentDirName.toLowerCase().trim()}`
+		const cacheKey = `${config.remoteDir.inner[0].uuid}:${parentDirName.toLowerCase().trim()}`
 		const fromCache = this.ensureParentDirectoryExistsCache.get(cacheKey)
 
 		if (fromCache) {
@@ -543,10 +545,11 @@ class CameraUpload {
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
-		const parentDirEnum = new AnyNormalDir.Dir(config.remoteDir)
-		const dir = await authedSdkClient.createDir(parentDirEnum, parentDirName, {
-			signal
-		})
+		const dir = new AnyNormalDir.Dir(
+			await authedSdkClient.createDir(config.remoteDir, parentDirName, {
+				signal
+			})
+		)
 
 		this.ensureParentDirectoryExistsCache.set(cacheKey, dir)
 
@@ -686,11 +689,9 @@ class CameraUpload {
 									originalPath: delta.file.originalPath
 								})
 
-								const parentDirEnum = new AnyNormalDir.Dir(parentDir)
-
 								const transferResult = await transfers.upload({
 									localFileOrDir: uploadFile,
-									parent: parentDirEnum,
+									parent: parentDir,
 									abortController,
 									pauseSignal,
 									name: delta.file.info.filename,

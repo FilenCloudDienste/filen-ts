@@ -61,6 +61,18 @@ const DriveSelectToolbar = memo(() => {
 		})
 	})()
 
+	const canSelect = (() => {
+		if (!drivePath.selectOptions) {
+			return false
+		}
+
+		if (drivePath.selectOptions.directories) {
+			return selectedItems.length > 0 || parentDir !== null
+		}
+
+		return selectedItems.length > 0
+	})()
+
 	const createDirectory = async () => {
 		if (!parentDir) {
 			return
@@ -102,6 +114,7 @@ const DriveSelectToolbar = memo(() => {
 		if (!result.success) {
 			console.error(result.error)
 			alerts.error(result.error)
+
 			return
 		}
 	}
@@ -132,6 +145,7 @@ const DriveSelectToolbar = memo(() => {
 				if (!result.success) {
 					console.error(result.error)
 					alerts.error(result.error)
+
 					return
 				}
 
@@ -139,11 +153,39 @@ const DriveSelectToolbar = memo(() => {
 			}
 
 			case "select": {
-				router.dismissAll()
+				if (!canSelect) {
+					return
+				}
+
+				if (router.canDismiss()) {
+					router.dismissAll()
+				}
+
+				if (selectedItems.length === 0) {
+					if (!parentDir || !drivePath.selectOptions.directories) {
+						return
+					}
+
+					events.emit("driveSelect", {
+						id: drivePath.selectOptions.id,
+						selectedItems: [
+							{
+								type: "root",
+								data: parentDir
+							}
+						],
+						cancelled: false
+					})
+
+					return
+				}
 
 				events.emit("driveSelect", {
 					id: drivePath.selectOptions.id,
-					selectedItems,
+					selectedItems: selectedItems.map(item => ({
+						type: "driveItem",
+						data: item
+					})),
 					cancelled: false
 				})
 
@@ -175,6 +217,7 @@ const DriveSelectToolbar = memo(() => {
 				<PressableScale
 					onPress={submit}
 					className="absolute right-4"
+					enabled={!isSameParentAsSelectedItems}
 					style={{
 						bottom: insets.bottom
 					}}
@@ -193,17 +236,19 @@ const DriveSelectToolbar = memo(() => {
 				<PressableScale
 					onPress={submit}
 					className="absolute right-4"
+					enabled={canSelect}
 					style={{
 						bottom: insets.bottom
 					}}
 				>
 					<CrossGlassContainerView
-						className={cn(
-							"min-h-12 min-w-12 px-4 flex-row items-center justify-center",
-							selectedItems.length === 0 && "opacity-50"
-						)}
+						className={cn("min-h-12 min-w-12 px-4 flex-row items-center justify-center", !canSelect && "opacity-50")}
 					>
-						<Text className="font-bold text-blue-500">tbd_select_items {selectedItems.length}</Text>
+						<Text className="font-bold text-blue-500">
+							{selectedItems.length === 0 && parentDir && drivePath.selectOptions.directories
+								? "tbd_select_root"
+								: `tbd_select_items ${selectedItems.length}`}
+						</Text>
 					</CrossGlassContainerView>
 				</PressableScale>
 			)}

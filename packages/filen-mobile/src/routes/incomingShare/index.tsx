@@ -15,7 +15,6 @@ import { run, formatBytes } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import cache from "@/lib/cache"
-import { AnyNormalDir_Tags } from "@filen/sdk-rs"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { randomUUID } from "expo-crypto"
 import isEqual from "react-fast-compare"
@@ -195,13 +194,25 @@ const IncomingShare = memo(() => {
 
 											const selectedItem = selectResult.data.selectedItems[0]
 
-											if (!selectedItem || selectedItem.type !== "directory") {
+											if (!selectedItem) {
 												return
 											}
 
-											const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.uuid)
+											const remoteDir = (() => {
+												if (selectedItem.type === "root") {
+													return selectedItem.data
+												}
 
-											if (!fromCache || fromCache.tag !== AnyNormalDir_Tags.Dir) {
+												const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
+
+												if (!fromCache) {
+													return null
+												}
+
+												return fromCache
+											})()
+
+											if (!remoteDir) {
 												return
 											}
 
@@ -271,7 +282,7 @@ const IncomingShare = memo(() => {
 
 														return await transfers.upload({
 															localFileOrDir: asset.file,
-															parent: fromCache,
+															parent: remoteDir,
 															name: asset.name
 														})
 													})
