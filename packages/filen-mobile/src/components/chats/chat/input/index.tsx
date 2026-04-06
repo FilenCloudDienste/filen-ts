@@ -288,6 +288,7 @@ export const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
 							}
 
 							const closestIndex = findClosestIndexString(chatInputValue, ":", inputSelection.start)
+
 							if (closestIndex === -1) {
 								return
 							}

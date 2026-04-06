@@ -20,6 +20,7 @@ class Setup {
 				this.mutex.release()
 			})
 
+			const now = performance.now()
 			const isAuthed = await auth.isAuthed()
 
 			if (isAuthed.isAuthed && isAuthed.stringifiedClient) {
@@ -41,6 +42,10 @@ class Setup {
 					})
 				}
 			}
+
+			const duration = performance.now() - now
+
+			console.log(`[Setup] Completed in ${duration.toFixed(2)}ms`)
 
 			return {
 				isAuthed: isAuthed.isAuthed
