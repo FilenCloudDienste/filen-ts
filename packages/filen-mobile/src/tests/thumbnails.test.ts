@@ -15,7 +15,8 @@ const {
 	mockGetFileUrl,
 	mockHttpStoreState,
 	mockHttpStoreSubscribers,
-	mockRandomUUID
+	mockRandomUUID,
+	mockAvailableThumbnails
 } = vi.hoisted(() => {
 	const mockSaveAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/manipulated.jpg" })
 	const mockRenderAsync = vi.fn().mockResolvedValue({ saveAsync: mockSaveAsync })
@@ -75,7 +76,8 @@ const {
 		mockGetFileUrl,
 		mockHttpStoreState,
 		mockHttpStoreSubscribers,
-		mockRandomUUID
+		mockRandomUUID,
+		mockAvailableThumbnails: new Map<string, boolean>()
 	}
 })
 
@@ -178,10 +180,7 @@ vi.mock("@/lib/utils", () => ({
 
 vi.mock("@/lib/cache", () => ({
 	default: {
-		availableThumbnails: {
-			clear: vi.fn(),
-			delete: vi.fn()
-		}
+		availableThumbnails: mockAvailableThumbnails
 	}
 }))
 
@@ -233,6 +232,7 @@ describe("Thumbnails", () => {
 	beforeEach(() => {
 		fs.clear()
 		vi.clearAllMocks()
+		mockAvailableThumbnails.clear()
 		mockHttpStoreSubscribers.clear()
 
 		mockSaveAsync.mockImplementation(async () => {
@@ -1073,6 +1073,138 @@ describe("Thumbnails", () => {
 			thumbnails.clear()
 
 			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
+		})
+	})
+
+	describe("generateFromLocalFile", () => {
+		it("generates thumbnail from a local image path", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set("file:///local/photo.jpg", new Uint8Array([1, 2, 3]))
+
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/photo.jpg",
+				uuid: "local-img-uuid",
+				name: "photo.jpg"
+			})
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/local-img-uuid.png`)
+			expect(mockManipulate).toHaveBeenCalledWith("file:///local/photo.jpg")
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+		})
+
+		it("generates thumbnail from a local video path", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set("file:///local/video.mp4", new Uint8Array([1, 2, 3]))
+
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/video.mp4",
+				uuid: "local-vid-uuid",
+				name: "video.mp4"
+			})
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/local-vid-uuid.png`)
+			expect(mockCreateVideoPlayer).toHaveBeenCalledWith("file:///local/video.mp4")
+		})
+
+		it("returns null for unsupported extensions", async () => {
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/doc.pdf",
+				uuid: "pdf-uuid",
+				name: "doc.pdf"
+			})
+
+			expect(result).toBeNull()
+			expect(mockManipulate).not.toHaveBeenCalled()
+		})
+
+		it("returns null for files without extension", async () => {
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/noext",
+				uuid: "noext-uuid",
+				name: "noext"
+			})
+
+			expect(result).toBeNull()
+		})
+
+		it("returns cached path when thumbnail already exists", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/existing-uuid.png`, new Uint8Array([0xff]))
+
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/photo.jpg",
+				uuid: "existing-uuid",
+				name: "photo.jpg"
+			})
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/existing-uuid.png`)
+			expect(mockManipulate).not.toHaveBeenCalled()
+		})
+
+		it("returns null on generation failure instead of throwing", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			mockManipulate.mockImplementationOnce(() => {
+				throw new Error("Manipulator crashed")
+			})
+
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/photo.jpg",
+				uuid: "fail-uuid",
+				name: "photo.jpg"
+			})
+
+			expect(result).toBeNull()
+		})
+
+		it("increments failure count on error", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			mockManipulate.mockImplementation(() => {
+				throw new Error("fail")
+			})
+
+			for (let i = 0; i < 3; i++) {
+				await thumbnails.generateFromLocalFile({
+					localPath: "file:///local/photo.jpg",
+					uuid: "repeat-fail-uuid",
+					name: "photo.jpg"
+				})
+			}
+
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/photo.jpg",
+				uuid: "repeat-fail-uuid",
+				name: "photo.jpg"
+			})
+
+			expect(result).toBeNull()
+			expect(mockManipulate).toHaveBeenCalledTimes(3)
+		})
+
+		it("does not use HTTP provider for local video", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			mockHttpStoreState.port = null
+			mockHttpStoreState.getFileUrl = null
+
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/video.mp4",
+				uuid: "local-vid-no-http-uuid",
+				name: "video.mp4"
+			})
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/local-vid-no-http-uuid.png`)
+			expect(mockGetFileUrl).not.toHaveBeenCalled()
+		})
+
+		it("updates cache.availableThumbnails on success", async () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/photo.jpg",
+				uuid: "cache-uuid",
+				name: "photo.jpg"
+			})
+
+			expect(mockAvailableThumbnails.get("cache-uuid")).toBe(true)
 		})
 	})
 })

@@ -250,15 +250,23 @@ vi.mock("@/lib/drive", () => ({
 	}
 }))
 
+vi.mock("@/lib/thumbnails", () => ({
+	default: {
+		generateFromLocalFile: vi.fn().mockResolvedValue(null)
+	}
+}))
+
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
+	normalizeFilePathForExpo: vi.fn((path: string) => path),
 	unwrapDirMeta: mockUnwrapDirMeta,
 	unwrapFileMeta: mockUnwrapFileMeta,
 	wrapAbortSignalForSdk: vi.fn(() => ({})),
 	PauseSignal: MockPauseSignal,
 	createCompositePauseSignal: mockCreateCompositePauseSignal,
 	createCompositeAbortSignal: mockCreateCompositeAbortSignal,
-	unwrapParentUuid: mockUnwrapParentUuid
+	unwrapParentUuid: mockUnwrapParentUuid,
+	listLocalDirectoryRecursive: vi.fn(() => [])
 }))
 
 import transfers from "@/lib/transfers"
