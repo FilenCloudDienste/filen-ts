@@ -315,10 +315,10 @@ const Photos = memo(() => {
 								usePhotosStore.getState().setVisibleDateRange({
 									start: firstItem?.item.data.decryptedMeta?.created
 										? Number(firstItem.item.data.decryptedMeta.created)
-										: null,
+										: Number(firstItem?.item.data.timestamp),
 									end: lastItem?.item.data.decryptedMeta?.created
 										? Number(lastItem.item.data.decryptedMeta.created)
-										: null
+										: Number(lastItem?.item.data.timestamp)
 								})
 							}}
 							data={
