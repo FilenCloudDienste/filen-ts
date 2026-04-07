@@ -19,6 +19,7 @@ import {
 import useTransfersStore from "@/stores/useTransfers.store"
 import {
 	normalizeFilePathForSdk,
+	normalizeFilePathForExpo,
 	unwrapDirMeta,
 	unwrapFileMeta,
 	wrapAbortSignalForSdk,
@@ -32,6 +33,8 @@ import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import drive from "@/lib/drive"
+import thumbnails from "@/lib/thumbnails"
+import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { randomUUID } from "expo-crypto"
 
 class Transfers {
@@ -603,6 +606,22 @@ class Transfers {
 					}
 				]
 			})
+		}
+
+		const uploadedFileName = name ?? localFileOrDir.name ?? ""
+		const ext = FileSystem.Paths.extname(uploadedFileName).toLowerCase()
+
+		if (EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext) || EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)) {
+			await thumbnails
+				.generateFromLocalFile({
+					localPath: normalizeFilePathForExpo(localFileOrDir.uri),
+					uuid: result.data.uuid,
+					name: uploadedFileName,
+					signal: compositeAbortSignal
+				})
+				.catch(err => {
+					console.error("[Transfers] Thumbnail generation failed, deferring", err)
+				})
 		}
 
 		return {

@@ -158,63 +158,79 @@ class Thumbnails {
 		})
 	}
 
-	private async generateImage(params: {
-		file: AnyFile
-		item: DriveItem
-		outputPath: string
-		width: number
-		quality: number
-		signal?: AbortSignal
-	}): Promise<void> {
+	private async generateImage(
+		params: {
+			outputPath: string
+			width: number
+			quality: number
+			signal?: AbortSignal
+		} & (
+			| {
+					localSourcePath: string
+			  }
+			| {
+					file: AnyFile
+					item: DriveItem
+			  }
+		)
+	): Promise<void> {
 		const result = await run(async defer => {
-			const { authedSdkClient } = await auth.getSdkClients()
-			const tempDir = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, `thumb_tmp_${randomUUID()}`))
+			let sourcePath: string
 
-			defer(() => {
-				if (tempDir.exists) {
-					tempDir.delete()
-				}
-			})
+			if ("localSourcePath" in params) {
+				sourcePath = params.localSourcePath
+			} else {
+				const { authedSdkClient } = await auth.getSdkClients()
+				const tempDir = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, `thumb_tmp_${randomUUID()}`))
 
-			if (!tempDir.exists) {
-				tempDir.create({
-					idempotent: true,
-					intermediates: true
+				defer(() => {
+					if (tempDir.exists) {
+						tempDir.delete()
+					}
 				})
-			}
 
-			const ext = this.getExtension(params.item)
+				if (!tempDir.exists) {
+					tempDir.create({
+						idempotent: true,
+						intermediates: true
+					})
+				}
 
-			if (!ext) {
-				throw new Error("File has no extension")
-			}
+				const ext = this.getExtension(params.item)
 
-			const tempPath = FileSystem.Paths.join(tempDir.uri, `source${ext}`)
-			const wrappedSignal = params.signal ? wrapAbortSignalForSdk(params.signal) : undefined
+				if (!ext) {
+					throw new Error("File has no extension")
+				}
 
-			await authedSdkClient.downloadFileToPath(
-				params.file,
-				normalizeFilePathForSdk(tempPath),
-				undefined,
-				ManagedFuture.new({
-					pauseSignal: undefined,
-					abortSignal: wrappedSignal
-				}),
-				params.signal
-					? {
-							signal: params.signal
-						}
-					: undefined
-			)
+				const tempPath = FileSystem.Paths.join(tempDir.uri, `source${ext}`)
+				const wrappedSignal = params.signal ? wrapAbortSignalForSdk(params.signal) : undefined
 
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
+				await authedSdkClient.downloadFileToPath(
+					params.file,
+					normalizeFilePathForSdk(tempPath),
+					undefined,
+					ManagedFuture.new({
+						pauseSignal: undefined,
+						abortSignal: wrappedSignal
+					}),
+					params.signal
+						? {
+								signal: params.signal
+							}
+						: undefined
+				)
+
+				if (params.signal?.aborted) {
+					throw abortError(params.signal)
+				}
+
+				sourcePath = tempPath
 			}
 
 			let manipulated: ImageManipulator.ImageRef | null = null
 
 			try {
-				manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(tempPath))
+				manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(sourcePath))
 					.resize({
 						width: params.width
 					})
@@ -262,17 +278,32 @@ class Thumbnails {
 		}
 	}
 
-	private async generateVideo(params: {
-		file: AnyFile
-		outputPath: string
-		width: number
-		quality: number
-		timestamp: number
-		signal?: AbortSignal
-	}): Promise<void> {
+	private async generateVideo(
+		params: {
+			outputPath: string
+			width: number
+			quality: number
+			timestamp: number
+			signal?: AbortSignal
+		} & (
+			| {
+					localSourcePath: string
+			  }
+			| {
+					file: AnyFile
+			  }
+		)
+	): Promise<void> {
 		const result = await run(async defer => {
-			const getFileUrl = await this.waitForHttpProvider(params.signal)
-			const url = getFileUrl(params.file)
+			let url: string
+
+			if ("localSourcePath" in params) {
+				url = normalizeFilePathForExpo(params.localSourcePath)
+			} else {
+				const getFileUrl = await this.waitForHttpProvider(params.signal)
+
+				url = getFileUrl(params.file)
+			}
 
 			if (params.signal?.aborted) {
 				throw abortError(params.signal)
@@ -555,6 +586,105 @@ class Thumbnails {
 			}
 
 			throw result.error
+		}
+
+		return result.data
+	}
+
+	public async generateFromLocalFile(params: {
+		localPath: string
+		uuid: string
+		name: string
+		width?: number
+		quality?: number
+		videoTimestamp?: number
+		signal?: AbortSignal
+	}): Promise<string | null> {
+		const ext = FileSystem.Paths.extname(params.name).toLowerCase().trim()
+
+		if (!ext) {
+			return null
+		}
+
+		const isImage = EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext)
+		const isVideo = EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)
+
+		if (!isImage && !isVideo) {
+			return null
+		}
+
+		if ((this.failures.get(params.uuid) ?? 0) >= MAX_FAILURES) {
+			return null
+		}
+
+		const outputPath = FileSystem.Paths.join(this.directory.uri, `${params.uuid}.png`)
+		const outputFile = new FileSystem.File(outputPath)
+
+		if (outputFile.exists) {
+			cache.availableThumbnails.set(params.uuid, true)
+
+			return normalizeFilePathForExpo(outputPath)
+		}
+
+		const pendingPromise = this.pending.get(params.uuid)
+
+		if (pendingPromise) {
+			return pendingPromise
+		}
+
+		const width = params.width ?? DEFAULT_WIDTH
+		const quality = params.quality ?? DEFAULT_QUALITY
+
+		const promise = (async (): Promise<string> => {
+			await this.semaphore.acquire()
+
+			try {
+				this.ensureDirectory()
+
+				if (isImage) {
+					await this.generateImage({
+						localSourcePath: params.localPath,
+						outputPath,
+						width,
+						quality,
+						signal: params.signal
+					})
+				} else {
+					await this.generateVideo({
+						localSourcePath: params.localPath,
+						outputPath,
+						width,
+						quality,
+						timestamp: params.videoTimestamp ?? DEFAULT_VIDEO_TIMESTAMP,
+						signal: params.signal
+					})
+				}
+
+				cache.availableThumbnails.set(params.uuid, true)
+
+				return normalizeFilePathForExpo(outputPath)
+			} catch (error) {
+				if (!params.signal?.aborted) {
+					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
+				}
+
+				if (outputFile.exists) {
+					outputFile.delete()
+				}
+
+				throw error
+			} finally {
+				this.semaphore.release()
+				this.pending.delete(params.uuid)
+			}
+		})()
+
+		this.pending.set(params.uuid, promise)
+
+		const result = await run(async () => await promise)
+
+		if (!result.success) {
+			return null
 		}
 
 		return result.data
