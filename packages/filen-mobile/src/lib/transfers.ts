@@ -353,6 +353,8 @@ class Transfers {
 										]
 									})
 								}
+
+								// TODO: Add thumbnail generation for uploaded files here once sdk exposes different type with path
 							}
 						}
 					},
