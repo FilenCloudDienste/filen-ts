@@ -309,6 +309,7 @@ const Item = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; d
 								)}
 							<Thumbnail
 								item={info.item}
+								target={info.target}
 								size={{
 									icon: 38,
 									thumbnail: 38

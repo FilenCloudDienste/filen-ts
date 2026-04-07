@@ -107,6 +107,7 @@ const Photo = memo(
 							)}
 							<Thumbnail
 								item={info.item}
+								target={info.target}
 								contentFit="cover"
 								size={thumbnailSize}
 							/>
