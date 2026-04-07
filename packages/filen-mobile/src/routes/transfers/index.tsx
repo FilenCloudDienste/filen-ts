@@ -18,7 +18,7 @@ import { DirectoryIcon, FileIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import transfersLib from "@/lib/transfers"
 
-const Transfer = memo(({ info: { item: transfer } }: { info: ListRenderItemInfo<TTransfer> }) => {
+const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderItemInfo<TTransfer> }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
@@ -44,6 +44,7 @@ const Transfer = memo(({ info: { item: transfer } }: { info: ListRenderItemInfo<
 					) : (
 						<Thumbnail
 							item={transfer.item}
+							target={target}
 							size={{
 								icon: 32,
 								thumbnail: 32

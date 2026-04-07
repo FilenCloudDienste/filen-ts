@@ -6,7 +6,7 @@ import { run, runEffect } from "@filen/utils"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
-import { useRecyclingState } from "@shopify/flash-list"
+import { type RenderTarget, useRecyclingState } from "@shopify/flash-list"
 import { AppState } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
 import { useFocusEffect } from "expo-router"
@@ -38,12 +38,14 @@ const FileThumbnailWithGenerate = memo(
 		item,
 		size,
 		className,
-		contentFit
+		contentFit,
+		target = "Cell"
 	}: {
 		item: DriveItemFileExtracted
 		size: ThumbnailSize
 		className?: string
 		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
+		target?: RenderTarget
 	}) => {
 		const abortControllerRef = useRef<AbortController | null>(null)
 		const errorRetryCountRef = useRef<number>(0)
@@ -69,13 +71,11 @@ const FileThumbnailWithGenerate = memo(
 			}
 		)
 
-		const localPathRef = useRef(localPath)
-
-		useEffect(() => {
-			localPathRef.current = localPath
-		}, [localPath])
-
 		const generate = useCallback(async () => {
+			if (target !== "Cell" || localPath || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
+				return
+			}
+
 			const result = await run(async defer => {
 				if (isGeneratingRef.current) {
 					return
@@ -87,7 +87,7 @@ const FileThumbnailWithGenerate = memo(
 					isGeneratingRef.current = false
 				})
 
-				if (localPathRef.current || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
+				if (target !== "Cell" || localPath || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
 					return
 				}
 
@@ -137,13 +137,7 @@ const FileThumbnailWithGenerate = memo(
 
 				return
 			}
-		}, [item, setLocalPath])
-
-		const generateRef = useRef(generate)
-
-		useEffect(() => {
-			generateRef.current = generate
-		}, [generate])
+		}, [item, setLocalPath, target, localPath])
 
 		const onFailure = () => {
 			cache.availableThumbnails.delete(item.data.uuid)
@@ -158,20 +152,29 @@ const FileThumbnailWithGenerate = memo(
 
 			thumbnails.remove(item)
 
-			localPathRef.current = null
-
 			setLocalPath(null)
 
-			generateRef.current?.()
+			generate()
+		}
+
+		const source = !localPath
+			? null
+			: {
+					uri: localPath
+				}
+
+		const imageStyle = {
+			width: size.thumbnail,
+			height: size.thumbnail
 		}
 
 		useEffect(() => {
 			errorRetryCountRef.current = 0
 
-			if (!localPathRef.current) {
+			if (!localPath) {
 				generate()
 			}
-		}, [generate])
+		}, [target, generate, localPath])
 
 		useEffect(() => {
 			const { cleanup } = runEffect(defer => {
@@ -234,17 +237,6 @@ const FileThumbnailWithGenerate = memo(
 			}, [])
 		)
 
-		const source = !localPath
-			? null
-			: {
-					uri: localPath
-				}
-
-		const imageStyle = {
-			width: size.thumbnail,
-			height: size.thumbnail
-		}
-
 		if (!localPath || !source) {
 			return (
 				<FileIcon
@@ -275,12 +267,14 @@ const FileThumbnail = memo(
 		item,
 		size,
 		className,
-		contentFit
+		contentFit,
+		target
 	}: {
 		item: DriveItemFileExtracted
 		size: ThumbnailSize
 		className?: string
 		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
+		target?: RenderTarget
 	}) => {
 		const [localPath] = useRecyclingState<string | null>(() => {
 			const available = cache.availableThumbnails.get(item.data.uuid)
@@ -325,6 +319,7 @@ const FileThumbnail = memo(
 				size={size}
 				className={className}
 				contentFit={contentFit}
+				target={target}
 			/>
 		)
 	}
@@ -335,12 +330,14 @@ const Thumbnail = memo(
 		item,
 		size,
 		className,
-		contentFit
+		contentFit,
+		target
 	}: {
 		item: DriveItem
 		size: ThumbnailSize
 		className?: string
 		contentFit?: React.ComponentProps<typeof Image>["contentFit"]
+		target?: RenderTarget
 	}) => {
 		if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
 			return (
@@ -349,6 +346,7 @@ const Thumbnail = memo(
 					size={size}
 					className={className}
 					contentFit={contentFit}
+					target={target}
 				/>
 			)
 		}
