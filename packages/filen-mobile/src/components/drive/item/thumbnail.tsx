@@ -50,6 +50,7 @@ const FileThumbnailWithGenerate = memo(
 		const abortControllerRef = useRef<AbortController | null>(null)
 		const errorRetryCountRef = useRef<number>(0)
 		const isGeneratingRef = useRef<boolean>(false)
+		const localPathRef = useRef<string | null>(null)
 
 		const [localPath, setLocalPath] = useRecyclingState<string | null>(
 			() => {
@@ -68,11 +69,16 @@ const FileThumbnailWithGenerate = memo(
 				abortControllerRef.current = null
 				errorRetryCountRef.current = 0
 				isGeneratingRef.current = false
+				localPathRef.current = null
 			}
 		)
 
+		useEffect(() => {
+			localPathRef.current = localPath
+		}, [localPath])
+
 		const generate = useCallback(async () => {
-			if (target !== "Cell" || localPath || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
+			if (target !== "Cell" || localPathRef.current || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
 				return
 			}
 
@@ -87,12 +93,11 @@ const FileThumbnailWithGenerate = memo(
 					isGeneratingRef.current = false
 				})
 
-				if (target !== "Cell" || localPath || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
+				if (localPathRef.current || AppState.currentState !== "active") {
 					return
 				}
 
 				abortControllerRef.current?.abort()
-				errorRetryCountRef.current = 0
 				abortControllerRef.current = new AbortController()
 
 				const signal = abortControllerRef.current.signal
@@ -137,7 +142,13 @@ const FileThumbnailWithGenerate = memo(
 
 				return
 			}
-		}, [item, setLocalPath, target, localPath])
+		}, [item, setLocalPath, target])
+
+		const generateRef = useRef(generate)
+
+		useEffect(() => {
+			generateRef.current = generate
+		}, [generate])
 
 		const onFailure = () => {
 			cache.availableThumbnails.delete(item.data.uuid)
@@ -152,9 +163,9 @@ const FileThumbnailWithGenerate = memo(
 
 			thumbnails.remove(item)
 
-			setLocalPath(null)
+			localPathRef.current = null
 
-			generate()
+			setLocalPath(null)
 		}
 
 		const source = !localPath
@@ -169,12 +180,10 @@ const FileThumbnailWithGenerate = memo(
 		}
 
 		useEffect(() => {
-			errorRetryCountRef.current = 0
-
 			if (!localPath) {
 				generate()
 			}
-		}, [target, generate, localPath])
+		}, [generate, localPath])
 
 		useEffect(() => {
 			const { cleanup } = runEffect(defer => {
@@ -183,8 +192,11 @@ const FileThumbnailWithGenerate = memo(
 						abortControllerRef.current?.abort()
 
 						abortControllerRef.current = null
-						errorRetryCountRef.current = 0
 						isGeneratingRef.current = false
+					} else if (nextAppState === "active") {
+						if (!localPathRef.current) {
+							generateRef.current?.()
+						}
 					}
 				})
 
@@ -199,7 +211,6 @@ const FileThumbnailWithGenerate = memo(
 							abortControllerRef.current?.abort()
 
 							abortControllerRef.current = null
-							errorRetryCountRef.current = 0
 							isGeneratingRef.current = false
 						}
 					}
@@ -227,11 +238,14 @@ const FileThumbnailWithGenerate = memo(
 
 		useFocusEffect(
 			useCallback(() => {
+				if (!localPathRef.current) {
+					generateRef.current?.()
+				}
+
 				return () => {
 					abortControllerRef.current?.abort()
 
 					abortControllerRef.current = null
-					errorRetryCountRef.current = 0
 					isGeneratingRef.current = false
 				}
 			}, [])
