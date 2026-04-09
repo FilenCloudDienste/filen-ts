@@ -8,6 +8,7 @@ import { serialize, deserialize } from "@/lib/serializer"
 import isEqual from "react-fast-compare"
 import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk, normalizeFilePathForSdk } from "@/lib/utils"
+import offline from "@/lib/offline"
 
 export type Metadata = DriveItemFileExtracted & {
 	cachedAt: number
@@ -92,6 +93,12 @@ export class FileCache {
 			return false
 		}
 
+		const offlineFile = await offline.getLocalFile(item)
+
+		if (offlineFile?.exists) {
+			return true
+		}
+
 		const { file, metadata } = this.getFiles(item)
 
 		if (!file.exists || !metadata.exists || metadata.size === 0) {
@@ -112,6 +119,12 @@ export class FileCache {
 	public async get({ item, signal }: { item: DriveItem; signal?: AbortSignal }): Promise<FileSystem.File> {
 		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
+		}
+
+		const offlineFile = await offline.getLocalFile(item)
+
+		if (offlineFile?.exists) {
+			return offlineFile
 		}
 
 		const result = await run(async defer => {

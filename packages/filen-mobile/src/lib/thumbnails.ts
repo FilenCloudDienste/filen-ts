@@ -11,6 +11,8 @@ import useHttpStore from "@/stores/useHttp.store"
 import { Platform } from "react-native"
 import { randomUUID } from "expo-crypto"
 import cache from "@/lib/cache"
+import offline from "@/lib/offline"
+import fileCache from "@/lib/fileCache"
 
 export type ThumbnailParams = {
 	item: DriveItem
@@ -180,51 +182,61 @@ class Thumbnails {
 			if ("localSourcePath" in params) {
 				sourcePath = params.localSourcePath
 			} else {
-				const { authedSdkClient } = await auth.getSdkClients()
-				const tempDir = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, `thumb_tmp_${randomUUID()}`))
+				const offlineFile = await offline.getLocalFile(params.item)
 
-				defer(() => {
-					if (tempDir.exists) {
-						tempDir.delete()
-					}
-				})
+				if (offlineFile?.exists) {
+					sourcePath = normalizeFilePathForExpo(offlineFile.uri)
+				} else if (await fileCache.has(params.item)) {
+					const cachedFile = await fileCache.get({ item: params.item, signal: params.signal })
 
-				if (!tempDir.exists) {
-					tempDir.create({
-						idempotent: true,
-						intermediates: true
+					sourcePath = normalizeFilePathForExpo(cachedFile.uri)
+				} else {
+					const { authedSdkClient } = await auth.getSdkClients()
+					const tempDir = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, `thumb_tmp_${randomUUID()}`))
+
+					defer(() => {
+						if (tempDir.exists) {
+							tempDir.delete()
+						}
 					})
+
+					if (!tempDir.exists) {
+						tempDir.create({
+							idempotent: true,
+							intermediates: true
+						})
+					}
+
+					const ext = this.getExtension(params.item)
+
+					if (!ext) {
+						throw new Error("File has no extension")
+					}
+
+					const tempPath = FileSystem.Paths.join(tempDir.uri, `source${ext}`)
+					const wrappedSignal = params.signal ? wrapAbortSignalForSdk(params.signal) : undefined
+
+					await authedSdkClient.downloadFileToPath(
+						params.file,
+						normalizeFilePathForSdk(tempPath),
+						undefined,
+						ManagedFuture.new({
+							pauseSignal: undefined,
+							abortSignal: wrappedSignal
+						}),
+						params.signal
+							? {
+									signal: params.signal
+								}
+							: undefined
+					)
+
+					if (params.signal?.aborted) {
+						throw abortError(params.signal)
+					}
+
+					sourcePath = tempPath
 				}
-
-				const ext = this.getExtension(params.item)
-
-				if (!ext) {
-					throw new Error("File has no extension")
-				}
-
-				const tempPath = FileSystem.Paths.join(tempDir.uri, `source${ext}`)
-				const wrappedSignal = params.signal ? wrapAbortSignalForSdk(params.signal) : undefined
-
-				await authedSdkClient.downloadFileToPath(
-					params.file,
-					normalizeFilePathForSdk(tempPath),
-					undefined,
-					ManagedFuture.new({
-						pauseSignal: undefined,
-						abortSignal: wrappedSignal
-					}),
-					params.signal
-						? {
-								signal: params.signal
-							}
-						: undefined
-				)
-
-				if (params.signal?.aborted) {
-					throw abortError(params.signal)
-				}
-
-				sourcePath = tempPath
 			}
 
 			let manipulated: ImageManipulator.ImageRef | null = null
@@ -291,6 +303,7 @@ class Thumbnails {
 			  }
 			| {
 					file: AnyFile
+					item: DriveItem
 			  }
 		)
 	): Promise<void> {
@@ -300,9 +313,15 @@ class Thumbnails {
 			if ("localSourcePath" in params) {
 				url = normalizeFilePathForExpo(params.localSourcePath)
 			} else {
-				const getFileUrl = await this.waitForHttpProvider(params.signal)
+				const offlineFile = await offline.getLocalFile(params.item)
 
-				url = getFileUrl(params.file)
+				if (offlineFile?.exists) {
+					url = normalizeFilePathForExpo(offlineFile.uri)
+				} else {
+					const getFileUrl = await this.waitForHttpProvider(params.signal)
+
+					url = getFileUrl(params.file)
+				}
 			}
 
 			if (params.signal?.aborted) {
@@ -563,6 +582,7 @@ class Thumbnails {
 			} else if (params.isVideo) {
 				await this.generateVideo({
 					file,
+					item: params.item,
 					outputPath: params.outputPath,
 					width: params.width,
 					quality: params.quality,

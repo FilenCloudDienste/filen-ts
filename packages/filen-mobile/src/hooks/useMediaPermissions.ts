@@ -65,22 +65,17 @@ export async function hasAllNeededMediaPermissions(params?: { shouldRequest?: bo
 export default function useMediaPermissions(params?: { shouldRequest?: boolean }): MediaPermissions {
 	const didRequestRef = useRef<boolean>(false)
 
-	const query = useSimpleQuery(
-		async () => {
-			const [mediaLibraryPermissions, cameraPermissions] = await Promise.all([
-				MediaLibraryLegacy.getPermissionsAsync(),
-				ImagePicker.getCameraPermissionsAsync()
-			])
+	const query = useSimpleQuery(async () => {
+		const [mediaLibraryPermissions, cameraPermissions] = await Promise.all([
+			MediaLibraryLegacy.getPermissionsAsync(),
+			ImagePicker.getCameraPermissionsAsync()
+		])
 
-			return {
-				mediaLibrary: mediaLibraryPermissions,
-				camera: cameraPermissions
-			}
-		},
-		{
-			retry: 0
+		return {
+			mediaLibrary: mediaLibraryPermissions,
+			camera: cameraPermissions
 		}
-	)
+	})
 
 	const { refetch } = query
 

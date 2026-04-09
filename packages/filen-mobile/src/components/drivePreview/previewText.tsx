@@ -17,7 +17,6 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
-import offline from "@/lib/offline"
 import { useRecyclingState } from "@shopify/flash-list"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
@@ -169,16 +168,6 @@ const PreviewText = memo(({ item, drivePath }: { item: DriveItemFileExtracted; d
 	const previewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
 
 	const query = useSimpleQuery(async signal => {
-		const isStoredOffline = await offline.isItemStored(item)
-
-		if (isStoredOffline) {
-			const file = await offline.getLocalFile(item)
-
-			if (file) {
-				return await file.text()
-			}
-		}
-
 		const file = await fileCache.get({
 			item,
 			signal

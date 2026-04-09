@@ -663,10 +663,6 @@ class Transfers {
 			? createCompositeAbortSignal(transferAbortController.signal)
 			: createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
 
-		if (item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
-			console.log(item.data)
-		}
-
 		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 			const result = await run(async defer => {
 				defer(() => {
@@ -1079,7 +1075,7 @@ class Transfers {
 				})
 			}
 
-			const cachedFile = await run(async () => {
+			const cachedOrOfflineFile = await run(async () => {
 				if (await fileCache.has(item)) {
 					return await fileCache.get({
 						item,
@@ -1094,8 +1090,8 @@ class Transfers {
 				destination.delete()
 			}
 
-			if (cachedFile.success && cachedFile.data) {
-				cachedFile.data.copy(destination)
+			if (cachedOrOfflineFile.success && cachedOrOfflineFile.data) {
+				cachedOrOfflineFile.data.copy(destination)
 
 				if (!hideProgress) {
 					useTransfersStore.getState().setTransfers(prev =>
