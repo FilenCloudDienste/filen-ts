@@ -17,8 +17,8 @@ export const NETINFO_CONFIG: NetInfoConfiguration = {
 
 export const EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
-		ios: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".heic", ".heif", ".webp", ".avif", ".svg"],
-		android: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".heif", ".svg"],
+		ios: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".heic", ".heif", ".webp", ".avif"],
+		android: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".heif"],
 		default: [".jpg", ".jpeg", ".png", ".gif", ".bmp"]
 	}) as string[]
 )

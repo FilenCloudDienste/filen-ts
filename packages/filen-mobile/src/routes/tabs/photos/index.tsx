@@ -29,6 +29,8 @@ import usePhotosStore from "@/stores/usePhotos.store"
 import { simpleDateNoTime } from "@/lib/time"
 import { useHeaderHeight } from "@react-navigation/elements"
 import { useSecureStore } from "@/lib/secureStore"
+import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
+import * as FileSystem from "expo-file-system"
 
 const Photo = memo(
 	({ info, size, drivePath }: { info: ListRenderItemInfo<DriveItemFileExtracted>; size: number; drivePath: DrivePath }) => {
@@ -335,7 +337,14 @@ const Photos = memo(() => {
 
 												const previewType = getPreviewType(item.data.decryptedMeta.name)
 
-												return previewType === "image" || previewType === "video"
+												return (
+													(previewType === "image" || previewType === "video") &&
+													(previewType === "image"
+														? EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(
+																FileSystem.Paths.extname(item.data.decryptedMeta.name)
+															)
+														: true)
+												)
 											}),
 											"creationDesc"
 										)

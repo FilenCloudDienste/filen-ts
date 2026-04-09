@@ -61,6 +61,8 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 				onErrorWorkingRef.current = false
 			})
 
+			console.log("PDF load error", e)
+
 			switch (e.code) {
 				case "invalid_document": {
 					alerts.error("tbd_invalid_pdf")
@@ -127,6 +129,7 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	return (
 		<View className="bg-background flex-1">
 			<PdfView
+				key={password ?? "no-password"}
 				style={pdfViewStyle}
 				contentPadding={contentPadding}
 				password={password ?? undefined}
