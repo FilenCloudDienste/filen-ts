@@ -16,6 +16,7 @@ import { Platform, ActivityIndicator } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
+import { AnyNormalDir_Tags } from "@filen/sdk-rs"
 
 const CameraUpload = memo(() => {
 	const { config, setConfig } = useCameraUpload()
@@ -117,23 +118,20 @@ const CameraUpload = memo(() => {
 											icon: "time-outline",
 											title: "tbd_cloud_directory",
 											subTitle: config.remoteDir
-												? (unwrapDirMeta(config.remoteDir).meta?.name ?? "tbd_cloud_directory_description")
+												? config.remoteDir.tag === AnyNormalDir_Tags.Root
+													? "tbd_cloud_directory_root_description"
+													: (unwrapDirMeta(config.remoteDir).meta?.name ?? "tbd_cloud_directory_description")
 												: "tbd_cloud_directory_description",
 											rightItem: {
 												type: "badge",
 												value: (
 													<Ionicons
-														name={
-															config.remoteDir && unwrapDirMeta(config.remoteDir).meta ? "checkmark" : "close"
-														}
+														name={config.remoteDir ? "checkmark" : "close"}
 														size={15}
 														color="white"
 													/>
 												),
-												color:
-													config.remoteDir && unwrapDirMeta(config.remoteDir).meta
-														? (textGreen500.color as string | undefined)
-														: undefined
+												color: config.remoteDir ? (textGreen500.color as string | undefined) : undefined
 											},
 											onPress: async () => {
 												const result = await run(async () => {
