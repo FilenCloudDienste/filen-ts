@@ -13,17 +13,14 @@ import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import offline from "@/lib/offline"
 import { useRecyclingState } from "@shopify/flash-list"
-
-const pdfViewStyle = {
-	flex: 1,
-	backgroundColor: "transparent"
-}
+import Button from "@/components/ui/button"
 
 const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	const [password, setPassword] = useRecyclingState<string | null>(null, [item.data.uuid])
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 	const onErrorWorkingRef = useRef<boolean>(false)
+	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [item.data.uuid])
 
 	const query = useSimpleQuery(async signal => {
 		const isStoredOffline = await offline.isItemStored(item)
@@ -44,9 +41,41 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 		return file
 	})
 
-	const contentPadding = {
-		top: headerHeight ?? 0,
-		bottom: insets.bottom
+	const promptPassword = async () => {
+		const result = await run(async () => {
+			return await prompts.input({
+				title: "tbd_password_required",
+				message: "tbd_enter_password",
+				cancelText: "tbd_cancel",
+				okText: "tbd_ok",
+				inputType: "secure-text"
+			})
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			setDidCancelPasswordPrompt(true)
+
+			return
+		}
+
+		if (result.data.cancelled || result.data.type !== "string") {
+			setDidCancelPasswordPrompt(true)
+
+			return
+		}
+
+		const password = result.data.value.trim()
+
+		if (password.length === 0) {
+			setDidCancelPasswordPrompt(true)
+
+			return
+		}
+
+		setPassword(password)
 	}
 
 	const onError = (e: OnErrorEventPayload) => {
@@ -60,8 +89,6 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 			defer(() => {
 				onErrorWorkingRef.current = false
 			})
-
-			console.log("PDF load error", e)
 
 			switch (e.code) {
 				case "invalid_document": {
@@ -78,38 +105,9 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 
 				case "password_incorrect":
 				case "password_required": {
-					while (true) {
-						const result = await run(async () => {
-							return await prompts.input({
-								title: "tbd_password_required",
-								message: "tbd_enter_password",
-								cancelText: "tbd_cancel",
-								okText: "tbd_ok",
-								inputType: "secure-text"
-							})
-						})
+					await promptPassword()
 
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							continue
-						}
-
-						if (result.data.cancelled || result.data.type !== "string") {
-							continue
-						}
-
-						const password = result.data.value.trim()
-
-						if (password.length === 0) {
-							continue
-						}
-
-						setPassword(password)
-
-						break
-					}
+					break
 				}
 			}
 		})
@@ -128,17 +126,29 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 
 	return (
 		<View className="bg-background flex-1">
-			<PdfView
-				key={password ?? "no-password"}
-				style={pdfViewStyle}
-				contentPadding={contentPadding}
-				password={password ?? undefined}
-				doubleTapToZoom={true}
-				autoScale={false}
-				fitMode="both"
-				uri={query.data.uri}
-				onError={onError}
-			/>
+			{didCancelPasswordPrompt ? (
+				<View className="flex-1 bg-transparent items-center justify-center">
+					<Button onPress={() => promptPassword()}>tbd_enter_pdf_password</Button>
+				</View>
+			) : (
+				<PdfView
+					key={password ?? "no-password"}
+					style={{
+						flex: 1,
+						backgroundColor: "transparent"
+					}}
+					contentPadding={{
+						top: headerHeight ?? 0,
+						bottom: insets.bottom
+					}}
+					password={password ?? undefined}
+					doubleTapToZoom={true}
+					autoScale={false}
+					fitMode="both"
+					uri={query.data.uri}
+					onError={onError}
+				/>
+			)}
 		</View>
 	)
 })
