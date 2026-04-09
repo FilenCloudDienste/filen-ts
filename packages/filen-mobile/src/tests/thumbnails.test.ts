@@ -184,6 +184,19 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
+vi.mock("@/lib/offline", () => ({
+	default: {
+		getLocalFile: vi.fn().mockResolvedValue(null)
+	}
+}))
+
+vi.mock("@/lib/fileCache", () => ({
+	default: {
+		has: vi.fn().mockResolvedValue(false),
+		get: vi.fn().mockResolvedValue(null)
+	}
+}))
+
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("expo-crypto", () => ({

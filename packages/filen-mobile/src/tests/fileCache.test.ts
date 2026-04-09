@@ -48,6 +48,12 @@ vi.mock("@/lib/utils", () => ({
 			.replace(/\/$/, "")
 }))
 
+vi.mock("@/lib/offline", () => ({
+	default: {
+		getLocalFile: vi.fn().mockResolvedValue(null)
+	}
+}))
+
 vi.mock("react-fast-compare", () => ({
 	default: (a: unknown, b: unknown) =>
 		JSON.stringify(a, (_k, v) => (typeof v === "bigint" ? `__bigint__${v.toString()}` : v)) ===

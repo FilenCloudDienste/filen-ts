@@ -11,7 +11,6 @@ import alerts from "@/lib/alerts"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import offline from "@/lib/offline"
 import { useRecyclingState } from "@shopify/flash-list"
 import Button from "@/components/ui/button"
 
@@ -23,22 +22,10 @@ const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
 	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [item.data.uuid])
 
 	const query = useSimpleQuery(async signal => {
-		const isStoredOffline = await offline.isItemStored(item)
-
-		if (isStoredOffline) {
-			const file = await offline.getLocalFile(item)
-
-			if (file) {
-				return file
-			}
-		}
-
-		const file = await fileCache.get({
+		return await fileCache.get({
 			item,
 			signal
 		})
-
-		return file
 	})
 
 	const promptPassword = async () => {

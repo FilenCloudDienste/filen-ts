@@ -24,26 +24,21 @@ const Albums = memo(() => {
 		shouldRequest: true
 	})
 
-	const albumsQuery = useSimpleQuery(
-		async () => {
-			const permissions = await hasAllNeededMediaPermissions({
-				shouldRequest: true
-			})
+	const albumsQuery = useSimpleQuery(async () => {
+		const permissions = await hasAllNeededMediaPermissions({
+			shouldRequest: true
+		})
 
-			if (!permissions) {
-				return []
-			}
-
-			const albums = await MediaLibraryLegacy.getAlbumsAsync({
-				includeSmartAlbums: true
-			})
-
-			return albums
-		},
-		{
-			retry: 0
+		if (!permissions) {
+			return []
 		}
-	)
+
+		const albums = await MediaLibraryLegacy.getAlbumsAsync({
+			includeSmartAlbums: true
+		})
+
+		return albums
+	})
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener("change", nextAppState => {

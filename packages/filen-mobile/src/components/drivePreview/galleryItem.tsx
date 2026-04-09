@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { type DriveItemFileExtracted } from "@/types"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType, normalizeFilePathForExpo } from "@/lib/utils"
 import useHttpStore from "@/stores/useHttp.store"
 import { useWindowDimensions, ActivityIndicator } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
@@ -12,6 +12,8 @@ import PreviewText from "@/components/drivePreview/previewText"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { AnyFile } from "@filen/sdk-rs"
+import offline from "@/lib/offline"
+import useSimpleQuery from "@/hooks/useSimpleQuery"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import View from "@/components/ui/view"
@@ -57,19 +59,50 @@ const GalleryItem = memo(
 		const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
 		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
-		const fileUrl = !getFileUrl ? null : getFileUrlForItem(info.item, getFileUrl)
+
+		const fileUrlQuery = useSimpleQuery(async () => {
+			const file = await offline.getLocalFile(info.item)
+
+			if (file?.exists) {
+				return normalizeFilePathForExpo(file.uri)
+			}
+
+			if (!getFileUrl) {
+				return null
+			}
+
+			return getFileUrlForItem(info.item, getFileUrl)
+		})
+
+		const fileUrl = fileUrlQuery.data ?? null
 
 		const itemStyle = {
 			width: dimensions.width,
 			height: dimensions.height
 		}
 
-		if (!fileUrl || !previewType || previewType === "unknown") {
+		if (!previewType || previewType === "unknown") {
 			return (
 				<View
 					className="bg-transparent"
 					style={itemStyle}
 				/>
+			)
+		}
+
+		if (!fileUrl) {
+			return (
+				<View
+					className="bg-transparent"
+					style={itemStyle}
+				>
+					<View className="bg-transparent flex-1 items-center justify-center">
+						<ActivityIndicator
+							size="small"
+							color="white"
+						/>
+					</View>
+				</View>
 			)
 		}
 
