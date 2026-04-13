@@ -3,6 +3,9 @@ import { Platform } from "react-native"
 
 export const IOS_APP_GROUP_IDENTIFIER: string = "group.io.filen.app"
 
+export const FILE_PUBLIC_LINK_URL_PREFIX: string = "https://app.filen.io/#/d/"
+export const DIRECTORY_PUBLIC_LINK_URL_PREFIX: string = "https://app.filen.io/#/f/"
+
 export const NETINFO_CONFIG: NetInfoConfiguration = {
 	reachabilityUrl: "https://gateway.filen.io",
 	reachabilityTest: async response => response.status === 200,

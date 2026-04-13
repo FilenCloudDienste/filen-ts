@@ -1,5 +1,14 @@
 import auth from "@/lib/auth"
-import { type Chat, type ChatMessagePartial, ChatTypingType, type ChatMessage, type Contact, type ChatParticipant } from "@filen/sdk-rs"
+import {
+	type Chat,
+	type ChatMessagePartial,
+	ChatTypingType,
+	type ChatMessage,
+	type Contact,
+	type ChatParticipant,
+	AnyNormalDir,
+	DirMeta_Tags
+} from "@filen/sdk-rs"
 import { chatsQueryUpdate, chatsQueryGet, fetchData as chatsQueryFetch } from "@/queries/useChats.query"
 import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/queries/useChatMessages.query"
 import { Semaphore, run } from "@filen/utils"
@@ -498,6 +507,37 @@ class Chats {
 				throw: true
 			}
 		)
+	}
+
+	public async getChatUploadsDirectory() {
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		let dotFilenDir = (
+			await authedSdkClient.listDir(
+				new AnyNormalDir.Root({
+					uuid: authedSdkClient.root().uuid
+				})
+			)
+		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === ".filen")
+
+		if (!dotFilenDir) {
+			dotFilenDir = await authedSdkClient.createDir(
+				new AnyNormalDir.Root({
+					uuid: authedSdkClient.root().uuid
+				}),
+				".filen"
+			)
+		}
+
+		let chatUploadsDir = (await authedSdkClient.listDir(new AnyNormalDir.Dir(dotFilenDir))).dirs.find(
+			d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === "chat uploads"
+		)
+
+		if (!chatUploadsDir) {
+			chatUploadsDir = await authedSdkClient.createDir(new AnyNormalDir.Dir(dotFilenDir), "Chat Uploads")
+		}
+
+		return chatUploadsDir
 	}
 }
 

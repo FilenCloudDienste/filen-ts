@@ -1,4 +1,4 @@
-import { type Chat, type ChatParticipant, ChatTypingType } from "@filen/sdk-rs"
+import { type Chat, type ChatParticipant, ChatTypingType, AnyNormalDir, FileMeta_Tags } from "@filen/sdk-rs"
 import { useRef, useEffect, Fragment, memo, useCallback } from "react"
 import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent } from "react-native"
 import View, { KeyboardStickyView, CrossGlassContainerView, GestureHandlerScrollView } from "@/components/ui/view"
@@ -15,7 +15,7 @@ import { useShallow } from "zustand/shallow"
 import { useSecureStore } from "@/lib/secureStore"
 import { cn, fastLocaleCompare, run, Semaphore, runEffect, findClosestIndexString } from "@filen/utils"
 import { useStringifiedClient } from "@/lib/auth"
-import { contactDisplayName } from "@/lib/utils"
+import { contactDisplayName, unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/utils"
 import Avatar from "@/components/ui/avatar"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Image from "@/components/ui/image"
@@ -27,8 +27,18 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import events from "@/lib/events"
 import { chatMessagesQueryUpdate } from "@/queries/useChatMessages.query"
+import Menu from "@/components/ui/menu"
+import * as DocumentPicker from "expo-document-picker"
+import * as ImagePicker from "expo-image-picker"
+import * as FileSystem from "expo-file-system"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
+import transfers from "@/lib/transfers"
+import drive from "@/lib/drive"
+import { FILE_PUBLIC_LINK_URL_PREFIX } from "@/constants"
+import { Buffer } from "react-native-quick-crypto"
 
-export const PopupContainerView = memo(
+const PopupContainerView = memo(
 	({
 		children,
 		className,
@@ -213,7 +223,7 @@ export const MentionSuggestions = memo(({ chat }: { chat: Chat }) => {
 	)
 })
 
-export const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
+const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
 	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
 	const inputSelection = useChatsStore(useShallow(state => state.inputSelection))
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
@@ -339,7 +349,95 @@ export const EmojiSuggestions = memo(({ chat }: { chat: Chat }) => {
 	)
 })
 
-export const ReplyTo = memo(({ chat }: { chat: Chat }) => {
+async function uploadAssetsAndGenerateLinks(
+	assets: {
+		uri: string
+		name: string
+		lastModified?: number
+		mimeType?: string
+	}[]
+): Promise<string[]> {
+	const parent = new AnyNormalDir.Dir(await chats.getChatUploadsDirectory())
+
+	return (
+		await Promise.all(
+			assets.map(async asset => {
+				const result = await run(async defer => {
+					const assetFile = new FileSystem.File(asset.uri)
+
+					defer(() => {
+						if (assetFile.exists) {
+							assetFile.delete()
+						}
+					})
+
+					if (!assetFile.exists) {
+						throw new Error("Asset file does not exist")
+					}
+
+					const assetNameParsed = FileSystem.Paths.parse(asset.name)
+					const uploadResult = await transfers.upload({
+						localFileOrDir: assetFile,
+						parent,
+						name: `${assetNameParsed.name}.${Date.now()}${assetNameParsed.ext}`,
+						modified: asset.lastModified,
+						mime: asset.mimeType,
+						hideProgress: true
+					})
+
+					if (!uploadResult) {
+						return []
+					}
+
+					const items = uploadResult.files.map(f => unwrappedFileIntoDriveItem(unwrapFileMeta(f)))
+
+					const links = (
+						await Promise.all(
+							items.map(async item => {
+								const link = await drive.enablePublicLink({
+									item
+								})
+
+								if (link.type !== "file") {
+									return null
+								}
+
+								return {
+									link: link.link,
+									item
+								}
+							})
+						)
+					).filter((l): l is NonNullable<typeof l> => l !== null)
+
+					return links
+				})
+
+				if (!result.success) {
+					throw result.error
+				}
+
+				const links = result.data
+					.map(link => {
+						if (link.item.type !== "file" || link.item.data.meta.tag !== FileMeta_Tags.Decoded) {
+							return null
+						}
+
+						return `${FILE_PUBLIC_LINK_URL_PREFIX}${link.link.linkUuid}${encodeURIComponent("#")}${Buffer.from(link.item.data.meta.inner[0].key, "utf-8").toString("hex")}`
+					})
+					.filter((l): l is NonNullable<typeof l> => l !== null)
+
+				if (links.length === 0) {
+					return []
+				}
+
+				return links
+			})
+		)
+	).flat()
+}
+
+const ReplyTo = memo(({ chat }: { chat: Chat }) => {
 	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -437,7 +535,7 @@ export const ReplyTo = memo(({ chat }: { chat: Chat }) => {
 	)
 })
 
-export const Input = memo(({ chat }: { chat: Chat }) => {
+const Input = memo(({ chat }: { chat: Chat }) => {
 	const insets = useSafeAreaInsets()
 	const inputViewRef = useRef<TView>(null)
 	const { onLayout: inputViewOnLayout, layout: inputViewLayout } = useViewLayout(inputViewRef)
@@ -691,58 +789,385 @@ export const Input = memo(({ chat }: { chat: Chat }) => {
 				ref={inputViewRef}
 				onLayout={inputViewOnLayout}
 			>
-				<PressableScale rippleColor="transparent">
-					<CrossGlassContainerView className="items-center justify-center rounded-full size-11">
-						<Ionicons
-							name="add-outline"
-							size={24}
-							color={textForeground.color}
-						/>
-					</CrossGlassContainerView>
-				</PressableScale>
-				<CrossGlassContainerView className="flex-1 rounded-3xl min-h-11">
-					<TextInput
-						ref={inputRef}
-						value={chatInputValue}
-						onChangeText={onChangeText}
-						className="ios:py-3 text-foreground min-h-11 flex-1 rounded-3xl py-2 pl-3 pr-12 leading-5"
-						placeholderTextColorClassName="text-muted-foreground"
-						placeholder="tbd_type_a_message"
-						multiline={true}
-						scrollEnabled={true}
-						autoFocus={false}
-						autoCapitalize={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "none" : undefined}
-						autoComplete={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "off" : undefined}
-						autoCorrect={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
-						spellCheck={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
-						keyboardType="default"
-						returnKeyType="default"
-						enterKeyHint="enter"
-						onKeyPress={onKeyPress}
-						onFocus={onFocus}
-						onBlur={onBlur}
-						onSelectionChange={onSelectionChange}
-						style={{
-							maxHeight: Math.max(128, windowDimensions.height / 4)
-						}}
-					/>
-					<AnimatedView
-						className="absolute z-50 bottom-2 right-2"
-						entering={FadeIn}
-						exiting={FadeOut}
-					>
+				<Menu
+					type="dropdown"
+					buttons={[
+						{
+							id: "addMedia",
+							title: "tbd_add_photos_or_videos_from_gallery",
+							onPress: async () => {
+								const permissionsResult = await run(async () => {
+									return await hasAllNeededMediaPermissions({
+										shouldRequest: true
+									})
+								})
+
+								if (!permissionsResult.success) {
+									console.error(permissionsResult.error)
+									alerts.error(permissionsResult.error)
+
+									return
+								}
+
+								if (!permissionsResult.data) {
+									alerts.error("tbd_no_permissions_enable_manually")
+
+									return
+								}
+
+								const imagePickerResult = await run(async () => {
+									return await ImagePicker.launchImageLibraryAsync({
+										mediaTypes: ["images", "videos"],
+										exif: false,
+										base64: false,
+										quality: 1,
+										allowsMultipleSelection: true,
+										presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+										shouldDownloadFromNetwork: true
+									})
+								})
+
+								if (!imagePickerResult.success) {
+									console.error(imagePickerResult.error)
+									alerts.error(imagePickerResult.error)
+
+									return
+								}
+
+								if (imagePickerResult.data.canceled) {
+									return
+								}
+
+								const assets = imagePickerResult.data.assets.map(asset => {
+									const extname = FileSystem.Paths.extname(asset.uri)
+									const fileName = asset.fileName ?? `${randomUUID()}${extname}`
+
+									return {
+										uri: asset.uri,
+										name: fileName,
+										mimeType: asset.mimeType
+									} satisfies Parameters<typeof uploadAssetsAndGenerateLinks>[0][number]
+								})
+
+								const result = await runWithLoading(async () => {
+									return await uploadAssetsAndGenerateLinks(assets)
+								})
+
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
+
+									return
+								}
+
+								if (result.data.length === 0) {
+									return
+								}
+
+								const replacedMessage =
+									chatInputValue.trim().length === 0
+										? `${result.data.join("\n")} `
+										: `${chatInputValue} ${result.data.join("\n")}`
+
+								if (replacedMessage.length === 0) {
+									return
+								}
+
+								setChatInputValue(replacedMessage)
+
+								useChatsStore.getState().setInputSelection({
+									start: replacedMessage.length,
+									end: replacedMessage.length
+								})
+							}
+						},
+						{
+							id: "takeMedia",
+							title: "tbd_take_photo_or_video",
+							onPress: async () => {
+								const permissionsResult = await run(async () => {
+									return await hasAllNeededMediaPermissions({
+										shouldRequest: true
+									})
+								})
+
+								if (!permissionsResult.success) {
+									console.error(permissionsResult.error)
+									alerts.error(permissionsResult.error)
+
+									return
+								}
+
+								if (!permissionsResult.data) {
+									alerts.error("tbd_no_permissions_enable_manually")
+
+									return
+								}
+
+								const imagePickerResult = await run(async () => {
+									return await ImagePicker.launchCameraAsync({
+										mediaTypes: ["images", "videos"],
+										exif: false,
+										base64: false,
+										quality: 1,
+										allowsMultipleSelection: true,
+										presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+										shouldDownloadFromNetwork: true
+									})
+								})
+
+								if (!imagePickerResult.success) {
+									console.error(imagePickerResult.error)
+									alerts.error(imagePickerResult.error)
+
+									return
+								}
+
+								if (imagePickerResult.data.canceled) {
+									return
+								}
+
+								const assets = imagePickerResult.data.assets.map(asset => {
+									const extname = FileSystem.Paths.extname(asset.uri)
+									const fileName = asset.fileName ?? `${randomUUID()}${extname}`
+
+									return {
+										uri: asset.uri,
+										name: fileName,
+										mimeType: asset.mimeType
+									} satisfies Parameters<typeof uploadAssetsAndGenerateLinks>[0][number]
+								})
+
+								const result = await runWithLoading(async () => {
+									return await uploadAssetsAndGenerateLinks(assets)
+								})
+
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
+
+									return
+								}
+
+								if (result.data.length === 0) {
+									return
+								}
+
+								const replacedMessage =
+									chatInputValue.trim().length === 0
+										? `${result.data.join("\n")} `
+										: `${chatInputValue} ${result.data.join("\n")}`
+
+								if (replacedMessage.length === 0) {
+									return
+								}
+
+								setChatInputValue(replacedMessage)
+
+								useChatsStore.getState().setInputSelection({
+									start: replacedMessage.length,
+									end: replacedMessage.length
+								})
+							}
+						},
+						{
+							id: "addFiles",
+							title: "tbd_add_files",
+							onPress: async () => {
+								const documentPickerResult = await run(async () => {
+									return await DocumentPicker.getDocumentAsync({
+										type: "*/*",
+										multiple: true,
+										copyToCacheDirectory: true,
+										base64: false
+									})
+								})
+
+								if (!documentPickerResult.success) {
+									console.error(documentPickerResult.error)
+									alerts.error(documentPickerResult.error)
+
+									return
+								}
+
+								if (documentPickerResult.data.canceled) {
+									return
+								}
+
+								const assets = documentPickerResult.data.assets
+
+								const result = await runWithLoading(async () => {
+									return await uploadAssetsAndGenerateLinks(assets)
+								})
+
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
+
+									return
+								}
+
+								if (result.data.length === 0) {
+									return
+								}
+
+								const replacedMessage =
+									chatInputValue.trim().length === 0
+										? `${result.data.join("\n")} `
+										: `${chatInputValue} ${result.data.join("\n")}`
+
+								if (replacedMessage.length === 0) {
+									return
+								}
+
+								setChatInputValue(replacedMessage)
+
+								useChatsStore.getState().setInputSelection({
+									start: replacedMessage.length,
+									end: replacedMessage.length
+								})
+							}
+						},
+						{
+							id: "addDriveItems",
+							title: "tbd_add_drive_items",
+							onPress: async () => {
+								const selectDriveItemsResult = await run(async () => {
+									return await selectDriveItems({
+										type: "multiple",
+										files: true,
+										directories: false,
+										items: []
+									})
+								})
+
+								if (!selectDriveItemsResult.success) {
+									console.error(selectDriveItemsResult.error)
+									alerts.error(selectDriveItemsResult.error)
+
+									return
+								}
+
+								if (selectDriveItemsResult.data.cancelled || selectDriveItemsResult.data.selectedItems.length === 0) {
+									return
+								}
+
+								const items = selectDriveItemsResult.data.selectedItems
+
+								const result = await runWithLoading(async () => {
+									return await Promise.all(
+										items.map(async item => {
+											if (
+												item.type !== "driveItem" ||
+												item.data.type !== "file" ||
+												item.data.data.meta.tag !== FileMeta_Tags.Decoded
+											) {
+												return null
+											}
+
+											const link = await drive.enablePublicLink({
+												item: item.data
+											})
+
+											if (link.type !== "file") {
+												return null
+											}
+
+											return `${FILE_PUBLIC_LINK_URL_PREFIX}${link.link.linkUuid}${encodeURIComponent("#")}${Buffer.from(item.data.data.meta.inner[0].key, "utf-8").toString("hex")}`
+										})
+									)
+								})
+
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
+
+									return
+								}
+
+								const validLinks = result.data.filter((l): l is NonNullable<typeof l> => l !== null)
+
+								if (validLinks.length === 0) {
+									return
+								}
+
+								const replacedMessage =
+									chatInputValue.trim().length === 0
+										? `${validLinks.join("\n")} `
+										: `${chatInputValue} ${validLinks.join("\n")}`
+
+								if (replacedMessage.length === 0) {
+									return
+								}
+
+								setChatInputValue(replacedMessage)
+
+								useChatsStore.getState().setInputSelection({
+									start: replacedMessage.length,
+									end: replacedMessage.length
+								})
+							}
+						}
+					]}
+				>
+					<CrossGlassContainerView>
 						<PressableScale
-							className="ios:rounded-full rounded-full size-7 bg-blue-500 items-center justify-center"
-							onPress={send}
-							hitSlop={15}
+							className="items-center justify-center size-11"
+							rippleColor="transparent"
 						>
 							<Ionicons
-								name="arrow-up-outline"
-								size={18}
-								color="white"
+								name="add-outline"
+								size={24}
+								color={textForeground.color}
 							/>
 						</PressableScale>
-					</AnimatedView>
+					</CrossGlassContainerView>
+				</Menu>
+				<CrossGlassContainerView className="flex-1 rounded-3xl min-h-11">
+					<View className="flex-1 bg-transparent">
+						<TextInput
+							ref={inputRef}
+							value={chatInputValue}
+							onChangeText={onChangeText}
+							className="ios:py-3 text-foreground min-h-11 flex-1 rounded-3xl py-2 pl-3 pr-12 leading-5"
+							placeholderTextColorClassName="text-muted-foreground"
+							placeholder="tbd_type_a_message"
+							multiline={true}
+							scrollEnabled={true}
+							autoFocus={false}
+							autoCapitalize={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "none" : undefined}
+							autoComplete={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "off" : undefined}
+							autoCorrect={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
+							spellCheck={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
+							keyboardType="default"
+							returnKeyType="default"
+							enterKeyHint="enter"
+							onKeyPress={onKeyPress}
+							onFocus={onFocus}
+							onBlur={onBlur}
+							onSelectionChange={onSelectionChange}
+							style={{
+								maxHeight: Math.max(128, windowDimensions.height / 4)
+							}}
+						/>
+						<AnimatedView
+							className="absolute z-50 bottom-2 right-2"
+							entering={FadeIn}
+							exiting={FadeOut}
+						>
+							<PressableScale
+								className="ios:rounded-full rounded-full size-7 bg-blue-500 items-center justify-center"
+								onPress={send}
+								hitSlop={15}
+							>
+								<Ionicons
+									name="arrow-up-outline"
+									size={18}
+									color="white"
+								/>
+							</PressableScale>
+						</AnimatedView>
+					</View>
 				</CrossGlassContainerView>
 			</View>
 		</KeyboardStickyView>

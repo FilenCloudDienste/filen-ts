@@ -837,6 +837,111 @@ class Drive {
 
 		return item
 	}
+
+	public async enablePublicLink({
+		item,
+		signal,
+		onProgress
+	}: {
+		item: DriveItem
+		signal?: AbortSignal
+		onProgress?: (bytesDownloaded: number, totalBytes: number | undefined) => void
+	}) {
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type")
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		if (item.type === "directory") {
+			let status = await authedSdkClient.getDirLinkStatus(
+				item.data,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+
+			if (status) {
+				return {
+					type: "directory" as const,
+					link: status
+				}
+			}
+
+			status = await authedSdkClient.publicLinkDir(
+				item.data,
+				onProgress
+					? {
+							onProgress: (bytesDownloaded, totalBytes) => {
+								onProgress(Number(bytesDownloaded), totalBytes ? Number(totalBytes) : undefined)
+							}
+						}
+					: undefined,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "links",
+						uuid: null
+					}
+				},
+				updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
+			})
+
+			return {
+				type: "directory" as const,
+				link: status
+			}
+		} else {
+			let status = await authedSdkClient.getFileLinkStatus(
+				item.data,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+
+			if (status) {
+				return {
+					type: "file" as const,
+					link: status
+				}
+			}
+
+			status = await authedSdkClient.publicLinkFileInner(
+				item.data,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+
+			driveItemsQueryUpdate({
+				params: {
+					path: {
+						type: "links",
+						uuid: null
+					}
+				},
+				updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
+			})
+
+			return {
+				type: "file" as const,
+				link: status
+			}
+		}
+	}
 }
 
 const drive = new Drive()

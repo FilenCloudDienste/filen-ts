@@ -235,6 +235,9 @@ const Header = memo(() => {
 								if (r.status === "rejected") {
 									console.error(r.reason)
 									alerts.error(r.reason)
+								} else if (!r.value.success) {
+									console.error(r.value.error)
+									alerts.error(r.value.error)
 								}
 							}
 
@@ -336,6 +339,9 @@ const Header = memo(() => {
 								if (r.status === "rejected") {
 									console.error(r.reason)
 									alerts.error(r.reason)
+								} else if (!r.value.success) {
+									console.error(r.value.error)
+									alerts.error(r.value.error)
 								}
 							}
 
@@ -439,6 +445,9 @@ const Header = memo(() => {
 								if (r.status === "rejected") {
 									console.error(r.reason)
 									alerts.error(r.reason)
+								} else if (!r.value.success) {
+									console.error(r.value.error)
+									alerts.error(r.value.error)
 								}
 							}
 
@@ -535,6 +544,9 @@ const Header = memo(() => {
 								if (r.status === "rejected") {
 									console.error(r.reason)
 									alerts.error(r.reason)
+								} else if (!r.value.success) {
+									console.error(r.value.error)
+									alerts.error(r.value.error)
 								}
 							}
 
