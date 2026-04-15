@@ -1,21 +1,11 @@
 import { memo } from "react"
-import { router, useLocalSearchParams } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
 import { type DriveItemFileExtracted, type DriveItem } from "@/types"
 import { deserialize } from "@/lib/serializer"
 import { type DrivePath } from "@/hooks/useDrivePath"
-import useEffectOnce from "@/hooks/useEffectOnce"
 import { getPreviewType } from "@/lib/utils"
 import Gallery from "@/components/drivePreview/gallery"
-
-const Return = memo(() => {
-	useEffectOnce(() => {
-		if (router.canDismiss()) {
-			router.dismiss()
-		}
-	})
-
-	return null
-})
+import DismissStack from "@/components/dismissStack"
 
 type SearchParams = {
 	drivePath?: string
@@ -72,7 +62,7 @@ const DrivePreview = memo(() => {
 	const previewType = getPreviewType(item?.data.decryptedMeta?.name ?? "")
 
 	if (!drivePath || !item || previewType === "unknown") {
-		return <Return />
+		return <DismissStack />
 	}
 
 	return (

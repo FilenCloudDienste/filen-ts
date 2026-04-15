@@ -1,7 +1,7 @@
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
@@ -17,7 +17,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/lib/drive"
 import { ScrollView } from "react-native-gesture-handler"
 import { Information } from "@/routes/driveItemInfo"
-import { useStringifiedClient } from "@/lib/auth"
+import DismissStack from "@/components/dismissStack"
 
 const ChangeDirectoryColor = memo(() => {
 	const { item: itemSerialized } = useLocalSearchParams<{
@@ -27,7 +27,6 @@ const ChangeDirectoryColor = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const [selectedColor, setSelectedColor] = useState<string | null>(null)
-	const stringifiedClient = useStringifiedClient()
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -50,16 +49,7 @@ const ChangeDirectoryColor = memo(() => {
 	})
 
 	if (!item || item.type !== "directory") {
-		return (
-			<Redirect
-				href={{
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: stringifiedClient?.rootUuid ?? "root"
-					}
-				}}
-			/>
-		)
+		return <DismissStack />
 	}
 
 	return (

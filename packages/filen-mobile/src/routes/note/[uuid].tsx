@@ -1,7 +1,7 @@
 import { Fragment, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import type { Note as TNote, NoteHistory } from "@filen/sdk-rs"
 import Content from "@/components/notes/content"
@@ -18,6 +18,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { deserialize } from "@/lib/serializer"
 import { createMenuButtons } from "@/components/notes/note/menu"
 import { useStringifiedClient } from "@/lib/auth"
+import DismissStack from "@/components/dismissStack"
 
 const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
@@ -183,7 +184,7 @@ const Note = memo(() => {
 	})()
 
 	if (!(note as TNote | undefined)) {
-		return <Redirect href="/tabs/notes" />
+		return <DismissStack />
 	}
 
 	return (

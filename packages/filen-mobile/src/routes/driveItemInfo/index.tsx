@@ -1,7 +1,7 @@
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
@@ -16,8 +16,8 @@ import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.
 import { simpleDate } from "@/lib/time"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { getPreviewType } from "@/lib/utils"
-import { useStringifiedClient } from "@/lib/auth"
 import Thumbnail from "@/components/drive/item/thumbnail"
+import DismissStack from "@/components/dismissStack"
 
 export const Information = memo(({ item }: { item: DriveItem }) => {
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -337,7 +337,6 @@ const DriveItemInfo = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const stringifiedClient = useStringifiedClient()
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -352,16 +351,7 @@ const DriveItemInfo = memo(() => {
 	})()
 
 	if (!item) {
-		return (
-			<Redirect
-				href={{
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: stringifiedClient?.rootUuid ?? "root"
-					}
-				}}
-			/>
-		)
+		return <DismissStack />
 	}
 
 	return (
@@ -403,7 +393,7 @@ const DriveItemInfo = memo(() => {
 					showsHorizontalScrollIndicator={true}
 					showsVerticalScrollIndicator={false}
 				>
-					<View className="bg-transparent items-center justify-center flex-col">
+					<View className="bg-transparent items-center justify-center flex-col px-4">
 						{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory" ? (
 							<DirectoryIcon
 								color={item.type === "directory" ? item.data.color : DirColor.Default.new()}

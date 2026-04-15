@@ -1,6 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header, { type HeaderItem } from "@/components/ui/header"
@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Avatar from "@/components/ui/avatar"
 import { contactDisplayName } from "@/lib/utils"
 import { selectContacts } from "@/routes/contacts"
+import DismissStack from "@/components/dismissStack"
 
 const Participant = memo(({ participant, note, isOwner }: { participant: NoteParticipant; note: Note; isOwner: boolean }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -222,16 +223,7 @@ const NoteParticipants = memo(() => {
 	const isOwner = note?.ownerId === stringifiedClient?.userId
 
 	if (!note) {
-		return (
-			<Redirect
-				href={{
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: stringifiedClient?.rootUuid ?? "root"
-					}
-				}}
-			/>
-		)
+		return <DismissStack />
 	}
 
 	return (

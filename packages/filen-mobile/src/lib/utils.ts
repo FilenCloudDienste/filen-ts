@@ -31,7 +31,13 @@ import {
 	AnyLinkedDir_Tags
 } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
-import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
+import {
+	EXPO_IMAGE_SUPPORTED_EXTENSIONS,
+	EXPO_AUDIO_SUPPORTED_EXTENSIONS,
+	EXPO_VIDEO_SUPPORTED_EXTENSIONS,
+	FILE_PUBLIC_LINK_URL_PREFIX,
+	DIRECTORY_PUBLIC_LINK_URL_PREFIX
+} from "@/constants"
 import mimeTypes from "mime-types"
 import pathModule from "path"
 import type { DriveItem, Prettify } from "@/types"
@@ -1086,6 +1092,38 @@ export function getRealDriveItemParent({
 				}
 			}
 
+			return null
+		}
+	}
+}
+
+export function makeDriveItemPublicLink({
+	item,
+	linkUuid,
+	linkKey
+}: {
+	item: DriveItem
+	linkUuid: string
+	linkKey?: string
+}): string | null {
+	switch (item.type) {
+		case "file": {
+			if (item.data.meta.tag !== FileMeta_Tags.Decoded) {
+				return null
+			}
+
+			return `${FILE_PUBLIC_LINK_URL_PREFIX}${linkUuid}${encodeURIComponent("#")}${Buffer.from(item.data.meta.inner[0].key, "utf-8").toString("hex")}`
+		}
+
+		case "directory": {
+			if (!linkKey) {
+				return null
+			}
+
+			return `${DIRECTORY_PUBLIC_LINK_URL_PREFIX}${linkUuid}${encodeURIComponent("#")}${Buffer.from(linkKey, "utf-8").toString("hex")}`
+		}
+
+		default: {
 			return null
 		}
 	}

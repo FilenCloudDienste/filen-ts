@@ -1,6 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
@@ -8,7 +8,6 @@ import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run, formatBytes } from "@filen/utils"
-import { useStringifiedClient } from "@/lib/auth"
 import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
@@ -21,6 +20,7 @@ import type { FileVersion } from "@filen/sdk-rs"
 import Menu from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import DismissStack from "@/components/dismissStack"
 
 const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -153,7 +153,6 @@ const FileVersions = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const stringifiedClient = useStringifiedClient()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
 
@@ -184,16 +183,7 @@ const FileVersions = memo(() => {
 			: []
 
 	if (!item || item.type !== "file") {
-		return (
-			<Redirect
-				href={{
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: stringifiedClient?.rootUuid ?? "root"
-					}
-				}}
-			/>
-		)
+		return <DismissStack />
 	}
 
 	return (
