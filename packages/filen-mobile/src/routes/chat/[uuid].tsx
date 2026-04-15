@@ -1,7 +1,7 @@
 import { Fragment, useEffect, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import { useLocalSearchParams, Redirect, useRouter } from "expo-router"
+import { useLocalSearchParams, useRouter } from "expo-router"
 import type { Chat as TChat } from "@filen/sdk-rs"
 import { Platform, ActivityIndicator } from "react-native"
 import useChatsQuery from "@/queries/useChats.query"
@@ -29,6 +29,7 @@ import alerts from "@/lib/alerts"
 import { simpleDateNoTime } from "@/lib/time"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
 import useChatsStore from "@/stores/useChats.store"
+import DismissStack from "@/components/dismissStack"
 
 const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 	const stringifiedClient = useStringifiedClient()
@@ -256,7 +257,7 @@ const Chat = memo(() => {
 	}, [uuid, router])
 
 	if (!(chat as TChat | undefined)) {
-		return <Redirect href="/tabs/chats" />
+		return <DismissStack />
 	}
 
 	return (

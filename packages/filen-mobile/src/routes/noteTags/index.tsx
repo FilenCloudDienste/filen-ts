@@ -1,13 +1,12 @@
 import Text from "@/components/ui/text"
 import { Platform, ActivityIndicator } from "react-native"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run, fastLocaleCompare } from "@filen/utils"
-import { useStringifiedClient } from "@/lib/auth"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
@@ -19,6 +18,7 @@ import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import notes from "@/lib/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useNotesTagsQuery from "@/queries/useNotesTags.query"
+import DismissStack from "@/components/dismissStack"
 
 const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -173,7 +173,6 @@ const NoteTags = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const stringifiedClient = useStringifiedClient()
 	const insets = useSafeAreaInsets()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
@@ -204,16 +203,7 @@ const NoteTags = memo(() => {
 		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid)) : []
 
 	if (!note) {
-		return (
-			<Redirect
-				href={{
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: stringifiedClient?.rootUuid ?? "root"
-					}
-				}}
-			/>
-		)
+		return <DismissStack />
 	}
 
 	return (

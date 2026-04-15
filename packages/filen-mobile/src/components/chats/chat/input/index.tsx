@@ -1,4 +1,4 @@
-import { type Chat, type ChatParticipant, ChatTypingType, AnyNormalDir, FileMeta_Tags } from "@filen/sdk-rs"
+import { type Chat, type ChatParticipant, ChatTypingType, AnyNormalDir } from "@filen/sdk-rs"
 import { useRef, useEffect, Fragment, memo, useCallback } from "react"
 import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent } from "react-native"
 import View, { KeyboardStickyView, CrossGlassContainerView, GestureHandlerScrollView } from "@/components/ui/view"
@@ -15,7 +15,7 @@ import { useShallow } from "zustand/shallow"
 import { useSecureStore } from "@/lib/secureStore"
 import { cn, fastLocaleCompare, run, Semaphore, runEffect, findClosestIndexString } from "@filen/utils"
 import { useStringifiedClient } from "@/lib/auth"
-import { contactDisplayName, unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import { contactDisplayName, unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/utils"
 import Avatar from "@/components/ui/avatar"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Image from "@/components/ui/image"
@@ -35,8 +35,6 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import transfers from "@/lib/transfers"
 import drive from "@/lib/drive"
-import { FILE_PUBLIC_LINK_URL_PREFIX } from "@/constants"
-import { Buffer } from "react-native-quick-crypto"
 
 const PopupContainerView = memo(
 	({
@@ -419,11 +417,10 @@ async function uploadAssetsAndGenerateLinks(
 
 				const links = result.data
 					.map(link => {
-						if (link.item.type !== "file" || link.item.data.meta.tag !== FileMeta_Tags.Decoded) {
-							return null
-						}
-
-						return `${FILE_PUBLIC_LINK_URL_PREFIX}${link.link.linkUuid}${encodeURIComponent("#")}${Buffer.from(link.item.data.meta.inner[0].key, "utf-8").toString("hex")}`
+						return makeDriveItemPublicLink({
+							item: link.item,
+							linkUuid: link.link.linkUuid
+						})
 					})
 					.filter((l): l is NonNullable<typeof l> => l !== null)
 
@@ -1057,11 +1054,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 								const result = await runWithLoading(async () => {
 									return await Promise.all(
 										items.map(async item => {
-											if (
-												item.type !== "driveItem" ||
-												item.data.type !== "file" ||
-												item.data.data.meta.tag !== FileMeta_Tags.Decoded
-											) {
+											if (item.type !== "driveItem") {
 												return null
 											}
 
@@ -1069,11 +1062,10 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 												item: item.data
 											})
 
-											if (link.type !== "file") {
-												return null
-											}
-
-											return `${FILE_PUBLIC_LINK_URL_PREFIX}${link.link.linkUuid}${encodeURIComponent("#")}${Buffer.from(item.data.data.meta.inner[0].key, "utf-8").toString("hex")}`
+											return makeDriveItemPublicLink({
+												item: item.data,
+												linkUuid: link.link.linkUuid
+											})
 										})
 									)
 								})

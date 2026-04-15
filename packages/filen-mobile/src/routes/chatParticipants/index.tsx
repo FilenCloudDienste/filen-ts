@@ -1,6 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header, { type HeaderItem } from "@/components/ui/header"
@@ -22,6 +22,7 @@ import { contactDisplayName } from "@/lib/utils"
 import useChatsQuery from "@/queries/useChats.query"
 import chats from "@/lib/chats"
 import { selectContacts } from "@/routes/contacts"
+import DismissStack from "@/components/dismissStack"
 
 const Participant = memo(({ participant, chat, isOwner }: { participant: ChatParticipant; chat: Chat; isOwner: boolean }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -152,16 +153,7 @@ const ChatParticipants = memo(() => {
 	const isOwner = chat?.ownerId === stringifiedClient?.userId
 
 	if (!chat) {
-		return (
-			<Redirect
-				href={{
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: stringifiedClient?.rootUuid ?? "root"
-					}
-				}}
-			/>
-		)
+		return <DismissStack />
 	}
 
 	return (

@@ -1,13 +1,12 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
-import { useLocalSearchParams, Redirect, router } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize, serialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/utils"
-import { useStringifiedClient } from "@/lib/auth"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -22,6 +21,7 @@ import useNoteHistoryQuery from "@/queries/useNoteHistory.query"
 import notes from "@/lib/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Icon from "@/components/notes/note/icon"
+import DismissStack from "@/components/dismissStack"
 
 const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -137,7 +137,6 @@ const NoteHistory = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const stringifiedClient = useStringifiedClient()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
 
@@ -174,16 +173,7 @@ const NoteHistory = memo(() => {
 	const history = noteHistoryQuery.status === "success" && note ? noteHistoryQuery.data : []
 
 	if (!note) {
-		return (
-			<Redirect
-				href={{
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: stringifiedClient?.rootUuid ?? "root"
-					}
-				}}
-			/>
-		)
+		return <DismissStack />
 	}
 
 	return (

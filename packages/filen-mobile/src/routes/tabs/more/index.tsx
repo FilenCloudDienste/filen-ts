@@ -37,7 +37,26 @@ export type Button = {
 				value: React.ReactNode | string
 				color?: string
 		  }
+		| {
+				type: "custom"
+				value: React.ReactNode
+		  }
 }
+
+const GroupButtonContainer = memo(
+	(
+		props: React.ComponentPropsWithoutRef<typeof PressableOpacity> &
+			React.ComponentPropsWithoutRef<typeof View> & {
+				children?: React.ReactNode
+			}
+	) => {
+		if (props.onPress && props.enabled) {
+			return <PressableOpacity {...props}>{props.children}</PressableOpacity>
+		}
+
+		return <View {...props}>{props.children}</View>
+	}
+)
 
 export const Group = memo(({ buttons, className }: { buttons: Button[]; className?: string }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -47,7 +66,7 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 		<View className={cn("bg-background-secondary rounded-3xl overflow-hidden", className)}>
 			{buttons.map(({ onPress, icon, iconSize, iconColor, title, subTitle, rightItem, badge, badgeColor }, index) => {
 				return (
-					<PressableOpacity
+					<GroupButtonContainer
 						key={index}
 						className="bg-transparent flex-row items-center gap-4 px-4"
 						onPress={onPress}
@@ -168,6 +187,9 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 										/>
 									</View>
 								)}
+								{rightItem?.type === "custom" && (
+									<View className="items-center flex-row bg-transparent">{rightItem.value}</View>
+								)}
 								{onPress && (
 									<Ionicons
 										className="shrink-0"
@@ -178,7 +200,7 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 								)}
 							</View>
 						</View>
-					</PressableOpacity>
+					</GroupButtonContainer>
 				)
 			})}
 		</View>

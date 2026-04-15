@@ -405,7 +405,12 @@ export function createMenuButtons({
 					id: "sharePublicLink",
 					title: "tbd_share_public_link",
 					onPress: () => {
-						// TODO
+						router.push({
+							pathname: "/publicLink",
+							params: {
+								item: serialize(item)
+							}
+						})
 					}
 				},
 				{
@@ -652,50 +657,6 @@ export function createMenuButtons({
 		})
 	}
 
-	if (drivePath.type === "links" && (item.type === "file" || item.type === "directory") && !drivePath.uuid) {
-		menuButtons.push({
-			id: "removeLink",
-			title: "tbd_remove_link",
-			icon: "delete",
-			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: "tbd_remove_link_item",
-						message: "tbd_confirm_remove_link",
-						cancelText: "tbd_cancel",
-						okText: "tbd_remove_link"
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await drive.removeShare({
-						item,
-						parentUuid: drivePath.uuid ?? undefined
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		})
-	}
-
 	if (
 		((drivePath.type === "sharedIn" && !drivePath.uuid) ||
 			(!isOwner &&
@@ -799,6 +760,52 @@ export function createMenuButtons({
 				}
 
 				// TODO: if we are in a preview, close the preview after stopping sharing the item
+			}
+		})
+	}
+
+	if (drivePath.type === "links" && (item.type === "file" || item.type === "directory") && !drivePath.uuid) {
+		menuButtons.push({
+			id: "disablePublicLink",
+			title: "tbd_disable_public_link",
+			icon: "delete",
+			destructive: true,
+			onPress: async () => {
+				const promptResult = await run(async () => {
+					return await prompts.alert({
+						title: "tbd_disable_public_link",
+						message: "tbd_confirm_disable_public_link",
+						cancelText: "tbd_cancel",
+						okText: "tbd_disable",
+						destructive: true
+					})
+				})
+
+				if (!promptResult.success) {
+					console.error(promptResult.error)
+					alerts.error(promptResult.error)
+
+					return
+				}
+
+				if (promptResult.data.cancelled) {
+					return
+				}
+
+				const result = await runWithLoading(async () => {
+					await drive.disablePublicLink({
+						item
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+
+				// TODO: if we are in a preview, close the preview after
 			}
 		})
 	}
