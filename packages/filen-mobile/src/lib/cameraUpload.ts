@@ -648,6 +648,11 @@ class CameraUpload {
 						switch (delta.type) {
 							case "upload": {
 								const uri = await delta.file.asset.getUri()
+
+								if (!uri) {
+									throw new Error(`Failed to get URI for asset with id: ${delta.file.info.id}`)
+								}
+
 								const assetFile = new FileSystem.File(uri)
 
 								if (!assetFile.exists) {
