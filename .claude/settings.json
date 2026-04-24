@@ -20,7 +20,7 @@
 	"enabledPlugins": {
 		"typescript-lsp@claude-plugins-official": true
 	},
-	"model": "claude-opus-4-6[1m]",
+	"model": "claude-opus-4-7[1m]",
 	"includeCoAuthoredBy": false,
 	"hooks": {
 		"UserPromptSubmit": [
