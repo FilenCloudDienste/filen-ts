@@ -50,8 +50,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-          cache-dependency-path: packages/filen-web/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-web
         run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
@@ -69,8 +67,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-          cache-dependency-path: packages/filen-mobile/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-mobile
         run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
@@ -88,8 +84,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
-          cache-dependency-path: packages/filen-utils/package-lock.json
       - name: Install dependencies
         working-directory: packages/filen-utils
         run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
