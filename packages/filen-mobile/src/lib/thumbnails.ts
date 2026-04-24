@@ -187,7 +187,10 @@ class Thumbnails {
 				if (offlineFile?.exists) {
 					sourcePath = normalizeFilePathForExpo(offlineFile.uri)
 				} else if (await fileCache.has(params.item)) {
-					const cachedFile = await fileCache.get({ item: params.item, signal: params.signal })
+					const cachedFile = await fileCache.get({
+						item: params.item,
+						signal: params.signal
+					})
 
 					sourcePath = normalizeFilePathForExpo(cachedFile.uri)
 				} else {
