@@ -56,18 +56,6 @@ export class Audio {
 		}).catch(console.error)
 
 		this.playlistPlayer.addListener("playbackStatusUpdate", status => {
-			if (status.remoteAction === "nextTrack") {
-				this.next()
-
-				return
-			}
-
-			if (status.remoteAction === "previousTrack") {
-				this.previous()
-
-				return
-			}
-
 			events.emit("audioStatus", {
 				mode: "queue",
 				status
@@ -197,9 +185,7 @@ export class Audio {
 			},
 			{
 				showSeekBackward: true,
-				showSeekForward: true,
-				showNextTrack: true,
-				showPreviousTrack: true
+				showSeekForward: true
 			}
 		)
 	}
