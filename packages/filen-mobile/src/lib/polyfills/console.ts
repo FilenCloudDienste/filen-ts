@@ -20,3 +20,16 @@ global.console = {
 		originalConsoleError(...args)
 	}
 }
+
+if (!__DEV__) {
+	// In production, silence all console logs.
+	global.console = {
+		...global.console,
+		log: () => {},
+		warn: () => {},
+		error: () => {},
+		info: () => {},
+		debug: () => {},
+		trace: () => {}
+	}
+}
