@@ -25,7 +25,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --force --include=dev
+        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
 
       - name: Run i18n translation script
         working-directory: packages/filen-web

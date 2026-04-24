@@ -52,7 +52,7 @@ jobs:
           node-version: 24
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
+        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
       - name: Typecheck
         working-directory: packages/filen-web
         run: npm run typecheck
@@ -69,7 +69,7 @@ jobs:
           node-version: 24
       - name: Install dependencies
         working-directory: packages/filen-mobile
-        run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
+        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
       - name: Typecheck
         working-directory: packages/filen-mobile
         run: npm run typecheck
@@ -86,7 +86,7 @@ jobs:
           node-version: 24
       - name: Install dependencies
         working-directory: packages/filen-utils
-        run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
+        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
       - name: Typecheck
         working-directory: packages/filen-utils
         run: npm run typecheck
