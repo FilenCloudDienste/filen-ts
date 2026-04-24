@@ -34,7 +34,7 @@ jobs:
           node-version: 24
       - name: Install dependencies
         working-directory: packages/filen-web
-        run: npm install --package-lock-only && npm ci && npx -y patch-package  --patch-dir ./patches
+        run: npm install --force --include=dev && npx -y patch-package  --patch-dir ./patches
         env:
           NODE_OPTIONS: --max-old-space-size=6144
       - name: Build
