@@ -10,24 +10,24 @@ import { useRef, useEffect, memo } from "react"
 import { type View as TView, Platform } from "react-native"
 import Menu from "@/components/drive/item/menu"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
-import type { DrivePath } from "@/hooks/useDrivePath"
 import { useShallow } from "zustand/shallow"
 import { getPreviewType } from "@/lib/utils"
 import { cn } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
+import type { InitialItem } from "@/components/drivePreview/gallery"
 
 const GalleryHeader = memo(
 	({
 		animatedStyle,
 		goBack,
-		drivePath
+		initialItem
 	}: {
 		animatedStyle: {
 			opacity: number
 		}
 		goBack: () => void
-		drivePath: DrivePath
+		initialItem: InitialItem
 	}) => {
 		const insets = useSafeAreaInsets()
 		const viewRef = useRef<TView>(null)
@@ -42,7 +42,13 @@ const GalleryHeader = memo(
 
 		const driveItemsQuery = useDriveItemsQuery(
 			{
-				path: drivePath
+				path:
+					initialItem.type === "drive"
+						? initialItem.data.drivePath
+						: {
+								type: "drive",
+								uuid: ""
+							}
 			},
 			{
 				enabled: false
@@ -50,7 +56,11 @@ const GalleryHeader = memo(
 		)
 
 		const currentItem =
-			driveItemsQuery.status === "success" ? (driveItemsQuery.data.find(item => item.data.uuid === currentItemUuid) ?? null) : null
+			initialItem.type === "drive"
+				? driveItemsQuery.status === "success"
+					? (driveItemsQuery.data.find(item => item.data.uuid === currentItemUuid) ?? null)
+					: null
+				: null
 		const currentItemPreviewType = getPreviewType(currentItem?.data.decryptedMeta?.name ?? "")
 		const solidHeader = currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
 
@@ -114,13 +124,15 @@ const GalleryHeader = memo(
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{currentItem?.data.decryptedMeta?.name ?? currentItem?.data.uuid ?? ""}
+						{initialItem.type === "external"
+							? initialItem.data.name
+							: (currentItem?.data.decryptedMeta?.name ?? currentItem?.data.uuid ?? "")}
 					</Text>
-					{currentItem && (
+					{currentItem && initialItem.type === "drive" ? (
 						<Menu
 							type="dropdown"
 							item={currentItem}
-							drivePath={drivePath}
+							drivePath={initialItem.data.drivePath}
 							isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
 						>
 							{currentItemPreviewType === "audio" ? (
@@ -141,6 +153,15 @@ const GalleryHeader = memo(
 								</CrossGlassContainerView>
 							)}
 						</Menu>
+					) : (
+						<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+							{/* TODO: menu for external items */}
+							<Ionicons
+								name="ellipsis-horizontal"
+								size={24}
+								color={solidHeader ? textForeground.color : "white"}
+							/>
+						</CrossGlassContainerView>
 					)}
 				</View>
 			</AnimatedView>

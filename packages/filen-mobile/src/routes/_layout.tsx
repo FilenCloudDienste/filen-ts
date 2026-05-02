@@ -194,6 +194,14 @@ const RootLayout = memo(() => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="linkedDir"
+												options={modalOptions}
+											/>
+											<Stack.Screen
+												name="linkedFile"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="drivePreview"
 												options={{
 													presentation: "transparentModal",

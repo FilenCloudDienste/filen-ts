@@ -51,7 +51,8 @@ export function createMenuButtons({
 			drivePath.type === "sharedOut" ||
 			drivePath.type === "favorites" ||
 			drivePath.type === "links" ||
-			drivePath.type === "offline")
+			drivePath.type === "offline" ||
+			drivePath.type === "linked")
 	) {
 		menuButtons.push({
 			id: "open",
@@ -64,14 +65,19 @@ export function createMenuButtons({
 							? "/offline/[uuid]"
 							: drivePath.type === "links"
 								? "/links/[uuid]"
-								: item.type === "directory"
+								: drivePath.type === "drive"
 									? "/tabs/drive/[uuid]"
 									: drivePath.type === "sharedIn"
 										? "/sharedIn/[uuid]"
-										: "/sharedOut/[uuid]",
+										: drivePath.type === "linked"
+											? "/linkedDir/[uuid]"
+											: drivePath.type === "sharedOut"
+												? "/sharedOut/[uuid]"
+												: "",
 					params: {
 						uuid: item.data.uuid,
-						selectOptions: drivePath.selectOptions ? serialize(drivePath.selectOptions) : undefined
+						selectOptions: drivePath.selectOptions ? serialize(drivePath.selectOptions) : undefined,
+						linked: drivePath.linked ? serialize(drivePath.linked) : undefined
 					}
 				})
 			}
@@ -810,7 +816,13 @@ export function createMenuButtons({
 		})
 	}
 
-	if (drivePath.type !== "trash" && drivePath.type !== "sharedIn" && drivePath.type !== "offline" && drivePath.type !== "recents") {
+	if (
+		drivePath.type !== "trash" &&
+		drivePath.type !== "sharedIn" &&
+		drivePath.type !== "offline" &&
+		drivePath.type !== "recents" &&
+		drivePath.type !== "linked"
+	) {
 		menuButtons.push({
 			id: "trash",
 			title: "tbd_trash",

@@ -39,8 +39,9 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import { fs, File, Directory } from "@/tests/mocks/expoFileSystem"
 import { serialize } from "@/lib/serializer"
-import type { DriveItem } from "@/types"
-import type { Metadata } from "@/lib/audioCache"
+import { xxHash32 } from "js-xxhash"
+import { type DriveItem, type CacheItem } from "@/types"
+import { type Metadata } from "@/lib/audioCache"
 
 const fileCache = (await import("@/lib/fileCache")).default
 const { parseWebStream } = await import("music-metadata")
@@ -81,12 +82,49 @@ function makeDirItem(uuid: string): DriveItem {
 	} as unknown as DriveItem
 }
 
+function wrapDrive(item: DriveItem): CacheItem {
+	return {
+		type: "drive",
+		data: item
+	}
+}
+
+function makeExternalItem(url: string, name: string): CacheItem {
+	return {
+		type: "external",
+		data: {
+			url,
+			name
+		}
+	}
+}
+
+function externalId(url: string): string {
+	return xxHash32(url).toString(16)
+}
+
 function setupFileCacheGetFiles(): void {
-	vi.mocked(fileCache.getFiles).mockImplementation(((item: DriveItem) => ({
-		file: new File(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}/${item.data.uuid}${extname(item.data.decryptedMeta!.name)}`),
-		metadata: new File(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}/${item.data.uuid}.filenmeta`),
-		parentDirectory: new Directory(`${FILE_CACHE_BASE_DIR}/${item.data.uuid}`)
-	})) as any)
+	vi.mocked(fileCache.getFiles).mockImplementation(((item: CacheItem) => {
+		if (item.type === "drive") {
+			const driveItem = item.data
+
+			return {
+				file: new File(
+					`${FILE_CACHE_BASE_DIR}/${driveItem.data.uuid}/${driveItem.data.uuid}${extname(driveItem.data.decryptedMeta!.name)}`
+				),
+				metadata: new File(`${FILE_CACHE_BASE_DIR}/${driveItem.data.uuid}/${driveItem.data.uuid}.filenmeta`),
+				parentDirectory: new Directory(`${FILE_CACHE_BASE_DIR}/${driveItem.data.uuid}`)
+			}
+		}
+
+		const id = externalId(item.data.url)
+
+		return {
+			file: new File(`${FILE_CACHE_BASE_DIR}/${id}/${id}${extname(item.data.name)}`),
+			metadata: new File(`${FILE_CACHE_BASE_DIR}/${id}/${id}.filenmeta`),
+			parentDirectory: new Directory(`${FILE_CACHE_BASE_DIR}/${id}`)
+		}
+	}) as any)
 }
 
 async function createAudioCache(): Promise<InstanceType<(typeof import("@/lib/audioCache"))["AudioCache"]>> {
@@ -112,19 +150,31 @@ describe("AudioCache", () => {
 	describe("getFiles", () => {
 		it("returns audio file from fileCache and own metadata file", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-1", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-1", "song.mp3"))
 
 			const files = cache.getFiles(item)
 
 			expect(files.audio.uri).toBe(`${FILE_CACHE_BASE_DIR}/uuid-1/uuid-1.mp3`)
 			expect(files.metadata.uri).toBe(`${AUDIO_BASE_DIR}/uuid-1.filenmeta`)
 		})
+
+		it("returns hashed metadata path for external items", async () => {
+			const cache = await createAudioCache()
+			const url = "https://example.com/song.mp3"
+			const item = makeExternalItem(url, "song.mp3")
+			const id = externalId(url)
+
+			const files = cache.getFiles(item)
+
+			expect(files.audio.uri).toBe(`${FILE_CACHE_BASE_DIR}/${id}/${id}.mp3`)
+			expect(files.metadata.uri).toBe(`${AUDIO_BASE_DIR}/${id}.filenmeta`)
+		})
 	})
 
 	describe("has", () => {
 		it("returns true when audio and metadata exist and metadata is non-empty", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-2", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-2", "song.mp3"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-2/uuid-2.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-2.filenmeta`
@@ -151,7 +201,7 @@ describe("AudioCache", () => {
 
 		it("returns false for non-file items", async () => {
 			const cache = await createAudioCache()
-			const item = makeDirItem("uuid-3")
+			const item = wrapDrive(makeDirItem("uuid-3"))
 
 			const result = await cache.has(item)
 
@@ -160,7 +210,7 @@ describe("AudioCache", () => {
 
 		it("returns false when audio file doesn't exist", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-4", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-4", "song.mp3"))
 
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-4.filenmeta`
 			const metadata: Metadata = {
@@ -183,7 +233,7 @@ describe("AudioCache", () => {
 
 		it("returns false when metadata doesn't exist", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-5", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-5", "song.mp3"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-5/uuid-5.mp3`
 
@@ -196,7 +246,7 @@ describe("AudioCache", () => {
 
 		it("returns false when metadata is empty/null", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-6", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-6", "song.mp3"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-6/uuid-6.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-6.filenmeta`
@@ -213,7 +263,7 @@ describe("AudioCache", () => {
 	describe("get", () => {
 		it("returns cached audio and metadata when both exist (cache hit)", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-7", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-7", "song.mp3"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-7/uuid-7.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-7.filenmeta`
@@ -246,7 +296,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-8"
 			const name = "song.mp3"
-			const item = makeFileItem(uuid, name)
+			const item = wrapDrive(makeFileItem(uuid, name))
 
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
@@ -272,7 +322,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-9"
 			const name = "document.pdf"
-			const item = makeFileItem(uuid, name)
+			const item = wrapDrive(makeFileItem(uuid, name))
 
 			const mockFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
@@ -287,21 +337,21 @@ describe("AudioCache", () => {
 
 		it("throws for non-file items", async () => {
 			const cache = await createAudioCache()
-			const item = makeDirItem("uuid-10")
+			const item = wrapDrive(makeDirItem("uuid-10"))
 
 			await expect(cache.get({ item })).rejects.toThrow("Item must be a file or shared file")
 		})
 
 		it("throws when decryptedMeta is null", async () => {
 			const cache = await createAudioCache()
-			const item = {
+			const item = wrapDrive({
 				type: "file",
 				data: {
 					uuid: "uuid-11",
 					decryptedMeta: null,
 					size: 100n
 				}
-			} as unknown as DriveItem
+			} as unknown as DriveItem)
 
 			await expect(cache.get({ item })).rejects.toThrow("Item metadata is not decrypted")
 		})
@@ -310,7 +360,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-12"
 			const name = "song.mp3"
-			const item = makeFileItem(uuid, name)
+			const item = wrapDrive(makeFileItem(uuid, name))
 
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
@@ -330,7 +380,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-13"
 			const name = "song.mp3"
-			const item = makeFileItem(uuid, name)
+			const item = wrapDrive(makeFileItem(uuid, name))
 
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
@@ -362,7 +412,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-14"
 			const name = "song.mp3"
-			const item = makeFileItem(uuid, name)
+			const item = wrapDrive(makeFileItem(uuid, name))
 
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
@@ -382,7 +432,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-dl-noexist"
 			const name = "song.mp3"
-			const item = makeFileItem(uuid, name)
+			const item = wrapDrive(makeFileItem(uuid, name))
 
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
@@ -402,7 +452,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-shared"
 			const name = "shared-song.mp3"
-			const item = {
+			const item = wrapDrive({
 				type: "sharedFile" as const,
 				data: {
 					uuid,
@@ -415,7 +465,7 @@ describe("AudioCache", () => {
 					},
 					size: 100n
 				}
-			} as unknown as DriveItem
+			} as unknown as DriveItem)
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
@@ -441,12 +491,44 @@ describe("AudioCache", () => {
 			expect(result.metadata).not.toBeNull()
 			expect(result.metadata!.artist).toBe("Shared Artist")
 		})
+
+		it("works with external items (cache hit by hashed url id)", async () => {
+			const cache = await createAudioCache()
+			const url = "https://example.com/track.mp3"
+			const item = makeExternalItem(url, "track.mp3")
+			const id = externalId(url)
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${id}/${id}.mp3`
+			const metaPath = `${AUDIO_BASE_DIR}/${id}.filenmeta`
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+
+			const metadata: Metadata = {
+				artist: "External Artist",
+				title: "External Song",
+				album: null,
+				date: null,
+				duration: 240,
+				pictureBase64: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
+
+			const result = await cache.get({ item })
+
+			expect(result.audio.uri).toBe(audioPath)
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.artist).toBe("External Artist")
+			expect(fileCache.get).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("getMetadata", () => {
 		it("delegates to get and returns only metadata", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-15", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-15", "song.mp3"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-15/uuid-15.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-15.filenmeta`
@@ -477,7 +559,7 @@ describe("AudioCache", () => {
 	describe("remove", () => {
 		it("deletes only the metadata file", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-16", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-16", "song.mp3"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-16/uuid-16.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-16.filenmeta`
@@ -493,14 +575,14 @@ describe("AudioCache", () => {
 
 		it("throws for non-file items", async () => {
 			const cache = await createAudioCache()
-			const item = makeDirItem("uuid-17")
+			const item = wrapDrive(makeDirItem("uuid-17"))
 
 			await expect(cache.remove(item)).rejects.toThrow("Item must be a file or shared file")
 		})
 
 		it("does not throw when metadata doesn't exist", async () => {
 			const cache = await createAudioCache()
-			const item = makeFileItem("uuid-18", "song.mp3")
+			const item = wrapDrive(makeFileItem("uuid-18", "song.mp3"))
 
 			await expect(cache.remove(item)).resolves.toBeUndefined()
 		})

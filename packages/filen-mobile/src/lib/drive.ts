@@ -9,7 +9,15 @@ import {
 	NonRootNormalItem,
 	NonRootNormalItem_Tags,
 	NonRootItem_Tags,
-	AnyNormalDir
+	AnyNormalDir,
+	ErrorKind,
+	AnyLinkedDir,
+	type LinkedRootDir,
+	DirMeta_Tags,
+	type File,
+	FileMeta,
+	ParentUuid,
+	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import {
@@ -18,12 +26,20 @@ import {
 	unwrapParentUuid,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
-	normalizeFilePathForSdk
+	normalizeFilePathForSdk,
+	unwrapSdkError
 } from "@/lib/utils"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/queries/useDriveItemVersions.query"
 import cache from "@/lib/cache"
 import { driveItemPublicLinkStatusQueryUpdate } from "@/queries/useDriveItemPublicLinkStatus.query"
+import prompts from "@/lib/prompts"
+import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import { run } from "@filen/utils"
+import alerts from "@/lib/alerts"
+import { router } from "expo-router"
+import { serialize } from "@/lib/serializer"
+import type { Linked } from "@/hooks/useDrivePath"
 
 class Drive {
 	public async favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
@@ -1141,8 +1157,6 @@ class Drive {
 				...link.link
 			}
 
-			console.log("Merged link:", merged)
-
 			await authedSdkClient.updateFileLink(
 				item.data,
 				merged,
@@ -1163,6 +1177,182 @@ class Drive {
 				})
 			})
 		}
+	}
+
+	public async openLinkedDirectory({
+		linkUuid,
+		linkKey,
+		root,
+		password
+	}: {
+		linkUuid: string
+		linkKey: string
+		root: LinkedRootDir
+		password?: string
+	}) {
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		const result = await runWithLoading(async () => {
+			const info = await authedSdkClient.getDirPublicLinkInfo(linkUuid, linkKey)
+
+			return authedSdkClient.listLinkedDir(
+				new AnyLinkedDir.Root(info.root),
+				{
+					...info.link,
+					password
+				},
+				undefined
+			)
+		})
+
+		if (!result.success) {
+			const unwrappedError = unwrapSdkError(result.error)
+
+			if (unwrappedError?.kind() === ErrorKind.WrongPassword) {
+				if (!password) {
+					const promptResult = await run(async () => {
+						return await prompts.input({
+							title: "tbd_password_required",
+							message: "tbd_enter_public_link_directory_password",
+							cancelText: "tbd_cancel",
+							okText: "tbd_submit",
+							inputType: "secure-text"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+						return
+					}
+
+					password = promptResult.data.value.trim()
+
+					await this.openLinkedDirectory({
+						linkUuid,
+						linkKey,
+						root,
+						password
+					})
+
+					return
+				}
+
+				alerts.error("tbd_wrong_password")
+
+				return
+			}
+
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+
+		router.push({
+			pathname: "/linkedDir/[uuid]",
+			params: {
+				linked: serialize({
+					uuid: linkUuid,
+					key: linkKey,
+					rootName: root.inner.meta.tag === DirMeta_Tags.Decoded ? root.inner.meta.inner[0].name : root.inner.uuid,
+					password
+				} satisfies Linked)
+			}
+		})
+	}
+
+	public async openLinkedFile({ linkUuid, fileKey, password }: { linkUuid: string; fileKey: string; password?: string }) {
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		const result = await runWithLoading(async () => {
+			return authedSdkClient.getLinkedFile(linkUuid, fileKey, password)
+		})
+
+		if (!result.success) {
+			const unwrappedError = unwrapSdkError(result.error)
+
+			if (unwrappedError?.kind() === ErrorKind.WrongPassword) {
+				if (!password) {
+					const promptResult = await run(async () => {
+						return await prompts.input({
+							title: "tbd_password_required",
+							message: "tbd_enter_public_link_file_password",
+							cancelText: "tbd_cancel",
+							okText: "tbd_submit",
+							inputType: "secure-text"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+						return
+					}
+
+					password = promptResult.data.value.trim()
+
+					await this.openLinkedFile({
+						linkUuid,
+						fileKey,
+						password
+					})
+
+					return
+				}
+
+				alerts.error("tbd_wrong_password")
+
+				return
+			}
+
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+
+		router.push({
+			pathname: "/linkedFile",
+			params: {
+				item: serialize(
+					unwrappedFileIntoDriveItem(
+						unwrapFileMeta({
+							...result.data,
+							meta: new FileMeta.Decoded({
+								name:
+									result.data.name.tag === MaybeEncryptedUniffi_Tags.Decrypted
+										? result.data.name.inner[0]
+										: result.data.uuid,
+								mime:
+									result.data.mime.tag === MaybeEncryptedUniffi_Tags.Decrypted
+										? result.data.mime.inner[0]
+										: "application/octet-stream",
+								size: result.data.size,
+								version: result.data.version,
+								key: fileKey,
+								created: result.data.timestamp,
+								modified: result.data.timestamp,
+								hash: undefined
+							}),
+							parent: new ParentUuid.Uuid(result.data.uuid),
+							canMakeThumbnail: false,
+							favorited: false
+						} satisfies File)
+					)
+				)
+			}
+		})
 	}
 }
 

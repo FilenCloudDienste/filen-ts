@@ -2,7 +2,6 @@ import { memo, useRef } from "react"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
-import { DriveItemFileExtracted } from "@/types"
 import fileCache from "@/lib/fileCache"
 import { PdfView, type OnErrorEventPayload } from "@kishannareshpal/expo-pdf"
 import prompts from "@/lib/prompts"
@@ -13,17 +12,32 @@ import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRecyclingState } from "@shopify/flash-list"
 import Button from "@/components/ui/button"
+import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 
-const PreviewPdf = memo(({ item }: { item: DriveItemFileExtracted }) => {
-	const [password, setPassword] = useRecyclingState<string | null>(null, [item.data.uuid])
+const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
+	const [password, setPassword] = useRecyclingState<string | null>(null, [item.type === "drive" ? item.data.data.uuid : item.data.url])
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 	const onErrorWorkingRef = useRef<boolean>(false)
-	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [item.data.uuid])
+	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [
+		item.type === "drive" ? item.data.data.uuid : item.data.url
+	])
 
 	const query = useSimpleQuery(async signal => {
 		return await fileCache.get({
-			item,
+			item:
+				item.type === "external"
+					? {
+							type: "external",
+							data: {
+								url: item.data.url,
+								name: item.data.name
+							}
+						}
+					: {
+							type: "drive",
+							data: item.data
+						},
 			signal
 		})
 	})

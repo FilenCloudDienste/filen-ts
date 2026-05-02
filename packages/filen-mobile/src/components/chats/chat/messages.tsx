@@ -3,7 +3,7 @@ import type { Chat as TChat } from "@filen/sdk-rs"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useChatMessagesQuery from "@/queries/useChatMessages.query"
-import VirtualList, { type ListRenderItemInfo, type ListRef } from "@/components/ui/virtualList"
+import VirtualList, { type ListRef } from "@/components/ui/virtualList"
 import Text from "@/components/ui/text"
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller"
 import { AnimatedView } from "@/components/ui/animated"
@@ -11,10 +11,11 @@ import { interpolate, useAnimatedStyle } from "react-native-reanimated"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
 import Message from "@/components/chats/chat/message"
-import { ActivityIndicator } from "react-native"
+import { ActivityIndicator, type View as TView } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/utils"
 import chats from "@/lib/chats"
+import useViewLayout from "@/hooks/useViewLayout"
 import alerts from "@/lib/alerts"
 
 const Messages = memo(({ chat }: { chat: TChat }) => {
@@ -27,6 +28,8 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 	const [isFetchingMore, setIsFetchingMore] = useState<boolean>(false)
 	const isFetchingMoreRef = useRef<boolean>(false)
 	const hasMoreRef = useRef<boolean>(true)
+	const viewRef = useRef<TView>(null)
+	const { onLayout, layout } = useViewLayout(viewRef)
 
 	const chatMessagesQuery = useChatMessagesQuery(
 		{
@@ -55,112 +58,10 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 		}
 	}, [insets.bottom, keyboardAnimation, inputViewLayout.height])
 
-	const renderItem = (info: ListRenderItemInfo<ChatMessageWithInflightId>) => {
-		if (!chat) {
-			return null
-		}
-
-		return (
-			<Message
-				chat={chat}
-				info={info}
-				nextMessage={messages[info.index - 1]}
-				prevMessage={messages[info.index + 1]}
-			/>
-		)
-	}
-
-	const keyExtractor = (item: ChatMessageWithInflightId) => {
-		return item.inner.uuid
-	}
-
-	const footerComponent = () => {
-		if (!isFetchingMore) {
-			return undefined
-		}
-
-		return (
-			<View className="w-full h-auto items-center justify-center pt-4">
-				<ActivityIndicator
-					size="small"
-					color={textMutedForeground.color}
-				/>
-			</View>
-		)
-	}
-
-	const headerComponent = () => {
-		return <AnimatedView style={headerStyle} />
-	}
-
-	const emptyComponent = () => {
-		return (
-			<View
-				className="flex-1 items-center justify-center"
-				style={{
-					transform: [
-						{
-							scaleY: -1
-						}
-					]
-				}}
-			>
-				<Text>tbd_no_messages</Text>
-			</View>
-		)
-	}
-
-	const fetchMore = async () => {
-		if (isFetchingMoreRef.current || chatMessagesQuery.status !== "success" || messages.length === 0 || !hasMoreRef.current) {
-			return
-		}
-
-		const result = await run(async defer => {
-			isFetchingMoreRef.current = true
-
-			setIsFetchingMore(true)
-
-			defer(() => {
-				isFetchingMoreRef.current = false
-
-				setIsFetchingMore(false)
-			})
-
-			const lastMessage = messages[messages.length - 1]
-
-			if (!lastMessage) {
-				return []
-			}
-
-			const moreMessages = await chats.listBefore({
-				chat,
-				before: lastMessage.sentTimestamp
-			})
-
-			return moreMessages.map(m => ({
-				...m,
-				inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-			})) satisfies ChatMessageWithInflightId[]
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
-		}
-
-		if (result.data.length === 0) {
-			hasMoreRef.current = false
-		}
-
-		setFetchedMessages(prev => [...prev, ...result.data])
-	}
-
-	const onEndReached = () => fetchMore()
-
 	return (
 		<View
+			ref={viewRef}
+			onLayout={onLayout}
 			className="bg-transparent flex-1"
 			style={{
 				transform: [
@@ -175,18 +76,114 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 				className="flex-1"
 				contentInsetAdjustmentBehavior="automatic"
 				contentContainerClassName="android:pb-8"
-				keyExtractor={keyExtractor}
+				keyExtractor={item => {
+					return item.inner.uuid
+				}}
 				data={messages}
-				renderItem={renderItem}
+				renderItem={info => {
+					if (!chat) {
+						return null
+					}
+
+					return (
+						<Message
+							chat={chat}
+							info={info}
+							nextMessage={messages[info.index - 1]}
+							prevMessage={messages[info.index + 1]}
+							layout={layout}
+						/>
+					)
+				}}
 				onEndReachedThreshold={0.5}
 				loading={chatMessagesQuery.status !== "success"}
-				footerComponent={footerComponent}
-				onEndReached={onEndReached}
+				footerComponent={() => {
+					if (!isFetchingMore) {
+						return undefined
+					}
+
+					return (
+						<View className="w-full h-auto items-center justify-center pt-4">
+							<ActivityIndicator
+								size="small"
+								color={textMutedForeground.color}
+							/>
+						</View>
+					)
+				}}
+				onEndReached={async () => {
+					if (
+						isFetchingMoreRef.current ||
+						chatMessagesQuery.status !== "success" ||
+						messages.length === 0 ||
+						!hasMoreRef.current
+					) {
+						return
+					}
+
+					const result = await run(async defer => {
+						isFetchingMoreRef.current = true
+
+						setIsFetchingMore(true)
+
+						defer(() => {
+							isFetchingMoreRef.current = false
+
+							setIsFetchingMore(false)
+						})
+
+						const lastMessage = messages[messages.length - 1]
+
+						if (!lastMessage) {
+							return []
+						}
+
+						const moreMessages = await chats.listBefore({
+							chat,
+							before: lastMessage.sentTimestamp
+						})
+
+						return moreMessages.map(m => ({
+							...m,
+							inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+						})) satisfies ChatMessageWithInflightId[]
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					if (result.data.length === 0) {
+						hasMoreRef.current = false
+					}
+
+					setFetchedMessages(prev => [...prev, ...result.data])
+				}}
 				maintainVisibleContentPosition={{
 					disabled: true
 				}}
-				headerComponent={headerComponent}
-				emptyComponent={emptyComponent}
+				headerComponent={() => {
+					return <AnimatedView style={headerStyle} />
+				}}
+				emptyComponent={() => {
+					return (
+						<View
+							className="flex-1 items-center justify-center"
+							style={{
+								transform: [
+									{
+										scaleY: -1
+									}
+								]
+							}}
+						>
+							<Text>tbd_no_messages</Text>
+						</View>
+					)
+				}}
 			/>
 		</View>
 	)

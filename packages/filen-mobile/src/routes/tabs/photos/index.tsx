@@ -46,21 +46,6 @@ const Photo = memo(
 			height: size
 		}
 
-		const thumbnailSize: React.ComponentProps<typeof Thumbnail>["size"] = {
-			icon: size - 2,
-			thumbnail: size - 2
-		}
-
-		const onPress = () => {
-			router.push({
-				pathname: "/drivePreview",
-				params: {
-					item: serialize(info.item),
-					drivePath: serialize(drivePath)
-				}
-			})
-		}
-
 		return (
 			<View
 				style={viewStyle}
@@ -77,7 +62,15 @@ const Photo = memo(
 					<View style={viewStyle}>
 						<PressableOpacity
 							className="items-center justify-center flex-1 overflow-hidden"
-							onPress={onPress}
+							onPress={() => {
+								router.push({
+									pathname: "/drivePreview",
+									params: {
+										item: serialize(info.item),
+										drivePath: serialize(drivePath)
+									}
+								})
+							}}
 							style={viewStyle}
 						>
 							{previewType === "video" && (
@@ -111,7 +104,10 @@ const Photo = memo(
 								item={info.item}
 								target={info.target}
 								contentFit="cover"
-								size={thumbnailSize}
+								size={{
+									icon: size - 2,
+									thumbnail: size - 2
+								}}
 							/>
 						</PressableOpacity>
 					</View>

@@ -3,14 +3,27 @@ import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import { Semaphore, run } from "@filen/utils"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { Platform } from "react-native"
-import type { DriveItem, DriveItemFileExtracted } from "@/types"
+import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
 import isEqual from "react-fast-compare"
 import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk, normalizeFilePathForSdk } from "@/lib/utils"
 import offline from "@/lib/offline"
+import { xxHash32 } from "js-xxhash"
 
-export type Metadata = DriveItemFileExtracted & {
+export type Metadata = (
+	| {
+			type: "drive"
+			data: DriveItemFileExtracted
+	  }
+	| {
+			type: "external"
+			data: {
+				url: string
+				name: string
+			}
+	  }
+) & {
 	cachedAt: number
 }
 
@@ -61,16 +74,22 @@ export class FileCache {
 		return mutex
 	}
 
-	public getFiles(item: DriveItem): {
+	private getExternalItemId(item: Extract<CacheItem, { type: "external" }>): string {
+		return xxHash32(item.data.url).toString(16)
+	}
+
+	public getFiles(item: CacheItem): {
 		file: FileSystem.File
 		metadata: FileSystem.File
 		parentDirectory: FileSystem.Directory
 	} {
-		if (!item.data.decryptedMeta) {
+		if (item.type === "drive" && !item.data.data.decryptedMeta) {
 			throw new Error("Item does not have decrypted metadata")
 		}
 
-		const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.parentDirectory.uri, item.data.uuid))
+		const parentDirectory = new FileSystem.Directory(
+			FileSystem.Paths.join(this.parentDirectory.uri, item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
+		)
 
 		if (!parentDirectory.exists) {
 			parentDirectory.create({
@@ -81,22 +100,32 @@ export class FileCache {
 
 		return {
 			file: new FileSystem.File(
-				FileSystem.Paths.join(parentDirectory.uri, `${item.data.uuid}${FileSystem.Paths.extname(item.data.decryptedMeta.name)}`)
+				FileSystem.Paths.join(
+					parentDirectory.uri,
+					`${item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)}${FileSystem.Paths.extname(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)}`
+				)
 			),
-			metadata: new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, `${item.data.uuid}.filenmeta`)),
+			metadata: new FileSystem.File(
+				FileSystem.Paths.join(
+					parentDirectory.uri,
+					`${item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)}.filenmeta`
+				)
+			),
 			parentDirectory
 		}
 	}
 
-	public async has(item: DriveItem): Promise<boolean> {
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+	public async has(item: CacheItem): Promise<boolean> {
+		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 			return false
 		}
 
-		const offlineFile = await offline.getLocalFile(item)
+		if (item.type === "drive") {
+			const offlineFile = await offline.getLocalFile(item.data)
 
-		if (offlineFile?.exists) {
-			return true
+			if (offlineFile?.exists) {
+				return true
+			}
 		}
 
 		const { file, metadata } = this.getFiles(item)
@@ -116,19 +145,21 @@ export class FileCache {
 		return isEqual(metadataWithoutCachedAt, item)
 	}
 
-	public async get({ item, signal }: { item: DriveItem; signal?: AbortSignal }): Promise<FileSystem.File> {
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+	public async get({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<FileSystem.File> {
+		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 
-		const offlineFile = await offline.getLocalFile(item)
+		if (item.type === "drive") {
+			const offlineFile = await offline.getLocalFile(item.data)
 
-		if (offlineFile?.exists) {
-			return offlineFile
+			if (offlineFile?.exists) {
+				return offlineFile
+			}
 		}
 
 		const result = await run(async defer => {
-			const mutex = this.getMutexForKey(item.data.uuid)
+			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
 			await mutex.acquire()
 
@@ -165,20 +196,30 @@ export class FileCache {
 					file.delete()
 				}
 
-				await authedSdkClient.downloadFileToPath(
-					item.type === "file" ? new AnyFile.File(item.data) : new AnyFile.Shared(item.data),
-					normalizeFilePathForSdk(file.uri),
-					undefined,
-					ManagedFuture.new({
-						pauseSignal: undefined,
-						abortSignal: wrappedSignal
-					}),
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
+				if (item.type === "external") {
+					await FileSystem.File.downloadFileAsync(item.data.url, file, {
+						idempotent: true
+					})
+				} else {
+					if (item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+						throw new Error("Item must be a file or shared file")
+					}
+
+					await authedSdkClient.downloadFileToPath(
+						item.data.type === "file" ? new AnyFile.File(item.data.data) : new AnyFile.Shared(item.data.data),
+						normalizeFilePathForSdk(file.uri),
+						undefined,
+						ManagedFuture.new({
+							pauseSignal: undefined,
+							abortSignal: wrappedSignal
+						}),
+						signal
+							? {
+									signal
+								}
+							: undefined
+					)
+				}
 
 				if (!file.exists) {
 					throw new Error("File does not exist after download")
@@ -188,12 +229,27 @@ export class FileCache {
 					metadataFile.delete()
 				}
 
-				metadataFile.write(
-					serialize({
-						...item,
-						cachedAt: Date.now()
-					} satisfies Metadata)
-				)
+				if (item.type === "drive") {
+					if (item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+						throw new Error("Item must be a file or shared file")
+					}
+
+					metadataFile.write(
+						serialize({
+							type: "drive",
+							data: item.data,
+							cachedAt: Date.now()
+						} satisfies Metadata)
+					)
+				} else {
+					metadataFile.write(
+						serialize({
+							type: "external",
+							data: item.data,
+							cachedAt: Date.now()
+						} satisfies Metadata)
+					)
+				}
 
 				return file
 			} catch (e) {
@@ -212,13 +268,13 @@ export class FileCache {
 		return result.data
 	}
 
-	public async remove(item: DriveItem): Promise<void> {
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+	public async remove(item: CacheItem): Promise<void> {
+		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 
 		const result = await run(async defer => {
-			const mutex = this.getMutexForKey(item.data.uuid)
+			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
 			await mutex.acquire()
 

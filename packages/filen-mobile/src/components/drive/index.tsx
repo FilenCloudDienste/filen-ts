@@ -931,6 +931,14 @@ const Header = memo(() => {
 				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_favorites"
 			}
 
+			case "linked": {
+				if (drivePath.linked && drivePath.linked.rootName) {
+					return drivePath.linked.rootName
+				}
+
+				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_linked"
+			}
+
 			case "trash": {
 				return "tbd_trash"
 			}
@@ -1044,11 +1052,6 @@ const Drive = memo(() => {
 		}, 1000)
 	})()
 
-	const searchBarProps = {
-		placeholder: "tbd_search_drive",
-		onChangeText: setSearchQuery
-	}
-
 	useEffect(() => {
 		if (drivePath.type !== "drive" || drivePath.selectOptions) {
 			return
@@ -1113,7 +1116,10 @@ const Drive = memo(() => {
 						}
 					}}
 					loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
-					searchBar={searchBarProps}
+					searchBar={{
+						placeholder: "tbd_search_drive",
+						onChangeText: setSearchQuery
+					}}
 				/>
 			</SafeAreaView>
 		</Fragment>

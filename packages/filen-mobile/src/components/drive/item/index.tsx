@@ -214,6 +214,22 @@ const Item = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; d
 				return
 			}
 
+			if (drivePath.type === "linked") {
+				if (!drivePath.linked) {
+					return
+				}
+
+				router.push({
+					pathname: "/linkedDir/[uuid]",
+					params: {
+						uuid: info.item.data.uuid,
+						linked: serialize(drivePath.linked)
+					}
+				})
+
+				return
+			}
+
 			router.push({
 				pathname: "/tabs/drive/[uuid]",
 				params: {

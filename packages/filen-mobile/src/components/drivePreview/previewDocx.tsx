@@ -7,16 +7,28 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import fileCache from "@/lib/fileCache"
-import type { DriveItemFileExtracted } from "@/types"
 import { ActivityIndicator } from "react-native"
+import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 
-const PreviewDocx = memo(({ item }: { item: DriveItemFileExtracted }) => {
+const PreviewDocx = memo(({ item }: { item: GalleryItemTagged }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 
 	const query = useSimpleQuery(async signal => {
 		const file = await fileCache.get({
-			item,
+			item:
+				item.type === "external"
+					? {
+							type: "external",
+							data: {
+								url: item.data.url,
+								name: item.data.name
+							}
+						}
+					: {
+							type: "drive",
+							data: item.data
+						},
 			signal
 		})
 

@@ -101,3 +101,16 @@ export type DriveItemFileExtracted = Prettify<
 >
 
 export type DriveItemDirectoryExtracted = Prettify<Exclude<DriveItem, DriveItemFileExtracted>>
+
+export type CacheItem =
+	| {
+			type: "drive"
+			data: DriveItem
+	  }
+	| {
+			type: "external"
+			data: {
+				url: string
+				name: string
+			}
+	  }

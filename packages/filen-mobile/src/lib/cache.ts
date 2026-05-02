@@ -1,4 +1,4 @@
-import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext, File } from "@filen/sdk-rs"
+import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext, File, AnyLinkedDir, DirPublicLink } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -119,6 +119,14 @@ class Cache {
 	public readonly directoryUuidToAnyDirWithContext: PersistentMap<AnyDirWithContext>
 	public readonly availableThumbnails: PersistentMap<boolean>
 	public readonly cameraUploadHashes: PersistentMap<string>
+	public readonly chatAttachmentLayouts: PersistentMap<{
+		width: number
+		height: number
+	}>
+	public readonly directoryUuidToAnyLinkedDirWithMeta: PersistentMap<{
+		dir: AnyLinkedDir
+		meta: DirPublicLink
+	}>
 
 	public constructor() {
 		this.directoryUuidToName = this.createMap<string>("directoryUuidToName")
@@ -131,6 +139,14 @@ class Cache {
 		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
 		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
 		this.cameraUploadHashes = this.createMap<string>("cameraUploadHashes")
+		this.chatAttachmentLayouts = this.createMap<{
+			width: number
+			height: number
+		}>("chatAttachmentLayouts")
+		this.directoryUuidToAnyLinkedDirWithMeta = this.createMap<{
+			dir: AnyLinkedDir
+			meta: DirPublicLink
+		}>("directoryUuidToAnyLinkedDirWithMeta")
 
 		AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {

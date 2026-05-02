@@ -17,7 +17,7 @@ import useSimpleQuery from "@/hooks/useSimpleQuery"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import View from "@/components/ui/view"
-import type { DrivePath } from "@/hooks/useDrivePath"
+import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
 
 function getFileUrlForItem(item: DriveItemFileExtracted, getFileUrl: (file: AnyFile) => string): string | null {
 	try {
@@ -45,23 +45,31 @@ const GalleryItem = memo(
 		goBack,
 		onZoomChange,
 		onSingleTap,
-		drivePath
+		initialItem
 	}: {
-		info: ListRenderItemInfo<DriveItemFileExtracted>
+		info: ListRenderItemInfo<GalleryItemTagged>
 		galleryZoomScale: SharedValue<number>
 		goBack: () => void
 		onZoomChange?: (zoom: number) => void
 		onSingleTap?: () => void
-		drivePath: DrivePath
+		initialItem: InitialItem
 	}) => {
 		const dimensions = useWindowDimensions()
 		const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
-		const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
+		const isActiveFromStore = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
-		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
+		const isActive = initialItem.type === "external" || info.item.type === "external" ? true : isActiveFromStore
+
+		const previewType = getPreviewType(
+			info.item.type === "drive" ? (info.item.data.data.decryptedMeta?.name ?? "") : info.item.data.name
+		)
 
 		const fileUrlQuery = useSimpleQuery(async () => {
-			const file = await offline.getLocalFile(info.item)
+			if (info.item.type === "external") {
+				return info.item.data.url
+			}
+
+			const file = await offline.getLocalFile(info.item.data)
 
 			if (file?.exists) {
 				return normalizeFilePathForExpo(file.uri)
@@ -71,7 +79,7 @@ const GalleryItem = memo(
 				return null
 			}
 
-			return getFileUrlForItem(info.item, getFileUrl)
+			return getFileUrlForItem(info.item.data, getFileUrl)
 		})
 
 		const fileUrl = fileUrlQuery.data ?? null
@@ -191,7 +199,10 @@ const GalleryItem = memo(
 						style={itemStyle}
 					>
 						{isActive ? (
-							<PreviewAudio item={info.item} />
+							<PreviewAudio
+								item={info.item}
+								fileUrl={fileUrl}
+							/>
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">
 								<ActivityIndicator
@@ -214,7 +225,7 @@ const GalleryItem = memo(
 						{isActive ? (
 							<PreviewText
 								item={info.item}
-								drivePath={drivePath}
+								initialItem={initialItem}
 							/>
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">

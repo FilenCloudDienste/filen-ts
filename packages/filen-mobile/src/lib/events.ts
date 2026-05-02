@@ -3,7 +3,6 @@ import type { ShowActionSheetOptions } from "@/providers/actionSheet.provider"
 import type { NoteContentEdited, Contact, AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import type { AudioStatus } from "expo-audio"
-import type { Mode as AudioMode } from "@/lib/audio"
 
 export type Events = {
 	secureStoreChange: {
@@ -58,10 +57,7 @@ export type Events = {
 				id: string
 				cancelled: true
 		  }
-	audioStatus: {
-		mode: AudioMode
-		status: AudioStatus
-	}
+	audioStatus: AudioStatus
 	audioLoading: boolean
 }
 

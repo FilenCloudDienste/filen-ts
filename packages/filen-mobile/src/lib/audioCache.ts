@@ -2,11 +2,13 @@ import * as FileSystem from "expo-file-system"
 import { Semaphore, run } from "@filen/utils"
 import { IOS_APP_GROUP_IDENTIFIER, MUSIC_METADATA_SUPPORTED_EXTENSIONS } from "@/constants"
 import { Platform } from "react-native"
-import type { DriveItem } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
 import fileCache from "@/lib/fileCache"
 import { parseWebStream } from "music-metadata"
 import { Image, type ImageRef } from "expo-image"
+import { xxHash32 } from "js-xxhash"
+import mimeTypes from "mime-types"
+import type { CacheItem } from "@/types"
 
 export type Metadata = {
 	pictureBase64?: string | null
@@ -60,7 +62,11 @@ export class AudioCache {
 		return mutex
 	}
 
-	public getFiles(item: DriveItem): {
+	private getExternalItemId(item: Extract<CacheItem, { type: "external" }>): string {
+		return xxHash32(item.data.url).toString(16)
+	}
+
+	public getFiles(item: CacheItem): {
 		audio: FileSystem.File
 		metadata: FileSystem.File
 	} {
@@ -68,12 +74,17 @@ export class AudioCache {
 
 		return {
 			audio: dataFile,
-			metadata: new FileSystem.File(FileSystem.Paths.join(this.parentDirectory.uri, `${item.data.uuid}.filenmeta`))
+			metadata: new FileSystem.File(
+				FileSystem.Paths.join(
+					this.parentDirectory.uri,
+					`${item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)}.filenmeta`
+				)
+			)
 		}
 	}
 
-	public async has(item: DriveItem): Promise<boolean> {
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+	public async has(item: CacheItem): Promise<boolean> {
+		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 			return false
 		}
 
@@ -92,8 +103,8 @@ export class AudioCache {
 		return true
 	}
 
-	public async getMetadata({ item, signal }: { item: DriveItem; signal?: AbortSignal }): Promise<Metadata> {
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+	public async getMetadata({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<Metadata> {
+		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 
@@ -105,20 +116,28 @@ export class AudioCache {
 		).metadata
 	}
 
-	public async get({ item, signal }: { item: DriveItem; signal?: AbortSignal }): Promise<{
+	public async get({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<{
 		audio: FileSystem.File
 		metadata: Metadata
 	}> {
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
-			throw new Error("Item must be a file or shared file")
-		}
-
 		const result = await run(async defer => {
-			if (!item.data.decryptedMeta) {
+			if (
+				item.type === "drive" &&
+				item.data.type !== "file" &&
+				item.data.type !== "sharedFile" &&
+				item.data.type !== "sharedRootFile"
+			) {
+				throw new Error("Item must be a file or shared file")
+			}
+
+			const name = item.type === "drive" ? item.data.data.decryptedMeta?.name : item.data.name
+			const mime = mimeTypes.lookup(name ?? "")
+
+			if (!name) {
 				throw new Error("Item metadata is not decrypted")
 			}
 
-			const mutex = this.getMutexForKey(item.data.uuid)
+			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
 			await mutex.acquire()
 
@@ -146,7 +165,7 @@ export class AudioCache {
 
 			let metadata: Metadata = null
 
-			if (MUSIC_METADATA_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(item.data.decryptedMeta.name).toLowerCase().trim())) {
+			if (MUSIC_METADATA_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(name).toLowerCase().trim())) {
 				try {
 					if (!metadataFile.exists || metadataFile.size === 0) {
 						if (!audioFile.exists) {
@@ -154,8 +173,8 @@ export class AudioCache {
 						}
 
 						const parsedMetadata = await parseWebStream(audioFile.stream(), {
-							mimeType: item.data.decryptedMeta.mime,
-							size: Number(item.data.size)
+							mimeType: mime ? mime : undefined,
+							size: audioFile.size
 						})
 
 						const picture = parsedMetadata?.common?.picture?.at(0)
@@ -230,13 +249,13 @@ export class AudioCache {
 		return result.data
 	}
 
-	public async remove(item: DriveItem): Promise<void> {
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+	public async remove(item: CacheItem): Promise<void> {
+		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 			throw new Error("Item must be a file or shared file")
 		}
 
 		const result = await run(async defer => {
-			const mutex = this.getMutexForKey(item.data.uuid)
+			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
 			await mutex.acquire()
 
