@@ -18,7 +18,9 @@ const Size = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; d
 							? "trash"
 							: drivePath.type === "offline"
 								? "offline"
-								: "normal"
+								: drivePath.type === "linked"
+									? "linked"
+									: "normal"
 		},
 		{
 			enabled: info.item.type === "directory" || info.item.type === "sharedDirectory" || info.item.type === "sharedRootDirectory"

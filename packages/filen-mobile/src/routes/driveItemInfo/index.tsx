@@ -19,7 +19,7 @@ import { getPreviewType } from "@/lib/utils"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import DismissStack from "@/components/dismissStack"
 
-export const Information = memo(({ item }: { item: DriveItem }) => {
+export const Information = memo(({ item, linked }: { item: DriveItem; linked?: boolean }) => {
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textGreen500 = useResolveClassNames("text-green-500")
 
@@ -277,21 +277,25 @@ export const Information = memo(({ item }: { item: DriveItem }) => {
 					}
 				})()
 			},
-			{
-				type: "offline",
-				title: "tbd_offline",
-				value: (
-					<Ionicons
-						name="cloud-download-outline"
-						size={16}
-						color={
-							driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data
-								? textGreen500.color
-								: textRed500.color
+			...(!linked
+				? [
+						{
+							type: "offline",
+							title: "tbd_offline",
+							value: (
+								<Ionicons
+									name="cloud-download-outline"
+									size={16}
+									color={
+										driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data
+											? textGreen500.color
+											: textRed500.color
+									}
+								/>
+							)
 						}
-					/>
-				)
-			}
+					]
+				: [])
 		] as const
 	).filter(info => info.value !== null)
 

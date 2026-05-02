@@ -3,7 +3,14 @@ import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import auth from "@/lib/auth"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
-import { AnyDirWithContext_Tags, AnyDirWithContext, AnyNormalDir, AnyNormalDir_Tags, ParentUuid } from "@filen/sdk-rs"
+import {
+	AnyDirWithContext_Tags,
+	AnyDirWithContext,
+	AnyNormalDir,
+	AnyNormalDir_Tags,
+	ParentUuid,
+	AnyLinkedDirWithContext
+} from "@filen/sdk-rs"
 import offline from "@/lib/offline"
 import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
 
@@ -11,7 +18,7 @@ export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 
 export type UseDirectorySizeQueryParams = {
 	uuid: string
-	type: "offline" | "trash" | "sharedIn" | "sharedOut" | "normal"
+	type: "offline" | "trash" | "sharedIn" | "sharedOut" | "normal" | "linked"
 }
 
 export async function fetchData(
@@ -42,6 +49,21 @@ export async function fetchData(
 
 				if (fromCache) {
 					return new AnyDirWithContext.Shared(fromCache)
+				}
+
+				return null
+			}
+
+			case "linked": {
+				const fromCache = cache.directoryUuidToAnyLinkedDirWithMeta.get(params.uuid)
+
+				if (fromCache) {
+					return new AnyDirWithContext.Linked(
+						AnyLinkedDirWithContext.new({
+							dir: fromCache.dir,
+							link: fromCache.meta
+						})
+					)
 				}
 
 				return null

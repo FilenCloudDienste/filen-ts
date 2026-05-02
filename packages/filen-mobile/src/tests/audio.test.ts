@@ -25,23 +25,13 @@ function makeMockPlayer() {
 
 type MockPlayer = ReturnType<typeof makeMockPlayer>
 
-let latestPlaylistPlayer: MockPlayer
-let latestPreviewPlayer: MockPlayer
-let playerCreateCount = 0
+let latestPlayer: MockPlayer
 
 vi.mock("expo-audio", () => ({
 	createAudioPlayer: vi.fn(() => {
-		playerCreateCount++
+		latestPlayer = makeMockPlayer()
 
-		// Odd calls = playlist player, even calls = preview player
-		// (each Audio() constructor creates playlist first, then preview)
-		if (playerCreateCount % 2 === 1) {
-			latestPlaylistPlayer = makeMockPlayer()
-			return latestPlaylistPlayer
-		}
-
-		latestPreviewPlayer = makeMockPlayer()
-		return latestPreviewPlayer
+		return latestPlayer
 	}),
 	setAudioModeAsync: vi.fn().mockResolvedValue(undefined)
 }))
@@ -101,7 +91,6 @@ function makeFileItem(uuid: string, name: string): DriveItemFileExtracted {
 interface AudioTestContext {
 	audio: InstanceType<typeof import("@/lib/audio").Audio>
 	playlist: MockPlayer
-	preview: MockPlayer
 }
 
 async function createAudio(): Promise<AudioTestContext> {
@@ -110,13 +99,12 @@ async function createAudio(): Promise<AudioTestContext> {
 
 	return {
 		audio,
-		playlist: latestPlaylistPlayer,
-		preview: latestPreviewPlayer
+		playlist: latestPlayer
 	}
 }
 
 function getPlaylistStatusListener(playlist: MockPlayer): ((status: Record<string, unknown>) => void) | undefined {
-	const found = playlist.addListener.mock.calls.find((call: any) => call[0] === "playbackStatusUpdate")
+	const found = playlist.addListener.mock.calls.find((call: unknown[]) => call[0] === "playbackStatusUpdate")
 
 	return found?.[1] as ((status: Record<string, unknown>) => void) | undefined
 }
@@ -142,21 +130,21 @@ beforeEach(() => {
 
 describe("Audio", () => {
 	describe("constructor", () => {
-		it("creates two audio players", async () => {
+		it("creates one audio player per Audio instance", async () => {
 			const { createAudioPlayer: mockCreate } = await import("expo-audio")
 
-			// The module-level singleton also creates 2 players on first import,
-			// so we measure all calls and verify they come in pairs of 2
+			// On first import, the module-level singleton also creates 1 player.
+			// Take a fresh measurement after importing to isolate just our new Audio().
+			await import("@/lib/audio")
+
 			const callsBefore = vi.mocked(mockCreate).mock.calls.length
 
 			await createAudio()
 
 			const newCalls = vi.mocked(mockCreate).mock.calls.length - callsBefore
 
-			// newCalls includes module-level singleton (2) on first import + our new Audio() (2)
-			// On subsequent runs (module cached), it's just 2
-			expect(newCalls % 2).toBe(0)
-			expect(newCalls).toBeGreaterThanOrEqual(2)
+			// new Audio() creates exactly 1 player (queue-unified refactor)
+			expect(newCalls).toBe(1)
 		})
 
 		it("calls setAudioModeAsync with background playback enabled", async () => {
@@ -223,24 +211,20 @@ describe("Audio", () => {
 			expect(emitCalls[1]![1]).toBe(false)
 		})
 
-		it("bails if operationId changed during fetch", async () => {
+		it("calls audioCache.get with drive-typed CacheItem", async () => {
 			const { audio } = await createAudio()
 			const item = makeFileItem("a", "song-a.mp3")
 
-			vi.mocked(audioCache.get).mockImplementation(async () => {
-				// Simulate another operation bumping the id
-				audio.clearQueue()
-
-				return {
-					audio: { uri: "file:///cache/audio.mp3" },
-					metadata: { title: "Test", artist: "Test", album: "Test", cachedAt: Date.now() }
-				} as never
-			})
+			vi.mocked(audioCache.get).mockClear()
 
 			await audio.addToQueue({ item })
 
-			// Queue should be empty because clearQueue was called and the add bailed
-			expect(audio.getQueue()).toHaveLength(0)
+			expect(audioCache.get).toHaveBeenCalledWith({
+				item: {
+					type: "drive",
+					data: item
+				}
+			})
 		})
 	})
 
@@ -436,24 +420,6 @@ describe("Audio", () => {
 			expect(emitCalls[1]![1]).toBe(false)
 		})
 
-		it("bails if operationId changed during fetch", async () => {
-			const { audio } = await createAudio()
-			const item = makeFileItem("a", "song.mp3")
-
-			vi.mocked(audioCache.get).mockImplementation(async () => {
-				audio.clearQueue()
-
-				return {
-					audio: { uri: "file:///cache/audio.mp3" },
-					metadata: { title: "Test", artist: "Test", album: "Test", cachedAt: Date.now() }
-				} as never
-			})
-
-			await audio.play(item)
-
-			expect(audio.getQueue()).toHaveLength(0)
-		})
-
 		it("does nothing when no item given and queue is empty", async () => {
 			const { audio, playlist } = await createAudio()
 
@@ -467,25 +433,25 @@ describe("Audio", () => {
 		})
 	})
 
-	describe("pausePlaylist / resumePlaylist", () => {
-		it("pauses the playlist player", async () => {
+	describe("pause / resume", () => {
+		it("pauses the player", async () => {
 			const { audio, playlist } = await createAudio()
 
 			playlist.pause.mockClear()
 
-			audio.pausePlaylist()
+			audio.pause()
 
 			expect(playlist.pause).toHaveBeenCalled()
 		})
 
-		it("resumes the playlist player when queue has items", async () => {
+		it("resumes the player when queue has items", async () => {
 			const { audio, playlist } = await createAudio()
 
 			await audio.addToQueue({ item: makeFileItem("a", "a.mp3") })
 
 			playlist.play.mockClear()
 
-			audio.resumePlaylist()
+			audio.resume()
 
 			expect(playlist.play).toHaveBeenCalled()
 		})
@@ -495,7 +461,7 @@ describe("Audio", () => {
 
 			playlist.play.mockClear()
 
-			audio.resumePlaylist()
+			audio.resume()
 
 			expect(playlist.play).not.toHaveBeenCalled()
 		})
@@ -550,7 +516,6 @@ describe("Audio", () => {
 			expect(audio.getQueuePosition()).toBe(0)
 			expect(playlist.replace).not.toHaveBeenCalled()
 		})
-
 	})
 
 	describe("previous", () => {
@@ -622,16 +587,15 @@ describe("Audio", () => {
 			expect(playlist.seekTo).toHaveBeenCalledWith(0)
 			expect(audio.getQueuePosition()).toBe(0)
 		})
-
 	})
 
-	describe("seekPlaylist / stopPlaylist", () => {
+	describe("seek / stop", () => {
 		it("seeks to given position", async () => {
 			const { audio, playlist } = await createAudio()
 
 			playlist.seekTo.mockClear()
 
-			audio.seekPlaylist(42)
+			audio.seek(42)
 
 			expect(playlist.seekTo).toHaveBeenCalledWith(42)
 		})
@@ -643,13 +607,12 @@ describe("Audio", () => {
 			playlist.seekTo.mockClear()
 			playlist.clearLockScreenControls.mockClear()
 
-			audio.stopPlaylist()
+			audio.stop()
 
 			expect(playlist.pause).toHaveBeenCalled()
 			expect(playlist.seekTo).toHaveBeenCalledWith(0)
 			expect(playlist.clearLockScreenControls).toHaveBeenCalled()
 		})
-
 	})
 
 	describe("setLoopMode", () => {
@@ -767,191 +730,11 @@ describe("Audio", () => {
 			expect(audio.getQueuePosition()).toBe(0)
 			expect(playlist.replace).not.toHaveBeenCalled()
 		})
-
 	})
 
-	describe("enterPreviewMode", () => {
-		it("pauses playlist and sets mode to preview", async () => {
-			const { audio, playlist } = await createAudio()
-			const item = makeFileItem("prev", "preview.mp3")
+	// preview mode (enterPreviewMode / switchPreviewTrack / pausePreview / resumePreview / seekPreview / exitPreviewMode / getMode / getPreviewItem) removed in queue-unified refactor
 
-			playlist.pause.mockClear()
-
-			await audio.enterPreviewMode({ item })
-
-			expect(playlist.pause).toHaveBeenCalled()
-			expect(audio.getMode()).toBe("preview")
-		})
-
-		it("loads and optionally autoplays track", async () => {
-			const { audio, preview } = await createAudio()
-			const item = makeFileItem("prev", "preview.mp3")
-
-			await audio.enterPreviewMode({ item, autoPlay: true })
-
-			expect(preview.replace).toHaveBeenCalled()
-			expect(preview.play).toHaveBeenCalled()
-		})
-
-		it("sets loading during fetch", async () => {
-			const { audio } = await createAudio()
-			const item = makeFileItem("prev", "preview.mp3")
-
-			vi.mocked(events.emit).mockClear()
-
-			await audio.enterPreviewMode({ item })
-
-			const emitCalls = vi.mocked(events.emit).mock.calls.filter(c => c[0] === "audioLoading")
-
-			expect(emitCalls[0]![1]).toBe(true)
-			expect(emitCalls[1]![1]).toBe(false)
-		})
-
-		it("bails if operationId changed during fetch", async () => {
-			const { audio, preview } = await createAudio()
-			const item = makeFileItem("prev", "preview.mp3")
-
-			vi.mocked(audioCache.get).mockImplementation(async () => {
-				// Simulate another operation
-				audio.exitPreviewMode()
-
-				return {
-					audio: { uri: "file:///cache/audio.mp3" },
-					metadata: { title: "Test", artist: "Test", album: "Test", cachedAt: Date.now() }
-				} as never
-			})
-
-			await audio.enterPreviewMode({ item })
-
-			// exitPreviewMode bumps operationId, so the replace should not happen
-			expect(preview.replace).not.toHaveBeenCalled()
-		})
-	})
-
-	describe("switchPreviewTrack", () => {
-		it("pauses preview player and loads new track", async () => {
-			const { audio, preview } = await createAudio()
-			const item1 = makeFileItem("p1", "preview1.mp3")
-			const item2 = makeFileItem("p2", "preview2.mp3")
-
-			await audio.enterPreviewMode({ item: item1 })
-
-			preview.pause.mockClear()
-			preview.replace.mockClear()
-
-			await audio.switchPreviewTrack({ item: item2 })
-
-			expect(preview.pause).toHaveBeenCalled()
-			expect(preview.replace).toHaveBeenCalled()
-		})
-
-		it("sets loading during fetch", async () => {
-			const { audio } = await createAudio()
-			const item1 = makeFileItem("p1", "preview1.mp3")
-			const item2 = makeFileItem("p2", "preview2.mp3")
-
-			await audio.enterPreviewMode({ item: item1 })
-
-			vi.mocked(events.emit).mockClear()
-
-			await audio.switchPreviewTrack({ item: item2 })
-
-			const emitCalls = vi.mocked(events.emit).mock.calls.filter(c => c[0] === "audioLoading")
-
-			expect(emitCalls[0]![1]).toBe(true)
-			expect(emitCalls[1]![1]).toBe(false)
-		})
-
-		it("bails if operationId changed during fetch", async () => {
-			const { audio, preview } = await createAudio()
-			const item1 = makeFileItem("p1", "preview1.mp3")
-			const item2 = makeFileItem("p2", "preview2.mp3")
-
-			await audio.enterPreviewMode({ item: item1 })
-
-			vi.mocked(audioCache.get).mockImplementation(async () => {
-				audio.exitPreviewMode()
-
-				return {
-					audio: { uri: "file:///cache/audio.mp3" },
-					metadata: { title: "Test", artist: "Test", album: "Test", cachedAt: Date.now() }
-				} as never
-			})
-
-			preview.replace.mockClear()
-
-			await audio.switchPreviewTrack({ item: item2 })
-
-			expect(preview.replace).not.toHaveBeenCalled()
-		})
-	})
-
-	describe("pausePreview / resumePreview / seekPreview", () => {
-		it("pauses the preview player", async () => {
-			const { audio, preview } = await createAudio()
-
-			preview.pause.mockClear()
-
-			audio.pausePreview()
-
-			expect(preview.pause).toHaveBeenCalled()
-		})
-
-		it("resumes the preview player", async () => {
-			const { audio, preview } = await createAudio()
-
-			preview.play.mockClear()
-
-			audio.resumePreview()
-
-			expect(preview.play).toHaveBeenCalled()
-		})
-
-		it("seeks the preview player", async () => {
-			const { audio, preview } = await createAudio()
-
-			preview.seekTo.mockClear()
-
-			audio.seekPreview(15)
-
-			expect(preview.seekTo).toHaveBeenCalledWith(15)
-		})
-	})
-
-	describe("exitPreviewMode", () => {
-		it("pauses preview player and seeks to 0", async () => {
-			const { audio, preview } = await createAudio()
-			const item = makeFileItem("prev", "preview.mp3")
-
-			await audio.enterPreviewMode({ item })
-
-			preview.pause.mockClear()
-			preview.seekTo.mockClear()
-
-			audio.exitPreviewMode()
-
-			expect(preview.pause).toHaveBeenCalled()
-			expect(preview.seekTo).toHaveBeenCalledWith(0)
-		})
-
-		it("resets mode to queue and clears previewItem", async () => {
-			const { audio } = await createAudio()
-			const item = makeFileItem("prev", "preview.mp3")
-
-			await audio.enterPreviewMode({ item })
-
-			expect(audio.getMode()).toBe("preview")
-			expect(audio.getPreviewItem()).toBe(item)
-
-			audio.exitPreviewMode()
-
-			expect(audio.getMode()).toBe("queue")
-			expect(audio.getPreviewItem()).toBeNull()
-		})
-
-	})
-
-	describe("handlePlaylistTrackEnd", () => {
+	describe("handleTrackEnd", () => {
 		it("advances to next track", async () => {
 			const { audio, playlist } = await createAudio()
 
@@ -1024,7 +807,7 @@ describe("Audio", () => {
 
 			statusListener!({ didJustFinish: true, remoteAction: undefined })
 
-			// Track loop is handled by native player, so handlePlaylistTrackEnd returns early
+			// Track loop is handled by native player, so handleTrackEnd returns early
 			expect(audio.getQueuePosition()).toBe(0)
 			expect(playlist.replace).not.toHaveBeenCalled()
 			expect(playlist.pause).not.toHaveBeenCalled()
@@ -1068,16 +851,6 @@ describe("Audio", () => {
 	})
 
 	describe("getters", () => {
-		it("getMode returns current mode", async () => {
-			const { audio } = await createAudio()
-
-			expect(audio.getMode()).toBe("queue")
-
-			await audio.enterPreviewMode({ item: makeFileItem("p", "p.mp3") })
-
-			expect(audio.getMode()).toBe("preview")
-		})
-
 		it("getQueue returns readonly queue", async () => {
 			const { audio } = await createAudio()
 			const item = makeFileItem("a", "a.mp3")
@@ -1110,6 +883,12 @@ describe("Audio", () => {
 			const { audio } = await createAudio()
 
 			expect(audio.getCurrentQueueItem()).toBeNull()
+		})
+
+		it("isLoading reflects loading state", async () => {
+			const { audio } = await createAudio()
+
+			expect(audio.isLoading()).toBe(false)
 		})
 	})
 })

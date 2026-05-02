@@ -62,9 +62,10 @@ vi.mock("react-fast-compare", () => ({
 
 import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
-import type { DriveItem } from "@/types"
+import { type DriveItem, type CacheItem } from "@/types"
 import auth from "@/lib/auth"
-import type { Metadata } from "@/lib/fileCache"
+import { type Metadata } from "@/lib/fileCache"
+import { xxHash32 } from "js-xxhash"
 
 const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
 
@@ -95,6 +96,27 @@ function makeDirItem(uuid: string, name: string): DriveItem {
 	} as unknown as DriveItem
 }
 
+function wrapDrive(item: DriveItem): CacheItem {
+	return {
+		type: "drive",
+		data: item
+	}
+}
+
+function makeExternalItem(url: string, name: string): CacheItem {
+	return {
+		type: "external",
+		data: {
+			url,
+			name
+		}
+	}
+}
+
+function externalId(url: string): string {
+	return xxHash32(url).toString(16)
+}
+
 function extname(filename: string): string {
 	const dot = filename.lastIndexOf(".")
 
@@ -108,7 +130,7 @@ function writeFile(uuid: string, name: string, data: Uint8Array = new Uint8Array
 	fs.set(`${dir}/${uuid}${extname(name)}`, data)
 }
 
-function writeMetadata(uuid: string, item: DriveItem): void {
+function writeMetadata(uuid: string, item: CacheItem): void {
 	const dir = `${BASE_DIR}/${uuid}`
 
 	fs.set(dir, "dir")
@@ -149,7 +171,7 @@ describe("FileCache", () => {
 	describe("getFiles", () => {
 		it("returns file, metadata, and parentDirectory for a valid item", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("abc-123", "test.txt")
+			const item = wrapDrive(makeFileItem("abc-123", "test.txt"))
 
 			const result = cache.getFiles(item)
 
@@ -160,14 +182,17 @@ describe("FileCache", () => {
 
 		it("throws when item has no decryptedMeta", async () => {
 			const cache = await createFileCache()
-			const item = { type: "file", data: { uuid: "no-meta" } } as unknown as DriveItem
+			const item: CacheItem = {
+				type: "drive",
+				data: { type: "file", data: { uuid: "no-meta" } } as unknown as DriveItem
+			}
 
 			expect(() => cache.getFiles(item)).toThrow("Item does not have decrypted metadata")
 		})
 
 		it("creates UUID subdirectory if it doesn't exist", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("new-uuid", "doc.pdf")
+			const item = wrapDrive(makeFileItem("new-uuid", "doc.pdf"))
 
 			expect(fs.has(`${BASE_DIR}/new-uuid`)).toBe(false)
 
@@ -176,12 +201,25 @@ describe("FileCache", () => {
 			expect(fs.has(`${BASE_DIR}/new-uuid`)).toBe(true)
 			expect(fs.get(`${BASE_DIR}/new-uuid`)).toBe("dir")
 		})
+
+		it("returns file, metadata, and parentDirectory for an external item", async () => {
+			const cache = await createFileCache()
+			const url = "https://example.com/asset.png"
+			const item = makeExternalItem(url, "asset.png")
+			const id = externalId(url)
+
+			const result = cache.getFiles(item)
+
+			expect(result.file.uri).toBe(`${BASE_DIR}/${id}/${id}.png`)
+			expect(result.metadata.uri).toBe(`${BASE_DIR}/${id}/${id}.filenmeta`)
+			expect(result.parentDirectory.uri).toBe(`${BASE_DIR}/${id}`)
+		})
 	})
 
 	describe("has", () => {
 		it("returns true when file and metadata exist and match", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("has-uuid", "photo.jpg")
+			const item = wrapDrive(makeFileItem("has-uuid", "photo.jpg"))
 
 			writeFile("has-uuid", "photo.jpg")
 			writeMetadata("has-uuid", item)
@@ -193,7 +231,7 @@ describe("FileCache", () => {
 
 		it("returns false for non-file items", async () => {
 			const cache = await createFileCache()
-			const item = makeDirItem("dir-uuid", "my-folder")
+			const item = wrapDrive(makeDirItem("dir-uuid", "my-folder"))
 
 			const result = await cache.has(item)
 
@@ -202,7 +240,7 @@ describe("FileCache", () => {
 
 		it("returns false when file doesn't exist", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("missing-uuid", "gone.txt")
+			const item = wrapDrive(makeFileItem("missing-uuid", "gone.txt"))
 
 			writeMetadata("missing-uuid", item)
 
@@ -213,7 +251,7 @@ describe("FileCache", () => {
 
 		it("returns false when metadata doesn't exist", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("no-meta-uuid", "data.bin")
+			const item = wrapDrive(makeFileItem("no-meta-uuid", "data.bin"))
 
 			writeFile("no-meta-uuid", "data.bin")
 
@@ -224,7 +262,7 @@ describe("FileCache", () => {
 
 		it("returns false when metadata is empty", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("empty-meta", "file.txt")
+			const item = wrapDrive(makeFileItem("empty-meta", "file.txt"))
 
 			writeFile("empty-meta", "file.txt")
 
@@ -240,8 +278,8 @@ describe("FileCache", () => {
 
 		it("returns false when metadata doesn't match item", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("mismatch-uuid", "v2.txt")
-			const staleItem = makeFileItem("mismatch-uuid", "v1.txt")
+			const item = wrapDrive(makeFileItem("mismatch-uuid", "v2.txt"))
+			const staleItem = wrapDrive(makeFileItem("mismatch-uuid", "v1.txt"))
 
 			writeFile("mismatch-uuid", "v1.txt")
 			writeMetadata("mismatch-uuid", staleItem)
@@ -255,7 +293,7 @@ describe("FileCache", () => {
 	describe("get", () => {
 		it("returns cached file when metadata matches (cache hit)", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("cached-uuid", "cached.txt")
+			const item = wrapDrive(makeFileItem("cached-uuid", "cached.txt"))
 
 			writeFile("cached-uuid", "cached.txt", new Uint8Array([99]))
 			writeMetadata("cached-uuid", item)
@@ -268,7 +306,7 @@ describe("FileCache", () => {
 
 		it("downloads file via SDK when not cached (cache miss)", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("dl-uuid", "download.bin")
+			const item = wrapDrive(makeFileItem("dl-uuid", "download.bin"))
 
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
 				authedSdkClient: {
@@ -296,14 +334,14 @@ describe("FileCache", () => {
 
 		it("throws for non-file items", async () => {
 			const cache = await createFileCache()
-			const item = makeDirItem("dir-uuid", "folder")
+			const item = wrapDrive(makeDirItem("dir-uuid", "folder"))
 
 			await expect(cache.get({ item })).rejects.toThrow("Item must be a file or shared file")
 		})
 
 		it("cleans up on download failure", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("fail-uuid", "fail.bin")
+			const item = wrapDrive(makeFileItem("fail-uuid", "fail.bin"))
 
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
 				authedSdkClient: {
@@ -317,8 +355,8 @@ describe("FileCache", () => {
 
 		it("re-downloads when metadata doesn't match", async () => {
 			const cache = await createFileCache()
-			const staleItem = makeFileItem("redownload-uuid", "old.txt")
-			const newItem = makeFileItem("redownload-uuid", "new.txt")
+			const staleItem = wrapDrive(makeFileItem("redownload-uuid", "old.txt"))
+			const newItem = wrapDrive(makeFileItem("redownload-uuid", "new.txt"))
 
 			writeFile("redownload-uuid", "old.txt", new Uint8Array([1]))
 			writeMetadata("redownload-uuid", staleItem)
@@ -340,12 +378,12 @@ describe("FileCache", () => {
 
 		it("deletes existing file before re-downloading", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("replace-uuid", "replace.txt")
+			const item = wrapDrive(makeFileItem("replace-uuid", "replace.txt"))
 
 			writeFile("replace-uuid", "replace.txt", new Uint8Array([1, 2, 3]))
 
 			// Metadata doesn't match (different item to force re-download)
-			const otherItem = makeFileItem("replace-uuid", "other.txt")
+			const otherItem = wrapDrive(makeFileItem("replace-uuid", "other.txt"))
 
 			writeMetadata("replace-uuid", otherItem)
 
@@ -370,7 +408,7 @@ describe("FileCache", () => {
 
 		it("writes metadata after successful download", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("meta-write-uuid", "result.dat")
+			const item = wrapDrive(makeFileItem("meta-write-uuid", "result.dat"))
 
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
 				authedSdkClient: {
@@ -390,7 +428,29 @@ describe("FileCache", () => {
 
 			const meta = deserialize(new TextDecoder().decode(await metaFile.bytes())) as Metadata
 
-			expect(meta.type).toBe("file")
+			expect(meta.type).toBe("drive")
+			expect(meta.cachedAt).toBeTypeOf("number")
+		})
+
+		it("downloads external item via FileSystem.File.downloadFileAsync", async () => {
+			const cache = await createFileCache()
+			const url = "https://example.com/picture.jpg"
+			const item = makeExternalItem(url, "picture.jpg")
+			const id = externalId(url)
+
+			const file = await cache.get({ item })
+
+			expect(file).toBeInstanceOf(File)
+			expect(file.uri).toBe(`${BASE_DIR}/${id}/${id}.jpg`)
+			expect(file.exists).toBe(true)
+
+			const metaFile = new File(`${BASE_DIR}/${id}/${id}.filenmeta`)
+
+			expect(metaFile.exists).toBe(true)
+
+			const meta = deserialize(new TextDecoder().decode(await metaFile.bytes())) as Metadata
+
+			expect(meta.type).toBe("external")
 			expect(meta.cachedAt).toBeTypeOf("number")
 		})
 	})
@@ -398,7 +458,7 @@ describe("FileCache", () => {
 	describe("remove", () => {
 		it("removes file, metadata, and parent directory", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("rm-uuid", "remove-me.txt")
+			const item = wrapDrive(makeFileItem("rm-uuid", "remove-me.txt"))
 
 			writeFile("rm-uuid", "remove-me.txt")
 			writeMetadata("rm-uuid", item)
@@ -412,14 +472,14 @@ describe("FileCache", () => {
 
 		it("throws for non-file items", async () => {
 			const cache = await createFileCache()
-			const item = makeDirItem("dir-uuid", "folder")
+			const item = wrapDrive(makeDirItem("dir-uuid", "folder"))
 
 			await expect(cache.remove(item)).rejects.toThrow("Item must be a file or shared file")
 		})
 
 		it("does not throw when files don't exist", async () => {
 			const cache = await createFileCache()
-			const item = makeFileItem("ghost-uuid", "phantom.txt")
+			const item = wrapDrive(makeFileItem("ghost-uuid", "phantom.txt"))
 
 			await expect(cache.remove(item)).resolves.toBeUndefined()
 		})
@@ -446,7 +506,7 @@ describe("FileCache", () => {
 		it("keeps fresh entries", async () => {
 			const cache = await createFileCache()
 			const uuid = "fresh-uuid"
-			const item = makeFileItem(uuid, "fresh.txt")
+			const item = wrapDrive(makeFileItem(uuid, "fresh.txt"))
 			const dir = `${BASE_DIR}/${uuid}`
 
 			fs.set(dir, "dir")

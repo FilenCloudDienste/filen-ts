@@ -4,8 +4,6 @@ import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import audio, { useAudio } from "@/lib/audio"
-import alerts from "@/lib/alerts"
 import { type TextStyle, type LayoutChangeEvent, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
 import { ImageBackground, Image } from "@/components/ui/image"
@@ -14,10 +12,12 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler"
 import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDerivedValue } from "react-native-reanimated"
 import { runOnJS } from "react-native-worklets"
 import { Paths } from "expo-file-system"
-import type { DriveItemFileExtracted } from "@/types"
 import { type Metadata } from "@/lib/audioCache"
-import useEffectOnce from "@/hooks/useEffectOnce"
 import { useRecyclingState } from "@shopify/flash-list"
+import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
+import audio from "@/lib/audio"
+import useEffectOnce from "@/hooks/useEffectOnce"
 
 const FONT_TABULAR_NUMS: TextStyle = {
 	fontVariant: ["tabular-nums"]
@@ -182,9 +182,9 @@ const AudioSlider = memo(
 		currentTime: number
 		duration: number
 		onSeek: (seconds: number) => void
-		item: DriveItemFileExtracted
+		item: GalleryItemTagged
 	}) => {
-		const [trackWidth, setTrackWidth] = useRecyclingState<number>(0, [item.data.uuid])
+		const [trackWidth, setTrackWidth] = useRecyclingState<number>(0, [item.type === "drive" ? item.data.data.uuid : item.data.url])
 		const isSeeking = useSharedValue<boolean>(false)
 		const seekProgress = useSharedValue<number>(0)
 		const thumbScale = useSharedValue<number>(1)
@@ -284,40 +284,18 @@ const AudioSlider = memo(
 	}
 )
 
-const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtracted; metadata: Metadata }) => {
-	const { status, pausePreview, resumePreview, seekPreview, loading } = useAudio()
+const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItemTagged; metadata: Metadata; fileUrl: string }) => {
+	const player = useAudioPlayer(fileUrl, {
+		updateInterval: 1000,
+		crossOrigin: "anonymous"
+	})
+	const status = useAudioPlayerStatus(player)
 
-	const isLoadingOrBuffering = loading || (status["preview"]?.isBuffering ?? false) || !(status["preview"]?.isLoaded ?? false)
-
-	const onPlayPause = () => {
-		if (isLoadingOrBuffering) {
-			return
-		}
-
-		if (status["preview"] && status["preview"].playing) {
-			pausePreview()
-		} else if (status["preview"] && status["preview"].didJustFinish) {
-			seekPreview(0)
-			resumePreview()
-		} else {
-			resumePreview()
-		}
-	}
-
-	const onSeek = (seconds: number) => {
-		seekPreview(seconds)
-	}
+	const isLoadingOrBuffering = status.isBuffering || !status.isLoaded
 
 	useEffectOnce(() => {
-		audio.enterPreviewMode({ item }).catch(err => {
-			console.error(err)
-			alerts.error(err)
-		})
-
-		return () => {
-			// TODO: Fix when exiting drivePreview and playlist player is active
-			// audio.exitPreviewMode()
-		}
+		audio.setAudioMode()
+		audio.pause()
 	})
 
 	return (
@@ -358,14 +336,31 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{Paths.parse(item.data.decryptedMeta?.name ?? item.data.uuid).name}
+							{
+								Paths.parse(
+									item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? item.data.data.uuid) : item.data.name
+								).name
+							}
 						</Text>
 					</Fragment>
 				)}
 			</View>
 			<PressableScale
 				className="bg-white/20 size-16 rounded-full mt-10 mb-6 items-center justify-center"
-				onPress={onPlayPause}
+				onPress={() => {
+					if (isLoadingOrBuffering) {
+						return
+					}
+
+					if (status.playing) {
+						player.pause()
+					} else if (status.didJustFinish) {
+						player.seekTo(0)
+						player.play()
+					} else {
+						player.play()
+					}
+				}}
 			>
 				{isLoadingOrBuffering ? (
 					<ActivityIndicator
@@ -374,7 +369,7 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 					/>
 				) : (
 					<Ionicons
-						name={status["preview"]?.playing ? "pause" : "play"}
+						name={status.playing ? "pause" : "play"}
 						size={32}
 						color="white"
 					/>
@@ -383,9 +378,11 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 			<View className="bg-transparent px-4 w-full">
 				<AudioSlider
 					item={item}
-					currentTime={status["preview"]?.currentTime ?? 0}
-					duration={status["preview"]?.duration ?? 0}
-					onSeek={onSeek}
+					currentTime={status.currentTime}
+					duration={status.duration}
+					onSeek={seconds => {
+						player.seekTo(seconds)
+					}}
 				/>
 			</View>
 			<View className="w-full flex-row justify-between bg-transparent px-4">
@@ -393,23 +390,36 @@ const PreviewAudioInner = memo(({ item, metadata }: { item: DriveItemFileExtract
 					className="text-white/70 text-xs"
 					style={FONT_TABULAR_NUMS}
 				>
-					{formatAudioTime(status["preview"]?.currentTime ?? 0)}
+					{formatAudioTime(status.currentTime)}
 				</Text>
 				<Text
 					className="text-white/70 text-xs"
 					style={FONT_TABULAR_NUMS}
 				>
-					{formatAudioTime(status["preview"]?.duration ?? metadata?.duration ?? 0)}
+					{formatAudioTime(status.duration)}
 				</Text>
 			</View>
 		</Background>
 	)
 })
 
-const PreviewAudio = memo(({ item }: { item: DriveItemFileExtracted }) => {
-	const audioMetadataQuery = useAudioMetadataQuery({
-		uuid: item.data.uuid
-	})
+const PreviewAudio = memo(({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: string }) => {
+	const audioMetadataQuery = useAudioMetadataQuery(
+		item.type === "drive"
+			? {
+					type: "drive",
+					data: {
+						uuid: item.data.data.uuid
+					}
+				}
+			: {
+					type: "external",
+					data: {
+						url: item.data.url,
+						name: item.data.name
+					}
+				}
+	)
 
 	if (audioMetadataQuery.status !== "success") {
 		return (
@@ -426,6 +436,7 @@ const PreviewAudio = memo(({ item }: { item: DriveItemFileExtracted }) => {
 		<PreviewAudioInner
 			item={item}
 			metadata={audioMetadataQuery.data}
+			fileUrl={fileUrl}
 		/>
 	)
 })

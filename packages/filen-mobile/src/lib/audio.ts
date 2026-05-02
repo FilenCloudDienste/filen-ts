@@ -15,68 +15,45 @@ export type QueueItem = {
 
 export type LoopMode = "none" | "track" | "queue"
 
-export type Mode = "queue" | "preview"
-
 export class Audio {
-	// Two separate players — they never interfere with each other
-	private readonly playlistPlayer = createAudioPlayer(undefined, {
-		updateInterval: 500,
+	private readonly player = createAudioPlayer(undefined, {
+		updateInterval: 1000,
 		crossOrigin: "anonymous"
 	})
-	private readonly previewPlayer = createAudioPlayer(undefined, {
-		updateInterval: 500,
-		crossOrigin: "anonymous"
-	})
-
-	// Queue/playlist state
 	private queue: QueueItem[] = []
 	private queuePosition = 0
 	private loopMode: LoopMode = "none"
 	private shuffled = false
 	private shuffleOrder: number[] = []
-
-	// Mode tracking
-	private mode: Mode = "queue"
-	private previewItem: DriveItemFileExtracted | null = null
 	private loading = false
-
-	// Concurrency control
-	private operationId = 0
-	private readonly previewMutex = new Semaphore(1)
 	private readonly queueMutex = new Semaphore(1)
 
 	public constructor() {
-		setAudioModeAsync({
-			interruptionMode: "doNotMix",
-			playsInSilentMode: true,
-			allowsRecording: false,
-			shouldPlayInBackground: true,
-			shouldRouteThroughEarpiece: false,
-			allowsBackgroundRecording: false
-		}).catch(console.error)
+		this.setAudioMode()
 
-		this.playlistPlayer.addListener("playbackStatusUpdate", status => {
-			events.emit("audioStatus", {
-				mode: "queue",
-				status
-			})
+		this.player.addListener("playbackStatusUpdate", status => {
+			events.emit("audioStatus", status)
 
-			if (status.didJustFinish && this.mode === "queue") {
-				this.handlePlaylistTrackEnd()
+			if (status.didJustFinish) {
+				this.handleTrackEnd()
 			}
 		})
+	}
 
-		this.previewPlayer.addListener("playbackStatusUpdate", status => {
-			events.emit("audioStatus", {
-				mode: "preview",
-				status
+	public setAudioMode(): void {
+		run(async () => {
+			await setAudioModeAsync({
+				interruptionMode: "doNotMix",
+				playsInSilentMode: true,
+				allowsRecording: false,
+				shouldPlayInBackground: true,
+				shouldRouteThroughEarpiece: false,
+				allowsBackgroundRecording: false
 			})
 		})
 	}
 
-	private handlePlaylistTrackEnd(): void {
-		// Native player.loop handles track looping — this guard is defensive
-		// in case didJustFinish fires despite loop being on
+	private handleTrackEnd(): void {
 		if (this.loopMode === "track") {
 			return
 		}
@@ -92,7 +69,7 @@ export class Audio {
 				return
 			}
 
-			this.playlistPlayer.pause()
+			this.player.pause()
 
 			return
 		}
@@ -151,13 +128,13 @@ export class Audio {
 			return
 		}
 
-		this.playlistPlayer.replace({
+		this.player.replace({
 			uri: entry.audio.uri,
 			name: this.trackName(entry.item, entry.metadata)
 		})
 
-		this.playlistPlayer.play()
-		this.updatePlaylistLockScreen(entry)
+		this.player.play()
+		this.updateLockScreen(entry)
 	}
 
 	private loadWithoutPlaying(queueIndex: number): void {
@@ -167,16 +144,16 @@ export class Audio {
 			return
 		}
 
-		this.playlistPlayer.replace({
+		this.player.replace({
 			uri: entry.audio.uri,
 			name: this.trackName(entry.item, entry.metadata)
 		})
 
-		this.updatePlaylistLockScreen(entry)
+		this.updateLockScreen(entry)
 	}
 
-	private updatePlaylistLockScreen(entry: QueueItem): void {
-		this.playlistPlayer.setActiveForLockScreen(
+	private updateLockScreen(entry: QueueItem): void {
+		this.player.setActiveForLockScreen(
 			true,
 			{
 				title: this.trackName(entry.item, entry.metadata),
@@ -225,15 +202,9 @@ export class Audio {
 		this.queuePosition = 0
 	}
 
-	// ──────────────────────────────────────────────
-	// Queue/playlist mode — public API
-	// ──────────────────────────────────────────────
-
 	public async addToQueue({ item, position = "end" }: { item: DriveItemFileExtracted; position?: "start" | "end" }): Promise<void> {
 		await run(
 			async defer => {
-				const myOp = this.operationId
-
 				await this.queueMutex.acquire()
 
 				defer(() => {
@@ -244,12 +215,11 @@ export class Audio {
 				this.setLoading(true)
 
 				const { audio, metadata } = await audioCache.get({
-					item
+					item: {
+						type: "drive",
+						data: item
+					}
 				})
-
-				if (this.operationId !== myOp) {
-					return
-				}
 
 				const queueItem: QueueItem = {
 					item,
@@ -290,26 +260,22 @@ export class Audio {
 			if (this.queue.length > 0) {
 				this.loadWithoutPlaying(this.getEffectiveIndex(this.queuePosition))
 			} else {
-				this.stopPlaylist()
+				this.stop()
 			}
 		}
 	}
 
 	public clearQueue(): void {
-		this.operationId++
-
 		this.queue = []
 		this.queuePosition = 0
 		this.shuffleOrder = []
-		this.playlistPlayer.pause()
-		this.playlistPlayer.clearLockScreenControls()
+		this.player.pause()
+		this.player.clearLockScreenControls()
 	}
 
 	public async play(item?: DriveItemFileExtracted): Promise<void> {
 		await run(
 			async defer => {
-				const myOp = this.operationId
-
 				await this.queueMutex.acquire()
 
 				defer(() => {
@@ -321,12 +287,11 @@ export class Audio {
 					this.setLoading(true)
 
 					const { audio, metadata } = await audioCache.get({
-						item
+						item: {
+							type: "drive",
+							data: item
+						}
 					})
-
-					if (this.operationId !== myOp) {
-						return
-					}
 
 					const queueItem: QueueItem = {
 						item,
@@ -343,8 +308,8 @@ export class Audio {
 					return
 				}
 
-				if (this.playlistPlayer.paused && this.playlistPlayer.isLoaded && this.queue.length > 0) {
-					this.playlistPlayer.play()
+				if (this.player.paused && this.player.isLoaded && this.queue.length > 0) {
+					this.player.play()
 
 					return
 				}
@@ -359,19 +324,17 @@ export class Audio {
 		)
 	}
 
-	public pausePlaylist(): void {
-		this.playlistPlayer.pause()
+	public pause(): void {
+		this.player.pause()
 	}
 
-	public resumePlaylist(): void {
+	public resume(): void {
 		if (this.queue.length > 0) {
-			this.playlistPlayer.play()
+			this.player.play()
 		}
 	}
 
 	public next(): void {
-		this.operationId++
-
 		const nextIndex = this.getNextIndex()
 
 		if (nextIndex === null) {
@@ -392,11 +355,9 @@ export class Audio {
 	}
 
 	public previous(): void {
-		this.operationId++
-
 		// If more than 3 seconds in, restart the current track instead of going back
-		if (this.playlistPlayer.currentTime > 3) {
-			this.playlistPlayer.seekTo(0)
+		if (this.player.currentTime > 3) {
+			this.player.seekTo(0)
 
 			return
 		}
@@ -412,7 +373,7 @@ export class Audio {
 				return
 			}
 
-			this.playlistPlayer.seekTo(0)
+			this.player.seekTo(0)
 
 			return
 		}
@@ -422,21 +383,19 @@ export class Audio {
 		this.loadAndPlay(this.getEffectiveIndex(prevIndex))
 	}
 
-	public seekPlaylist(seconds: number): void {
-		this.playlistPlayer.seekTo(seconds)
+	public seek(seconds: number): void {
+		this.player.seekTo(seconds)
 	}
 
-	public stopPlaylist(): void {
-		this.operationId++
-
-		this.playlistPlayer.pause()
-		this.playlistPlayer.seekTo(0)
-		this.playlistPlayer.clearLockScreenControls()
+	public stop(): void {
+		this.player.pause()
+		this.player.seekTo(0)
+		this.player.clearLockScreenControls()
 	}
 
 	public setLoopMode(mode: LoopMode): void {
 		this.loopMode = mode
-		this.playlistPlayer.loop = mode === "track"
+		this.player.loop = mode === "track"
 	}
 
 	public toggleShuffle(): void {
@@ -457,121 +416,9 @@ export class Audio {
 			return
 		}
 
-		this.operationId++
 		this.queuePosition = index
 
 		this.loadAndPlay(this.getEffectiveIndex(index))
-	}
-
-	// ──────────────────────────────────────────────
-	// Preview mode — public API
-	// ──────────────────────────────────────────────
-
-	public async enterPreviewMode({ item, autoPlay = false }: { item: DriveItemFileExtracted; autoPlay?: boolean }): Promise<void> {
-		await run(
-			async defer => {
-				const myOp = ++this.operationId
-
-				await this.previewMutex.acquire()
-
-				defer(() => {
-					this.setLoading(false)
-					this.previewMutex.release()
-				})
-
-				this.playlistPlayer.pause()
-
-				this.mode = "preview"
-				this.previewItem = item
-				this.setLoading(true)
-
-				const { audio, metadata } = await audioCache.get({
-					item
-				})
-
-				if (this.operationId !== myOp) {
-					return
-				}
-
-				this.previewPlayer.replace({
-					uri: audio.uri,
-					name: this.trackName(item, metadata)
-				})
-
-				if (autoPlay) {
-					this.previewPlayer.play()
-				}
-			},
-			{
-				throw: true
-			}
-		)
-	}
-
-	public async switchPreviewTrack({ item }: { item: DriveItemFileExtracted }): Promise<void> {
-		await run(
-			async defer => {
-				const myOp = ++this.operationId
-
-				await this.previewMutex.acquire()
-
-				defer(() => {
-					this.setLoading(false)
-					this.previewMutex.release()
-				})
-
-				this.previewPlayer.pause()
-
-				this.previewItem = item
-				this.setLoading(true)
-
-				const { audio, metadata } = await audioCache.get({
-					item
-				})
-
-				if (this.operationId !== myOp) {
-					return
-				}
-
-				this.previewPlayer.replace({
-					uri: audio.uri,
-					name: this.trackName(item, metadata)
-				})
-			},
-			{
-				throw: true
-			}
-		)
-	}
-
-	public pausePreview(): void {
-		this.previewPlayer.pause()
-	}
-
-	public resumePreview(): void {
-		this.previewPlayer.play()
-	}
-
-	public seekPreview(seconds: number): void {
-		this.previewPlayer.seekTo(seconds)
-	}
-
-	public exitPreviewMode(): void {
-		this.operationId++
-
-		this.previewPlayer.pause()
-		this.previewPlayer.seekTo(0)
-
-		this.mode = "queue"
-		this.previewItem = null
-	}
-
-	// ──────────────────────────────────────────────
-	// Getters
-	// ──────────────────────────────────────────────
-
-	public getMode(): Mode {
-		return this.mode
 	}
 
 	public getQueue(): readonly QueueItem[] {
@@ -584,10 +431,6 @@ export class Audio {
 
 	public getCurrentQueueItem(): QueueItem | null {
 		return this.queue[this.getEffectiveIndex(this.queuePosition)] ?? null
-	}
-
-	public getPreviewItem(): DriveItemFileExtracted | null {
-		return this.previewItem
 	}
 
 	public getLoopMode(): LoopMode {
@@ -606,10 +449,7 @@ export class Audio {
 const audio = new Audio()
 
 export function useAudio() {
-	const [status, setStatus] = useState<Record<Mode, AudioStatus | null>>({
-		queue: null,
-		preview: null
-	})
+	const [status, setStatus] = useState<AudioStatus | null>(null)
 	const [loading, setLoadingState] = useState<boolean>(false)
 
 	const play = (item?: DriveItemFileExtracted) => {
@@ -619,12 +459,12 @@ export function useAudio() {
 		})
 	}
 
-	const pausePlaylist = () => {
-		audio.pausePlaylist()
+	const pause = () => {
+		audio.pause()
 	}
 
-	const resumePlaylist = () => {
-		audio.resumePlaylist()
+	const resume = () => {
+		audio.resume()
 	}
 
 	const next = () => {
@@ -635,8 +475,8 @@ export function useAudio() {
 		audio.previous()
 	}
 
-	const seekPlaylist = (seconds: number) => {
-		audio.seekPlaylist(seconds)
+	const seek = (seconds: number) => {
+		audio.seek(seconds)
 	}
 
 	const addToQueue = (params: Parameters<typeof audio.addToQueue>[0]) => {
@@ -666,48 +506,12 @@ export function useAudio() {
 		audio.skipTo(index)
 	}
 
-	const stopPlaylist = () => {
-		audio.stopPlaylist()
-	}
-
-	const enterPreviewMode = (params: Parameters<typeof audio.enterPreviewMode>[0]) => {
-		audio.enterPreviewMode(params).catch(err => {
-			console.error(err)
-			alerts.error(err)
-		})
-	}
-
-	const switchPreviewTrack = (params: Parameters<typeof audio.switchPreviewTrack>[0]) => {
-		audio.switchPreviewTrack(params).catch(err => {
-			console.error(err)
-			alerts.error(err)
-		})
-	}
-
-	const pausePreview = () => {
-		audio.pausePreview()
-	}
-
-	const resumePreview = () => {
-		audio.resumePreview()
-	}
-
-	const seekPreview = (seconds: number) => {
-		audio.seekPreview(seconds)
-	}
-
-	const exitPreviewMode = () => {
-		audio.exitPreviewMode()
+	const stop = () => {
+		audio.stop()
 	}
 
 	useEffect(() => {
-		const statusSubscription = events.subscribe("audioStatus", info => {
-			setStatus(prev => ({
-				...prev,
-				[info.mode]: info.status
-			}))
-		})
-
+		const statusSubscription = events.subscribe("audioStatus", setStatus)
 		const loadingSubscription = events.subscribe("audioLoading", setLoadingState)
 
 		return () => {
@@ -719,32 +523,24 @@ export function useAudio() {
 	return {
 		status,
 		loading,
-		mode: () => audio.getMode(),
 		queue: () => audio.getQueue(),
 		queuePosition: () => audio.getQueuePosition(),
 		currentQueueItem: () => audio.getCurrentQueueItem(),
-		previewItem: () => audio.getPreviewItem(),
 		loopMode: () => audio.getLoopMode(),
 		shuffled: () => audio.isShuffled(),
 		play,
-		pausePlaylist,
-		resumePlaylist,
+		pause,
+		resume,
 		next,
 		previous,
-		seekPlaylist,
+		seek,
 		addToQueue,
 		removeFromQueue,
 		clearQueue,
 		setLoopMode,
 		toggleShuffle,
 		skipTo,
-		stopPlaylist,
-		enterPreviewMode,
-		switchPreviewTrack,
-		pausePreview,
-		resumePreview,
-		seekPreview,
-		exitPreviewMode
+		stop
 	}
 }
 

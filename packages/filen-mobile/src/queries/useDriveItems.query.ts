@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
-import { sortParams } from "@filen/utils"
+import { sortParams, run } from "@filen/utils"
 import {
 	type File,
 	type Dir,
@@ -14,10 +14,15 @@ import {
 	AnyDirWithContext,
 	type NormalDirsAndFiles,
 	type SharedRootDirsAndFiles,
-	NonRootDir_Tags
+	NonRootDir_Tags,
+	type LinkedDirsAndFiles,
+	AnyLinkedDir,
+	type DirPublicLink,
+	ErrorKind,
+	AnyLinkedDirWithContext
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
-import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapSdkError } from "@/lib/utils"
 import type { DriveItem } from "@/types"
 import offline from "@/lib/offline"
 import cameraUpload from "@/lib/cameraUpload"
@@ -30,6 +35,11 @@ export type UseDriveItemsQueryParams = {
 
 export type NormalResult = NormalDirsAndFiles & {
 	type: "normal"
+}
+
+export type LinkedResult = LinkedDirsAndFiles & {
+	type: "linked"
+	meta: DirPublicLink | null
 }
 
 export type SharedResult = {
@@ -52,7 +62,7 @@ export type OfflineResult = {
 	type: "offline"
 }
 
-export type Result = NormalResult | SharedRootResult | SharedResult | OfflineResult | undefined
+export type Result = NormalResult | SharedRootResult | SharedResult | OfflineResult | LinkedResult | undefined
 
 export async function fetchData(
 	params: UseDriveItemsQueryParams & {
@@ -191,9 +201,6 @@ export async function fetchData(
 				if (!parent) {
 					const result = await authedSdkClient.listInSharedRoot(signal)
 
-					console.log("sharedIn root result", result.dirs.at(0)?.sharingRole)
-					console.log("sharedIn root result", result.files.at(0)?.sharingRole)
-
 					return {
 						...result,
 						type: "sharedRoot"
@@ -205,9 +212,6 @@ export async function fetchData(
 					files: [],
 					type: "shared"
 				}
-
-				console.log("sharedIn parent", parent)
-				console.log("sharedIn parent shareInfo", parent.shareInfo)
 
 				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
 
@@ -246,9 +250,6 @@ export async function fetchData(
 				if (!parent) {
 					const result = await authedSdkClient.listOutShared(undefined, signal)
 
-					console.log("sharedOut root result", result.dirs.at(0)?.sharingRole)
-					console.log("sharedOut root result", result.files.at(0)?.sharingRole)
-
 					return {
 						...result,
 						type: "sharedRoot"
@@ -262,9 +263,6 @@ export async function fetchData(
 				}
 
 				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
-
-				console.log("sharedOut parent", parent)
-				console.log("sharedOut parent shareInfo", parent.shareInfo)
 
 				for (const resultDir of dirs) {
 					result.dirs.push({
@@ -358,6 +356,78 @@ export async function fetchData(
 					files: offlineFileItems,
 					type: "offline" as const
 				}
+			}
+
+			case "linked": {
+				if (!params.path.linked) {
+					return {
+						dirs: [],
+						files: [],
+						type: "linked",
+						meta: null
+					} satisfies Result
+				}
+
+				const parent = (() => {
+					if (!params.path.uuid || params.path.uuid.length === 0) {
+						return null
+					}
+
+					const cachedDir = cache.directoryUuidToAnyLinkedDirWithMeta.get(params.path.uuid)
+
+					if (cachedDir) {
+						return cachedDir
+					}
+
+					return null
+				})()
+
+				if (!parent) {
+					const info = await authedSdkClient.getDirPublicLinkInfo(params.path.linked.uuid, params.path.linked.key, signal)
+
+					const meta = {
+						...info.link,
+						password: params.path.linked?.password
+					}
+
+					const result = await run(async () => {
+						return authedSdkClient.listLinkedDir(new AnyLinkedDir.Root(info.root), meta, undefined, signal)
+					})
+
+					if (!result.success) {
+						const unwrappedSdkError = unwrapSdkError(result.error)
+
+						if (unwrappedSdkError?.kind() === ErrorKind.WrongPassword) {
+							return {
+								dirs: [],
+								files: [],
+								type: "linked",
+								meta: null
+							} satisfies Result
+						}
+
+						throw result.error
+					}
+
+					return {
+						...result.data,
+						type: "linked",
+						meta
+					} satisfies Result
+				}
+
+				const meta = {
+					...parent.meta,
+					password: params.path.linked?.password
+				}
+
+				const result = await authedSdkClient.listLinkedDir(parent.dir, meta, undefined, signal)
+
+				return {
+					...result,
+					type: "linked",
+					meta
+				} satisfies Result
 			}
 
 			default: {
@@ -501,6 +571,47 @@ export async function fetchData(
 			}
 
 			break
+		}
+
+		case "linked": {
+			for (const resultDir of result.dirs) {
+				const unwrappedDir = unwrapDirMeta(resultDir.inner)
+				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+
+				items.push(driveItem)
+
+				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
+
+				if (unwrappedDir.meta?.name) {
+					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+				}
+
+				if (result.meta) {
+					cache.directoryUuidToAnyLinkedDirWithMeta.set(unwrappedDir.uuid, {
+						dir: new AnyLinkedDir.Dir(resultDir),
+						meta: result.meta
+					})
+
+					cache.directoryUuidToAnyDirWithContext.set(
+						unwrappedDir.uuid,
+						new AnyDirWithContext.Linked(
+							AnyLinkedDirWithContext.new({
+								dir: new AnyLinkedDir.Dir(resultDir),
+								link: result.meta
+							})
+						)
+					)
+				}
+			}
+
+			for (const resultFile of result.files) {
+				const unwrappedFile = unwrapFileMeta(resultFile)
+				const driveItem = unwrappedFileIntoDriveItem(unwrappedFile)
+
+				items.push(driveItem)
+
+				cache.uuidToAnyDriveItem.set(unwrappedFile.file.uuid, driveItem)
+			}
 		}
 	}
 

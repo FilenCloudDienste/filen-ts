@@ -4,7 +4,18 @@ import type { DriveItem } from "@/types"
 import { deserialize } from "@/lib/serializer"
 import { useCameraUpload } from "@/lib/cameraUpload"
 
-export const DRIVE_PATH_TYPES = ["drive", "sharedIn", "recents", "favorites", "trash", "sharedOut", "offline", "links", "photos"] as const
+export const DRIVE_PATH_TYPES = [
+	"drive",
+	"sharedIn",
+	"recents",
+	"favorites",
+	"trash",
+	"sharedOut",
+	"offline",
+	"links",
+	"photos",
+	"linked"
+] as const
 export type DrivePathType = (typeof DRIVE_PATH_TYPES)[number]
 
 export type SelectOptions = {
@@ -16,22 +27,32 @@ export type SelectOptions = {
 	id: string
 }
 
+export type Linked = {
+	uuid: string
+	key: string
+	rootName: string
+	password?: string
+}
+
 export type DrivePath =
 	| {
 			type: DrivePathType
 			uuid: string | null
 			selectOptions?: SelectOptions
+			linked?: Linked
 	  }
 	| {
 			type: null
 			uuid: null
 			selectOptions?: SelectOptions
+			linked?: Linked
 	  }
 
 export default function useDrivePath(): DrivePath {
 	const searchParams = useLocalSearchParams<{
 		uuid?: string
 		selectOptions?: string
+		linked?: string
 	}>()
 	const { getId: getNavigationId } = useNavigation()
 	const { config: cameraUploadConfig } = useCameraUpload()
@@ -57,16 +78,42 @@ export default function useDrivePath(): DrivePath {
 		return null
 	})()
 
+	const linked = ((): Linked | null => {
+		if (searchParams && searchParams.linked) {
+			try {
+				const parsed = deserialize(searchParams.linked) as Linked
+
+				return parsed
+			} catch {
+				return null
+			}
+		}
+
+		return null
+	})()
+
 	const drivePath = ((): DrivePath => {
 		const navigationId = getNavigationId() ?? ""
 		const isDriveSelectScreen = navigationId.startsWith("/driveSelect")
+		const uuid =
+			searchParams && searchParams.uuid && searchParams.uuid.length > 0 && validateUuid(searchParams.uuid) ? searchParams.uuid : null
 
 		if (isDriveSelectScreen && selectOptions) {
 			return {
 				type: "drive",
-				uuid: searchParams && searchParams.uuid && validateUuid(searchParams.uuid) ? searchParams.uuid : null,
+				uuid,
 				selectOptions
 			}
+		}
+
+		const isLinkedDirScreen = navigationId.startsWith("/linkedDir")
+
+		if (isLinkedDirScreen && linked) {
+			return {
+				type: "linked",
+				uuid,
+				linked
+			} satisfies DrivePath
 		}
 
 		const isDriveScreen = navigationId.startsWith("/tabs/drive")
@@ -108,9 +155,7 @@ export default function useDrivePath(): DrivePath {
 					? cameraUploadConfig.enabled && cameraUploadConfig.remoteDir
 						? cameraUploadConfig.remoteDir.inner[0].uuid
 						: null
-					: searchParams && searchParams.uuid && validateUuid(searchParams.uuid)
-						? searchParams.uuid
-						: null
+					: uuid
 			}
 		} else if (isTrashScreen) {
 			return {

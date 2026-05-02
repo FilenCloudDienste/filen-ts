@@ -878,6 +878,238 @@ describe("serializer", () => {
 		})
 	})
 
+	describe("binary types", () => {
+		it("round-trips ArrayBuffer preserving bytes", () => {
+			const source = new Uint8Array([1, 2, 3, 4, 5])
+			const buffer = source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength)
+			const result = roundtrip(buffer)
+
+			expect(result).toBeInstanceOf(ArrayBuffer)
+			expect(result.byteLength).toBe(5)
+			expect(Array.from(new Uint8Array(result))).toEqual([1, 2, 3, 4, 5])
+		})
+
+		it("round-trips empty ArrayBuffer", () => {
+			const result = roundtrip(new ArrayBuffer(0))
+
+			expect(result).toBeInstanceOf(ArrayBuffer)
+			expect(result.byteLength).toBe(0)
+		})
+
+		it("round-trips Uint8Array preserving bytes and type", () => {
+			const arr = new Uint8Array([10, 20, 30, 40])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Uint8Array)
+			expect(result.length).toBe(4)
+			expect(Array.from(result)).toEqual([10, 20, 30, 40])
+		})
+
+		it("round-trips empty Uint8Array", () => {
+			const result = roundtrip(new Uint8Array(0))
+
+			expect(result).toBeInstanceOf(Uint8Array)
+			expect(result.length).toBe(0)
+		})
+
+		it("round-trips Int8Array with negative values", () => {
+			const arr = new Int8Array([-128, -1, 0, 1, 127])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Int8Array)
+			expect(Array.from(result)).toEqual([-128, -1, 0, 1, 127])
+		})
+
+		it("round-trips Uint8ClampedArray", () => {
+			const arr = new Uint8ClampedArray([0, 100, 200, 255])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Uint8ClampedArray)
+			expect(Array.from(result)).toEqual([0, 100, 200, 255])
+		})
+
+		it("round-trips Int16Array", () => {
+			const arr = new Int16Array([-32768, -1, 0, 1, 32767])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Int16Array)
+			expect(Array.from(result)).toEqual([-32768, -1, 0, 1, 32767])
+		})
+
+		it("round-trips Uint16Array", () => {
+			const arr = new Uint16Array([0, 256, 65535])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Uint16Array)
+			expect(Array.from(result)).toEqual([0, 256, 65535])
+		})
+
+		it("round-trips Int32Array", () => {
+			const arr = new Int32Array([-2147483648, -1, 0, 1, 2147483647])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Int32Array)
+			expect(Array.from(result)).toEqual([-2147483648, -1, 0, 1, 2147483647])
+		})
+
+		it("round-trips Uint32Array", () => {
+			const arr = new Uint32Array([0, 1, 4294967295])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Uint32Array)
+			expect(Array.from(result)).toEqual([0, 1, 4294967295])
+		})
+
+		it("round-trips Float32Array", () => {
+			const arr = new Float32Array([1.5, -2.5, 0, 3.14])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Float32Array)
+			expect(result.length).toBe(4)
+			expect(result[0]).toBeCloseTo(1.5)
+			expect(result[1]).toBeCloseTo(-2.5)
+			expect(result[2]).toBe(0)
+			expect(result[3]).toBeCloseTo(3.14)
+		})
+
+		it("round-trips Float64Array", () => {
+			const arr = new Float64Array([Math.PI, Math.E, Number.MAX_VALUE, Number.MIN_VALUE])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(Float64Array)
+			expect(result[0]).toBe(Math.PI)
+			expect(result[1]).toBe(Math.E)
+			expect(result[2]).toBe(Number.MAX_VALUE)
+			expect(result[3]).toBe(Number.MIN_VALUE)
+		})
+
+		it("round-trips BigInt64Array", () => {
+			const arr = new BigInt64Array([-9223372036854775808n, 0n, 9223372036854775807n])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(BigInt64Array)
+			expect(result[0]).toBe(-9223372036854775808n)
+			expect(result[1]).toBe(0n)
+			expect(result[2]).toBe(9223372036854775807n)
+		})
+
+		it("round-trips BigUint64Array", () => {
+			const arr = new BigUint64Array([0n, 1n, 18446744073709551615n])
+			const result = roundtrip(arr)
+
+			expect(result).toBeInstanceOf(BigUint64Array)
+			expect(result[0]).toBe(0n)
+			expect(result[1]).toBe(1n)
+			expect(result[2]).toBe(18446744073709551615n)
+		})
+
+		it("round-trips DataView preserving bytes", () => {
+			const buffer = new ArrayBuffer(8)
+			const view = new DataView(buffer)
+
+			view.setInt32(0, 0x12345678, false)
+			view.setInt32(4, -1, false)
+
+			const result = roundtrip(view)
+
+			expect(result).toBeInstanceOf(DataView)
+			expect(result.byteLength).toBe(8)
+			expect(result.getInt32(0, false)).toBe(0x12345678)
+			expect(result.getInt32(4, false)).toBe(-1)
+		})
+
+		it("round-trips Buffer preserving bytes and type", () => {
+			const buf = Buffer.from([1, 2, 3, 4, 5])
+			const result = roundtrip(buf)
+
+			expect(Buffer.isBuffer(result)).toBe(true)
+			expect(result.length).toBe(5)
+			expect(Array.from(result)).toEqual([1, 2, 3, 4, 5])
+		})
+
+		it("round-trips empty Buffer", () => {
+			const result = roundtrip(Buffer.alloc(0))
+
+			expect(Buffer.isBuffer(result)).toBe(true)
+			expect(result.length).toBe(0)
+		})
+
+		it("serializes only the view's bytes for a subarray", () => {
+			const full = new Uint8Array([10, 20, 30, 40, 50, 60])
+			const slice = full.subarray(2, 5)
+			const result = roundtrip(slice)
+
+			expect(result).toBeInstanceOf(Uint8Array)
+			expect(result.length).toBe(3)
+			expect(Array.from(result)).toEqual([30, 40, 50])
+		})
+
+		it("preserves binary data inside nested objects", () => {
+			const obj = {
+				name: "file.bin",
+				size: 5n,
+				bytes: new Uint8Array([1, 2, 3, 4, 5]),
+				header: new ArrayBuffer(2)
+			}
+
+			new Uint8Array(obj.header).set([0xff, 0xee])
+
+			const result = roundtrip(obj)
+
+			expect(result.name).toBe("file.bin")
+			expect(result.size).toBe(5n)
+			expect(result.bytes).toBeInstanceOf(Uint8Array)
+			expect(Array.from(result.bytes)).toEqual([1, 2, 3, 4, 5])
+			expect(result.header).toBeInstanceOf(ArrayBuffer)
+			expect(Array.from(new Uint8Array(result.header))).toEqual([0xff, 0xee])
+		})
+
+		it("preserves binary data inside arrays", () => {
+			const arr = [new Uint8Array([1]), new Int32Array([100, 200]), new Float64Array([1.5])]
+			const result = roundtrip(arr)
+
+			expect(result).toHaveLength(3)
+			expect(result[0]).toBeInstanceOf(Uint8Array)
+			expect(Array.from(result[0])).toEqual([1])
+			expect(result[1]).toBeInstanceOf(Int32Array)
+			expect(Array.from(result[1])).toEqual([100, 200])
+			expect(result[2]).toBeInstanceOf(Float64Array)
+			expect(result[2][0]).toBeCloseTo(1.5)
+		})
+
+		it("handles binary data alongside BigInt and UniffiEnum in one object", () => {
+			const obj = {
+				id: 99n,
+				meta: new MockVariant("with-binary"),
+				payload: new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+			}
+
+			const result = roundtrip(obj)
+
+			expect(result.id).toBe(99n)
+			expect(result.meta[uniffiTypeNameSymbol]).toBe("TestType")
+			expect(result.meta.inner).toEqual(["with-binary"])
+			expect(result.payload).toBeInstanceOf(Uint8Array)
+			expect(Array.from(result.payload)).toEqual([0xde, 0xad, 0xbe, 0xef])
+		})
+
+		it("double round-trip preserves binary type and bytes", () => {
+			const arr = new Uint16Array([100, 200, 300, 400])
+			const first = roundtrip(arr)
+			const second = roundtrip(first)
+
+			expect(second).toBeInstanceOf(Uint16Array)
+			expect(Array.from(second)).toEqual([100, 200, 300, 400])
+		})
+
+		it("does not interpret a plain object with __bin: 1 as binary if shape mismatches", () => {
+			const plain = { __bin: 2, k: "Uint8Array", d: "AQID" }
+			const result = roundtrip(plain)
+
+			expect(result).toEqual(plain)
+		})
+	})
+
 	describe("idempotency", () => {
 		it("double serialize/deserialize produces identical result", () => {
 			const obj = {

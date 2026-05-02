@@ -9,18 +9,17 @@ import useChatsStore, { type ChatMessageWithInflightId } from "@/stores/useChats
 import Image from "@/components/ui/image"
 import { useShallow } from "zustand/shallow"
 import { PressableScale } from "@/components/ui/pressables"
-import { contactDisplayName } from "@/lib/utils"
+import { contactDisplayName, safeParseUrl, extractLinks } from "@/lib/utils"
 import { cn, run } from "@filen/utils"
 import * as Linking from "expo-linking"
 import { useSecureStore } from "@/lib/secureStore"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
+import { URL_REGEX } from "@/constants"
 
 export const MENTION_REGEX: RegExp = /(@[\w.-]+@[\w.-]+\.\w+|@everyone)/g
 export const LINE_BREAK_REGEX: RegExp = /\n/gi
 export const CODE_REGEX: RegExp = /```([\s\S]*?)```/gi
-export const URL_REGEX: RegExp =
-	/https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,64}\b(?:[-a-zA-Z0-9()@:%_+.~#?&//=]*)/gi
 export const EMOJI_REGEX_WITH_SKIN_TONES: RegExp = /:[\d+_a-z-]+(?:::skin-tone-\d+)?:/gi
 export const MENTIONS: RegExp = /(@[\w.-]+@[\w.-]+\.\w+|@everyone)/gi
 export const REGEX: RegExp = new RegExp(
@@ -84,7 +83,7 @@ const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean 
 	)
 })
 
-const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
+export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
 	const [chatTrustedDomains, setChatTrustedDomains] = useSecureStore<string[]>("chatTrustedDomains", [])
 
 	const parsedDomain = (() => {
@@ -234,7 +233,7 @@ const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMe
 					)
 				}
 
-				if (match.startsWith("https://") || match.startsWith("http://")) {
+				if (match.startsWith("https://") && extractLinks(match).length === 1 && safeParseUrl(match)) {
 					return (
 						<Link
 							match={match}

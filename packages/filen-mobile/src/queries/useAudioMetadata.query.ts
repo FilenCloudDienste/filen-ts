@@ -6,23 +6,47 @@ import audioCache from "@/lib/audioCache"
 
 export const BASE_QUERY_KEY = "useAudioMetadataQuery"
 
-export type UseAudioMetadataQueryParams = {
-	uuid: string
-}
+export type UseAudioMetadataQueryParams =
+	| {
+			type: "drive"
+			data: {
+				uuid: string
+			}
+	  }
+	| {
+			type: "external"
+			data: {
+				url: string
+				name: string
+			}
+	  }
 
 export async function fetchData(
 	params: UseAudioMetadataQueryParams & {
 		signal?: AbortSignal
 	}
 ) {
-	const item = cache.uuidToAnyDriveItem.get(params.uuid)
+	if (params.type === "drive") {
+		const item = cache.uuidToAnyDriveItem.get(params.data.uuid)
 
-	if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
-		throw new Error("Drive item not found or is not a file")
+		if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
+			throw new Error("Drive item not found or is not a file")
+		}
+
+		return await audioCache.getMetadata({
+			item: {
+				type: "drive",
+				data: item
+			},
+			signal: params.signal
+		})
 	}
 
 	return await audioCache.getMetadata({
-		item,
+		item: {
+			type: "external",
+			data: params.data
+		},
 		signal: params.signal
 	})
 }

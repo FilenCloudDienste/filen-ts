@@ -1076,9 +1076,17 @@ class Transfers {
 			}
 
 			const cachedOrOfflineFile = await run(async () => {
-				if (await fileCache.has(item)) {
+				if (
+					await fileCache.has({
+						type: "drive",
+						data: item
+					})
+				) {
 					return await fileCache.get({
-						item,
+						item: {
+							type: "drive",
+							data: item
+						},
 						signal: compositeAbortSignal
 					})
 				}

@@ -8,7 +8,6 @@ import { useResolveClassNames, useUniwind } from "uniwind"
 import { ActivityIndicator } from "react-native"
 import { useSimpleQuery } from "@/hooks/useSimpleQuery"
 import fileCache from "@/lib/fileCache"
-import type { DriveItemFileExtracted } from "@/types"
 import { memo } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -18,41 +17,51 @@ import alerts from "@/lib/alerts"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import { useRecyclingState } from "@shopify/flash-list"
-import type { DrivePath } from "@/hooks/useDrivePath"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
+import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
 
 const PreviewTextInner = memo(
 	({
 		previewType,
 		text,
 		item,
-		drivePath
+		initialItem
 	}: {
 		previewType: "text" | "code"
 		text: string
-		item: DriveItemFileExtracted
-		drivePath: DrivePath
+		item: GalleryItemTagged
+		initialItem: InitialItem
 	}) => {
 		const bgBackground = useResolveClassNames("bg-background")
 		const { theme } = useUniwind()
 		const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 		const insets = useSafeAreaInsets()
-		const [editedText, setEditedText] = useRecyclingState<string | null>(null, [item.data.uuid])
+		const [editedText, setEditedText] = useRecyclingState<string | null>(null, [
+			item.type === "drive" ? item.data.data.uuid : item.data.url
+		])
 		const textPrimary = useResolveClassNames("text-primary")
 		const currentItemEdited = useDrivePreviewStore(useShallow(state => state.currentItemEdited))
 
-		const parent = getRealDriveItemParent({
-			item,
-			drivePath
-		})
+		const parent =
+			item.type === "drive" && initialItem.type === "drive"
+				? getRealDriveItemParent({
+						item: item.data,
+						drivePath: initialItem.data.drivePath
+					})
+				: null
 
 		const itemToUse =
-			currentItemEdited &&
-			currentItemEdited.data.decryptedMeta?.name.toLowerCase().trim() === item.data.decryptedMeta?.name.toLowerCase().trim()
-				? currentItemEdited
-				: item
+			item.type === "drive"
+				? currentItemEdited &&
+					currentItemEdited.data.decryptedMeta?.name.toLowerCase().trim() ===
+						item.data.data.decryptedMeta?.name.toLowerCase().trim()
+					? currentItemEdited
+					: item.data
+				: null
 
-		const readOnly = itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
+		const readOnly = !itemToUse
+			? true
+			: itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
 
 		const save = async () => {
 			if (editedText === null || readOnly) {
@@ -60,11 +69,15 @@ const PreviewTextInner = memo(
 			}
 
 			const result = await runWithLoading(async defer => {
+				if (!itemToUse) {
+					throw new Error("Missing item to use for saving")
+				}
+
 				if (!itemToUse.data.decryptedMeta) {
 					throw new Error("Missing decryptedMeta")
 				}
 
-				if (!parent || parent.tag !== AnyDirWithContext_Tags.Normal) {
+				if (!parent || parent === "sharedInRoot" || parent.tag !== AnyDirWithContext_Tags.Normal) {
 					throw new Error("Missing parent directory")
 				}
 
@@ -125,7 +138,7 @@ const PreviewTextInner = memo(
 							: backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
 				}}
 			>
-				{editedText !== null && (
+				{editedText !== null && item.type === "drive" && (
 					<View
 						className="absolute left-0 right-0 bg-transparent z-1000 flex-row items-center justify-end px-4"
 						style={{
@@ -162,14 +175,26 @@ const PreviewTextInner = memo(
 	}
 )
 
-const PreviewText = memo(({ item, drivePath }: { item: DriveItemFileExtracted; drivePath: DrivePath }) => {
+const PreviewText = memo(({ item, initialItem }: { item: GalleryItemTagged; initialItem: InitialItem }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
-	const previewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
+	const previewType = getPreviewType(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)
 
 	const query = useSimpleQuery(async signal => {
 		const file = await fileCache.get({
-			item,
+			item:
+				item.type === "external"
+					? {
+							type: "external",
+							data: {
+								url: item.data.url,
+								name: item.data.name
+							}
+						}
+					: {
+							type: "drive",
+							data: item.data
+						},
 			signal
 		})
 
@@ -200,7 +225,7 @@ const PreviewText = memo(({ item, drivePath }: { item: DriveItemFileExtracted; d
 			previewType={previewType === "code" ? "code" : "text"}
 			text={query.data}
 			item={item}
-			drivePath={drivePath}
+			initialItem={initialItem}
 		/>
 	)
 })
