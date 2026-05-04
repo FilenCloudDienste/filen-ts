@@ -8,7 +8,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn } from "react-native-reanimated"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
-import { contactDisplayName, extractLinks, safeParseUrl } from "@/lib/utils"
+import { contactDisplayName, extractLinks, safeParseUrl, linkedFileIntoDriveItem } from "@/lib/utils"
 import { Fragment, memo } from "react"
 import { simpleDate } from "@/lib/time"
 import Regexed from "@/components/chats/chat/message/regexed"
@@ -27,6 +27,7 @@ import { serialize } from "@/lib/serializer"
 import type { External } from "@/routes/drivePreview"
 import alerts from "@/lib/alerts"
 import drive from "@/lib/drive"
+import type { DrivePath } from "@/hooks/useDrivePath"
 
 const Typing = memo(({ chat }: { chat: TChat }) => {
 	const typing = useChatsStore(useShallow(state => state.typing[chat.uuid] ?? []))
@@ -57,7 +58,8 @@ const VideoAttachment = memo(
 	({
 		url,
 		name,
-		layout
+		layout,
+		linked
 	}: {
 		url: string
 		name: string
@@ -65,6 +67,13 @@ const VideoAttachment = memo(
 			width: number
 			height: number
 		}
+		linked?: Extract<
+			LinkResult,
+			{
+				type: "internal"
+				success: true
+			}
+		>["data"]
 	}) => {
 		const player = useVideoPlayer(url, p => {
 			p.loop = false
@@ -83,6 +92,27 @@ const VideoAttachment = memo(
 				className="bg-background items-center justify-center rounded-2xl overflow-hidden flex-row"
 				style={style}
 				onPress={() => {
+					if (linked && linked.type === "file") {
+						const driveItem = linkedFileIntoDriveItem(linked.file)
+
+						if (driveItem.type !== "file") {
+							return
+						}
+
+						router.push({
+							pathname: "/drivePreview",
+							params: {
+								item: serialize(driveItem),
+								drivePath: serialize({
+									type: "linked",
+									uuid: null
+								} satisfies DrivePath)
+							}
+						})
+
+						return
+					}
+
 					router.push({
 						pathname: "/drivePreview",
 						params: {
@@ -122,7 +152,8 @@ const ImageAttachment = memo(
 		url,
 		name,
 		layout,
-		onLoadFailed
+		onLoadFailed,
+		linked
 	}: {
 		url: string
 		name: string
@@ -131,6 +162,13 @@ const ImageAttachment = memo(
 			height: number
 		}
 		onLoadFailed?: () => void
+		linked?: Extract<
+			LinkResult,
+			{
+				type: "internal"
+				success: true
+			}
+		>["data"]
 	}) => {
 		const [imageLayout, setImageLayout] = useRecyclingState<{
 			width: number
@@ -149,6 +187,27 @@ const ImageAttachment = memo(
 				className="bg-transparent"
 				style={style}
 				onPress={() => {
+					if (linked && linked.type === "file") {
+						const driveItem = linkedFileIntoDriveItem(linked.file)
+
+						if (driveItem.type !== "file") {
+							return
+						}
+
+						router.push({
+							pathname: "/drivePreview",
+							params: {
+								item: serialize(driveItem),
+								drivePath: serialize({
+									type: "linked",
+									uuid: null
+								} satisfies DrivePath)
+							}
+						})
+
+						return
+					}
+
 					router.push({
 						pathname: "/drivePreview",
 						params: {
@@ -202,8 +261,6 @@ const InternalAttachment = memo(
 			height: number
 		}
 	}) => {
-		const getHttpProviderFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
-
 		const maxWH = layout.width * 0.75 - 32 - 24
 
 		return (
@@ -232,8 +289,6 @@ const InternalAttachment = memo(
 						return
 					}
 
-					const name = data.file.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? data.file.name.inner[0] : data.file.uuid
-
 					if (data.previewType === "unknown") {
 						const result = await run(async () => {
 							return await drive.openLinkedFile({
@@ -252,19 +307,20 @@ const InternalAttachment = memo(
 						return
 					}
 
-					if (!getHttpProviderFileUrl) {
+					const driveItem = linkedFileIntoDriveItem(data.file)
+
+					if (driveItem.type !== "file") {
 						return
 					}
-
-					const url = getHttpProviderFileUrl(new AnyFile.Linked(data.file))
 
 					router.push({
 						pathname: "/drivePreview",
 						params: {
-							external: serialize({
-								url,
-								name
-							} satisfies External)
+							item: serialize(driveItem),
+							drivePath: serialize({
+								type: "linked",
+								uuid: null
+							} satisfies DrivePath)
 						}
 					})
 				}}
@@ -396,6 +452,7 @@ const Attachments = memo(
 								name={name}
 								layout={layout}
 								onLoadFailed={() => setSingleAttachmentLoadFailed(true)}
+								linked={link.type === "internal" ? link.data : undefined}
 							/>
 						)
 					}
@@ -427,6 +484,7 @@ const Attachments = memo(
 								url={videoUrl}
 								name={name}
 								layout={layout}
+								linked={link.type === "internal" ? link.data : undefined}
 							/>
 						)
 					}
@@ -496,6 +554,7 @@ const Attachments = memo(
 											url={imageUrl}
 											name={name}
 											layout={layout}
+											linked={link.type === "internal" ? link.data : undefined}
 										/>
 									</View>
 								)
@@ -535,6 +594,7 @@ const Attachments = memo(
 											url={videoUrl}
 											name={name}
 											layout={layout}
+											linked={link.type === "internal" ? link.data : undefined}
 										/>
 									</View>
 								)

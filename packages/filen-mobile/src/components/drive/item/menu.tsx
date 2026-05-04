@@ -21,6 +21,8 @@ import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
 import { serialize } from "@/lib/serializer"
 import auth from "@/lib/auth"
 import { selectContacts } from "@/routes/contacts"
+import cache from "@/lib/cache"
+import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 
 export function createMenuButtons({
 	item,
@@ -42,7 +44,7 @@ export function createMenuButtons({
 		drivePath
 	})
 
-	const isOwner = drivePath.type !== "sharedIn"
+	const isOwner = !(drivePath.type === "sharedIn")
 
 	if (
 		(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") &&
@@ -380,6 +382,130 @@ export function createMenuButtons({
 	}
 
 	if (
+		(item.type === "file" ||
+			item.type === "directory" ||
+			item.type === "sharedFile" ||
+			item.type === "sharedRootFile" ||
+			item.type === "sharedDirectory" ||
+			item.type === "sharedRootDirectory") &&
+		item.data.decryptedMeta &&
+		(!isOwner || drivePath.type === "linked")
+	) {
+		downloadSubButtons.push({
+			id: "import",
+			title: "tbd_import",
+			onPress: async () => {
+				const selectResult = await run(async () => {
+					return await selectDriveItems({
+						type: "single",
+						files: false,
+						directories: true,
+						items: []
+					})
+				})
+
+				if (!selectResult.success) {
+					console.error(selectResult.error)
+					alerts.error(selectResult.error)
+
+					return
+				}
+
+				if (selectResult.data.cancelled) {
+					return
+				}
+
+				const selectedItem = selectResult.data.selectedItems[0]
+
+				if (!selectedItem) {
+					return
+				}
+
+				const remoteDir = (() => {
+					if (selectedItem.type === "root") {
+						return selectedItem.data
+					}
+
+					const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
+
+					if (!fromCache) {
+						return null
+					}
+
+					return fromCache
+				})()
+
+				if (!remoteDir) {
+					return
+				}
+
+				const result = await run(async defer => {
+					if (!item.data.decryptedMeta) {
+						throw new Error("Missing decrypted metadata")
+					}
+
+					const destination =
+						item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+							? new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name))
+							: new FileSystem.Directory(
+									FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
+								)
+
+					defer(() => {
+						if (destination.parentDirectory.exists) {
+							destination.parentDirectory.delete()
+						}
+					})
+
+					if (!destination.parentDirectory.exists) {
+						destination.parentDirectory.create({
+							intermediates: true,
+							idempotent: true
+						})
+					}
+
+					if (destination.exists) {
+						destination.delete()
+					}
+
+					await transfers.download({
+						item,
+						destination
+					})
+
+					await transfers.upload({
+						localFileOrDir: destination,
+						parent: remoteDir,
+						name: item.data.decryptedMeta.name,
+						created:
+							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+							item.data.decryptedMeta.created
+								? Number(item.data.decryptedMeta.created)
+								: undefined,
+						modified:
+							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+							item.data.decryptedMeta.modified
+								? Number(item.data.decryptedMeta.modified)
+								: undefined,
+						mime:
+							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+							item.data.decryptedMeta.mime
+								? item.data.decryptedMeta.mime
+								: undefined
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+			}
+		})
+	}
+
+	if (
 		downloadSubButtons.length > 0 &&
 		drivePath.type !== "offline" &&
 		(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
@@ -622,7 +748,7 @@ export function createMenuButtons({
 	}
 
 	// Removing offline files should only be allowed when inside the root of the offline view or when it is already stored offline
-	if ((drivePath.type === "offline" && !drivePath.uuid) || isStoredOffline) {
+	if (((drivePath.type === "offline" && !drivePath.uuid) || isStoredOffline) && drivePath.type !== "linked") {
 		menuButtons.push({
 			id: "removeOffline",
 			title: "tbd_remove_offline",

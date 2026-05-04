@@ -268,7 +268,7 @@ const IncomingShare = memo(() => {
 											clear(currentPayloadsRef.current)
 
 											if (router.canDismiss()) {
-												router.dismiss()
+												router.dismissAll()
 											}
 
 											const result = await run(async defer => {

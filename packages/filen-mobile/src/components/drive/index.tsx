@@ -1015,6 +1015,13 @@ const Drive = memo(() => {
 
 	const debouncedSearch = (() => {
 		return debounce(async (value: string) => {
+			if (drivePath.type !== "drive" || drivePath.selectOptions) {
+				setGlobalSearchResult([])
+				setQueryingGlobalSearch(false)
+
+				return
+			}
+
 			const normalized = value.trim().toLowerCase()
 
 			if (normalized.length === 0) {
