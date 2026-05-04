@@ -28,7 +28,10 @@ import {
 	AnySharedDir,
 	AnyFile,
 	AnyFile_Tags,
-	AnyLinkedDir_Tags
+	AnyLinkedDir_Tags,
+	type LinkedFile,
+	FileMeta,
+	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import {
@@ -1201,4 +1204,30 @@ export function safeParseUrl(raw: string): URL | null {
 	} catch {
 		return null
 	}
+}
+
+export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
+	return unwrappedFileIntoDriveItem(
+		unwrapFileMeta({
+			uuid: file.uuid,
+			timestamp: file.timestamp,
+			size: file.size,
+			region: file.region,
+			bucket: file.bucket,
+			chunks: file.chunks,
+			meta: new FileMeta.Decoded({
+				name: file.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? file.name.inner[0] : file.uuid,
+				mime: file.mime.tag === MaybeEncryptedUniffi_Tags.Decrypted ? file.mime.inner[0] : "application/octet-stream",
+				size: file.size,
+				version: file.version,
+				key: file.fileKey,
+				created: file.timestamp,
+				modified: file.timestamp,
+				hash: undefined
+			}),
+			parent: new ParentUuid.Uuid(file.uuid),
+			canMakeThumbnail: false,
+			favorited: false
+		} satisfies File)
+	)
 }

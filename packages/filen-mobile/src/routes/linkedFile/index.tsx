@@ -12,8 +12,9 @@ import { cn } from "@filen/utils"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import DismissStack from "@/components/dismissStack"
 import { Information } from "@/routes/driveItemInfo"
-import { getPreviewType } from "@/lib/utils"
-import type { MenuButton } from "@/components/ui/menu"
+import useHttpStore from "@/stores/useHttp.store"
+import { useShallow } from "zustand/shallow"
+import { createMenuButtons } from "@/components/drive/item/menu"
 
 const LinkedFile = memo(() => {
 	const { item: itemSerialized } = useLocalSearchParams<{
@@ -21,6 +22,7 @@ const LinkedFile = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
+	const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -38,8 +40,6 @@ const LinkedFile = memo(() => {
 			return null
 		}
 	})()
-
-	const previewType = item?.data.decryptedMeta?.name ? getPreviewType(item.data.decryptedMeta.name) : null
 
 	if (!item || item.type !== "file") {
 		return <DismissStack />
@@ -80,44 +80,16 @@ const LinkedFile = memo(() => {
 						props: {
 							type: "dropdown",
 							hitSlop: 20,
-							buttons: [
-								{
-									id: "download",
-									icon: "export",
-									title: "tbd_download_to_device",
-									onPress: () => {
-										// TODO
-									}
-								},
-								...(previewType === "image" || previewType === "video"
-									? [
-											{
-												id: "save_to_photos",
-												icon: "export",
-												title: "tbd_save_to_photos",
-												onPress: () => {
-													// TODO
-												}
-											} satisfies MenuButton
-										]
-									: []),
-								{
-									id: "export",
-									icon: "export",
-									title: "tbd_export",
-									onPress: () => {
-										// TODO
-									}
-								},
-								{
-									id: "import",
-									icon: "export",
-									title: "tbd_import",
-									onPress: () => {
-										// TODO
-									}
-								}
-							]
+							buttons: getFileUrl
+								? createMenuButtons({
+										item,
+										drivePath: {
+											type: "linked",
+											uuid: null
+										},
+										isStoredOffline: false
+									})
+								: []
 						},
 						triggerProps: {
 							hitSlop: 20

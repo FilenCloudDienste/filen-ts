@@ -105,6 +105,8 @@ export function useSimpleQuery<T>(
 					return
 				}
 
+				console.error(e)
+
 				const unwrappedSdkError = unwrapSdkError(e)
 
 				if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
@@ -119,6 +121,10 @@ export function useSimpleQuery<T>(
 					continue
 				}
 			}
+		}
+
+		if (abortControllerRef.current.signal.aborted) {
+			return
 		}
 
 		console.error(lastError)

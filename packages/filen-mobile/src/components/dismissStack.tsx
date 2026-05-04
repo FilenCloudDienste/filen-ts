@@ -5,7 +5,7 @@ const DismissStack = memo(() => {
 	useFocusEffect(
 		useCallback(() => {
 			if (router.canDismiss()) {
-				router.dismiss()
+				router.dismissAll()
 			}
 		}, [])
 	)

@@ -19,6 +19,7 @@ import { randomUUID } from "expo-crypto"
 import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
+import type { DriveItemFileExtracted } from "@/types"
 
 const PreviewTextInner = memo(
 	({
@@ -40,7 +41,9 @@ const PreviewTextInner = memo(
 			item.type === "drive" ? item.data.data.uuid : item.data.url
 		])
 		const textPrimary = useResolveClassNames("text-primary")
-		const currentItemEdited = useDrivePreviewStore(useShallow(state => state.currentItemEdited))
+		const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [
+			item.type === "drive" ? item.data.data.uuid : item.data.url
+		])
 
 		const parent =
 			item.type === "drive" && initialItem.type === "drive"
@@ -52,16 +55,16 @@ const PreviewTextInner = memo(
 
 		const itemToUse =
 			item.type === "drive"
-				? currentItemEdited &&
-					currentItemEdited.data.decryptedMeta?.name.toLowerCase().trim() ===
-						item.data.data.decryptedMeta?.name.toLowerCase().trim()
-					? currentItemEdited
+				? itemEdited &&
+					itemEdited.data.decryptedMeta?.name.toLowerCase().trim() === item.data.data.decryptedMeta?.name.toLowerCase().trim()
+					? itemEdited
 					: item.data
 				: null
 
-		const readOnly = !itemToUse
-			? true
-			: itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
+		const readOnly =
+			!itemToUse || item.type !== "drive"
+				? true
+				: itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
 
 		const save = async () => {
 			if (editedText === null || readOnly) {
@@ -119,8 +122,12 @@ const PreviewTextInner = memo(
 					const newDriveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(newFile))
 
 					if (newDriveItem.type === "file") {
-						useDrivePreviewStore.getState().setCurrentItemEdited(newDriveItem)
-						useDrivePreviewStore.getState().setCurrentItem(newDriveItem)
+						setItemEdited(newDriveItem)
+
+						useDrivePreviewStore.getState().setCurrentItem({
+							type: "drive",
+							data: newDriveItem
+						})
 					}
 				}
 			}
@@ -178,6 +185,7 @@ const PreviewTextInner = memo(
 const PreviewText = memo(({ item, initialItem }: { item: GalleryItemTagged; initialItem: InitialItem }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
+
 	const previewType = getPreviewType(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)
 
 	const query = useSimpleQuery(async signal => {

@@ -19,6 +19,8 @@ import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
 import Text from "@/components/ui/text"
 import type { External } from "@/routes/drivePreview"
+import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
+import * as FileSystem from "expo-file-system"
 
 const DISMISS_POSITION_RATIO = 0.25
 const DISMISS_VELOCITY_THRESHOLD = 1000
@@ -245,7 +247,9 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 				}
 			}
 
-			const previewType = getPreviewType(state.currentItem.data.decryptedMeta?.name ?? "")
+			const previewType = getPreviewType(
+				state.currentItem.type === "drive" ? (state.currentItem.data.data.decryptedMeta?.name ?? "") : state.currentItem.data.name
+			)
 
 			return {
 				isImage: previewType === "image",
@@ -334,6 +338,7 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 
 		const basePreviewType = getPreviewType(initialItem.data.item.data.decryptedMeta?.name ?? "")
 
+		// If it's a docx, text, pdf, or code file, we won't show the gallery and just show that file, so we return an array with just that file as the item to render
 		if (basePreviewType === "docx" || basePreviewType === "text" || basePreviewType === "pdf" || basePreviewType === "code") {
 			return [
 				{
@@ -359,7 +364,12 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 
 						const previewType = getPreviewType(item.data.decryptedMeta.name)
 
-						return previewType === "image" || previewType === "video"
+						return (
+							(previewType === "image" || previewType === "video") &&
+							(previewType === "image"
+								? EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(item.data.decryptedMeta.name))
+								: true)
+						)
 					}),
 					"creationDesc"
 				) as DriveItemFileExtracted[]
@@ -436,6 +446,7 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 				animatedStyle={headerAnimatedStyle}
 				goBack={goBack}
 				initialItem={initialItem}
+				items={itemsSorted}
 			/>
 			<GestureDetector gesture={dismissGesture}>
 				<AnimatedView
@@ -445,7 +456,7 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 					<FlashList<GalleryItemTagged>
 						ref={listRef}
 						data={itemsSorted}
-						keyExtractor={item => (item.type === "drive" ? item.data.data.uuid : `external-${item.data.url}`)}
+						keyExtractor={item => (item.type === "drive" ? item.data.data.uuid : item.data.url)}
 						renderItem={info => {
 							return (
 								<GalleryItem
@@ -468,14 +479,10 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 						showsHorizontalScrollIndicator={false}
 						initialScrollIndex={initialScrollIndex >= 0 && initialScrollIndex < itemsSorted.length ? initialScrollIndex : 0}
 						onViewableItemsChanged={info => {
-							if (initialItem.type === "external") {
-								return
-							}
-
 							const first = info.viewableItems[0]
 
 							if (first && first.item && first.item.type === "drive") {
-								useDrivePreviewStore.getState().setCurrentItem(first.item.data)
+								useDrivePreviewStore.getState().setCurrentItem(first.item)
 								useDrivePreviewStore.getState().setCurrentIndex(first.index ?? -1)
 
 								currentIndexRef.current = first.index ?? 0

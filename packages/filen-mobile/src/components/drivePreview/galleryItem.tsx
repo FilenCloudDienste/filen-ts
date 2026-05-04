@@ -76,7 +76,7 @@ const GalleryItem = memo(
 			}
 
 			if (!getFileUrl) {
-				return null
+				throw new Error("http store not initialized")
 			}
 
 			return getFileUrlForItem(info.item.data, getFileUrl)

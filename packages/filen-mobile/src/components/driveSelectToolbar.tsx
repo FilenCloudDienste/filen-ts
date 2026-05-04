@@ -158,7 +158,7 @@ const DriveSelectToolbar = memo(() => {
 				}
 
 				if (router.canDismiss()) {
-					router.dismiss()
+					router.dismissAll()
 				}
 
 				if (selectedItems.length === 0) {
