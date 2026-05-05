@@ -60,7 +60,7 @@ const FileThumbnailWithGenerate = memo(
 					return null
 				}
 
-				return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.png`)
+				return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.webp`)
 			},
 			[item.data.uuid],
 			() => {
@@ -297,7 +297,7 @@ const FileThumbnail = memo(
 				return null
 			}
 
-			return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.png`)
+			return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.webp`)
 		}, [item.data.uuid])
 
 		const [didFail, setDidFail] = useRecyclingState<boolean>(false, [item.data.uuid])

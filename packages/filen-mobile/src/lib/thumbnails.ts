@@ -25,11 +25,15 @@ export type ThumbnailParams = {
 export const DEFAULT_WIDTH = 128
 export const DEFAULT_QUALITY = 0.8
 export const DEFAULT_VIDEO_TIMESTAMP = 1.0
-export const MAX_CONCURRENT = 3
+export const MAX_CONCURRENT = Platform.select({
+	ios: 3,
+	android: 2,
+	default: 2
+})
 export const MAX_FAILURES = 3
 
 // Critical: When changing anything related to storage index/store/persistence/width/height/quality format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
+export const VERSION = 2
 
 function abortError(signal?: AbortSignal): Error {
 	const reason = signal?.reason
@@ -65,7 +69,7 @@ class Thumbnails {
 	}
 
 	private getPath(item: DriveItem): string {
-		return FileSystem.Paths.join(this.directory.uri, `${item.data.uuid}.png`)
+		return FileSystem.Paths.join(this.directory.uri, `${item.data.uuid}.webp`)
 	}
 
 	private ensureDirectory(): void {
@@ -275,7 +279,7 @@ class Thumbnails {
 			try {
 				saved = await manipulated.saveAsync({
 					compress: params.quality,
-					format: ImageManipulator.SaveFormat.PNG,
+					format: ImageManipulator.SaveFormat.WEBP,
 					base64: false
 				})
 			} catch (error) {
@@ -437,7 +441,7 @@ class Thumbnails {
 			try {
 				saved = await manipulated.saveAsync({
 					compress: params.quality,
-					format: ImageManipulator.SaveFormat.PNG,
+					format: ImageManipulator.SaveFormat.WEBP,
 					base64: false
 				})
 			} catch (error) {
@@ -648,7 +652,7 @@ class Thumbnails {
 			return null
 		}
 
-		const outputPath = FileSystem.Paths.join(this.directory.uri, `${params.uuid}.png`)
+		const outputPath = FileSystem.Paths.join(this.directory.uri, `${params.uuid}.webp`)
 		const outputFile = new FileSystem.File(outputPath)
 
 		if (outputFile.exists) {
