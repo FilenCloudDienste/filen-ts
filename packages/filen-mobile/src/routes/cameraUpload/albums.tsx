@@ -7,11 +7,10 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
 import { Platform, ActivityIndicator, AppState } from "react-native"
-import { useSimpleQuery } from "@/hooks/useSimpleQuery"
-import * as MediaLibraryLegacy from "expo-media-library"
+import useCameraUploadAlbumsQuery from "@/queries/useCameraUploadAlbums.query"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
-import useMediaPermissions, { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import useMediaPermissions from "@/hooks/useMediaPermissions"
 
 const Albums = memo(() => {
 	const { config, setConfig } = useCameraUpload()
@@ -24,21 +23,7 @@ const Albums = memo(() => {
 		shouldRequest: true
 	})
 
-	const albumsQuery = useSimpleQuery(async () => {
-		const permissions = await hasAllNeededMediaPermissions({
-			shouldRequest: true
-		})
-
-		if (!permissions) {
-			return []
-		}
-
-		const albums = await MediaLibraryLegacy.getAlbumsAsync({
-			includeSmartAlbums: true
-		})
-
-		return albums
-	})
+	const albumsQuery = useCameraUploadAlbumsQuery()
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener("change", nextAppState => {
@@ -74,7 +59,7 @@ const Albums = memo(() => {
 						/>
 					</View>
 				) : mediaPermissions.granted ? (
-					albumsQuery.status === "loading" ? (
+					albumsQuery.status === "pending" ? (
 						<View className="flex-1 bg-transparent items-center justify-center">
 							<ActivityIndicator
 								size="large"

@@ -22,12 +22,9 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { useVideoPlayer, VideoView } from "expo-video"
 import { PressableScale } from "@/components/ui/pressables"
-import { router } from "expo-router"
-import { serialize } from "@/lib/serializer"
-import type { External } from "@/routes/drivePreview"
 import alerts from "@/lib/alerts"
 import drive from "@/lib/drive"
-import type { DrivePath } from "@/hooks/useDrivePath"
+import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 
 const Typing = memo(({ chat }: { chat: TChat }) => {
 	const typing = useChatsStore(useShallow(state => state.typing[chat.uuid] ?? []))
@@ -59,7 +56,8 @@ const VideoAttachment = memo(
 		url,
 		name,
 		layout,
-		linked
+		linked,
+		fromSelf
 	}: {
 		url: string
 		name: string
@@ -74,6 +72,7 @@ const VideoAttachment = memo(
 				success: true
 			}
 		>["data"]
+		fromSelf: boolean
 	}) => {
 		const player = useVideoPlayer(url, p => {
 			p.loop = false
@@ -89,7 +88,10 @@ const VideoAttachment = memo(
 
 		return (
 			<PressableScale
-				className="bg-background items-center justify-center rounded-2xl overflow-hidden flex-row"
+				className={cn(
+					"items-center justify-center rounded-2xl overflow-hidden flex-row",
+					fromSelf ? "bg-blue-600" : "bg-background-tertiary"
+				)}
 				style={style}
 				onPress={() => {
 					if (linked && linked.type === "file") {
@@ -99,28 +101,45 @@ const VideoAttachment = memo(
 							return
 						}
 
-						router.push({
-							pathname: "/drivePreview",
-							params: {
-								item: serialize(driveItem),
-								drivePath: serialize({
-									type: "linked",
-									uuid: null
-								} satisfies DrivePath)
-							}
+						useDrivePreviewStore.getState().open({
+							initialItem: {
+								type: "drive",
+								data: {
+									item: driveItem,
+									drivePath: {
+										type: "linked",
+										uuid: null
+									}
+								}
+							},
+							items: [
+								{
+									type: "drive",
+									data: driveItem
+								}
+							]
 						})
 
 						return
 					}
 
-					router.push({
-						pathname: "/drivePreview",
-						params: {
-							external: serialize({
+					useDrivePreviewStore.getState().open({
+						initialItem: {
+							type: "external",
+							data: {
 								url,
 								name
-							} satisfies External)
-						}
+							}
+						},
+						items: [
+							{
+								type: "external",
+								data: {
+									url,
+									name
+								}
+							}
+						]
 					})
 				}}
 			>
@@ -194,28 +213,45 @@ const ImageAttachment = memo(
 							return
 						}
 
-						router.push({
-							pathname: "/drivePreview",
-							params: {
-								item: serialize(driveItem),
-								drivePath: serialize({
-									type: "linked",
-									uuid: null
-								} satisfies DrivePath)
-							}
+						useDrivePreviewStore.getState().open({
+							initialItem: {
+								type: "drive",
+								data: {
+									item: driveItem,
+									drivePath: {
+										type: "linked",
+										uuid: null
+									}
+								}
+							},
+							items: [
+								{
+									type: "drive",
+									data: driveItem
+								}
+							]
 						})
 
 						return
 					}
 
-					router.push({
-						pathname: "/drivePreview",
-						params: {
-							external: serialize({
+					useDrivePreviewStore.getState().open({
+						initialItem: {
+							type: "external",
+							data: {
 								url,
 								name
-							} satisfies External)
-						}
+							}
+						},
+						items: [
+							{
+								type: "external",
+								data: {
+									url,
+									name
+								}
+							}
+						]
 					})
 				}}
 			>
@@ -247,7 +283,8 @@ const ImageAttachment = memo(
 const InternalAttachment = memo(
 	({
 		data,
-		layout
+		layout,
+		fromSelf
 	}: {
 		data: Extract<
 			LinkResult,
@@ -260,12 +297,16 @@ const InternalAttachment = memo(
 			width: number
 			height: number
 		}
+		fromSelf: boolean
 	}) => {
 		const maxWH = layout.width * 0.75 - 32 - 24
 
 		return (
 			<PressableScale
-				className="bg-background items-center justify-center rounded-2xl overflow-hidden flex-row px-10 py-4 gap-4"
+				className={cn(
+					"items-center justify-center rounded-2xl overflow-hidden flex-row px-10 py-4 gap-4",
+					fromSelf ? "bg-blue-600" : "bg-background-tertiary"
+				)}
 				style={{
 					width: maxWH
 				}}
@@ -313,15 +354,26 @@ const InternalAttachment = memo(
 						return
 					}
 
-					router.push({
-						pathname: "/drivePreview",
-						params: {
-							item: serialize(driveItem),
-							drivePath: serialize({
-								type: "linked",
-								uuid: null
-							} satisfies DrivePath)
-						}
+					// We have to set it here since some queries rely on it (e.g. useAudioMetadata)
+					cache.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
+
+					useDrivePreviewStore.getState().open({
+						initialItem: {
+							type: "drive",
+							data: {
+								item: driveItem,
+								drivePath: {
+									type: "linked",
+									uuid: null
+								}
+							}
+						},
+						items: [
+							{
+								type: "drive",
+								data: driveItem
+							}
+						]
 					})
 				}}
 			>
@@ -485,6 +537,7 @@ const Attachments = memo(
 								name={name}
 								layout={layout}
 								linked={link.type === "internal" ? link.data : undefined}
+								fromSelf={fromSelf}
 							/>
 						)
 					}
@@ -495,6 +548,7 @@ const Attachments = memo(
 						<InternalAttachment
 							data={link.data}
 							layout={layout}
+							fromSelf={fromSelf}
 						/>
 					)
 				}
@@ -595,6 +649,7 @@ const Attachments = memo(
 											name={name}
 											layout={layout}
 											linked={link.type === "internal" ? link.data : undefined}
+											fromSelf={fromSelf}
 										/>
 									</View>
 								)
@@ -610,6 +665,7 @@ const Attachments = memo(
 									<InternalAttachment
 										data={link.data}
 										layout={layout}
+										fromSelf={fromSelf}
 									/>
 								</View>
 							)

@@ -138,10 +138,14 @@ export function createMenuButtons({
 						destination.delete()
 					}
 
-					await transfers.download({
+					const result = await transfers.download({
 						item,
 						destination
 					})
+
+					if (!result) {
+						return
+					}
 
 					if (Platform.OS === "android") {
 						if (
@@ -281,11 +285,15 @@ export function createMenuButtons({
 						destination.delete()
 					}
 
-					await transfers.download({
+					const result = await transfers.download({
 						item,
 						destination,
 						hideProgress: true
 					})
+
+					if (!result) {
+						return
+					}
 
 					// TODO: Add NSPhotoLibraryAddUsageDescription to Info.plist and ask for permissions on both iOS and Android
 					await MediaLibrary.saveToLibraryAsync(destination.uri)
@@ -333,7 +341,7 @@ export function createMenuButtons({
 					})
 
 					if (!downloadResult) {
-						throw new Error("Download failed")
+						return null
 					}
 
 					if (
@@ -356,8 +364,12 @@ export function createMenuButtons({
 				}
 
 				const shareResult = await run(async defer => {
+					if (!result.data) {
+						return
+					}
+
 					defer(() => {
-						if (result.data.parentDirectory.exists) {
+						if (result.data && result.data.parentDirectory.exists) {
 							result.data.parentDirectory.delete()
 						}
 					})
@@ -468,12 +480,16 @@ export function createMenuButtons({
 						destination.delete()
 					}
 
-					await transfers.download({
+					const downloadResult = await transfers.download({
 						item,
 						destination
 					})
 
-					await transfers.upload({
+					if (!downloadResult) {
+						return
+					}
+
+					const uploadResult = await transfers.upload({
 						localFileOrDir: destination,
 						parent: remoteDir,
 						name: item.data.decryptedMeta.name,
@@ -493,6 +509,10 @@ export function createMenuButtons({
 								? item.data.decryptedMeta.mime
 								: undefined
 					})
+
+					if (!uploadResult) {
+						return
+					}
 				})
 
 				if (!result.success) {

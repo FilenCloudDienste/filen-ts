@@ -1,6 +1,6 @@
 import * as MediaLibraryLegacy from "expo-media-library"
 import * as ImagePicker from "expo-image-picker"
-import useSimpleQuery from "@/hooks/useSimpleQuery"
+import useMediaPermissionsQuery from "@/queries/useMediaPermissions.query"
 import { run } from "@filen/utils"
 import { useEffect, useRef, useCallback } from "react"
 import { AppState } from "react-native"
@@ -65,17 +65,7 @@ export async function hasAllNeededMediaPermissions(params?: { shouldRequest?: bo
 export default function useMediaPermissions(params?: { shouldRequest?: boolean }): MediaPermissions {
 	const didRequestRef = useRef<boolean>(false)
 
-	const query = useSimpleQuery(async () => {
-		const [mediaLibraryPermissions, cameraPermissions] = await Promise.all([
-			MediaLibraryLegacy.getPermissionsAsync(),
-			ImagePicker.getCameraPermissionsAsync()
-		])
-
-		return {
-			mediaLibrary: mediaLibraryPermissions,
-			camera: cameraPermissions
-		}
-	})
+	const query = useMediaPermissionsQuery()
 
 	const { refetch } = query
 
@@ -117,7 +107,7 @@ export default function useMediaPermissions(params?: { shouldRequest?: boolean }
 		}
 	}, [refetch])
 
-	if (query.status === "loading" || query.status === "idle") {
+	if (query.status === "pending") {
 		return {
 			loading: true,
 			error: null,

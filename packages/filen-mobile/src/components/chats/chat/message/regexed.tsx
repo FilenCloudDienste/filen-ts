@@ -67,7 +67,7 @@ const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean 
 	})()
 
 	return (
-		<View className={cn("flex-1 rounded-lg basis-full p-2 shrink-0", fromSelf ? "bg-blue-400" : "bg-background-tertiary")}>
+		<View className={cn("flex-1 rounded-lg basis-full p-2 shrink-0", fromSelf ? "bg-blue-600" : "bg-background-tertiary")}>
 			<Text
 				className={cn("text-xs", fromSelf ? "text-white" : "text-muted-foreground")}
 				style={{
@@ -84,7 +84,7 @@ const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean 
 })
 
 export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
-	const [chatTrustedDomains, setChatTrustedDomains] = useSecureStore<string[]>("chatTrustedDomains", [])
+	const [openLinkTrustedDomains, setOpenLinkTrustedDomains] = useSecureStore<Record<string, boolean>>("openLinkTrustedDomains", {})
 
 	const parsedDomain = (() => {
 		try {
@@ -118,13 +118,11 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 			return
 		}
 
-		let trusted = chatTrustedDomains.includes(parsedDomain)
-
-		if (!trusted) {
+		if (!openLinkTrustedDomains[parsedDomain]) {
 			const promptResponse = await run(async () => {
 				return await prompts.alert({
 					title: "tbd_open_external_link",
-					message: "tbd_open_external_link_message",
+					message: `tbd_open_external_link_message_${parsedDomain}`,
 					cancelText: "tbd_cancel",
 					okText: "tbd_open_trust"
 				})
@@ -141,9 +139,10 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 				return
 			}
 
-			setChatTrustedDomains(prev => [...prev, parsedDomain])
-
-			trusted = true
+			setOpenLinkTrustedDomains(prev => ({
+				...prev,
+				[parsedDomain]: true
+			}))
 		}
 
 		const openResult = await run(async () => {

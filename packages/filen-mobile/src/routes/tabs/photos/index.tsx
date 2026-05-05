@@ -17,7 +17,6 @@ import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.
 import { PressableOpacity } from "@/components/ui/pressables"
 import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
 import { router } from "expo-router"
-import { serialize } from "@/lib/serializer"
 import Menu from "@/components/drive/item/menu"
 import cameraUpload, { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
@@ -31,9 +30,20 @@ import { useHeaderHeight } from "@react-navigation/elements"
 import { useSecureStore } from "@/lib/secureStore"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import * as FileSystem from "expo-file-system"
+import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 
 const Photo = memo(
-	({ info, size, drivePath }: { info: ListRenderItemInfo<DriveItemFileExtracted>; size: number; drivePath: DrivePath }) => {
+	({
+		info,
+		size,
+		drivePath,
+		getListItems
+	}: {
+		info: ListRenderItemInfo<DriveItemFileExtracted>
+		size: number
+		drivePath: DrivePath
+		getListItems: () => DriveItemFileExtracted[]
+	}) => {
 		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
@@ -63,12 +73,18 @@ const Photo = memo(
 						<PressableOpacity
 							className="items-center justify-center flex-1 overflow-hidden"
 							onPress={() => {
-								router.push({
-									pathname: "/drivePreview",
-									params: {
-										item: serialize(info.item),
-										drivePath: serialize(drivePath)
-									}
+								useDrivePreviewStore.getState().open({
+									initialItem: {
+										type: "drive",
+										data: {
+											item: info.item,
+											drivePath
+										}
+									},
+									items: getListItems().map(item => ({
+										type: "drive",
+										data: item
+									}))
 								})
 							}}
 							style={viewStyle}
@@ -279,6 +295,31 @@ const Photos = memo(() => {
 
 	const size = !layout ? 0 : layout.width / Math.min(Math.max(1, photosGridTiles), 5)
 
+	const items = (
+		driveItemsQuery.data
+			? itemSorter.sortItems(
+					driveItemsQuery.data.filter(item => {
+						if (
+							!item.data.decryptedMeta ||
+							(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
+						) {
+							return false
+						}
+
+						const previewType = getPreviewType(item.data.decryptedMeta.name)
+
+						return (
+							(previewType === "image" || previewType === "video") &&
+							(previewType === "image"
+								? EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(item.data.decryptedMeta.name))
+								: true)
+						)
+					}),
+					"creationDesc"
+				)
+			: []
+	) as DriveItemFileExtracted[]
+
 	return (
 		<Fragment>
 			<Header />
@@ -320,38 +361,14 @@ const Photos = memo(() => {
 										: Number(lastItem?.item.data.timestamp)
 								})
 							}}
-							data={
-								(driveItemsQuery.data
-									? itemSorter.sortItems(
-											driveItemsQuery.data.filter(item => {
-												if (
-													!item.data.decryptedMeta ||
-													(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
-												) {
-													return false
-												}
-
-												const previewType = getPreviewType(item.data.decryptedMeta.name)
-
-												return (
-													(previewType === "image" || previewType === "video") &&
-													(previewType === "image"
-														? EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(
-																FileSystem.Paths.extname(item.data.decryptedMeta.name)
-															)
-														: true)
-												)
-											}),
-											"creationDesc"
-										)
-									: []) as DriveItemFileExtracted[]
-							}
+							data={items}
 							renderItem={info => {
 								return (
 									<Photo
 										info={info}
 										size={size}
 										drivePath={drivePath}
+										getListItems={() => items}
 									/>
 								)
 							}}

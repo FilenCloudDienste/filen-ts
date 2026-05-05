@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo } from "react"
+import { useState, useEffect, memo } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { router } from "expo-router"
@@ -7,9 +7,6 @@ import { getPreviewType } from "@/lib/utils"
 import { useWindowDimensions } from "react-native"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
 import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring } from "react-native-reanimated"
-import { FlashList, type FlashListRef } from "@shopify/flash-list"
-import useDriveItemsQuery from "@/queries/useDriveItems.query"
-import { itemSorter } from "@/lib/sort"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import GalleryHeader from "@/components/drivePreview/header"
 import GalleryItem from "@/components/drivePreview/galleryItem"
@@ -19,8 +16,7 @@ import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
 import Text from "@/components/ui/text"
 import type { External } from "@/routes/drivePreview"
-import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
-import * as FileSystem from "expo-file-system"
+import { FlashList } from "@shopify/flash-list"
 
 const DISMISS_POSITION_RATIO = 0.25
 const DISMISS_VELOCITY_THRESHOLD = 1000
@@ -176,7 +172,7 @@ function changeZoom(zoomScale: SharedValue<number>, newZoom: number) {
 	zoomScale.value = newZoom
 }
 
-const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
+const Gallery = memo(() => {
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
 	const [isDismissGestureActive, setIsDismissGestureActive] = useState<boolean>(false)
@@ -187,25 +183,10 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 	const startTouchX = useSharedValue<number>(0)
 	const startTouchY = useSharedValue<number>(0)
 	const isDismissing = useSharedValue<number>(0)
-	const listRef = useRef<FlashListRef<GalleryItemTagged>>(null)
-	const currentIndexRef = useRef<number>(0)
+	const items = useDrivePreviewStore(useShallow(state => state.items))
+	const initialScrollIndex = useDrivePreviewStore(useShallow(state => state.initialScrollIndex))
 
 	const fadeRange = dimensions.height * 0.5
-
-	const driveItemsQuery = useDriveItemsQuery(
-		{
-			path:
-				initialItem.type === "drive"
-					? initialItem.data.drivePath
-					: {
-							type: "drive",
-							uuid: ""
-						}
-		},
-		{
-			enabled: false
-		}
-	)
 
 	const onDismissGestureStart = () => {
 		lockToCurrentOrientation().catch(console.error)
@@ -237,13 +218,14 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 		}
 	}
 
-	const { isImage, isVideo, isAudio } = useDrivePreviewStore(
+	const { isImage, isVideo, isAudio, isExternal } = useDrivePreviewStore(
 		useShallow(state => {
 			if (!state.currentItem) {
 				return {
 					isImage: false,
 					isVideo: false,
-					isAudio: false
+					isAudio: false,
+					isExternal: false
 				}
 			}
 
@@ -254,7 +236,8 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 			return {
 				isImage: previewType === "image",
 				isVideo: previewType === "video",
-				isAudio: previewType === "audio"
+				isAudio: previewType === "audio",
+				isExternal: state.currentItem.type === "external"
 			}
 		})
 	)
@@ -326,80 +309,6 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 		}
 	})
 
-	const itemsSorted = ((): GalleryItemTagged[] => {
-		if (initialItem.type === "external") {
-			return [
-				{
-					type: "external",
-					data: initialItem.data
-				}
-			]
-		}
-
-		const basePreviewType = getPreviewType(initialItem.data.item.data.decryptedMeta?.name ?? "")
-
-		// If it's a docx, text, pdf, or code file, we won't show the gallery and just show that file, so we return an array with just that file as the item to render
-		if (basePreviewType === "docx" || basePreviewType === "text" || basePreviewType === "pdf" || basePreviewType === "code") {
-			return [
-				{
-					type: "drive",
-					data: initialItem.data.item
-				}
-			]
-		}
-
-		const items =
-			driveItemsQuery.status === "success" && driveItemsQuery.data.length > 0 ? driveItemsQuery.data : [initialItem.data.item]
-
-		if (initialItem.data.drivePath.type === "photos") {
-			return (
-				itemSorter.sortItems(
-					items.filter(item => {
-						if (
-							!item.data.decryptedMeta ||
-							(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
-						) {
-							return false
-						}
-
-						const previewType = getPreviewType(item.data.decryptedMeta.name)
-
-						return (
-							(previewType === "image" || previewType === "video") &&
-							(previewType === "image"
-								? EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(item.data.decryptedMeta.name))
-								: true)
-						)
-					}),
-					"creationDesc"
-				) as DriveItemFileExtracted[]
-			).map(i => ({
-				type: "drive",
-				data: i
-			}))
-		}
-
-		return (
-			itemSorter.sortItems(items, "nameAsc").filter(i => {
-				if (
-					!initialItem.data.item.data.decryptedMeta ||
-					(initialItem.data.item.type !== "file" &&
-						initialItem.data.item.type !== "sharedFile" &&
-						initialItem.data.item.type !== "sharedRootFile")
-				) {
-					return false
-				}
-
-				const type = getPreviewType(i.data.decryptedMeta?.name ?? "")
-
-				return type === "image" || type === "video" || type === "audio"
-			}) as DriveItemFileExtracted[]
-		).map(i => ({
-			type: "drive",
-			data: i
-		}))
-	})()
-
 	const dismissGesture = buildDismissGesture(
 		{
 			zoomScale,
@@ -412,12 +321,7 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 		goBack,
 		onDismissGestureStart,
 		onDismissGestureEnd
-	).enabled(isImage || isVideo || isAudio || itemsSorted.length === 0 || initialItem.type === "external")
-
-	const initialScrollIndex =
-		initialItem.type === "external"
-			? 0
-			: itemsSorted.findIndex(i => (i.type === "drive" ? i.data.data.uuid === initialItem.data.item.data.uuid : false))
+	).enabled(isImage || isVideo || isAudio || items.length === 0 || (isExternal && (isImage || isVideo || isAudio)))
 
 	useEffect(() => {
 		return () => {
@@ -426,15 +330,6 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 			ScreenOrientation.unlockAsync().catch(console.error)
 		}
 	}, [])
-
-	useEffect(() => {
-		if (currentIndexRef.current >= 0) {
-			listRef.current?.scrollToIndex({
-				index: currentIndexRef.current,
-				animated: false
-			})
-		}
-	}, [dimensions.width])
 
 	return (
 		<View className="flex-1 bg-transparent">
@@ -445,8 +340,6 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 			<GalleryHeader
 				animatedStyle={headerAnimatedStyle}
 				goBack={goBack}
-				initialItem={initialItem}
-				items={itemsSorted}
 			/>
 			<GestureDetector gesture={dismissGesture}>
 				<AnimatedView
@@ -454,8 +347,7 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 					style={dismissAnimatedStyle}
 				>
 					<FlashList<GalleryItemTagged>
-						ref={listRef}
-						data={itemsSorted}
+						data={items}
 						keyExtractor={item => (item.type === "drive" ? item.data.data.uuid : item.data.url)}
 						renderItem={info => {
 							return (
@@ -465,27 +357,23 @@ const Gallery = memo(({ initialItem }: { initialItem: InitialItem }) => {
 									goBack={goBack}
 									onZoomChange={onZoomChange}
 									onSingleTap={onSingleTap}
-									initialItem={initialItem}
 								/>
 							)
 						}}
 						drawDistance={dimensions.width}
+						maxItemsInRecyclePool={0}
 						horizontal={true}
-						pagingEnabled={itemsSorted.length > 1 && !isDismissGestureActive}
-						scrollEnabled={
-							scrollEnabled && !isDismissGestureActive && itemsSorted.length > 1 && (isImage || isVideo || isAudio)
-						}
-						bounces={itemsSorted.length > 1}
+						pagingEnabled={items.length > 1 && !isDismissGestureActive}
+						scrollEnabled={scrollEnabled && !isDismissGestureActive && items.length > 1 && (isImage || isVideo || isAudio)}
+						bounces={items.length > 1}
 						showsHorizontalScrollIndicator={false}
-						initialScrollIndex={initialScrollIndex >= 0 && initialScrollIndex < itemsSorted.length ? initialScrollIndex : 0}
+						initialScrollIndex={initialScrollIndex >= 0 && initialScrollIndex < items.length ? initialScrollIndex : 0}
 						onViewableItemsChanged={info => {
 							const first = info.viewableItems[0]
 
-							if (first && first.item && first.item.type === "drive") {
+							if (first && first.item) {
 								useDrivePreviewStore.getState().setCurrentItem(first.item)
 								useDrivePreviewStore.getState().setCurrentIndex(first.index ?? -1)
-
-								currentIndexRef.current = first.index ?? 0
 
 								setHeaderOpacityValue(headerOpacity, true)
 							}

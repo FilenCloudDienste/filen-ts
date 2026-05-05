@@ -26,7 +26,6 @@ import * as ImagePicker from "expo-image-picker"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
-import { serialize } from "@/lib/serializer"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, normalizeFilePathForExpo } from "@/lib/utils"
 import DocumentScanner, {
 	ResponseType as DocumentScannerResponseType,
@@ -34,6 +33,7 @@ import DocumentScanner, {
 } from "react-native-document-scanner-plugin"
 import * as DocumentPicker from "expo-document-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 
 const Header = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -645,12 +645,24 @@ const Header = memo(() => {
 
 							const item = unwrappedFileIntoDriveItem(unwrapFileMeta(file))
 
-							router.push({
-								pathname: "/drivePreview",
-								params: {
-									item: serialize(item),
-									drivePath: serialize(drivePath)
-								}
+							if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+								return
+							}
+
+							useDrivePreviewStore.getState().open({
+								initialItem: {
+									type: "drive",
+									data: {
+										item: item,
+										drivePath
+									}
+								},
+								items: [
+									{
+										type: "drive",
+										data: item
+									}
+								]
 							})
 						}
 					}
@@ -1109,6 +1121,7 @@ const Drive = memo(() => {
 							<Item
 								info={info}
 								drivePath={drivePath}
+								getListItems={() => items}
 							/>
 						)
 					}}

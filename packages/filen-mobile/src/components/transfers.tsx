@@ -19,7 +19,7 @@ const TransfersInner = memo(() => {
 
 	return (
 		<Fragment>
-			<View className="flex-row items-center justify-between bg-transparent px-4 py-3 gap-4 flex-1">
+			<View className="flex-row items-center justify-between bg-transparent px-3 py-2 gap-4 flex-1">
 				<Text
 					className="shrink-0 flex-1"
 					numberOfLines={1}
@@ -70,7 +70,7 @@ const Transfers = memo(() => {
 			className="absolute left-0 right-0 bg-transparent"
 			style={{
 				bottom: Platform.select({
-					ios: insets.bottom + 8,
+					ios: insets.bottom + 8 + 48,
 					default: 8
 				}),
 				paddingLeft: insets.left > 0 ? insets.left : 16,

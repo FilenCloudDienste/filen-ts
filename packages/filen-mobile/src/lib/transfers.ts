@@ -55,6 +55,7 @@ class Transfers {
 		this.globalPauseSignal.resume()
 	}
 
+	/** Returns uploaded items as the result. If null, the transfer has been cancelled. */
 	public async upload({
 		localFileOrDir,
 		parent,
@@ -85,12 +86,14 @@ class Transfers {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
+		const globalAbortController = this.globalAbortController
+		const globalPauseSignal = this.globalPauseSignal
 		const compositePauseSignal = hideProgress
 			? createCompositePauseSignal(transferPauseSignal)
-			: createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
+			: createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
 		const compositeAbortSignal = hideProgress
 			? createCompositeAbortSignal(transferAbortController.signal)
-			: createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
+			: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
 
 		if (localFileOrDir instanceof FileSystem.Directory) {
 			const result = await run(async defer => {
@@ -167,15 +170,15 @@ class Transfers {
 					transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
-					this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-					this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+					globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+					globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 					defer(() => {
 						transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 						transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 
-						this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-						this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+						globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+						globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 					})
 				}
 
@@ -372,7 +375,7 @@ class Transfers {
 			})
 
 			if (!result.success) {
-				if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
+				if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
 					return null
 				}
@@ -486,15 +489,15 @@ class Transfers {
 				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
-				this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-				this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+				globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+				globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 				defer(() => {
 					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 
-					this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-					this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+					globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+					globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 				})
 			}
 
@@ -544,7 +547,7 @@ class Transfers {
 		})
 
 		if (!result.success) {
-			if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
+			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return null
 			}
@@ -632,6 +635,7 @@ class Transfers {
 		}
 	}
 
+	/** Returns downloaded items as the result. If null, the transfer has been cancelled. */
 	public async download({
 		item,
 		destination,
@@ -656,12 +660,14 @@ class Transfers {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = abortController ?? new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
+		const globalAbortController = this.globalAbortController
+		const globalPauseSignal = this.globalPauseSignal
 		const compositePauseSignal = hideProgress
 			? createCompositePauseSignal(transferPauseSignal)
-			: createCompositePauseSignal(this.globalPauseSignal, transferPauseSignal)
+			: createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
 		const compositeAbortSignal = hideProgress
 			? createCompositeAbortSignal(transferAbortController.signal)
-			: createCompositeAbortSignal(this.globalAbortController.signal, transferAbortController.signal)
+			: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
 
 		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 			const result = await run(async defer => {
@@ -742,15 +748,15 @@ class Transfers {
 					transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
-					this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-					this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+					globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+					globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 					defer(() => {
 						transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 						transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 
-						this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-						this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+						globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+						globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 					})
 				}
 
@@ -926,7 +932,7 @@ class Transfers {
 					destination.delete()
 				}
 
-				if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
+				if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
 					return null
 				}
@@ -1053,15 +1059,15 @@ class Transfers {
 				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
 				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
-				this.globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-				this.globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
+				globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
+				globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
 
 				defer(() => {
 					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
 					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 
-					this.globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-					this.globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
+					globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
+					globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
 				})
 			}
 
@@ -1159,7 +1165,7 @@ class Transfers {
 				destination.delete()
 			}
 
-			if (transferAbortController.signal.aborted || this.globalAbortController.signal.aborted) {
+			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return null
 			}

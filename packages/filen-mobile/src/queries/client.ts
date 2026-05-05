@@ -16,12 +16,27 @@ export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000 * 10 // 10 years, effe
 
 const PERSIST_DEBOUNCE = 1000
 const PERSIST_CHUNK_SIZE = 100
-const UNCACHED_QUERY_KEYS = new Map<string, true>([])
+const UNCACHED_QUERY_KEYS = new Map<string, true>([
+	["useFileTextQuery", true],
+	["useFileBase64Query", true],
+	["useFileUriQuery", true],
+	["useFileUrlQuery", true],
+	["useMediaPermissionsQuery", true],
+	["useCameraUploadAlbumsQuery", true]
+])
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
-	const shouldNotPersist = (query.queryKey as unknown[]).some(
-		queryKey => typeof queryKey === "string" && UNCACHED_QUERY_KEYS.has(queryKey)
-	)
+	const shouldNotPersist = (query.queryKey as unknown[]).some(queryKey => {
+		if (typeof queryKey === "string" && UNCACHED_QUERY_KEYS.has(queryKey)) {
+			return true
+		}
+
+		if (Array.isArray(queryKey) && queryKey.some(k => typeof k === "string" && UNCACHED_QUERY_KEYS.has(k))) {
+			return true
+		}
+
+		return false
+	})
 
 	return !shouldNotPersist && query.state.status === "success"
 }
@@ -281,7 +296,7 @@ export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "q
 	staleTime: 0,
 	gcTime: QUERY_CLIENT_CACHE_TIME,
 	refetchInterval: false,
-	experimental_prefetchInRender: false,
+	experimental_prefetchInRender: true,
 	refetchIntervalInBackground: false,
 	retry: 5,
 	retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
