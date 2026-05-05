@@ -1,14 +1,8 @@
 import { memo } from "react"
 import ZoomableView from "@/components/ui/zoomableView"
 import Image from "@/components/ui/image"
-import { useWindowDimensions, type ViewStyle } from "react-native"
+import { useWindowDimensions } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
-
-const ZOOMABLE_VIEW_STYLE: ViewStyle = {
-	flex: 1,
-	alignItems: "center",
-	justifyContent: "center"
-}
 
 const PreviewImage = memo(
 	({
@@ -31,13 +25,16 @@ const PreviewImage = memo(
 			height: dimensions.height
 		}
 
-		const imageSource = {
-			uri: fileUrl
-		}
-
 		return (
 			<ZoomableView
-				style={[ZOOMABLE_VIEW_STYLE, imageStyle]}
+				style={[
+					{
+						flex: 1,
+						alignItems: "center",
+						justifyContent: "center"
+					},
+					imageStyle
+				]}
 				scaleValue={zoomScale}
 				onPinchDismiss={onPinchDismiss}
 				onZoomChange={onZoomChange}
@@ -46,7 +43,9 @@ const PreviewImage = memo(
 			>
 				<Image
 					className="flex-1 bg-transparent"
-					source={imageSource}
+					source={{
+						uri: fileUrl
+					}}
 					contentFit="contain"
 					cachePolicy="disk"
 					style={imageStyle}

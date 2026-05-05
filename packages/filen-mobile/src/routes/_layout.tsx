@@ -28,6 +28,7 @@ import useEffectOnce from "@/hooks/useEffectOnce"
 import Http from "@/components/http"
 import CameraUploadSync from "@/components/cameraUpload/sync"
 import IncomingShareHandler from "@/components/incomingShareHandler"
+import Transfers from "@/components/transfers"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -214,6 +215,7 @@ const RootLayout = memo(() => {
 										</Stack>
 										{isAuthed && (
 											<Fragment>
+												<Transfers />
 												<Socket />
 												<Http />
 												<NotesSync />

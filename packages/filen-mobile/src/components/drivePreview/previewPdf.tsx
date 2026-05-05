@@ -1,8 +1,7 @@
 import { memo, useRef } from "react"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
-import { useSimpleQuery } from "@/hooks/useSimpleQuery"
-import fileCache from "@/lib/fileCache"
+import useFileUriQuery from "@/queries/useFileUri.query"
 import { PdfView, type OnErrorEventPayload } from "@kishannareshpal/expo-pdf"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
@@ -23,24 +22,22 @@ const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
 		item.type === "drive" ? item.data.data.uuid : item.data.url
 	])
 
-	const query = useSimpleQuery(async signal => {
-		return await fileCache.get({
-			item:
-				item.type === "external"
-					? {
-							type: "external",
-							data: {
-								url: item.data.url,
-								name: item.data.name
-							}
-						}
-					: {
-							type: "drive",
-							data: item.data
-						},
-			signal
-		})
-	})
+	const query = useFileUriQuery(
+		item.type === "external"
+			? {
+					type: "external",
+					data: {
+						url: item.data.url,
+						name: item.data.name
+					}
+				}
+			: {
+					type: "drive",
+					data: {
+						uuid: item.data.data.uuid
+					}
+				}
+	)
 
 	const promptPassword = async () => {
 		const result = await run(async () => {

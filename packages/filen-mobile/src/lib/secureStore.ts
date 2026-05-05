@@ -253,7 +253,7 @@ class SecureStore {
 			const encryptionKey = await this.getEncryptionKey()
 			const iv = crypto.randomBytes(12)
 			const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(encryptionKey, "hex"), iv)
-			const encrypted = cipher.update(Buffer.from(serialize(data)))
+			const encrypted = cipher.update(Buffer.from(serialize(data), "utf-8"))
 			const final = cipher.final()
 			const authTag = cipher.getAuthTag()
 

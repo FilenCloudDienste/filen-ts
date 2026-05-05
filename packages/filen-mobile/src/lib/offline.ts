@@ -1259,23 +1259,25 @@ export class Offline {
 					resolveCompletion = resolve
 				})
 
-				await transfers.download({
+				const result = await transfers.download({
 					item: file,
 					destination: dataFile,
 					hideProgress,
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
 				})
 
-				this.atomicWrite(
-					metaFile,
-					serialize({
-						item: file,
-						parent
-					} satisfies FileOrDirectoryOfflineMeta)
-				)
+				if (result) {
+					this.atomicWrite(
+						metaFile,
+						serialize({
+							item: file,
+							parent
+						} satisfies FileOrDirectoryOfflineMeta)
+					)
 
-				if (!skipIndexUpdate) {
-					await this.updateIndex()
+					if (!skipIndexUpdate) {
+						await this.updateIndex()
+					}
 				}
 			})
 
@@ -1285,13 +1287,6 @@ export class Offline {
 				}
 
 				throw innerResult.error
-			}
-
-			return {
-				dataFile,
-				metaFile,
-				file,
-				parent
 			}
 		})
 

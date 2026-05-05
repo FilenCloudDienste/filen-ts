@@ -1,42 +1,19 @@
 import { memo } from "react"
-import { type DriveItemFileExtracted } from "@/types"
-import { getPreviewType, normalizeFilePathForExpo } from "@/lib/utils"
-import useHttpStore from "@/stores/useHttp.store"
+import { getPreviewType } from "@/lib/utils"
 import { useWindowDimensions, ActivityIndicator } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
-import { type ListRenderItemInfo } from "@shopify/flash-list"
 import PreviewImage from "@/components/drivePreview/previewImage"
 import PreviewVideo from "@/components/drivePreview/previewVideo"
 import PreviewAudio from "@/components/drivePreview/previewAudio"
 import PreviewText from "@/components/drivePreview/previewText"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import { AnyFile } from "@filen/sdk-rs"
-import offline from "@/lib/offline"
-import useSimpleQuery from "@/hooks/useSimpleQuery"
+import useFileUrlQuery from "@/queries/useFileUrl.query"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import View from "@/components/ui/view"
-import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
-
-function getFileUrlForItem(item: DriveItemFileExtracted, getFileUrl: (file: AnyFile) => string): string | null {
-	try {
-		switch (item.type) {
-			case "file": {
-				return getFileUrl(new AnyFile.File(item.data))
-			}
-
-			case "sharedFile":
-			case "sharedRootFile": {
-				return getFileUrl(new AnyFile.Shared(item.data))
-			}
-		}
-	} catch (e) {
-		console.error(e)
-
-		return null
-	}
-}
+import type { ListRenderItemInfo } from "@shopify/flash-list"
+import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 
 const GalleryItem = memo(
 	({
@@ -44,61 +21,46 @@ const GalleryItem = memo(
 		galleryZoomScale,
 		goBack,
 		onZoomChange,
-		onSingleTap,
-		initialItem
+		onSingleTap
 	}: {
 		info: ListRenderItemInfo<GalleryItemTagged>
 		galleryZoomScale: SharedValue<number>
 		goBack: () => void
 		onZoomChange?: (zoom: number) => void
 		onSingleTap?: () => void
-		initialItem: InitialItem
 	}) => {
 		const dimensions = useWindowDimensions()
-		const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
-		const isActiveFromStore = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
-
-		const isActive = initialItem.type === "external" || info.item.type === "external" ? true : isActiveFromStore
+		const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
 		const previewType = getPreviewType(
 			info.item.type === "drive" ? (info.item.data.data.decryptedMeta?.name ?? "") : info.item.data.name
 		)
 
-		const fileUrlQuery = useSimpleQuery(async () => {
-			if (info.item.type === "external") {
-				return info.item.data.url
-			}
+		const fileUrlQuery = useFileUrlQuery(
+			info.item.type === "drive"
+				? {
+						type: "drive",
+						data: {
+							uuid: info.item.data.data.uuid
+						}
+					}
+				: {
+						type: "external",
+						data: {
+							url: info.item.data.url,
+							name: info.item.data.name
+						}
+					}
+		)
 
-			const file = await offline.getLocalFile(info.item.data)
-
-			if (file?.exists) {
-				return normalizeFilePathForExpo(file.uri)
-			}
-
-			if (!getFileUrl) {
-				throw new Error("http store not initialized")
-			}
-
-			return getFileUrlForItem(info.item.data, getFileUrl)
-		})
-
-		const fileUrl = fileUrlQuery.data ?? null
+		const fileUrl = fileUrlQuery.status === "success" ? fileUrlQuery.data : null
 
 		const itemStyle = {
 			width: dimensions.width,
 			height: dimensions.height
 		}
 
-		if (!previewType || previewType === "unknown") {
-			return (
-				<View
-					className="bg-transparent"
-					style={itemStyle}
-				/>
-			)
-		}
-
-		if (!fileUrl) {
+		if (!fileUrl || previewType === "unknown") {
 			return (
 				<View
 					className="bg-transparent"
@@ -223,10 +185,7 @@ const GalleryItem = memo(
 						style={itemStyle}
 					>
 						{isActive ? (
-							<PreviewText
-								item={info.item}
-								initialItem={initialItem}
-							/>
+							<PreviewText item={info.item} />
 						) : (
 							<View className="bg-transparent flex-1 items-center justify-center">
 								<ActivityIndicator
