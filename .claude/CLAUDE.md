@@ -44,18 +44,3 @@ The Rust SDK is the backbone of all Filen apps. It handles everything below the 
 
 - **Never reimplement crypto or API calls in JS/TS** — always delegate to the SDK
 - **Never add retry/rate-limit/concurrency logic in JS** — the SDK handles this internally
-
-## Context Efficiency
-
-### File Reading
-
-Read files with purpose. Before reading a file, know what you're looking for.
-Use Grep to locate relevant sections before reading entire large files.
-Never re-read a file you've already read in this session.
-For files over 500 lines, use offset/limit to read only the relevant section.
-
-### Responses
-
-Don't echo back file contents you just read — the user can see them.
-Don't narrate tool calls ("Let me read the file..." / "Now I'll edit..."). Just do it.
-Keep explanations proportional to complexity. Simple changes need one sentence, not three paragraphs.
