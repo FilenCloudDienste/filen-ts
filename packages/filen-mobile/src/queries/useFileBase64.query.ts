@@ -26,6 +26,8 @@ export function useFileBase64Query(
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		// Base64 strings are ~4/3 the original file size; evict immediately when the last subscriber unmounts. fileCache backs us on disk, so refetch is cheap.
+		gcTime: 0,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
