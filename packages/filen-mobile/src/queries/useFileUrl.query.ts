@@ -70,6 +70,8 @@ export function useFileUrlQuery(
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		// Evict immediately when the last subscriber unmounts. URLs are bound to the localhost HTTP provider's session-scoped port, so re-deriving on next mount is the correct behavior anyway.
+		gcTime: 0,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>

@@ -29,6 +29,8 @@ export function useFileUriQuery(
 
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		// Evict immediately when the last subscriber unmounts. The underlying fileCache file may be evicted independently, so a fresh resolve on next mount is the correct behavior anyway.
+		gcTime: 0,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
