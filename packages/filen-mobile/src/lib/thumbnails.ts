@@ -132,10 +132,18 @@ class Thumbnails {
 				return
 			}
 
+			let timeoutId: ReturnType<typeof setTimeout> | null = null
+
 			const cleanup = () => {
 				unsubscribe()
 
 				signal?.removeEventListener("abort", onAbort)
+
+				if (timeoutId !== null) {
+					clearTimeout(timeoutId)
+
+					timeoutId = null
+				}
 			}
 
 			const unsubscribe = useHttpStore.subscribe(
@@ -161,6 +169,12 @@ class Thumbnails {
 			signal?.addEventListener("abort", onAbort, {
 				once: true
 			})
+
+			timeoutId = setTimeout(() => {
+				cleanup()
+
+				reject(new Error("HTTP provider unavailable after 30s"))
+			}, 30_000)
 		})
 	}
 
@@ -293,11 +307,25 @@ class Thumbnails {
 			const savedFile = new FileSystem.File(saved.uri)
 			const outputFile = new FileSystem.File(params.outputPath)
 
-			if (outputFile.exists) {
-				outputFile.delete()
-			}
+			try {
+				if (outputFile.exists) {
+					outputFile.delete()
+				}
 
-			savedFile.move(outputFile)
+				savedFile.move(outputFile)
+			} catch (error) {
+				try {
+					if (savedFile.exists) {
+						savedFile.delete()
+					}
+				} catch {
+					// Best-effort cleanup of the orphaned manipulated file
+				}
+
+				const message = error instanceof Error ? error.message : String(error)
+
+				throw new Error(`Failed to move thumbnail to output path: ${message}`)
+			}
 		})
 
 		if (!result.success) {
@@ -345,23 +373,11 @@ class Thumbnails {
 
 			const player = createVideoPlayer(url)
 
+			// The defer below releases the player on every exit path including abort.
+			// Do NOT register a separate onAbort handler that also calls release() — that would double-release a native SharedObject.
 			defer(() => {
 				player.release()
 			})
-
-			if (params.signal) {
-				const onAbort = () => {
-					player.release()
-				}
-
-				params.signal.addEventListener("abort", onAbort, {
-					once: true
-				})
-
-				defer(() => {
-					params.signal?.removeEventListener("abort", onAbort)
-				})
-			}
 
 			if (player.status !== "readyToPlay") {
 				await new Promise<void>((resolve, reject) => {
@@ -405,10 +421,22 @@ class Thumbnails {
 				throw abortError(params.signal)
 			}
 
-			const thumbnails = await player.generateThumbnailsAsync([params.timestamp], {
-				maxWidth: params.width,
-				maxHeight: params.width
-			})
+			let thumbnails: VideoThumbnail[]
+
+			try {
+				thumbnails = await player.generateThumbnailsAsync([params.timestamp], {
+					maxWidth: params.width,
+					maxHeight: params.width
+				})
+			} catch (error) {
+				if (params.signal?.aborted) {
+					throw abortError(params.signal)
+				}
+
+				const message = error instanceof Error ? error.message : String(error)
+
+				throw new Error(`Video thumbnail extraction failed at ${params.timestamp}s: ${message}`)
+			}
 
 			if (params.signal?.aborted) {
 				throw abortError(params.signal)
@@ -455,11 +483,25 @@ class Thumbnails {
 			const savedFile = new FileSystem.File(saved.uri)
 			const outputFile = new FileSystem.File(params.outputPath)
 
-			if (outputFile.exists) {
-				outputFile.delete()
-			}
+			try {
+				if (outputFile.exists) {
+					outputFile.delete()
+				}
 
-			savedFile.move(outputFile)
+				savedFile.move(outputFile)
+			} catch (error) {
+				try {
+					if (savedFile.exists) {
+						savedFile.delete()
+					}
+				} catch {
+					// Best-effort cleanup of the orphaned manipulated file
+				}
+
+				const message = error instanceof Error ? error.message : String(error)
+
+				throw new Error(`Failed to move thumbnail to output path: ${message}`)
+			}
 		})
 
 		if (!result.success) {
@@ -481,13 +523,7 @@ class Thumbnails {
 	}
 
 	public async generate(params: ThumbnailParams): Promise<string> {
-		const result = await run(async defer => {
-			await this.semaphore.acquire()
-
-			defer(() => {
-				this.semaphore.release()
-			})
-
+		const result = await run(async () => {
 			if (params.signal?.aborted) {
 				throw abortError(params.signal)
 			}
@@ -514,7 +550,16 @@ class Thumbnails {
 			const outputFile = new FileSystem.File(outputPath)
 
 			if (outputFile.exists) {
-				return normalizeFilePathForExpo(outputPath)
+				// Validate integrity — a 0-byte file is the result of a crashed/interrupted write and would loop the consumer forever.
+				if (outputFile.size > 0) {
+					return normalizeFilePathForExpo(outputPath)
+				}
+
+				try {
+					outputFile.delete()
+				} catch {
+					// Best-effort cleanup of the corrupt cache entry; if delete fails we'll regenerate anyway.
+				}
 			}
 
 			const pendingPromise = this.pending.get(uuid)
@@ -576,54 +621,77 @@ class Thumbnails {
 		quality: number
 		videoTimestamp: number
 	}): Promise<string> {
-		const result = await run(async () => {
-			this.ensureDirectory()
+		// Acquire here (not in generate()) so concurrent callers waiting on the same in-flight pending promise don't each occupy a slot while idle.
+		await this.semaphore.acquire()
 
-			const file = this.driveItemToAnyFile(params.item)
+		try {
+			const result = await run(async () => {
+				this.ensureDirectory()
 
-			if (!file) {
-				throw new Error("Unsupported item type")
+				const file = this.driveItemToAnyFile(params.item)
+
+				if (!file) {
+					throw new Error("Unsupported item type")
+				}
+
+				if (params.isImage) {
+					await this.generateImage({
+						file,
+						item: params.item,
+						outputPath: params.outputPath,
+						width: params.width,
+						quality: params.quality,
+						signal: params.signal
+					})
+				} else if (params.isVideo) {
+					await this.generateVideo({
+						file,
+						item: params.item,
+						outputPath: params.outputPath,
+						width: params.width,
+						quality: params.quality,
+						timestamp: params.videoTimestamp,
+						signal: params.signal
+					})
+				}
+
+				return normalizeFilePathForExpo(params.outputPath)
+			})
+
+			if (!result.success) {
+				if (!params.signal?.aborted) {
+					console.error(
+						"[Thumbnails] generation failed",
+						{
+							uuid: params.uuid,
+							ext: params.ext,
+							isImage: params.isImage,
+							isVideo: params.isVideo,
+							platform: Platform.OS
+						},
+						result.error
+					)
+
+					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
+				}
+
+				const outputFile = new FileSystem.File(params.outputPath)
+
+				if (outputFile.exists) {
+					try {
+						outputFile.delete()
+					} catch {
+						// Best-effort cleanup of partial output
+					}
+				}
+
+				throw result.error
 			}
 
-			if (params.isImage) {
-				await this.generateImage({
-					file,
-					item: params.item,
-					outputPath: params.outputPath,
-					width: params.width,
-					quality: params.quality,
-					signal: params.signal
-				})
-			} else if (params.isVideo) {
-				await this.generateVideo({
-					file,
-					item: params.item,
-					outputPath: params.outputPath,
-					width: params.width,
-					quality: params.quality,
-					timestamp: params.videoTimestamp,
-					signal: params.signal
-				})
-			}
-
-			return normalizeFilePathForExpo(params.outputPath)
-		})
-
-		if (!result.success) {
-			if (!params.signal?.aborted) {
-				this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
-			}
-
-			const outputFile = new FileSystem.File(params.outputPath)
-
-			if (outputFile.exists) {
-				outputFile.delete()
-			}
-
-			throw result.error
+			return result.data
+		} finally {
+			this.semaphore.release()
 		}
-
-		return result.data
 	}
 
 	public async generateFromLocalFile(params: {
@@ -656,9 +724,18 @@ class Thumbnails {
 		const outputFile = new FileSystem.File(outputPath)
 
 		if (outputFile.exists) {
-			cache.availableThumbnails.set(params.uuid, true)
+			// Validate integrity — a 0-byte file is the result of a crashed/interrupted write and would loop the consumer forever.
+			if (outputFile.size > 0) {
+				cache.availableThumbnails.set(params.uuid, true)
 
-			return normalizeFilePathForExpo(outputPath)
+				return normalizeFilePathForExpo(outputPath)
+			}
+
+			try {
+				outputFile.delete()
+			} catch {
+				// Best-effort cleanup of the corrupt cache entry; if delete fails we'll regenerate anyway.
+			}
 		}
 
 		const pendingPromise = this.pending.get(params.uuid)
@@ -700,11 +777,27 @@ class Thumbnails {
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
 				if (!params.signal?.aborted) {
+					console.error(
+						"[Thumbnails] generateFromLocalFile failed",
+						{
+							uuid: params.uuid,
+							ext,
+							isImage,
+							isVideo,
+							platform: Platform.OS
+						},
+						error
+					)
+
 					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
 				}
 
 				if (outputFile.exists) {
-					outputFile.delete()
+					try {
+						outputFile.delete()
+					} catch {
+						// Best-effort cleanup of partial output
+					}
 				}
 
 				throw error
