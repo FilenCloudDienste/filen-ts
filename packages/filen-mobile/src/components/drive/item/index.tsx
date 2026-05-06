@@ -88,6 +88,30 @@ const Item = memo(
 			}
 		})()
 
+		// True when the row is "disabled" only because the caller's selectOptions exclude
+		// directories (e.g. files-only picker), but the item itself is a directory the user
+		// must still be able to navigate into. Selection stays blocked; row-tap navigates.
+		const navigateOnly = (() => {
+			if (!disabled || !drivePath.selectOptions) {
+				return false
+			}
+
+			if (drivePath.selectOptions.intention !== "select") {
+				return false
+			}
+
+			if (drivePath.selectOptions.directories) {
+				return false
+			}
+
+			const isDirectory =
+				info.item.type === "directory" ||
+				info.item.type === "sharedDirectory" ||
+				info.item.type === "sharedRootDirectory"
+
+			return isDirectory
+		})()
+
 		const onPressSelectForDriveSelect = () => {
 			if (disabled) {
 				return
@@ -109,48 +133,50 @@ const Item = memo(
 		}
 
 		const onPress = () => {
-			if (disabled) {
+			if (disabled && !navigateOnly) {
 				return
 			}
 
-			if (isSelectedFromDriveSelect) {
-				onPressSelectForDriveSelect()
+			if (!navigateOnly) {
+				if (isSelectedFromDriveSelect) {
+					onPressSelectForDriveSelect()
 
-				return
-			}
+					return
+				}
 
-			if (areDriveItemsSelected) {
-				useDriveStore.getState().setSelectedItems(prev => {
-					const prevSelected = prev.some(i => i.data.uuid === info.item.data.uuid)
+				if (areDriveItemsSelected) {
+					useDriveStore.getState().setSelectedItems(prev => {
+						const prevSelected = prev.some(i => i.data.uuid === info.item.data.uuid)
 
-					if (prevSelected) {
-						return prev.filter(i => i.data.uuid !== info.item.data.uuid)
-					}
-
-					return [...prev.filter(i => i.data.uuid !== info.item.data.uuid), info.item]
-				})
-
-				return
-			}
-
-			if (info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile") {
-				useDrivePreviewStore.getState().open({
-					initialItem: {
-						type: "drive",
-						data: {
-							item: info.item,
-							drivePath
+						if (prevSelected) {
+							return prev.filter(i => i.data.uuid !== info.item.data.uuid)
 						}
-					},
-					items: getListItems()
-						.filter(i => i.type === "file" || i.type === "sharedFile" || i.type === "sharedRootFile")
-						.map(item => ({
-							type: "drive",
-							data: item
-						}))
-				})
 
-				return
+						return [...prev.filter(i => i.data.uuid !== info.item.data.uuid), info.item]
+					})
+
+					return
+				}
+
+				if (info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile") {
+					useDrivePreviewStore.getState().open({
+						initialItem: {
+							type: "drive",
+							data: {
+								item: info.item,
+								drivePath
+							}
+						},
+						items: getListItems()
+							.filter(i => i.type === "file" || i.type === "sharedFile" || i.type === "sharedRootFile")
+							.map(item => ({
+								type: "drive",
+								data: item
+							}))
+					})
+
+					return
+				}
 			}
 
 			if (
@@ -256,7 +282,7 @@ const Item = memo(
 				className={cn(
 					"w-full h-auto flex-row items-center flex-1",
 					isMenuOpen ? (drivePath.type === "offline" ? "bg-background-tertiary" : "bg-background-secondary") : "bg-transparent",
-					disabled && "opacity-50"
+					disabled && !navigateOnly && "opacity-50"
 				)}
 			>
 				<Menu
@@ -289,7 +315,7 @@ const Item = memo(
 								/>
 							</AnimatedView>
 						)}
-						{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && (
+						{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && !disabled && (
 							<AnimatedView
 								className="flex-row h-full items-center justify-center bg-transparent shrink-0"
 								entering={FadeIn}
