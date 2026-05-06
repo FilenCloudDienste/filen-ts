@@ -205,7 +205,13 @@ class CameraUpload {
 			throw new Error(`compress() called on file outside cache directory: ${file.uri}`)
 		}
 
-		const manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(file.uri)).renderAsync()
+		// Hold the Context in a local binding across the await. expo-image-manipulator's
+		// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
+		// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
+		// the native task would be cancelled and renderAsync would reject with
+		// JobCancellationException.
+		const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(file.uri))
+		const manipulated = await context.renderAsync()
 		const result = await manipulated.saveAsync({
 			compress: 0.8,
 			format: ImageManipulator.SaveFormat.JPEG,

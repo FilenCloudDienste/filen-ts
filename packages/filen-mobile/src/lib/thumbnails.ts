@@ -268,14 +268,19 @@ class Thumbnails {
 				}
 			}
 
+			// Hold the Context in a local binding across the await. expo-image-manipulator's
+			// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
+			// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
+			// the native task would be cancelled and renderAsync would reject with
+			// JobCancellationException.
+			const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(sourcePath)).resize({
+				width: params.width
+			})
+
 			let manipulated: ImageManipulator.ImageRef | null = null
 
 			try {
-				manipulated = await ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(sourcePath))
-					.resize({
-						width: params.width
-					})
-					.renderAsync()
+				manipulated = await context.renderAsync()
 			} catch (error) {
 				if (params.signal?.aborted) {
 					throw abortError(params.signal)
@@ -448,10 +453,14 @@ class Thumbnails {
 				throw new Error("No thumbnail generated")
 			}
 
+			// See generateImage: hold Context across renderAsync to prevent Hermes GC from
+			// cancelling the underlying coroutine task via sharedObjectDidRelease.
+			const context = ImageManipulator.ImageManipulator.manipulate(thumbnail)
+
 			let manipulated: ImageManipulator.ImageRef | null = null
 
 			try {
-				manipulated = await ImageManipulator.ImageManipulator.manipulate(thumbnail).renderAsync()
+				manipulated = await context.renderAsync()
 			} catch (error) {
 				if (params.signal?.aborted) {
 					throw abortError(params.signal)
