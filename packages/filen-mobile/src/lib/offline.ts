@@ -608,7 +608,11 @@ export class Offline {
 						if (!listResult.success) {
 							const unwrappedSdkError = unwrapSdkError(listResult.error)
 
-							if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.FolderNotFound) {
+							if (
+								unwrappedSdkError &&
+								(unwrappedSdkError.kind() === ErrorKind.FolderNotFound ||
+									unwrappedSdkError.kind() === ErrorKind.WrongPassword)
+							) {
 								parentListings.set(key, null)
 							}
 
