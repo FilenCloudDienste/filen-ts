@@ -105,9 +105,7 @@ const Item = memo(
 			}
 
 			const isDirectory =
-				info.item.type === "directory" ||
-				info.item.type === "sharedDirectory" ||
-				info.item.type === "sharedRootDirectory"
+				info.item.type === "directory" || info.item.type === "sharedDirectory" || info.item.type === "sharedRootDirectory"
 
 			return isDirectory
 		})()
@@ -315,16 +313,17 @@ const Item = memo(
 								/>
 							</AnimatedView>
 						)}
-						{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && !disabled && (
+						{drivePath.selectOptions && drivePath.selectOptions.intention === "select" && (
 							<AnimatedView
 								className="flex-row h-full items-center justify-center bg-transparent shrink-0"
 								entering={FadeIn}
 								exiting={FadeOut}
 							>
 								<Checkbox
-									value={isSelectedFromDriveSelect}
-									onValueChange={onPressSelectForDriveSelect}
+									value={disabled ? false : isSelectedFromDriveSelect}
+									onValueChange={disabled ? undefined : onPressSelectForDriveSelect}
 									hitSlop={16}
+									color={disabled ? "transparent" : undefined}
 								/>
 							</AnimatedView>
 						)}

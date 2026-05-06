@@ -115,7 +115,7 @@ const GalleryHeader = memo(
 								: currentItem.data.name
 							: ""}
 					</Text>
-					{currentItem ? (
+					{currentItem && !drivePath?.selectOptions ? (
 						<Fragment>
 							{currentItem.type === "drive" ? (
 								<DriveItemMenu
@@ -239,7 +239,9 @@ const GalleryHeader = memo(
 								</Menu>
 							)}
 						</Fragment>
-					) : null}
+					) : (
+						<View className="size-11 flex-row items-center justify-center bg-transparent" />
+					)}
 				</View>
 			</AnimatedView>
 		)
