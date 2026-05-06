@@ -129,6 +129,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			"VIBRATE",
 			"POST_NOTIFICATIONS",
 			"FOREGROUND_SERVICE",
+			"FOREGROUND_SERVICE_DATA_SYNC",
 			"USE_FINGERPRINT",
 			"USE_BIOMETRIC",
 			"SYSTEM_ALERT_WINDOW",
@@ -270,6 +271,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"./plugins/withAndroidNetworkSecurityConfig",
 		"./plugins/withAndroidLargeHeapAndHardwareAcceleration",
 		"./plugins/withGradleMemory",
+		"./plugins/withNotifeeForegroundServiceType",
 		[
 			"react-native-document-scanner-plugin",
 			{
