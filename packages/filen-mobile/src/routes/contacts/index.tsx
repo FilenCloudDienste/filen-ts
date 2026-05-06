@@ -104,10 +104,11 @@ function useSelectOptions() {
 	return selectOptions
 }
 
-const Header = memo(() => {
+const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectOptions = useSelectOptions()
 	const selectedContacts = useContactsStore(
 		useShallow(state => state.selectedContacts.filter(c => c.type === "contact").map(c => c.data as TContact))
@@ -243,6 +244,24 @@ const Header = memo(() => {
 				default: bgBackgroundSecondary.backgroundColor as string
 			})}
 			rightItems={headerRightItems}
+			searchBarOptions={{
+				placement: "integratedButton",
+				placeholder: "tbd_search_contacts",
+				onChangeText: e => setSearchQuery(e.nativeEvent.text),
+				onCancelButtonPress: () => setSearchQuery(""),
+				onClose: () => setSearchQuery(""),
+				onOpen: () => setSearchQuery(""),
+				allowToolbarIntegration: false,
+				headerIconColor: textForeground.color,
+				textColor: textForeground.color,
+				barTintColor: "transparent",
+				tintColor: textForeground.color,
+				hintTextColor: textMutedForeground.color,
+				shouldShowHintSearchIcon: true,
+				hideNavigationBar: false,
+				hideWhenScrolling: false,
+				inputType: "text"
+			}}
 		/>
 	)
 })
@@ -950,11 +969,6 @@ const Contacts = memo(() => {
 		)
 	}
 
-	const searchBar = {
-		onChangeText: setSearchQuery,
-		placeholder: "tbd_search_contacts"
-	}
-
 	useFocusEffect(
 		useCallback(() => {
 			useContactsStore.getState().setSelectedContacts([])
@@ -967,7 +981,7 @@ const Contacts = memo(() => {
 
 	return (
 		<Fragment>
-			<Header />
+			<Header setSearchQuery={setSearchQuery} />
 			<SafeAreaView
 				edges={["left", "right"]}
 				className="bg-background-secondary"
@@ -982,7 +996,6 @@ const Contacts = memo(() => {
 					loading={contactRequestsQuery.status !== "success" || contactsQuery.status !== "success"}
 					onRefresh={onRefresh}
 					emptyComponent={emptyComponent}
-					searchBar={searchBar}
 				/>
 			</SafeAreaView>
 		</Fragment>

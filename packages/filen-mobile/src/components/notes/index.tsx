@@ -27,9 +27,10 @@ import { useStringifiedClient } from "@/lib/auth"
 import * as Sharing from "expo-sharing"
 import * as DocumentPicker from "expo-document-picker"
 
-const Header = memo(() => {
+const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const stringifiedClient = useStringifiedClient()
 	const textForeground = useResolveClassNames("text-foreground")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedNotes = useNotesStore(useShallow(state => state.selectedNotes))
 	const selectedTags = useNotesStore(useShallow(state => state.selectedTags))
 	const [notesViewMode, setNotesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
@@ -1011,6 +1012,24 @@ const Header = memo(() => {
 			title={title}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
+			searchBarOptions={{
+				placement: "integratedButton",
+				placeholder: viewMode === "notes" ? "tbd_search_notes" : "tbd_search_tags",
+				onChangeText: e => setSearchQuery(e.nativeEvent.text),
+				onCancelButtonPress: () => setSearchQuery(""),
+				onClose: () => setSearchQuery(""),
+				onOpen: () => setSearchQuery(""),
+				allowToolbarIntegration: false,
+				headerIconColor: textForeground.color,
+				textColor: textForeground.color,
+				barTintColor: "transparent",
+				tintColor: textForeground.color,
+				hintTextColor: textMutedForeground.color,
+				shouldShowHintSearchIcon: true,
+				hideNavigationBar: false,
+				hideWhenScrolling: false,
+				inputType: "text"
+			}}
 		/>
 	)
 })
@@ -1175,11 +1194,6 @@ const Notes = memo(() => {
 		)
 	}
 
-	const notesSearchBar = {
-		onChangeText: setSearchQuery,
-		placeholder: "tbd_search_notes"
-	}
-
 	const tagsEmptyComponent = () => {
 		return (
 			<View className="flex-1 items-center justify-center">
@@ -1188,14 +1202,9 @@ const Notes = memo(() => {
 		)
 	}
 
-	const tagsSearchBar = {
-		onChangeText: setSearchQuery,
-		placeholder: "tbd_search_notes_tags"
-	}
-
 	return (
 		<Fragment>
-			<Header />
+			<Header setSearchQuery={setSearchQuery} />
 			<SafeAreaView edges={["left", "right"]}>
 				{viewMode === "notes" ? (
 					<VirtualList
@@ -1208,7 +1217,6 @@ const Notes = memo(() => {
 						loading={notesQuery.status !== "success"}
 						onRefresh={onRefresh}
 						emptyComponent={notesEmptyComponent}
-						searchBar={notesSearchBar}
 					/>
 				) : (
 					<VirtualList
@@ -1221,7 +1229,6 @@ const Notes = memo(() => {
 						renderItem={renderItemTagsView}
 						onRefresh={onRefresh}
 						emptyComponent={tagsEmptyComponent}
-						searchBar={tagsSearchBar}
 					/>
 				)}
 			</SafeAreaView>

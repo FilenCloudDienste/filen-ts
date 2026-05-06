@@ -35,9 +35,10 @@ import * as DocumentPicker from "expo-document-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 
-const Header = memo(() => {
+const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedDriveItems = useDriveStore(useShallow(state => state.selectedItems))
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
@@ -981,6 +982,24 @@ const Header = memo(() => {
 			}
 			leftItems={leftItems}
 			rightItems={rightItems}
+			searchBarOptions={{
+				placement: "integratedButton",
+				placeholder: "tbd_search_drive",
+				onChangeText: e => setSearchQuery(e.nativeEvent.text),
+				onCancelButtonPress: () => setSearchQuery(""),
+				onClose: () => setSearchQuery(""),
+				onOpen: () => setSearchQuery(""),
+				allowToolbarIntegration: false,
+				headerIconColor: textForeground.color,
+				textColor: textForeground.color,
+				barTintColor: "transparent",
+				tintColor: textForeground.color,
+				hintTextColor: textMutedForeground.color,
+				shouldShowHintSearchIcon: true,
+				hideNavigationBar: false,
+				hideWhenScrolling: false,
+				inputType: "text"
+			}}
 		/>
 	)
 })
@@ -1097,7 +1116,7 @@ const Drive = memo(() => {
 
 	return (
 		<Fragment>
-			<Header />
+			<Header setSearchQuery={setSearchQuery} />
 			<SafeAreaView
 				className={cn(
 					"flex-1",
@@ -1136,10 +1155,6 @@ const Drive = memo(() => {
 						}
 					}}
 					loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
-					searchBar={{
-						placeholder: "tbd_search_drive",
-						onChangeText: setSearchQuery
-					}}
 				/>
 			</SafeAreaView>
 		</Fragment>
