@@ -8,13 +8,12 @@ import alerts from "@/lib/alerts"
 import Chat from "@/components/chats/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
-import { useState, memo } from "react"
+import { memo } from "react"
 import { Platform } from "react-native"
 
-const List = memo(() => {
+const List = memo(({ searchQuery }: { searchQuery: string }) => {
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
-	const [searchQuery, setSearchQuery] = useState<string>("")
 
 	const chats = (() => {
 		if (chatsQuery.status !== "success") {
@@ -94,11 +93,6 @@ const List = memo(() => {
 		)
 	}
 
-	const searchBarProps = {
-		onChangeText: setSearchQuery,
-		placeholder: "tbd_search_chats"
-	}
-
 	return (
 		<VirtualList
 			className="flex-1"
@@ -110,7 +104,6 @@ const List = memo(() => {
 			renderItem={renderItem}
 			onRefresh={onRefresh}
 			emptyComponent={emptyComponent}
-			searchBar={searchBarProps}
 		/>
 	)
 })

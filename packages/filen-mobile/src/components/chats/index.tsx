@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback } from "react"
+import { Fragment, memo, useCallback, useState } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { Platform } from "react-native"
@@ -17,10 +17,11 @@ import prompts from "@/lib/prompts"
 import type { MenuButton } from "@/components/ui/menu"
 import { selectContacts } from "@/routes/contacts"
 
-const Header = memo(() => {
+const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
 	const textForeground = useResolveClassNames("text-foreground")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedChatsIncludesMuted = useChatsStore(useShallow(state => state.selectedChats.some(chat => chat.muted)))
 	const everySelectedChatOwnedBySelf = useChatsStore(
 		useShallow(state => state.selectedChats.every(chat => chat.ownerId === stringigiedClient?.userId))
@@ -284,11 +285,31 @@ const Header = memo(() => {
 			transparent={Platform.OS === "ios"}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
+			searchBarOptions={{
+				placement: "integratedButton",
+				placeholder: "tbd_search_chats",
+				onChangeText: e => setSearchQuery(e.nativeEvent.text),
+				onCancelButtonPress: () => setSearchQuery(""),
+				onClose: () => setSearchQuery(""),
+				onOpen: () => setSearchQuery(""),
+				allowToolbarIntegration: false,
+				headerIconColor: textForeground.color,
+				textColor: textForeground.color,
+				barTintColor: "transparent",
+				tintColor: textForeground.color,
+				hintTextColor: textMutedForeground.color,
+				shouldShowHintSearchIcon: true,
+				hideNavigationBar: false,
+				hideWhenScrolling: false,
+				inputType: "text"
+			}}
 		/>
 	)
 })
 
 export const Chats = memo(() => {
+	const [searchQuery, setSearchQuery] = useState<string>("")
+
 	useFocusEffect(
 		useCallback(() => {
 			useChatsStore.getState().setSelectedChats([])
@@ -301,9 +322,9 @@ export const Chats = memo(() => {
 
 	return (
 		<Fragment>
-			<Header />
+			<Header setSearchQuery={setSearchQuery} />
 			<SafeAreaView edges={["left", "right"]}>
-				<List />
+				<List searchQuery={searchQuery} />
 			</SafeAreaView>
 		</Fragment>
 	)

@@ -22,7 +22,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
-		<View className="bg-background-tertiary px-4 flex-col py-2">
+		<View className="bg-transparent px-4 flex-col py-2">
 			<View className="bg-transparent items-center justify-between flex-row gap-4">
 				<View className="flex-row items-center gap-3 bg-transparent flex-1">
 					{transfer.type === "uploadDirectory" || transfer.type === "uploadFile" ? (
