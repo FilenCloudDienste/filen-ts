@@ -29,6 +29,7 @@ import Http from "@/components/http"
 import CameraUploadSync from "@/components/cameraUpload/sync"
 import IncomingShareHandler from "@/components/incomingShareHandler"
 import Transfers from "@/components/transfers"
+import ForegroundService from "@/components/foregroundService"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -222,6 +223,7 @@ const RootLayout = memo(() => {
 												<ChatsSync />
 												<CameraUploadSync />
 												<IncomingShareHandler />
+												<ForegroundService />
 											</Fragment>
 										)}
 										<Pathname />

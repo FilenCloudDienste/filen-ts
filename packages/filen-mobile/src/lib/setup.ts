@@ -6,6 +6,7 @@ import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 import offline from "@/lib/offline"
 import alerts from "@/lib/alerts"
+import foregroundService from "@/lib/foregroundService"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -35,6 +36,8 @@ class Setup {
 				await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
 
 				if (isAuthed.isAuthed) {
+					foregroundService.init().catch(console.error)
+
 					// TODO: Move to host component like camera upload
 					Promise.all([offline.updateIndex(), offline.sync()]).catch(err => {
 						console.error(err)
