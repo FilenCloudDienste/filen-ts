@@ -3,7 +3,7 @@ import { Notifier, NotifierComponents } from "react-native-notifier"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { memo } from "react"
-import { FilenSdkError } from "@filen/sdk-rs"
+import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/utils"
 
 const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }) => {
 	const insets = useSafeAreaInsets()
@@ -22,8 +22,9 @@ const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }
 
 export class Alerts {
 	public error(message: unknown): void {
-		const description = FilenSdkError.hasInner(message)
-			? FilenSdkError.getInner(message).message()
+		const unwrappedSdkError = unwrapSdkError(message)
+		const description = unwrappedSdkError
+			? unwrappedSdkErrorToHumanReadable(unwrappedSdkError)
 			: message instanceof Error
 				? message.message
 				: String(message)

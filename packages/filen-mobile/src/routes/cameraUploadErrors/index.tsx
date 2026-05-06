@@ -10,8 +10,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useCameraUploadStore, { type CameraUploadError } from "@/stores/useCameraUpload.store"
 import { useShallow } from "zustand/shallow"
-import { unwrapSdkError } from "@/lib/utils"
-// import { ErrorKind } from "@filen/sdk-rs"
+import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/utils"
 import cameraUpload from "@/lib/cameraUpload"
 
 const Err = memo(({ error }: { error: CameraUploadError }) => {
@@ -23,7 +22,7 @@ const Err = memo(({ error }: { error: CameraUploadError }) => {
 		const unwrappedError = unwrapSdkError(error.error)
 
 		if (unwrappedError) {
-			return `sdk error ${unwrappedError.kind()}: ${unwrappedError.message()}`
+			return unwrappedSdkErrorToHumanReadable(unwrappedError)
 		}
 
 		if (error.error instanceof Error) {

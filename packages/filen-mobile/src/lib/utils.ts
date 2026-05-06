@@ -31,7 +31,8 @@ import {
 	AnyLinkedDir_Tags,
 	type LinkedFile,
 	FileMeta,
-	MaybeEncryptedUniffi_Tags
+	MaybeEncryptedUniffi_Tags,
+	ErrorKind
 } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import {
@@ -237,6 +238,110 @@ export function unwrapSdkError(error: unknown): FilenSdkError | null {
 	}
 
 	return null
+}
+
+export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
+	const kind = (() => {
+		switch (unwrapped.kind()) {
+			case ErrorKind.BadRecoveryKey: {
+				return "tbd_bad_recovery_key"
+			}
+
+			case ErrorKind.FolderNotFound: {
+				return "tbd_directory_not_found"
+			}
+
+			case ErrorKind.WrongPassword: {
+				return "tbd_wrong_password"
+			}
+
+			case ErrorKind.Cancelled: {
+				return "tbd_operation_cancelled"
+			}
+
+			case ErrorKind.ChunkTooLarge: {
+				return "tbd_chunk_too_large"
+			}
+
+			case ErrorKind.Conversion: {
+				return "tbd_conversion_error"
+			}
+
+			case ErrorKind.FileChangedDuringSync: {
+				return "tbd_file_changed_during_sync"
+			}
+
+			case ErrorKind.HeifError: {
+				return "tbd_heif_error"
+			}
+
+			case ErrorKind.ImageError: {
+				return "tbd_image_error"
+			}
+
+			case ErrorKind.InsufficientMemory: {
+				return "tbd_insufficient_memory"
+			}
+
+			case ErrorKind.Internal: {
+				return "tbd_internal_error"
+			}
+
+			case ErrorKind.InvalidName: {
+				return "tbd_invalid_name"
+			}
+
+			case ErrorKind.InvalidState: {
+				return "tbd_invalid_state"
+			}
+
+			case ErrorKind.InvalidType: {
+				return "tbd_invalid_type"
+			}
+
+			case ErrorKind.Io: {
+				return "tbd_fs_io_error"
+			}
+
+			case ErrorKind.MaxStorageReached: {
+				return "tbd_max_remote_storage_reached"
+			}
+
+			case ErrorKind.MetadataWasNotDecrypted: {
+				return "tbd_metadata_was_not_decrypted"
+			}
+
+			case ErrorKind.Reqwest: {
+				return "tbd_network_error"
+			}
+
+			case ErrorKind.Response: {
+				return "tbd_network_error"
+			}
+
+			case ErrorKind.RetryFailed: {
+				return "tbd_network_retry_failed"
+			}
+
+			case ErrorKind.Server: {
+				return "tbd_server_error"
+			}
+
+			case ErrorKind.Unauthenticated: {
+				return "tbd_unauthenticated"
+			}
+
+			case ErrorKind.Walk: {
+				return "tbd_fs_directory_walk_error"
+			}
+
+			default: {
+				return "tbd_unknown_error"
+			}
+		}
+	})()
+
+	return `tbd_sdk_error: ${kind}: ${unwrapped.message()}`
 }
 
 export function unwrapAnyDirUuid(dir: AnyDirWithContext): string | null {
