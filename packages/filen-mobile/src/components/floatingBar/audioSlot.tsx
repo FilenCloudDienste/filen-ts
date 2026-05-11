@@ -5,19 +5,28 @@ import audio, { useAudio } from "@/lib/audio"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
-import FontAwesome6 from "@expo/vector-icons/FontAwesome6"
 import { useResolveClassNames } from "uniwind"
+import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
+import Image from "@/components/ui/image"
+import Ionicons from "@expo/vector-icons/Ionicons"
 
 const AudioSlot = memo(() => {
 	const { status, loading, queueItem } = useAudio()
 	const textForeground = useResolveClassNames("text-foreground")
 
-	if (!queueItem) {
-		return null
-	}
+	const audioMetadataQuery = useAudioMetadataQuery(
+		{
+			type: "drive",
+			data: {
+				uuid: queueItem?.item.data.uuid ?? ""
+			}
+		},
+		{
+			enabled: !!queueItem
+		}
+	)
 
 	const playing = status?.playing ?? false
-	const title = queueItem.item.data.decryptedMeta?.name ?? queueItem.item.data.uuid
 
 	const onBodyPress = () => {
 		router.push("/playlists")
@@ -31,23 +40,57 @@ const AudioSlot = memo(() => {
 		}
 	}
 
+	if (!queueItem) {
+		return null
+	}
+
 	return (
 		<PressableScale
-			className="flex-1 flex-row items-center px-3 py-2 gap-3"
+			className="flex-1 flex-row items-center px-3 py-2 gap-2 min-h-9"
 			rippleColor="transparent"
 			onPress={onBodyPress}
 		>
-			<View className="flex-1 bg-transparent">
-				<Text
-					className="text-sm"
-					numberOfLines={1}
-					ellipsizeMode="tail"
-				>
-					{title}
-				</Text>
+			<View className="flex-row items-center gap-2 bg-transparent flex-1">
+				{queueItem && audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureBase64 ? (
+					<Image
+						className="size-8 rounded-lg bg-background-tertiary"
+						source={audioMetadataQuery.data.pictureBase64}
+						contentFit="contain"
+						cachePolicy="disk"
+						recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}
+					/>
+				) : (
+					<View className="bg-background-tertiary size-8 rounded-lg flex-row items-center justify-center">
+						<Ionicons
+							name="musical-note"
+							size={16}
+							color={textForeground.color}
+						/>
+					</View>
+				)}
+				<View className="flex-col bg-transparent flex-1 justify-center">
+					<Text
+						className="text-xs"
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{queueItem && audioMetadataQuery.status === "success"
+							? (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? "tbd_unknown_title")
+							: "tbd_not_playing"}
+					</Text>
+					<Text
+						className="text-xs text-muted-foreground"
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{queueItem && audioMetadataQuery.status === "success"
+							? (audioMetadataQuery.data?.artist ?? "tbd_unknown_artist")
+							: "tbd_not_playing"}
+					</Text>
+				</View>
 			</View>
 			<PressableScale
-				className="shrink-0 size-8 items-center justify-center"
+				className="shrink-0 size-5 items-center justify-center"
 				rippleColor="transparent"
 				onPress={onTogglePlay}
 			>
@@ -57,9 +100,9 @@ const AudioSlot = memo(() => {
 						color={textForeground.color}
 					/>
 				) : (
-					<FontAwesome6
+					<Ionicons
 						name={playing ? "pause" : "play"}
-						size={16}
+						size={18}
 						color={textForeground.color}
 					/>
 				)}

@@ -9,15 +9,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 // (home indicator / Dynamic Island bottom) is reported separately by
 // react-native-safe-area-context and must be added.
 //
-// Android: with react-native-edge-to-edge enabled, BottomNavigationView is
-// laid out by the OS such that its visual height is already absorbed in the
-// view tree — content above it does NOT need to add the bar height because
-// the tab bar sits inside the same safe area window. Only a small margin is
-// needed between floating UI and the tab bar.
+// Android: BottomNavigationView (Material) overlays content; the floating bar
+// must clear both the system nav bar (insets.bottom under edge-to-edge) AND
+// the BottomNavigationView height. The Material 3 default is 80dp; older
+// Material implementations use 56dp. expo-router unstable-native-tabs renders
+// at the Material 3 default, so 80dp is the right baseline. Tune here if the
+// bar visually overlaps on a specific device.
 //
 // If a future OS update breaks these assumptions, change the constant here
 // — every floating-above-tabs surface uses this hook.
 const IOS_TAB_BAR_HEIGHT = 49
+const ANDROID_TAB_BAR_HEIGHT = 80
 const FLOATING_BAR_GAP = 8
 
 export function useFloatingBarOffset(): number {
@@ -25,7 +27,7 @@ export function useFloatingBarOffset(): number {
 
 	return Platform.select({
 		ios: insets.bottom + IOS_TAB_BAR_HEIGHT + FLOATING_BAR_GAP,
-		default: FLOATING_BAR_GAP
+		default: insets.bottom + ANDROID_TAB_BAR_HEIGHT + FLOATING_BAR_GAP
 	}) ?? FLOATING_BAR_GAP
 }
 
