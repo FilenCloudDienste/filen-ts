@@ -28,7 +28,7 @@ import useEffectOnce from "@/hooks/useEffectOnce"
 import Http from "@/components/http"
 import CameraUploadSync from "@/components/cameraUpload/sync"
 import IncomingShareHandler from "@/components/incomingShareHandler"
-import Transfers from "@/components/transfers"
+import FloatingBar from "@/components/floatingBar"
 import ForegroundService from "@/components/foregroundService"
 
 SplashScreen.setOptions({
@@ -224,7 +224,7 @@ const RootLayout = memo(() => {
 										</Stack>
 										{isAuthed && (
 											<Fragment>
-												<Transfers />
+												<FloatingBar />
 												<Socket />
 												<Http />
 												<NotesSync />
