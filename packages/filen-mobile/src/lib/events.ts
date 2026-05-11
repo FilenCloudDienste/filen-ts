@@ -3,6 +3,7 @@ import type { ShowActionSheetOptions } from "@/providers/actionSheet.provider"
 import type { NoteContentEdited, Contact, AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import type { AudioStatus } from "expo-audio"
+import type { QueueItem, PlaylistWithItems } from "@/lib/audio"
 
 export type Events = {
 	secureStoreChange: {
@@ -59,6 +60,18 @@ export type Events = {
 		  }
 	audioStatus: AudioStatus
 	audioLoading: boolean
+	audioQueue: QueueItem[]
+	audioQueuePosition: number
+	playlistsSelect:
+		| {
+				id: string
+				selectedPlaylists: PlaylistWithItems[]
+				cancelled: false
+		  }
+		| {
+				id: string
+				cancelled: true
+		  }
 }
 
 class TypedEventEmitter<T> {

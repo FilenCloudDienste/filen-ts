@@ -1,10 +1,10 @@
-import { Fragment, memo } from "react"
+import { Fragment, memo, useState } from "react"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { type TextStyle, type LayoutChangeEvent, useWindowDimensions, ActivityIndicator } from "react-native"
+import { type TextStyle, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
 import { ImageBackground, Image } from "@/components/ui/image"
 import { useResolveClassNames } from "uniwind"
@@ -13,17 +13,16 @@ import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDeri
 import { runOnJS } from "react-native-worklets"
 import { Paths } from "expo-file-system"
 import { type Metadata } from "@/lib/audioCache"
-import { useRecyclingState } from "@shopify/flash-list"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
 import audio from "@/lib/audio"
 import useEffectOnce from "@/hooks/useEffectOnce"
 
-const FONT_TABULAR_NUMS: TextStyle = {
+export const FONT_TABULAR_NUMS: TextStyle = {
 	fontVariant: ["tabular-nums"]
 }
 
-function formatAudioTime(seconds: number): string {
+export function formatAudioTime(seconds: number): string {
 	if (!isFinite(seconds) || seconds < 0) {
 		return "0:00"
 	}
@@ -54,7 +53,7 @@ const Background = memo(({ children, blurhash }: { children: React.ReactNode; bl
 	)
 })
 
-const Picture = memo(({ blurhash, pictureBase64 }: { blurhash?: string; pictureBase64?: string }) => {
+const Picture = memo(({ blurhash, pictureBase64, id }: { blurhash?: string; pictureBase64?: string; id: string }) => {
 	const dimensions = useWindowDimensions()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -75,7 +74,7 @@ const Picture = memo(({ blurhash, pictureBase64 }: { blurhash?: string; pictureB
 						}}
 						contentFit="contain"
 						cachePolicy="disk"
-						recyclingKey={`preview-audio-picture-${pictureBase64}`}
+						recyclingKey={`preview-audio-picture-${id}`}
 					/>
 				) : (
 					<Ionicons
@@ -172,22 +171,13 @@ function buildSliderTapGesture(sv: SliderSharedValues, trackWidth: number, seekT
 	})
 }
 
-const AudioSlider = memo(
-	({
-		currentTime,
-		duration,
-		onSeek,
-		item
-	}: {
-		currentTime: number
-		duration: number
-		onSeek: (seconds: number) => void
-		item: GalleryItemTagged
-	}) => {
-		const [trackWidth, setTrackWidth] = useRecyclingState<number>(0, [item.type === "drive" ? item.data.data.uuid : item.data.url])
+export const AudioSlider = memo(
+	({ currentTime, duration, onSeek }: { currentTime: number; duration: number; onSeek: (seconds: number) => void }) => {
+		const [trackWidth, setTrackWidth] = useState<number>(0)
 		const isSeeking = useSharedValue<boolean>(false)
 		const seekProgress = useSharedValue<number>(0)
 		const thumbScale = useSharedValue<number>(1)
+
 		const normalizedProgress = duration > 0 ? Math.min(currentTime / duration, 1) : 0
 
 		const progress = useDerivedValue(() => {
@@ -197,10 +187,6 @@ const AudioSlider = memo(
 
 			return normalizedProgress
 		})
-
-		const onTrackLayout = (e: LayoutChangeEvent) => {
-			setTrackWidth(e.nativeEvent.layout.width)
-		}
 
 		const seekToPosition = (fraction: number) => {
 			if (duration > 0) {
@@ -248,7 +234,9 @@ const AudioSlider = memo(
 					style={{
 						height: THUMB_SIZE * 2
 					}}
-					onLayout={onTrackLayout}
+					onLayout={e => {
+						setTrackWidth(e.nativeEvent.layout.width)
+					}}
 				>
 					<View
 						className="w-full bg-white/20 rounded-full"
@@ -303,6 +291,7 @@ const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItem
 			<Picture
 				blurhash={metadata?.pictureBlurhash ?? undefined}
 				pictureBase64={metadata?.pictureBase64 ?? undefined}
+				id={item.type === "drive" ? item.data.data.uuid : item.data.url}
 			/>
 			<View className="flex-col mt-6 bg-transparent w-full px-4 items-center gap-1">
 				{metadata?.title && metadata?.artist ? (
@@ -377,7 +366,6 @@ const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItem
 			</PressableScale>
 			<View className="bg-transparent px-4 w-full">
 				<AudioSlider
-					item={item}
 					currentTime={status.currentTime}
 					duration={status.duration}
 					onSeek={seconds => {

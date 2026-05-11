@@ -1,5 +1,5 @@
 import { Stack } from "expo-router"
-import { memo } from "react"
+import { memo, Fragment } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useOfflineStore from "@/stores/useOffline.store"
@@ -49,10 +49,10 @@ const Indicator = memo(() => {
 
 const Layout = memo(() => {
 	return (
-		<View className="flex-1">
+		<Fragment>
 			<Stack />
 			<Indicator />
-		</View>
+		</Fragment>
 	)
 })
 
