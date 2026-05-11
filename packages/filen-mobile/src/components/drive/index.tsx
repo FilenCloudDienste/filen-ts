@@ -64,23 +64,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 	const rightItems = (() => {
 		if (drivePath.selectOptions) {
-			return [
-				{
-					type: "button",
-					icon: {
-						name: "close-outline",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							if (router.canGoBack()) {
-								router.back()
-							}
-						}
-					}
-				}
-			] satisfies HeaderItem[]
+			return []
 		}
 
 		const items: HeaderItem[] = []
@@ -838,6 +822,26 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	})()
 
 	const leftItems = ((): HeaderItem[] => {
+		if (drivePath.selectOptions) {
+			return [
+				{
+					type: "button",
+					icon: {
+						name: "chevron-back-outline",
+						color: textForeground.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							if (router.canGoBack()) {
+								router.back()
+							}
+						}
+					}
+				}
+			] satisfies HeaderItem[]
+		}
+
 		if (selectedDriveItems.length > 0) {
 			return [
 				{

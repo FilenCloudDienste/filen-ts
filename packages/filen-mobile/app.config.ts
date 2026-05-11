@@ -197,7 +197,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		[
 			"expo-audio",
 			{
-				microphonePermission: "Please allow access to your microphone so that Filen can capture audio when recording videos."
+				microphonePermission: "Please allow access to your microphone so that Filen can capture audio when recording videos.",
+				enableBackgroundPlayback: true,
+				enableBackgroundRecording: false,
+				recordAudioAndroid: false
 			}
 		],
 		[

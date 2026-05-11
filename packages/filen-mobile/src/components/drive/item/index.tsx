@@ -24,6 +24,7 @@ import useDriveSelectStore from "@/stores/useDriveSelect.store"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import { useRecyclingState } from "@shopify/flash-list"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { getPreviewType } from "@/lib/utils"
 
 const Item = memo(
 	({ info, drivePath, getListItems }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath; getListItems: () => DriveItem[] }) => {
@@ -39,6 +40,10 @@ const Item = memo(
 			useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
 		)
 		const selectedItemsFromDriveSelectLength = useDriveSelectStore(useShallow(state => state.selectedItems.length))
+		const previewType =
+			info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile"
+				? getPreviewType(info.item.data.decryptedMeta?.name ?? "")
+				: null
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
 			uuid: info.item.data.uuid,
@@ -52,7 +57,7 @@ const Item = memo(
 
 			switch (drivePath.selectOptions.intention) {
 				case "move": {
-					return drivePath.selectOptions.items.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
+					return drivePath.selectOptions.items.some(i => i.data.uuid === info.item.data.uuid)
 				}
 
 				case "select": {
@@ -71,7 +76,11 @@ const Item = memo(
 							? "directory"
 							: "file"
 
-					if (!allowedItemTypes.includes(normalizeItemType)) {
+					if (
+						!allowedItemTypes.includes(normalizeItemType) ||
+						(drivePath.selectOptions.previewType && drivePath.selectOptions.previewType !== previewType) ||
+						drivePath.selectOptions.items.some(i => i.data.uuid === info.item.data.uuid)
+					) {
 						return true
 					}
 
@@ -300,7 +309,7 @@ const Item = memo(
 							areDriveItemsSelected || (drivePath.selectOptions && drivePath.selectOptions.intention === "select" && "pr-14")
 						)}
 					>
-						{areDriveItemsSelected && (
+						{areDriveItemsSelected && !drivePath.selectOptions && (
 							<AnimatedView
 								className="flex-row h-full items-center justify-center bg-transparent shrink-0"
 								entering={FadeIn}

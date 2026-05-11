@@ -1,32 +1,115 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-audio"
 import audioCache, { type Metadata } from "@/lib/audioCache"
 import type { DriveItemFileExtracted } from "@/types"
-import * as FileSystem from "expo-file-system"
 import { useEffect, useState } from "react"
-import alerts from "@/lib/alerts"
 import events from "@/lib/events"
-import { Semaphore, run } from "@filen/utils"
-
-export type QueueItem = {
-	item: DriveItemFileExtracted
-	audio: FileSystem.File
-	metadata: Metadata
-}
+import { run } from "@filen/utils"
+import auth from "@/lib/auth"
+import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
+import { Buffer } from "react-native-quick-crypto"
+import { type } from "arktype"
+import { wrapAbortSignalForSdk } from "@/lib/utils"
+import { playlistsQueryUpdate } from "@/queries/usePlaylists.query"
+import cache from "@/lib/cache"
+import secureStore, { useSecureStore } from "@/lib/secureStore"
 
 export type LoopMode = "none" | "track" | "queue"
+
+export type QueueItem = {
+	playlistUuid: string
+	item: DriveItemFileExtracted
+}
+
+export const PlaylistFileSchema = type({
+	uuid: "string",
+	name: "string",
+	mime: "string",
+	size: "number",
+	bucket: "string",
+	key: "string",
+	version: "number",
+	chunks: "number",
+	region: "string",
+	playlist: "string"
+})
+
+export const PlaylistSchema = type({
+	uuid: "string",
+	name: "string",
+	created: "number",
+	updated: "number",
+	files: PlaylistFileSchema.array()
+})
+
+export type Playlist = typeof PlaylistSchema.infer
+export type PlaylistFile = typeof PlaylistFileSchema.infer
+
+export type PlaylistWithItems = Omit<Playlist, "files"> & {
+	files: (PlaylistFile & {
+		item: DriveItemFileExtracted
+	})[]
+}
+
+type State = {
+	queue: QueueItem[]
+	position: number
+	loading: boolean
+}
 
 export class Audio {
 	private readonly player = createAudioPlayer(undefined, {
 		updateInterval: 1000,
 		crossOrigin: "anonymous"
 	})
-	private queue: QueueItem[] = []
-	private queuePosition = 0
-	private loopMode: LoopMode = "none"
-	private shuffled = false
+
+	// Runtime-only shuffle state. The queue itself isn't persisted, so
+	// persisting the shuffle order would be meaningless across restarts.
 	private shuffleOrder: number[] = []
-	private loading = false
-	private readonly queueMutex = new Semaphore(1)
+	private shufflePosition: number = 0
+
+	// Generation counter for loadAndPlay; bumped on each call so older in-flight loads can detect they've been superseded.
+	private loadGeneration: number = 0
+
+	// Tracks playlist UUIDs whose missing-file cleanup has already been initiated this session, to avoid rewriting on every read.
+	private playlistCleanupDone: Set<string> = new Set()
+
+	private state = new Proxy<State>(
+		{
+			queue: [],
+			position: 0,
+			loading: false
+		},
+		{
+			set: (target, prop, value): boolean => {
+				const result = Reflect.set(target, prop, value)
+
+				switch (prop) {
+					case "queue": {
+						events.emit("audioQueue", value as QueueItem[])
+
+						break
+					}
+
+					case "position": {
+						events.emit("audioQueuePosition", value as number)
+
+						break
+					}
+
+					case "loading": {
+						events.emit("audioLoading", value as boolean)
+
+						break
+					}
+				}
+
+				return result
+			}
+		}
+	)
+
+	public readonly loopModeKey = "audioLoopMode"
+	public readonly shuffleEnabledKey = "audioShuffleEnabled"
 
 	public constructor() {
 		this.setAudioMode()
@@ -35,7 +118,7 @@ export class Audio {
 			events.emit("audioStatus", status)
 
 			if (status.didJustFinish) {
-				this.handleTrackEnd()
+				this.handleTrackEnd().catch(console.error)
 			}
 		})
 	}
@@ -53,112 +136,231 @@ export class Audio {
 		})
 	}
 
-	private handleTrackEnd(): void {
-		if (this.loopMode === "track") {
-			return
-		}
+	private async isShuffleEnabled(): Promise<boolean> {
+		return (await secureStore.get<boolean>(this.shuffleEnabledKey)) ?? false
+	}
 
-		const nextIndex = this.getNextIndex()
+	private async getLoopMode(): Promise<LoopMode> {
+		return (await secureStore.get<LoopMode>(this.loopModeKey)) ?? "none"
+	}
 
-		if (nextIndex === null) {
-			if (this.loopMode === "queue" && this.queue.length > 0) {
-				this.queuePosition = 0
+	/**
+	 * Generates a shuffled list of queue indices.
+	 * If `firstIdx` is provided, that index is placed first (used when toggling
+	 * shuffle on so the current track keeps playing). Otherwise full random.
+	 */
+	private generateShuffleOrder(firstIdx?: number): number[] {
+		const indices = Array.from(
+			{
+				length: this.state.queue.length
+			},
+			(_, i) => i
+		)
 
-				this.loadAndPlay(this.getEffectiveIndex(0))
+		if (firstIdx === undefined) {
+			for (let i = indices.length - 1; i > 0; i--) {
+				const j = Math.floor(Math.random() * (i + 1))
 
-				return
+				;[indices[i], indices[j]] = [indices[j]!, indices[i]!]
 			}
 
-			this.player.pause()
-
-			return
+			return indices
 		}
 
-		this.queuePosition = nextIndex
+		const others = indices.filter(i => i !== firstIdx)
 
-		this.loadAndPlay(this.getEffectiveIndex(nextIndex))
-	}
+		for (let i = others.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1))
 
-	private getEffectiveIndex(position: number): number {
-		if (this.shuffled && this.shuffleOrder.length > 0) {
-			return this.shuffleOrder[position] ?? position
+			;[others[i], others[j]] = [others[j]!, others[i]!]
 		}
 
-		return position
+		return [firstIdx, ...others]
 	}
 
-	private getNextIndex(): number | null {
-		const next = this.queuePosition + 1
+	private async advanceToNext(): Promise<boolean> {
+		const shuffle = await this.isShuffleEnabled()
 
-		if (next >= this.queue.length) {
-			return null
+		if (shuffle) {
+			// Stale order (queue changed without shuffle being aware) — rebuild from current position.
+			if (this.shuffleOrder.length !== this.state.queue.length) {
+				this.shuffleOrder = this.generateShuffleOrder(this.state.position)
+				this.shufflePosition = 0
+			}
+
+			const next = this.shufflePosition + 1
+
+			if (next >= this.shuffleOrder.length) {
+				return false
+			}
+
+			this.shufflePosition = next
+			this.state.position = this.shuffleOrder[next]!
+
+			return true
 		}
 
-		return next
+		const next = this.state.position + 1
+
+		if (next >= this.state.queue.length) {
+			return false
+		}
+
+		this.state.position = next
+
+		return true
 	}
 
-	private getPreviousIndex(): number | null {
-		const prev = this.queuePosition - 1
+	private async advanceToPrevious(): Promise<boolean> {
+		const shuffle = await this.isShuffleEnabled()
+
+		if (shuffle) {
+			if (this.shuffleOrder.length !== this.state.queue.length) {
+				this.shuffleOrder = this.generateShuffleOrder(this.state.position)
+				this.shufflePosition = 0
+			}
+
+			const prev = this.shufflePosition - 1
+
+			if (prev < 0) {
+				return false
+			}
+
+			this.shufflePosition = prev
+			this.state.position = this.shuffleOrder[prev]!
+
+			return true
+		}
+
+		const prev = this.state.position - 1
 
 		if (prev < 0) {
-			return null
+			return false
 		}
 
-		return prev
+		this.state.position = prev
+
+		return true
 	}
 
-	private setLoading(value: boolean): void {
-		if (this.loading === value) {
+	private async wrapToStart(): Promise<void> {
+		const shuffle = await this.isShuffleEnabled()
+
+		if (shuffle && this.state.queue.length > 0) {
+			// Reshuffle on loop so the second pass isn't the same order.
+			this.shuffleOrder = this.generateShuffleOrder()
+			this.shufflePosition = 0
+			this.state.position = this.shuffleOrder[0] ?? 0
+
 			return
 		}
 
-		this.loading = value
-
-		events.emit("audioLoading", value)
+		this.state.position = 0
 	}
 
-	private trackName(item: DriveItemFileExtracted, metadata: Metadata): string {
-		return metadata?.title ?? FileSystem.Paths.parse(item.data.decryptedMeta?.name ?? item.data.uuid).name
-	}
+	private async wrapToEnd(): Promise<void> {
+		const shuffle = await this.isShuffleEnabled()
 
-	private loadAndPlay(queueIndex: number): void {
-		const entry = this.queue[queueIndex]
+		if (shuffle && this.state.queue.length > 0) {
+			if (this.shuffleOrder.length !== this.state.queue.length) {
+				this.shuffleOrder = this.generateShuffleOrder(this.state.position)
+			}
 
-		if (!entry) {
+			this.shufflePosition = this.shuffleOrder.length - 1
+			this.state.position = this.shuffleOrder[this.shufflePosition] ?? 0
+
 			return
 		}
 
-		this.player.replace({
-			uri: entry.audio.uri,
-			name: this.trackName(entry.item, entry.metadata)
-		})
-
-		this.player.play()
-		this.updateLockScreen(entry)
+		this.state.position = this.state.queue.length - 1
 	}
 
-	private loadWithoutPlaying(queueIndex: number): void {
-		const entry = this.queue[queueIndex]
+	private async handleTrackEnd(): Promise<void> {
+		const loopMode = await this.getLoopMode()
 
-		if (!entry) {
+		if (loopMode === "track") {
+			await this.loadAndPlay(this.state.position)
+
 			return
 		}
 
-		this.player.replace({
-			uri: entry.audio.uri,
-			name: this.trackName(entry.item, entry.metadata)
-		})
+		if (await this.advanceToNext()) {
+			await this.loadAndPlay(this.state.position)
 
-		this.updateLockScreen(entry)
+			return
+		}
+
+		if (loopMode === "queue" && this.state.queue.length > 0) {
+			await this.wrapToStart()
+			await this.loadAndPlay(this.state.position)
+
+			return
+		}
+
+		this.player.pause()
 	}
 
-	private updateLockScreen(entry: QueueItem): void {
+	private async loadAndPlay(queueIndex: number): Promise<void> {
+		const generation = ++this.loadGeneration
+
+		await run(
+			async defer => {
+				this.state.loading = true
+
+				defer(() => {
+					if (generation === this.loadGeneration) {
+						this.state.loading = false
+					}
+				})
+
+				const entry = this.state.queue[queueIndex]
+
+				if (!entry) {
+					return
+				}
+
+				const { audio, metadata } = await audioCache.get({
+					item: {
+						type: "drive",
+						data: entry.item
+					}
+				})
+
+				if (generation !== this.loadGeneration) {
+					return
+				}
+
+				this.player.replace({
+					uri: audio.uri,
+					name: metadata?.title ?? entry.item.data.decryptedMeta?.name ?? entry.item.data.uuid
+				})
+
+				await this.player.seekTo(0)
+
+				if (generation !== this.loadGeneration) {
+					return
+				}
+
+				this.player.play()
+
+				this.updateLockScreen({
+					item: entry,
+					metadata
+				})
+			},
+			{
+				throw: true
+			}
+		)
+	}
+
+	private updateLockScreen({ item, metadata }: { item: QueueItem; metadata: Metadata }): void {
 		this.player.setActiveForLockScreen(
 			true,
 			{
-				title: this.trackName(entry.item, entry.metadata),
-				artist: entry.metadata?.artist ?? undefined,
-				albumTitle: entry.metadata?.album ?? undefined
+				title: metadata?.title ?? item.item.data.decryptedMeta?.name ?? item.item.data.uuid,
+				artist: metadata?.artist ?? undefined,
+				albumTitle: metadata?.album ?? undefined
 			},
 			{
 				showSeekBackward: true,
@@ -167,161 +369,73 @@ export class Audio {
 		)
 	}
 
-	private generateShuffleOrder(): void {
-		const length = this.queue.length
+	public async addToQueue({ item, position = "end" }: { item: QueueItem; position?: "start" | "end" }): Promise<void> {
+		const shuffle = await this.isShuffleEnabled()
 
-		this.shuffleOrder = new Array<number>(length)
+		if (position === "start") {
+			this.state.queue = [item, ...this.state.queue]
 
-		for (let i = 0; i < length; i++) {
-			this.shuffleOrder[i] = i
-		}
+			if (this.state.queue.length > 1) {
+				this.state.position++
+			}
 
-		const currentEffective = this.getEffectiveIndex(this.queuePosition)
-
-		// Fisher-Yates shuffle
-		for (let i = length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1))
-			const a = this.shuffleOrder[i] ?? i
-			const b = this.shuffleOrder[j] ?? j
-
-			this.shuffleOrder[i] = b
-			this.shuffleOrder[j] = a
-		}
-
-		// Move the current track to position 0 so it doesn't restart
-		const currentShufflePos = this.shuffleOrder.indexOf(currentEffective)
-
-		if (currentShufflePos > 0) {
-			const a = this.shuffleOrder[0] ?? 0
-			const b = this.shuffleOrder[currentShufflePos] ?? currentShufflePos
-
-			this.shuffleOrder[0] = b
-			this.shuffleOrder[currentShufflePos] = a
-		}
-
-		this.queuePosition = 0
-	}
-
-	public async addToQueue({ item, position = "end" }: { item: DriveItemFileExtracted; position?: "start" | "end" }): Promise<void> {
-		await run(
-			async defer => {
-				await this.queueMutex.acquire()
-
-				defer(() => {
-					this.setLoading(false)
-					this.queueMutex.release()
-				})
-
-				this.setLoading(true)
-
-				const { audio, metadata } = await audioCache.get({
-					item: {
-						type: "drive",
-						data: item
-					}
-				})
-
-				const queueItem: QueueItem = {
-					item,
-					audio,
-					metadata
-				}
-
-				if (position === "start") {
-					this.queue.unshift(queueItem)
-
-					if (this.queue.length > 1) {
-						this.queuePosition++
-					}
+			if (shuffle) {
+				// Existing entries pointed to old indices — bump each by 1, then add new index 0 at the end.
+				if (this.shuffleOrder.length + 1 === this.state.queue.length) {
+					this.shuffleOrder = [...this.shuffleOrder.map(i => i + 1), 0]
 				} else {
-					this.queue.push(queueItem)
+					this.shuffleOrder = this.generateShuffleOrder(this.state.position)
+					this.shufflePosition = 0
 				}
-			},
-			{
-				throw: true
 			}
-		)
-	}
+		} else {
+			this.state.queue = [...this.state.queue, item]
 
-	public removeFromQueue(index: number): void {
-		if (index < 0 || index >= this.queue.length) {
-			return
-		}
+			if (shuffle) {
+				const newIdx = this.state.queue.length - 1
 
-		this.queue.splice(index, 1)
+				if (this.shuffleOrder.length === newIdx) {
+					// Insert at a uniformly random slot strictly after the current shufflePosition so the
+					// new track is reachable within the remaining shuffle pass.
+					const insertAt = this.shufflePosition + 1 + Math.floor(Math.random() * (this.shuffleOrder.length - this.shufflePosition))
 
-		if (index < this.queuePosition) {
-			this.queuePosition--
-		} else if (index === this.queuePosition) {
-			if (this.queuePosition >= this.queue.length) {
-				this.queuePosition = Math.max(0, this.queue.length - 1)
-			}
-
-			if (this.queue.length > 0) {
-				this.loadWithoutPlaying(this.getEffectiveIndex(this.queuePosition))
-			} else {
-				this.stop()
+					this.shuffleOrder = [...this.shuffleOrder.slice(0, insertAt), newIdx, ...this.shuffleOrder.slice(insertAt)]
+				} else {
+					this.shuffleOrder = this.generateShuffleOrder(this.state.position)
+					this.shufflePosition = 0
+				}
 			}
 		}
 	}
 
-	public clearQueue(): void {
-		this.queue = []
-		this.queuePosition = 0
+	public async replaceQueue({ items, startingPosition = 0 }: { items: QueueItem[]; startingPosition?: number }): Promise<void> {
+		this.state.queue = items
+		this.state.position = startingPosition
+
+		const shuffle = await this.isShuffleEnabled()
+
+		if (shuffle && items.length > 0) {
+			this.shuffleOrder = this.generateShuffleOrder(startingPosition)
+			this.shufflePosition = 0
+		} else {
+			this.shuffleOrder = []
+			this.shufflePosition = 0
+		}
+	}
+
+	public async clearQueue(): Promise<void> {
+		await this.stop()
+
+		this.state.queue = []
+		this.state.position = 0
 		this.shuffleOrder = []
-		this.player.pause()
-		this.player.clearLockScreenControls()
+		this.shufflePosition = 0
 	}
 
-	public async play(item?: DriveItemFileExtracted): Promise<void> {
-		await run(
-			async defer => {
-				await this.queueMutex.acquire()
-
-				defer(() => {
-					this.setLoading(false)
-					this.queueMutex.release()
-				})
-
-				if (item) {
-					this.setLoading(true)
-
-					const { audio, metadata } = await audioCache.get({
-						item: {
-							type: "drive",
-							data: item
-						}
-					})
-
-					const queueItem: QueueItem = {
-						item,
-						audio,
-						metadata
-					}
-
-					this.queue.unshift(queueItem)
-
-					this.queuePosition = 0
-
-					this.loadAndPlay(this.getEffectiveIndex(0))
-
-					return
-				}
-
-				if (this.player.paused && this.player.isLoaded && this.queue.length > 0) {
-					this.player.play()
-
-					return
-				}
-
-				if (this.queue.length > 0) {
-					this.loadAndPlay(this.getEffectiveIndex(this.queuePosition))
-				}
-			},
-			{
-				throw: true
-			}
-		)
+	public async play(): Promise<void> {
+		if (this.state.queue.length > 0) {
+			await this.loadAndPlay(this.state.position)
+		}
 	}
 
 	public pause(): void {
@@ -329,120 +443,412 @@ export class Audio {
 	}
 
 	public resume(): void {
-		if (this.queue.length > 0) {
+		if (this.state.queue.length > 0) {
 			this.player.play()
 		}
 	}
 
-	public next(): void {
-		const nextIndex = this.getNextIndex()
-
-		if (nextIndex === null) {
-			if (this.loopMode === "queue" && this.queue.length > 0) {
-				this.queuePosition = 0
-
-				this.loadAndPlay(this.getEffectiveIndex(0))
-
-				return
-			}
+	public async next(): Promise<void> {
+		if (await this.advanceToNext()) {
+			await this.loadAndPlay(this.state.position)
 
 			return
 		}
 
-		this.queuePosition = nextIndex
+		const loopMode = await this.getLoopMode()
 
-		this.loadAndPlay(this.getEffectiveIndex(nextIndex))
+		if (loopMode === "queue" && this.state.queue.length > 0) {
+			await this.wrapToStart()
+			await this.loadAndPlay(this.state.position)
+		}
 	}
 
-	public previous(): void {
-		// If more than 3 seconds in, restart the current track instead of going back
-		if (this.player.currentTime > 3) {
-			this.player.seekTo(0)
+	public async previous(): Promise<void> {
+		// If more than 3 seconds in, restart the current track instead of going back.
+		// Guard against NaN/undefined currentTime (e.g. before playback has started).
+		if (Number.isFinite(this.player.currentTime) && this.player.currentTime > 3) {
+			await this.player.seekTo(0)
 
 			return
 		}
 
-		const prevIndex = this.getPreviousIndex()
-
-		if (prevIndex === null) {
-			if (this.loopMode === "queue" && this.queue.length > 0) {
-				this.queuePosition = this.queue.length - 1
-
-				this.loadAndPlay(this.getEffectiveIndex(this.queuePosition))
-
-				return
-			}
-
-			this.player.seekTo(0)
+		if (await this.advanceToPrevious()) {
+			await this.loadAndPlay(this.state.position)
 
 			return
 		}
 
-		this.queuePosition = prevIndex
+		const loopMode = await this.getLoopMode()
 
-		this.loadAndPlay(this.getEffectiveIndex(prevIndex))
+		if (loopMode === "queue" && this.state.queue.length > 0) {
+			await this.wrapToEnd()
+			await this.loadAndPlay(this.state.position)
+
+			return
+		}
+
+		await this.player.seekTo(0)
 	}
 
-	public seek(seconds: number): void {
-		this.player.seekTo(seconds)
+	public async seek(seconds: number): Promise<void> {
+		await this.player.seekTo(seconds)
 	}
 
-	public stop(): void {
+	public async stop(): Promise<void> {
 		this.player.pause()
-		this.player.seekTo(0)
+
+		await this.player.seekTo(0)
+
 		this.player.clearLockScreenControls()
 	}
 
-	public setLoopMode(mode: LoopMode): void {
-		this.loopMode = mode
-		this.player.loop = mode === "track"
-	}
-
-	public toggleShuffle(): void {
-		this.shuffled = !this.shuffled
-
-		if (this.shuffled) {
-			this.generateShuffleOrder()
-		} else {
-			const realIndex = this.getEffectiveIndex(this.queuePosition)
-
-			this.shuffleOrder = []
-			this.queuePosition = realIndex
-		}
-	}
-
-	public skipTo(index: number): void {
-		if (index < 0 || index >= this.queue.length) {
+	public async skipTo(index: number): Promise<void> {
+		if (index < 0 || index >= this.state.queue.length) {
 			return
 		}
 
-		this.queuePosition = index
+		this.state.position = index
 
-		this.loadAndPlay(this.getEffectiveIndex(index))
+		const shuffle = await this.isShuffleEnabled()
+
+		if (shuffle) {
+			const shufIdx = this.shuffleOrder.indexOf(index)
+
+			if (shufIdx !== -1) {
+				this.shufflePosition = shufIdx
+			} else {
+				// Stale order — regenerate with this index first so playback continues from here.
+				this.shuffleOrder = this.generateShuffleOrder(index)
+				this.shufflePosition = 0
+			}
+		}
+
+		await this.loadAndPlay(index)
 	}
 
-	public getQueue(): readonly QueueItem[] {
-		return this.queue
+	public async setLoopMode(mode: LoopMode): Promise<void> {
+		await secureStore.set(this.loopModeKey, mode)
 	}
 
-	public getQueuePosition(): number {
-		return this.queuePosition
+	public async setShuffleEnabled(enabled: boolean): Promise<void> {
+		await secureStore.set(this.shuffleEnabledKey, enabled)
+
+		if (enabled) {
+			this.shuffleOrder = this.generateShuffleOrder(this.state.position)
+			this.shufflePosition = 0
+		} else {
+			this.shuffleOrder = []
+			this.shufflePosition = 0
+		}
 	}
 
-	public getCurrentQueueItem(): QueueItem | null {
-		return this.queue[this.getEffectiveIndex(this.queuePosition)] ?? null
+	public getCurrentQueueItem() {
+		return this.state.queue[this.state.position] ?? null
 	}
 
-	public getLoopMode(): LoopMode {
-		return this.loopMode
+	public getQueue() {
+		return this.state.queue
 	}
 
-	public isShuffled(): boolean {
-		return this.shuffled
+	public getPosition() {
+		return this.state.position
 	}
 
-	public isLoading(): boolean {
-		return this.loading
+	public getLoading() {
+		return this.state.loading
+	}
+
+	public async getPlaylistsDirectory(signal?: AbortSignal): Promise<Dir> {
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		let dotFilenDir = (
+			await authedSdkClient.listDir(
+				new AnyNormalDir.Root({
+					uuid: authedSdkClient.root().uuid
+				}),
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === ".filen")
+
+		if (!dotFilenDir) {
+			dotFilenDir = await authedSdkClient.createDir(
+				new AnyNormalDir.Root({
+					uuid: authedSdkClient.root().uuid
+				}),
+				".filen",
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		}
+
+		let playlistsDir = (
+			await authedSdkClient.listDir(
+				new AnyNormalDir.Dir(dotFilenDir),
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === "playlists")
+
+		if (!playlistsDir) {
+			playlistsDir = await authedSdkClient.createDir(
+				new AnyNormalDir.Dir(dotFilenDir),
+				"Playlists",
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		}
+
+		return playlistsDir
+	}
+
+	private parsePlaylistBytes(bytes: ArrayBuffer): Playlist | null {
+		let parsed: unknown
+
+		try {
+			parsed = JSON.parse(Buffer.from(bytes).toString("utf-8"))
+		} catch {
+			return null
+		}
+
+		const result = PlaylistSchema(parsed)
+
+		if (result instanceof type.errors) {
+			return null
+		}
+
+		return result
+	}
+
+	public async getPlaylists(signal?: AbortSignal): Promise<PlaylistWithItems[]> {
+		const { authedSdkClient } = await auth.getSdkClients()
+		const playlistsDir = await this.getPlaylistsDirectory(signal)
+		const playlists = await authedSdkClient.listDir(
+			new AnyNormalDir.Dir(playlistsDir),
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
+
+		const parsedPlaylists = await Promise.all(
+			playlists.files.map(async file => {
+				const read = await authedSdkClient.downloadFileToBytes(
+					new AnyFile.File(file),
+					{
+						abortSignal: signal ? wrapAbortSignalForSdk(signal) : undefined,
+						pauseSignal: undefined
+					},
+					signal
+						? {
+								signal
+							}
+						: undefined
+				)
+
+				const result = this.parsePlaylistBytes(read)
+
+				if (!result) {
+					console.warn(`Skipping malformed playlist file: ${file.uuid}`)
+
+					return null
+				}
+
+				const now = Date.now()
+				const nonExistentFileUuids = new Set<string>()
+
+				const filesWithItems = (
+					await Promise.all(
+						result.files.map(async file => {
+							const fileExists = await authedSdkClient.getFileOptional(
+								file.uuid,
+								signal
+									? {
+											signal
+										}
+									: undefined
+							)
+
+							if (!fileExists) {
+								nonExistentFileUuids.add(file.uuid)
+
+								return null
+							}
+
+							const meta = {
+								name: file.name,
+								mime: file.mime,
+								created: undefined,
+								modified: BigInt(now),
+								hash: undefined,
+								size: BigInt(file.size),
+								key: file.key,
+								version: file.version
+							}
+
+							const item: DriveItemFileExtracted = {
+								type: "file",
+								data: {
+									uuid: file.uuid,
+									meta: new FileMeta.Decoded(meta),
+									parent: new ParentUuid.Uuid(file.uuid),
+									size: BigInt(file.size),
+									favorited: false,
+									region: file.region,
+									bucket: file.bucket,
+									timestamp: BigInt(now),
+									chunks: BigInt(file.chunks),
+									canMakeThumbnail: false,
+									decryptedMeta: meta
+								}
+							}
+
+							// We need to cache it here for the audioMetadata query to work later, since it relies on the cache
+							cache.uuidToAnyDriveItem.set(file.uuid, item)
+
+							return {
+								...file,
+								item
+							}
+						})
+					)
+				).filter(file => file !== null)
+
+				if (nonExistentFileUuids.size > 0 && !this.playlistCleanupDone.has(result.uuid)) {
+					this.playlistCleanupDone.add(result.uuid)
+
+					// Fire-and-forget: don't block the read on cleanup persistence. UI already sees the
+					// filtered list via filesWithItems, so a delayed persist is harmless.
+					this.savePlaylist({
+						playlist: {
+							...result,
+							files: result.files.filter(file => !nonExistentFileUuids.has(file.uuid))
+						},
+						signal
+					}).catch(console.error)
+				}
+
+				return {
+					...result,
+					files: filesWithItems
+				}
+			})
+		)
+
+		return parsedPlaylists.filter(p => p !== null)
+	}
+
+	public async savePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
+		const { authedSdkClient } = await auth.getSdkClients()
+		const playlistsDir = await this.getPlaylistsDirectory(signal)
+
+		await authedSdkClient.uploadFileFromBytes(Buffer.from(JSON.stringify(playlist), "utf-8").buffer, {
+			fileBuilderParams: {
+				parent: new AnyNormalDir.Dir(playlistsDir),
+				name: `${playlist.uuid}.json`,
+				created: BigInt(Date.now()),
+				modified: BigInt(Date.now()),
+				mime: "application/json"
+			},
+			managedFuture: {
+				abortSignal: signal ? wrapAbortSignalForSdk(signal) : undefined,
+				pauseSignal: undefined
+			}
+		})
+
+		const now = Date.now()
+		const playlistWithItems = {
+			...playlist,
+			files: playlist.files.map(file => {
+				const meta = {
+					name: file.name,
+					mime: file.mime,
+					created: undefined,
+					modified: BigInt(now),
+					hash: undefined,
+					size: BigInt(file.size),
+					key: file.key,
+					version: file.version
+				}
+
+				const item: DriveItemFileExtracted = {
+					type: "file",
+					data: {
+						uuid: file.uuid,
+						meta: new FileMeta.Decoded(meta),
+						parent: new ParentUuid.Uuid(file.uuid),
+						size: BigInt(file.size),
+						favorited: false,
+						region: file.region,
+						bucket: file.bucket,
+						timestamp: BigInt(now),
+						chunks: BigInt(file.chunks),
+						canMakeThumbnail: false,
+						decryptedMeta: meta
+					}
+				}
+
+				// We need to cache it here for the audioMetadata query to work later, since it relies on the cache
+				cache.uuidToAnyDriveItem.set(file.uuid, item)
+
+				return {
+					...file,
+					item
+				}
+			})
+		}
+
+		playlistsQueryUpdate({
+			updater: prev => [...prev.filter(p => p.uuid !== playlist.uuid), playlistWithItems]
+		})
+	}
+
+	public async deletePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
+		const { authedSdkClient } = await auth.getSdkClients()
+		const playlistsDir = await this.getPlaylistsDirectory(signal)
+
+		const file = (
+			await authedSdkClient.listDir(
+				new AnyNormalDir.Dir(playlistsDir),
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		).files.find(
+			f =>
+				f.meta.tag === FileMeta_Tags.Decoded &&
+				f.meta.inner[0].name.toLowerCase().trim() === `${playlist.uuid}.json`.toLowerCase().trim()
+		)
+
+		if (file) {
+			await authedSdkClient.deleteFilePermanently(
+				file,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		}
+
+		playlistsQueryUpdate({
+			updater: prev => prev.filter(p => p.uuid !== playlist.uuid)
+		})
 	}
 }
 
@@ -450,97 +856,53 @@ const audio = new Audio()
 
 export function useAudio() {
 	const [status, setStatus] = useState<AudioStatus | null>(null)
-	const [loading, setLoadingState] = useState<boolean>(false)
-
-	const play = (item?: DriveItemFileExtracted) => {
-		audio.play(item).catch(err => {
-			console.error(err)
-			alerts.error(err)
-		})
-	}
-
-	const pause = () => {
-		audio.pause()
-	}
-
-	const resume = () => {
-		audio.resume()
-	}
-
-	const next = () => {
-		audio.next()
-	}
-
-	const previous = () => {
-		audio.previous()
-	}
-
-	const seek = (seconds: number) => {
-		audio.seek(seconds)
-	}
-
-	const addToQueue = (params: Parameters<typeof audio.addToQueue>[0]) => {
-		audio.addToQueue(params).catch(err => {
-			console.error(err)
-			alerts.error(err)
-		})
-	}
-
-	const removeFromQueue = (index: number) => {
-		audio.removeFromQueue(index)
-	}
-
-	const clearQueue = () => {
-		audio.clearQueue()
-	}
-
-	const setLoopMode = (mode: LoopMode) => {
-		audio.setLoopMode(mode)
-	}
-
-	const toggleShuffle = () => {
-		audio.toggleShuffle()
-	}
-
-	const skipTo = (index: number) => {
-		audio.skipTo(index)
-	}
-
-	const stop = () => {
-		audio.stop()
-	}
+	const [loading, setLoadingState] = useState<boolean>(audio.getLoading())
+	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
+	const [queuePosition, setQueuePosition] = useState<number>(audio.getPosition())
+	const [shuffleEnabled] = useSecureStore<boolean>(audio.shuffleEnabledKey, false)
+	const [loopMode] = useSecureStore<LoopMode>(audio.loopModeKey, "none")
 
 	useEffect(() => {
 		const statusSubscription = events.subscribe("audioStatus", setStatus)
 		const loadingSubscription = events.subscribe("audioLoading", setLoadingState)
+		const queueSubscription = events.subscribe("audioQueue", setQueue)
+		const positionSubscription = events.subscribe("audioQueuePosition", setQueuePosition)
 
 		return () => {
 			statusSubscription.remove()
 			loadingSubscription.remove()
+			queueSubscription.remove()
+			positionSubscription.remove()
 		}
 	}, [])
 
 	return {
 		status,
 		loading,
-		queue: () => audio.getQueue(),
-		queuePosition: () => audio.getQueuePosition(),
-		currentQueueItem: () => audio.getCurrentQueueItem(),
-		loopMode: () => audio.getLoopMode(),
-		shuffled: () => audio.isShuffled(),
-		play,
-		pause,
-		resume,
-		next,
-		previous,
-		seek,
-		addToQueue,
-		removeFromQueue,
-		clearQueue,
-		setLoopMode,
-		toggleShuffle,
-		skipTo,
-		stop
+		queueItem: queue[queuePosition] ?? null,
+		shuffleEnabled,
+		loopMode
+	}
+}
+
+export function useAudioQueue() {
+	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
+	const [position, setPosition] = useState<number>(audio.getPosition())
+
+	useEffect(() => {
+		const queueSubscription = events.subscribe("audioQueue", setQueue)
+		const positionSubscription = events.subscribe("audioQueuePosition", setPosition)
+
+		return () => {
+			queueSubscription.remove()
+			positionSubscription.remove()
+		}
+	}, [])
+
+	return {
+		queue,
+		position,
+		queueItem: queue[position] ?? null
 	}
 }
 
