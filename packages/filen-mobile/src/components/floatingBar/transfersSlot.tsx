@@ -2,19 +2,22 @@ import { memo } from "react"
 import { useShallow } from "zustand/shallow"
 import { router } from "expo-router"
 import { ActivityIndicator } from "react-native"
-import * as Progress from "react-native-progress"
 import { bpsToReadable } from "@filen/utils"
 import useTransfersStore from "@/stores/useTransfers.store"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import { useResolveClassNames } from "uniwind"
+import AnimatedProgressBar from "@/components/floatingBar/animatedProgressBar"
 
 const TransfersSlot = memo(() => {
 	const transfersActive = useTransfersStore(useShallow(state => state.transfers.length > 0))
-	const { progress, speed, count } = useTransfersStore(useShallow(state => state.stats))
-	const textBlue500 = useResolveClassNames("text-blue-500")
-	const bgBackgroundTertiary = useResolveClassNames("bg-background-tertiary")
+	const { count, speed } = useTransfersStore(
+		useShallow(state => ({
+			count: state.stats.count,
+			speed: state.stats.speed
+		}))
+	)
 	const textForeground = useResolveClassNames("text-foreground")
 
 	if (!transfersActive) {
@@ -27,13 +30,13 @@ const TransfersSlot = memo(() => {
 
 	return (
 		<PressableScale
-			className="flex-1 flex-col overflow-hidden"
+			className="flex-1 flex-col overflow-hidden min-h-9"
 			rippleColor="transparent"
 			onPress={onPress}
 		>
 			<View className="flex-row items-center justify-between bg-transparent px-3 py-2 gap-3 flex-1">
 				<Text
-					className="text-sm shrink-0 flex-1"
+					className="text-xs shrink-0 flex-1"
 					numberOfLines={1}
 					ellipsizeMode="middle"
 				>
@@ -47,7 +50,7 @@ const TransfersSlot = memo(() => {
 					/>
 				) : (
 					<Text
-						className="text-sm shrink-0"
+						className="text-xs shrink-0"
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
@@ -55,16 +58,7 @@ const TransfersSlot = memo(() => {
 					</Text>
 				)}
 			</View>
-			<Progress.Bar
-				width={null}
-				height={3}
-				progress={progress}
-				color={textBlue500.color as string | undefined}
-				borderWidth={0}
-				borderRadius={0}
-				unfilledColor={bgBackgroundTertiary.color as string | undefined}
-				animated={false}
-			/>
+			<AnimatedProgressBar />
 		</PressableScale>
 	)
 })

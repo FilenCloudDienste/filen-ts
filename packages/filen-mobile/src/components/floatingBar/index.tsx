@@ -3,7 +3,7 @@ import { useShallow } from "zustand/shallow"
 import { FadeInDown, FadeOutDown, LinearTransition } from "react-native-reanimated"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { AnimatedView } from "@/components/ui/animated"
-import { CrossGlassContainerView } from "@/components/ui/view"
+import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useAudio } from "@/lib/audio"
 import useTransfersStore from "@/stores/useTransfers.store"
 import useFloatingBarOffset from "@/hooks/useFloatingBarOffset"
@@ -26,18 +26,16 @@ const FloatingBar = memo(() => {
 	}
 
 	return (
-		<AnimatedView
+		<View
 			pointerEvents="box-none"
 			className="absolute left-0 right-0 bg-transparent"
-			entering={FadeInDown.duration(220)}
-			exiting={FadeOutDown.duration(180)}
 			style={{
 				bottom: offset,
 				paddingLeft: insets.left > 0 ? insets.left : 16,
 				paddingRight: insets.right > 0 ? insets.right : 16
 			}}
 		>
-			<CrossGlassContainerView className="overflow-hidden flex-row items-stretch">
+			<CrossGlassContainerView className="overflow-hidden flex-row items-stretch min-h-9">
 				{audioActive ? (
 					<AnimatedView
 						className="flex-1"
@@ -64,7 +62,7 @@ const FloatingBar = memo(() => {
 					<Fragment />
 				)}
 			</CrossGlassContainerView>
-		</AnimatedView>
+		</View>
 	)
 })
 

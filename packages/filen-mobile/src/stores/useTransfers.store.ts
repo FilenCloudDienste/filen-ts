@@ -98,7 +98,7 @@ function updateTransfers({
 					addToNextUpdateAt: false
 				})
 			)
-		}, 1000)
+		}, 100)
 	}
 
 	if (now < state.stats.nextUpdateAt) {
@@ -135,7 +135,7 @@ function updateTransfers({
 					? Math.min(1, Math.max(0, activeTransfersTotalBytesTransferred / activeTransfersTotalSize))
 					: 0,
 			count: transfers.length,
-			nextUpdateAt: addToNextUpdateAt ? now + 500 : state.stats.nextUpdateAt
+			nextUpdateAt: addToNextUpdateAt ? now + 100 : state.stats.nextUpdateAt
 		}
 	}
 }
