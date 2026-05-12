@@ -1246,7 +1246,7 @@ class Drive {
 						return
 					}
 
-					password = promptResult.data.value.trim()
+					password = promptResult.data.value
 
 					await this.openLinkedDirectory({
 						linkUuid,
@@ -1335,7 +1335,7 @@ class Drive {
 						return
 					}
 
-					password = promptResult.data.value.trim()
+					password = promptResult.data.value
 
 					await this.openLinkedFile({
 						linkUuid,

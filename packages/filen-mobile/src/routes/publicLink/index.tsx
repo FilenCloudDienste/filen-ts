@@ -370,7 +370,7 @@ const PublicLink = memo(() => {
 																return
 															}
 
-															const newPassword = promptResult.data.value.trim()
+															const newPassword = promptResult.data.value
 
 															if (newPassword.length === 0) {
 																return

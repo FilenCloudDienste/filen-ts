@@ -1,10 +1,10 @@
 import events from "@/lib/events"
-import { useEffect, memo } from "react"
+import { useEffect, useRef, memo } from "react"
 import { runEffect } from "@filen/utils"
 import { ActionSheetProvider as ExpoActionSheetProvider, useActionSheet } from "@expo/react-native-action-sheet"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import type { ViewStyle } from "react-native"
+import { BackHandler, type ViewStyle } from "react-native"
 
 export type ShowActionSheetOptions = {
 	buttons: {
@@ -17,11 +17,44 @@ export type ShowActionSheetOptions = {
 	userInterfaceStyle?: "light" | "dark"
 }
 
-export const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode }) => {
+const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode }) => {
 	const { showActionSheetWithOptions } = useActionSheet()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const textForeground = useResolveClassNames("text-foreground")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { theme } = useUniwind()
 	const insets = useSafeAreaInsets()
+	const visibleRef = useRef<boolean>(false)
+	const cancelActionRef = useRef<(() => void) | undefined>(undefined)
+
+	useEffect(() => {
+		const { cleanup } = runEffect(defer => {
+			const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+				if (!visibleRef.current) {
+					return false
+				}
+
+				const action = cancelActionRef.current
+
+				visibleRef.current = false
+				cancelActionRef.current = undefined
+
+				if (action) {
+					action()
+				}
+
+				return true
+			})
+
+			defer(() => {
+				subscription.remove()
+			})
+		})
+
+		return () => {
+			cleanup()
+		}
+	}, [])
 
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
@@ -36,6 +69,9 @@ export const ActionSheetProviderInner = memo(({ children }: { children: React.Re
 					.at(-1)
 				const buttonActions = options.buttons.map(button => button.onPress)
 
+				visibleRef.current = true
+				cancelActionRef.current = cancelButtonIndex !== undefined ? buttonActions[cancelButtonIndex] : undefined
+
 				showActionSheetWithOptions(
 					{
 						options: buttons,
@@ -47,11 +83,31 @@ export const ActionSheetProviderInner = memo(({ children }: { children: React.Re
 							borderTopRightRadius: 16,
 							paddingBottom: insets.bottom,
 							paddingLeft: insets.left,
-							paddingRight: insets.right
+							paddingRight: insets.right,
+							paddingTop: insets.top
 						},
-						userInterfaceStyle: options.userInterfaceStyle ?? (theme === "dark" ? "dark" : "light")
+						textStyle: {
+							color: textForeground.color
+						},
+						titleTextStyle: {
+							color: textForeground.color
+						},
+						messageTextStyle: {
+							color: textMutedForeground.color
+						},
+						userInterfaceStyle: options.userInterfaceStyle ?? (theme === "dark" ? "dark" : "light"),
+						useModal: false
 					},
 					(selectedIndex?: number) => {
+						const wasVisible = visibleRef.current
+
+						visibleRef.current = false
+						cancelActionRef.current = undefined
+
+						if (!wasVisible) {
+							return
+						}
+
 						const action = buttonActions[selectedIndex ?? -1]
 
 						if (action) {
@@ -69,7 +125,17 @@ export const ActionSheetProviderInner = memo(({ children }: { children: React.Re
 		return () => {
 			cleanup()
 		}
-	}, [showActionSheetWithOptions, bgBackgroundSecondary.backgroundColor, theme, insets.bottom, insets.left, insets.right])
+	}, [
+		showActionSheetWithOptions,
+		bgBackgroundSecondary.backgroundColor,
+		theme,
+		insets.bottom,
+		insets.left,
+		insets.right,
+		insets.top,
+		textForeground.color,
+		textMutedForeground.color
+	])
 
 	return children
 })
@@ -82,7 +148,7 @@ export const ActionSheetProvider = memo(({ children }: { children: React.ReactNo
 	)
 })
 
-export class ActionSheet {
+class ActionSheet {
 	public async show(options: ShowActionSheetOptions) {
 		events.emit("showActionSheet", options)
 	}

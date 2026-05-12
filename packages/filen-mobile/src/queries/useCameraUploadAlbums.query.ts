@@ -5,7 +5,7 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 
 export const BASE_QUERY_KEY = "useCameraUploadAlbumsQuery"
 
-export async function fetchData() {
+export async function fetchData(_signal?: AbortSignal) {
 	const permissions = await hasAllNeededMediaPermissions({
 		shouldRequest: true
 	})
@@ -26,7 +26,7 @@ export function useCameraUploadAlbumsQuery(
 		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		queryKey: [BASE_QUERY_KEY],
-		queryFn: () => fetchData()
+		queryFn: ({ signal }) => fetchData(signal)
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
