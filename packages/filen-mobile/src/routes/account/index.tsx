@@ -22,6 +22,7 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import * as FileSystem from "expo-file-system"
 import * as Sharing from "expo-sharing"
 import * as Linking from "expo-linking"
+import * as ImageManipulator from "expo-image-manipulator"
 import { serialize } from "@/lib/serializer"
 
 type BigIntToNumber<T> = T extends bigint
@@ -183,21 +184,56 @@ const Account = memo(() => {
 								}
 
 								const result = await runWithLoading(async defer => {
-									const assetFile = new FileSystem.File(asset.uri)
+									const originalFile = new FileSystem.File(asset.uri)
 
 									defer(() => {
-										if (assetFile.exists) {
-											assetFile.delete()
+										if (originalFile.exists) {
+											originalFile.delete()
 										}
 									})
 
-									if (!assetFile.exists) {
+									if (!originalFile.exists) {
 										throw new Error("Asset file does not exist")
+									}
+
+									if (!asset.mimeType || !asset.mimeType.toLowerCase().startsWith("image/") || !asset.fileSize) {
+										throw new Error("Selected file is not an image")
+									}
+
+									const mimeType = asset.mimeType?.toLowerCase()
+									let fileToUpload = originalFile
+
+									if (mimeType !== "image/jpeg" && mimeType !== "image/png") {
+										// Hold the Context in a local binding across the await. expo-image-manipulator's
+										// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
+										// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
+										// the native task would be cancelled and renderAsync would reject with
+										// JobCancellationException.
+										const context = ImageManipulator.ImageManipulator.manipulate(asset.uri)
+										const manipulated = await context.renderAsync()
+										const saved = await manipulated.saveAsync({
+											format: ImageManipulator.SaveFormat.JPEG,
+											base64: false
+										})
+
+										const convertedFile = new FileSystem.File(saved.uri)
+
+										defer(() => {
+											if (convertedFile.exists) {
+												convertedFile.delete()
+											}
+										})
+
+										if (!convertedFile.exists) {
+											throw new Error("Converted file does not exist")
+										}
+
+										fileToUpload = convertedFile
 									}
 
 									const { authedSdkClient } = await auth.getSdkClients()
 
-									await authedSdkClient.uploadAvatar(await assetFile.arrayBuffer())
+									await authedSdkClient.uploadAvatar(await fileToUpload.arrayBuffer())
 									await accountQuery.refetch()
 								})
 
