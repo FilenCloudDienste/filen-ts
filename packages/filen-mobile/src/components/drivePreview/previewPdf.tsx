@@ -65,7 +65,7 @@ const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
 			return
 		}
 
-		const password = result.data.value.trim()
+		const password = result.data.value
 
 		if (password.length === 0) {
 			setDidCancelPasswordPrompt(true)

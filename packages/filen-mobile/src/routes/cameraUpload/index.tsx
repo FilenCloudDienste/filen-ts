@@ -45,9 +45,11 @@ const CameraUpload = memo(() => {
 			<Header
 				title="tbd_camera_upload"
 				transparent={Platform.OS === "ios"}
+				shadowVisible={false}
+				backVisible={Platform.OS === "android"}
 				backgroundColor={Platform.select({
 					ios: undefined,
-					default: bgBackgroundSecondary.color as string | undefined
+					default: bgBackgroundSecondary.backgroundColor as string
 				})}
 			/>
 			<SafeAreaView

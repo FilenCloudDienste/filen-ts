@@ -55,7 +55,7 @@
 		"@expo/react-native-action-sheet": "^4.1.1",
 		"@expo/ui": "~55.0.15",
 		"@expo/vector-icons": "^15.1.1",
-		"@filen/sdk-rs": "^0.4.17",
+		"@filen/sdk-rs": "^0.4.18",
 		"@filen/utils": "^0.0.11",
 		"@kishannareshpal/expo-pdf": "^0.3.2",
 		"@op-engineering/op-sqlite": "^15.2.12",
@@ -66,8 +66,8 @@
 		"@react-navigation/elements": "^2.9.12",
 		"@react-navigation/native": "^7.1.33",
 		"@shopify/flash-list": "2.3.1",
-		"@tanstack/query-persist-client-core": "^5.100.9",
-		"@tanstack/react-query": "^5.100.9",
+		"@tanstack/query-persist-client-core": "^5.100.10",
+		"@tanstack/react-query": "^5.100.10",
 		"@uiw/codemirror-extensions-langs": "^4.25.9",
 		"@uiw/codemirror-theme-material": "^4.25.9",
 		"@uiw/codemirror-theme-xcode": "^4.25.9",
@@ -148,7 +148,7 @@
 		"react-native-mmkv": "^4.3.1",
 		"react-native-nitro-modules": "^0.35.5",
 		"react-native-notifier": "^2.0.0",
-		"react-native-notify-kit": "^10.3.3",
+		"react-native-notify-kit": "^10.4.2",
 		"react-native-progress": "^5.0.1",
 		"react-native-quick-crypto": "^1.0.19",
 		"react-native-reanimated": "4.2.1",
@@ -164,7 +164,7 @@
 		"regexify-string": "^1.0.19",
 		"rehype-sanitize": "^6.0.0",
 		"remove": "^0.1.5",
-		"tailwind-merge": "^3.5.0",
+		"tailwind-merge": "^3.6.0",
 		"tailwindcss": "^4.3.0",
 		"unist-util-visit": "^5.1.0",
 		"uniwind": "^1.6.4",
@@ -175,7 +175,7 @@
 		"hermes-compiler": "250829098.0.4"
 	},
 	"devDependencies": {
-		"@tanstack/eslint-plugin-query": "^5.100.9",
+		"@tanstack/eslint-plugin-query": "^5.100.10",
 		"@testing-library/react": "^16.3.2",
 		"@types/mime-types": "^3.0.1",
 		"@types/react": "~19.2.10",
@@ -189,13 +189,13 @@
 		"eslint-plugin-react-compiler": "^19.1.0-rc.2",
 		"eslint-plugin-react-hooks": "^7.1.1",
 		"happy-dom": "^20.9.0",
-		"npm-check-updates": "^22.1.1",
+		"npm-check-updates": "^22.2.0",
 		"patch-package": "^8.0.1",
 		"prettier-plugin-tailwindcss": "^0.8.0",
 		"ts-node": "^10.9.2",
 		"tsx": "^4.21.0",
 		"typescript": "~5.9.3",
 		"typescript-eslint": "^8.58.2",
-		"vitest": "^4.1.5"
+		"vitest": "^4.1.6"
 	}
 }

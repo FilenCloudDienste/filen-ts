@@ -2,16 +2,17 @@ import { Fragment, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import View from "@/components/ui/view"
-import { ScrollView, Platform, Switch } from "react-native"
+import { ScrollView, Platform, Switch, ActivityIndicator } from "react-native"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
-import { PressableOpacity } from "@/components/ui/pressables"
-import { cn } from "@filen/utils"
+import { PressableOpacity, PressableScale } from "@/components/ui/pressables"
+import { cn, formatBytes } from "@filen/utils"
 import { router } from "expo-router"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
+import useAccountQuery from "@/queries/useAccount.query"
 
 export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]
@@ -215,6 +216,8 @@ const More = memo(() => {
 		enabled: false
 	})
 
+	const accountQuery = useAccountQuery()
+
 	return (
 		<Fragment>
 			<Header
@@ -223,11 +226,24 @@ const More = memo(() => {
 			/>
 			<SafeAreaView edges={["left", "right"]}>
 				<ScrollView
-					contentContainerClassName="px-4 gap-8 pb-40"
+					contentContainerClassName="px-4 gap-4 pb-40"
 					contentInsetAdjustmentBehavior="automatic"
 				>
-					<View className="bg-background-secondary rounded-3xl overflow-hidden flex-row gap-4 items-center p-4">
-						<Avatar size={64} />
+					<PressableScale
+						className="bg-background-secondary rounded-3xl overflow-hidden flex-row gap-4 items-center p-4"
+						rippleColor="transparent"
+						onPress={() => {
+							router.push("/account")
+						}}
+					>
+						<Avatar
+							size={48}
+							source={
+								accountQuery.status === "success" && accountQuery.data.avatarUrl.length > 0
+									? accountQuery.data.avatarUrl
+									: undefined
+							}
+						/>
 						<View className="flex-1 flex-col bg-transparent justify-center">
 							<Text
 								numberOfLines={1}
@@ -236,20 +252,28 @@ const More = memo(() => {
 							>
 								{stringifiedClient?.email}
 							</Text>
-							<Text
-								numberOfLines={1}
-								ellipsizeMode="middle"
-								className="text-muted-foreground text-sm"
-							>
-								{stringifiedClient?.userId}
-							</Text>
+							{accountQuery.status === "success" ? (
+								<Text
+									numberOfLines={1}
+									ellipsizeMode="middle"
+									className="text-muted-foreground text-sm"
+								>
+									{formatBytes(Number(accountQuery.data.storageUsed))} tbd_used_of{" "}
+									{formatBytes(Number(accountQuery.data.maxStorage))}
+								</Text>
+							) : (
+								<ActivityIndicator
+									size="small"
+									color={textMutedForeground.color}
+								/>
+							)}
 						</View>
 						<Ionicons
 							name="chevron-forward-outline"
 							size={20}
 							color={textMutedForeground.color}
 						/>
-					</View>
+					</PressableScale>
 					<Group
 						buttons={[
 							{
@@ -269,6 +293,25 @@ const More = memo(() => {
 											uuid: "favorites"
 										}
 									})
+								}
+							},
+							{
+								icon: "cloud-download-outline",
+								title: "tbd_saved_offline",
+								onPress: () => {
+									router.push({
+										pathname: "/offline/[uuid]",
+										params: {
+											uuid: "offline"
+										}
+									})
+								}
+							},
+							{
+								icon: "trash-outline",
+								title: "tbd_trash",
+								onPress: () => {
+									router.push("/trash")
 								}
 							}
 						]}
@@ -331,25 +374,6 @@ const More = memo(() => {
 								title: "tbd_playlists",
 								onPress: () => {
 									router.push("/playlists")
-								}
-							},
-							{
-								icon: "cloud-download-outline",
-								title: "tbd_saved_offline",
-								onPress: () => {
-									router.push({
-										pathname: "/offline/[uuid]",
-										params: {
-											uuid: "offline"
-										}
-									})
-								}
-							},
-							{
-								icon: "trash-outline",
-								title: "tbd_trash",
-								onPress: () => {
-									router.push("/trash")
 								}
 							}
 						]}
