@@ -24,6 +24,7 @@ import * as Sharing from "expo-sharing"
 import * as Linking from "expo-linking"
 import * as ImageManipulator from "expo-image-manipulator"
 import { serialize } from "@/lib/serializer"
+import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 
 type BigIntToNumber<T> = T extends bigint
 	? number
@@ -196,7 +197,12 @@ const Account = memo(() => {
 										throw new Error("Asset file does not exist")
 									}
 
-									if (!asset.mimeType || !asset.mimeType.toLowerCase().startsWith("image/") || !asset.fileSize) {
+									if (
+										!asset.mimeType ||
+										!asset.mimeType.toLowerCase().startsWith("image/") ||
+										!asset.fileSize ||
+										!asset.fileName
+									) {
 										throw new Error("Selected file is not an image")
 									}
 
@@ -204,6 +210,14 @@ const Account = memo(() => {
 									let fileToUpload = originalFile
 
 									if (mimeType !== "image/jpeg" && mimeType !== "image/png") {
+										if (
+											!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(
+												FileSystem.Paths.extname(asset.fileName).toLowerCase()
+											)
+										) {
+											throw new Error("Selected image format is not supported")
+										}
+
 										// Hold the Context in a local binding across the await. expo-image-manipulator's
 										// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
 										// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
