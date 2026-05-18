@@ -384,6 +384,13 @@ const More = memo(() => {
 								onPress: () => {
 									router.push("/security")
 								}
+							},
+							{
+								icon: "list-outline",
+								title: "tbd_events",
+								onPress: () => {
+									router.push("/events")
+								}
 							}
 						]}
 					/>
