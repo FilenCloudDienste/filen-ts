@@ -94,7 +94,17 @@ class Contacts {
 			updater: prev => ({
 				...prev,
 				contacts: prev.contacts.filter(c => c.email !== email),
-				blocked: [...prev.blocked.filter(c => c.email !== email), contactToBlock]
+				blocked: [
+					...prev.blocked.filter(c => c.email !== email),
+					{
+						uuid: contactToBlock.uuid,
+						userId: contactToBlock.userId,
+						email: contactToBlock.email,
+						avatar: contactToBlock.avatar,
+						nickName: contactToBlock.nickName ?? "",
+						timestamp: contactToBlock.timestamp
+					}
+				]
 			})
 		})
 	}

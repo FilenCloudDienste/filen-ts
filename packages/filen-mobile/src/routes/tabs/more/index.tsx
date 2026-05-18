@@ -239,9 +239,7 @@ const More = memo(() => {
 						<Avatar
 							size={48}
 							source={
-								accountQuery.status === "success" && accountQuery.data.avatarUrl.length > 0
-									? accountQuery.data.avatarUrl
-									: undefined
+								accountQuery.status === "success" && accountQuery.data.avatarUrl ? accountQuery.data.avatarUrl : undefined
 							}
 						/>
 						<View className="flex-1 flex-col bg-transparent justify-center">

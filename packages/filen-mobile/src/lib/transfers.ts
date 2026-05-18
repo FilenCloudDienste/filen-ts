@@ -517,7 +517,9 @@ class Transfers {
 					name: name ?? localFileOrDir.name ?? undefined,
 					created: created ? BigInt(created) : undefined,
 					modified: modified ? BigInt(modified) : undefined,
-					mime: mime ?? undefined
+					mime: mime ?? undefined,
+					noExif: false,
+					noExifOverride: false
 				},
 				normalizeFilePathForSdk(localFileOrDir.uri),
 				{
