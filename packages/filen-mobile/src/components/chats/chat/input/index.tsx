@@ -379,8 +379,7 @@ async function uploadAssetsAndGenerateLinks(
 						parent,
 						name: `${assetNameParsed.name}.${Date.now()}${assetNameParsed.ext}`,
 						modified: asset.lastModified,
-						mime: asset.mimeType,
-						hideProgress: true
+						mime: asset.mimeType
 					})
 
 					if (!uploadResult) {

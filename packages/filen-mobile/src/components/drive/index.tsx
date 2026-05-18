@@ -668,7 +668,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								return await transfers.upload({
 									localFileOrDir: tmpFile,
 									parent,
-									hideProgress: true,
 									name: fileName,
 									mime: "text/plain",
 									modified: Date.now(),

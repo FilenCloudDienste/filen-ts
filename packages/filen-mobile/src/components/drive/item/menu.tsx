@@ -286,8 +286,7 @@ export function createMenuButtons({
 
 					const result = await transfers.download({
 						item,
-						destination,
-						hideProgress: true
+						destination
 					})
 
 					if (!result) {
@@ -333,8 +332,7 @@ export function createMenuButtons({
 
 					const downloadResult = await transfers.download({
 						item,
-						destination,
-						hideProgress: true
+						destination
 					})
 
 					if (!downloadResult) {
