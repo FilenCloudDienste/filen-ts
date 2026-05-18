@@ -4,6 +4,7 @@ import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import { notesSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
+import ListEmpty from "@/components/ui/listEmpty"
 import { type Note as TNote, NoteType, type NoteTag } from "@filen/sdk-rs"
 import { run, fastLocaleCompare, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -20,8 +21,6 @@ import notesLib from "@/lib/notes"
 import * as FileSystem from "expo-file-system"
 import { useSecureStore } from "@/lib/secureStore"
 import Tag from "@/components/notes/tag"
-import View from "@/components/ui/view"
-import Text from "@/components/ui/text"
 import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import * as Sharing from "expo-sharing"
@@ -1186,21 +1185,19 @@ const Notes = memo(() => {
 		}, [])
 	)
 
-	const notesEmptyComponent = () => {
-		return (
-			<View className="flex-1 items-center justify-center">
-				<Text>tbd</Text>
-			</View>
-		)
-	}
+	const notesEmptyComponent = () => (
+		<ListEmpty
+			icon="document-text-outline"
+			title="tbd_no_notes"
+		/>
+	)
 
-	const tagsEmptyComponent = () => {
-		return (
-			<View className="flex-1 items-center justify-center">
-				<Text>tbd</Text>
-			</View>
-		)
-	}
+	const tagsEmptyComponent = () => (
+		<ListEmpty
+			icon="pricetag-outline"
+			title="tbd_no_tags"
+		/>
+	)
 
 	return (
 		<Fragment>

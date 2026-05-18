@@ -3,6 +3,7 @@ import { Platform, ActivityIndicator } from "react-native"
 import { router, useNavigation } from "expo-router"
 import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
+import ListEmpty from "@/components/ui/listEmpty"
 import Header from "@/components/ui/header"
 import { Fragment, memo, useRef, useState } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -10,7 +11,6 @@ import { run } from "@filen/utils"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
 import alerts from "@/lib/alerts"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import { UserEventResult_Tags, type UserEvent, type UserEventKind, UserEventKind_Tags } from "@filen/sdk-rs"
 import { PressableScale } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -353,18 +353,12 @@ const Events = memo(() => {
 						}
 					}}
 					onEndReachedThreshold={ON_END_REACHED_THRESHOLD}
-					emptyComponent={() => {
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-								<Ionicons
-									name="list-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text>tbd_no_events</Text>
-							</View>
-						)
-					}}
+					emptyComponent={() => (
+						<ListEmpty
+							icon="list-outline"
+							title="tbd_no_events"
+						/>
+					)}
 					footerComponent={() => {
 						if (!loadingMore) {
 							return null

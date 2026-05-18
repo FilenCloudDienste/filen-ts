@@ -5,6 +5,7 @@ import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
+import ListEmpty from "@/components/ui/listEmpty"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -154,7 +155,6 @@ const FileVersions = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 
@@ -295,18 +295,12 @@ const FileVersions = memo(() => {
 							alerts.error(result.error)
 						}
 					}}
-					emptyComponent={() => {
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-								<Ionicons
-									name="time-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text>tbd_no_file_versions</Text>
-							</View>
-						)
-					}}
+					emptyComponent={() => (
+						<ListEmpty
+							icon="time-outline"
+							title="tbd_no_file_versions"
+						/>
+					)}
 					renderItem={({ item: version }) => {
 						return (
 							<Version

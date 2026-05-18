@@ -1,6 +1,7 @@
 import { memo, Fragment, useState } from "react"
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
+import ListEmpty from "@/components/ui/listEmpty"
 import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
 import useTransfersStore, { type Transfer as TTransfer } from "@/stores/useTransfers.store"
@@ -126,7 +127,6 @@ const Transfers = memo(() => {
 	const insets = useSafeAreaInsets()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const [allPaused, setAllPaused] = useState<boolean>(false)
 
 	return (
@@ -223,18 +223,12 @@ const Transfers = memo(() => {
 					keyExtractor={transfer => `${transfer.type}-${transfer.id}`}
 					data={transfers}
 					renderItem={info => <Transfer info={info} />}
-					emptyComponent={() => {
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent gap-2">
-								<Ionicons
-									name="sync-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text>tbd_no_transfers</Text>
-							</View>
-						)
-					}}
+					emptyComponent={() => (
+						<ListEmpty
+							icon="sync-outline"
+							title="tbd_no_transfers"
+						/>
+					)}
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}

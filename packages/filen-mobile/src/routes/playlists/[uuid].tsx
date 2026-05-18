@@ -3,6 +3,7 @@ import Header from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
+import ListEmpty from "@/components/ui/listEmpty"
 import { router, useLocalSearchParams } from "expo-router"
 import usePlaylistsQuery from "@/queries/usePlaylists.query"
 import { run, formatBytes, cn } from "@filen/utils"
@@ -239,7 +240,6 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 const Playlist = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { uuid } = useLocalSearchParams<{
 		uuid?: string
 	}>()
@@ -571,20 +571,15 @@ const Playlist = memo(() => {
 					data={playlist.files}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
-						paddingBottom: 300
+						paddingBottom: 300,
+						flexGrow: 1
 					}}
-					ListEmptyComponent={() => {
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent gap-2 mt-40">
-								<Ionicons
-									name="musical-note-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text>tbd_no_tracks</Text>
-							</View>
-						)
-					}}
+					ListEmptyComponent={() => (
+						<ListEmpty
+							icon="musical-note-outline"
+							title="tbd_no_tracks"
+						/>
+					)}
 					renderItem={({ item: track }) => {
 						return (
 							<Track

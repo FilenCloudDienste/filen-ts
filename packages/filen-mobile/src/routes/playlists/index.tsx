@@ -2,6 +2,7 @@ import { memo, Fragment, useEffect, useCallback } from "react"
 import Header from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import VirtualList from "@/components/ui/virtualList"
+import ListEmpty from "@/components/ui/listEmpty"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
@@ -402,7 +403,6 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 const Playlists = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { selectOptions: selectOptionsSerialized } = useLocalSearchParams<{
 		selectOptions?: string
 	}>()
@@ -571,18 +571,12 @@ const Playlists = memo(() => {
 							alerts.error(result.error)
 						}
 					}}
-					emptyComponent={() => {
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-								<Ionicons
-									name="musical-note-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text>tbd_no_playlists</Text>
-							</View>
-						)
-					}}
+					emptyComponent={() => (
+						<ListEmpty
+							icon="musical-note-outline"
+							title="tbd_no_playlists"
+						/>
+					)}
 					renderItem={({ item: playlist }) => {
 						return (
 							<Playlist

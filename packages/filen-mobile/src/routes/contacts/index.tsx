@@ -6,6 +6,7 @@ import { Platform } from "react-native"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
+import ListEmpty from "@/components/ui/listEmpty"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import { useResolveClassNames } from "uniwind"
@@ -960,13 +961,12 @@ const Contacts = memo(() => {
 		}
 	}
 
-	const emptyComponent = () => {
-		return (
-			<View className="flex-1 items-center justify-center bg-transparent">
-				<Text>tbd</Text>
-			</View>
-		)
-	}
+	const emptyComponent = () => (
+		<ListEmpty
+			icon="people-outline"
+			title="tbd_no_contacts"
+		/>
+	)
 
 	useFocusEffect(
 		useCallback(() => {
