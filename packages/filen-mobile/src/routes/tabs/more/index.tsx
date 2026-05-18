@@ -97,13 +97,7 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 									>
 										{title}
 									</Text>
-									<Text
-										numberOfLines={1}
-										ellipsizeMode="middle"
-										className="text-muted-foreground text-xs"
-									>
-										{subTitle}
-									</Text>
+									<Text className="text-muted-foreground text-xs">{subTitle}</Text>
 								</View>
 							) : (
 								<Text
