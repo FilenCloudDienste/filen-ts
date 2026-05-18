@@ -3,6 +3,7 @@ import { Platform } from "react-native"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
 import { deserialize, serialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
+import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -207,45 +208,50 @@ const NoteHistory = memo(() => {
 					default: undefined
 				})}
 			/>
-			<VirtualList
-				data={history}
-				loading={noteHistoryQuery.status !== "success"}
-				contentInsetAdjustmentBehavior="automatic"
-				contentContainerStyle={{
-					paddingBottom: insets.bottom
-				}}
-				onRefresh={async () => {
-					const result = await run(async () => {
-						return await noteHistoryQuery.refetch()
-					})
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
+				<VirtualList
+					data={history}
+					loading={noteHistoryQuery.status !== "success"}
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerStyle={{
+						paddingBottom: insets.bottom
+					}}
+					onRefresh={async () => {
+						const result = await run(async () => {
+							return await noteHistoryQuery.refetch()
+						})
 
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-					}
-				}}
-				emptyComponent={() => {
-					return (
-						<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-							<Ionicons
-								name="time-outline"
-								size={64}
-								color={textMutedForeground.color}
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+						}
+					}}
+					emptyComponent={() => {
+						return (
+							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
+								<Ionicons
+									name="time-outline"
+									size={64}
+									color={textMutedForeground.color}
+								/>
+								<Text>tbd_no_note_history</Text>
+							</View>
+						)
+					}}
+					renderItem={({ item: history }) => {
+						return (
+							<History
+								history={history}
+								note={note}
 							/>
-							<Text>tbd_no_note_history</Text>
-						</View>
-					)
-				}}
-				renderItem={({ item: history }) => {
-					return (
-						<History
-							history={history}
-							note={note}
-						/>
-					)
-				}}
-				keyExtractor={history => history.id.toString()}
-			/>
+						)
+					}}
+					keyExtractor={history => history.id.toString()}
+				/>
+			</SafeAreaView>
 		</Fragment>
 	)
 })

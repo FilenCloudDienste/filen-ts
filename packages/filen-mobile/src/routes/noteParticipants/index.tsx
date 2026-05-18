@@ -3,6 +3,7 @@ import { Platform } from "react-native"
 import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
+import SafeAreaView from "@/components/ui/safeAreaView"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -301,35 +302,40 @@ const NoteParticipants = memo(() => {
 						: undefined
 				}
 			/>
-			<VirtualList
-				data={participants}
-				contentInsetAdjustmentBehavior="automatic"
-				contentContainerStyle={{
-					paddingBottom: insets.bottom
-				}}
-				emptyComponent={() => {
-					return (
-						<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-							<Ionicons
-								name="people-outline"
-								size={64}
-								color={textMutedForeground.color}
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
+				<VirtualList
+					data={participants}
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerStyle={{
+						paddingBottom: insets.bottom
+					}}
+					emptyComponent={() => {
+						return (
+							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
+								<Ionicons
+									name="people-outline"
+									size={64}
+									color={textMutedForeground.color}
+								/>
+								<Text>tbd_no_note_participants</Text>
+							</View>
+						)
+					}}
+					renderItem={({ item: participant }) => {
+						return (
+							<Participant
+								participant={participant}
+								note={note}
+								isOwner={isOwner}
 							/>
-							<Text>tbd_no_note_participants</Text>
-						</View>
-					)
-				}}
-				renderItem={({ item: participant }) => {
-					return (
-						<Participant
-							participant={participant}
-							note={note}
-							isOwner={isOwner}
-						/>
-					)
-				}}
-				keyExtractor={participant => participant.userId.toString()}
-			/>
+						)
+					}}
+					keyExtractor={participant => participant.userId.toString()}
+				/>
+			</SafeAreaView>
 		</Fragment>
 	)
 })

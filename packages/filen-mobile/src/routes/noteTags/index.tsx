@@ -3,6 +3,7 @@ import { Platform, ActivityIndicator } from "react-native"
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
+import SafeAreaView from "@/components/ui/safeAreaView"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -291,42 +292,47 @@ const NoteTags = memo(() => {
 					] satisfies HeaderItem[]
 				}
 			/>
-			{notesTagsQuery.status !== "success" ? (
-				<View className="flex-1 bg-transparent items-center justify-center">
-					<ActivityIndicator
-						size="large"
-						color={textForeground.color as string}
-					/>
-				</View>
-			) : tags.length === 0 ? (
-				<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
-					<Ionicons
-						name="pricetag-outline"
-						size={64}
-						color={textMutedForeground.color}
-					/>
-					<Text>tbd_no_tags</Text>
-				</View>
-			) : (
-				<GestureHandlerScrollView
-					contentContainerClassName="flex-row flex-wrap gap-2 px-4 pt-2 bg-transparent"
-					showsHorizontalScrollIndicator={false}
-					contentInsetAdjustmentBehavior="automatic"
-					contentContainerStyle={{
-						paddingBottom: insets.bottom
-					}}
-				>
-					{tags.map(tag => {
-						return (
-							<Tag
-								key={tag.uuid}
-								tag={tag}
-								note={note}
-							/>
-						)
-					})}
-				</GestureHandlerScrollView>
-			)}
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
+				{notesTagsQuery.status !== "success" ? (
+					<View className="flex-1 bg-transparent items-center justify-center">
+						<ActivityIndicator
+							size="large"
+							color={textForeground.color as string}
+						/>
+					</View>
+				) : tags.length === 0 ? (
+					<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
+						<Ionicons
+							name="pricetag-outline"
+							size={64}
+							color={textMutedForeground.color}
+						/>
+						<Text>tbd_no_tags</Text>
+					</View>
+				) : (
+					<GestureHandlerScrollView
+						contentContainerClassName="flex-row flex-wrap gap-2 px-4 pt-2 bg-transparent"
+						showsHorizontalScrollIndicator={false}
+						contentInsetAdjustmentBehavior="automatic"
+						contentContainerStyle={{
+							paddingBottom: insets.bottom
+						}}
+					>
+						{tags.map(tag => {
+							return (
+								<Tag
+									key={tag.uuid}
+									tag={tag}
+									note={note}
+								/>
+							)
+						})}
+					</GestureHandlerScrollView>
+				)}
+			</SafeAreaView>
 		</Fragment>
 	)
 })
