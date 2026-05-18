@@ -26,6 +26,7 @@ import * as ImagePicker from "expo-image-picker"
 import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
+import { newTmpDir } from "@/lib/tmp"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, normalizeFilePathForExpo } from "@/lib/utils"
 import DocumentScanner, {
 	ResponseType as DocumentScannerResponseType,
@@ -577,16 +578,17 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 
 							const result = await runWithLoading(async defer => {
-								const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), fileName))
+								const tmpDir = newTmpDir()
+								const tmpFile = new FileSystem.File(FileSystem.Paths.join(tmpDir.uri, fileName))
 
 								defer(() => {
-									if (tmpFile.parentDirectory.exists) {
-										tmpFile.parentDirectory.delete()
+									if (tmpDir.exists) {
+										tmpDir.delete()
 									}
 								})
 
-								if (!tmpFile.parentDirectory.exists) {
-									tmpFile.parentDirectory.create({
+								if (!tmpDir.exists) {
+									tmpDir.create({
 										idempotent: true,
 										intermediates: true
 									})

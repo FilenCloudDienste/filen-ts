@@ -13,7 +13,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import auth from "@/lib/auth"
-import * as FileSystem from "expo-file-system"
+import { newTmpFile } from "@/lib/tmp"
 import * as Sharing from "expo-sharing"
 
 const Security = memo(() => {
@@ -244,12 +244,7 @@ const Security = memo(() => {
 
 										const exportResult = await runWithLoading(async () => {
 											const keys = await (await auth.getSdkClients()).authedSdkClient.exportMasterKeys()
-											const file = new FileSystem.File(
-												FileSystem.Paths.join(
-													FileSystem.Paths.cache,
-													`${accountQuery.data.email}.masterKeys.${Date.now()}.txt`
-												)
-											)
+											const file = newTmpFile(`${accountQuery.data.email}.masterKeys.${Date.now()}.txt`)
 
 											if (file.exists) {
 												file.delete()

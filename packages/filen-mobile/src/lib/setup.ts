@@ -7,6 +7,7 @@ import sqlite from "@/lib/sqlite"
 import offline from "@/lib/offline"
 import alerts from "@/lib/alerts"
 import foregroundService from "@/lib/foregroundService"
+import { sweepTmpDir } from "@/lib/tmp"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -22,6 +23,13 @@ class Setup {
 			})
 
 			const now = performance.now()
+
+			// Wipe filen-tmp/ orphans from crashed sessions. Safe only because no transfers
+			// can be in flight before setup() completes.
+			if (!options?.background) {
+				sweepTmpDir()
+			}
+
 			const isAuthed = await auth.isAuthed()
 
 			if (isAuthed.isAuthed && isAuthed.stringifiedClient) {

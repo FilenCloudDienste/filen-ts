@@ -5,8 +5,8 @@ import { createNotePreviewFromContentText } from "@filen/utils"
 import { notesTagsQueryUpdate } from "@/queries/useNotesTags.query"
 import { notesWithContentQueryUpdate } from "@/queries/useNotesWithContent.query"
 import JSZip from "jszip"
-import * as FileSystem from "expo-file-system"
 import { sanitizeFileName } from "@/lib/utils"
+import { newTmpFile } from "@/lib/tmp"
 
 class Notes {
 	public async getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
@@ -227,7 +227,7 @@ class Notes {
 			throw new Error("Note content is empty")
 		}
 
-		const file = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, sanitizeFileName(`${note.title ?? note.uuid}.txt`)))
+		const file = newTmpFile(sanitizeFileName(`${note.title ?? note.uuid}.txt`))
 
 		if (file.exists) {
 			file.delete()
@@ -268,7 +268,7 @@ class Notes {
 		)
 
 		const buffer = await zip.generateAsync({ type: "uint8array" })
-		const file = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, sanitizeFileName(`notes_export_${Date.now()}.zip`)))
+		const file = newTmpFile(sanitizeFileName(`notes_export_${Date.now()}.zip`))
 
 		if (file.exists) {
 			file.delete()

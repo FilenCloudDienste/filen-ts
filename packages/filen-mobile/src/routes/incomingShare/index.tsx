@@ -16,7 +16,7 @@ import alerts from "@/lib/alerts"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import cache from "@/lib/cache"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import { randomUUID } from "expo-crypto"
+import { newTmpFile } from "@/lib/tmp"
 import isEqual from "react-fast-compare"
 import useIncomingShareStore from "@/stores/useIncomingShare.store"
 import Image from "@/components/ui/image"
@@ -231,9 +231,7 @@ const IncomingShare = memo(() => {
 															}
 														})
 
-														const tmpFile = new FileSystem.File(
-															FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID())
-														)
+														const tmpFile = newTmpFile()
 
 														if (tmpFile.exists) {
 															tmpFile.delete()

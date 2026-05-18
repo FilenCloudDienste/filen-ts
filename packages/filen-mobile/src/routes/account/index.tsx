@@ -20,6 +20,7 @@ import auth from "@/lib/auth"
 import * as ImagePicker from "expo-image-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import * as FileSystem from "expo-file-system"
+import { newTmpFile } from "@/lib/tmp"
 import * as Sharing from "expo-sharing"
 import * as Linking from "expo-linking"
 import * as ImageManipulator from "expo-image-manipulator"
@@ -456,9 +457,7 @@ const Account = memo(() => {
 										const result = await runWithLoading(async () => {
 											const { authedSdkClient } = await auth.getSdkClients()
 
-											const file = new FileSystem.File(
-												FileSystem.Paths.join(FileSystem.Paths.cache, `gdpr_${accountQuery.data.email}.txt`)
-											)
+											const file = newTmpFile(`gdpr_${accountQuery.data.email}.txt`)
 
 											file.write(JSON.stringify(convertBigInts(await authedSdkClient.getGdprInfo()), null, 4))
 

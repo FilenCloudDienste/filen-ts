@@ -38,6 +38,7 @@ import {
 } from "@/lib/utils"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
+import { newTmpFile } from "@/lib/tmp"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
@@ -175,7 +176,7 @@ export class Offline {
 	 * Prevents corruption from crashes mid-write.
 	 */
 	private atomicWrite(file: FileSystem.File, data: string | Uint8Array): FileSystem.File {
-		const tmp = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, `.tmp-${randomUUID()}`))
+		const tmp = newTmpFile(`.tmp-${randomUUID()}`)
 
 		tmp.write(data)
 
