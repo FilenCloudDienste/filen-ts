@@ -1008,36 +1008,7 @@ export function getPreviewTypeFromMime(mimeType: string): PreviewType {
 	return getPreviewType(`file.${extname}`)
 }
 
-export function listLocalDirectoryRecursive(directory: FileSystem.Directory): (FileSystem.File | FileSystem.Directory)[] {
-	const visited = new Set<string>()
-	const allEntries: (FileSystem.File | FileSystem.Directory)[] = []
-
-	function traverse(dir: FileSystem.Directory) {
-		if (visited.has(dir.uri)) {
-			return
-		}
-
-		visited.add(dir.uri)
-
-		try {
-			const entries = dir.list()
-
-			for (const entry of entries) {
-				allEntries.push(entry)
-
-				if (entry instanceof FileSystem.Directory) {
-					traverse(entry)
-				}
-			}
-		} catch {
-			return
-		}
-	}
-
-	traverse(directory)
-
-	return allEntries
-}
+export { listLocalDirectoryRecursive } from "@/lib/fsUtils"
 
 export function normalizeModificationTimestampForComparison(timestamp: number): number {
 	return Math.floor(timestamp / 1000)

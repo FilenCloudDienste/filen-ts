@@ -532,5 +532,104 @@ describe("FileCache", () => {
 			expect(fs.has(dir)).toBe(false)
 			expect(fs.has(`${dir}/${uuid}`)).toBe(false)
 		})
+
+		it("tolerates a corrupted metadata sidecar and still sweeps the rest", async () => {
+			const cache = await createFileCache()
+			const goodUuid = "good-uuid"
+			const goodItem = wrapDrive(makeFileItem(goodUuid, "good.txt"))
+			const goodDir = `${BASE_DIR}/${goodUuid}`
+			const expiredTime = Date.now() - 86400 * 1000 - 1
+
+			fs.set(goodDir, "dir")
+			fs.set(`${goodDir}/${goodUuid}.txt`, new Uint8Array([1]))
+			fs.set(`${goodDir}/${goodUuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...goodItem, cachedAt: expiredTime }))))
+
+			const corruptUuid = "corrupt-uuid"
+			const corruptDir = `${BASE_DIR}/${corruptUuid}`
+
+			fs.set(corruptDir, "dir")
+			fs.set(`${corruptDir}/${corruptUuid}`, new Uint8Array([1]))
+			fs.set(`${corruptDir}/${corruptUuid}.filenmeta`, new Uint8Array(new TextEncoder().encode("{this is not valid msgpackr}")))
+
+			await expect(cache.gc()).resolves.toBeUndefined()
+
+			expect(fs.has(goodDir)).toBe(false)
+			expect(fs.has(corruptDir)).toBe(false)
+		})
+
+		it("wipes everything when called with age=0", async () => {
+			const cache = await createFileCache()
+			const uuid = "fresh-uuid"
+			const item = wrapDrive(makeFileItem(uuid, "fresh.txt"))
+			const dir = `${BASE_DIR}/${uuid}`
+
+			fs.set(dir, "dir")
+			fs.set(`${dir}/${uuid}.txt`, new Uint8Array([1]))
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: Date.now() }))))
+
+			await cache.gc(0)
+
+			expect(fs.has(dir)).toBe(false)
+		})
+	})
+
+	describe("clear", () => {
+		it("removes every entry under the parent directory and recreates it empty", async () => {
+			const cache = await createFileCache()
+			const uuid = "to-clear"
+			const dir = `${BASE_DIR}/${uuid}`
+
+			fs.set(dir, "dir")
+			fs.set(`${dir}/${uuid}.txt`, new Uint8Array([1, 2, 3]))
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array([4, 5, 6]))
+
+			await cache.clear()
+
+			expect(fs.has(BASE_DIR)).toBe(true)
+			expect(fs.get(BASE_DIR)).toBe("dir")
+			expect(fs.has(dir)).toBe(false)
+			expect(fs.has(`${dir}/${uuid}.txt`)).toBe(false)
+			expect(fs.has(`${dir}/${uuid}.filenmeta`)).toBe(false)
+		})
+
+		it("is idempotent — calling twice does not throw", async () => {
+			const cache = await createFileCache()
+
+			await cache.clear()
+			await expect(cache.clear()).resolves.toBeUndefined()
+			expect(fs.has(BASE_DIR)).toBe(true)
+		})
+	})
+
+	describe("size", () => {
+		it("returns 0 when the parent directory is empty", async () => {
+			const cache = await createFileCache()
+
+			expect(cache.size()).toBe(0)
+		})
+
+		it("sums file sizes one level deep (uuid subdirs)", async () => {
+			const cache = await createFileCache()
+
+			fs.set(`${BASE_DIR}/a`, "dir")
+			fs.set(`${BASE_DIR}/a/a.txt`, new Uint8Array([1, 2, 3, 4]))
+			fs.set(`${BASE_DIR}/a/a.filenmeta`, new Uint8Array([1, 2]))
+			fs.set(`${BASE_DIR}/b`, "dir")
+			fs.set(`${BASE_DIR}/b/b.png`, new Uint8Array(new Array(10).fill(0)))
+
+			expect(cache.size()).toBe(4 + 2 + 10)
+		})
+
+		it("includes every file under the parent directory recursively", async () => {
+			const cache = await createFileCache()
+
+			fs.set(`${BASE_DIR}/stray-file`, new Uint8Array([9]))
+			fs.set(`${BASE_DIR}/a`, "dir")
+			fs.set(`${BASE_DIR}/a/data`, new Uint8Array([1, 2]))
+			fs.set(`${BASE_DIR}/a/nested`, "dir")
+			fs.set(`${BASE_DIR}/a/nested/deep`, new Uint8Array([3, 4, 5, 6]))
+
+			expect(cache.size()).toBe(1 + 2 + 4)
+		})
 	})
 })

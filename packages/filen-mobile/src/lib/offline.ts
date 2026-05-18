@@ -36,6 +36,7 @@ import {
 	unwrapParentUuid,
 	normalizeModificationTimestampForComparison
 } from "@/lib/utils"
+import { listLocalDirectoryRecursive } from "@/lib/fsUtils"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
@@ -1987,6 +1988,120 @@ export class Offline {
 
 				return sizeResult
 			}
+		}
+	}
+
+	public async clearAll(): Promise<void> {
+		const result = await run(async defer => {
+			await this.storeMutex.acquire()
+
+			defer(() => {
+				this.storeMutex.release()
+			})
+
+			// Snapshot every uuid+type that's about to disappear so we can invalidate the
+			// "is item stored offline?" queries after deletion. Match removeItem's pattern of
+			// walking nested directory-meta entries pessimistically.
+			const stored: {
+				uuid: string
+				type: DriveItem["type"]
+			}[] = []
+
+			if (this.indexFile.exists) {
+				const index = await this.readIndex()
+
+				for (const fileEntry of Object.values(index.files)) {
+					stored.push({
+						uuid: fileEntry.item.data.uuid,
+						type: fileEntry.item.type
+					})
+				}
+
+				for (const directoryEntry of Object.values(index.directories)) {
+					stored.push({
+						uuid: directoryEntry.item.data.uuid,
+						type: directoryEntry.item.type
+					})
+
+					const meta = await this.readDirectoryMeta(directoryEntry.item.data.uuid)
+
+					if (!meta) {
+						continue
+					}
+
+					for (const entry of Object.values(meta.entries)) {
+						if (!entry) {
+							continue
+						}
+
+						stored.push({
+							uuid: entry.item.data.uuid,
+							type: entry.item.type
+						})
+					}
+				}
+			}
+
+			if (this.directory.exists) {
+				this.directory.delete()
+			}
+
+			this.directoriesEnsured = false
+			this.indexCache = null
+
+			this.ensureDirectories()
+			this.invalidateCaches()
+
+			return stored
+		})
+
+		if (!result.success) {
+			throw result.error
+		}
+
+		// updateIndex acquires indexMutex internally — call it outside the storeMutex critical section.
+		await this.updateIndex()
+
+		// Broadcast offline=false for every item that was previously stored so badges update
+		// without waiting for the next isItemStored() refetch.
+		for (const { uuid, type } of result.data) {
+			driveItemStoredOfflineQueryUpdate({
+				updater: false,
+				params: {
+					uuid,
+					type
+				}
+			})
+		}
+	}
+
+	public async size(): Promise<{
+		size: number
+		files: number
+		dirs: number
+	}> {
+		const index = await this.readIndex()
+		const files = Object.keys(index.files).length
+		const dirs = Object.keys(index.directories).length
+
+		let size = 0
+
+		for (const dir of [this.filesDirectory, this.directoriesDirectory]) {
+			if (!dir.exists) {
+				continue
+			}
+
+			for (const entry of listLocalDirectoryRecursive(dir)) {
+				if (entry instanceof FileSystem.File) {
+					size += entry.size ?? 0
+				}
+			}
+		}
+
+		return {
+			size,
+			files,
+			dirs
 		}
 	}
 

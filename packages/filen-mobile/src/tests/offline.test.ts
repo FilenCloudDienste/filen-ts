@@ -5082,4 +5082,80 @@ describe("Offline", () => {
 			expect(transfers.download).not.toHaveBeenCalled()
 		})
 	})
+
+	describe("clearAll", () => {
+		it("deletes every offline file and directory, then rebuilds an empty index", async () => {
+			const fileUuid = "ff111111-ffff-1111-ffff-111111111111"
+			const dirUuid = "dd222222-dddd-2222-dddd-222222222222"
+			const fileItem = makeFileItem(fileUuid, "doc.txt")
+			const dirItem = makeDirItem(dirUuid, "Folder")
+			const parent = makeParent("00000000-0000-0000-0000-000000000000")
+
+			writeFileMeta(fileUuid, { item: fileItem, parent })
+			writeFileData(fileUuid, "doc.txt")
+			writeDirectoryMeta(dirUuid, { item: dirItem, parent, entries: {} })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+			await offline.clearAll()
+
+			expect(fs.has(`${FILES_DIR_URI}/${fileUuid}`)).toBe(false)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}`)).toBe(false)
+			expect(fs.get(FILES_DIR_URI)).toBe("dir")
+			expect(fs.get(DIRECTORIES_DIR_URI)).toBe("dir")
+
+			const index = readIndex()
+
+			expect(Object.keys(index.files).length).toBe(0)
+			expect(Object.keys(index.directories).length).toBe(0)
+		})
+
+		it("is idempotent — calling on an empty store does not throw", async () => {
+			const offline = await createOffline()
+
+			await expect(offline.clearAll()).resolves.toBeUndefined()
+			await expect(offline.clearAll()).resolves.toBeUndefined()
+			expect(fs.get(FILES_DIR_URI)).toBe("dir")
+			expect(fs.get(DIRECTORIES_DIR_URI)).toBe("dir")
+		})
+	})
+
+	describe("size", () => {
+		it("returns zero counts when nothing is stored", async () => {
+			const offline = await createOffline()
+
+			const result = await offline.size()
+
+			expect(result.size).toBe(0)
+			expect(result.files).toBe(0)
+			expect(result.dirs).toBe(0)
+		})
+
+		it("counts indexed entries and sums all on-disk bytes", async () => {
+			const fileUuid = "11111111-1111-1111-1111-111111111111"
+			const dirUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(fileUuid, "doc.txt")
+			const dirItem = makeDirItem(dirUuid, "Folder")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			writeFileMeta(fileUuid, { item: fileItem, parent })
+			writeFileData(fileUuid, "doc.txt", new Uint8Array(new Array(10).fill(0)))
+			writeDirectoryMeta(dirUuid, { item: dirItem, parent, entries: {} })
+
+			// Add a nested file under the stored directory to simulate the recursive walk.
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/nested.bin`, new Uint8Array(new Array(20).fill(0)))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const result = await offline.size()
+
+			expect(result.files).toBe(1)
+			expect(result.dirs).toBe(1)
+			// size includes every file under files/ and directories/ (data + sidecars).
+			expect(result.size).toBeGreaterThanOrEqual(10 + 20)
+		})
+	})
 })

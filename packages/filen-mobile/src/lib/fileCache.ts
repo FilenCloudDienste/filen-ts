@@ -8,6 +8,7 @@ import { serialize, deserialize } from "@/lib/serializer"
 import isEqual from "react-fast-compare"
 import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk, normalizeFilePathForSdk } from "@/lib/utils"
+import { listLocalDirectoryRecursive } from "@/lib/fsUtils"
 import offline from "@/lib/offline"
 import { xxHash32 } from "js-xxhash"
 
@@ -303,57 +304,105 @@ export class FileCache {
 	}
 
 	public async gc(age?: number): Promise<void> {
+		if (!this.parentDirectory.exists) {
+			return
+		}
+
 		const toDelete: string[] = []
 		const now = Date.now()
 		const entries = this.parentDirectory.list()
 
 		await Promise.all(
 			entries.map(async entry => {
-				if (!(entry instanceof FileSystem.Directory)) {
-					return
-				}
+				const inspection = await run(async () => {
+					if (!(entry instanceof FileSystem.Directory)) {
+						return null
+					}
 
-				const uuid = entry.name
-				const metadataFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${uuid}.filenmeta`))
+					const uuid = entry.name
+					const metadataFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${uuid}.filenmeta`))
 
-				if (!metadataFile.exists) {
-					toDelete.push(uuid)
+					if (!metadataFile.exists) {
+						return uuid
+					}
 
-					return
-				}
+					const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-				const metadata = deserialize(await metadataFile.text()) as Metadata
+					if (
+						!metadata ||
+						Object.keys(metadata).length === 0 ||
+						now >= metadata.cachedAt + (age ?? 86400 * 1000)
+					) {
+						return uuid
+					}
 
-				if (Object.keys(metadata).length === 0 || now > metadata.cachedAt + (age ?? 86400 * 1000)) {
-					toDelete.push(uuid)
+					return null
+				})
+
+				if (inspection.success && inspection.data) {
+					toDelete.push(inspection.data)
+				} else if (!inspection.success && entry instanceof FileSystem.Directory) {
+					// A read/parse failure for a well-shaped directory means the entry is corrupted —
+					// schedule it for deletion so a future gc/clear can recover.
+					toDelete.push(entry.name)
 				}
 			})
 		)
 
 		await Promise.all(
 			toDelete.map(async uuid => {
-				await run(
-					async defer => {
-						const mutex = this.getMutexForKey(uuid)
+				await run(async defer => {
+					const mutex = this.getMutexForKey(uuid)
 
-						await mutex.acquire()
+					await mutex.acquire()
 
-						defer(() => {
-							mutex.release()
-						})
+					defer(() => {
+						mutex.release()
+					})
 
-						const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.parentDirectory.uri, uuid))
+					const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.parentDirectory.uri, uuid))
 
-						if (parentDirectory.exists) {
-							parentDirectory.delete()
-						}
-					},
-					{
-						throw: true
+					if (parentDirectory.exists) {
+						parentDirectory.delete()
 					}
-				)
+				})
 			})
 		)
+	}
+
+	public async clear(): Promise<void> {
+		const result = await run(async () => {
+			if (this.parentDirectory.exists) {
+				this.parentDirectory.delete()
+			}
+
+			this.parentDirectory.create({
+				idempotent: true,
+				intermediates: true
+			})
+
+			this.directoryEnsured = true
+		})
+
+		if (!result.success) {
+			throw result.error
+		}
+	}
+
+	public size(): number {
+		if (!this.parentDirectory.exists) {
+			return 0
+		}
+
+		let total = 0
+
+		for (const entry of listLocalDirectoryRecursive(this.parentDirectory)) {
+			if (entry instanceof FileSystem.File) {
+				total += entry.size ?? 0
+			}
+		}
+
+		return total
 	}
 }
 
