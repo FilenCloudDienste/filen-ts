@@ -30,6 +30,8 @@ import CameraUploadSync from "@/components/cameraUpload/sync"
 import IncomingShareHandler from "@/components/incomingShareHandler"
 import FloatingBar from "@/components/floatingBar"
 import ForegroundService from "@/components/foregroundService"
+import Biometric from "@/components/biometric"
+import PrivacyCover from "@/components/privacyCover"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -102,6 +104,12 @@ const RootLayout = memo(() => {
 							<QueryClientProvider client={queryClient}>
 								<ActionSheetProvider>
 									<View className="flex-1 bg-background">
+										{isAuthed && (
+											<Fragment>
+												<Biometric />
+												<PrivacyCover />
+											</Fragment>
+										)}
 										<Stack
 											initialRouteName={isAuthed ? "tabs" : "auth"}
 											screenOptions={{
@@ -213,6 +221,10 @@ const RootLayout = memo(() => {
 											/>
 											<Stack.Screen
 												name="account"
+												options={modalOptions}
+											/>
+											<Stack.Screen
+												name="security"
 												options={modalOptions}
 											/>
 											<Stack.Screen

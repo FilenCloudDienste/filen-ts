@@ -448,35 +448,38 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		}
 	}
 
-	const set = (fn: T | ((prev: T) => T)): void => {
-		;(async () => {
-			const result = await run(async defer => {
-				await flushMutexRef.current.acquire()
+	const set = useCallback(
+		(fn: T | ((prev: T) => T)): void => {
+			;(async () => {
+				const result = await run(async defer => {
+					await flushMutexRef.current.acquire()
 
-				defer(() => {
-					flushMutexRef.current.release()
+					defer(() => {
+						flushMutexRef.current.release()
+					})
+
+					isLocalUpdateRef.current = true
+
+					defer(() => {
+						isLocalUpdateRef.current = false
+					})
+
+					const now = typeof fn === "function" ? (fn as (prev: T) => T)(lastValueRef.current) : fn
+
+					setStateChecked(now)
+
+					await secureStore.set(key, now)
 				})
 
-				isLocalUpdateRef.current = true
+				if (!result.success) {
+					console.error("Error setting value in secureStore:", result.error)
 
-				defer(() => {
-					isLocalUpdateRef.current = false
-				})
-
-				const now = typeof fn === "function" ? (fn as (prev: T) => T)(lastValueRef.current) : fn
-
-				setStateChecked(now)
-
-				await secureStore.set(key, now)
-			})
-
-			if (!result.success) {
-				console.error("Error setting value in secureStore:", result.error)
-
-				return
-			}
-		})()
-	}
+					return
+				}
+			})()
+		},
+		[key, setStateChecked]
+	)
 
 	useEffect(() => {
 		initialValueRef.current = initialValue

@@ -18,8 +18,6 @@ const IOS_DEPLOYMENT_TARGET: string = "26.0"
 const NAME: string = "Filen"
 const IDENTIFIER: string = "com.anonymous.filenmobile" // "io.filen.app"
 
-// TODO: Add back @config-plugins/react-native-blob-util when its updated for sdk 55
-
 function semverToNumber(version: string): number {
 	const parts = version.replace(/^v/, "").split(".").map(Number)
 
@@ -225,6 +223,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				microphonePermission: "Please allow access to your microphone so that Filen can capture audio when recording videos."
 			}
 		],
+		[
+			"expo-local-authentication",
+			{
+				faceIDPermission: "Please allow Filen to use FaceID or TouchID to lock itself."
+			}
+		],
+		"@config-plugins/react-native-blob-util",
 		"expo-sqlite",
 		"expo-localization",
 		"expo-background-task",
