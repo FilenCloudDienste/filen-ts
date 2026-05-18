@@ -19,7 +19,7 @@ import contacts from "@/lib/contacts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import useContactsStore, { type ContactListItemWithHeader } from "@/stores/useContacts.store"
-import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
+import { router, useLocalSearchParams, useFocusEffect, useNavigation } from "expo-router"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import { randomUUID } from "expo-crypto"
 import events from "@/lib/events"
@@ -110,6 +110,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectOptions = useSelectOptions()
+	const navigation = useNavigation()
 	const selectedContacts = useContactsStore(
 		useShallow(state => state.selectedContacts.filter(c => c.type === "contact").map(c => c.data as TContact))
 	)
@@ -132,9 +133,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								cancelled: false
 							})
 
-							if (router.canGoBack()) {
-								router.back()
-							}
+							navigation.getParent()?.goBack()
 						}
 					}
 				}

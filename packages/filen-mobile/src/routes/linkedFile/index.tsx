@@ -1,7 +1,7 @@
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
-import { useLocalSearchParams, router } from "expo-router"
+import { useLocalSearchParams, useNavigation } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
@@ -23,6 +23,7 @@ const LinkedFile = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
+	const navigation = useNavigation()
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -67,7 +68,7 @@ const LinkedFile = memo(() => {
 							},
 							props: {
 								onPress: () => {
-									router.back()
+									navigation.getParent()?.goBack()
 								}
 							}
 						}

@@ -18,7 +18,7 @@ import { unwrapParentUuid } from "@/lib/utils"
 import useDriveSelectStore from "@/stores/useDriveSelect.store"
 import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
-import { router } from "expo-router"
+import { useNavigation } from "expo-router"
 
 const DriveSelectToolbar = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -26,6 +26,7 @@ const DriveSelectToolbar = memo(() => {
 	const drivePath = useDrivePath()
 	const { authedSdkClient } = useSdkClients()
 	const selectedItems = useDriveSelectStore(useShallow(state => state.selectedItems))
+	const navigation = useNavigation()
 
 	const parentDir = (() => {
 		if (!authedSdkClient) {
@@ -149,6 +150,8 @@ const DriveSelectToolbar = memo(() => {
 					return
 				}
 
+				navigation.getParent()?.goBack()
+
 				break
 			}
 
@@ -157,9 +160,7 @@ const DriveSelectToolbar = memo(() => {
 					return
 				}
 
-				if (router.canDismiss()) {
-					router.dismissAll()
-				}
+				navigation.getParent()?.goBack()
 
 				if (selectedItems.length === 0) {
 					if (!parentDir || !drivePath.selectOptions.directories) {

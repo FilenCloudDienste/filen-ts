@@ -1,7 +1,7 @@
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
-import { useLocalSearchParams, router } from "expo-router"
+import { useLocalSearchParams, useNavigation } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
@@ -26,6 +26,7 @@ const ChangeDirectoryColor = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
+	const navigation = useNavigation()
 	const [selectedColor, setSelectedColor] = useState<string | null>(null)
 
 	const item = (() => {
@@ -74,7 +75,7 @@ const ChangeDirectoryColor = memo(() => {
 							},
 							props: {
 								onPress: () => {
-									router.back()
+									navigation.getParent()?.goBack()
 								}
 							}
 						}

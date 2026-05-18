@@ -1,7 +1,7 @@
 import { Fragment, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
-import { useLocalSearchParams, router } from "expo-router"
+import { useLocalSearchParams, router, useNavigation } from "expo-router"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import type { Note as TNote, NoteHistory } from "@filen/sdk-rs"
 import Content from "@/components/notes/content"
@@ -25,6 +25,7 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
+	const navigation = useNavigation()
 
 	const writeAccess =
 		note.ownerId === stringifiedClient?.userId ||
@@ -48,7 +49,7 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 						},
 						props: {
 							onPress: () => {
-								router.back()
+								navigation.getParent()?.goBack()
 							}
 						}
 					}
