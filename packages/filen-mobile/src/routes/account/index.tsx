@@ -33,7 +33,9 @@ type BigIntToNumber<T> = T extends bigint
 		: T extends (infer U)[]
 			? BigIntToNumber<U>[]
 			: T extends object
-				? { [K in keyof T]: BigIntToNumber<T[K]> }
+				? {
+						[K in keyof T]: BigIntToNumber<T[K]>
+					}
 				: T
 
 export function convertBigInts<T>(value: T): BigIntToNumber<T> {
@@ -261,7 +263,7 @@ const Account = memo(() => {
 						>
 							<Avatar
 								size={22}
-								source={accountQuery.data.avatarUrl.length > 0 ? accountQuery.data.avatarUrl : undefined}
+								source={accountQuery.data.avatarUrl}
 							/>
 							<Text
 								numberOfLines={1}
@@ -390,7 +392,7 @@ const Account = memo(() => {
 								{
 									icon: "time-outline",
 									title: "tbd_change_nickname",
-									subTitle: accountQuery.data.nickName.length > 0 ? accountQuery.data.nickName : undefined,
+									subTitle: accountQuery.data.nickName,
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.input({
@@ -398,7 +400,7 @@ const Account = memo(() => {
 												message: "tbd_enter_nickname",
 												cancelText: "tbd_cancel",
 												okText: "tbd_save",
-												placeholder: accountQuery.data.nickName.length > 0 ? accountQuery.data.nickName : undefined
+												placeholder: accountQuery.data.nickName
 											})
 										})
 
@@ -828,13 +830,13 @@ const Account = memo(() => {
 													return
 												}
 
-												const password = twoFactorPromptResult.data.value
+												const twoFactor = twoFactorPromptResult.data.value
 
-												if (password.length === 0) {
+												if (twoFactor.length === 0) {
 													return
 												}
 
-												twoFactorCode = password
+												twoFactorCode = twoFactor
 											}
 
 											const result = await runWithLoading(async () => {
