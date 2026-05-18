@@ -23,7 +23,8 @@ const UNCACHED_QUERY_KEYS = new Map<string, true>([
 	["useFileUrlQuery", true],
 	["useMediaPermissionsQuery", true],
 	["useCameraUploadAlbumsQuery", true],
-	["useLocalAuthenticationQuery", true]
+	["useLocalAuthenticationQuery", true],
+	["useCacheSizes", true]
 ])
 
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
