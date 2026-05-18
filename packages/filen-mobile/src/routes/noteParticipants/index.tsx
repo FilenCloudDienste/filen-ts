@@ -4,6 +4,7 @@ import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
+import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -196,7 +197,6 @@ const NoteParticipants = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
 
 	const noteParsed = (() => {
@@ -312,18 +312,12 @@ const NoteParticipants = memo(() => {
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}
-					emptyComponent={() => {
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-								<Ionicons
-									name="people-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text>tbd_no_note_participants</Text>
-							</View>
-						)
-					}}
+					emptyComponent={() => (
+						<ListEmpty
+							icon="people-outline"
+							title="tbd_no_note_participants"
+						/>
+					)}
 					renderItem={({ item: participant }) => {
 						return (
 							<Participant

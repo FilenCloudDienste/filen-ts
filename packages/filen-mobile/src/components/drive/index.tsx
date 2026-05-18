@@ -6,6 +6,7 @@ import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import { itemSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
+import ListEmpty from "@/components/ui/listEmpty"
 import Item from "@/components/drive/item"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -1161,6 +1162,42 @@ const Drive = memo(() => {
 						}
 					}}
 					loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
+					emptyComponent={() => (
+						<ListEmpty
+							icon={
+								drivePath.type === "trash"
+									? "trash-outline"
+									: drivePath.type === "favorites"
+										? "heart-outline"
+										: drivePath.type === "recents"
+											? "time-outline"
+											: drivePath.type === "sharedIn" || drivePath.type === "sharedOut"
+												? "people-outline"
+												: drivePath.type === "links"
+													? "link-outline"
+													: drivePath.type === "offline"
+														? "cloud-offline-outline"
+														: "folder-open-outline"
+							}
+							title={
+								drivePath.type === "trash"
+									? "tbd_trash_is_empty"
+									: drivePath.type === "favorites"
+										? "tbd_no_favorites"
+										: drivePath.type === "recents"
+											? "tbd_no_recents"
+											: drivePath.type === "sharedIn"
+												? "tbd_no_shared_in_items"
+												: drivePath.type === "sharedOut"
+													? "tbd_no_shared_out_items"
+													: drivePath.type === "links"
+														? "tbd_no_links"
+														: drivePath.type === "offline"
+															? "tbd_no_offline_items"
+															: "tbd_folder_is_empty"
+							}
+						/>
+					)}
 				/>
 			</SafeAreaView>
 		</Fragment>

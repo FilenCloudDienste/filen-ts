@@ -14,7 +14,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { runOnJS } from "react-native-worklets"
 import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
-import Text from "@/components/ui/text"
+import ListEmpty from "@/components/ui/listEmpty"
 import type { External } from "@/routes/drivePreview"
 import { FlashList } from "@shopify/flash-list"
 
@@ -381,19 +381,20 @@ const Gallery = memo(() => {
 						viewabilityConfig={{
 							itemVisiblePercentThreshold: 50
 						}}
-						ListEmptyComponent={() => {
-							return (
-								<View
-									className="flex-1 items-center justify-center bg-transparent"
-									style={{
-										width: dimensions.width,
-										height: dimensions.height
-									}}
-								>
-									<Text className="text-base text-foreground">tbd_no_preview</Text>
-								</View>
-							)
-						}}
+						ListEmptyComponent={() => (
+							<View
+								className="flex-1 bg-transparent"
+								style={{
+									width: dimensions.width,
+									height: dimensions.height
+								}}
+							>
+								<ListEmpty
+									icon="eye-off-outline"
+									title="tbd_no_preview"
+								/>
+							</View>
+						)}
 					/>
 				</AnimatedView>
 			</GestureDetector>

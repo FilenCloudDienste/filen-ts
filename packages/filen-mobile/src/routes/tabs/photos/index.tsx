@@ -6,6 +6,7 @@ import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import type { DriveItemFileExtracted } from "@/types"
 import { itemSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
+import ListEmpty from "@/components/ui/listEmpty"
 import { type View as RNView, Platform, type ViewStyle } from "react-native"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -385,6 +386,12 @@ const Photos = memo(() => {
 								cameraUpload.sync().catch(console.error)
 							}}
 							loading={driveItemsQuery.status !== "success"}
+							emptyComponent={() => (
+								<ListEmpty
+									icon="images-outline"
+									title="tbd_no_photos"
+								/>
+							)}
 						/>
 					) : (
 						<View className="flex-1 items-center justify-center">

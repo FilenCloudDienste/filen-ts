@@ -1,8 +1,7 @@
-import Text from "@/components/ui/text"
 import useChatsQuery from "@/queries/useChats.query"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
+import ListEmpty from "@/components/ui/listEmpty"
 import type { Chat as TChat } from "@filen/sdk-rs"
-import View from "@/components/ui/view"
 import { parseNumbersFromString, run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import Chat from "@/components/chats/list/chat"
@@ -85,13 +84,12 @@ const List = memo(({ searchQuery }: { searchQuery: string }) => {
 		return <Chat info={info} />
 	}
 
-	const emptyComponent = () => {
-		return (
-			<View className="flex-1 items-center justify-center">
-				<Text>{searchQuery && searchQuery.length > 0 ? "tbd_no_chats_search" : "tbd_no_chats"}</Text>
-			</View>
-		)
-	}
+	const emptyComponent = () => (
+		<ListEmpty
+			icon="chatbubbles-outline"
+			title={searchQuery && searchQuery.length > 0 ? "tbd_no_chats_search" : "tbd_no_chats"}
+		/>
+	)
 
 	return (
 		<VirtualList

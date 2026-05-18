@@ -4,7 +4,7 @@ import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useChatMessagesQuery from "@/queries/useChatMessages.query"
 import VirtualList, { type ListRef } from "@/components/ui/virtualList"
-import Text from "@/components/ui/text"
+import ListEmpty from "@/components/ui/listEmpty"
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller"
 import { AnimatedView } from "@/components/ui/animated"
 import { interpolate, useAnimatedStyle } from "react-native-reanimated"
@@ -168,22 +168,23 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 				headerComponent={() => {
 					return <AnimatedView style={headerStyle} />
 				}}
-				emptyComponent={() => {
-					return (
-						<View
-							className="flex-1 items-center justify-center"
-							style={{
-								transform: [
-									{
-										scaleY: -1
-									}
-								]
-							}}
-						>
-							<Text>tbd_no_messages</Text>
-						</View>
-					)
-				}}
+				emptyComponent={() => (
+					<View
+						className="flex-1"
+						style={{
+							transform: [
+								{
+									scaleY: -1
+								}
+							]
+						}}
+					>
+						<ListEmpty
+							icon="chatbubble-outline"
+							title="tbd_no_messages"
+						/>
+					</View>
+				)}
 			/>
 		</View>
 	)

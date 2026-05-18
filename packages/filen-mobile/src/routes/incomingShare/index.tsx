@@ -2,13 +2,13 @@ import { useIncomingShare, type ResolvedSharePayload } from "expo-sharing"
 import { Platform } from "react-native"
 import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
+import ListEmpty from "@/components/ui/listEmpty"
 import { memo, Fragment, useCallback, useEffect, useRef } from "react"
 import Header from "@/components/ui/header"
 import { useResolveClassNames } from "uniwind"
 import { useNavigation, useFocusEffect } from "expo-router"
 import VirtualList from "@/components/ui/virtualList"
 import Text from "@/components/ui/text"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
@@ -79,7 +79,6 @@ const IncomingShare = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const insets = useSafeAreaInsets()
 	const { resolvedSharedPayloads, isResolving, error } = useIncomingShare()
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const navigation = useNavigation()
 	const currentPayloadsRef = useRef<ResolvedSharePayload[]>([])
@@ -310,31 +309,19 @@ const IncomingShare = memo(() => {
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}
-					emptyComponent={() => {
-						if (error) {
-							return (
-								<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-									<Ionicons
-										name="warning-outline"
-										size={64}
-										color={textMutedForeground.color}
-									/>
-									<Text>tbd_error_resolving_shares</Text>
-								</View>
-							)
-						}
-
-						return (
-							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-								<Ionicons
-									name="time-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text>tbd_no_resolved_shares</Text>
-							</View>
+					emptyComponent={() =>
+						error ? (
+							<ListEmpty
+								icon="warning-outline"
+								title="tbd_error_resolving_shares"
+							/>
+						) : (
+							<ListEmpty
+								icon="time-outline"
+								title="tbd_no_resolved_shares"
+							/>
 						)
-					}}
+					}
 					renderItem={({ item: payload }) => {
 						return <Payload payload={payload} />
 					}}
