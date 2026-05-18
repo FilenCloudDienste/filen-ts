@@ -779,7 +779,6 @@ export class Offline {
 									await this.storeFile({
 										file: unwrappedFileIntoDriveItem(unwrappedFileMeta),
 										parent,
-										hideProgress: true,
 										skipIndexUpdate: true
 									})
 
@@ -816,7 +815,6 @@ export class Offline {
 							await this.storeFile({
 								file: unwrappedFileIntoDriveItem(unwrapFileMeta(updatedFile)),
 								parent,
-								hideProgress: true,
 								skipIndexUpdate: true
 							})
 
@@ -891,7 +889,6 @@ export class Offline {
 										await this.storeDirectory({
 											directory: unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch)),
 											parent,
-											hideProgress: true,
 											skipIndexUpdate: true
 										})
 									}
@@ -1113,7 +1110,6 @@ export class Offline {
 								await this.storeDirectory({
 									directory: item,
 									parent,
-									hideProgress: true,
 									skipIndexUpdate: true,
 									force: true
 								})
