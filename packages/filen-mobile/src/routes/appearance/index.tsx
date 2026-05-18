@@ -11,6 +11,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { useDriveSortPreferences, DEFAULT_SORT_PREFERENCES } from "@/lib/driveSortPreference"
+import { useStartScreen, START_SCREENS, type StartScreen } from "@/lib/startScreen"
+import { actionSheet } from "@/providers/actionSheet.provider"
+
+const START_SCREEN_LABELS: Record<StartScreen, string> = {
+	drive: "tbd_drive",
+	photos: "tbd_photos",
+	notes: "tbd_notes",
+	chats: "tbd_chats",
+	more: "tbd_more"
+}
 
 const Appearance = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -18,8 +28,37 @@ const Appearance = memo(() => {
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
+	const [startScreen, setStartScreen] = useStartScreen()
 
-	const buttons: Button[] = [
+	const generalButtons: Button[] = [
+		{
+			icon: "rocket-outline",
+			title: "tbd_start_screen",
+			subTitle: "tbd_start_screen_description",
+			rightItem: {
+				type: "text",
+				value: START_SCREEN_LABELS[startScreen]
+			},
+			onPress: () => {
+				actionSheet.show({
+					buttons: [
+						...START_SCREENS.map(option => ({
+							title: START_SCREEN_LABELS[option],
+							onPress: () => {
+								setStartScreen(option)
+							}
+						})),
+						{
+							title: "tbd_close",
+							cancel: true
+						}
+					]
+				})
+			}
+		}
+	]
+
+	const sortButtons: Button[] = [
 		{
 			icon: "swap-vertical-outline",
 			title: "tbd_remember_sort_per_directory",
@@ -117,7 +156,11 @@ const Appearance = memo(() => {
 				>
 					<Group
 						className="bg-background-tertiary"
-						buttons={buttons}
+						buttons={generalButtons}
+					/>
+					<Group
+						className="bg-background-tertiary"
+						buttons={sortButtons}
 					/>
 				</GestureHandlerScrollView>
 			</SafeAreaView>

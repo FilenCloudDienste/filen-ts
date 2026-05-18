@@ -7,9 +7,11 @@ import auth from "@/lib/auth"
 import { TextInput } from "react-native"
 import Button from "@/components/ui/button"
 import { useRouter } from "expo-router"
+import { useStartScreen, buildStartScreenHref } from "@/lib/startScreen"
 
 const Login = memo(() => {
 	const router = useRouter()
+	const [startScreen] = useStartScreen()
 
 	return (
 		<Fragment>
@@ -33,12 +35,7 @@ const Login = memo(() => {
 
 								const { authedSdkClient } = await auth.getSdkClients()
 
-								router.replace({
-									pathname: "/tabs/drive/[uuid]",
-									params: {
-										uuid: authedSdkClient.root().uuid
-									}
-								})
+								router.replace(buildStartScreenHref(startScreen, authedSdkClient.root().uuid))
 							}}
 						>
 							Login
