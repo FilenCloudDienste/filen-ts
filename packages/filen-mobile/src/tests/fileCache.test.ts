@@ -599,6 +599,52 @@ describe("FileCache", () => {
 			await expect(cache.clear()).resolves.toBeUndefined()
 			expect(fs.has(BASE_DIR)).toBe(true)
 		})
+
+		it("waits for an in-flight get() before wiping the directory", async () => {
+			const cache = await createFileCache()
+			const uuid = "racing-uuid"
+			const item = wrapDrive(makeFileItem(uuid, "racing.txt"))
+
+			let releaseDownload!: () => void
+			const downloadGate = new Promise<void>(resolve => {
+				releaseDownload = resolve
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						await downloadGate
+						fs.set("file://" + path, new Uint8Array([7, 8, 9]))
+					})
+				}
+			} as never)
+
+			const getPromise = cache.get({ item })
+
+			// Give the get() a chance to start and acquire the barrier.
+			await Promise.resolve()
+			await Promise.resolve()
+
+			let clearResolved = false
+			const clearPromise = cache.clear().then(() => {
+				clearResolved = true
+			})
+
+			// Barrier should hold clear() until the in-flight get drains.
+			await Promise.resolve()
+			await Promise.resolve()
+
+			expect(clearResolved).toBe(false)
+
+			releaseDownload()
+
+			await getPromise
+			await clearPromise
+
+			expect(clearResolved).toBe(true)
+			// After clear, the entry written by get is gone.
+			expect(fs.has(`${BASE_DIR}/${uuid}`)).toBe(false)
+		})
 	})
 
 	describe("size", () => {

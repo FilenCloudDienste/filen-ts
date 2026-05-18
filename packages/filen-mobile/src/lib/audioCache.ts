@@ -1,5 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { Semaphore, run } from "@filen/utils"
+import { ClearBarrier } from "@/lib/clearBarrier"
 import { IOS_APP_GROUP_IDENTIFIER, MUSIC_METADATA_SUPPORTED_EXTENSIONS } from "@/constants"
 import { Platform } from "react-native"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -36,6 +37,7 @@ export class AudioCache {
 		})
 	)
 	private readonly mutexes = new Map<string, Semaphore>()
+	private readonly clearBarrier = new ClearBarrier()
 
 	private ensureDirectory(): void {
 		if (!this.parentDirectory.exists) {
@@ -88,19 +90,33 @@ export class AudioCache {
 			return false
 		}
 
-		const { audio, metadata } = this.getFiles(item)
+		const result = await run(async defer => {
+			await this.clearBarrier.enter()
 
-		if (!audio.exists || !metadata.exists || metadata.size === 0) {
-			return false
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
+			const { audio, metadata } = this.getFiles(item)
+
+			if (!audio.exists || !metadata.exists || metadata.size === 0) {
+				return false
+			}
+
+			const metadataContent = deserialize(await metadata.text()) as Metadata
+
+			if (Object.keys(metadataContent ?? {}).length === 0) {
+				return false
+			}
+
+			return true
+		})
+
+		if (!result.success) {
+			throw result.error
 		}
 
-		const metadataContent = deserialize(await metadata.text()) as Metadata
-
-		if (Object.keys(metadataContent ?? {}).length === 0) {
-			return false
-		}
-
-		return true
+		return result.data
 	}
 
 	public async getMetadata({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<Metadata> {
@@ -136,6 +152,12 @@ export class AudioCache {
 			if (!name) {
 				throw new Error("Item metadata is not decrypted")
 			}
+
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
 
 			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
@@ -255,6 +277,12 @@ export class AudioCache {
 		}
 
 		const result = await run(async defer => {
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
 			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
 			await mutex.acquire()
@@ -326,7 +354,7 @@ export class AudioCache {
 	}
 
 	public async clear(): Promise<void> {
-		const result = await run(async () => {
+		await this.clearBarrier.runExclusive(() => {
 			if (this.parentDirectory.exists) {
 				this.parentDirectory.delete()
 			}
@@ -336,10 +364,6 @@ export class AudioCache {
 				intermediates: true
 			})
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
 	}
 
 	public size(): number {

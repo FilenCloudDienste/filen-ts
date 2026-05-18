@@ -877,7 +877,7 @@ describe("Thumbnails", () => {
 			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
 
 			// Clear resets failures
-			thumbnails.clear()
+			await thumbnails.clear()
 
 			// Restore working download
 			mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
@@ -1070,21 +1070,21 @@ describe("Thumbnails", () => {
 	})
 
 	describe("clear", () => {
-		it("deletes entire thumbnails directory", () => {
+		it("deletes entire thumbnails directory", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 			fs.set(`${THUMBNAILS_DIR}/a.jpg`, new Uint8Array([1]))
 			fs.set(`${THUMBNAILS_DIR}/b.jpg`, new Uint8Array([2]))
 
-			thumbnails.clear()
+			await thumbnails.clear()
 
 			expect(fs.has(`${THUMBNAILS_DIR}/a.jpg`)).toBe(false)
 			expect(fs.has(`${THUMBNAILS_DIR}/b.jpg`)).toBe(false)
 		})
 
-		it("recreates directory after deletion", () => {
+		it("recreates directory after deletion", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 
-			thumbnails.clear()
+			await thumbnails.clear()
 
 			expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
 		})

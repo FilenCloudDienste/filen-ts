@@ -164,7 +164,7 @@ const Advanced = memo(() => {
 										title: "tbd_clear_image_thumbnails",
 										message: "tbd_clear_image_thumbnails_description",
 										action: async () => {
-											thumbnails.clear()
+											await thumbnails.clear()
 
 											await clearExpoImageCache()
 										},
@@ -231,7 +231,7 @@ const Advanced = memo(() => {
 											// Independent disk operations — run in parallel and surface a
 											// partial failure only after each gets a chance to complete.
 											const results = await Promise.allSettled([
-												Promise.resolve().then(() => thumbnails.clear()),
+												thumbnails.clear(),
 												fileCache.clear(),
 												audioCache.clear(),
 												sandboxCache.clear()
