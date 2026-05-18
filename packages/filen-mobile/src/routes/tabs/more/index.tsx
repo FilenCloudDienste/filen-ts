@@ -378,6 +378,17 @@ const More = memo(() => {
 							}
 						]}
 					/>
+					<Group
+						buttons={[
+							{
+								icon: "lock-closed-outline",
+								title: "tbd_security",
+								onPress: () => {
+									router.push("/security")
+								}
+							}
+						]}
+					/>
 				</ScrollView>
 			</SafeAreaView>
 		</Fragment>
