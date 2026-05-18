@@ -4,6 +4,7 @@ import { useLocalSearchParams, useNavigation } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
+import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -273,45 +274,50 @@ const FileVersions = memo(() => {
 						: undefined
 				}
 			/>
-			<VirtualList
-				data={versions}
-				loading={driveItemVersionsQuery.status !== "success"}
-				contentInsetAdjustmentBehavior="automatic"
-				contentContainerStyle={{
-					paddingBottom: insets.bottom
-				}}
-				onRefresh={async () => {
-					const result = await run(async () => {
-						return await driveItemVersionsQuery.refetch()
-					})
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
+				<VirtualList
+					data={versions}
+					loading={driveItemVersionsQuery.status !== "success"}
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerStyle={{
+						paddingBottom: insets.bottom
+					}}
+					onRefresh={async () => {
+						const result = await run(async () => {
+							return await driveItemVersionsQuery.refetch()
+						})
 
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-					}
-				}}
-				emptyComponent={() => {
-					return (
-						<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-							<Ionicons
-								name="time-outline"
-								size={64}
-								color={textMutedForeground.color}
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+						}
+					}}
+					emptyComponent={() => {
+						return (
+							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
+								<Ionicons
+									name="time-outline"
+									size={64}
+									color={textMutedForeground.color}
+								/>
+								<Text>tbd_no_file_versions</Text>
+							</View>
+						)
+					}}
+					renderItem={({ item: version }) => {
+						return (
+							<Version
+								version={version}
+								item={item}
 							/>
-							<Text>tbd_no_file_versions</Text>
-						</View>
-					)
-				}}
-				renderItem={({ item: version }) => {
-					return (
-						<Version
-							version={version}
-							item={item}
-						/>
-					)
-				}}
-				keyExtractor={version => version.uuid}
-			/>
+						)
+					}}
+					keyExtractor={version => version.uuid}
+				/>
+			</SafeAreaView>
 		</Fragment>
 	)
 })

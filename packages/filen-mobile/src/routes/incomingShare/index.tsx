@@ -1,6 +1,7 @@
 import { useIncomingShare, type ResolvedSharePayload } from "expo-sharing"
 import { Platform } from "react-native"
 import View from "@/components/ui/view"
+import SafeAreaView from "@/components/ui/safeAreaView"
 import { memo, Fragment, useCallback, useEffect, useRef } from "react"
 import Header from "@/components/ui/header"
 import { useResolveClassNames } from "uniwind"
@@ -298,43 +299,48 @@ const IncomingShare = memo(() => {
 						: undefined
 				}
 			/>
-			<VirtualList
-				data={payloads}
-				loading={isResolving}
-				contentInsetAdjustmentBehavior="automatic"
-				contentContainerStyle={{
-					paddingBottom: insets.bottom
-				}}
-				emptyComponent={() => {
-					if (error) {
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
+				<VirtualList
+					data={payloads}
+					loading={isResolving}
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerStyle={{
+						paddingBottom: insets.bottom
+					}}
+					emptyComponent={() => {
+						if (error) {
+							return (
+								<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
+									<Ionicons
+										name="warning-outline"
+										size={64}
+										color={textMutedForeground.color}
+									/>
+									<Text>tbd_error_resolving_shares</Text>
+								</View>
+							)
+						}
+
 						return (
 							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
 								<Ionicons
-									name="warning-outline"
+									name="time-outline"
 									size={64}
 									color={textMutedForeground.color}
 								/>
-								<Text>tbd_error_resolving_shares</Text>
+								<Text>tbd_no_resolved_shares</Text>
 							</View>
 						)
-					}
-
-					return (
-						<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-							<Ionicons
-								name="time-outline"
-								size={64}
-								color={textMutedForeground.color}
-							/>
-							<Text>tbd_no_resolved_shares</Text>
-						</View>
-					)
-				}}
-				renderItem={({ item: payload }) => {
-					return <Payload payload={payload} />
-				}}
-				keyExtractor={payload => JSON.stringify(payload)}
-			/>
+					}}
+					renderItem={({ item: payload }) => {
+						return <Payload payload={payload} />
+					}}
+					keyExtractor={payload => JSON.stringify(payload)}
+				/>
+			</SafeAreaView>
 		</Fragment>
 	)
 })

@@ -2,6 +2,7 @@ import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { router } from "expo-router"
 import View from "@/components/ui/view"
+import SafeAreaView from "@/components/ui/safeAreaView"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -119,29 +120,34 @@ const CameraUploadErrors = memo(() => {
 					}
 				]}
 			/>
-			<VirtualList
-				data={errors}
-				contentInsetAdjustmentBehavior="automatic"
-				contentContainerStyle={{
-					paddingBottom: insets.bottom
-				}}
-				emptyComponent={() => {
-					return (
-						<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-							<Ionicons
-								name="checkmark-outline"
-								size={64}
-								color={textMutedForeground.color}
-							/>
-							<Text>tbd_no_camera_upload_errors</Text>
-						</View>
-					)
-				}}
-				renderItem={({ item: error }) => {
-					return <Err error={error} />
-				}}
-				keyExtractor={error => error.id}
-			/>
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
+				<VirtualList
+					data={errors}
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerStyle={{
+						paddingBottom: insets.bottom
+					}}
+					emptyComponent={() => {
+						return (
+							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
+								<Ionicons
+									name="checkmark-outline"
+									size={64}
+									color={textMutedForeground.color}
+								/>
+								<Text>tbd_no_camera_upload_errors</Text>
+							</View>
+						)
+					}}
+					renderItem={({ item: error }) => {
+						return <Err error={error} />
+					}}
+					keyExtractor={error => error.id}
+				/>
+			</SafeAreaView>
 		</Fragment>
 	)
 })

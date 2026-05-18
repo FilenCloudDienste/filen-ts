@@ -2,6 +2,7 @@ import Text from "@/components/ui/text"
 import { Platform, ActivityIndicator } from "react-native"
 import { router, useNavigation } from "expo-router"
 import View from "@/components/ui/view"
+import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import { Fragment, memo, useRef, useState } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -262,123 +263,128 @@ const Events = memo(() => {
 					default: undefined
 				})}
 			/>
-			<VirtualList
-				data={events}
-				loading={eventsQuery.status !== "success"}
-				contentInsetAdjustmentBehavior="automatic"
-				contentContainerStyle={{
-					paddingBottom: insets.bottom
-				}}
-				onRefresh={async () => {
-					const result = await run(async () => {
-						setHasMore(true)
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={["left", "right"]}
+			>
+				<VirtualList
+					data={events}
+					loading={eventsQuery.status !== "success"}
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerStyle={{
+						paddingBottom: insets.bottom
+					}}
+					onRefresh={async () => {
+						const result = await run(async () => {
+							setHasMore(true)
 
-						return await eventsQuery.refetch()
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-					}
-				}}
-				onEndReached={async () => {
-					if (inflightRef.current || !hasMore || eventsQuery.status !== "success") {
-						return
-					}
-
-					const oldest = events.at(-1)
-
-					if (!oldest) {
-						return
-					}
-
-					const result = await run(async defer => {
-						inflightRef.current = true
-
-						defer(() => {
-							inflightRef.current = false
+							return await eventsQuery.refetch()
 						})
 
-						setLoadingMore(true)
-
-						defer(() => {
-							setLoadingMore(false)
-						})
-
-						const next = await fetchData({
-							timestamp: oldest.inner[0].timestamp
-						})
-
-						if (next.length === 0) {
-							setHasMore(false)
-
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+						}
+					}}
+					onEndReached={async () => {
+						if (inflightRef.current || !hasMore || eventsQuery.status !== "success") {
 							return
 						}
 
-						eventsQueryUpdate({
-							updater: prev => {
-								const existingIds = new Set<bigint>()
+						const oldest = events.at(-1)
 
-								for (const e of prev) {
-									if (e.tag === UserEventResult_Tags.Ok) {
-										existingIds.add(e.inner[0].id)
-									}
-								}
+						if (!oldest) {
+							return
+						}
 
-								const filtered = next.filter(e => {
-									if (e.tag !== UserEventResult_Tags.Ok) {
-										return true
-									}
+						const result = await run(async defer => {
+							inflightRef.current = true
 
-									return !existingIds.has(e.inner[0].id)
-								})
+							defer(() => {
+								inflightRef.current = false
+							})
 
-								if (filtered.length === 0) {
-									setHasMore(false)
-								}
+							setLoadingMore(true)
 
-								return [...prev, ...filtered]
+							defer(() => {
+								setLoadingMore(false)
+							})
+
+							const next = await fetchData({
+								timestamp: oldest.inner[0].timestamp
+							})
+
+							if (next.length === 0) {
+								setHasMore(false)
+
+								return
 							}
+
+							eventsQueryUpdate({
+								updater: prev => {
+									const existingIds = new Set<bigint>()
+
+									for (const e of prev) {
+										if (e.tag === UserEventResult_Tags.Ok) {
+											existingIds.add(e.inner[0].id)
+										}
+									}
+
+									const filtered = next.filter(e => {
+										if (e.tag !== UserEventResult_Tags.Ok) {
+											return true
+										}
+
+										return !existingIds.has(e.inner[0].id)
+									})
+
+									if (filtered.length === 0) {
+										setHasMore(false)
+									}
+
+									return [...prev, ...filtered]
+								}
+							})
 						})
-					})
 
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-					}
-				}}
-				onEndReachedThreshold={ON_END_REACHED_THRESHOLD}
-				emptyComponent={() => {
-					return (
-						<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
-							<Ionicons
-								name="list-outline"
-								size={64}
-								color={textMutedForeground.color}
-							/>
-							<Text>tbd_no_events</Text>
-						</View>
-					)
-				}}
-				footerComponent={() => {
-					if (!loadingMore) {
-						return null
-					}
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+						}
+					}}
+					onEndReachedThreshold={ON_END_REACHED_THRESHOLD}
+					emptyComponent={() => {
+						return (
+							<View className="flex-1 items-center justify-center bg-transparent gap-2 -mt-40">
+								<Ionicons
+									name="list-outline"
+									size={64}
+									color={textMutedForeground.color}
+								/>
+								<Text>tbd_no_events</Text>
+							</View>
+						)
+					}}
+					footerComponent={() => {
+						if (!loadingMore) {
+							return null
+						}
 
-					return (
-						<View className="py-4 items-center bg-transparent">
-							<ActivityIndicator
-								size="small"
-								color={textMutedForeground.color as string}
-							/>
-						</View>
-					)
-				}}
-				renderItem={({ item: event }) => {
-					return <Event event={event.inner[0]} />
-				}}
-				keyExtractor={event => event.inner[0].id.toString()}
-			/>
+						return (
+							<View className="py-4 items-center bg-transparent">
+								<ActivityIndicator
+									size="small"
+									color={textMutedForeground.color as string}
+								/>
+							</View>
+						)
+					}}
+					renderItem={({ item: event }) => {
+						return <Event event={event.inner[0]} />
+					}}
+					keyExtractor={event => event.inner[0].id.toString()}
+				/>
+			</SafeAreaView>
 		</Fragment>
 	)
 })
