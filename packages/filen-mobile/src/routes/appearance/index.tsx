@@ -10,7 +10,7 @@ import { Platform } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
-import { useDriveSortPreferences } from "@/lib/driveSortPreference"
+import { useDriveSortPreferences, DEFAULT_SORT_PREFERENCES } from "@/lib/driveSortPreference"
 
 const Appearance = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -18,8 +18,6 @@ const Appearance = memo(() => {
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
-
-	const hasPerDirectoryEntries = Object.keys(sortPrefs.perDirectory).length > 0
 
 	const buttons: Button[] = [
 		{
@@ -35,19 +33,16 @@ const Appearance = memo(() => {
 						mode: value ? "perDirectory" : "global"
 					}))
 			}
-		}
-	]
-
-	if (hasPerDirectoryEntries) {
-		buttons.push({
+		},
+		{
 			icon: "refresh-outline",
-			title: "tbd_reset_per_directory_sort",
-			subTitle: "tbd_reset_per_directory_sort_description",
+			title: "tbd_reset_sort",
+			subTitle: "tbd_reset_sort_description",
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_reset_per_directory_sort",
-						message: "tbd_reset_per_directory_sort_confirm",
+						title: "tbd_reset_sort",
+						message: "tbd_reset_sort_confirm",
 						okText: "tbd_reset",
 						cancelText: "tbd_cancel",
 						destructive: true
@@ -67,11 +62,12 @@ const Appearance = memo(() => {
 
 				setSortPrefs(prev => ({
 					...prev,
+					global: DEFAULT_SORT_PREFERENCES.global,
 					perDirectory: {}
 				}))
 			}
-		})
-	}
+		}
+	]
 
 	return (
 		<Fragment>
