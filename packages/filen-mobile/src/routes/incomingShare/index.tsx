@@ -4,7 +4,7 @@ import View from "@/components/ui/view"
 import { memo, Fragment, useCallback, useEffect, useRef } from "react"
 import Header from "@/components/ui/header"
 import { useResolveClassNames } from "uniwind"
-import { router, useNavigation, useFocusEffect } from "expo-router"
+import { useNavigation, useFocusEffect } from "expo-router"
 import VirtualList from "@/components/ui/virtualList"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -153,7 +153,7 @@ const IncomingShare = memo(() => {
 							},
 							props: {
 								onPress: () => {
-									router.back()
+									navigation.getParent()?.goBack()
 								}
 							}
 						}
@@ -267,9 +267,7 @@ const IncomingShare = memo(() => {
 
 											clear(currentPayloadsRef.current)
 
-											if (router.canDismiss()) {
-												router.dismissAll()
-											}
+											navigation.getParent()?.goBack()
 
 											const result = await run(async defer => {
 												return await Promise.all(

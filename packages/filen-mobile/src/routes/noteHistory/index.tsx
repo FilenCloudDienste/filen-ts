@@ -1,6 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
-import { useLocalSearchParams, router } from "expo-router"
+import { useLocalSearchParams, router, useNavigation } from "expo-router"
 import { deserialize, serialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Header from "@/components/ui/header"
@@ -139,6 +139,7 @@ const NoteHistory = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
+	const navigation = useNavigation()
 
 	const noteParsed = (() => {
 		if (!noteSerialized) {
@@ -198,7 +199,7 @@ const NoteHistory = memo(() => {
 							},
 							props: {
 								onPress: () => {
-									router.back()
+									navigation.getParent()?.goBack()
 								}
 							}
 						}

@@ -1,6 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform, ActivityIndicator } from "react-native"
-import { useLocalSearchParams, router } from "expo-router"
+import { useLocalSearchParams, useNavigation } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import Header, { type HeaderItem } from "@/components/ui/header"
@@ -175,6 +175,7 @@ const NoteTags = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const navigation = useNavigation()
 
 	const noteParsed = (() => {
 		if (!noteSerialized) {
@@ -228,7 +229,7 @@ const NoteTags = memo(() => {
 							},
 							props: {
 								onPress: () => {
-									router.back()
+									navigation.getParent()?.goBack()
 								}
 							}
 						}

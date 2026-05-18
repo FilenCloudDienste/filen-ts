@@ -1,13 +1,18 @@
 import { memo, useCallback } from "react"
-import { router, useFocusEffect } from "expo-router"
+import { useFocusEffect, useNavigation } from "expo-router"
+import alerts from "@/lib/alerts"
 
-const DismissStack = memo(() => {
+const DismissStack = memo(({ error }: { error?: string }) => {
+	const navigation = useNavigation()
+
 	useFocusEffect(
 		useCallback(() => {
-			if (router.canDismiss()) {
-				router.dismissAll()
+			navigation.getParent()?.goBack()
+
+			if (error) {
+				alerts.error(error)
 			}
-		}, [])
+		}, [error, navigation])
 	)
 
 	return null

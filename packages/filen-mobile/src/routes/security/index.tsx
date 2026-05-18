@@ -2,7 +2,7 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/routes/tabs/more"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, memo } from "react"
-import { router } from "expo-router"
+import { router, useNavigation } from "expo-router"
 import { run } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
@@ -20,6 +20,7 @@ const Security = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
+	const navigation = useNavigation()
 
 	const accountQuery = useAccountQuery()
 
@@ -49,9 +50,7 @@ const Security = memo(() => {
 							},
 							props: {
 								onPress: () => {
-									if (router.canGoBack()) {
-										router.back()
-									}
+									navigation.getParent()?.goBack()
 								}
 							}
 						}

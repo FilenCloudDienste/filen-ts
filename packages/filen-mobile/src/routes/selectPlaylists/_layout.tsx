@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams, router } from "expo-router"
+import { Stack, useLocalSearchParams, useNavigation } from "expo-router"
 import { memo, Fragment } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import { deserialize } from "@/lib/serializer"
@@ -17,6 +17,7 @@ function Toolbar() {
 		selectOptions?: string
 	}>()
 	const selectedPlaylists = usePlaylistsStore(useShallow(state => state.selectedPlaylists))
+	const navigation = useNavigation()
 
 	const selectOptions = (() => {
 		if (!selectOptionsSerialized) {
@@ -59,9 +60,7 @@ function Toolbar() {
 					cancelled: false
 				})
 
-				if (router.canDismiss()) {
-					router.dismiss()
-				}
+				navigation.getParent()?.goBack()
 			}}
 			className="absolute right-4"
 			enabled={canSubmit}
