@@ -386,6 +386,13 @@ const More = memo(() => {
 								}
 							},
 							{
+								icon: "color-palette-outline",
+								title: "tbd_appearance",
+								onPress: () => {
+									router.push("/appearance")
+								}
+							},
+							{
 								icon: "list-outline",
 								title: "tbd_events",
 								onPress: () => {
