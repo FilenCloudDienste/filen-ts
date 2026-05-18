@@ -4,7 +4,8 @@ import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useDrivePath from "@/hooks/useDrivePath"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
-import { itemSorter } from "@/lib/sort"
+import { itemSorter, type SortByType } from "@/lib/sort"
+import { useDriveSortPreference } from "@/lib/driveSortPreference"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
 import Item from "@/components/drive/item"
@@ -37,6 +38,62 @@ import * as DocumentPicker from "expo-document-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 
+function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
+	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
+		id,
+		title,
+		checked: current === value,
+		onPress: () => setSort(value)
+	})
+
+	return {
+		id: "sort",
+		title: "tbd_sort_by",
+		icon: "list",
+		subButtons: [
+			{
+				id: "sort.name",
+				title: "tbd_sort_name",
+				subButtons: [leaf("sort.nameAsc", "tbd_sort_name_asc", "nameAsc"), leaf("sort.nameDesc", "tbd_sort_name_desc", "nameDesc")]
+			},
+			{
+				id: "sort.size",
+				title: "tbd_sort_size",
+				subButtons: [leaf("sort.sizeAsc", "tbd_sort_size_asc", "sizeAsc"), leaf("sort.sizeDesc", "tbd_sort_size_desc", "sizeDesc")]
+			},
+			{
+				id: "sort.type",
+				title: "tbd_sort_type",
+				subButtons: [leaf("sort.mimeAsc", "tbd_sort_type_asc", "mimeAsc"), leaf("sort.mimeDesc", "tbd_sort_type_desc", "mimeDesc")]
+			},
+			{
+				id: "sort.modified",
+				title: "tbd_sort_modified",
+				subButtons: [
+					leaf("sort.lastModifiedAsc", "tbd_sort_modified_asc", "lastModifiedAsc"),
+					leaf("sort.lastModifiedDesc", "tbd_sort_modified_desc", "lastModifiedDesc")
+				]
+			},
+			{
+				id: "sort.uploaded",
+				title: "tbd_sort_uploaded",
+				subButtons: [
+					leaf("sort.uploadDateAsc", "tbd_sort_uploaded_asc", "uploadDateAsc"),
+					leaf("sort.uploadDateDesc", "tbd_sort_uploaded_desc", "uploadDateDesc")
+				]
+			},
+			{
+				id: "sort.created",
+				title: "tbd_sort_created",
+				subButtons: [
+					leaf("sort.creationAsc", "tbd_sort_created_asc", "creationAsc"),
+					leaf("sort.creationDesc", "tbd_sort_created_desc", "creationDesc")
+				]
+			}
+		]
+	}
+}
+
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -44,6 +101,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const selectedDriveItems = useDriveStore(useShallow(state => state.selectedItems))
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
+	const { sort: currentSort, setSort, sortable } = useDriveSortPreference(drivePath)
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -71,6 +129,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
+
+		if (sortable) {
+			menuButtons.push(buildSortMenuButton(currentSort, setSort))
+		}
 
 		if (driveItems.length > 0) {
 			if (selectedDriveItems.length === driveItems.length) {
@@ -1016,6 +1078,7 @@ const Drive = memo(() => {
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const [globalSearchResult, setGlobalSearchResult] = useState<DriveItem[]>([])
 	const [queryingGlobalSearch, setQueryingGlobalSearch] = useState<boolean>(false)
+	const { sort } = useDriveSortPreference(drivePath)
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -1028,7 +1091,7 @@ const Drive = memo(() => {
 
 	const itemsSorted = itemSorter.sortItems(
 		[...(driveItemsQuery.status === "success" ? driveItemsQuery.data : []), ...globalSearchResult],
-		drivePath.type === "recents" ? "uploadDateDesc" : "nameAsc"
+		sort
 	)
 
 	const items = (() => {

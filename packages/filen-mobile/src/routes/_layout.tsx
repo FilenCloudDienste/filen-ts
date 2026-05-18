@@ -232,6 +232,10 @@ const RootLayout = memo(() => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="appearance"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="events"
 												options={modalOptions}
 											/>
