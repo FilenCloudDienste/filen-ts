@@ -1090,6 +1090,37 @@ describe("Thumbnails", () => {
 		})
 	})
 
+	describe("size", () => {
+		it("returns 0 when the thumbnails directory is empty", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+
+			expect(thumbnails.size()).toBe(0)
+		})
+
+		it("returns 0 when the thumbnails directory does not exist", () => {
+			fs.delete(THUMBNAILS_DIR)
+
+			expect(thumbnails.size()).toBe(0)
+		})
+
+		it("sums all .webp file sizes", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/a.webp`, new Uint8Array(new Array(7).fill(0)))
+			fs.set(`${THUMBNAILS_DIR}/b.webp`, new Uint8Array(new Array(13).fill(0)))
+
+			expect(thumbnails.size()).toBe(7 + 13)
+		})
+
+		it("ignores stray subdirectories", () => {
+			fs.set(THUMBNAILS_DIR, "dir")
+			fs.set(`${THUMBNAILS_DIR}/a.webp`, new Uint8Array([1, 2]))
+			fs.set(`${THUMBNAILS_DIR}/nested`, "dir")
+			fs.set(`${THUMBNAILS_DIR}/nested/x.webp`, new Uint8Array([3, 4, 5]))
+
+			expect(thumbnails.size()).toBe(2)
+		})
+	})
+
 	describe("generateFromLocalFile", () => {
 		it("generates thumbnail from a local image path", async () => {
 			fs.set(THUMBNAILS_DIR, "dir")

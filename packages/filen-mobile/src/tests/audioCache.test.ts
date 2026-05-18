@@ -645,5 +645,103 @@ describe("AudioCache", () => {
 
 			expect(fs.has(metaPath)).toBe(false)
 		})
+
+		it("tolerates a corrupted sidecar and still sweeps the rest", async () => {
+			const cache = await createAudioCache()
+			const expiredMeta: Metadata = {
+				artist: "Old",
+				title: "Old Song",
+				album: null,
+				date: null,
+				duration: 1,
+				pictureBase64: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now() - 86400 * 1000 - 1
+			}
+
+			const goodPath = `${AUDIO_BASE_DIR}/good-uuid.filenmeta`
+			const corruptPath = `${AUDIO_BASE_DIR}/corrupt-uuid.filenmeta`
+
+			fs.set(goodPath, new Uint8Array(new TextEncoder().encode(serialize(expiredMeta))))
+			fs.set(corruptPath, new Uint8Array(new TextEncoder().encode("not valid msgpackr at all")))
+
+			await expect(cache.gc()).resolves.toBeUndefined()
+
+			expect(fs.has(goodPath)).toBe(false)
+			expect(fs.has(corruptPath)).toBe(false)
+		})
+
+		it("wipes everything when called with age=0", async () => {
+			const cache = await createAudioCache()
+			const freshMeta: Metadata = {
+				artist: "Fresh",
+				title: "Fresh Song",
+				album: null,
+				date: null,
+				duration: 100,
+				pictureBase64: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			const metaPath = `${AUDIO_BASE_DIR}/fresh-uuid.filenmeta`
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(freshMeta))))
+
+			await cache.gc(0)
+
+			expect(fs.has(metaPath)).toBe(false)
+		})
+	})
+
+	describe("clear", () => {
+		it("removes every metadata file and recreates an empty parent directory", async () => {
+			const cache = await createAudioCache()
+
+			fs.set(`${AUDIO_BASE_DIR}/a.filenmeta`, new Uint8Array([1, 2]))
+			fs.set(`${AUDIO_BASE_DIR}/b.filenmeta`, new Uint8Array([3, 4, 5]))
+
+			await cache.clear()
+
+			expect(fs.has(AUDIO_BASE_DIR)).toBe(true)
+			expect(fs.get(AUDIO_BASE_DIR)).toBe("dir")
+			expect(fs.has(`${AUDIO_BASE_DIR}/a.filenmeta`)).toBe(false)
+			expect(fs.has(`${AUDIO_BASE_DIR}/b.filenmeta`)).toBe(false)
+		})
+
+		it("is idempotent — calling twice does not throw", async () => {
+			const cache = await createAudioCache()
+
+			await cache.clear()
+			await expect(cache.clear()).resolves.toBeUndefined()
+			expect(fs.has(AUDIO_BASE_DIR)).toBe(true)
+		})
+	})
+
+	describe("size", () => {
+		it("returns 0 when the parent directory is empty", async () => {
+			const cache = await createAudioCache()
+
+			expect(cache.size()).toBe(0)
+		})
+
+		it("sums sidecar metadata file sizes", async () => {
+			const cache = await createAudioCache()
+
+			fs.set(`${AUDIO_BASE_DIR}/a.filenmeta`, new Uint8Array(new Array(5).fill(0)))
+			fs.set(`${AUDIO_BASE_DIR}/b.filenmeta`, new Uint8Array(new Array(11).fill(0)))
+
+			expect(cache.size()).toBe(5 + 11)
+		})
+
+		it("ignores stray subdirectories", async () => {
+			const cache = await createAudioCache()
+
+			fs.set(`${AUDIO_BASE_DIR}/some-dir`, "dir")
+			fs.set(`${AUDIO_BASE_DIR}/some-dir/nested`, new Uint8Array([1, 2, 3]))
+			fs.set(`${AUDIO_BASE_DIR}/a.filenmeta`, new Uint8Array([4]))
+
+			expect(cache.size()).toBe(1)
+		})
 	})
 })

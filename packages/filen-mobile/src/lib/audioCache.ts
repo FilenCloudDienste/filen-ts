@@ -276,37 +276,88 @@ export class AudioCache {
 	}
 
 	public async gc(age?: number): Promise<void> {
+		if (!this.parentDirectory.exists) {
+			return
+		}
+
 		const now = Date.now()
 		const entries = this.parentDirectory.list()
 
 		await Promise.all(
 			entries.map(async entry => {
-				await run(
-					async defer => {
-						if (!(entry instanceof FileSystem.File)) {
-							return
-						}
+				await run(async defer => {
+					if (!(entry instanceof FileSystem.File)) {
+						return
+					}
 
+					let shouldDelete = false
+
+					const parseResult = await run(async () => {
 						const metadata = deserialize(await entry.text()) as Metadata
 
-						if (Object.keys(metadata ?? {}).length === 0 || now > (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)) {
-							const mutex = this.getMutexForKey(entry.name.replace(".filenmeta", ""))
+						return Object.keys(metadata ?? {}).length === 0 || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
+					})
 
-							await mutex.acquire()
-
-							defer(() => {
-								mutex.release()
-							})
-
-							entry.delete()
-						}
-					},
-					{
-						throw: true
+					if (parseResult.success) {
+						shouldDelete = parseResult.data
+					} else {
+						// A corrupted sidecar is a deletion candidate too.
+						shouldDelete = true
 					}
-				)
+
+					if (!shouldDelete) {
+						return
+					}
+
+					const mutex = this.getMutexForKey(entry.name.replace(".filenmeta", ""))
+
+					await mutex.acquire()
+
+					defer(() => {
+						mutex.release()
+					})
+
+					if (entry.exists) {
+						entry.delete()
+					}
+				})
 			})
 		)
+	}
+
+	public async clear(): Promise<void> {
+		const result = await run(async () => {
+			if (this.parentDirectory.exists) {
+				this.parentDirectory.delete()
+			}
+
+			this.parentDirectory.create({
+				idempotent: true,
+				intermediates: true
+			})
+		})
+
+		if (!result.success) {
+			throw result.error
+		}
+	}
+
+	public size(): number {
+		if (!this.parentDirectory.exists) {
+			return 0
+		}
+
+		let total = 0
+
+		for (const entry of this.parentDirectory.list()) {
+			if (!(entry instanceof FileSystem.File)) {
+				continue
+			}
+
+			total += entry.size ?? 0
+		}
+
+		return total
 	}
 }
 

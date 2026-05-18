@@ -875,6 +875,24 @@ class Thumbnails {
 			intermediates: true
 		})
 	}
+
+	public size(): number {
+		if (!this.directory.exists) {
+			return 0
+		}
+
+		let total = 0
+
+		for (const entry of this.directory.list()) {
+			if (!(entry instanceof FileSystem.File)) {
+				continue
+			}
+
+			total += entry.size ?? 0
+		}
+
+		return total
+	}
 }
 
 const thumbnails = new Thumbnails()
