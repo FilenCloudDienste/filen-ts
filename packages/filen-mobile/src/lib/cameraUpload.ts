@@ -14,6 +14,7 @@ import { run, Semaphore, fastLocaleCompare } from "@filen/utils"
 import useCameraUploadStore from "@/stores/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { randomUUID } from "expo-crypto"
+import { newTmpFile } from "@/lib/tmp"
 import { useShallow } from "zustand/shallow"
 import { xxHash32 } from "js-xxhash"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
@@ -675,7 +676,7 @@ class CameraUpload {
 									break
 								}
 
-								const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
+								const tmpFile = newTmpFile()
 
 								defer(() => {
 									if (tmpFile.exists) {

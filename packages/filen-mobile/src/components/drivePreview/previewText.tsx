@@ -13,8 +13,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import transfers from "@/lib/transfers"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
-import * as FileSystem from "expo-file-system"
-import { randomUUID } from "expo-crypto"
+import { newTmpFile } from "@/lib/tmp"
 import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
@@ -73,7 +72,7 @@ const PreviewTextInner = memo(({ previewType, text, item }: { previewType: "text
 				throw new Error("Missing parent directory")
 			}
 
-			const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
+			const tmpFile = newTmpFile()
 
 			defer(() => {
 				if (tmpFile.exists) {

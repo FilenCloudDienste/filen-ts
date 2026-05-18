@@ -43,6 +43,8 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
+vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
+
 vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))
 
 vi.mock("react-native-mmkv", async () => await import("@/tests/mocks/reactNativeMMKV"))

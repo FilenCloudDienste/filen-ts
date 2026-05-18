@@ -13,7 +13,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import auth from "@/lib/auth"
-import * as FileSystem from "expo-file-system"
+import { newTmpFile } from "@/lib/tmp"
 import * as Sharing from "expo-sharing"
 import QRCode from "react-qr-code"
 import Button from "@/components/ui/button"
@@ -224,11 +224,8 @@ const TwoFactor = memo(() => {
 											}
 
 											const exportResult = await runWithLoading(async () => {
-												const file = new FileSystem.File(
-													FileSystem.Paths.join(
-														FileSystem.Paths.cache,
-														`${accountQuery.data.email}.twoFactorRecoveryKey.${Date.now()}.txt`
-													)
+												const file = newTmpFile(
+													`${accountQuery.data.email}.twoFactorRecoveryKey.${Date.now()}.txt`
 												)
 
 												if (file.exists) {

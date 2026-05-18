@@ -8,6 +8,7 @@ import { run, Semaphore, runEffect } from "@filen/utils"
 import { useRef, useEffect, useCallback, useState } from "react"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
+import { newTmpFile } from "@/lib/tmp"
 import { Buffer } from "react-native-quick-crypto"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import isEqual from "react-fast-compare"
@@ -257,7 +258,7 @@ class SecureStore {
 			const final = cipher.final()
 			const authTag = cipher.getAuthTag()
 
-			const tmpFile = new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, `.securestore.tmp.${crypto.randomUUID()}`))
+			const tmpFile = newTmpFile(`.securestore.tmp.${crypto.randomUUID()}`)
 
 			try {
 				tmpFile.write(new Uint8Array(Buffer.concat([iv, encrypted, final, authTag])))

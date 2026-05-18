@@ -10,6 +10,7 @@ import { run } from "@filen/utils"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { randomUUID } from "expo-crypto"
+import { newTmpDir } from "@/lib/tmp"
 import { Platform, type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import offline from "@/lib/offline"
@@ -117,8 +118,8 @@ export function createMenuButtons({
 									),
 						default:
 							item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-								? new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
-								: new FileSystem.Directory(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID()))
+								? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
+								: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 					})
 
 					defer(() => {
@@ -264,9 +265,7 @@ export function createMenuButtons({
 						throw new Error("Missing decrypted metadata")
 					}
 
-					const destination = new FileSystem.File(
-						FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
-					)
+					const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 
 					defer(() => {
 						if (destination.parentDirectory.exists) {
@@ -319,9 +318,7 @@ export function createMenuButtons({
 						throw new Error("Missing decrypted metadata")
 					}
 
-					const destination = new FileSystem.File(
-						FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
-					)
+					const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 
 					if (!destination.parentDirectory.exists) {
 						destination.parentDirectory.create({
@@ -458,10 +455,8 @@ export function createMenuButtons({
 
 					const destination =
 						item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-							? new FileSystem.File(FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name))
-							: new FileSystem.Directory(
-									FileSystem.Paths.join(FileSystem.Paths.cache, randomUUID(), item.data.decryptedMeta.name)
-								)
+							? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
+							: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 
 					defer(() => {
 						if (destination.parentDirectory.exists) {
