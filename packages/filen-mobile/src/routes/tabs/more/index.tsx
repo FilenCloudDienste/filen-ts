@@ -391,6 +391,13 @@ const More = memo(() => {
 								onPress: () => {
 									router.push("/events")
 								}
+							},
+							{
+								icon: "build-outline",
+								title: "tbd_advanced",
+								onPress: () => {
+									router.push("/advanced")
+								}
 							}
 						]}
 					/>
