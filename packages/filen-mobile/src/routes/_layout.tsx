@@ -228,6 +228,14 @@ const RootLayout = memo(() => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="events"
+												options={modalOptions}
+											/>
+											<Stack.Screen
+												name="eventInfo"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="drivePreview"
 												options={{
 													presentation: "transparentModal",
