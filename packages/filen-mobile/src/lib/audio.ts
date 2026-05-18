@@ -397,7 +397,8 @@ export class Audio {
 				if (this.shuffleOrder.length === newIdx) {
 					// Insert at a uniformly random slot strictly after the current shufflePosition so the
 					// new track is reachable within the remaining shuffle pass.
-					const insertAt = this.shufflePosition + 1 + Math.floor(Math.random() * (this.shuffleOrder.length - this.shufflePosition))
+					const insertAt =
+						this.shufflePosition + 1 + Math.floor(Math.random() * (this.shuffleOrder.length - this.shufflePosition))
 
 					this.shuffleOrder = [...this.shuffleOrder.slice(0, insertAt), newIdx, ...this.shuffleOrder.slice(insertAt)]
 				} else {
@@ -761,7 +762,9 @@ export class Audio {
 				name: `${playlist.uuid}.json`,
 				created: BigInt(Date.now()),
 				modified: BigInt(Date.now()),
-				mime: "application/json"
+				mime: "application/json",
+				noExif: false,
+				noExifOverride: false
 			},
 			managedFuture: {
 				abortSignal: signal ? wrapAbortSignalForSdk(signal) : undefined,

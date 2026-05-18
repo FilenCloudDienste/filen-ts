@@ -707,7 +707,6 @@ class CameraUpload {
 									abortController,
 									pauseSignal,
 									name: delta.file.info.filename,
-									// TODO: Remove when exif parsing hits the rust sdk
 									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
 									created: delta.file.info.creationTime ?? delta.file.info.modificationTime ?? undefined,
 									hideProgress: params?.background ?? undefined
