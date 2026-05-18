@@ -1,4 +1,5 @@
 import Alert from "@blazejkustra/react-native-alert"
+import { Semaphore, run } from "@filen/utils"
 
 export type AlertPromptResult =
 	| {
@@ -46,119 +47,149 @@ export type InputPromptOptions = {
 }
 
 class Prompts {
+	private readonly mutex: Semaphore = new Semaphore(1)
+
 	public async alert(options?: AlertPromptOptions): Promise<AlertPromptResult> {
-		return await new Promise<AlertPromptResult>(resolve => {
-			Alert.alert(
-				options?.title ?? "Title",
-				options?.message,
-				[
+		const result = await run(async defer => {
+			await this.mutex.acquire()
+
+			defer(() => {
+				this.mutex.release()
+			})
+
+			return await new Promise<AlertPromptResult>(resolve => {
+				Alert.alert(
+					options?.title ?? "Title",
+					options?.message,
+					[
+						{
+							text: options?.cancelText ?? "Cancel",
+							style: "cancel",
+							onPress: () => {
+								resolve({
+									cancelled: true
+								})
+							}
+						},
+						{
+							text: options?.okText ?? "OK",
+							style: options?.destructive ? "destructive" : "default",
+							onPress: () => {
+								resolve({
+									cancelled: false
+								})
+							}
+						}
+					],
 					{
-						text: options?.cancelText ?? "Cancel",
-						style: "cancel",
-						onPress: () => {
+						cancelable: options?.cancellable ?? true,
+						onDismiss: () => {
+							if (!(options?.cancellable ?? true)) {
+								return
+							}
+
 							resolve({
 								cancelled: true
 							})
 						}
-					},
-					{
-						text: options?.okText ?? "OK",
-						style: options?.destructive ? "destructive" : "default",
-						onPress: () => {
-							resolve({
-								cancelled: false
-							})
-						}
 					}
-				],
-				{
-					cancelable: options?.cancellable ?? true,
-					onDismiss: () => {
-						if (!(options?.cancellable ?? true)) {
-							return
-						}
-
-						resolve({
-							cancelled: true
-						})
-					}
-				}
-			)
+				)
+			})
 		})
+
+		if (!result.success) {
+			throw result.error
+		}
+
+		return result.data
 	}
 
 	public async input(options?: InputPromptOptions): Promise<InputPromptResult> {
-		return await new Promise<InputPromptResult>(resolve => {
-			Alert.prompt(
-				options?.title ?? "Title",
-				options?.message,
-				[
+		const result = await run(async defer => {
+			await this.mutex.acquire()
+
+			defer(() => {
+				this.mutex.release()
+			})
+
+			return await new Promise<InputPromptResult>(resolve => {
+				Alert.prompt(
+					options?.title ?? "Title",
+					options?.message,
+					[
+						{
+							text: options?.cancelText ?? "Cancel",
+							style: "cancel",
+							onPress: () => {
+								resolve({
+									cancelled: true
+								})
+							}
+						},
+						{
+							text: options?.okText ?? "OK",
+							style: options?.destructive ? "destructive" : "default",
+							onPress: (
+								value?:
+									| string
+									| {
+											login: string
+											password: string
+									  }
+							) => {
+								if (!value) {
+									resolve({
+										cancelled: false,
+										value: "",
+										type: "string"
+									})
+
+									return
+								}
+
+								if (typeof value === "string") {
+									resolve({
+										cancelled: false,
+										type: "string",
+										value
+									})
+
+									return
+								}
+
+								resolve({
+									cancelled: false,
+									type: "credentials",
+									login: value.login,
+									password: value.password
+								})
+							}
+						}
+					],
+					options?.inputType ?? "plain-text",
+					options?.defaultValue,
+					undefined,
 					{
-						text: options?.cancelText ?? "Cancel",
-						style: "cancel",
-						onPress: () => {
+						cancelable: options?.cancellable ?? true,
+						onDismiss: () => {
+							if (!(options?.cancellable ?? true)) {
+								return
+							}
+
 							resolve({
 								cancelled: true
 							})
 						}
-					},
-					{
-						text: options?.okText ?? "OK",
-						style: options?.destructive ? "destructive" : "default",
-						onPress: (
-							value?:
-								| string
-								| {
-										login: string
-										password: string
-								  }
-						) => {
-							if (!value) {
-								resolve({
-									cancelled: false,
-									value: "",
-									type: "string"
-								})
-
-								return
-							}
-
-							if (typeof value === "string") {
-								resolve({
-									cancelled: false,
-									type: "string",
-									value
-								})
-
-								return
-							}
-
-							resolve({
-								cancelled: false,
-								type: "credentials",
-								login: value.login,
-								password: value.password
-							})
-						}
 					}
-				],
-				options?.inputType ?? "plain-text",
-				options?.defaultValue,
-				undefined,
-				{
-					cancelable: options?.cancellable ?? true,
-					onDismiss: () => {
-						if (!(options?.cancellable ?? true)) {
-							return
-						}
-
-						resolve({
-							cancelled: true
-						})
-					}
-				}
-			)
+				)
+			})
 		})
+
+		if (!result.success) {
+			throw result.error
+		}
+
+		return result.data
 	}
 }
 
