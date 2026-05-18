@@ -8,7 +8,8 @@ import { serialize, deserialize } from "@/lib/serializer"
 import isEqual from "react-fast-compare"
 import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk, normalizeFilePathForSdk } from "@/lib/utils"
-import { listLocalDirectoryRecursive } from "@/lib/fsUtils"
+import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
+import { ClearBarrier } from "@/lib/clearBarrier"
 import offline from "@/lib/offline"
 import { xxHash32 } from "js-xxhash"
 
@@ -42,6 +43,7 @@ export class FileCache {
 		})
 	)
 	private readonly mutexes = new Map<string, Semaphore>()
+	private readonly clearBarrier = new ClearBarrier()
 	private directoryEnsured = false
 
 	private ensureDirectory(): void {
@@ -129,21 +131,35 @@ export class FileCache {
 			}
 		}
 
-		const { file, metadata } = this.getFiles(item)
+		const result = await run(async defer => {
+			await this.clearBarrier.enter()
 
-		if (!file.exists || !metadata.exists || metadata.size === 0) {
-			return false
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
+			const { file, metadata } = this.getFiles(item)
+
+			if (!file.exists || !metadata.exists || metadata.size === 0) {
+				return false
+			}
+
+			const metadataContent = deserialize(await metadata.text()) as Metadata
+
+			if (Object.keys(metadataContent).length === 0) {
+				return false
+			}
+
+			const { cachedAt: _, ...metadataWithoutCachedAt } = metadataContent
+
+			return isEqual(metadataWithoutCachedAt, item)
+		})
+
+		if (!result.success) {
+			throw result.error
 		}
 
-		const metadataContent = deserialize(await metadata.text()) as Metadata
-
-		if (Object.keys(metadataContent).length === 0) {
-			return false
-		}
-
-		const { cachedAt: _, ...metadataWithoutCachedAt } = metadataContent
-
-		return isEqual(metadataWithoutCachedAt, item)
+		return result.data
 	}
 
 	public async get({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<FileSystem.File> {
@@ -160,6 +176,12 @@ export class FileCache {
 		}
 
 		const result = await run(async defer => {
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
 			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
 			await mutex.acquire()
@@ -275,6 +297,12 @@ export class FileCache {
 		}
 
 		const result = await run(async defer => {
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
 			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
 			await mutex.acquire()
@@ -371,7 +399,7 @@ export class FileCache {
 	}
 
 	public async clear(): Promise<void> {
-		const result = await run(async () => {
+		await this.clearBarrier.runExclusive(() => {
 			if (this.parentDirectory.exists) {
 				this.parentDirectory.delete()
 			}
@@ -383,26 +411,10 @@ export class FileCache {
 
 			this.directoryEnsured = true
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
 	}
 
 	public size(): number {
-		if (!this.parentDirectory.exists) {
-			return 0
-		}
-
-		let total = 0
-
-		for (const entry of listLocalDirectoryRecursive(this.parentDirectory)) {
-			if (entry instanceof FileSystem.File) {
-				total += entry.size ?? 0
-			}
-		}
-
-		return total
+		return sumLocalDirectoryFileBytes(this.parentDirectory)
 	}
 }
 

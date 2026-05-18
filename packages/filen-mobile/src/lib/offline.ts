@@ -36,7 +36,8 @@ import {
 	unwrapParentUuid,
 	normalizeModificationTimestampForComparison
 } from "@/lib/utils"
-import { listLocalDirectoryRecursive } from "@/lib/fsUtils"
+import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
+import { ClearBarrier } from "@/lib/clearBarrier"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
@@ -116,6 +117,8 @@ export class Offline {
 	private readonly syncMutex = new Semaphore(1)
 	// storeMutex(3): allows up to 3 concurrent file/directory downloads while still bounding I/O.
 	private readonly storeMutex = new Semaphore(3)
+	// clearBarrier: serializes clearAll against in-flight storeFile/storeDirectory/removeItem.
+	private readonly clearBarrier = new ClearBarrier()
 	private readonly listDirectoriesCache = new Map<string, Awaited<ReturnType<Offline["listDirectories"]>>>()
 	private listFilesCache: Awaited<ReturnType<Offline["listFiles"]>> | null = null
 	private listDirectoriesRecursiveCache: Awaited<ReturnType<Offline["listDirectoriesRecursive"]>> | null = null
@@ -1218,6 +1221,12 @@ export class Offline {
 				throw new Error("File missing decrypted meta")
 			}
 
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
 			await this.storeMutex.acquire()
 
 			defer(() => {
@@ -1321,6 +1330,12 @@ export class Offline {
 			if (!directory.data.decryptedMeta) {
 				throw new Error("Directory missing decrypted meta")
 			}
+
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
 
 			await this.storeMutex.acquire()
 
@@ -1992,17 +2007,11 @@ export class Offline {
 	}
 
 	public async clearAll(): Promise<void> {
-		const result = await run(async defer => {
-			await this.storeMutex.acquire()
-
-			defer(() => {
-				this.storeMutex.release()
-			})
-
-			// Snapshot every uuid+type that's about to disappear so we can invalidate the
-			// "is item stored offline?" queries after deletion. Match removeItem's pattern of
-			// walking nested directory-meta entries pessimistically.
-			const stored: {
+		// Snapshot every uuid+type that's about to disappear so we can invalidate the
+		// "is item stored offline?" queries after deletion. Match removeItem's pattern of
+		// walking nested directory-meta entries pessimistically.
+		const stored = await this.clearBarrier.runExclusive(async () => {
+			const collected: {
 				uuid: string
 				type: DriveItem["type"]
 			}[] = []
@@ -2011,14 +2020,14 @@ export class Offline {
 				const index = await this.readIndex()
 
 				for (const fileEntry of Object.values(index.files)) {
-					stored.push({
+					collected.push({
 						uuid: fileEntry.item.data.uuid,
 						type: fileEntry.item.type
 					})
 				}
 
 				for (const directoryEntry of Object.values(index.directories)) {
-					stored.push({
+					collected.push({
 						uuid: directoryEntry.item.data.uuid,
 						type: directoryEntry.item.type
 					})
@@ -2034,7 +2043,7 @@ export class Offline {
 							continue
 						}
 
-						stored.push({
+						collected.push({
 							uuid: entry.item.data.uuid,
 							type: entry.item.type
 						})
@@ -2052,19 +2061,15 @@ export class Offline {
 			this.ensureDirectories()
 			this.invalidateCaches()
 
-			return stored
+			return collected
 		})
 
-		if (!result.success) {
-			throw result.error
-		}
-
-		// updateIndex acquires indexMutex internally — call it outside the storeMutex critical section.
+		// updateIndex acquires indexMutex internally — call it after leaving the barrier.
 		await this.updateIndex()
 
 		// Broadcast offline=false for every item that was previously stored so badges update
 		// without waiting for the next isItemStored() refetch.
-		for (const { uuid, type } of result.data) {
+		for (const { uuid, type } of stored) {
 			driveItemStoredOfflineQueryUpdate({
 				updater: false,
 				params: {
@@ -2084,19 +2089,7 @@ export class Offline {
 		const files = Object.keys(index.files).length
 		const dirs = Object.keys(index.directories).length
 
-		let size = 0
-
-		for (const dir of [this.filesDirectory, this.directoriesDirectory]) {
-			if (!dir.exists) {
-				continue
-			}
-
-			for (const entry of listLocalDirectoryRecursive(dir)) {
-				if (entry instanceof FileSystem.File) {
-					size += entry.size ?? 0
-				}
-			}
-		}
+		const size = sumLocalDirectoryFileBytes(this.filesDirectory) + sumLocalDirectoryFileBytes(this.directoriesDirectory)
 
 		return {
 			size,
@@ -2107,6 +2100,12 @@ export class Offline {
 
 	public async removeItem(item: DriveItem): Promise<void> {
 		const result = await run(async defer => {
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
 			await this.storeMutex.acquire()
 
 			defer(() => {

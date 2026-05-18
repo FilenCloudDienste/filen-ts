@@ -5,6 +5,7 @@ import type { DriveItem } from "@/types"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS, IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk, wrapAbortSignalForSdk } from "@/lib/utils"
 import { run, Semaphore } from "@filen/utils"
+import { ClearBarrier } from "@/lib/clearBarrier"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import auth from "@/lib/auth"
 import useHttpStore from "@/stores/useHttp.store"
@@ -63,6 +64,7 @@ class Thumbnails {
 	private readonly pending = new Map<string, Promise<string>>()
 	private readonly failures = new Map<string, number>()
 	private readonly semaphore = new Semaphore(MAX_CONCURRENT)
+	private readonly clearBarrier = new ClearBarrier()
 
 	public constructor() {
 		this.ensureDirectory()
@@ -532,7 +534,13 @@ class Thumbnails {
 	}
 
 	public async generate(params: ThumbnailParams): Promise<string> {
-		const result = await run(async () => {
+		const result = await run(async defer => {
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
 			if (params.signal?.aborted) {
 				throw abortError(params.signal)
 			}
@@ -712,6 +720,24 @@ class Thumbnails {
 		videoTimestamp?: number
 		signal?: AbortSignal
 	}): Promise<string | null> {
+		await this.clearBarrier.enter()
+
+		try {
+			return await this.generateFromLocalFileImpl(params)
+		} finally {
+			this.clearBarrier.leave()
+		}
+	}
+
+	private async generateFromLocalFileImpl(params: {
+		localPath: string
+		uuid: string
+		name: string
+		width?: number
+		quality?: number
+		videoTimestamp?: number
+		signal?: AbortSignal
+	}): Promise<string | null> {
 		const ext = FileSystem.Paths.extname(params.name).toLowerCase().trim()
 
 		if (!ext) {
@@ -861,18 +887,20 @@ class Thumbnails {
 		cache.availableThumbnails.delete(item.data.uuid)
 	}
 
-	public clear(): void {
-		this.failures.clear()
+	public async clear(): Promise<void> {
+		await this.clearBarrier.runExclusive(() => {
+			this.failures.clear()
 
-		cache.availableThumbnails.clear()
+			cache.availableThumbnails.clear()
 
-		if (this.directory.exists) {
-			this.directory.delete()
-		}
+			if (this.directory.exists) {
+				this.directory.delete()
+			}
 
-		this.directory.create({
-			idempotent: true,
-			intermediates: true
+			this.directory.create({
+				idempotent: true,
+				intermediates: true
+			})
 		})
 	}
 

@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { run } from "@filen/utils"
-import { listLocalDirectoryRecursive } from "@/lib/fsUtils"
+import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 
 // Wraps the OS-managed sandbox cache directory (`FileSystem.Paths.cache`). The directory itself
 // is owned by the OS and must not be deleted — we only remove its children.
@@ -41,21 +41,7 @@ export class SandboxCache {
 	}
 
 	public size(): number {
-		const directory = this.directory
-
-		if (!directory.exists) {
-			return 0
-		}
-
-		let total = 0
-
-		for (const entry of listLocalDirectoryRecursive(directory)) {
-			if (entry instanceof FileSystem.File) {
-				total += entry.size ?? 0
-			}
-		}
-
-		return total
+		return sumLocalDirectoryFileBytes(this.directory)
 	}
 }
 
