@@ -607,10 +607,42 @@ const Account = memo(() => {
 							className="bg-background-tertiary"
 							buttons={[
 								{
-									icon: "time-outline",
+									icon: "log-out-outline",
 									title: "tbd_logout",
 									onPress: async () => {
-										// TODO: logout flow
+										const promptResult = await run(async () => {
+											return await prompts.alert({
+												title: "tbd_logout",
+												message: "tbd_logout_confirm_wipes_local_data",
+												okText: "tbd_logout",
+												cancelText: "tbd_cancel",
+												destructive: true
+											})
+										})
+
+										if (!promptResult.success) {
+											console.error(promptResult.error)
+											alerts.error(promptResult.error)
+
+											return
+										}
+
+										if (promptResult.data.cancelled) {
+											return
+										}
+
+										const result = await runWithLoading(async () => {
+											await auth.logout()
+										})
+
+										if (!result.success) {
+											console.error(result.error)
+											alerts.error(result.error)
+
+											return
+										}
+
+										router.replace("/auth/login")
 									}
 								}
 							]}
