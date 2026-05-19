@@ -14,6 +14,7 @@ import { unregisterBackgroundSync } from "@/lib/backgroundTask"
 import fileProvider from "@/lib/fileProvider"
 import sqlite from "@/lib/sqlite"
 import audio from "@/lib/audio"
+import offline from "@/lib/offline"
 import { sync as chatsSync } from "@/components/chats/sync"
 import { sync as notesSync } from "@/components/notes/sync"
 import { reloadAppAsync } from "expo"
@@ -166,11 +167,15 @@ class Auth {
 			cameraUpload.cancel()
 			chatsSync.cancel()
 			notesSync.cancel()
+			offline.cancel()
 		} catch (e) {
 			console.error(e)
 		}
 
 		await Promise.all([secureStore.clear(), sqlite.clearAsync()])
+
+		// Wait a bit for everyting to settle before reloading, to avoid potential race conditions
+		await new Promise(resolve => setTimeout(resolve, 3000))
 
 		reloadAppAsync().catch(console.error)
 	}
