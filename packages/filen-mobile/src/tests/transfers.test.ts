@@ -486,7 +486,7 @@ describe("Transfers", () => {
 					localFileOrDir: file,
 					parent,
 					hideProgress: true,
-					abortController: controller
+					signal: controller.signal
 				})
 
 				expect(result).toBeNull()
@@ -667,7 +667,7 @@ describe("Transfers", () => {
 					localFileOrDir: dir,
 					parent,
 					hideProgress: true,
-					abortController: controller
+					signal: controller.signal
 				})
 
 				expect(result).toBeNull()
@@ -758,7 +758,7 @@ describe("Transfers", () => {
 						item,
 						destination: dest,
 						hideProgress: true,
-						abortController: controller
+						signal: controller.signal
 					})
 				).resolves.not.toThrow()
 			})
@@ -809,7 +809,7 @@ describe("Transfers", () => {
 						item,
 						destination: dest,
 						hideProgress: true,
-						abortController: controller
+						signal: controller.signal
 					})
 				).resolves.not.toThrow()
 			})
