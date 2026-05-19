@@ -29,17 +29,19 @@ export type Metadata = (
 	cachedAt: number
 }
 
+// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = 1
+
 export class FileCache {
-	// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-	public readonly version = 1
+	public readonly version = VERSION
 	private readonly parentDirectory = new FileSystem.Directory(
 		Platform.select({
 			ios: FileSystem.Paths.join(
 				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 				"fileCache",
-				`v${this.version}`
+				`v${VERSION}`
 			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "fileCache", `v${this.version}`)
+			default: FileSystem.Paths.join(FileSystem.Paths.document, "fileCache", `v${VERSION}`)
 		})
 	)
 	private readonly mutexes = new Map<string, Semaphore>()
