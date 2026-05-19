@@ -3,7 +3,6 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import { Platform } from "react-native"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { useIsAuthed } from "@/lib/auth"
-import { Redirect } from "expo-router"
 import { memo } from "react"
 import useChatsUnreadCount from "@/hooks/useChatsUnreadCount"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
@@ -19,7 +18,7 @@ const TabsLayout = memo(() => {
 	const { theme } = useUniwind()
 
 	if (!isAuthed) {
-		return <Redirect href="/auth/login" />
+		return null
 	}
 
 	return (
