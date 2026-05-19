@@ -10,20 +10,54 @@ vi.mock("@/constants", () => ({
 	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
 }))
 
+// Hoisted so vi.mock factories below can reference them — vi.mock is moved
+// above all const declarations during test transform.
+const { OFFLINE_FILES, OFFLINE_DIRS, FILE_CACHE, AUDIO_CACHE, THUMBNAILS, DOWNLOADS } = vi.hoisted(() => {
+	const BASE = "file:///document"
+	return {
+		OFFLINE_FILES: `${BASE}/offline/v1/files`,
+		OFFLINE_DIRS: `${BASE}/offline/v1/directories`,
+		FILE_CACHE: `${BASE}/fileCache/v1`,
+		AUDIO_CACHE: `${BASE}/audioCache/v1`,
+		THUMBNAILS: `${BASE}/thumbnails/v2`,
+		DOWNLOADS: `${BASE}/Downloads`
+	}
+})
+
+// fsUtils imports Directory constants from each module. Mock the modules to
+// expose only those directory constants — avoids pulling in their full
+// transitive deps (SDK, auth, expo-image, etc.).
+vi.mock("@/lib/offline", async () => {
+	const { Directory } = await import("@/tests/mocks/expoFileSystem")
+	return {
+		FILES_DIRECTORY: new Directory(OFFLINE_FILES),
+		DIRECTORIES_DIRECTORY: new Directory(OFFLINE_DIRS)
+	}
+})
+
+vi.mock("@/lib/fileCache", async () => {
+	const { Directory } = await import("@/tests/mocks/expoFileSystem")
+	return {
+		PARENT_DIRECTORY: new Directory(FILE_CACHE)
+	}
+})
+
+vi.mock("@/lib/audioCache", async () => {
+	const { Directory } = await import("@/tests/mocks/expoFileSystem")
+	return {
+		PARENT_DIRECTORY: new Directory(AUDIO_CACHE)
+	}
+})
+
+vi.mock("@/lib/thumbnails", async () => {
+	const { Directory } = await import("@/tests/mocks/expoFileSystem")
+	return {
+		DIRECTORY: new Directory(THUMBNAILS)
+	}
+})
+
 import { fs } from "@/tests/mocks/expoFileSystem"
 import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
-
-// Default Platform.select branch resolves to FileSystem.Paths.document, which
-// the mock exposes as "file:///document". Matches the path the production code
-// would use on Android.
-const BASE = "file:///document"
-
-const OFFLINE_FILES = `${BASE}/offline/v1/files`
-const OFFLINE_DIRS = `${BASE}/offline/v1/directories`
-const FILE_CACHE = `${BASE}/fileCache/v1`
-const AUDIO_CACHE = `${BASE}/audioCache/v1`
-const THUMBNAILS = `${BASE}/thumbnails/v2`
-const DOWNLOADS = `${BASE}/Downloads`
 
 describe("sweepStrayDownloadFiles", () => {
 	beforeEach(() => {

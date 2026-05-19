@@ -49,10 +49,16 @@ vi.mock("@/lib/utils", () => ({
 }))
 
 vi.mock("@/lib/offline", () => ({
+	VERSION: 1,
 	default: {
 		getLocalFile: vi.fn().mockResolvedValue(null)
 	}
 }))
+
+// fsUtils (imported by fileCache.ts) now pulls VERSION from sibling lib modules.
+// Mock them with just the VERSION export so their full transitive deps don't load.
+vi.mock("@/lib/audioCache", () => ({ VERSION: 1 }))
+vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
 vi.mock("react-fast-compare", () => ({
 	default: (a: unknown, b: unknown) =>

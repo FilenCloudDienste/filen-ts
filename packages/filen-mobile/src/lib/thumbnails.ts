@@ -36,6 +36,17 @@ export const MAX_FAILURES = 3
 // Critical: When changing anything related to storage index/store/persistence/width/height/quality format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 2
 
+export const DIRECTORY = new FileSystem.Directory(
+	FileSystem.Paths.join(
+		Platform.select({
+			ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+			default: FileSystem.Paths.document
+		}),
+		"thumbnails",
+		`v${VERSION}`
+	)
+)
+
 function abortError(signal?: AbortSignal): Error {
 	const reason = signal?.reason
 
@@ -51,16 +62,6 @@ function abortError(signal?: AbortSignal): Error {
 }
 
 class Thumbnails {
-	public readonly directory = new FileSystem.Directory(
-		FileSystem.Paths.join(
-			Platform.select({
-				ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-				default: FileSystem.Paths.document
-			}),
-			"thumbnails",
-			`v${VERSION}`
-		)
-	)
 	private readonly pending = new Map<string, Promise<string>>()
 	private readonly failures = new Map<string, number>()
 	private readonly semaphore = new Semaphore(MAX_CONCURRENT)
@@ -71,12 +72,12 @@ class Thumbnails {
 	}
 
 	private getPath(item: DriveItem): string {
-		return FileSystem.Paths.join(this.directory.uri, `${item.data.uuid}.webp`)
+		return FileSystem.Paths.join(DIRECTORY.uri, `${item.data.uuid}.webp`)
 	}
 
 	private ensureDirectory(): void {
-		if (!this.directory.exists) {
-			this.directory.create({
+		if (!DIRECTORY.exists) {
+			DIRECTORY.create({
 				idempotent: true,
 				intermediates: true
 			})
@@ -223,7 +224,7 @@ class Thumbnails {
 					sourcePath = normalizeFilePathForExpo(cachedFile.uri)
 				} else {
 					const { authedSdkClient } = await auth.getSdkClients()
-					const tempDir = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, `thumb_tmp_${randomUUID()}`))
+					const tempDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORY.uri, `thumb_tmp_${randomUUID()}`))
 
 					defer(() => {
 						if (tempDir.exists) {
@@ -755,7 +756,7 @@ class Thumbnails {
 			return null
 		}
 
-		const outputPath = FileSystem.Paths.join(this.directory.uri, `${params.uuid}.webp`)
+		const outputPath = FileSystem.Paths.join(DIRECTORY.uri, `${params.uuid}.webp`)
 		const outputFile = new FileSystem.File(outputPath)
 
 		if (outputFile.exists) {
@@ -893,11 +894,11 @@ class Thumbnails {
 
 			cache.availableThumbnails.clear()
 
-			if (this.directory.exists) {
-				this.directory.delete()
+			if (DIRECTORY.exists) {
+				DIRECTORY.delete()
 			}
 
-			this.directory.create({
+			DIRECTORY.create({
 				idempotent: true,
 				intermediates: true
 			})
@@ -905,13 +906,13 @@ class Thumbnails {
 	}
 
 	public size(): number {
-		if (!this.directory.exists) {
+		if (!DIRECTORY.exists) {
 			return 0
 		}
 
 		let total = 0
 
-		for (const entry of this.directory.list()) {
+		for (const entry of DIRECTORY.list()) {
 			if (!(entry instanceof FileSystem.File)) {
 				continue
 			}

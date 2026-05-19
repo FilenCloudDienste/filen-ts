@@ -32,18 +32,18 @@ export type Metadata = (
 // Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
 
+export const PARENT_DIRECTORY = new FileSystem.Directory(
+	Platform.select({
+		ios: FileSystem.Paths.join(
+			FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+			"fileCache",
+			`v${VERSION}`
+		),
+		default: FileSystem.Paths.join(FileSystem.Paths.document, "fileCache", `v${VERSION}`)
+	})
+)
+
 export class FileCache {
-	public readonly version = VERSION
-	private readonly parentDirectory = new FileSystem.Directory(
-		Platform.select({
-			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-				"fileCache",
-				`v${VERSION}`
-			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "fileCache", `v${VERSION}`)
-		})
-	)
 	private readonly mutexes = new Map<string, Semaphore>()
 	private readonly clearBarrier = new ClearBarrier()
 	private directoryEnsured = false
@@ -53,8 +53,8 @@ export class FileCache {
 			return
 		}
 
-		if (!this.parentDirectory.exists) {
-			this.parentDirectory.create({
+		if (!PARENT_DIRECTORY.exists) {
+			PARENT_DIRECTORY.create({
 				idempotent: true,
 				intermediates: true
 			})
@@ -93,7 +93,7 @@ export class FileCache {
 		}
 
 		const parentDirectory = new FileSystem.Directory(
-			FileSystem.Paths.join(this.parentDirectory.uri, item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
+			FileSystem.Paths.join(PARENT_DIRECTORY.uri, item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 		)
 
 		if (!parentDirectory.exists) {
@@ -334,13 +334,13 @@ export class FileCache {
 	}
 
 	public async gc(age?: number): Promise<void> {
-		if (!this.parentDirectory.exists) {
+		if (!PARENT_DIRECTORY.exists) {
 			return
 		}
 
 		const toDelete: string[] = []
 		const now = Date.now()
-		const entries = this.parentDirectory.list()
+		const entries = PARENT_DIRECTORY.list()
 
 		await Promise.all(
 			entries.map(async entry => {
@@ -358,11 +358,7 @@ export class FileCache {
 
 					const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-					if (
-						!metadata ||
-						Object.keys(metadata).length === 0 ||
-						now >= metadata.cachedAt + (age ?? 86400 * 1000)
-					) {
+					if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? 86400 * 1000)) {
 						return uuid
 					}
 
@@ -390,7 +386,7 @@ export class FileCache {
 						mutex.release()
 					})
 
-					const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.parentDirectory.uri, uuid))
+					const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(PARENT_DIRECTORY.uri, uuid))
 
 					if (parentDirectory.exists) {
 						parentDirectory.delete()
@@ -402,11 +398,11 @@ export class FileCache {
 
 	public async clear(): Promise<void> {
 		await this.clearBarrier.runExclusive(() => {
-			if (this.parentDirectory.exists) {
-				this.parentDirectory.delete()
+			if (PARENT_DIRECTORY.exists) {
+				PARENT_DIRECTORY.delete()
 			}
 
-			this.parentDirectory.create({
+			PARENT_DIRECTORY.create({
 				idempotent: true,
 				intermediates: true
 			})
@@ -416,7 +412,7 @@ export class FileCache {
 	}
 
 	public size(): number {
-		return sumLocalDirectoryFileBytes(this.parentDirectory)
+		return sumLocalDirectoryFileBytes(PARENT_DIRECTORY)
 	}
 }
 

@@ -82,6 +82,20 @@ export type Index = {
 // Critical: When changing anything related to offline storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
 
+export const DIRECTORY = new FileSystem.Directory(
+	Platform.select({
+		ios: FileSystem.Paths.join(
+			FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+			"offline",
+			`v${VERSION}`
+		),
+		default: FileSystem.Paths.join(FileSystem.Paths.document, "offline", `v${VERSION}`)
+	})
+)
+export const FILES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORY.uri, "files"))
+export const DIRECTORIES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORY.uri, "directories"))
+export const INDEX_FILE = new FileSystem.File(FileSystem.Paths.join(DIRECTORY.uri, "index"))
+
 // Manages offline file/directory storage on device.
 //
 // Storage layout:
@@ -96,21 +110,6 @@ export const VERSION = 1
 //   - The Index is the source of truth for "is this item offline?" queries and is rebuilt atomically.
 //   - sync() compares local offline state against remote, re-downloading changed/new files and pruning deleted ones.
 export class Offline {
-	private readonly directory: FileSystem.Directory = new FileSystem.Directory(
-		Platform.select({
-			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-				"offline",
-				`v${VERSION}`
-			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "offline", `v${VERSION}`)
-		})
-	)
-	private readonly filesDirectory: FileSystem.Directory = new FileSystem.Directory(FileSystem.Paths.join(this.directory.uri, "files"))
-	private readonly directoriesDirectory: FileSystem.Directory = new FileSystem.Directory(
-		FileSystem.Paths.join(this.directory.uri, "directories")
-	)
-	private readonly indexFile = new FileSystem.File(FileSystem.Paths.join(this.directory.uri, "index"))
 	// indexMutex(1): serializes index read/write to prevent concurrent corruption.
 	private readonly indexMutex = new Semaphore(1)
 	private indexCache: Index | null = null
@@ -153,22 +152,22 @@ export class Offline {
 			return
 		}
 
-		if (!this.directory.exists) {
-			this.directory.create({
+		if (!DIRECTORY.exists) {
+			DIRECTORY.create({
 				intermediates: true,
 				idempotent: true
 			})
 		}
 
-		if (!this.filesDirectory.exists) {
-			this.filesDirectory.create({
+		if (!FILES_DIRECTORY.exists) {
+			FILES_DIRECTORY.create({
 				intermediates: true,
 				idempotent: true
 			})
 		}
 
-		if (!this.directoriesDirectory.exists) {
-			this.directoriesDirectory.create({
+		if (!DIRECTORIES_DIRECTORY.exists) {
+			DIRECTORIES_DIRECTORY.create({
 				intermediates: true,
 				idempotent: true
 			})
@@ -228,9 +227,7 @@ export class Offline {
 			return cached
 		}
 
-		const metaFile = new FileSystem.File(
-			FileSystem.Paths.join(this.directoriesDirectory.uri, topLevelUuid, `${topLevelUuid}.filenmeta`)
-		)
+		const metaFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, `${topLevelUuid}.filenmeta`))
 
 		if (!metaFile.exists || metaFile.size === 0) {
 			return null
@@ -266,7 +263,7 @@ export class Offline {
 		}
 
 		const index = new Map<string, string>()
-		const topLevelEntries = this.directoriesDirectory.list()
+		const topLevelEntries = DIRECTORIES_DIRECTORY.list()
 
 		for (const topLevelEntry of topLevelEntries) {
 			if (!(topLevelEntry instanceof FileSystem.Directory) || !validateUuid(topLevelEntry.name)) {
@@ -363,7 +360,7 @@ export class Offline {
 					directories: indexDirectories
 				}
 
-				this.atomicWrite(this.indexFile, serialize(index satisfies Index))
+				this.atomicWrite(INDEX_FILE, serialize(index satisfies Index))
 
 				this.indexCache = index
 			},
@@ -391,7 +388,7 @@ export class Offline {
 
 			this.ensureDirectories()
 
-			if (!this.indexFile.exists || this.indexFile.size === 0) {
+			if (!INDEX_FILE.exists || INDEX_FILE.size === 0) {
 				return {
 					files: {},
 					directories: {}
@@ -399,7 +396,7 @@ export class Offline {
 			}
 
 			const readResult = await run(async () => {
-				const index: Index = deserialize(await this.indexFile.text())
+				const index: Index = deserialize(await INDEX_FILE.text())
 
 				if (Object.keys(index).length === 0) {
 					throw new Error("Index file is empty")
@@ -414,8 +411,8 @@ export class Offline {
 				return readResult.data
 			}
 
-			if (this.indexFile.exists) {
-				this.indexFile.delete()
+			if (INDEX_FILE.exists) {
+				INDEX_FILE.delete()
 			}
 
 			return {
@@ -607,11 +604,9 @@ export class Offline {
 									switch (parent.inner[0].dir.tag) {
 										case AnySharedDir_Tags.Dir:
 										case AnySharedDir_Tags.Root: {
-											return await authedSdkClient.listSharedDir(
-												parent.inner[0].dir,
-												parent.inner[0].shareInfo,
-												{ signal }
-											)
+											return await authedSdkClient.listSharedDir(parent.inner[0].dir, parent.inner[0].shareInfo, {
+												signal
+											})
 										}
 
 										default: {
@@ -737,10 +732,10 @@ export class Offline {
 							}
 
 							const dataFile = new FileSystem.File(
-								FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid, item.data.decryptedMeta.name)
+								FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid, item.data.decryptedMeta.name)
 							)
 							const metaFile = new FileSystem.File(
-								FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
+								FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
 							)
 
 							if (!dataFile.exists || !metaFile.exists) {
@@ -864,7 +859,7 @@ export class Offline {
 							}
 
 							const metaFile = new FileSystem.File(
-								FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
+								FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
 							)
 
 							if (!metaFile.exists || metaFile.size === 0) {
@@ -1028,7 +1023,7 @@ export class Offline {
 									case "sharedRootDirectory":
 									case "sharedDirectory": {
 										const directory = new FileSystem.Directory(
-											FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
+											FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, item.data.uuid, path)
 										)
 
 										if (directory.exists) {
@@ -1044,9 +1039,7 @@ export class Offline {
 									case "file":
 									case "sharedFile":
 									case "sharedRootFile": {
-										const file = new FileSystem.File(
-											FileSystem.Paths.join(this.directoriesDirectory.uri, item.data.uuid, path)
-										)
+										const file = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY, item.data.uuid, path))
 
 										if (file.exists) {
 											localFiles.set(path, {
@@ -1178,7 +1171,7 @@ export class Offline {
 
 		this.ensureDirectories()
 
-		const entries = this.filesDirectory.list()
+		const entries = FILES_DIRECTORY.list()
 		const files: Awaited<ReturnType<typeof this.listFiles>> = []
 
 		await Promise.all(
@@ -1285,12 +1278,8 @@ export class Offline {
 				return
 			}
 
-			const dataFile = new FileSystem.File(
-				FileSystem.Paths.join(this.filesDirectory.uri, file.data.uuid, file.data.decryptedMeta.name)
-			)
-			const metaFile = new FileSystem.File(
-				FileSystem.Paths.join(this.filesDirectory.uri, file.data.uuid, `${file.data.uuid}.filenmeta`)
-			)
+			const dataFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, file.data.decryptedMeta.name))
+			const metaFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, `${file.data.uuid}.filenmeta`))
 
 			if (dataFile.parentDirectory.exists) {
 				dataFile.parentDirectory.delete()
@@ -1400,9 +1389,9 @@ export class Offline {
 				return
 			}
 
-			const dataDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.directoriesDirectory.uri, directory.data.uuid))
+			const dataDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, directory.data.uuid))
 			const metaFile = new FileSystem.File(
-				FileSystem.Paths.join(this.directoriesDirectory.uri, directory.data.uuid, `${directory.data.uuid}.filenmeta`)
+				FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, directory.data.uuid, `${directory.data.uuid}.filenmeta`)
 			)
 
 			if (!dataDirectory.exists) {
@@ -1469,7 +1458,7 @@ export class Offline {
 						const entryUuid = entry.item.data.uuid
 
 						if (currentIndex.files[entryUuid]) {
-							const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(this.filesDirectory.uri, entryUuid))
+							const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, entryUuid))
 
 							if (standaloneFileDir.exists) {
 								standaloneFileDir.delete()
@@ -1478,9 +1467,7 @@ export class Offline {
 
 						// Don't delete ourselves — we're storing this directory, not a nested one.
 						if (currentIndex.directories[entryUuid] && entryUuid !== directory.data.uuid) {
-							const standaloneDirDir = new FileSystem.Directory(
-								FileSystem.Paths.join(this.directoriesDirectory.uri, entryUuid)
-							)
+							const standaloneDirDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, entryUuid))
 
 							if (standaloneDirDir.exists) {
 								standaloneDirDir.delete()
@@ -1596,7 +1583,7 @@ export class Offline {
 
 		const directories: Awaited<ReturnType<typeof this.listDirectories>>["directories"] = []
 		const files: Awaited<ReturnType<typeof this.listDirectories>>["files"] = []
-		const topLevelEntries = this.directoriesDirectory.list()
+		const topLevelEntries = DIRECTORIES_DIRECTORY.list()
 
 		if (!parent) {
 			await Promise.all(
@@ -1776,7 +1763,7 @@ export class Offline {
 		const directories: Awaited<ReturnType<typeof this.listDirectories>>["directories"] = []
 		const files: Awaited<ReturnType<typeof this.listDirectories>>["files"] = []
 		const seenUuids = new Set<string>()
-		const topLevelEntries = this.directoriesDirectory.list()
+		const topLevelEntries = DIRECTORIES_DIRECTORY.list()
 
 		await Promise.all(
 			topLevelEntries.map(async topLevelEntry => {
@@ -2059,7 +2046,7 @@ export class Offline {
 				type: DriveItem["type"]
 			}[] = []
 
-			if (this.indexFile.exists) {
+			if (INDEX_FILE.exists) {
 				const index = await this.readIndex()
 
 				for (const fileEntry of Object.values(index.files)) {
@@ -2094,8 +2081,8 @@ export class Offline {
 				}
 			}
 
-			if (this.directory.exists) {
-				this.directory.delete()
+			if (DIRECTORY.exists) {
+				DIRECTORY.delete()
 			}
 
 			this.directoriesEnsured = false
@@ -2132,7 +2119,7 @@ export class Offline {
 		const files = Object.keys(index.files).length
 		const dirs = Object.keys(index.directories).length
 
-		const size = sumLocalDirectoryFileBytes(this.filesDirectory) + sumLocalDirectoryFileBytes(this.directoriesDirectory)
+		const size = sumLocalDirectoryFileBytes(FILES_DIRECTORY) + sumLocalDirectoryFileBytes(DIRECTORIES_DIRECTORY)
 
 		return {
 			size,
@@ -2160,7 +2147,7 @@ export class Offline {
 			let didDelete = false
 
 			if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
-				const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.filesDirectory.uri, item.data.uuid))
+				const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid))
 
 				if (parentDirectory.exists) {
 					parentDirectory.delete()
@@ -2203,7 +2190,7 @@ export class Offline {
 					}
 
 					const dataDirectory = new FileSystem.Directory(
-						FileSystem.Paths.join(this.directoriesDirectory.uri, directoryItem.data.uuid)
+						FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, directoryItem.data.uuid)
 					)
 
 					if (!dataDirectory.exists) {
@@ -2259,7 +2246,7 @@ export class Offline {
 		}
 
 		const file = new FileSystem.File(
-			FileSystem.Paths.join(this.filesDirectory.uri, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
+			FileSystem.Paths.join(FILES_DIRECTORY.uri, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
 		)
 
 		if (file.exists) {
@@ -2292,7 +2279,7 @@ export class Offline {
 			}
 
 			if (entryMeta.item.data.uuid === item.data.uuid) {
-				const foundFile = new FileSystem.File(FileSystem.Paths.join(this.directoriesDirectory.uri, topLevelUuid, path))
+				const foundFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, path))
 
 				if (foundFile.exists) {
 					this.getLocalFileCache.set(item.data.uuid, foundFile)
@@ -2333,7 +2320,7 @@ export class Offline {
 
 		// Check if this is the top-level directory itself
 		if (directoryMeta.item.data.uuid === item.data.uuid) {
-			const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.directoriesDirectory.uri, topLevelUuid))
+			const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid))
 
 			if (foundDirectory.exists) {
 				this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
@@ -2356,7 +2343,7 @@ export class Offline {
 			}
 
 			if (entryMeta.item.data.uuid === item.data.uuid) {
-				const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(this.directoriesDirectory.uri, topLevelUuid, path))
+				const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, path))
 
 				if (foundDirectory.exists) {
 					this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)

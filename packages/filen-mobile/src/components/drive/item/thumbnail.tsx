@@ -1,7 +1,7 @@
 import { useEffect, useRef, memo, useCallback } from "react"
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
 import cache from "@/lib/cache"
-import thumbnails from "@/lib/thumbnails"
+import thumbnails, { DIRECTORY as THUMBNAILS_DIRECTORY } from "@/lib/thumbnails"
 import { run, runEffect } from "@filen/utils"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
@@ -60,7 +60,7 @@ const FileThumbnailWithGenerate = memo(
 					return null
 				}
 
-				return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.webp`)
+				return FileSystem.Paths.join(THUMBNAILS_DIRECTORY.uri, `${item.data.uuid}.webp`)
 			},
 			[item.data.uuid],
 			() => {
@@ -297,7 +297,7 @@ const FileThumbnail = memo(
 				return null
 			}
 
-			return FileSystem.Paths.join(thumbnails.directory.uri, `${item.data.uuid}.webp`)
+			return FileSystem.Paths.join(THUMBNAILS_DIRECTORY.uri, `${item.data.uuid}.webp`)
 		}, [item.data.uuid])
 
 		const [didFail, setDidFail] = useRecyclingState<boolean>(false, [item.data.uuid])

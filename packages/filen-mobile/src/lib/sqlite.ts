@@ -6,6 +6,20 @@ import { serialize, deserialize } from "@/lib/serializer"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { normalizeFilePathForSdk } from "@/lib/utils"
 
+// Critical: When changing anything related to the on-disk database file format, increment the VERSION constant to invalidate old databases and prevent potential issues from stale or incompatible data.
+export const VERSION = 1
+export const DB_FILE_NAME = "sqlite.db"
+export const DB_FILE_DIRECTORY = new FileSystem.Directory(
+	FileSystem.Paths.join(
+		Platform.select({
+			ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+			default: FileSystem.Paths.document
+		}),
+		"sqlite",
+		`v${VERSION}`
+	)
+)
+
 // Order matters: page_size before journal_mode, locking_mode before first WAL access.
 // page_size only takes effect on a fresh database or after VACUUM outside WAL mode.
 const INIT_QUERIES: string[] = [
@@ -39,19 +53,6 @@ class Sqlite {
 	private stmtSet: PreparedStatement | null = null
 	private stmtRemove: PreparedStatement | null = null
 	private stmtContains: PreparedStatement | null = null
-
-	public readonly version: number = 1
-	public readonly dbFileName: string = "sqlite.db"
-	public readonly dbFileDirectory: FileSystem.Directory = new FileSystem.Directory(
-		FileSystem.Paths.join(
-			Platform.select({
-				ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-				default: FileSystem.Paths.document
-			}),
-			"sqlite",
-			`v${this.version}`
-		)
-	)
 
 	public constructor() {
 		// Maintenance on app background: checkpoint WAL, reclaim free pages, run optimize with query history
@@ -95,16 +96,16 @@ class Sqlite {
 			}
 
 			if (!this.db) {
-				if (!this.dbFileDirectory.exists) {
-					this.dbFileDirectory.create({
+				if (!DB_FILE_DIRECTORY.exists) {
+					DB_FILE_DIRECTORY.create({
 						idempotent: true,
 						intermediates: true
 					})
 				}
 
 				this.db = open({
-					name: this.dbFileName,
-					location: normalizeFilePathForSdk(this.dbFileDirectory.uri)
+					name: DB_FILE_NAME,
+					location: normalizeFilePathForSdk(DB_FILE_DIRECTORY.uri)
 				})
 			}
 
