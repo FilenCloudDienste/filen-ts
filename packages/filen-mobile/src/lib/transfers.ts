@@ -61,8 +61,8 @@ class Transfers {
 		parent,
 		hideProgress,
 		awaitExternalCompletionBeforeMarkingAsFinished,
-		abortController,
 		pauseSignal,
+		signal,
 		name,
 		created,
 		modified,
@@ -72,8 +72,8 @@ class Transfers {
 		parent: AnyNormalDir
 		hideProgress?: boolean
 		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
-		abortController?: AbortController
 		pauseSignal?: PauseSignal
+		signal?: AbortSignal
 		name?: string
 		created?: number
 		modified?: number
@@ -84,15 +84,13 @@ class Transfers {
 	} | null> {
 		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
-		const transferAbortController = abortController ?? new AbortController()
+		const transferAbortController = new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
 		const globalAbortController = this.globalAbortController
 		const globalPauseSignal = this.globalPauseSignal
-		const compositePauseSignal = hideProgress
-			? createCompositePauseSignal(transferPauseSignal)
-			: createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
-		const compositeAbortSignal = hideProgress
-			? createCompositeAbortSignal(transferAbortController.signal)
+		const compositePauseSignal = createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
+		const compositeAbortSignal = signal
+			? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
 			: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
 
 		if (localFileOrDir instanceof FileSystem.Directory) {
@@ -375,7 +373,7 @@ class Transfers {
 			})
 
 			if (!result.success) {
-				if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
+				if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
 					return null
 				}
@@ -549,7 +547,7 @@ class Transfers {
 		})
 
 		if (!result.success) {
-			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
+			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return null
 			}
@@ -643,15 +641,15 @@ class Transfers {
 		destination,
 		hideProgress,
 		awaitExternalCompletionBeforeMarkingAsFinished,
-		abortController,
-		pauseSignal
+		pauseSignal,
+		signal
 	}: {
 		item: DriveItem
 		destination: FileSystem.File | FileSystem.Directory
 		hideProgress?: boolean
 		awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
-		abortController?: AbortController
 		pauseSignal?: PauseSignal
+		signal?: AbortSignal
 	}): Promise<{
 		files: (Omit<FileWithPath, "file"> & {
 			file: File | SharedFile
@@ -660,15 +658,13 @@ class Transfers {
 	} | null> {
 		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
-		const transferAbortController = abortController ?? new AbortController()
+		const transferAbortController = new AbortController()
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
 		const globalAbortController = this.globalAbortController
 		const globalPauseSignal = this.globalPauseSignal
-		const compositePauseSignal = hideProgress
-			? createCompositePauseSignal(transferPauseSignal)
-			: createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
-		const compositeAbortSignal = hideProgress
-			? createCompositeAbortSignal(transferAbortController.signal)
+		const compositePauseSignal = createCompositePauseSignal(globalPauseSignal, transferPauseSignal)
+		const compositeAbortSignal = signal
+			? createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal, signal)
 			: createCompositeAbortSignal(globalAbortController.signal, transferAbortController.signal)
 
 		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
@@ -934,7 +930,7 @@ class Transfers {
 					destination.delete()
 				}
 
-				if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
+				if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
 					// Don't treat abort errors as actual errors to be shown in the UI
 					return null
 				}
@@ -1167,7 +1163,7 @@ class Transfers {
 				destination.delete()
 			}
 
-			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted) {
+			if (transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted) {
 				// Don't treat abort errors as actual errors to be shown in the UI
 				return null
 			}

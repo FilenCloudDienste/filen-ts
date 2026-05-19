@@ -705,7 +705,7 @@ class CameraUpload {
 								const transferResult = await transfers.upload({
 									localFileOrDir: uploadFile,
 									parent: parentDir,
-									abortController,
+									signal: abortController.signal,
 									pauseSignal,
 									name: delta.file.info.filename,
 									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
