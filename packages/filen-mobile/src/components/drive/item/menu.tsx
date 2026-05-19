@@ -13,6 +13,7 @@ import { randomUUID } from "expo-crypto"
 import { newTmpDir } from "@/lib/tmp"
 import { Platform, type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import offline from "@/lib/offline"
 import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, getRealDriveItemParent } from "@/lib/utils"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
@@ -260,6 +261,25 @@ export function createMenuButtons({
 			id: "saveToPhotos",
 			title: "tbd_save_to_photos",
 			onPress: async () => {
+				const permissionsResult = await run(async () => {
+					return await hasAllNeededMediaPermissions({
+						shouldRequest: true
+					})
+				})
+
+				if (!permissionsResult.success) {
+					console.error(permissionsResult.error)
+					alerts.error(permissionsResult.error)
+
+					return
+				}
+
+				if (!permissionsResult.data) {
+					alerts.error("tbd_no_permissions_enable_manually")
+
+					return
+				}
+
 				const result = await runWithLoading(async defer => {
 					if (!item.data.decryptedMeta) {
 						throw new Error("Missing decrypted metadata")
@@ -293,7 +313,6 @@ export function createMenuButtons({
 						return
 					}
 
-					// TODO: Add NSPhotoLibraryAddUsageDescription to Info.plist and ask for permissions on both iOS and Android
 					await MediaLibrary.saveToLibraryAsync(destination.uri)
 				})
 
