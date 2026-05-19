@@ -8,6 +8,8 @@ import { debounce } from "es-toolkit/function"
 import { unwrapSdkError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
+import auth from "@/lib/auth"
+import { router } from "expo-router"
 
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
@@ -310,7 +312,15 @@ export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "q
 		const unwrappedSdkError = unwrapSdkError(err)
 
 		if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
-			// TODO: Logout on auth errors
+			alerts.error(err)
+
+			auth.logout()
+				.then(() => {
+					router.replace("/auth/login")
+				})
+				.catch(e => {
+					console.error("[QueryClient] logout failed:", e)
+				})
 
 			return
 		}

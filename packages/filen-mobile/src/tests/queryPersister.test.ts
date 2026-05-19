@@ -56,6 +56,18 @@ vi.mock("@tanstack/query-persist-client-core", () => ({
 	}))
 }))
 
+vi.mock("@/lib/auth", () => ({
+	default: {
+		logout: vi.fn().mockResolvedValue(undefined)
+	}
+}))
+
+vi.mock("expo-router", () => ({
+	router: {
+		replace: vi.fn()
+	}
+}))
+
 import { serialize, deserialize } from "@/lib/serializer"
 import { QueryPersisterKv, QUERY_CLIENT_PERSISTER_PREFIX } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
