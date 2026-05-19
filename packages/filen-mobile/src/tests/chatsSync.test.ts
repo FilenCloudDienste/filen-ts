@@ -450,5 +450,54 @@ describe("Sync (Chats)", () => {
 
 			expect(sqlite.kvAsync.remove).toHaveBeenCalledWith(KV_KEY)
 		})
+
+		it("threads an AbortSignal into chats.sendMessage", async () => {
+			const sync = await createSync()
+
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-1", "hello", 1000)]
+				}
+			}
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockSendMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					signal: expect.any(AbortSignal)
+				})
+			)
+		})
+
+		it("cancel() aborts the signal that's already been threaded into sendMessage", async () => {
+			const sync = await createSync()
+
+			let observedSignal: AbortSignal | undefined
+
+			mockSendMessage.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
+				observedSignal = signal
+
+				sync.cancel()
+
+				return { chat: mockChat("chat-1"), message: { inner: { uuid: "x" } } }
+			})
+
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-1", "hello", 1000)]
+				}
+			}
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(observedSignal).toBeDefined()
+			expect(observedSignal?.aborted).toBe(true)
+		})
 	})
 })
