@@ -180,12 +180,16 @@ const Security = memo(() => {
 										}
 
 										const changePasswordResult = await runWithLoading(async () => {
-											return await (
+											await (
 												await auth.getSdkClients()
 											).authedSdkClient.changePassword({
 												currentPassword,
 												newPassword
 											})
+
+											await auth.saveStringifiedClientToSecureStorage(
+												await (await auth.getSdkClients()).authedSdkClient.toStringified()
+											)
 										})
 
 										if (!changePasswordResult.success) {
@@ -196,8 +200,6 @@ const Security = memo(() => {
 										}
 
 										alerts.normal("tbd_password_changed_successfully")
-
-										// TODO: Logout user and force login with new password
 									}
 								},
 								{

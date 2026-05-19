@@ -38,20 +38,16 @@ class Setup {
 				cache.rootUuid = isAuthed.stringifiedClient.rootUuid
 			}
 
-			if (options?.background) {
-				await Promise.all([secureStore.init(), sqlite.init(), cache.restore()])
-			} else {
-				await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
+			await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
 
-				if (isAuthed.isAuthed) {
-					foregroundService.init().catch(console.error)
+			if (isAuthed.isAuthed && !options?.background) {
+				foregroundService.init().catch(console.error)
 
-					// TODO: Move to host component like camera upload
-					Promise.all([offline.updateIndex(), offline.sync()]).catch(err => {
-						console.error(err)
-						alerts.error(err)
-					})
-				}
+				// TODO: Move to host component like camera upload
+				Promise.all([offline.updateIndex(), offline.sync()]).catch(err => {
+					console.error(err)
+					alerts.error(err)
+				})
 			}
 
 			const duration = performance.now() - now

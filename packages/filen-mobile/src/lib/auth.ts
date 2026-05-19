@@ -4,7 +4,8 @@ import {
 	type StringifiedClient,
 	UnauthJsClient,
 	type UnauthJsClientInterface,
-	type JsClientConfig
+	type JsClientConfig,
+	LogLevel
 } from "@filen/sdk-rs"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { useEffect, useState } from "react"
@@ -18,6 +19,12 @@ import offline from "@/lib/offline"
 import thumbnails from "@/lib/thumbnails"
 import { sweepTmpDir } from "@/lib/tmp"
 import { queryClient, queryClientPersisterKv } from "@/queries/client"
+import fileCache from "@/lib/fileCache"
+import audioCache from "@/lib/audioCache"
+import sandboxCache from "@/lib/sandboxCache"
+import { Image } from "expo-image"
+import audio from "@/lib/audio"
+import { reloadAppAsync } from "expo"
 
 class Auth {
 	private authedClient: JsClientInterface | null = null
@@ -28,15 +35,15 @@ class Auth {
 	private clientsReady: Promise<void> = new Promise(resolve => {
 		this.clientsReadyResolve = resolve
 	})
-	public readonly maxIoMemoryUsage: number = 64 * 1024 * 1024 // 64 MiB
+	public readonly maxIoMemoryUsage: number = 64 * 1024 * 1024
 	public readonly maxParallelRequests: number = 128
 	public readonly jsClientBaseConfig: JsClientConfig = {
-		concurrency: undefined,
-		rateLimitPerSec: undefined,
+		concurrency: 128,
+		rateLimitPerSec: 128,
 		uploadBandwidthKilobytesPerSec: undefined,
 		downloadBandwidthKilobytesPerSec: undefined,
-		logLevel: undefined,
-		fileIoMemoryBudget: undefined
+		logLevel: LogLevel.Info,
+		fileIoMemoryBudget: BigInt(32 * 1024 * 1024)
 	}
 
 	public async isAuthed(): Promise<
@@ -75,12 +82,13 @@ class Auth {
 		unauthedClient: UnauthJsClientInterface
 	}> {
 		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
-
 		this.authedClient = this.unauthedClient.fromStringified({
 			...stringifiedClient,
 			maxIoMemoryUsage: this.maxIoMemoryUsage,
 			maxParallelRequests: this.maxParallelRequests
 		})
+
+		await this.saveStringifiedClientToSecureStorage(stringifiedClient)
 
 		this.notifyClientsReady()
 
@@ -117,6 +125,14 @@ class Auth {
 		}
 	}
 
+	public async saveStringifiedClientToSecureStorage(stringifiedClient: StringifiedClient): Promise<void> {
+		await secureStore.set(this.stringifiedClientStorageKey, {
+			...stringifiedClient,
+			maxIoMemoryUsage: this.maxIoMemoryUsage,
+			maxParallelRequests: this.maxParallelRequests
+		})
+	}
+
 	public async login(...params: Parameters<UnauthJsClientInterface["login"]>): Promise<JsClientInterface> {
 		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
 		this.authedClient = await this.unauthedClient.login(...params)
@@ -125,11 +141,7 @@ class Auth {
 			throw new Error("Login failed, authed client is null")
 		}
 
-		await secureStore.set(this.stringifiedClientStorageKey, {
-			...(await this.authedClient.toStringified()),
-			maxIoMemoryUsage: this.maxIoMemoryUsage,
-			maxParallelRequests: this.maxParallelRequests
-		})
+		await this.saveStringifiedClientToSecureStorage(await this.authedClient.toStringified())
 
 		this.notifyClientsReady()
 
@@ -163,12 +175,6 @@ class Auth {
 			console.error("[Auth] unregisterBackgroundSync failed:", e)
 		}
 
-		try {
-			await fileProvider.disable()
-		} catch (e) {
-			console.error("[Auth] fileProvider.disable failed:", e)
-		}
-
 		// 3. Stash + null SDK client refs. Destroy after the React unmount cascade
 		//    (steps 4-5) so still-mounted components holding the old client don't
 		//    call methods on a freed Arc.
@@ -177,6 +183,7 @@ class Auth {
 
 		this.authedClient = null
 		this.unauthedClient = null
+
 		this.clientsReady = new Promise(resolve => {
 			this.clientsReadyResolve = resolve
 		})
@@ -185,11 +192,11 @@ class Auth {
 		//    sets its state to (null, null) via the isAuthed dependency → the root
 		//    layout unmounts <Socket />/<Http /> → their cleanup destroys their
 		//    listener / provider handles.
-		await secureStore.remove(this.stringifiedClientStorageKey)
+		await secureStore.clear()
 
-		// 5. Yield one macrotask so React flushes the unmount before we destroy
+		// 5. Yield so React flushes the unmount before we destroy
 		//    the parent Arc<JsClient> that unmounted components were holding.
-		await new Promise<void>(resolve => setTimeout(resolve, 0))
+		await new Promise<void>(resolve => setTimeout(resolve, 1000))
 
 		// 6. Free the Rust Arc<JsClient> / Arc<UnauthJsClient>. uniffiDestroy lives
 		//    on the concrete class (inherited from UniffiAbstractObject), not on the
@@ -229,14 +236,22 @@ class Auth {
 			console.error("[Auth] queryClientPersisterKv.clear failed:", e)
 		}
 
-		// Single awaited DELETE FROM kv wipes cache:v1:*, reactQuery_v1:*,
-		// inflightChatMessages and inflightNoteContent in one go — replaces the
-		// fire-and-forget removes that cache.clear() / queryClientPersisterKv.clear()
-		// schedule, so we know the disk is clean before the next login.
 		try {
-			await sqlite.kvAsync.clear()
+			await fileProvider.disable()
 		} catch (e) {
-			console.error("[Auth] sqlite.kvAsync.clear failed:", e)
+			console.error("[Auth] fileProvider.disable failed:", e)
+		}
+
+		try {
+			await audio.stop()
+		} catch (e) {
+			console.error("[Auth] audio.stop failed:", e)
+		}
+
+		try {
+			await sqlite.clearAsync()
+		} catch (e) {
+			console.error("[Auth] sqlite.clearAsync failed:", e)
 		}
 
 		try {
@@ -246,15 +261,39 @@ class Auth {
 		}
 
 		try {
-			await thumbnails.clear()
+			await fileCache.clear()
 		} catch (e) {
-			console.error("[Auth] thumbnails.clear failed:", e)
+			console.error("[Auth] fileCache.clear failed:", e)
+		}
+
+		try {
+			await audioCache.clear()
+		} catch (e) {
+			console.error("[Auth] audioCache.clear failed:", e)
+		}
+
+		try {
+			await sandboxCache.clear()
+		} catch (e) {
+			console.error("[Auth] sandboxCache.clear failed:", e)
+		}
+
+		try {
+			await Promise.all([thumbnails.clear(), Image.clearDiskCache(), Image.clearMemoryCache()])
+		} catch (e) {
+			console.error("[Auth] imageCache.clear failed:", e)
 		}
 
 		try {
 			sweepTmpDir()
 		} catch (e) {
 			console.error("[Auth] sweepTmpDir failed:", e)
+		}
+
+		try {
+			await reloadAppAsync()
+		} catch (e) {
+			console.error("[Auth] reloadAppAsync failed:", e)
 		}
 	}
 }
