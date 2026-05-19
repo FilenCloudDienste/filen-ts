@@ -25,23 +25,24 @@ export type Metadata = {
 // Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
 
+export const PARENT_DIRECTORY = new FileSystem.Directory(
+	Platform.select({
+		ios: FileSystem.Paths.join(
+			FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
+			"audioCache",
+			`v${VERSION}`
+		),
+		default: FileSystem.Paths.join(FileSystem.Paths.document, "audioCache", `v${VERSION}`)
+	})
+)
+
 export class AudioCache {
-	private readonly parentDirectory = new FileSystem.Directory(
-		Platform.select({
-			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-				"audioCache",
-				`v${VERSION}`
-			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "audioCache", `v${VERSION}`)
-		})
-	)
 	private readonly mutexes = new Map<string, Semaphore>()
 	private readonly clearBarrier = new ClearBarrier()
 
 	private ensureDirectory(): void {
-		if (!this.parentDirectory.exists) {
-			this.parentDirectory.create({
+		if (!PARENT_DIRECTORY.exists) {
+			PARENT_DIRECTORY.create({
 				idempotent: true,
 				intermediates: true
 			})
@@ -78,7 +79,7 @@ export class AudioCache {
 			audio: dataFile,
 			metadata: new FileSystem.File(
 				FileSystem.Paths.join(
-					this.parentDirectory.uri,
+					PARENT_DIRECTORY.uri,
 					`${item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)}.filenmeta`
 				)
 			)
@@ -304,12 +305,12 @@ export class AudioCache {
 	}
 
 	public async gc(age?: number): Promise<void> {
-		if (!this.parentDirectory.exists) {
+		if (!PARENT_DIRECTORY.exists) {
 			return
 		}
 
 		const now = Date.now()
-		const entries = this.parentDirectory.list()
+		const entries = PARENT_DIRECTORY.list()
 
 		await Promise.all(
 			entries.map(async entry => {
@@ -355,11 +356,11 @@ export class AudioCache {
 
 	public async clear(): Promise<void> {
 		await this.clearBarrier.runExclusive(() => {
-			if (this.parentDirectory.exists) {
-				this.parentDirectory.delete()
+			if (PARENT_DIRECTORY.exists) {
+				PARENT_DIRECTORY.delete()
 			}
 
-			this.parentDirectory.create({
+			PARENT_DIRECTORY.create({
 				idempotent: true,
 				intermediates: true
 			})
@@ -367,13 +368,13 @@ export class AudioCache {
 	}
 
 	public size(): number {
-		if (!this.parentDirectory.exists) {
+		if (!PARENT_DIRECTORY.exists) {
 			return 0
 		}
 
 		let total = 0
 
-		for (const entry of this.parentDirectory.list()) {
+		for (const entry of PARENT_DIRECTORY.list()) {
 			if (!(entry instanceof FileSystem.File)) {
 				continue
 			}

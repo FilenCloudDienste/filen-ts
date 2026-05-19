@@ -35,6 +35,13 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
+// fsUtils (imported by offline.ts) now pulls VERSION from sibling lib modules.
+// Mock them with just the VERSION export so their full transitive deps
+// (expo-image via thumbnails, etc.) don't load in this test.
+vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
+vi.mock("@/lib/audioCache", () => ({ VERSION: 1 }))
+vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
+
 vi.mock("@/lib/events", () => ({
 	default: {
 		subscribe: vi.fn()
