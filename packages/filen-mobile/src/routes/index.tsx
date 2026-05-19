@@ -8,7 +8,7 @@ export default function Index() {
 	const [startScreen] = useStartScreen()
 
 	if (!isAuthed) {
-		return <Redirect href="/auth/login" />
+		return null
 	}
 
 	return <Redirect href={buildStartScreenHref(startScreen, stringifiedClient?.rootUuid ?? "root")} />
