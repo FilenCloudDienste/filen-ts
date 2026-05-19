@@ -1,24 +1,14 @@
-import * as FileSystem from "expo-file-system"
 import { open, type DB, type PreparedStatement } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/utils"
-import { Platform, AppState } from "react-native"
+import { AppState } from "react-native"
 import { serialize, deserialize } from "@/lib/serializer"
-import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { normalizeFilePathForSdk } from "@/lib/utils"
+import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
 
-// Critical: When changing anything related to the on-disk database file format, increment the VERSION constant to invalidate old databases and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
-export const DB_FILE_NAME = "sqlite.db"
-export const DB_FILE_DIRECTORY = new FileSystem.Directory(
-	FileSystem.Paths.join(
-		Platform.select({
-			ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-			default: FileSystem.Paths.document
-		}),
-		"sqlite",
-		`v${VERSION}`
-	)
-)
+// Critical: When changing anything related to the on-disk database file format, bump SQLITE_VERSION in storageRoots.ts to invalidate old databases and prevent potential issues from stale or incompatible data.
+export const VERSION = SQLITE_VERSION
+export const DB_FILE_NAME = SQLITE_DB_FILE_NAME
+export const DB_FILE_DIRECTORY = SQLITE_DB_FILE_DIRECTORY
 
 // Order matters: page_size before journal_mode, locking_mode before first WAL access.
 // page_size only takes effect on a fresh database or after VACUUM outside WAL mode.

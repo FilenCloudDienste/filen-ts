@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system"
 import * as ImageManipulator from "expo-image-manipulator"
 import { type VideoThumbnail, createVideoPlayer } from "expo-video"
 import type { DriveItem } from "@/types"
-import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS, IOS_APP_GROUP_IDENTIFIER } from "@/constants"
+import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk, wrapAbortSignalForSdk } from "@/lib/utils"
 import { run, Semaphore } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
@@ -14,6 +14,7 @@ import { randomUUID } from "expo-crypto"
 import cache from "@/lib/cache"
 import offline from "@/lib/offline"
 import fileCache from "@/lib/fileCache"
+import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
 
 export type ThumbnailParams = {
 	item: DriveItem
@@ -33,19 +34,9 @@ export const MAX_CONCURRENT = Platform.select({
 })
 export const MAX_FAILURES = 3
 
-// Critical: When changing anything related to storage index/store/persistence/width/height/quality format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 2
-
-export const DIRECTORY = new FileSystem.Directory(
-	FileSystem.Paths.join(
-		Platform.select({
-			ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-			default: FileSystem.Paths.document
-		}),
-		"thumbnails",
-		`v${VERSION}`
-	)
-)
+// Critical: When changing anything related to storage index/store/persistence/width/height/quality format, bump THUMBNAILS_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = THUMBNAILS_VERSION
+export const DIRECTORY = THUMBNAILS_DIRECTORY
 
 function abortError(signal?: AbortSignal): Error {
 	const reason = signal?.reason

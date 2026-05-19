@@ -1,8 +1,11 @@
 import * as FileSystem from "expo-file-system"
-import { DIRECTORIES_DIRECTORY, FILES_DIRECTORY } from "@/lib/offline"
-import { PARENT_DIRECTORY as FILE_CACHE_PARENT_DIRECTORY } from "@/lib/fileCache"
-import { PARENT_DIRECTORY as AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/audioCache"
-import { DIRECTORY as THUMBNAILS_DIRECTORY } from "@/lib/thumbnails"
+import {
+	OFFLINE_FILES_DIRECTORY,
+	OFFLINE_DIRECTORIES_DIRECTORY,
+	FILE_CACHE_PARENT_DIRECTORY,
+	AUDIO_CACHE_PARENT_DIRECTORY,
+	THUMBNAILS_DIRECTORY
+} from "@/lib/storageRoots"
 
 // Calls `visit` for every File and Directory under `directory`, recursively.
 // Visits each entry exactly once even if the tree contains symlink-style cycles.
@@ -76,8 +79,8 @@ export const STRAY_DOWNLOAD_EXTENSION = ".filendl"
 
 function strayDownloadRoots(): FileSystem.Directory[] {
 	return [
-		FILES_DIRECTORY,
-		DIRECTORIES_DIRECTORY,
+		OFFLINE_FILES_DIRECTORY,
+		OFFLINE_DIRECTORIES_DIRECTORY,
 		FILE_CACHE_PARENT_DIRECTORY,
 		AUDIO_CACHE_PARENT_DIRECTORY,
 		THUMBNAILS_DIRECTORY,
