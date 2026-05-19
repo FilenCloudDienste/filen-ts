@@ -1156,6 +1156,14 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			defer(() => {
 				clearInterval(checkConnectionIntervalRef.current)
 			})
+
+			defer(() => {
+				if (socketListenerHandleRef.current) {
+					socketListenerHandleRef.current.uniffiDestroy()
+					socketListenerHandleRef.current = null
+					useSocketStore.getState().setState("disconnected")
+				}
+			})
 		})
 
 		return () => {
