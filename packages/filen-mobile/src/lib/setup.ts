@@ -8,6 +8,7 @@ import offline from "@/lib/offline"
 import alerts from "@/lib/alerts"
 import foregroundService from "@/lib/foregroundService"
 import { sweepTmpDir } from "@/lib/tmp"
+import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -24,10 +25,12 @@ class Setup {
 
 			const now = performance.now()
 
-			// Wipe filen-tmp/ orphans from crashed sessions. Safe only because no transfers
-			// can be in flight before setup() completes.
+			// Wipe filen-tmp/ orphans and stray .filendl partial downloads from crashed
+			// sessions. Safe only because no transfers can be in flight before setup()
+			// completes.
 			if (!options?.background) {
 				sweepTmpDir()
+				sweepStrayDownloadFiles()
 			}
 
 			const isAuthed = await auth.isAuthed()
