@@ -17,17 +17,20 @@ vi.mock("@filen/sdk-rs", () => ({
 			login: vi.fn()
 		}))
 	},
-	FilenSdkError: class FilenSdkError extends Error {}
+	FilenSdkError: class FilenSdkError extends Error {},
+	LogLevel: { Info: "Info", Debug: "Debug", Warn: "Warn", Error: "Error", Trace: "Trace" }
 }))
 
 vi.mock("@/lib/secureStore", () => ({
 	default: {
+		clear: vi.fn(async () => {
+			callLog.push("secureStore.clear")
+		}),
 		remove: vi.fn(async (key: string) => {
 			callLog.push(`secureStore.remove:${key}`)
 		}),
 		get: vi.fn(async () => null),
-		set: vi.fn(async () => undefined),
-		clear: vi.fn(async () => undefined)
+		set: vi.fn(async () => undefined)
 	},
 	useSecureStore: vi.fn()
 }))
@@ -48,6 +51,24 @@ vi.mock("@/lib/cameraUpload", () => ({
 	}
 }))
 
+vi.mock("@/components/chats/sync", () => ({
+	sync: {
+		cancel: vi.fn(() => {
+			callLog.push("chatsSync.cancel")
+		})
+	},
+	SyncHost: vi.fn()
+}))
+
+vi.mock("@/components/notes/sync", () => ({
+	sync: {
+		cancel: vi.fn(() => {
+			callLog.push("notesSync.cancel")
+		})
+	},
+	SyncHost: vi.fn()
+}))
+
 vi.mock("@/lib/backgroundTask", () => ({
 	unregisterBackgroundSync: vi.fn(async () => {
 		callLog.push("unregisterBackgroundSync")
@@ -62,74 +83,31 @@ vi.mock("@/lib/fileProvider", () => ({
 	}
 }))
 
-let cacheRootUuid: string | null = "stub-root-uuid"
-
-vi.mock("@/lib/cache", () => ({
-	default: {
-		clear: vi.fn(() => {
-			callLog.push("cache.clear")
-		}),
-		get rootUuid() {
-			return cacheRootUuid
-		},
-		set rootUuid(v: string | null) {
-			cacheRootUuid = v
-			callLog.push(`cache.rootUuid=${v === null ? "null" : "set"}`)
-		}
-	}
-}))
-
-vi.mock("@/queries/client", () => ({
-	queryClient: {
-		clear: vi.fn(() => {
-			callLog.push("queryClient.clear")
-		})
-	},
-	queryClientPersisterKv: {
-		clear: vi.fn(() => {
-			callLog.push("queryClientPersisterKv.clear")
-		})
-	}
-}))
-
 vi.mock("@/lib/sqlite", () => ({
 	default: {
-		kvAsync: {
-			clear: vi.fn(async () => {
-				callLog.push("sqlite.kvAsync.clear")
-			})
-		}
-	}
-}))
-
-vi.mock("@/lib/offline", () => ({
-	default: {
-		clearAll: vi.fn(async () => {
-			callLog.push("offline.clearAll")
+		clearAsync: vi.fn(async () => {
+			callLog.push("sqlite.clearAsync")
 		})
 	}
 }))
 
-vi.mock("@/lib/thumbnails", () => ({
+vi.mock("@/lib/audio", () => ({
 	default: {
-		clear: vi.fn(async () => {
-			callLog.push("thumbnails.clear")
+		stop: vi.fn(async () => {
+			callLog.push("audio.stop")
 		})
 	}
 }))
 
-vi.mock("@/lib/tmp", () => ({
-	sweepTmpDir: vi.fn(() => {
-		callLog.push("sweepTmpDir")
+vi.mock("expo", () => ({
+	reloadAppAsync: vi.fn(async () => {
+		callLog.push("reloadAppAsync")
 	})
 }))
 
 import auth from "@/lib/auth"
 
 type AuthInternals = {
-	authedClient: { uniffiDestroy: () => void } | null
-	unauthedClient: { uniffiDestroy: () => void } | null
-	clientsReady: Promise<void>
 	logoutPromise: Promise<void> | null
 }
 
@@ -139,7 +117,6 @@ function authInternals(): AuthInternals {
 
 beforeEach(() => {
 	callLog.length = 0
-	cacheRootUuid = "stub-root-uuid"
 	authInternals().logoutPromise = null
 	vi.useFakeTimers()
 })
@@ -149,108 +126,57 @@ afterEach(() => {
 })
 
 describe("auth.logout", () => {
-	it("runs the full teardown in dependency order", async () => {
-		authInternals().authedClient = {
-			uniffiDestroy: vi.fn(() => {
-				callLog.push("authedClient.uniffiDestroy")
-			})
-		}
-		authInternals().unauthedClient = {
-			uniffiDestroy: vi.fn(() => {
-				callLog.push("unauthedClient.uniffiDestroy")
-			})
-		}
-
+	it("runs the teardown in dependency order", async () => {
 		const promise = auth.logout()
 
 		await vi.runAllTimersAsync()
 		await promise
 
 		expect(callLog).toEqual([
+			"unregisterBackgroundSync",
+			"audio.stop",
+			"fileProvider.disable",
 			"transfers.cancelAll",
 			"cameraUpload.cancel",
-			"unregisterBackgroundSync",
-			"fileProvider.disable",
-			"secureStore.remove:stringifiedClient",
-			"authedClient.uniffiDestroy",
-			"unauthedClient.uniffiDestroy",
-			"cache.rootUuid=null",
-			"cache.clear",
-			"queryClient.clear",
-			"queryClientPersisterKv.clear",
-			"sqlite.kvAsync.clear",
-			"offline.clearAll",
-			"thumbnails.clear",
-			"sweepTmpDir"
+			"chatsSync.cancel",
+			"notesSync.cancel",
+			"secureStore.clear",
+			"sqlite.clearAsync",
+			"reloadAppAsync"
 		])
 	})
 
-	it("destroys SDK clients only after secureStore.remove resolves", async () => {
-		authInternals().authedClient = {
-			uniffiDestroy: vi.fn(() => {
-				callLog.push("authedClient.uniffiDestroy")
-			})
-		}
-		authInternals().unauthedClient = { uniffiDestroy: vi.fn() }
-
+	it("cancels chats and notes sync alongside transfers and camera upload", async () => {
 		const promise = auth.logout()
 
 		await vi.runAllTimersAsync()
 		await promise
 
-		const remove = callLog.indexOf("secureStore.remove:stringifiedClient")
-		const destroy = callLog.indexOf("authedClient.uniffiDestroy")
+		const audioIdx = callLog.indexOf("audio.stop")
+		const transfersIdx = callLog.indexOf("transfers.cancelAll")
+		const chatsIdx = callLog.indexOf("chatsSync.cancel")
+		const notesIdx = callLog.indexOf("notesSync.cancel")
 
-		expect(remove).toBeGreaterThanOrEqual(0)
-		expect(destroy).toBeGreaterThan(remove)
+		expect(audioIdx).toBeGreaterThanOrEqual(0)
+		expect(transfersIdx).toBeGreaterThan(audioIdx)
+		expect(chatsIdx).toBeGreaterThan(transfersIdx)
+		expect(notesIdx).toBeGreaterThan(chatsIdx)
 	})
 
-	it("wipes disk surfaces AFTER destroying SDK clients", async () => {
-		authInternals().authedClient = {
-			uniffiDestroy: vi.fn(() => {
-				callLog.push("authedClient.uniffiDestroy")
-			})
-		}
-		authInternals().unauthedClient = { uniffiDestroy: vi.fn() }
-
+	it("removes auth secret before reloading the app", async () => {
 		const promise = auth.logout()
 
 		await vi.runAllTimersAsync()
 		await promise
 
-		const destroy = callLog.indexOf("authedClient.uniffiDestroy")
-		const sqlClear = callLog.indexOf("sqlite.kvAsync.clear")
-		const offlineClear = callLog.indexOf("offline.clearAll")
+		const secureClear = callLog.indexOf("secureStore.clear")
+		const reload = callLog.indexOf("reloadAppAsync")
 
-		expect(destroy).toBeGreaterThanOrEqual(0)
-		expect(sqlClear).toBeGreaterThan(destroy)
-		expect(offlineClear).toBeGreaterThan(destroy)
-	})
-
-	it("nulls both SDK client refs and resets clientsReady", async () => {
-		authInternals().authedClient = { uniffiDestroy: vi.fn() }
-		authInternals().unauthedClient = { uniffiDestroy: vi.fn() }
-		const before = authInternals().clientsReady
-
-		const promise = auth.logout()
-
-		await vi.runAllTimersAsync()
-		await promise
-
-		expect(authInternals().authedClient).toBe(null)
-		expect(authInternals().unauthedClient).toBe(null)
-
-		const after = authInternals().clientsReady
-		expect(after).not.toBe(before)
-
-		const settled = await Promise.race([after.then(() => "resolved"), Promise.resolve("pending")])
-		expect(settled).toBe("pending")
+		expect(secureClear).toBeGreaterThanOrEqual(0)
+		expect(reload).toBeGreaterThan(secureClear)
 	})
 
 	it("concurrent calls share the same in-flight teardown (Promise guard)", async () => {
-		authInternals().authedClient = { uniffiDestroy: vi.fn() }
-		authInternals().unauthedClient = { uniffiDestroy: vi.fn() }
-
 		const a = auth.logout()
 		const b = auth.logout()
 		const c = auth.logout()
@@ -258,79 +184,70 @@ describe("auth.logout", () => {
 		await vi.runAllTimersAsync()
 		await Promise.all([a, b, c])
 
-		const removeCalls = callLog.filter(c => c === "secureStore.remove:stringifiedClient")
-		expect(removeCalls.length).toBe(1)
+		const clearCalls = callLog.filter(c => c === "secureStore.clear")
+		expect(clearCalls.length).toBe(1)
 
 		const cancelCalls = callLog.filter(c => c === "transfers.cancelAll")
 		expect(cancelCalls.length).toBe(1)
+
+		const chatsCancelCalls = callLog.filter(c => c === "chatsSync.cancel")
+		expect(chatsCancelCalls.length).toBe(1)
+
+		const notesCancelCalls = callLog.filter(c => c === "notesSync.cancel")
+		expect(notesCancelCalls.length).toBe(1)
 	})
 
 	it("after a logout settles, a subsequent logout is allowed to run fresh", async () => {
-		authInternals().authedClient = { uniffiDestroy: vi.fn() }
-		authInternals().unauthedClient = { uniffiDestroy: vi.fn() }
-
 		const first = auth.logout()
 		await vi.runAllTimersAsync()
 		await first
 
 		callLog.length = 0
-		authInternals().authedClient = { uniffiDestroy: vi.fn() }
-		authInternals().unauthedClient = { uniffiDestroy: vi.fn() }
 
 		const second = auth.logout()
 		await vi.runAllTimersAsync()
 		await second
 
-		expect(callLog).toContain("secureStore.remove:stringifiedClient")
+		expect(callLog).toContain("secureStore.clear")
+		expect(callLog).toContain("chatsSync.cancel")
+		expect(callLog).toContain("notesSync.cancel")
 	})
 
-	it("does not throw when SDK client refs are already null", async () => {
-		authInternals().authedClient = null
-		authInternals().unauthedClient = null
+	it("continues even when audio.stop throws", async () => {
+		const audio = await import("@/lib/audio")
+		vi.mocked(audio.default.stop).mockRejectedValueOnce(new Error("audio session busy"))
 
 		const promise = auth.logout()
 
 		await vi.runAllTimersAsync()
 
 		await expect(promise).resolves.toBeUndefined()
-		expect(callLog).toContain("secureStore.remove:stringifiedClient")
+		expect(callLog).toContain("unregisterBackgroundSync")
+		expect(callLog).toContain("fileProvider.disable")
+		expect(callLog).toContain("transfers.cancelAll")
+		expect(callLog).toContain("chatsSync.cancel")
+		expect(callLog).toContain("notesSync.cancel")
+		expect(callLog).toContain("secureStore.clear")
+		expect(callLog).toContain("sqlite.clearAsync")
+		expect(callLog).toContain("reloadAppAsync")
 	})
 
-	it("continues wiping even when one wipe step throws", async () => {
-		authInternals().authedClient = { uniffiDestroy: vi.fn() }
-		authInternals().unauthedClient = { uniffiDestroy: vi.fn() }
-
-		const offline = await import("@/lib/offline")
-		vi.mocked(offline.default.clearAll).mockRejectedValueOnce(new Error("disk full"))
+	it("continues even when unregisterBackgroundSync throws", async () => {
+		const bg = await import("@/lib/backgroundTask")
+		vi.mocked(bg.unregisterBackgroundSync).mockRejectedValueOnce(new Error("task manager unavailable"))
 
 		const promise = auth.logout()
 
 		await vi.runAllTimersAsync()
 
 		await expect(promise).resolves.toBeUndefined()
-		expect(callLog).toContain("thumbnails.clear")
-		expect(callLog).toContain("sweepTmpDir")
-	})
-
-	it("swallows uniffiDestroy errors so wipe phase still runs", async () => {
-		authInternals().authedClient = {
-			uniffiDestroy: vi.fn(() => {
-				throw new Error("rust-side double destroy")
-			})
-		}
-		authInternals().unauthedClient = {
-			uniffiDestroy: vi.fn(() => {
-				callLog.push("unauthedClient.uniffiDestroy")
-			})
-		}
-
-		const promise = auth.logout()
-
-		await vi.runAllTimersAsync()
-
-		await expect(promise).resolves.toBeUndefined()
-		expect(callLog).toContain("cache.clear")
-		expect(callLog).toContain("sqlite.kvAsync.clear")
-		expect(callLog).toContain("sweepTmpDir")
+		expect(callLog).toContain("audio.stop")
+		expect(callLog).toContain("fileProvider.disable")
+		expect(callLog).toContain("transfers.cancelAll")
+		expect(callLog).toContain("chatsSync.cancel")
+		expect(callLog).toContain("notesSync.cancel")
+		expect(callLog).toContain("secureStore.clear")
+		expect(callLog).toContain("sqlite.clearAsync")
+		expect(callLog).toContain("reloadAppAsync")
 	})
 })

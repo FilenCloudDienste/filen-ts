@@ -51,6 +51,7 @@ export class ClearBarrier {
 
 		if (this.inflight === 0 && this.resolveDrained) {
 			this.resolveDrained()
+
 			this.resolveDrained = null
 		}
 	}
@@ -66,6 +67,7 @@ export class ClearBarrier {
 		this.exclusivePromise = new Promise<void>(resolve => {
 			resolveExclusive = resolve
 		})
+
 		this.exclusiveActive = true
 
 		try {
@@ -77,6 +79,7 @@ export class ClearBarrier {
 		} finally {
 			this.exclusiveActive = false
 			this.exclusivePromise = null
+
 			resolveExclusive()
 		}
 	}

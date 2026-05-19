@@ -641,8 +641,6 @@ const Account = memo(() => {
 
 											return
 										}
-
-										router.replace("/auth/login")
 									}
 								}
 							]}

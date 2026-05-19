@@ -1,5 +1,4 @@
 import {
-	type JsClient,
 	type JsClientInterface,
 	type StringifiedClient,
 	UnauthJsClient,
@@ -13,17 +12,10 @@ import transfers from "@/lib/transfers"
 import cameraUpload from "@/lib/cameraUpload"
 import { unregisterBackgroundSync } from "@/lib/backgroundTask"
 import fileProvider from "@/lib/fileProvider"
-import cache from "@/lib/cache"
 import sqlite from "@/lib/sqlite"
-import offline from "@/lib/offline"
-import thumbnails from "@/lib/thumbnails"
-import { sweepTmpDir } from "@/lib/tmp"
-import { queryClient, queryClientPersisterKv } from "@/queries/client"
-import fileCache from "@/lib/fileCache"
-import audioCache from "@/lib/audioCache"
-import sandboxCache from "@/lib/sandboxCache"
-import { Image } from "expo-image"
 import audio from "@/lib/audio"
+import { sync as chatsSync } from "@/components/chats/sync"
+import { sync as notesSync } from "@/components/notes/sync"
 import { reloadAppAsync } from "expo"
 
 class Auth {
@@ -163,138 +155,24 @@ class Auth {
 	}
 
 	private async doLogout(): Promise<void> {
-		// 1. Cancel in-flight work that uses the SDK so post-destroy callbacks
-		//    don't hit a freed Arc<JsClient>.
-		transfers.cancelAll()
-		cameraUpload.cancel()
-
-		// 2. Stop scheduled native work.
 		try {
-			await unregisterBackgroundSync()
+			await Promise.all([unregisterBackgroundSync(), audio.stop(), fileProvider.disable()])
 		} catch (e) {
-			console.error("[Auth] unregisterBackgroundSync failed:", e)
-		}
-
-		// 3. Stash + null SDK client refs. Destroy after the React unmount cascade
-		//    (steps 4-5) so still-mounted components holding the old client don't
-		//    call methods on a freed Arc.
-		const oldAuthedClient = this.authedClient
-		const oldUnauthedClient = this.unauthedClient
-
-		this.authedClient = null
-		this.unauthedClient = null
-
-		this.clientsReady = new Promise(resolve => {
-			this.clientsReadyResolve = resolve
-		})
-
-		// 4. Remove the auth secret → useIsAuthed flips to false → useSdkClients
-		//    sets its state to (null, null) via the isAuthed dependency → the root
-		//    layout unmounts <Socket />/<Http /> → their cleanup destroys their
-		//    listener / provider handles.
-		await secureStore.clear()
-
-		// 5. Yield so React flushes the unmount before we destroy
-		//    the parent Arc<JsClient> that unmounted components were holding.
-		await new Promise<void>(resolve => setTimeout(resolve, 1000))
-
-		// 6. Free the Rust Arc<JsClient> / Arc<UnauthJsClient>. uniffiDestroy lives
-		//    on the concrete class (inherited from UniffiAbstractObject), not on the
-		//    interface — the actual runtime objects are instances of JsClient /
-		//    UnauthJsClient so the cast is safe.
-		try {
-			;(oldAuthedClient as JsClient | null)?.uniffiDestroy()
-		} catch (e) {
-			console.error("[Auth] authedClient.uniffiDestroy failed:", e)
+			console.error(e)
 		}
 
 		try {
-			;(oldUnauthedClient as UnauthJsClient | null)?.uniffiDestroy()
+			transfers.cancelAll()
+			cameraUpload.cancel()
+			chatsSync.cancel()
+			notesSync.cancel()
 		} catch (e) {
-			console.error("[Auth] unauthedClient.uniffiDestroy failed:", e)
+			console.error(e)
 		}
 
-		// 7. Wipe every surface that holds decrypted user data. Per-step try/catch
-		//    so one failure doesn't block the rest — partial wipe beats no wipe.
-		cache.rootUuid = null
+		await Promise.all([secureStore.clear(), sqlite.clearAsync()])
 
-		try {
-			cache.clear()
-		} catch (e) {
-			console.error("[Auth] cache.clear failed:", e)
-		}
-
-		try {
-			queryClient.clear()
-		} catch (e) {
-			console.error("[Auth] queryClient.clear failed:", e)
-		}
-
-		try {
-			queryClientPersisterKv.clear()
-		} catch (e) {
-			console.error("[Auth] queryClientPersisterKv.clear failed:", e)
-		}
-
-		try {
-			await fileProvider.disable()
-		} catch (e) {
-			console.error("[Auth] fileProvider.disable failed:", e)
-		}
-
-		try {
-			await audio.stop()
-		} catch (e) {
-			console.error("[Auth] audio.stop failed:", e)
-		}
-
-		try {
-			await sqlite.clearAsync()
-		} catch (e) {
-			console.error("[Auth] sqlite.clearAsync failed:", e)
-		}
-
-		try {
-			await offline.clearAll()
-		} catch (e) {
-			console.error("[Auth] offline.clearAll failed:", e)
-		}
-
-		try {
-			await fileCache.clear()
-		} catch (e) {
-			console.error("[Auth] fileCache.clear failed:", e)
-		}
-
-		try {
-			await audioCache.clear()
-		} catch (e) {
-			console.error("[Auth] audioCache.clear failed:", e)
-		}
-
-		try {
-			await sandboxCache.clear()
-		} catch (e) {
-			console.error("[Auth] sandboxCache.clear failed:", e)
-		}
-
-		try {
-			await Promise.all([thumbnails.clear(), Image.clearDiskCache(), Image.clearMemoryCache()])
-		} catch (e) {
-			console.error("[Auth] imageCache.clear failed:", e)
-		}
-
-		try {
-			sweepTmpDir()
-		} catch (e) {
-			console.error("[Auth] sweepTmpDir failed:", e)
-		}
-
-		try {
-			await reloadAppAsync()
-		} catch (e) {
-			console.error("[Auth] reloadAppAsync failed:", e)
-		}
+		reloadAppAsync().catch(console.error)
 	}
 }
 
