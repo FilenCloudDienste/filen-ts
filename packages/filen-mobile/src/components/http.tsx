@@ -74,6 +74,15 @@ const InnerHttp = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			defer(() => {
 				appStateSubscription.remove()
 			})
+
+			defer(() => {
+				if (httpHandleRef.current) {
+					httpHandleRef.current.uniffiDestroy()
+					httpHandleRef.current = null
+					useHttpStore.getState().setPort(null)
+					useHttpStore.getState().setGetFileUrl(null)
+				}
+			})
 		})
 
 		return () => {
