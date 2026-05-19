@@ -492,6 +492,30 @@ describe("Transfers", () => {
 				expect(result).toBeNull()
 			})
 
+			it("registers and graceful-aborts with external signal when hideProgress is false", async () => {
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+				const controller = new AbortController()
+
+				mockSetTransfers.mockClear()
+
+				mockUploadFile.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				const result = await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					signal: controller.signal
+				})
+
+				expect(result).toBeNull()
+				expect(mockSetTransfers).toHaveBeenCalled()
+			})
+
 			it("skips query cache update for shared files", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
@@ -672,6 +696,30 @@ describe("Transfers", () => {
 
 				expect(result).toBeNull()
 			})
+
+			it("registers and graceful-aborts a directory upload with external signal when hideProgress is false", async () => {
+				const dir = new FsDirectory("file:///document/testdir")
+				fs.set(dir.uri, "dir")
+				const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
+				const controller = new AbortController()
+
+				mockSetTransfers.mockClear()
+
+				mockUploadDirRecursively.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				const result = await transfers.upload({
+					localFileOrDir: dir,
+					parent,
+					signal: controller.signal
+				})
+
+				expect(result).toBeNull()
+				expect(mockSetTransfers).toHaveBeenCalled()
+			})
 		})
 	})
 
@@ -762,6 +810,29 @@ describe("Transfers", () => {
 					})
 				).resolves.not.toThrow()
 			})
+
+			it("registers and graceful-aborts a file download with external signal when hideProgress is false", async () => {
+				const dest = new FsFile("file:///document/dest.txt")
+				const item = makeFileItem("file-uuid")
+				const controller = new AbortController()
+
+				mockSetTransfers.mockClear()
+
+				mockDownloadFileToPath.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				const result = await transfers.download({
+					item,
+					destination: dest,
+					signal: controller.signal
+				})
+
+				expect(result).toBeNull()
+				expect(mockSetTransfers).toHaveBeenCalled()
+			})
 		})
 
 		describe("directory", () => {
@@ -812,6 +883,29 @@ describe("Transfers", () => {
 						signal: controller.signal
 					})
 				).resolves.not.toThrow()
+			})
+
+			it("registers and graceful-aborts a directory download with external signal when hideProgress is false", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				const item = makeDirItem("dir-uuid")
+				const controller = new AbortController()
+
+				mockSetTransfers.mockClear()
+
+				mockDownloadDirRecursively.mockImplementation(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				const result = await transfers.download({
+					item,
+					destination: dest,
+					signal: controller.signal
+				})
+
+				expect(result).toBeNull()
+				expect(mockSetTransfers).toHaveBeenCalled()
 			})
 		})
 	})
