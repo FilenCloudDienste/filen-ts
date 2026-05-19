@@ -1,5 +1,4 @@
 import auth, { useSdkClients, useStringifiedClient } from "@/lib/auth"
-import { router } from "expo-router"
 import {
 	type JsClientInterface,
 	SocketEvent_Tags,
@@ -74,15 +73,9 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 				switch (eventInner.inner.tag) {
 					case GeneralEvent_Tags.PasswordChanged: {
-						alerts.error(new Error("tbd_password_changed_logout"))
-
-						auth.logout()
-							.then(() => {
-								router.replace("/auth/login")
-							})
-							.catch(e => {
-								console.error("[Socket] logout failed:", e)
-							})
+						auth.logout().catch(e => {
+							console.error("[Socket] logout failed:", e)
+						})
 
 						break
 					}
