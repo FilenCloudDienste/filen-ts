@@ -1,6 +1,4 @@
 import * as FileSystem from "expo-file-system"
-import { Platform } from "react-native"
-import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import type { DriveItem } from "@/types"
 import { run, Semaphore } from "@filen/utils"
 import transfers from "@/lib/transfers"
@@ -42,6 +40,13 @@ import { newTmpFile } from "@/lib/tmp"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
+import {
+	OFFLINE_VERSION,
+	OFFLINE_DIRECTORY,
+	OFFLINE_FILES_DIRECTORY,
+	OFFLINE_DIRECTORIES_DIRECTORY,
+	OFFLINE_INDEX_FILE
+} from "@/lib/storageRoots"
 
 // "sharedInRoot" means the item lives at the top level of Shared In (no parent dir, just the shared root listing).
 export type OfflineParent = AnyDirWithContext | "sharedInRoot"
@@ -79,22 +84,12 @@ export type Index = {
 	>
 }
 
-// Critical: When changing anything related to offline storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
-
-export const DIRECTORY = new FileSystem.Directory(
-	Platform.select({
-		ios: FileSystem.Paths.join(
-			FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-			"offline",
-			`v${VERSION}`
-		),
-		default: FileSystem.Paths.join(FileSystem.Paths.document, "offline", `v${VERSION}`)
-	})
-)
-export const FILES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORY.uri, "files"))
-export const DIRECTORIES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORY.uri, "directories"))
-export const INDEX_FILE = new FileSystem.File(FileSystem.Paths.join(DIRECTORY.uri, "index"))
+// Critical: When changing anything related to offline storage index/store/persistence format, bump OFFLINE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = OFFLINE_VERSION
+export const DIRECTORY = OFFLINE_DIRECTORY
+export const FILES_DIRECTORY = OFFLINE_FILES_DIRECTORY
+export const DIRECTORIES_DIRECTORY = OFFLINE_DIRECTORIES_DIRECTORY
+export const INDEX_FILE = OFFLINE_INDEX_FILE
 
 // Manages offline file/directory storage on device.
 //

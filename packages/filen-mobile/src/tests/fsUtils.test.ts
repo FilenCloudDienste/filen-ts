@@ -10,7 +10,7 @@ vi.mock("@/constants", () => ({
 	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
 }))
 
-// Hoisted so vi.mock factories below can reference them — vi.mock is moved
+// Hoisted so vi.mock factory below can reference them — vi.mock is moved
 // above all const declarations during test transform.
 const { OFFLINE_FILES, OFFLINE_DIRS, FILE_CACHE, AUDIO_CACHE, THUMBNAILS, DOWNLOADS } = vi.hoisted(() => {
 	const BASE = "file:///document"
@@ -24,35 +24,17 @@ const { OFFLINE_FILES, OFFLINE_DIRS, FILE_CACHE, AUDIO_CACHE, THUMBNAILS, DOWNLO
 	}
 })
 
-// fsUtils imports Directory constants from each module. Mock the modules to
-// expose only those directory constants — avoids pulling in their full
-// transitive deps (SDK, auth, expo-image, etc.).
-vi.mock("@/lib/offline", async () => {
+// fsUtils reads the Directory constants from storageRoots. Mocking that one
+// file is enough — it sidesteps the heavy modules (offline/fileCache/
+// audioCache/thumbnails) and their native deps (SDK, expo-image, expo-video).
+vi.mock("@/lib/storageRoots", async () => {
 	const { Directory } = await import("@/tests/mocks/expoFileSystem")
 	return {
-		FILES_DIRECTORY: new Directory(OFFLINE_FILES),
-		DIRECTORIES_DIRECTORY: new Directory(OFFLINE_DIRS)
-	}
-})
-
-vi.mock("@/lib/fileCache", async () => {
-	const { Directory } = await import("@/tests/mocks/expoFileSystem")
-	return {
-		PARENT_DIRECTORY: new Directory(FILE_CACHE)
-	}
-})
-
-vi.mock("@/lib/audioCache", async () => {
-	const { Directory } = await import("@/tests/mocks/expoFileSystem")
-	return {
-		PARENT_DIRECTORY: new Directory(AUDIO_CACHE)
-	}
-})
-
-vi.mock("@/lib/thumbnails", async () => {
-	const { Directory } = await import("@/tests/mocks/expoFileSystem")
-	return {
-		DIRECTORY: new Directory(THUMBNAILS)
+		OFFLINE_FILES_DIRECTORY: new Directory(OFFLINE_FILES),
+		OFFLINE_DIRECTORIES_DIRECTORY: new Directory(OFFLINE_DIRS),
+		FILE_CACHE_PARENT_DIRECTORY: new Directory(FILE_CACHE),
+		AUDIO_CACHE_PARENT_DIRECTORY: new Directory(AUDIO_CACHE),
+		THUMBNAILS_DIRECTORY: new Directory(THUMBNAILS)
 	}
 })
 

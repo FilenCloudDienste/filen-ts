@@ -1,8 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { Semaphore, run } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import { IOS_APP_GROUP_IDENTIFIER, MUSIC_METADATA_SUPPORTED_EXTENSIONS } from "@/constants"
-import { Platform } from "react-native"
+import { MUSIC_METADATA_SUPPORTED_EXTENSIONS } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
 import fileCache from "@/lib/fileCache"
 import { parseWebStream } from "music-metadata"
@@ -10,6 +9,7 @@ import { Image, type ImageRef } from "expo-image"
 import { xxHash32 } from "js-xxhash"
 import mimeTypes from "mime-types"
 import type { CacheItem } from "@/types"
+import { AUDIO_CACHE_VERSION, AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 
 export type Metadata = {
 	pictureBase64?: string | null
@@ -22,19 +22,9 @@ export type Metadata = {
 	cachedAt: number
 } | null
 
-// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
-
-export const PARENT_DIRECTORY = new FileSystem.Directory(
-	Platform.select({
-		ios: FileSystem.Paths.join(
-			FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-			"audioCache",
-			`v${VERSION}`
-		),
-		default: FileSystem.Paths.join(FileSystem.Paths.document, "audioCache", `v${VERSION}`)
-	})
-)
+// Critical: When changing anything related to storage index/store/persistence format, bump AUDIO_CACHE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = AUDIO_CACHE_VERSION
+export const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
 
 export class AudioCache {
 	private readonly mutexes = new Map<string, Semaphore>()

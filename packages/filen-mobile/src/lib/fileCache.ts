@@ -1,8 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import { Semaphore, run } from "@filen/utils"
-import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
-import { Platform } from "react-native"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
 import isEqual from "react-fast-compare"
@@ -12,6 +10,7 @@ import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import offline from "@/lib/offline"
 import { xxHash32 } from "js-xxhash"
+import { FILE_CACHE_VERSION, FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 
 export type Metadata = (
 	| {
@@ -29,19 +28,9 @@ export type Metadata = (
 	cachedAt: number
 }
 
-// Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
-
-export const PARENT_DIRECTORY = new FileSystem.Directory(
-	Platform.select({
-		ios: FileSystem.Paths.join(
-			FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-			"fileCache",
-			`v${VERSION}`
-		),
-		default: FileSystem.Paths.join(FileSystem.Paths.document, "fileCache", `v${VERSION}`)
-	})
-)
+// Critical: When changing anything related to storage index/store/persistence format, bump FILE_CACHE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
+export const VERSION = FILE_CACHE_VERSION
+export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
 
 export class FileCache {
 	private readonly mutexes = new Map<string, Semaphore>()
