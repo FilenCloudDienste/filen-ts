@@ -2688,6 +2688,108 @@ describe("Offline", () => {
 		})
 	})
 
+	describe("cancel", () => {
+		it("passes a non-aborted signal to SDK list calls during a normal sync", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "stored.txt")
+			const parent = makeParent(parentUuid)
+
+			writeFileData(uuid, "stored.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			let observedSignal: AbortSignal | undefined
+
+			const listDir = vi.fn(async (_dir: unknown, opts?: { signal: AbortSignal }) => {
+				observedSignal = opts?.signal
+
+				return { files: [], dirs: [] }
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: { listDir }
+			} as any)
+
+			await offline.sync()
+
+			expect(listDir).toHaveBeenCalled()
+			expect(observedSignal).toBeDefined()
+			expect(observedSignal?.aborted).toBe(false)
+		})
+
+		it("cancel() during sync aborts the signal already threaded into the SDK call", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "stored.txt")
+			const parent = makeParent(parentUuid)
+
+			writeFileData(uuid, "stored.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			let observedSignal: AbortSignal | undefined
+
+			const listDir = vi.fn(async (_dir: unknown, opts?: { signal: AbortSignal }) => {
+				observedSignal = opts?.signal
+
+				offline.cancel()
+
+				return { files: [], dirs: [] }
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: { listDir }
+			} as any)
+
+			await offline.sync()
+
+			expect(listDir).toHaveBeenCalled()
+			expect(observedSignal).toBeDefined()
+			expect(observedSignal?.aborted).toBe(true)
+		})
+
+		it("a sync after cancel() runs on a fresh non-aborted signal", async () => {
+			const offline = await createOffline()
+
+			offline.cancel()
+
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "stored.txt")
+			const parent = makeParent(parentUuid)
+
+			writeFileData(uuid, "stored.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			await offline.updateIndex()
+
+			let observedSignal: AbortSignal | undefined
+
+			const listDir = vi.fn(async (_dir: unknown, opts?: { signal: AbortSignal }) => {
+				observedSignal = opts?.signal
+
+				return { files: [], dirs: [] }
+			})
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: { listDir }
+			} as any)
+
+			await offline.sync()
+
+			expect(listDir).toHaveBeenCalled()
+			expect(observedSignal).toBeDefined()
+			expect(observedSignal?.aborted).toBe(false)
+		})
+	})
+
 	describe("integration: file lifecycle", () => {
 		it("store → verify stored → get local → remove → verify removed", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"

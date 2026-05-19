@@ -69,6 +69,14 @@ vi.mock("@/components/notes/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
+vi.mock("@/lib/offline", () => ({
+	default: {
+		cancel: vi.fn(() => {
+			callLog.push("offline.cancel")
+		})
+	}
+}))
+
 vi.mock("@/lib/backgroundTask", () => ({
 	unregisterBackgroundSync: vi.fn(async () => {
 		callLog.push("unregisterBackgroundSync")
@@ -140,13 +148,14 @@ describe("auth.logout", () => {
 			"cameraUpload.cancel",
 			"chatsSync.cancel",
 			"notesSync.cancel",
+			"offline.cancel",
 			"secureStore.clear",
 			"sqlite.clearAsync",
 			"reloadAppAsync"
 		])
 	})
 
-	it("cancels chats and notes sync alongside transfers and camera upload", async () => {
+	it("cancels chats, notes and offline sync alongside transfers and camera upload", async () => {
 		const promise = auth.logout()
 
 		await vi.runAllTimersAsync()
@@ -156,11 +165,13 @@ describe("auth.logout", () => {
 		const transfersIdx = callLog.indexOf("transfers.cancelAll")
 		const chatsIdx = callLog.indexOf("chatsSync.cancel")
 		const notesIdx = callLog.indexOf("notesSync.cancel")
+		const offlineIdx = callLog.indexOf("offline.cancel")
 
 		expect(audioIdx).toBeGreaterThanOrEqual(0)
 		expect(transfersIdx).toBeGreaterThan(audioIdx)
 		expect(chatsIdx).toBeGreaterThan(transfersIdx)
 		expect(notesIdx).toBeGreaterThan(chatsIdx)
+		expect(offlineIdx).toBeGreaterThan(notesIdx)
 	})
 
 	it("removes auth secret before reloading the app", async () => {
@@ -195,6 +206,9 @@ describe("auth.logout", () => {
 
 		const notesCancelCalls = callLog.filter(c => c === "notesSync.cancel")
 		expect(notesCancelCalls.length).toBe(1)
+
+		const offlineCancelCalls = callLog.filter(c => c === "offline.cancel")
+		expect(offlineCancelCalls.length).toBe(1)
 	})
 
 	it("after a logout settles, a subsequent logout is allowed to run fresh", async () => {
@@ -211,6 +225,7 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("secureStore.clear")
 		expect(callLog).toContain("chatsSync.cancel")
 		expect(callLog).toContain("notesSync.cancel")
+		expect(callLog).toContain("offline.cancel")
 	})
 
 	it("continues even when audio.stop throws", async () => {
@@ -227,6 +242,7 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("transfers.cancelAll")
 		expect(callLog).toContain("chatsSync.cancel")
 		expect(callLog).toContain("notesSync.cancel")
+		expect(callLog).toContain("offline.cancel")
 		expect(callLog).toContain("secureStore.clear")
 		expect(callLog).toContain("sqlite.clearAsync")
 		expect(callLog).toContain("reloadAppAsync")
@@ -246,6 +262,7 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("transfers.cancelAll")
 		expect(callLog).toContain("chatsSync.cancel")
 		expect(callLog).toContain("notesSync.cancel")
+		expect(callLog).toContain("offline.cancel")
 		expect(callLog).toContain("secureStore.clear")
 		expect(callLog).toContain("sqlite.clearAsync")
 		expect(callLog).toContain("reloadAppAsync")

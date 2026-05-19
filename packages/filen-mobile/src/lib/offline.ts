@@ -137,9 +137,15 @@ export class Offline {
 	private directoriesEnsured = false
 	private readonly directoryMetaCache = new Map<string, DirectoryOfflineMeta>()
 	private uuidToTopLevelCache: Map<string, string> | null = null
+	private abortController: AbortController = new AbortController()
 
 	public constructor() {
 		this.ensureDirectories()
+	}
+
+	public cancel(): void {
+		this.abortController.abort()
+		this.abortController = new AbortController()
 	}
 
 	private ensureDirectories(): void {
@@ -527,6 +533,8 @@ export class Offline {
 	// 3. For each stored directory: recursively compares entries; sets needsFullResync=true if any diff, then re-downloads.
 	// 4. Rebuilds the index at the end.
 	public async sync(): Promise<void> {
+		const signal = this.abortController.signal
+
 		await run(
 			async defer => {
 				await this.syncMutex.acquire()
@@ -538,6 +546,10 @@ export class Offline {
 
 					this.syncMutex.release()
 				})
+
+				if (signal.aborted) {
+					return
+				}
 
 				this.ensureDirectories()
 
@@ -577,21 +589,29 @@ export class Offline {
 
 				await Promise.all(
 					Array.from(uniqueParents.entries()).map(async ([key, parent]) => {
+						if (signal.aborted) {
+							return
+						}
+
 						const listResult = await run(async () => {
 							if (parent === "sharedInRoot") {
-								return await authedSdkClient.listInSharedRoot()
+								return await authedSdkClient.listInSharedRoot({ signal })
 							}
 
 							switch (parent.tag) {
 								case AnyDirWithContext_Tags.Normal: {
-									return await authedSdkClient.listDir(parent.inner[0])
+									return await authedSdkClient.listDir(parent.inner[0], { signal })
 								}
 
 								case AnyDirWithContext_Tags.Shared: {
 									switch (parent.inner[0].dir.tag) {
 										case AnySharedDir_Tags.Dir:
 										case AnySharedDir_Tags.Root: {
-											return await authedSdkClient.listSharedDir(parent.inner[0].dir, parent.inner[0].shareInfo)
+											return await authedSdkClient.listSharedDir(
+												parent.inner[0].dir,
+												parent.inner[0].shareInfo,
+												{ signal }
+											)
 										}
 
 										default: {
@@ -698,9 +718,17 @@ export class Offline {
 					})
 				}
 
+				if (signal.aborted) {
+					return
+				}
+
 				await Promise.all([
 					...files.map(({ item, parent }) =>
 						run(async () => {
+							if (signal.aborted) {
+								return
+							}
+
 							if (
 								!item.data.decryptedMeta ||
 								(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
@@ -779,7 +807,8 @@ export class Offline {
 									await this.storeFile({
 										file: unwrappedFileIntoDriveItem(unwrappedFileMeta),
 										parent,
-										skipIndexUpdate: true
+										skipIndexUpdate: true,
+										signal
 									})
 
 									return
@@ -815,7 +844,8 @@ export class Offline {
 							await this.storeFile({
 								file: unwrappedFileIntoDriveItem(unwrapFileMeta(updatedFile)),
 								parent,
-								skipIndexUpdate: true
+								skipIndexUpdate: true,
+								signal
 							})
 
 							if (dataFile.parentDirectory.exists) {
@@ -825,6 +855,10 @@ export class Offline {
 					),
 					...topLevelDirectories.map(({ item, parent }) =>
 						run(async () => {
+							if (signal.aborted) {
+								return
+							}
+
 							if (!item.data.decryptedMeta) {
 								return
 							}
@@ -889,7 +923,8 @@ export class Offline {
 										await this.storeDirectory({
 											directory: unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch)),
 											parent,
-											skipIndexUpdate: true
+											skipIndexUpdate: true,
+											signal
 										})
 									}
 								}
@@ -1111,12 +1146,17 @@ export class Offline {
 									directory: item,
 									parent,
 									skipIndexUpdate: true,
-									force: true
+									force: true,
+									signal
 								})
 							}
 						})
 					)
 				])
+
+				if (signal.aborted) {
+					return
+				}
 
 				await this.updateIndex()
 			},
@@ -1202,12 +1242,14 @@ export class Offline {
 		file,
 		parent,
 		hideProgress,
-		skipIndexUpdate
+		skipIndexUpdate,
+		signal
 	}: {
 		file: DriveItem
 		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
+		signal?: AbortSignal
 	}): Promise<void> {
 		const result = await run(async defer => {
 			if (file.type !== "file" && file.type !== "sharedFile" && file.type !== "sharedRootFile") {
@@ -1274,7 +1316,8 @@ export class Offline {
 					item: file,
 					destination: dataFile,
 					hideProgress,
-					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
+					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
+					signal
 				})
 
 				if (result) {
@@ -1311,13 +1354,15 @@ export class Offline {
 		parent,
 		hideProgress,
 		skipIndexUpdate,
-		force
+		force,
+		signal
 	}: {
 		directory: DriveItem
 		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		force?: boolean
+		signal?: AbortSignal
 	}): Promise<void> {
 		const result = await run(async defer => {
 			if (directory.type !== "directory" && directory.type !== "sharedDirectory" && directory.type !== "sharedRootDirectory") {
@@ -1382,7 +1427,8 @@ export class Offline {
 					item: directory,
 					destination: dataDirectory,
 					hideProgress,
-					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise
+					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
+					signal
 				})
 
 				if (transferred) {
