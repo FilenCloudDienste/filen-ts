@@ -270,7 +270,8 @@ describe("Sync (Notes)", () => {
 
 			expect(mockNotesSetContent).toHaveBeenCalledWith({
 				note: mockNote("note-1"),
-				content: "latest"
+				content: "latest",
+				signal: expect.any(AbortSignal)
 			})
 		})
 

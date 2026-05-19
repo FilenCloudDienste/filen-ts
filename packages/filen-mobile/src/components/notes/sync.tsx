@@ -13,6 +13,7 @@ export class Sync {
 	public readonly sqliteKvKey: string = "inflightNoteContent"
 	private readonly initPromise: Promise<void>
 	private resolveInit!: () => void
+	private abortController: AbortController = new AbortController()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -22,6 +23,13 @@ export class Sync {
 
 	public start(): void {
 		this.restoreFromDisk()
+	}
+
+	public cancel(): void {
+		this.syncTimeout?.cancel()
+		this.syncTimeout = null
+		this.abortController.abort()
+		this.abortController = new AbortController()
 	}
 
 	private async restoreFromDisk() {
@@ -96,6 +104,8 @@ export class Sync {
 	}
 
 	private async sync(): Promise<void> {
+		const signal = this.abortController.signal
+
 		const result = await run(async defer => {
 			await Promise.all([this.mutex.acquire(), this.initPromise])
 
@@ -111,6 +121,10 @@ export class Sync {
 
 			const results = await Promise.allSettled(
 				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
+					if (signal.aborted) {
+						return
+					}
+
 					if (contents.length === 0) {
 						return
 					}
@@ -123,7 +137,8 @@ export class Sync {
 
 					const updatedNote = await notes.setContent({
 						note: mostRecentContent.note,
-						content: mostRecentContent.content
+						content: mostRecentContent.content,
+						signal
 					})
 
 					useNotesStore.getState().setInflightContent(prev => {
@@ -154,6 +169,10 @@ export class Sync {
 		})
 
 		if (!result.success) {
+			if (signal.aborted) {
+				return
+			}
+
 			console.error(result.error)
 			alerts.error(result.error)
 		}

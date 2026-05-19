@@ -13,6 +13,7 @@ export class Sync {
 	public readonly sqliteKvKey: string = "inflightChatMessages"
 	private readonly initPromise: Promise<void>
 	private resolveInit!: () => void
+	private abortController: AbortController = new AbortController()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -22,6 +23,11 @@ export class Sync {
 
 	public start(): void {
 		this.restoreFromDisk()
+	}
+
+	public cancel(): void {
+		this.abortController.abort()
+		this.abortController = new AbortController()
 	}
 
 	private async restoreFromDisk() {
@@ -86,6 +92,8 @@ export class Sync {
 	}
 
 	private async sync(): Promise<void> {
+		const signal = this.abortController.signal
+
 		const result = await run(async defer => {
 			await Promise.all([this.mutex.acquire(), this.initPromise])
 
@@ -108,6 +116,10 @@ export class Sync {
 					const sorted = [...messages].sort((a, b) => Number(a.sentTimestamp) - Number(b.sentTimestamp))
 
 					for (const message of sorted) {
+						if (signal.aborted) {
+							return
+						}
+
 						if (!message.inner.message) {
 							continue
 						}
@@ -117,7 +129,8 @@ export class Sync {
 								chat,
 								message: message.inner.message,
 								replyTo: message.replyTo,
-								inflightId: message.inflightId
+								inflightId: message.inflightId,
+								signal
 							})
 
 							useChatsStore.getState().setInflightErrors(prev => {
@@ -130,6 +143,10 @@ export class Sync {
 								return updated
 							})
 						} catch (e) {
+							if (signal.aborted) {
+								return
+							}
+
 							useChatsStore.getState().setInflightErrors(prev => {
 								const updated = {
 									...prev
@@ -182,6 +199,10 @@ export class Sync {
 		})
 
 		if (!result.success) {
+			if (signal.aborted) {
+				return
+			}
+
 			console.error(result.error)
 			alerts.error(result.error)
 		}
