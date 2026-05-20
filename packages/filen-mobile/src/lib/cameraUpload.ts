@@ -599,6 +599,15 @@ class CameraUpload {
 				return
 			}
 
+			// Camera upload requires server reachability for listing + uploading.
+			// Without it, every listRemote / createDir / transfers.upload call
+			// fails into useCameraUploadStore.errors and surfaces banners. Bail
+			// silently when offline; the next AppState→active wake-up (which
+			// happens after reconnect) retries cleanly.
+			if (!netState.isConnected || !netState.isInternetReachable) {
+				return
+			}
+
 			if (!config.cellular && netState.type === "cellular") {
 				return
 			}
