@@ -168,6 +168,10 @@ const RootLayout = memo(() => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="register"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="cameraUpload"
 												options={modalOptions}
 											/>

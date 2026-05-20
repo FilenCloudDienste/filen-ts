@@ -336,12 +336,12 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 			}
 
 			default: {
-				return "tbd_unknown_error"
+				return unwrapped.message()
 			}
 		}
 	})()
 
-	return `tbd_sdk_error: ${kind}: ${unwrapped.message()}`
+	return kind
 }
 
 export function unwrapAnyDirUuid(dir: AnyDirWithContext): string | null {
