@@ -167,6 +167,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				id: "createFolder",
 				title: "tbd_create_folder",
 				icon: "plus",
+				requiresOnline: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.input({
@@ -218,6 +219,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						id: "uploadFiles",
 						title: "tbd_upload_files",
 						icon: "plus",
+						requiresOnline: true,
 						onPress: async () => {
 							const documentPickerResult = await run(async () => {
 								return await DocumentPicker.getDocumentAsync({
@@ -296,6 +298,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					},
 					{
 						id: "uploadPhotosOrVideos",
+						requiresOnline: true,
 						title: "tbd_upload_photos_or_videos",
 						icon: "plus",
 						onPress: async () => {
@@ -506,6 +509,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					},
 					{
 						id: "scanDocument",
+						requiresOnline: true,
 						title: "tbd_scan_document",
 						icon: "plus",
 						onPress: async () => {

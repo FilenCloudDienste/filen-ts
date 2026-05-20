@@ -102,6 +102,7 @@ export function createMenuButtons({
 		downloadSubButtons.push({
 			id: "downloadToDevice",
 			title: "tbd_download_to_device",
+			requiresOnline: true,
 			onPress: async () => {
 				const result = await run(async defer => {
 					if (!item.data.decryptedMeta) {
@@ -217,6 +218,7 @@ export function createMenuButtons({
 	if (parentForOfflineStorage && !isStoredOffline) {
 		downloadSubButtons.push({
 			id: "makeAvailableOffline",
+			requiresOnline: true,
 			title: "tbd_make_available_offline",
 			onPress: async () => {
 				if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
@@ -259,6 +261,7 @@ export function createMenuButtons({
 	) {
 		downloadSubButtons.push({
 			id: "saveToPhotos",
+			requiresOnline: true,
 			title: "tbd_save_to_photos",
 			onPress: async () => {
 				const permissionsResult = await run(async () => {
@@ -329,6 +332,7 @@ export function createMenuButtons({
 	if ((item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") && item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "export",
+			requiresOnline: true,
 			title: "tbd_export",
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
@@ -419,6 +423,7 @@ export function createMenuButtons({
 	) {
 		downloadSubButtons.push({
 			id: "import",
+			requiresOnline: true,
 			title: "tbd_import",
 			onPress: async () => {
 				const selectResult = await run(async () => {
@@ -567,6 +572,7 @@ export function createMenuButtons({
 			subButtons: [
 				{
 					id: "sharePublicLink",
+				requiresOnline: true,
 					title: "tbd_share_public_link",
 					onPress: () => {
 						router.push({
@@ -579,6 +585,7 @@ export function createMenuButtons({
 				},
 				{
 					id: "shareFilenUser",
+				requiresOnline: true,
 					title: "tbd_share_filen_user",
 					onPress: async () => {
 						await selectContacts({
@@ -602,6 +609,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "favorite",
+			requiresOnline: true,
 			title: item.data.favorited ? "tbd_unfavorite" : "tbd_favorite",
 			icon: "heart",
 			checked: item.data.favorited,
@@ -695,6 +703,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "rename",
+			requiresOnline: true,
 			title: "tbd_rename",
 			icon: "edit",
 			onPress: async () => {
@@ -744,6 +753,7 @@ export function createMenuButtons({
 		if (drivePath.type !== "photos") {
 			menuButtons.push({
 				id: "move",
+				requiresOnline: true,
 				title: "tbd_move",
 				icon: "edit",
 				onPress: async () => {
@@ -832,6 +842,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "removeShare",
+			requiresOnline: true,
 			title: "tbd_remove_share",
 			icon: "delete",
 			destructive: true,
@@ -886,6 +897,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "stopSharing",
+			requiresOnline: true,
 			title: "tbd_stop_sharing",
 			icon: "delete",
 			destructive: true,
@@ -931,6 +943,7 @@ export function createMenuButtons({
 	if (drivePath.type === "links" && (item.type === "file" || item.type === "directory") && !drivePath.uuid) {
 		menuButtons.push({
 			id: "disablePublicLink",
+			requiresOnline: true,
 			title: "tbd_disable_public_link",
 			icon: "delete",
 			destructive: true,
@@ -983,6 +996,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "trash",
+			requiresOnline: true,
 			title: "tbd_trash",
 			icon: "trash",
 			destructive: true,
@@ -1028,6 +1042,7 @@ export function createMenuButtons({
 	if ((item.type === "file" || item.type === "directory") && drivePath.type === "trash") {
 		menuButtons.push({
 			id: "restore",
+			requiresOnline: true,
 			title: "tbd_restore",
 			icon: "restore",
 			onPress: async () => {
@@ -1050,6 +1065,7 @@ export function createMenuButtons({
 	if ((item.type === "file" || item.type === "directory") && drivePath.type === "trash") {
 		menuButtons.push({
 			id: "deletePermanently",
+			requiresOnline: true,
 			title: "tbd_delete_permanently",
 			icon: "delete",
 			destructive: true,
