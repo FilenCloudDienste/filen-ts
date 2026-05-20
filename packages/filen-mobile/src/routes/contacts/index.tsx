@@ -148,6 +148,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			id: "add",
 			title: "tbd_add_contact",
 			icon: "plus",
+			requiresOnline: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
@@ -396,6 +397,7 @@ const Contact = memo(
 			if (info.item.type === "contact") {
 				buttons.push({
 					id: "block",
+				requiresOnline: true,
 					title: "tbd_block",
 					destructive: true,
 					icon: "delete",
@@ -441,6 +443,7 @@ const Contact = memo(
 
 				buttons.push({
 					id: "remove",
+				requiresOnline: true,
 					title: "tbd_remove",
 					destructive: true,
 					icon: "delete",
@@ -488,6 +491,7 @@ const Contact = memo(
 			if (info.item.type === "blocked") {
 				buttons.push({
 					id: "unblock",
+				requiresOnline: true,
 					title: "tbd_unblock",
 					destructive: true,
 					icon: "delete",
@@ -535,6 +539,7 @@ const Contact = memo(
 			if (info.item.type === "incomingRequest") {
 				buttons.push({
 					id: "accept",
+				requiresOnline: true,
 					title: "tbd_accept",
 					onPress: async () => {
 						const result = await runWithLoading(async () => {
@@ -558,6 +563,7 @@ const Contact = memo(
 
 				buttons.push({
 					id: "deny",
+				requiresOnline: true,
 					title: "tbd_deny",
 					destructive: true,
 					icon: "delete",
@@ -605,6 +611,7 @@ const Contact = memo(
 			if (info.item.type === "outgoingRequest") {
 				buttons.push({
 					id: "cancel",
+				requiresOnline: true,
 					title: "tbd_cancel",
 					destructive: true,
 					icon: "delete",

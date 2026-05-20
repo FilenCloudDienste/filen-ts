@@ -14,6 +14,7 @@ import * as FileSystem from "expo-file-system"
 import transfers from "@/lib/transfers"
 import { run, formatBytes } from "@filen/utils"
 import alerts from "@/lib/alerts"
+import useNetInfo from "@/hooks/useNetInfo"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import cache from "@/lib/cache"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -82,6 +83,7 @@ const IncomingShare = memo(() => {
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const navigation = useNavigation()
 	const currentPayloadsRef = useRef<ResolvedSharePayload[]>([])
+	const { hasInternet } = useNetInfo()
 
 	const payloads = resolvedSharedPayloads.filter(
 		payload => typeof payload.contentUri === "string" && typeof payload.originalName === "string"
@@ -161,7 +163,7 @@ const IncomingShare = memo(() => {
 					default: undefined
 				})}
 				rightItems={
-					payloads.length > 0
+					payloads.length > 0 && hasInternet
 						? [
 								{
 									type: "button",
