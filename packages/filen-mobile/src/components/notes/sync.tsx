@@ -1,5 +1,6 @@
 import { useEffect, memo } from "react"
 import { run, Semaphore, createExecutableTimeout } from "@filen/utils"
+import { onlineManager } from "@tanstack/react-query"
 import notes from "@/lib/notes"
 import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
@@ -104,6 +105,12 @@ export class Sync {
 	}
 
 	private async sync(): Promise<void> {
+		// No network → no point firing notes.setContent. Inflight content stays in
+		// SQLite; the reconnect listener calls forceSync() once we come back online.
+		if (!onlineManager.isOnline()) {
+			return
+		}
+
 		const signal = this.abortController.signal
 
 		const result = await run(async defer => {
@@ -188,6 +195,14 @@ export class Sync {
 
 	public executeNow(): void {
 		this.syncTimeout?.execute()
+	}
+
+	// Forces an immediate sync attempt regardless of pending debounce state.
+	// Used by the reconnect listener (src/lib/reconnect.ts) since executeNow()
+	// only fires whatever debounce happens to be queued — and an offline-induced
+	// early-return inside sync() will have already consumed any prior debounce.
+	public async forceSync(): Promise<void> {
+		await this.sync()
 	}
 }
 

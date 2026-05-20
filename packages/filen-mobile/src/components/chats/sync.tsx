@@ -1,5 +1,6 @@
 import { useEffect, memo } from "react"
 import { run, Semaphore } from "@filen/utils"
+import { onlineManager } from "@tanstack/react-query"
 import chats from "@/lib/chats"
 import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
@@ -92,6 +93,13 @@ export class Sync {
 	}
 
 	private async sync(): Promise<void> {
+		// No network → no point firing chats.sendMessage. Inflight messages stay
+		// in the inflight store + SQLite; the reconnect listener calls forceSync()
+		// when we come back online.
+		if (!onlineManager.isOnline()) {
+			return
+		}
+
 		const signal = this.abortController.signal
 
 		const result = await run(async defer => {
@@ -210,6 +218,12 @@ export class Sync {
 
 	public syncNow(): void {
 		this.sync().catch(console.error)
+	}
+
+	// Awaitable variant used by the reconnect listener (src/lib/reconnect.ts).
+	// syncNow() is fire-and-forget; forceSync() lets the listener catch errors.
+	public async forceSync(): Promise<void> {
+		await this.sync()
 	}
 }
 
