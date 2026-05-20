@@ -141,6 +141,26 @@ class Auth {
 		return this.authedClient
 	}
 
+	public async register(params: Parameters<UnauthJsClientInterface["register"]>[0]): Promise<void> {
+		const unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+
+		await unauthedClient.register(params)
+	}
+
+	public async startPasswordReset(email: string): Promise<void> {
+		const unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+
+		await unauthedClient.startPasswordReset(email)
+	}
+
+	// TODO: @filen/sdk-rs 0.4.20 does not expose a resendConfirmationEmail method on
+	// UnauthJsClient. When it lands upstream, replace this stub with:
+	//   const unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+	//   await unauthedClient.resendConfirmationEmail(email)
+	public async resendConfirmationEmail(_email: string): Promise<void> {
+		return
+	}
+
 	public async logout(): Promise<void> {
 		if (this.logoutPromise) {
 			await this.logoutPromise
