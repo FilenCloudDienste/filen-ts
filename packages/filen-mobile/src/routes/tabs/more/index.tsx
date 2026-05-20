@@ -25,6 +25,13 @@ export type Button = {
 	badge?: string | React.ReactNode
 	badgeColor?: string
 	onPress?: () => void
+	/**
+	 * When true, the row renders muted (opacity-50) and is non-interactive — onPress
+	 * is suppressed and the switch right-item (if any) is also disabled. Used by
+	 * settings screens to gray out SDK-touching controls offline; the global offline
+	 * banner is the explanation.
+	 */
+	disabled?: boolean
 	rightItem?:
 		| {
 				type: "switch"
@@ -80,17 +87,18 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 						badge,
 						badgeColor,
 						titleClassName,
-						subTitleClassName
+						subTitleClassName,
+						disabled
 					},
 					index
 				) => {
 					return (
 						<GroupButtonContainer
 							key={index}
-							className="bg-transparent flex-row items-center gap-4 px-4"
+							className={cn("bg-transparent flex-row items-center gap-4 px-4", disabled && "opacity-50")}
 							onPress={onPress}
-							rippleColor={onPress ? undefined : "transparent"}
-							enabled={!!onPress}
+							rippleColor={onPress && !disabled ? undefined : "transparent"}
+							enabled={!!onPress && !disabled}
 						>
 							{icon && (
 								<View className="bg-transparent flex-row items-center">
@@ -198,6 +206,7 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 											<Switch
 												value={rightItem.value}
 												onValueChange={rightItem.onValueChange}
+												disabled={disabled}
 											/>
 										</View>
 									)}
