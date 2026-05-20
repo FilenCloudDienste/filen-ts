@@ -37,6 +37,7 @@ import DocumentScanner, {
 import * as DocumentPicker from "expo-document-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { onlineManager } from "@tanstack/react-query"
 
 function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
@@ -1125,6 +1126,17 @@ const Drive = memo(() => {
 			const normalized = value.trim().toLowerCase()
 
 			if (normalized.length === 0) {
+				setGlobalSearchResult([])
+				setQueryingGlobalSearch(false)
+
+				return
+			}
+
+			// Global search hits the SDK (findItemMatchesForName) — offline this
+			// would throw a network error and produce a banner storm. Clear search
+			// state silently; local-filter results (which stay applied via the
+			// itemsSorted derivation above) still narrow the visible list.
+			if (!onlineManager.isOnline()) {
 				setGlobalSearchResult([])
 				setQueryingGlobalSearch(false)
 
