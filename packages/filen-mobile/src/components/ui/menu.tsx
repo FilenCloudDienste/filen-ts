@@ -13,6 +13,7 @@ import {
 	type MenuPreviewConfig
 } from "react-native-ios-context-menu"
 import { Image as SwiftUiImage } from "@expo/ui/swift-ui"
+import useNetInfo from "@/hooks/useNetInfo"
 
 export type MenuButton = {
 	onPress?: () => void
@@ -25,6 +26,14 @@ export type MenuButton = {
 	destructive?: boolean
 	hidden?: boolean
 	disabled?: boolean
+	/**
+	 * When true, the button is auto-disabled while the device is offline. This is the
+	 * canonical way for ~15 menu consumers (drive item, note menu, chat list menu,
+	 * file versions, etc.) to mark SDK-touching actions without each one wiring
+	 * useNetInfo individually. The Menu component reads `useNetInfo().hasInternet`
+	 * once and merges this flag into the effective `disabled` value per button.
+	 */
+	requiresOnline?: boolean
 	icon?: Icons
 	title?: string
 	keepMenuOpenOnPress?: boolean
@@ -32,6 +41,20 @@ export type MenuButton = {
 	iconColor?: string
 	testID?: string
 	iOSItemSize?: MenuElementSize
+}
+
+// Recursively merges the requiresOnline flag into effective `disabled` for a button
+// and its subButtons. Called once per render from MenuInner with the current
+// `hasInternet` value.
+function applyOfflineGate(button: MenuButton, hasInternet: boolean): MenuButton {
+	const subButtons = button.subButtons?.map(b => applyOfflineGate(b, hasInternet))
+	const offlineDisabled = button.requiresOnline === true && !hasInternet
+
+	return {
+		...button,
+		disabled: button.disabled || offlineDisabled,
+		subButtons
+	}
 }
 
 export type Icons =
@@ -537,15 +560,22 @@ const MenuInnerAndroid = memo(({ children, ...props }: MenuProps) => {
 })
 
 const MenuInner = memo(({ children, ...props }: MenuProps) => {
-	if (props.disabled) {
+	const { hasInternet } = useNetInfo()
+
+	// Apply the per-button requiresOnline gate once; downstream iOS/Android
+	// rendering paths see a fully-resolved `disabled` value per button.
+	const buttons = props.buttons?.map(button => applyOfflineGate(button, hasInternet))
+	const effectiveProps: Omit<MenuProps, "children"> = { ...props, buttons }
+
+	if (effectiveProps.disabled) {
 		return children
 	}
 
 	if (Platform.OS === "ios") {
-		return <MenuInnerIos {...props}>{children}</MenuInnerIos>
+		return <MenuInnerIos {...effectiveProps}>{children}</MenuInnerIos>
 	}
 
-	return <MenuInnerAndroid {...props}>{children}</MenuInnerAndroid>
+	return <MenuInnerAndroid {...effectiveProps}>{children}</MenuInnerAndroid>
 })
 
 export const Menu = memo(withUniwind(MenuInner) as typeof MenuInner)
