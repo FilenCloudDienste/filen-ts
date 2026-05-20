@@ -254,6 +254,8 @@ const Security = memo(() => {
 
 											file.write(keys)
 
+											await accountQuery.refetch()
+
 											return file
 										})
 
