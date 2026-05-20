@@ -1,4 +1,5 @@
 import secureStore, { useSecureStore } from "@/lib/secureStore"
+import useAppStore from "@/stores/useApp.store"
 import { fetchData } from "@/queries/useLocalAuthentication.query"
 import { type Biometric as TBiometric } from "@/routes/security/biometric"
 import useEffectOnce from "@/hooks/useEffectOnce"
@@ -414,6 +415,16 @@ function Biometric() {
 
 	const show = biometric.enabled && !authenticated
 	const locked = biometric.enabled && new Date().getTime() < biometric.lockedUntil
+
+	useEffect(() => {
+		useAppStore.getState().setBiometricUnlocked(!show)
+	}, [show])
+
+	useEffect(() => {
+		return () => {
+			useAppStore.getState().setBiometricUnlocked(null)
+		}
+	}, [])
 
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
