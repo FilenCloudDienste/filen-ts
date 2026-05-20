@@ -32,6 +32,7 @@ import FloatingBar from "@/components/floatingBar"
 import ForegroundService from "@/components/foregroundService"
 import Biometric from "@/components/biometric"
 import PrivacyCover from "@/components/privacyCover"
+import AccountReminders from "@/components/accountReminders"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -108,6 +109,7 @@ const RootLayout = memo(() => {
 											<Fragment>
 												<Biometric />
 												<PrivacyCover />
+												<AccountReminders />
 											</Fragment>
 										)}
 										<Stack
