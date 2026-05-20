@@ -39,6 +39,7 @@ import { ClearBarrier } from "@/lib/clearBarrier"
 import { newTmpFile } from "@/lib/tmp"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
+import { onlineManager } from "@tanstack/react-query"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
 import {
 	OFFLINE_VERSION,
@@ -540,6 +541,15 @@ export class Offline {
 				})
 
 				if (signal.aborted) {
+					return
+				}
+
+				// sync() reads remote server state for every stored item; without
+				// network those listDir calls would all fail. The reconnect
+				// listener re-fires sync() on offline → online transition, so
+				// returning here is the right behavior for cold-start in airplane
+				// mode (setup.ts fire-and-forget) and for any future caller.
+				if (!onlineManager.isOnline()) {
 					return
 				}
 
