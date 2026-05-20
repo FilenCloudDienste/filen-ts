@@ -1,11 +1,11 @@
-import { QueryClient, type UseQueryOptions, type Query } from "@tanstack/react-query"
+import { QueryClient, onlineManager, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite from "@/lib/sqlite"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
 import { debounce } from "es-toolkit/function"
-import { unwrapSdkError } from "@/lib/utils"
+import { unwrapSdkError, isNetworkClassError } from "@/lib/utils"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
 import auth from "@/lib/auth"
@@ -304,13 +304,25 @@ export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "q
 	retry: 5,
 	retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
 	retryOnMount: true,
-	networkMode: "always",
+	networkMode: "offlineFirst",
 	throwOnError(err, query: Query) {
 		console.error("Query error for key:", query?.queryKey, err)
+
+		// When offline, suppress network-class errors so the user doesn't see banner storms.
+		// The persistent <OfflineBanner /> is the canonical signal that requests can't go out.
+		if (isNetworkClassError(err) && !onlineManager.isOnline()) {
+			return false
+		}
 
 		const unwrappedSdkError = unwrapSdkError(err)
 
 		if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
+			// Auth failures while offline are indistinguishable from network failures;
+			// don't kick the user out — the next online query will surface a real Unauthenticated.
+			if (!onlineManager.isOnline()) {
+				return false
+			}
+
 			auth.logout().catch(e => {
 				console.error("[QueryClient] logout failed:", e)
 			})
