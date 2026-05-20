@@ -15,6 +15,7 @@ import cache from "@/lib/cache"
 import offline from "@/lib/offline"
 import fileCache from "@/lib/fileCache"
 import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
+import { onlineManager } from "@tanstack/react-query"
 
 export type ThumbnailParams = {
 	item: DriveItem
@@ -214,6 +215,15 @@ class Thumbnails {
 
 					sourcePath = normalizeFilePathForExpo(cachedFile.uri)
 				} else {
+					// Source is in neither offline-store nor file-cache; without network
+					// we can't fetch it. Throw an abort-flavoured error so the catch
+					// block (line ~671) treats it as aborted, NOT as a real failure —
+					// otherwise the 3-strike `failures` map would permanently skip the
+					// item even after we come back online.
+					if (!onlineManager.isOnline()) {
+						throw abortError(params.signal)
+					}
+
 					const { authedSdkClient } = await auth.getSdkClients()
 					const tempDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORY.uri, `thumb_tmp_${randomUUID()}`))
 
@@ -360,6 +370,14 @@ class Thumbnails {
 				if (offlineFile?.exists) {
 					url = normalizeFilePathForExpo(offlineFile.uri)
 				} else {
+					// Video thumbnails stream via the local HTTP provider, which
+					// internally streams from Filen servers via the SDK. Offline
+					// would stall. Throw abort-flavoured so the failures map isn't
+					// poisoned (see generateImage for the same reasoning).
+					if (!onlineManager.isOnline()) {
+						throw abortError(params.signal)
+					}
+
 					const getFileUrl = await this.waitForHttpProvider(params.signal)
 
 					url = getFileUrl(params.file)
