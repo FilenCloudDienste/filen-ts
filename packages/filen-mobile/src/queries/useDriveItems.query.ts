@@ -636,8 +636,14 @@ export function useDriveItemsQuery(
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const sortedParams = removeSelectOptionsFromParams(sortParams(params))
 
+	// The offline branch of fetchData reads only from the local offline.* store
+	// and never touches the network — it must not be paused by TanStack's
+	// "offlineFirst" gating. All other path types use the global default.
+	const networkMode = params.path.type === "offline" ? "always" : DEFAULT_QUERY_OPTIONS.networkMode
+
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
+		networkMode,
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
