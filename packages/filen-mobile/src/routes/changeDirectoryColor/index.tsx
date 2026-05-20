@@ -18,6 +18,7 @@ import drive from "@/lib/drive"
 import { ScrollView } from "react-native-gesture-handler"
 import { Information } from "@/routes/driveItemInfo"
 import DismissStack from "@/components/dismissStack"
+import useNetInfo from "@/hooks/useNetInfo"
 
 const ChangeDirectoryColor = memo(() => {
 	const { item: itemSerialized } = useLocalSearchParams<{
@@ -28,6 +29,7 @@ const ChangeDirectoryColor = memo(() => {
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const navigation = useNavigation()
 	const [selectedColor, setSelectedColor] = useState<string | null>(null)
+	const { hasInternet } = useNetInfo()
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -83,7 +85,7 @@ const ChangeDirectoryColor = memo(() => {
 					default: undefined
 				})}
 				rightItems={() => {
-					if (!selectedColor) {
+					if (!selectedColor || !hasInternet) {
 						return null
 					}
 

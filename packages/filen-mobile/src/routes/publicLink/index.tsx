@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useDriveItemPublicLinkStatusQuery from "@/queries/useDriveItemPublicLinkStatus.query"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Button from "@/components/ui/button"
+import useNetInfo from "@/hooks/useNetInfo"
 import drive from "@/lib/drive"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
@@ -82,6 +83,7 @@ const PublicLink = memo(() => {
 		expiration?: PublicLinkExpiration
 		downloadable?: boolean
 	} | null>(null)
+	const { hasInternet } = useNetInfo()
 
 	const itemParsed = (() => {
 		if (!itemSerialized) {
@@ -151,7 +153,7 @@ const PublicLink = memo(() => {
 				})}
 				rightItems={
 					publicLinkStatusQuery.status === "success" && publicLinkStatusQuery.data !== null && userIsSubbed
-						? edited
+						? edited && hasInternet
 							? [
 									{
 										type: "button",

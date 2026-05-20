@@ -53,6 +53,7 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 							{
 								id: "restore",
 								title: "tbd_restore",
+								requiresOnline: true,
 								onPress: async () => {
 									const promptResponse = await run(async () => {
 										return await prompts.alert({
@@ -94,6 +95,7 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 								id: "delete",
 								title: "tbd_delete",
 								destructive: true,
+								requiresOnline: true,
 								onPress: async () => {
 									const promptResponse = await run(async () => {
 										return await prompts.alert({
