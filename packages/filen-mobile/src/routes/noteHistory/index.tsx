@@ -78,6 +78,7 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 							{
 								id: "restore",
 								title: "tbd_restore",
+								requiresOnline: true,
 								onPress: async () => {
 									const promptResponse = await run(async () => {
 										return await prompts.alert({
