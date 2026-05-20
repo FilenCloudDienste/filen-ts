@@ -57,6 +57,7 @@ export function createMenuButtons({
 						title: "tbd_mark_as_read",
 						icon: "archive",
 						checked: isSelected,
+						requiresOnline: true,
 						onPress: async () => {
 							const result = await runWithLoading(async () => {
 								return await Promise.all([
@@ -94,6 +95,7 @@ export function createMenuButtons({
 		},
 		{
 			id: "muted",
+			requiresOnline: true,
 			title: "tbd_muted",
 			checked: chat.muted,
 			onPress: async () => {
@@ -116,6 +118,7 @@ export function createMenuButtons({
 			? ([
 					{
 						id: "editName",
+						requiresOnline: true,
 						title: "tbd_edit_name",
 						icon: "edit",
 						onPress: async () => {
@@ -162,6 +165,7 @@ export function createMenuButtons({
 					},
 					{
 						id: "delete",
+						requiresOnline: true,
 						title: "tbd_delete",
 						destructive: true,
 						icon: "delete",
@@ -208,6 +212,7 @@ export function createMenuButtons({
 			: ([
 					{
 						id: "leave",
+						requiresOnline: true,
 						title: "tbd_leave",
 						destructive: true,
 						icon: "delete",

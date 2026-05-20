@@ -67,6 +67,7 @@ const Participant = memo(({ participant, chat, isOwner }: { participant: ChatPar
 									title: "tbd_remove",
 									destructive: true,
 									icon: "delete",
+									requiresOnline: true,
 									onPress: async () => {
 										const promptResponse = await run(async () => {
 											return await prompts.alert({
