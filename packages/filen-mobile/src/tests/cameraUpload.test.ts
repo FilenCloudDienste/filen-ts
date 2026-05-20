@@ -486,7 +486,7 @@ describe("sync pre-flight checks", () => {
 
 	it("skips on cellular when config.cellular is false", async () => {
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: false })
-		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "cellular" } as any)
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "cellular", isConnected: true, isInternetReachable: true } as any)
 
 		await cameraUpload.sync()
 
@@ -495,7 +495,7 @@ describe("sync pre-flight checks", () => {
 
 	it("proceeds on cellular when config.cellular is true", async () => {
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
-		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "cellular" } as any)
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "cellular", isConnected: true, isInternetReachable: true } as any)
 
 		await cameraUpload.sync()
 
@@ -504,11 +504,29 @@ describe("sync pre-flight checks", () => {
 
 	it("proceeds on WiFi regardless of cellular setting", async () => {
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: false })
-		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi" } as any)
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: true } as any)
 
 		await cameraUpload.sync()
 
 		expect(mockSetSyncing).toHaveBeenCalledWith(true)
+	})
+
+	it("skips when offline (isConnected false)", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: false, isInternetReachable: true } as any)
+
+		await cameraUpload.sync()
+
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+	})
+
+	it("skips when internet is unreachable (captive portal / DNS dead)", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: false } as any)
+
+		await cameraUpload.sync()
+
+		expect(mockSetSyncing).not.toHaveBeenCalled()
 	})
 
 	it("skips on low battery when config.lowBattery is false", async () => {
