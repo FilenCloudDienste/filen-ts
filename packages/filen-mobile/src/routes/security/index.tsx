@@ -21,6 +21,7 @@ const Security = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
+	const textRed500 = useResolveClassNames("text-red-500")
 
 	const accountQuery = useAccountQuery()
 
@@ -220,8 +221,13 @@ const Security = memo(() => {
 								},
 								{
 									icon: "time-outline",
+									iconColor: accountQuery.data.didExportMasterKeys ? undefined : (textRed500.color as string),
 									title: "tbd_export_master_keys",
+									titleClassName: accountQuery.data.didExportMasterKeys ? undefined : "text-red-500",
 									subTitle: "tbd_export_master_keys_description",
+									subTitleClassName: accountQuery.data.didExportMasterKeys ? undefined : "text-red-500",
+									badge: accountQuery.data.didExportMasterKeys ? undefined : "!",
+									badgeColor: accountQuery.data.didExportMasterKeys ? undefined : (textRed500.color as string),
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.alert({
