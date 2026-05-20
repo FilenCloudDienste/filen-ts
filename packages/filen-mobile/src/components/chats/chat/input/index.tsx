@@ -35,6 +35,7 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import transfers from "@/lib/transfers"
 import drive from "@/lib/drive"
+import useAccountQuery from "@/queries/useAccount.query"
 
 const PopupContainerView = memo(
 	({
@@ -546,6 +547,10 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
 	const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
 
+	const accountQuery = useAccountQuery()
+
+	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
+
 	const onChangeText = (text: string) => {
 		setChatInputValue(text)
 
@@ -787,6 +792,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 			>
 				<Menu
 					type="dropdown"
+					disabled={!userIsSubbed}
 					buttons={[
 						{
 							id: "addMedia",
@@ -1101,9 +1107,9 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						}
 					]}
 				>
-					<CrossGlassContainerView>
+					<CrossGlassContainerView disableInteraction={!userIsSubbed}>
 						<PressableScale
-							className="items-center justify-center size-11"
+							className={cn("items-center justify-center size-11", !userIsSubbed && "opacity-50 pointer-events-none")}
 							rippleColor="transparent"
 						>
 							<Ionicons
