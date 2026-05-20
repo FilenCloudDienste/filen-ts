@@ -97,6 +97,14 @@ vi.mock("@/lib/cache", () => ({
 	default: { uuidToAnyDriveItem: new Map() }
 }))
 
+vi.mock("@/lib/fileCache", () => ({
+	default: { getCachedUri: vi.fn().mockResolvedValue(null) }
+}))
+
+vi.mock("@tanstack/react-query", () => ({
+	onlineManager: { isOnline: () => true }
+}))
+
 vi.mock("@/lib/utils", () => ({
 	wrapAbortSignalForSdk: vi.fn((signal: unknown) => signal)
 }))

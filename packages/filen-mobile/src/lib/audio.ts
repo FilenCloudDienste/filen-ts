@@ -1,9 +1,11 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-audio"
 import audioCache, { type Metadata } from "@/lib/audioCache"
+import fileCache from "@/lib/fileCache"
 import type { DriveItemFileExtracted } from "@/types"
 import { useEffect, useState } from "react"
 import events from "@/lib/events"
 import { run } from "@filen/utils"
+import { onlineManager } from "@tanstack/react-query"
 import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
@@ -317,6 +319,17 @@ export class Audio {
 
 				if (!entry) {
 					return
+				}
+
+				// When offline, audioCache.get → fileCache.get → SDK downloadFileToPath
+				// would stall trying to fetch. If the track isn't locally available,
+				// bail cleanly — the defer above clears state.loading on the way out.
+				if (!onlineManager.isOnline()) {
+					const cachedUri = await fileCache.getCachedUri({ type: "drive", data: entry.item })
+
+					if (!cachedUri) {
+						return
+					}
 				}
 
 				const { audio, metadata } = await audioCache.get({
