@@ -240,6 +240,18 @@ export function unwrapSdkError(error: unknown): FilenSdkError | null {
 	return null
 }
 
+export function isNetworkClassError(error: unknown): boolean {
+	const unwrapped = unwrapSdkError(error)
+
+	if (!unwrapped) {
+		return false
+	}
+
+	const kind = unwrapped.kind()
+
+	return kind === ErrorKind.Reqwest || kind === ErrorKind.RetryFailed || kind === ErrorKind.Response
+}
+
 export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
 	const kind = (() => {
 		switch (unwrapped.kind()) {
