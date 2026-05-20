@@ -9,6 +9,7 @@ import alerts from "@/lib/alerts"
 import foregroundService from "@/lib/foregroundService"
 import { sweepTmpDir } from "@/lib/tmp"
 import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
+import { startReconnectListener } from "@/lib/reconnect"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -42,6 +43,11 @@ class Setup {
 			}
 
 			await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
+
+			// Wire the reconnect-replay listener after the query cache is hydrated
+			// but before the fire-and-forget offline.sync below. Idempotent —
+			// only attaches the onlineManager subscription on first call.
+			startReconnectListener()
 
 			if (isAuthed.isAuthed && !options?.background) {
 				foregroundService.init().catch(console.error)
