@@ -76,6 +76,7 @@ const Account = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
+	const textRed500 = useResolveClassNames("text-red-500")
 
 	const accountQuery = useAccountQuery()
 
@@ -645,16 +646,18 @@ const Account = memo(() => {
 								}
 							]}
 						/>
-						<View className="bg-transparent border border-red-500 flex-col p-3 gap-2 rounded-3xl">
+						<View className="bg-transparent gap-2">
 							<View className="bg-transparent flex-row items-center gap-2 px-2">
-								<Text className="text-xs font-semibold uppercase tracking-wider">tbd_danger_zone</Text>
+								<Text className="text-xs font-semibold uppercase tracking-wider text-red-500">tbd_danger_zone</Text>
 							</View>
 							<Group
 								className="bg-background-tertiary"
 								buttons={[
 									{
 										icon: "time-outline",
+										iconColor: textRed500.color as string,
 										title: "tbd_delete_versioned_files",
+										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.versionedStorage)),
 										onPress: async () => {
 											if (accountQuery.data.versionedStorage <= 0) {
@@ -720,7 +723,9 @@ const Account = memo(() => {
 									},
 									{
 										icon: "time-outline",
+										iconColor: textRed500.color as string,
 										title: "tbd_delete_all_files_and_directories",
+										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.storageUsed)),
 										onPress: async () => {
 											if (accountQuery.data.storageUsed <= 0) {
@@ -786,7 +791,9 @@ const Account = memo(() => {
 									},
 									{
 										icon: "time-outline",
+										iconColor: textRed500.color as string,
 										title: "tbd_request_account_deletion",
+										titleClassName: "text-red-500",
 										subTitle: "tbd_request_account_deletion_description",
 										onPress: async () => {
 											const promptResult = await run(async () => {

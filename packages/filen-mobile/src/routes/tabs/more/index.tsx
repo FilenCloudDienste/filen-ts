@@ -19,7 +19,9 @@ export type Button = {
 	iconColor?: string
 	iconSize?: number
 	title: string
+	titleClassName?: string
 	subTitle?: string
+	subTitleClassName?: string
 	badge?: string | React.ReactNode
 	badgeColor?: string
 	onPress?: () => void
@@ -65,139 +67,157 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 
 	return (
 		<View className={cn("bg-background-secondary rounded-3xl overflow-hidden", className)}>
-			{buttons.map(({ onPress, icon, iconSize, iconColor, title, subTitle, rightItem, badge, badgeColor }, index) => {
-				return (
-					<GroupButtonContainer
-						key={index}
-						className="bg-transparent flex-row items-center gap-4 px-4"
-						onPress={onPress}
-						rippleColor={onPress ? undefined : "transparent"}
-						enabled={!!onPress}
-					>
-						{icon && (
-							<View className="bg-transparent flex-row items-center">
-								<Ionicons
-									name={icon}
-									size={iconSize ?? 22}
-									color={iconColor ?? textForeground.color}
-								/>
-							</View>
-						)}
-						<View
-							className={cn(
-								"bg-transparent flex-row items-center py-3 justify-between flex-1 gap-4",
-								index !== buttons.length - 1 && "border-b border-border"
-							)}
+			{buttons.map(
+				(
+					{
+						onPress,
+						icon,
+						iconSize,
+						iconColor,
+						title,
+						subTitle,
+						rightItem,
+						badge,
+						badgeColor,
+						titleClassName,
+						subTitleClassName
+					},
+					index
+				) => {
+					return (
+						<GroupButtonContainer
+							key={index}
+							className="bg-transparent flex-row items-center gap-4 px-4"
+							onPress={onPress}
+							rippleColor={onPress ? undefined : "transparent"}
+							enabled={!!onPress}
 						>
-							{subTitle ? (
-								<View className="flex-1 flex-col bg-transparent justify-center">
+							{icon && (
+								<View className="bg-transparent flex-row items-center">
+									<Ionicons
+										name={icon}
+										size={iconSize ?? 22}
+										color={iconColor ?? textForeground.color}
+									/>
+								</View>
+							)}
+							<View
+								className={cn(
+									"bg-transparent flex-row items-center py-3 justify-between flex-1 gap-4",
+									index !== buttons.length - 1 && "border-b border-border"
+								)}
+							>
+								{subTitle ? (
+									<View className="flex-1 flex-col bg-transparent justify-center">
+										<Text
+											numberOfLines={1}
+											ellipsizeMode="middle"
+											className={titleClassName}
+										>
+											{title}
+										</Text>
+										<Text className={cn("text-muted-foreground text-xs", subTitleClassName)}>{subTitle}</Text>
+									</View>
+								) : (
 									<Text
 										numberOfLines={1}
 										ellipsizeMode="middle"
+										className={cn("flex-1", titleClassName)}
 									>
 										{title}
 									</Text>
-									<Text className="text-muted-foreground text-xs">{subTitle}</Text>
-								</View>
-							) : (
-								<Text
-									numberOfLines={1}
-									ellipsizeMode="middle"
-									className="flex-1"
-								>
-									{title}
-								</Text>
-							)}
-							<View className="flex-row items-center gap-2 shrink-0 bg-transparent">
-								{badge && (
-									<View
-										className={cn(
-											"rounded-full size-5 flex-row items-center justify-center",
-											!badgeColor && "bg-red-500"
-										)}
-										style={
-											badgeColor
-												? {
-														backgroundColor: badgeColor
-													}
-												: undefined
-										}
-									>
-										{typeof badge === "string" ? (
-											<Text
-												className="text-xs"
-												numberOfLines={1}
-												ellipsizeMode="middle"
-											>
-												{badge}
-											</Text>
-										) : (
-											badge
-										)}
-									</View>
 								)}
-								{rightItem?.type === "text" && (
-									<View className="items-center flex-row bg-transparent max-w-32">
-										<Text
-											className="text-sm text-muted-foreground"
-											numberOfLines={1}
-											ellipsizeMode="middle"
+								<View className="flex-row items-center gap-2 shrink-0 bg-transparent">
+									{badge && (
+										<View
+											className={cn(
+												"rounded-full size-5 flex-row items-center justify-center",
+												!badgeColor && "bg-red-500"
+											)}
+											style={
+												badgeColor
+													? {
+															backgroundColor: badgeColor
+														}
+													: undefined
+											}
 										>
-											{rightItem.value}
-										</Text>
-									</View>
-								)}
-								{rightItem?.type === "badge" && (
-									<View
-										className={cn(
-											"rounded-full size-5 flex-row items-center justify-center",
-											!rightItem.color && "bg-red-500"
-										)}
-										style={
-											rightItem.color
-												? {
-														backgroundColor: rightItem.color
-													}
-												: undefined
-										}
-									>
-										{typeof rightItem.value === "string" ? (
+											{typeof badge === "string" ? (
+												<Text
+													className="text-xs"
+													numberOfLines={1}
+													ellipsizeMode="middle"
+												>
+													{badge}
+												</Text>
+											) : (
+												badge
+											)}
+										</View>
+									)}
+									{rightItem?.type === "text" && (
+										<View className="items-center flex-row bg-transparent max-w-32">
 											<Text
-												className="text-white text-xs"
+												className="text-sm text-muted-foreground"
 												numberOfLines={1}
 												ellipsizeMode="middle"
 											>
 												{rightItem.value}
 											</Text>
-										) : (
-											rightItem.value
-										)}
-									</View>
-								)}
-								{rightItem?.type === "switch" && (
-									<View className="items-center flex-row bg-transparent">
-										<Switch
-											value={rightItem.value}
-											onValueChange={rightItem.onValueChange}
+										</View>
+									)}
+									{rightItem?.type === "badge" && (
+										<View
+											className={cn(
+												"rounded-full size-5 flex-row items-center justify-center",
+												!rightItem.color && "bg-red-500"
+											)}
+											style={
+												rightItem.color
+													? {
+															backgroundColor: rightItem.color
+														}
+													: undefined
+											}
+										>
+											{typeof rightItem.value === "string" ? (
+												<Text
+													className="text-white text-xs"
+													numberOfLines={1}
+													ellipsizeMode="middle"
+												>
+													{rightItem.value}
+												</Text>
+											) : (
+												rightItem.value
+											)}
+										</View>
+									)}
+									{rightItem?.type === "switch" && (
+										<View className="items-center flex-row bg-transparent">
+											<Switch
+												value={rightItem.value}
+												onValueChange={rightItem.onValueChange}
+											/>
+										</View>
+									)}
+									{rightItem?.type === "custom" && (
+										<View className="items-center flex-row bg-transparent">{rightItem.value}</View>
+									)}
+									{onPress && (
+										<Ionicons
+											className="shrink-0"
+											name="chevron-forward-outline"
+											size={18}
+											color={textMutedForeground.color}
 										/>
-									</View>
-								)}
-								{rightItem?.type === "custom" && (
-									<View className="items-center flex-row bg-transparent">{rightItem.value}</View>
-								)}
-								{onPress && (
-									<Ionicons
-										className="shrink-0"
-										name="chevron-forward-outline"
-										size={18}
-										color={textMutedForeground.color}
-									/>
-								)}
+									)}
+								</View>
 							</View>
-						</View>
-					</GroupButtonContainer>
-				)
-			})}
+						</GroupButtonContainer>
+					)
+				}
+			)}
 		</View>
 	)
 })
@@ -211,6 +231,8 @@ const More = memo(() => {
 	})
 
 	const accountQuery = useAccountQuery()
+
+	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
 
 	return (
 		<Fragment>
@@ -310,18 +332,22 @@ const More = memo(() => {
 					/>
 					<Group
 						buttons={[
-							{
-								icon: "link-outline",
-								title: "tbd_public_links",
-								onPress: () => {
-									router.push({
-										pathname: "/links/[uuid]",
-										params: {
-											uuid: "links"
-										}
-									})
-								}
-							},
+							...(userIsSubbed
+								? [
+										{
+											icon: "link-outline",
+											title: "tbd_public_links",
+											onPress: () => {
+												router.push({
+													pathname: "/links/[uuid]",
+													params: {
+														uuid: "links"
+													}
+												})
+											}
+										} satisfies Button
+									]
+								: []),
 							{
 								icon: "share-outline",
 								title: "tbd_shared_with_me",

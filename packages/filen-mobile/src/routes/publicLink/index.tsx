@@ -27,6 +27,7 @@ import { makeDriveItemPublicLink } from "@/lib/utils"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import { DirectoryIcon } from "@/components/itemIcons"
 import cache from "@/lib/cache"
+import useAccountQuery from "@/queries/useAccount.query"
 
 function expirationToText(expiration: PublicLinkExpiration) {
 	switch (expiration) {
@@ -109,6 +110,10 @@ const PublicLink = memo(() => {
 		}
 	)
 
+	const accountQuery = useAccountQuery()
+
+	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
+
 	if (!itemParsed || (itemParsed.type !== "file" && itemParsed.type !== "directory")) {
 		return <DismissStack />
 	}
@@ -129,7 +134,7 @@ const PublicLink = memo(() => {
 						{
 							type: "button",
 							icon: {
-								name: "chevron-back-outline",
+								name: "close",
 								color: textForeground.color,
 								size: 20
 							},
@@ -145,7 +150,7 @@ const PublicLink = memo(() => {
 					default: undefined
 				})}
 				rightItems={
-					publicLinkStatusQuery.status === "success" && publicLinkStatusQuery.data !== null
+					publicLinkStatusQuery.status === "success" && publicLinkStatusQuery.data !== null && userIsSubbed
 						? edited
 							? [
 									{
@@ -267,59 +272,256 @@ const PublicLink = memo(() => {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				{publicLinkStatusQuery.status === "success" ? (
+				{publicLinkStatusQuery.status === "success" && accountQuery.status === "success" ? (
 					<Fragment>
-						{publicLinkStatusQuery.data ? (
-							<GestureHandlerScrollView
-								className="bg-transparent"
-								contentInsetAdjustmentBehavior="automatic"
-								contentContainerClassName="px-4 pt-2 gap-4"
-								contentContainerStyle={{
-									paddingBottom: insets.bottom
-								}}
-								showsHorizontalScrollIndicator={false}
-							>
-								<View className="bg-transparent items-center justify-center flex-col py-10 px-4">
-									{itemParsed.type === "directory" ? (
-										<DirectoryIcon
-											color={itemParsed.type === "directory" ? itemParsed.data.color : DirColor.Default.new()}
-											width={128}
-											height={128}
-										/>
-									) : (
-										<Thumbnail
-											item={itemParsed}
-											size={{
-												icon: 128,
-												thumbnail: 128
-											}}
-											contentFit="cover"
-											className="rounded-3xl"
-										/>
-									)}
-									<Text
-										className="text-lg font-bold mt-4"
-										numberOfLines={1}
-										ellipsizeMode="middle"
+						{userIsSubbed ? (
+							<Fragment>
+								{publicLinkStatusQuery.data ? (
+									<GestureHandlerScrollView
+										className="bg-transparent"
+										contentInsetAdjustmentBehavior="automatic"
+										contentContainerClassName="px-4 pt-2 gap-4"
+										contentContainerStyle={{
+											paddingBottom: insets.bottom
+										}}
+										showsHorizontalScrollIndicator={false}
 									>
-										{itemParsed.data.decryptedMeta?.name ?? itemParsed.data.uuid}
-									</Text>
-									<Text className="text-muted-foreground">
-										{itemParsed.type === "directory" ? "tbd_directory" : "tbd_file"}
-									</Text>
-								</View>
-								<Group
-									className="bg-background-tertiary"
-									buttons={[
-										{
-											icon: "time-outline",
-											title: "tbd_enabled",
-											rightItem: {
-												type: "switch",
-												value: true,
-												onValueChange: async () => {
+										<View className="bg-transparent items-center justify-center flex-col py-10 px-4">
+											{itemParsed.type === "directory" ? (
+												<DirectoryIcon
+													color={itemParsed.type === "directory" ? itemParsed.data.color : DirColor.Default.new()}
+													width={128}
+													height={128}
+												/>
+											) : (
+												<Thumbnail
+													item={itemParsed}
+													size={{
+														icon: 128,
+														thumbnail: 128
+													}}
+													contentFit="cover"
+													className="rounded-3xl"
+												/>
+											)}
+											<Text
+												className="text-lg font-bold mt-4"
+												numberOfLines={1}
+												ellipsizeMode="middle"
+											>
+												{itemParsed.data.decryptedMeta?.name ?? itemParsed.data.uuid}
+											</Text>
+											<Text className="text-muted-foreground">
+												{itemParsed.type === "directory" ? "tbd_directory" : "tbd_file"}
+											</Text>
+										</View>
+										<Group
+											className="bg-background-tertiary"
+											buttons={[
+												{
+													icon: "time-outline",
+													title: "tbd_enabled",
+													rightItem: {
+														type: "switch",
+														value: true,
+														onValueChange: async () => {
+															const result = await runWithLoading(async () => {
+																return await drive.disablePublicLink({
+																	item: itemParsed
+																})
+															})
+
+															if (!result.success) {
+																console.error(result.error)
+																alerts.error(result.error)
+
+																return
+															}
+
+															setEdited(null)
+														}
+													}
+												}
+											]}
+										/>
+										<Group
+											className="bg-background-tertiary"
+											buttons={[
+												{
+													icon: "time-outline",
+													title: "tbd_password",
+													rightItem: {
+														type: "custom",
+														value: (
+															<View className="flex-row items-center gap-4 bg-transparent">
+																{(publicLinkStatusQuery.data.status.password.tag !==
+																	PasswordState_Tags.None ||
+																	(edited &&
+																		edited.password &&
+																		edited.password.tag !== PasswordState_Tags.None)) && (
+																	<Text className="text-muted-foreground text-sm">********</Text>
+																)}
+																<PressableOpacity
+																	onPress={async () => {
+																		const promptResult = await run(async () => {
+																			return await prompts.input({
+																				title: "tbd_password",
+																				message: "tbd_enter_password",
+																				cancelText: "tbd_cancel",
+																				okText: "tbd_save",
+																				placeholder: "tbd_password",
+																				inputType: "secure-text"
+																			})
+																		})
+
+																		if (!promptResult.success) {
+																			console.error(promptResult.error)
+																			alerts.error(promptResult.error)
+
+																			return
+																		}
+
+																		if (
+																			promptResult.data.cancelled ||
+																			promptResult.data.type !== "string"
+																		) {
+																			return
+																		}
+
+																		const newPassword = promptResult.data.value
+
+																		if (newPassword.length === 0) {
+																			return
+																		}
+
+																		setEdited(prev => ({
+																			...(prev ?? {}),
+																			password: PasswordState.Known.new(newPassword)
+																		}))
+																	}}
+																>
+																	<Text className="text-blue-500 text-base">tbd_edit</Text>
+																</PressableOpacity>
+															</View>
+														)
+													}
+												},
+												{
+													icon: "time-outline",
+													title: "tbd_expiration",
+													rightItem: {
+														type: "custom",
+														value: (
+															<View className="flex-row items-center gap-4 bg-transparent">
+																<Menu
+																	type="dropdown"
+																	buttons={[
+																		{
+																			title: "tbd_never",
+																			enum: PublicLinkExpiration.Never
+																		},
+																		{
+																			title: "tbd_one_hour",
+																			enum: PublicLinkExpiration.OneHour
+																		},
+																		{
+																			title: "tbd_six_hours",
+																			enum: PublicLinkExpiration.SixHours
+																		},
+																		{
+																			title: "tbd_one_day",
+																			enum: PublicLinkExpiration.OneDay
+																		},
+																		{
+																			title: "tbd_three_days",
+																			enum: PublicLinkExpiration.ThreeDays
+																		},
+																		{
+																			title: "tbd_one_week",
+																			enum: PublicLinkExpiration.OneWeek
+																		},
+																		{
+																			title: "tbd_two_weeks",
+																			enum: PublicLinkExpiration.TwoWeeks
+																		},
+																		{
+																			title: "tbd_thirty_days",
+																			enum: PublicLinkExpiration.ThirtyDays
+																		}
+																	].map(expiration => ({
+																		id: expiration.enum.toString(),
+																		title: expiration.title,
+																		checked:
+																			(edited && edited.expiration === expiration.enum) ||
+																			(publicLinkStatusQuery.data
+																				? publicLinkStatusQuery.data.status.expiration ===
+																					expiration.enum
+																				: false),
+																		onPress: () => {
+																			setEdited(prev => ({
+																				...(prev ?? {}),
+																				expiration: expiration.enum
+																			}))
+																		}
+																	}))}
+																>
+																	<CrossGlassContainerView className="min-h-9 p-2 px-3 items-center justify-center flex-row">
+																		<Text className="text-blue-500 text-base">
+																			{expirationToText(
+																				edited && edited.expiration
+																					? edited.expiration
+																					: publicLinkStatusQuery.data.status.expiration
+																			)}
+																		</Text>
+																	</CrossGlassContainerView>
+																</Menu>
+															</View>
+														)
+													}
+												},
+												{
+													icon: "time-outline",
+													title: "tbd_downloadable",
+													rightItem: {
+														type: "switch",
+														value:
+															edited && typeof edited.downloadable === "boolean"
+																? edited.downloadable
+																: publicLinkStatusQuery.data.type === "file"
+																	? publicLinkStatusQuery.data.status.downloadable
+																	: publicLinkStatusQuery.data.status.enableDownload,
+														onValueChange: async () => {
+															setEdited(prev => ({
+																...(prev ?? {}),
+																downloadable:
+																	edited && typeof edited.downloadable === "boolean"
+																		? !edited.downloadable
+																		: publicLinkStatusQuery.data
+																			? publicLinkStatusQuery.data.type === "file"
+																				? !publicLinkStatusQuery.data.status.downloadable
+																				: !publicLinkStatusQuery.data.status.enableDownload
+																			: true
+															}))
+														}
+													}
+												}
+											]}
+										/>
+									</GestureHandlerScrollView>
+								) : (
+									<View className="flex-1 items-center justify-center bg-transparent">
+										<Ionicons
+											name="link-outline"
+											size={64}
+											color={textMutedForeground.color}
+										/>
+										<Text className="mt-2">tbd_public_link_disabled</Text>
+										<Text className="text-xs text-muted-foreground mt-0.5">tbd_public_link_description</Text>
+										<View className="mt-4 bg-transparent">
+											<Button
+												onPress={async () => {
 													const result = await runWithLoading(async () => {
-														return await drive.disablePublicLink({
+														return await drive.enablePublicLink({
 															item: itemParsed
 														})
 													})
@@ -327,175 +529,15 @@ const PublicLink = memo(() => {
 													if (!result.success) {
 														console.error(result.error)
 														alerts.error(result.error)
-
-														return
 													}
-
-													setEdited(null)
-												}
-											}
-										}
-									]}
-								/>
-								<Group
-									className="bg-background-tertiary"
-									buttons={[
-										{
-											icon: "time-outline",
-											title: "tbd_password",
-											rightItem: {
-												type: "custom",
-												value: (
-													<View className="flex-row items-center gap-4 bg-transparent">
-														{(publicLinkStatusQuery.data.status.password.tag !== PasswordState_Tags.None ||
-															(edited &&
-																edited.password &&
-																edited.password.tag !== PasswordState_Tags.None)) && (
-															<Text className="text-muted-foreground text-sm">********</Text>
-														)}
-														<PressableOpacity
-															onPress={async () => {
-																const promptResult = await run(async () => {
-																	return await prompts.input({
-																		title: "tbd_password",
-																		message: "tbd_enter_password",
-																		cancelText: "tbd_cancel",
-																		okText: "tbd_save",
-																		placeholder: "tbd_password",
-																		inputType: "secure-text"
-																	})
-																})
-
-																if (!promptResult.success) {
-																	console.error(promptResult.error)
-																	alerts.error(promptResult.error)
-
-																	return
-																}
-
-																if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-																	return
-																}
-
-																const newPassword = promptResult.data.value
-
-																if (newPassword.length === 0) {
-																	return
-																}
-
-																setEdited(prev => ({
-																	...(prev ?? {}),
-																	password: PasswordState.Known.new(newPassword)
-																}))
-															}}
-														>
-															<Text className="text-blue-500 text-base">tbd_edit</Text>
-														</PressableOpacity>
-													</View>
-												)
-											}
-										},
-										{
-											icon: "time-outline",
-											title: "tbd_expiration",
-											rightItem: {
-												type: "custom",
-												value: (
-													<View className="flex-row items-center gap-4 bg-transparent">
-														<Menu
-															type="dropdown"
-															buttons={[
-																{
-																	title: "tbd_never",
-																	enum: PublicLinkExpiration.Never
-																},
-																{
-																	title: "tbd_one_hour",
-																	enum: PublicLinkExpiration.OneHour
-																},
-																{
-																	title: "tbd_six_hours",
-																	enum: PublicLinkExpiration.SixHours
-																},
-																{
-																	title: "tbd_one_day",
-																	enum: PublicLinkExpiration.OneDay
-																},
-																{
-																	title: "tbd_three_days",
-																	enum: PublicLinkExpiration.ThreeDays
-																},
-																{
-																	title: "tbd_one_week",
-																	enum: PublicLinkExpiration.OneWeek
-																},
-																{
-																	title: "tbd_two_weeks",
-																	enum: PublicLinkExpiration.TwoWeeks
-																},
-																{
-																	title: "tbd_thirty_days",
-																	enum: PublicLinkExpiration.ThirtyDays
-																}
-															].map(expiration => ({
-																id: expiration.enum.toString(),
-																title: expiration.title,
-																checked:
-																	(edited && edited.expiration === expiration.enum) ||
-																	(publicLinkStatusQuery.data
-																		? publicLinkStatusQuery.data.status.expiration === expiration.enum
-																		: false),
-																onPress: () => {
-																	setEdited(prev => ({
-																		...(prev ?? {}),
-																		expiration: expiration.enum
-																	}))
-																}
-															}))}
-														>
-															<CrossGlassContainerView className="min-h-9 p-2 px-3 items-center justify-center flex-row">
-																<Text className="text-blue-500 text-base">
-																	{expirationToText(
-																		edited && edited.expiration
-																			? edited.expiration
-																			: publicLinkStatusQuery.data.status.expiration
-																	)}
-																</Text>
-															</CrossGlassContainerView>
-														</Menu>
-													</View>
-												)
-											}
-										},
-										{
-											icon: "time-outline",
-											title: "tbd_downloadable",
-											rightItem: {
-												type: "switch",
-												value:
-													edited && typeof edited.downloadable === "boolean"
-														? edited.downloadable
-														: publicLinkStatusQuery.data.type === "file"
-															? publicLinkStatusQuery.data.status.downloadable
-															: publicLinkStatusQuery.data.status.enableDownload,
-												onValueChange: async () => {
-													setEdited(prev => ({
-														...(prev ?? {}),
-														downloadable:
-															edited && typeof edited.downloadable === "boolean"
-																? !edited.downloadable
-																: publicLinkStatusQuery.data
-																	? publicLinkStatusQuery.data.type === "file"
-																		? !publicLinkStatusQuery.data.status.downloadable
-																		: !publicLinkStatusQuery.data.status.enableDownload
-																	: true
-													}))
-												}
-											}
-										}
-									]}
-								/>
-							</GestureHandlerScrollView>
+												}}
+											>
+												tbd_enable_public_link
+											</Button>
+										</View>
+									</View>
+								)}
+							</Fragment>
 						) : (
 							<View className="flex-1 items-center justify-center bg-transparent">
 								<Ionicons
@@ -503,26 +545,10 @@ const PublicLink = memo(() => {
 									size={64}
 									color={textMutedForeground.color}
 								/>
-								<Text className="mt-2">tbd_public_link_disabled</Text>
-								<Text className="text-xs text-muted-foreground mt-0.5">tbd_public_link_description</Text>
-								<View className="mt-4 bg-transparent">
-									<Button
-										onPress={async () => {
-											const result = await runWithLoading(async () => {
-												return await drive.enablePublicLink({
-													item: itemParsed
-												})
-											})
-
-											if (!result.success) {
-												console.error(result.error)
-												alerts.error(result.error)
-											}
-										}}
-									>
-										tbd_enable_public_link
-									</Button>
-								</View>
+								<Text className="mt-2">tbd_feature_requires_subscription</Text>
+								<Text className="text-xs text-muted-foreground mt-0.5">
+									tbd_feature_requires_subscription_public_links_description
+								</Text>
 							</View>
 						)}
 					</Fragment>
