@@ -136,6 +136,13 @@ const Login = memo(() => {
 	}
 
 	const handleForgotPassword = async (): Promise<void> => {
+		// Defense in depth: PressableOpacity is gated on hasInternet, but if
+		// it fires through any other path (race during NetInfo flip, keyboard
+		// shortcut, etc.) we still want the SDK call to no-op.
+		if (!hasInternet) {
+			return
+		}
+
 		const promptResult = await run(async () => {
 			return await prompts.input({
 				title: "tbd_reset_password",
