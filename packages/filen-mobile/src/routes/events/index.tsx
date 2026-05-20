@@ -16,6 +16,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useEventsQuery, { fetchData, eventsQueryUpdate } from "@/queries/useEvents.query"
 import { serialize } from "@/lib/serializer"
+import { onlineManager } from "@tanstack/react-query"
 
 const ON_END_REACHED_THRESHOLD = 0.5
 
@@ -288,6 +289,15 @@ const Events = memo(() => {
 					}}
 					onEndReached={async () => {
 						if (inflightRef.current || !hasMore || eventsQuery.status !== "success") {
+							return
+						}
+
+						// Pagination calls fetchData → authedSdkClient.getUserEvents
+						// outside TanStack, so offline it would throw a network
+						// error and the existing alerts.error result handler would
+						// banner. Return silently; hasMore stays true so once
+						// connectivity returns, scrolling triggers the next page.
+						if (!onlineManager.isOnline()) {
 							return
 						}
 
