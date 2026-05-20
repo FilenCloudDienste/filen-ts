@@ -46,14 +46,26 @@ export type MenuButton = {
 // Recursively merges the requiresOnline flag into effective `disabled` for a button
 // and its subButtons. Called once per render from MenuInner with the current
 // `hasInternet` value.
+//
+// CRITICAL: leaf buttons must NOT have a `subButtons` key on the returned object,
+// even with an undefined value. The iOS rendering path at toIosMenuSubMenuConfig
+// uses `"subButtons" in button` as the leaf-vs-submenu discriminator, so setting
+// `subButtons: undefined` on a leaf would route it through the submenu config and
+// break the native menu.
 function applyOfflineGate(button: MenuButton, hasInternet: boolean): MenuButton {
-	const subButtons = button.subButtons?.map(b => applyOfflineGate(b, hasInternet))
 	const offlineDisabled = button.requiresOnline === true && !hasInternet
+
+	if (button.subButtons) {
+		return {
+			...button,
+			disabled: button.disabled || offlineDisabled,
+			subButtons: button.subButtons.map(b => applyOfflineGate(b, hasInternet))
+		}
+	}
 
 	return {
 		...button,
-		disabled: button.disabled || offlineDisabled,
-		subButtons
+		disabled: button.disabled || offlineDisabled
 	}
 }
 
