@@ -8,6 +8,7 @@ import Text from "@/components/ui/text"
 import useNetInfo from "@/hooks/useNetInfo"
 import useIsAppActive from "@/hooks/useIsAppActive"
 import useAppStore from "@/stores/useApp.store"
+import { useIsAuthed } from "@/lib/auth"
 
 type Status = "online" | "offline" | "back-online"
 
@@ -41,6 +42,7 @@ Banner.displayName = "OfflineBannerInner"
 const OfflineBanner = memo(() => {
 	const { hasInternet } = useNetInfo()
 	const isActive = useIsAppActive()
+	const isAuthed = useIsAuthed()
 	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
 	const [status, setStatus] = useState<Status>(hasInternet ? "online" : "offline")
 
@@ -77,9 +79,12 @@ const OfflineBanner = memo(() => {
 		return null
 	}
 
-	// Coordination with the existing root overlays: don't leak the banner behind
-	// the biometric lock screen or into the app-switcher screenshot via PrivacyCover.
-	if (biometricUnlocked !== true) {
+	// Coordination with the existing root overlays applies ONLY when the user is
+	// authed — <Biometric /> and <PrivacyCover /> only mount inside the authed
+	// Fragment. On auth screens (login / register) the user has no biometric
+	// lock and the banner should surface immediately so they understand why
+	// "sign in" / "register" can't fire.
+	if (isAuthed && biometricUnlocked !== true) {
 		return null
 	}
 

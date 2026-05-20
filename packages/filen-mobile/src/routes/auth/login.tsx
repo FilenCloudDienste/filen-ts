@@ -15,6 +15,7 @@ import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { useStartScreen, buildStartScreenHref } from "@/lib/startScreen"
 import { unwrapSdkError } from "@/lib/utils"
+import useNetInfo from "@/hooks/useNetInfo"
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -44,8 +45,9 @@ const Login = memo(() => {
 
 	const [email, setEmail] = useState<string>("")
 	const [password, setPassword] = useState<string>("")
+	const { hasInternet } = useNetInfo()
 
-	const canSubmit = isValidEmail(email) && password.length > 0
+	const canSubmit = isValidEmail(email) && password.length > 0 && hasInternet
 
 	const finishLogin = async (): Promise<void> => {
 		const { authedSdkClient } = await auth.getSdkClients()
@@ -260,7 +262,11 @@ const Login = memo(() => {
 						>
 							<Text className="text-primary-foreground text-base font-semibold">tbd_sign_in</Text>
 						</PressableOpacity>
-						<PressableOpacity onPress={handleForgotPassword}>
+						<PressableOpacity
+							onPress={handleForgotPassword}
+							enabled={hasInternet}
+							className={cn(!hasInternet && "opacity-50")}
+						>
 							<Text className="text-primary text-sm text-center">tbd_forgot_password</Text>
 						</PressableOpacity>
 					</View>
