@@ -15,6 +15,7 @@ import alerts from "@/lib/alerts"
 import auth from "@/lib/auth"
 import { newTmpFile } from "@/lib/tmp"
 import * as Sharing from "expo-sharing"
+import useNetInfo from "@/hooks/useNetInfo"
 
 const Security = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -24,6 +25,7 @@ const Security = memo(() => {
 	const textRed500 = useResolveClassNames("text-red-500")
 
 	const accountQuery = useAccountQuery()
+	const { hasInternet } = useNetInfo()
 
 	return (
 		<Fragment>
@@ -86,6 +88,7 @@ const Security = memo(() => {
 									icon: "time-outline",
 									title: "tbd_change_password",
 									subTitle: "tbd_change_password_description",
+									disabled: !hasInternet,
 									onPress: async () => {
 										const newPasswordPromptResult = await run(async () => {
 											return await prompts.input({

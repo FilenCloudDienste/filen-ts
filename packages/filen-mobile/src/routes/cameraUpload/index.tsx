@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { AnyNormalDir_Tags } from "@filen/sdk-rs"
+import useNetInfo from "@/hooks/useNetInfo"
 
 const CameraUpload = memo(() => {
 	const { config, setConfig } = useCameraUpload()
@@ -25,6 +26,7 @@ const CameraUpload = memo(() => {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
+	const { hasInternet } = useNetInfo()
 
 	const mediaPermissions = useMediaPermissions({
 		shouldRequest: true
@@ -119,6 +121,7 @@ const CameraUpload = memo(() => {
 										{
 											icon: "time-outline",
 											title: "tbd_cloud_directory",
+											disabled: !hasInternet,
 											subTitle: config.remoteDir
 												? config.remoteDir.tag === AnyNormalDir_Tags.Root
 													? "tbd_cloud_directory_root_description"

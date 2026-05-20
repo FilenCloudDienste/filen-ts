@@ -3,7 +3,7 @@ import { Group } from "@/routes/tabs/more"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, memo } from "react"
 import { router, useNavigation } from "expo-router"
-import { run, formatBytes } from "@filen/utils"
+import { run, formatBytes, cn } from "@filen/utils"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
@@ -26,6 +26,7 @@ import * as Linking from "expo-linking"
 import * as ImageManipulator from "expo-image-manipulator"
 import { serialize } from "@/lib/serializer"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
+import useNetInfo from "@/hooks/useNetInfo"
 
 type BigIntToNumber<T> = T extends bigint
 	? number
@@ -79,6 +80,7 @@ const Account = memo(() => {
 	const textRed500 = useResolveClassNames("text-red-500")
 
 	const accountQuery = useAccountQuery()
+	const { hasInternet } = useNetInfo()
 
 	return (
 		<Fragment>
@@ -135,9 +137,16 @@ const Account = memo(() => {
 						}}
 					>
 						<PressableScale
-							className="bg-background-tertiary rounded-3xl overflow-hidden flex-row gap-4 items-center p-4"
+							className={cn(
+								"bg-background-tertiary rounded-3xl overflow-hidden flex-row gap-4 items-center p-4",
+								!hasInternet && "opacity-50"
+							)}
 							rippleColor="transparent"
 							onPress={async () => {
+								if (!hasInternet) {
+									return
+								}
+
 								const permissionsResult = await run(async () => {
 									return await hasAllNeededMediaPermissions({
 										shouldRequest: true
@@ -286,6 +295,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_change_email_address",
 									subTitle: accountQuery.data.email,
+									disabled: !hasInternet,
 									onPress: async () => {
 										const newEmailPromptResult = await run(async () => {
 											return await prompts.input({
@@ -394,6 +404,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_change_nickname",
 									subTitle: accountQuery.data.nickName,
+									disabled: !hasInternet,
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.input({
@@ -454,6 +465,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_gdpr_information",
 									subTitle: "tbd_gdpr_information_description",
+									disabled: !hasInternet,
 									onPress: async () => {
 										const result = await runWithLoading(async () => {
 											const { authedSdkClient } = await auth.getSdkClients()
@@ -558,6 +570,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_file_versioning",
 									subTitle: "tbd_file_versioning_description",
+									disabled: !hasInternet,
 									rightItem: {
 										type: "switch",
 										value: accountQuery.data.versioningEnabled,
@@ -582,6 +595,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_login_alerts",
 									subTitle: "tbd_login_alerts_description",
+									disabled: !hasInternet,
 									rightItem: {
 										type: "switch",
 										value: accountQuery.data.loginAlertsEnabled,
@@ -659,6 +673,7 @@ const Account = memo(() => {
 										title: "tbd_delete_versioned_files",
 										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.versionedStorage)),
+										disabled: !hasInternet,
 										onPress: async () => {
 											if (accountQuery.data.versionedStorage <= 0) {
 												return
@@ -727,6 +742,7 @@ const Account = memo(() => {
 										title: "tbd_delete_all_files_and_directories",
 										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.storageUsed)),
+										disabled: !hasInternet,
 										onPress: async () => {
 											if (accountQuery.data.storageUsed <= 0) {
 												return
@@ -795,6 +811,7 @@ const Account = memo(() => {
 										title: "tbd_request_account_deletion",
 										titleClassName: "text-red-500",
 										subTitle: "tbd_request_account_deletion_description",
+										disabled: !hasInternet,
 										onPress: async () => {
 											const promptResult = await run(async () => {
 												return await prompts.alert({
