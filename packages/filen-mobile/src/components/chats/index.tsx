@@ -94,6 +94,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				id: "createChat",
 				title: "tbd_create_chat",
 				icon: "plus",
+				requiresOnline: true,
 				onPress: async () => {
 					const selectContactsResult = await selectContacts({
 						multiple: true,
@@ -125,6 +126,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		if (selectedChats.length > 0) {
 			menuButtons.push({
 				id: "bulkMute",
+				requiresOnline: true,
 				title: selectedChatsIncludesMuted ? "tbd_unmute_all" : "tbd_mute_all",
 				icon: "plus",
 				onPress: async () => {
@@ -155,6 +157,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (everySelectedChatOwnedBySelf) {
 				menuButtons.push({
 					id: "bulkDelete",
+					requiresOnline: true,
 					title: "tbd_delete_chats",
 					icon: "delete",
 					destructive: true,
@@ -208,6 +211,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selfIsParticipantAndNotOwnerOfEverySelectedChat) {
 				menuButtons.push({
 					id: "bulkLeave",
+					requiresOnline: true,
 					title: "tbd_leave_chats",
 					icon: "exit",
 					destructive: true,

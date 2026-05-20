@@ -72,6 +72,7 @@ export const Menu = memo(
 						{
 							id: "edit",
 							title: "tbd_edit",
+							requiresOnline: true,
 							onPress: () => {
 								if (!info.item.inner.message) {
 									return
@@ -94,6 +95,7 @@ export const Menu = memo(
 							id: "delete",
 							title: "tbd_delete",
 							destructive: true,
+							requiresOnline: true,
 							onPress: async () => {
 								const promptResponse = await run(async () => {
 									return await prompts.alert({
