@@ -12,6 +12,8 @@ import useFileUrlQuery from "@/queries/useFileUrl.query"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
 import View from "@/components/ui/view"
+import Text from "@/components/ui/text"
+import Ionicons from "@expo/vector-icons/Ionicons"
 import type { ListRenderItemInfo } from "@shopify/flash-list"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 
@@ -58,6 +60,29 @@ const GalleryItem = memo(
 		const itemStyle = {
 			width: dimensions.width,
 			height: dimensions.height
+		}
+
+		// Resolver succeeded but produced no URL — happens when the device is
+		// offline AND the item is in neither the offline store nor the file cache.
+		// Render an explicit "unavailable offline" state instead of an indefinite spinner.
+		if (fileUrlQuery.status === "success" && fileUrl === null && previewType !== "unknown") {
+			return (
+				<View
+					className="bg-transparent"
+					style={itemStyle}
+				>
+					<View className="bg-transparent flex-1 items-center justify-center px-8">
+						<Ionicons
+							name="cloud-offline-outline"
+							size={48}
+							color="#9ca3af"
+						/>
+						<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
+							tbd_unavailable_offline
+						</Text>
+					</View>
+				</View>
+			)
 		}
 
 		if (!fileUrl || previewType === "unknown") {
