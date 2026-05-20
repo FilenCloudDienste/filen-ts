@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react"
 import { AppState, type AppStateStatus } from "react-native"
-import { router } from "expo-router"
+import { router, usePathname } from "expo-router"
 import { run, runEffect } from "@filen/utils"
 import useAccountQuery from "@/queries/useAccount.query"
 import useAppStore from "@/stores/useApp.store"
@@ -9,7 +9,7 @@ import alerts from "@/lib/alerts"
 
 const AccountReminders = memo(() => {
 	const accountQuery = useAccountQuery()
-	const pathname = useAppStore(state => state.pathname)
+	const pathname = usePathname()
 	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
 	const [appState, setAppState] = useState<AppStateStatus>(() => AppState.currentState)
 	const firedRef = useRef<boolean>(false)
