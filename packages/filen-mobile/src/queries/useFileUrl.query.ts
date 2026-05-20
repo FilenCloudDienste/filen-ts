@@ -1,9 +1,9 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, onlineManager, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import { AnyFile } from "@filen/sdk-rs"
 import cache from "@/lib/cache"
-import offline from "@/lib/offline"
+import fileCache from "@/lib/fileCache"
 import useHttpStore from "@/stores/useHttp.store"
 import { normalizeFilePathForExpo } from "@/lib/utils"
 import type { DriveItemFileExtracted } from "@/types"
@@ -47,10 +47,20 @@ export async function fetchData(
 		return null
 	}
 
-	const localFile = await offline.getLocalFile(item)
+	// Check offline store + file cache in one non-fetching call. Both surface
+	// streaming-style previews (image/video/audio) from local disk without
+	// involving the HTTP provider, which would otherwise stall offline.
+	const cachedUri = await fileCache.getCachedUri({ type: "drive", data: item })
 
-	if (localFile?.exists) {
-		return normalizeFilePathForExpo(localFile.uri)
+	if (cachedUri) {
+		return normalizeFilePathForExpo(cachedUri)
+	}
+
+	// No local copy. If we're offline, bail with null — the HTTP provider URL
+	// would stall because the provider streams via SDK which needs network.
+	// Returning null lets viewers render an "unavailable offline" state.
+	if (!onlineManager.isOnline()) {
+		return null
 	}
 
 	const getFileUrl = useHttpStore.getState().getFileUrl
@@ -72,6 +82,10 @@ export function useFileUrlQuery(
 		...DEFAULT_QUERY_OPTIONS,
 		// Evict immediately when the last subscriber unmounts. URLs are bound to the localhost HTTP provider's session-scoped port, so re-deriving on next mount is the correct behavior anyway.
 		gcTime: 0,
+		// Override the global "offlineFirst" default — this query's fetchData is
+		// pure-local computation (offline store / file cache / HTTP-provider URL
+		// resolution), so it must never be paused by TanStack's offline gating.
+		networkMode: "always",
 		...options,
 		queryKey: [BASE_QUERY_KEY, sortedParams],
 		queryFn: ({ signal }) =>
