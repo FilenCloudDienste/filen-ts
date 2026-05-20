@@ -15,7 +15,8 @@
 			"Bash(cat .env*)",
 			"Bash(cat **/.env*)",
 			"Bash(grep * .env*)"
-		]
+		],
+		"allow": ["mcp__argent"]
 	},
 	"enabledPlugins": {
 		"typescript-lsp@claude-plugins-official": true
