@@ -104,6 +104,42 @@ class Prompts {
 		return result.data
 	}
 
+	public async info(options?: AlertPromptOptions): Promise<void> {
+		const result = await run(async defer => {
+			await this.mutex.acquire()
+
+			defer(() => {
+				this.mutex.release()
+			})
+
+			return await new Promise<void>(resolve => {
+				Alert.alert(
+					options?.title ?? "Title",
+					options?.message,
+					[
+						{
+							text: options?.okText ?? "OK",
+							style: options?.destructive ? "destructive" : "default",
+							onPress: () => {
+								resolve()
+							}
+						}
+					],
+					{
+						cancelable: options?.cancellable ?? true,
+						onDismiss: () => {
+							resolve()
+						}
+					}
+				)
+			})
+		})
+
+		if (!result.success) {
+			throw result.error
+		}
+	}
+
 	public async input(options?: InputPromptOptions): Promise<InputPromptResult> {
 		const result = await run(async defer => {
 			await this.mutex.acquire()
