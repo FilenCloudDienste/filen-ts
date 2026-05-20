@@ -83,6 +83,7 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 									title: "tbd_remove",
 									destructive: true,
 									icon: "delete",
+									requiresOnline: true,
 									onPress: async () => {
 										const promptResponse = await run(async () => {
 											return await prompts.alert({
@@ -130,6 +131,7 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 											title: "tbd_read",
 											icon: "eye",
 											checked: !participant.permissionsWrite,
+											requiresOnline: true,
 											onPress: async () => {
 												const result = await runWithLoading(async () => {
 													await notes.setParticipantPermission({
@@ -152,6 +154,7 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 											title: "tbd_write",
 											icon: "edit",
 											checked: participant.permissionsWrite,
+											requiresOnline: true,
 											onPress: async () => {
 												const result = await runWithLoading(async () => {
 													await notes.setParticipantPermission({

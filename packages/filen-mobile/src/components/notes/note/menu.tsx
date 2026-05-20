@@ -125,6 +125,7 @@ export function createMenuButtons({
 						title: `tbd_${typeString}`,
 						checked: note.noteType === type,
 						disabled: note.noteType === type,
+						requiresOnline: true,
 						icon:
 							type === NoteType.Text
 								? "text"
@@ -167,6 +168,7 @@ export function createMenuButtons({
 		id: note.pinned ? "unpin" : "pin",
 		title: note.pinned ? "tbd_unpin" : "tbd_pin",
 		icon: "pin",
+		requiresOnline: true,
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
 				await notes.setPinned({
@@ -188,6 +190,7 @@ export function createMenuButtons({
 		id: note.favorite ? "unfavorite" : "favorite",
 		title: note.favorite ? "tbd_unfavorite" : "tbd_favorite",
 		icon: "heart",
+		requiresOnline: true,
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
 				await notes.setFavorited({
@@ -222,6 +225,7 @@ export function createMenuButtons({
 	if (writeAccess) {
 		buttons.push({
 			id: "rename",
+			requiresOnline: true,
 			title: "tbd_rename",
 			icon: "edit",
 			onPress: async () => {
@@ -271,6 +275,7 @@ export function createMenuButtons({
 
 	buttons.push({
 		id: "duplicate",
+		requiresOnline: true,
 		title: "tbd_duplicate",
 		icon: "copy",
 		onPress: async () => {
@@ -334,6 +339,7 @@ export function createMenuButtons({
 		if (!note.archive && !note.trash) {
 			buttons.push({
 				id: "archive",
+				requiresOnline: true,
 				title: "tbd_archive",
 				icon: "archive",
 				onPress: async () => {
@@ -356,6 +362,7 @@ export function createMenuButtons({
 		if (note.archive || note.trash) {
 			buttons.push({
 				id: "restore",
+				requiresOnline: true,
 				title: "tbd_restore",
 				icon: "restore",
 				onPress: async () => {
@@ -378,6 +385,7 @@ export function createMenuButtons({
 		if (!note.trash) {
 			buttons.push({
 				id: "trash",
+				requiresOnline: true,
 				title: "tbd_trash",
 				icon: "trash",
 				destructive: true,
@@ -425,6 +433,7 @@ export function createMenuButtons({
 		if (note.trash) {
 			buttons.push({
 				id: "delete",
+				requiresOnline: true,
 				title: "tbd_delete",
 				icon: "delete",
 				destructive: true,
@@ -471,6 +480,7 @@ export function createMenuButtons({
 	} else {
 		buttons.push({
 			id: "leave",
+			requiresOnline: true,
 			title: "tbd_leave",
 			icon: "exit",
 			destructive: true,

@@ -36,6 +36,7 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 					title: "tbd_tagged",
 					icon: "tag",
 					checked: isTagged,
+					requiresOnline: true,
 					onPress: async () => {
 						const result = await runWithLoading(async () => {
 							if (isTagged) {
@@ -63,6 +64,7 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 					id: "rename",
 					title: "tbd_rename",
 					icon: "edit",
+					requiresOnline: true,
 					onPress: async () => {
 						const promptResult = await run(async () => {
 							return await prompts.input({
@@ -110,6 +112,7 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 					title: "tbd_delete",
 					icon: "delete",
 					destructive: true,
+					requiresOnline: true,
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
