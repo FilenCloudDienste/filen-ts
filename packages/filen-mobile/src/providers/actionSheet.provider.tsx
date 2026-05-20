@@ -11,6 +11,7 @@ export type ShowActionSheetOptions = {
 		title: string
 		destructive?: boolean
 		cancel?: boolean
+		disabled?: boolean
 		onPress?: () => void
 	}[]
 	containerStyle?: ViewStyle
@@ -67,6 +68,10 @@ const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode
 					.map((button, index) => (button.cancel ? index : -1))
 					.filter(index => index !== -1)
 					.at(-1)
+				const disabledButtonIndices = options.buttons
+					.map((button, index) => (button.disabled ? index : -1))
+					.filter(index => index !== -1)
+				const disabledSet = new Set<number>(disabledButtonIndices)
 				const buttonActions = options.buttons.map(button => button.onPress)
 
 				visibleRef.current = true
@@ -77,6 +82,7 @@ const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode
 						options: buttons,
 						cancelButtonIndex,
 						destructiveButtonIndex,
+						disabledButtonIndices,
 						containerStyle: options.containerStyle ?? {
 							backgroundColor: bgBackgroundSecondary.backgroundColor,
 							borderTopLeftRadius: 16,
@@ -105,6 +111,12 @@ const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode
 						cancelActionRef.current = undefined
 
 						if (!wasVisible) {
+							return
+						}
+
+						if (selectedIndex !== undefined && disabledSet.has(selectedIndex)) {
+							// Belt-and-suspenders against any platform where
+							// disabledButtonIndices doesn't visually disable.
 							return
 						}
 
