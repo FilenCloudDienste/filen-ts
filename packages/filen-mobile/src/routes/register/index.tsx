@@ -13,6 +13,7 @@ import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import useNetInfo from "@/hooks/useNetInfo"
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -43,11 +44,12 @@ const Register = memo(() => {
 	const [email, setEmail] = useState<string>("")
 	const [password, setPassword] = useState<string>("")
 	const [confirmPassword, setConfirmPassword] = useState<string>("")
+	const { hasInternet } = useNetInfo()
 
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const emailValid = isValidEmail(email)
 	const passwordsMatch = password.length > 0 && password === confirmPassword
-	const canSubmit = emailValid && passwordsMatch && passwordStrength !== null
+	const canSubmit = emailValid && passwordsMatch && passwordStrength !== null && hasInternet
 
 	const dismiss = (): void => {
 		navigation.getParent()?.goBack()
@@ -269,7 +271,11 @@ const Register = memo(() => {
 						>
 							<Text className="text-primary-foreground text-base font-semibold">tbd_create_account</Text>
 						</PressableOpacity>
-						<PressableOpacity onPress={handleResendConfirmation}>
+						<PressableOpacity
+							onPress={handleResendConfirmation}
+							enabled={hasInternet}
+							className={cn(!hasInternet && "opacity-50")}
+						>
 							<Text className="text-primary text-sm text-center">tbd_resend_confirmation_email</Text>
 						</PressableOpacity>
 					</View>

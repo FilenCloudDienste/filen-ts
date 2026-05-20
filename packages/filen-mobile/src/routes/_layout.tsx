@@ -106,9 +106,17 @@ const RootLayout = memo(() => {
 							<QueryClientProvider client={queryClient}>
 								<ActionSheetProvider>
 									<View className="flex-1 bg-background">
+										{/*
+										 * Banner is mounted outside the isAuthed Fragment so it
+										 * surfaces on the auth screens too — otherwise tapping
+										 * "sign in" / "register" offline would silently no-op
+										 * (throwOnError suppresses network errors). Its internal
+										 * gate handles authed-vs-unauthed coordination with
+										 * <Biometric /> / <PrivacyCover />.
+										 */}
+										<OfflineBanner />
 										{isAuthed && (
 											<Fragment>
-												<OfflineBanner />
 												<Biometric />
 												<PrivacyCover />
 												<AccountReminders />
