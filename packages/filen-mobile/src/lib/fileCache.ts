@@ -109,6 +109,26 @@ export class FileCache {
 		}
 	}
 
+	public async getCachedUri(item: CacheItem): Promise<string | null> {
+		if (item.type === "drive") {
+			const offlineFile = await offline.getLocalFile(item.data)
+
+			if (offlineFile?.exists) {
+				return offlineFile.uri
+			}
+		}
+
+		try {
+			if (!(await this.has(item))) {
+				return null
+			}
+
+			return this.getFiles(item).file.uri
+		} catch {
+			return null
+		}
+	}
+
 	public async has(item: CacheItem): Promise<boolean> {
 		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 			return false
