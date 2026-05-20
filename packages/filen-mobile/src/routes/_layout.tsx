@@ -33,6 +33,7 @@ import ForegroundService from "@/components/foregroundService"
 import Biometric from "@/components/biometric"
 import PrivacyCover from "@/components/privacyCover"
 import AccountReminders from "@/components/accountReminders"
+import OfflineBanner from "@/components/offlineBanner"
 
 SplashScreen.setOptions({
 	duration: 400,
@@ -107,6 +108,7 @@ const RootLayout = memo(() => {
 									<View className="flex-1 bg-background">
 										{isAuthed && (
 											<Fragment>
+												<OfflineBanner />
 												<Biometric />
 												<PrivacyCover />
 												<AccountReminders />
