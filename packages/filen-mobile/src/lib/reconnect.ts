@@ -2,6 +2,7 @@ import { onlineManager } from "@tanstack/react-query"
 import offline from "@/lib/offline"
 import { sync as notesSync } from "@/components/notes/sync"
 import { sync as chatsSync } from "@/components/chats/sync"
+import cameraUpload from "@/lib/cameraUpload"
 
 let started = false
 let lastOnline = onlineManager.isOnline()
@@ -48,8 +49,9 @@ export function startReconnectListener(): void {
 			return
 		}
 
+		cameraUpload.sync().catch(console.error)
 		offline.sync().catch(console.error)
-		notesSync.forceSync().catch(console.error)
-		chatsSync.forceSync().catch(console.error)
+		notesSync.executeNow()
+		chatsSync.syncNow()
 	})
 }
