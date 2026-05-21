@@ -19,6 +19,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import * as Linking from "expo-linking"
+import SafeAreaView from "@/components/ui/safeAreaView"
 
 const GalleryHeader = memo(
 	({
@@ -66,80 +67,168 @@ const GalleryHeader = memo(
 		return (
 			<AnimatedView
 				className={cn("absolute top-0 left-0 right-0 z-1000", solidHeader ? "bg-background" : "bg-transparent")}
-				style={[
-					{
-						paddingTop: insets.top
-					},
-					animatedStyle
-				]}
+				style={animatedStyle}
 			>
-				<View
-					className={cn(
-						"flex-row items-center px-4 py-3 pt-0 min-h-11 gap-10 justify-between",
-						solidHeader ? "bg-background" : "bg-transparent"
-					)}
-					ref={viewRef}
-					onLayout={onLayout}
+				<SafeAreaView
+					edges={["top", "left", "right"]}
+					className="bg-transparent"
 				>
-					<PressableScale
-						className="size-11 items-center justify-center"
-						onPress={goBack}
-						hitSlop={10}
-					>
-						{currentItemPreviewType === "audio" ? (
-							<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
-								<Ionicons
-									name="close-outline"
-									size={24}
-									color="white"
-								/>
-							</View>
-						) : (
-							<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
-								<Ionicons
-									name="close-outline"
-									size={30}
-									color={solidHeader ? textForeground.color : "white"}
-								/>
-							</CrossGlassContainerView>
+					<View
+						className={cn(
+							"flex-row items-center px-4 py-3 pt-0 min-h-11 gap-10 justify-between",
+							solidHeader ? "bg-background" : "bg-transparent"
 						)}
-					</PressableScale>
-					<Text
-						className={cn("flex-1 font-semibold text-base text-center", solidHeader ? "text-foreground" : "text-white")}
-						numberOfLines={1}
-						ellipsizeMode="middle"
+						ref={viewRef}
+						onLayout={onLayout}
 					>
-						{currentItem
-							? currentItem.type === "drive"
-								? (currentItem.data.data.decryptedMeta?.name ?? "")
-								: currentItem.data.name
-							: ""}
-					</Text>
-					{currentItem && !drivePath?.selectOptions ? (
-						<Fragment>
-							{currentItem.type === "drive" ? (
-								<DriveItemMenu
-									type="dropdown"
-									item={currentItem.data}
-									drivePath={
-										drivePath ?? {
-											type: "linked",
-											uuid: null
+						<PressableScale
+							className="size-11 items-center justify-center"
+							onPress={goBack}
+							hitSlop={10}
+						>
+							{currentItemPreviewType === "audio" ? (
+								<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
+									<Ionicons
+										name="close-outline"
+										size={24}
+										color="white"
+									/>
+								</View>
+							) : (
+								<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+									<Ionicons
+										name="close-outline"
+										size={30}
+										color={solidHeader ? textForeground.color : "white"}
+									/>
+								</CrossGlassContainerView>
+							)}
+						</PressableScale>
+						<Text
+							className={cn("flex-1 font-semibold text-base text-center", solidHeader ? "text-foreground" : "text-white")}
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{currentItem
+								? currentItem.type === "drive"
+									? (currentItem.data.data.decryptedMeta?.name ?? "")
+									: currentItem.data.name
+								: ""}
+						</Text>
+						{currentItem && !drivePath?.selectOptions ? (
+							<Fragment>
+								{currentItem.type === "drive" ? (
+									<DriveItemMenu
+										type="dropdown"
+										item={currentItem.data}
+										drivePath={
+											drivePath ?? {
+												type: "linked",
+												uuid: null
+											}
 										}
-									}
-									isStoredOffline={
-										driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false
-									}
-								>
-									{currentItemPreviewType === "audio" ? (
-										<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
-											<Ionicons
-												name="ellipsis-horizontal"
-												size={24}
-												color="white"
-											/>
-										</View>
-									) : (
+										isStoredOffline={
+											driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false
+										}
+									>
+										{currentItemPreviewType === "audio" ? (
+											<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">
+												<Ionicons
+													name="ellipsis-horizontal"
+													size={24}
+													color="white"
+												/>
+											</View>
+										) : (
+											<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+												<Ionicons
+													name="ellipsis-horizontal"
+													size={24}
+													color={solidHeader ? textForeground.color : "white"}
+												/>
+											</CrossGlassContainerView>
+										)}
+									</DriveItemMenu>
+								) : (
+									<Menu
+										type="dropdown"
+										buttons={[
+											{
+												id: "openLink",
+												title: "tbd_open_link",
+												onPress: async () => {
+													const parsedDomain = (() => {
+														try {
+															const url = new URL(currentItem.data.url)
+
+															return url.hostname
+														} catch {
+															return null
+														}
+													})()
+
+													if (!parsedDomain) {
+														return
+													}
+
+													const canOpenResult = await run(async () => {
+														return await Linking.canOpenURL(currentItem.data.url)
+													})
+
+													if (!canOpenResult.success) {
+														console.error(canOpenResult.error)
+														alerts.error(canOpenResult.error)
+
+														return
+													}
+
+													if (!canOpenResult.data) {
+														alerts.error("tbd_cannot_open_link")
+
+														return
+													}
+
+													if (!openLinkTrustedDomains[parsedDomain]) {
+														const promptResponse = await run(async () => {
+															return await prompts.alert({
+																title: "tbd_open_external_link",
+																message: `tbd_open_external_link_message_${parsedDomain}`,
+																cancelText: "tbd_cancel",
+																okText: "tbd_open_trust"
+															})
+														})
+
+														if (!promptResponse.success) {
+															console.error(promptResponse.error)
+															alerts.error(promptResponse.error)
+
+															return
+														}
+
+														if (promptResponse.data.cancelled) {
+															return
+														}
+
+														setOpenLinkTrustedDomains(prev => ({
+															...prev,
+															[parsedDomain]: true
+														}))
+													}
+
+													const openResult = await run(async () => {
+														return await Linking.openURL(currentItem.data.url)
+													})
+
+													if (!openResult.success) {
+														console.error(openResult.error)
+														alerts.error(openResult.error)
+
+														return
+													}
+												}
+											}
+										]}
+									>
 										<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
 											<Ionicons
 												name="ellipsis-horizontal"
@@ -147,102 +236,14 @@ const GalleryHeader = memo(
 												color={solidHeader ? textForeground.color : "white"}
 											/>
 										</CrossGlassContainerView>
-									)}
-								</DriveItemMenu>
-							) : (
-								<Menu
-									type="dropdown"
-									buttons={[
-										{
-											id: "openLink",
-											title: "tbd_open_link",
-											onPress: async () => {
-												const parsedDomain = (() => {
-													try {
-														const url = new URL(currentItem.data.url)
-
-														return url.hostname
-													} catch {
-														return null
-													}
-												})()
-
-												if (!parsedDomain) {
-													return
-												}
-
-												const canOpenResult = await run(async () => {
-													return await Linking.canOpenURL(currentItem.data.url)
-												})
-
-												if (!canOpenResult.success) {
-													console.error(canOpenResult.error)
-													alerts.error(canOpenResult.error)
-
-													return
-												}
-
-												if (!canOpenResult.data) {
-													alerts.error("tbd_cannot_open_link")
-
-													return
-												}
-
-												if (!openLinkTrustedDomains[parsedDomain]) {
-													const promptResponse = await run(async () => {
-														return await prompts.alert({
-															title: "tbd_open_external_link",
-															message: `tbd_open_external_link_message_${parsedDomain}`,
-															cancelText: "tbd_cancel",
-															okText: "tbd_open_trust"
-														})
-													})
-
-													if (!promptResponse.success) {
-														console.error(promptResponse.error)
-														alerts.error(promptResponse.error)
-
-														return
-													}
-
-													if (promptResponse.data.cancelled) {
-														return
-													}
-
-													setOpenLinkTrustedDomains(prev => ({
-														...prev,
-														[parsedDomain]: true
-													}))
-												}
-
-												const openResult = await run(async () => {
-													return await Linking.openURL(currentItem.data.url)
-												})
-
-												if (!openResult.success) {
-													console.error(openResult.error)
-													alerts.error(openResult.error)
-
-													return
-												}
-											}
-										}
-									]}
-								>
-									<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
-										<Ionicons
-											name="ellipsis-horizontal"
-											size={24}
-											color={solidHeader ? textForeground.color : "white"}
-										/>
-									</CrossGlassContainerView>
-								</Menu>
-							)}
-						</Fragment>
-					) : (
-						<View className="size-11 flex-row items-center justify-center bg-transparent" />
-					)}
-				</View>
+									</Menu>
+								)}
+							</Fragment>
+						) : (
+							<View className="size-11 flex-row items-center justify-center bg-transparent" />
+						)}
+					</View>
+				</SafeAreaView>
 			</AnimatedView>
 		)
 	}
