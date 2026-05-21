@@ -2,9 +2,7 @@ import { useEffect, useRef, memo, useCallback } from "react"
 import type { DriveItem, DriveItemFileExtracted, DriveItemDirectoryExtracted } from "@/types"
 import cache from "@/lib/cache"
 import thumbnails, { DIRECTORY as THUMBNAILS_DIRECTORY } from "@/lib/thumbnails"
-import fileCache from "@/lib/fileCache"
 import { run, runEffect } from "@filen/utils"
-import { onlineManager } from "@tanstack/react-query"
 import Image from "@/components/ui/image"
 import { FileIcon, DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
@@ -97,20 +95,6 @@ const FileThumbnailWithGenerate = memo(
 
 				if (localPathRef.current || AppState.currentState !== "active") {
 					return
-				}
-
-				// Defense in depth on top of the library-level offline gate in
-				// thumbnails.ts: when offline AND the source isn't locally available
-				// (neither offline-store nor file-cache), skip the entire retry loop.
-				// The library would already abort-flavour-throw on each attempt, but
-				// the component loop sleeps 1s between MAX_GENERATE_RETRIES — saves
-				// ~3s of wasted retries per item while offline.
-				if (!onlineManager.isOnline()) {
-					const cachedUri = await fileCache.getCachedUri({ type: "drive", data: item })
-
-					if (!cachedUri) {
-						return
-					}
 				}
 
 				abortControllerRef.current?.abort()
