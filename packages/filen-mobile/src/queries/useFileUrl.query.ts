@@ -48,15 +48,22 @@ export async function fetchData(
 		return null
 	}
 
-	const fileCacheFile = await fileCache.get({
-		item: {
+	if (
+		await fileCache.has({
 			type: "drive",
 			data: item
-		}
-	})
+		})
+	) {
+		const fileCacheFile = await fileCache.get({
+			item: {
+				type: "drive",
+				data: item
+			}
+		})
 
-	if (fileCacheFile?.exists) {
-		return normalizeFilePathForExpo(fileCacheFile.uri)
+		if (fileCacheFile?.exists) {
+			return normalizeFilePathForExpo(fileCacheFile.uri)
+		}
 	}
 
 	const offlineFile = await offline.getLocalFile(item)
