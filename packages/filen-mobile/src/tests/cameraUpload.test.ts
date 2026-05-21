@@ -20,10 +20,22 @@ vi.mock("expo-battery", () => ({
 	isLowPowerModeEnabledAsync: vi.fn(async () => false)
 }))
 
-vi.mock("expo-media-library", () => ({
-	getPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true })),
-	requestPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true }))
-}))
+vi.mock("expo-media-library", async () => {
+	const next = await import("@/tests/mocks/expoMediaLibrary")
+
+	return {
+		getPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true })),
+		requestPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true })),
+		getAlbumsAsync: vi.fn(async () => {
+			return Array.from(next.ml.albums.values()).map(stored => ({
+				id: stored.id,
+				title: stored.title,
+				type: "album",
+				assetCount: stored.assetIds.length
+			}))
+		})
+	}
+})
 
 vi.mock("@/hooks/useMediaPermissions", () => ({
 	hasAllNeededMediaPermissions: vi.fn(async () => true)
@@ -188,6 +200,10 @@ beforeEach(() => {
 	fs.clear()
 	cache.cameraUploadHashes.clear()
 	cameraUpload.cancel()
+	// The parent-directory cache lives on the singleton and survives cancel(),
+	// so clear it explicitly between tests to avoid stale dir refs from earlier
+	// tests masking createDir call assertions.
+	;(cameraUpload as any).ensureParentDirectoryExistsCache.clear()
 	setupDefaultMocks()
 })
 
@@ -895,6 +911,540 @@ describe("listLocal filtering", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+})
+
+// ─── Same-title album disambiguation ────────────────────────────────────────
+
+describe("same-title album disambiguation", () => {
+	type AlbumSpec = {
+		id: string
+		title: string
+		assets: { id: string; filename: string }[]
+	}
+
+	function setupAlbums(albums: AlbumSpec[]): void {
+		for (const album of albums) {
+			ml.addAlbum({
+				id: album.id,
+				title: album.title,
+				assetIds: album.assets.map(a => a.id)
+			})
+
+			for (const asset of album.assets) {
+				const uri = `file:///media/${asset.id}`
+
+				ml.addAsset({
+					id: asset.id,
+					filename: asset.filename,
+					uri,
+					mediaType: MediaType.IMAGE,
+					creationTime: 1000,
+					modificationTime: 2000
+				})
+
+				fs.set(uri, new Uint8Array([1]))
+			}
+		}
+	}
+
+	function installCreateDirSpy(): ReturnType<typeof vi.fn> {
+		const createDir = vi.fn(async () => ({ uuid: "remote-dir-uuid" }))
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
+				createDir
+			}
+		} as any)
+
+		return createDir
+	}
+
+	it("two albums with identical titles each map to a distinct remote folder", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Screenshots",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		expect(createDir.mock.calls.length).toBe(2)
+		expect(createdDirNames.size).toBe(2)
+	})
+
+	it("alphabetically-earliest album.id keeps the bare title; later siblings get an album-id suffix", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Screenshots",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		expect(createdDirNames.has("Screenshots")).toBe(true)
+		expect(createdDirNames.has("Screenshots (album-b)")).toBe(true)
+	})
+
+	it("single selected album with no same-title sibling keeps the bare folder name (preserves cross-device merging)", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = createDir.mock.calls.map(call => call[1] as string)
+
+		expect(createdDirNames).toEqual(["Screenshots"])
+	})
+
+	it("same filename across two same-title albums uploads both into distinct remote folders — no silent merge", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Vacation",
+				assets: [{ id: "asset-a1", filename: "IMG_0001.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Vacation",
+				assets: [{ id: "asset-b1", filename: "IMG_0001.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		expect(createdDirNames.size).toBe(2)
+	})
+
+	it("three albums sharing one title produce three distinct remote folders", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b", "album-c"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Pictures",
+				assets: [{ id: "asset-a1", filename: "a.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Pictures",
+				assets: [{ id: "asset-b1", filename: "b.jpg" }]
+			},
+			{
+				id: "album-c",
+				title: "Pictures",
+				assets: [{ id: "asset-c1", filename: "c.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		expect(createDir.mock.calls.length).toBe(3)
+		expect(createdDirNames.size).toBe(3)
+		expect(createdDirNames.has("Pictures")).toBe(true)
+		expect(createdDirNames.has("Pictures (album-b)")).toBe(true)
+		expect(createdDirNames.has("Pictures (album-c)")).toBe(true)
+	})
+
+	it("duplicate detection is case-insensitive; each album keeps its own title casing in its folder name", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "SCREENSHOTS",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		// Two distinct calls, no cache-collision-induced extras.
+		expect(createDir.mock.calls.length).toBe(2)
+		expect(createdDirNames.size).toBe(2)
+		// album-a (lower id) wins bare slot, keeps its own casing.
+		expect(createdDirNames.has("Screenshots")).toBe(true)
+		// album-b is suffixed, and the suffixed name preserves its OWN title's casing,
+		// not the winner's title.
+		expect(createdDirNames.has("SCREENSHOTS (album-b)")).toBe(true)
+	})
+
+	it("two albums with non-colliding titles never get suffixes (negative case)", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Vacation",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		expect(createDir.mock.calls.length).toBe(2)
+		expect(createdDirNames).toEqual(new Set(["Screenshots", "Vacation"]))
+	})
+
+	it("album.id containing iOS-style '/L0/NNN' suffix is sanitized before being interpolated", async () => {
+		const createDir = installCreateDirSpy()
+
+		// Real iOS PHCollection.localIdentifier values look like "<UUID>/L0/<NNN>".
+		// The "/" segments would otherwise blow past slashCount === 2 in
+		// ensureParentDirectoryExists and throw "Unexpected path structure".
+		const iosAlbumA = "A1B2C3D4-1111-2222-3333-444455556666/L0/020"
+		const iosAlbumB = "Z9Y8X7W6-1111-2222-3333-444455556666/L0/020"
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: [iosAlbumA, iosAlbumB]
+		})
+
+		setupAlbums([
+			{
+				id: iosAlbumA,
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: iosAlbumB,
+				title: "Screenshots",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+		expect(createDir.mock.calls.length).toBe(2)
+		expect(createdDirNames.has("Screenshots")).toBe(true)
+		// Slashes in the id replaced by "_" so the suffix is a single path segment.
+		expect(createdDirNames.has(`Screenshots (${iosAlbumB.replace(/\//g, "_")})`)).toBe(true)
+		// Sanity: no created dir name contains "/" — that would break the path structure.
+		for (const name of createdDirNames) {
+			expect(name).not.toMatch(/\//)
+		}
+	})
+
+	it("album title containing '/' is sanitized so it stays a single path segment", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "2024/Trips",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = createDir.mock.calls.map(call => call[1] as string)
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(createdDirNames).toEqual(["2024_Trips"])
+	})
+
+	it("album with empty title is skipped (does not pollute the remote root)", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Screenshots",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		// Only album-b's asset uploads; album-a's empty-titled assets are skipped.
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(createDir.mock.calls.map(call => call[1] as string)).toEqual(["Screenshots"])
+	})
+
+	it("album with whitespace-only title is skipped", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "   ",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Screenshots",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(createDir.mock.calls.map(call => call[1] as string)).toEqual(["Screenshots"])
+	})
+
+	it("titles with leading/trailing whitespace are trimmed; ' Screenshots ' and 'Screenshots' merge", async () => {
+		const createDir = installCreateDirSpy()
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-b"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: " Screenshots ",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Screenshots",
+				assets: [{ id: "asset-b1", filename: "photo2.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+		expect(createDir.mock.calls.length).toBe(2)
+		// album-a (alphabetically first, has padded title) wins the bare slot — but
+		// the bare slot itself is trimmed, so it ends up as "Screenshots", not " Screenshots ".
+		expect(createdDirNames.has("Screenshots")).toBe(true)
+		expect(createdDirNames.has("Screenshots (album-b)")).toBe(true)
+	})
+
+	it("duplicate album ids in config are deduped (no double-iteration into the tree)", async () => {
+		const createDir = installCreateDirSpy()
+
+		// Defensive: persistence is Set-backed today, but a legacy/hand-edited config
+		// could contain dupes. The library must not double-iterate the same album.
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-a", "album-a"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(createDir.mock.calls.length).toBe(1)
+		expect(createDir.mock.calls.map(call => call[1] as string)).toEqual(["Screenshots"])
+	})
+
+	it("an unselected device album with the same title still anchors the bare slot (cross-selection stability)", async () => {
+		const createDir = installCreateDirSpy()
+
+		// User has 3 same-title albums on the device but only selected 2 of them.
+		// The third (unselected) one wins the bare slot anyway, so selecting/deselecting
+		// it later cannot shift the other two's folder names.
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-b", "album-c"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo-a.jpg" }]
+			},
+			{
+				id: "album-b",
+				title: "Screenshots",
+				assets: [{ id: "asset-b1", filename: "photo-b.jpg" }]
+			},
+			{
+				id: "album-c",
+				title: "Screenshots",
+				assets: [{ id: "asset-c1", filename: "photo-c.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+
+		// Only the two selected albums upload — neither uses the bare "Screenshots"
+		// because album-a (unselected, alphabetically earliest) anchors that slot.
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+		expect(createDir.mock.calls.length).toBe(2)
+		expect(createdDirNames.has("Screenshots")).toBe(false)
+		expect(createdDirNames.has("Screenshots (album-b)")).toBe(true)
+		expect(createdDirNames.has("Screenshots (album-c)")).toBe(true)
+	})
+
+	it("getAlbumsAsync failure aborts the sync loudly (no silent drop of selected albums)", async () => {
+		// Per the project's silent-failure discipline: if we can't enumerate the
+		// device catalogue, we can't safely disambiguate. Fail the whole sync.
+		const { getAlbumsAsync } = await import("expo-media-library")
+
+		vi.mocked(getAlbumsAsync).mockRejectedValueOnce(new Error("permission denied"))
+
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		// No uploads happen — the rejection propagated up through listLocal and
+		// the sync errored out cleanly.
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("a selected album that no longer exists on the device is silently skipped", async () => {
+		const createDir = installCreateDirSpy()
+
+		// User's config references an album that has since been deleted from Photos.
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			albumIds: ["album-a", "album-deleted"]
+		})
+
+		setupAlbums([
+			{
+				id: "album-a",
+				title: "Screenshots",
+				assets: [{ id: "asset-a1", filename: "photo1.jpg" }]
+			}
+		])
+
+		await cameraUpload.sync()
+
+		// Only album-a uploads; the dangling reference is dropped without crashing.
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(createDir.mock.calls.map(call => call[1] as string)).toEqual(["Screenshots"])
 	})
 })
 
