@@ -1,4 +1,5 @@
 import * as MediaLibrary from "expo-media-library/next"
+import * as MediaLibraryLegacy from "expo-media-library"
 import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
 import {
@@ -128,6 +129,20 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 	}
 }
 
+// Strip characters that would split a folder name into multiple path segments
+// when joined with a filename. iOS `PHCollection.localIdentifier` (used as
+// `Album.id`) has the format "<UUID>/L0/<NNN>" — passing it untreated into
+// `FileSystem.Paths.join` would produce extra "/" segments and trip the
+// strict `slashCount === 2` check inside `ensureParentDirectoryExists`.
+function sanitizePathSegment(s: string): string {
+	return s.replace(/\//g, "_")
+}
+
+type AlbumEntry = {
+	id: string
+	title: string
+}
+
 export const MAX_UPLOAD_FAILURES = 3
 // Critical: When changing the config type/object, increment the version to invalidate old configs and clear caches that may contain entries based on the old config structure.
 export const VERSION = 1
@@ -254,10 +269,96 @@ class CameraUpload {
 
 	private async listLocal({ config, signal }: { config: Config; signal: AbortSignal }): Promise<LocalTree> {
 		const tree: LocalTree = {}
-		const albums = config.albumIds.map(id => new MediaLibrary.Album(id))
+
+		// Defense-in-depth: config persistence is Set-backed in the album-selection UI,
+		// but dedupe here too so a legacy / hand-edited config can't race two iterations
+		// into the same tree slot.
+		const selectedIds = [...new Set(config.albumIds)]
+
+		if (selectedIds.length === 0) {
+			return tree
+		}
+
+		// Enumerate ALL device albums up front for two reasons:
+		//   1. We get every (id, title) in one call instead of N getTitle() round trips.
+		//   2. The bare-title winner among same-titled albums is determined over the
+		//      whole device catalogue, not just the currently-selected subset — so
+		//      adding/removing an album from the selection does NOT shift another
+		//      selected album's folder name.
+		// A failure here aborts the whole sync (caller decides). This is intentional:
+		// if we can't enumerate albums we can't safely disambiguate, so we'd rather
+		// fail loudly than silently drop selected albums.
+		// Residual edge cases this approach still cannot stabilize, by design:
+		//   - A newly CREATED device album with the same title and a lower id steals
+		//     the bare slot (iOS uses random UUIDs, so this is possible on creation).
+		//   - Deleting the current bare-title winner from the device lets the next
+		//     album by id take the bare slot, causing a one-time re-upload + orphan.
+		// Truly stable disambiguation would require persisting (albumId -> folderName)
+		// in Config; this implementation does NOT do that.
+		const allDeviceAlbums: AlbumEntry[] = (await MediaLibraryLegacy.getAlbumsAsync({ includeSmartAlbums: true })).map(album => ({
+			id: album.id,
+			title: album.title
+		}))
+
+		// Resolve the bare-title winner per canonical title across ALL device albums.
+		// Canonical form: trimmed (so " Screenshots " and "Screenshots" don't double-create
+		// folders), lowercased (so cross-device casing differences don't split). Empty
+		// titles after trimming cannot safely participate in folder naming and are skipped.
+		const sortedAllDeviceAlbums = allDeviceAlbums.slice().sort((a, b) => fastLocaleCompare(a.id, b.id))
+		const bareTitleWinnerByKey = new Map<string, string>()
+
+		for (const album of sortedAllDeviceAlbums) {
+			const canonical = album.title.trim()
+
+			if (canonical.length === 0) {
+				continue
+			}
+
+			const key = canonical.toLowerCase()
+
+			if (!bareTitleWinnerByKey.has(key)) {
+				bareTitleWinnerByKey.set(key, album.id)
+			}
+		}
+
+		// Project selected ids onto the device catalogue. A selected id that no longer
+		// exists on the device (album deleted in Photos but still in our config) is
+		// silently skipped — the next sync naturally heals when the UI re-saves the
+		// updated selection.
+		const deviceAlbumById = new Map<string, AlbumEntry>()
+
+		for (const album of allDeviceAlbums) {
+			deviceAlbumById.set(album.id, album)
+		}
+
+		const folderTitleByAlbumId = new Map<string, string>()
+
+		for (const id of selectedIds) {
+			const deviceAlbum = deviceAlbumById.get(id)
+
+			if (!deviceAlbum) {
+				continue
+			}
+
+			const canonical = deviceAlbum.title.trim()
+
+			if (canonical.length === 0) {
+				console.warn(`[cameraUpload] Skipping selected album ${id}: title is empty after trim.`)
+
+				continue
+			}
+
+			const sanitizedTitle = sanitizePathSegment(canonical)
+			const winnerId = bareTitleWinnerByKey.get(canonical.toLowerCase())
+			const folderTitle = winnerId === id ? sanitizedTitle : `${sanitizedTitle} (${sanitizePathSegment(id)})`
+
+			folderTitleByAlbumId.set(id, folderTitle)
+		}
 
 		await Promise.allSettled(
-			albums.map(async album => {
+			Array.from(folderTitleByAlbumId.entries()).map(async ([id, folderTitle]) => {
+				const album = new MediaLibrary.Album(id)
+
 				// Phase 1: query assets with native-level filters to avoid fetching
 				// info for assets that would be discarded by includeVideos/afterActivation.
 				let query = new MediaLibrary.Query().album(album)
@@ -272,7 +373,7 @@ class CameraUpload {
 					query = query.gte(MediaLibrary.AssetField.CREATION_TIME, config.activationTimestamp)
 				}
 
-				const [title, assets] = await Promise.all([album.getTitle(), query.exe()])
+				const assets = await query.exe()
 
 				// Phase 1.5: fetch asset infos concurrently (rate-limited by semaphore).
 				const infos = (
@@ -344,8 +445,8 @@ class CameraUpload {
 
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
 				for (const { asset, info } of infos) {
-					const originalPath = normalizeFilePathForSdk(FileSystem.Paths.join(title, info.filename)).trim()
-					let path = normalizeFilePathForSdk(FileSystem.Paths.join(title, info.filename)).toLowerCase().trim()
+					const originalPath = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).trim()
+					let path = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).toLowerCase().trim()
 					let iteration = 0
 
 					while (tree[path]) {
