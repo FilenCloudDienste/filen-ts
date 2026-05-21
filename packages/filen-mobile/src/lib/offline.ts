@@ -32,7 +32,8 @@ import {
 	unwrappedFileIntoDriveItem,
 	unwrapSdkError,
 	unwrapParentUuid,
-	normalizeModificationTimestampForComparison
+	normalizeModificationTimestampForComparison,
+	extractPathInsideUuidDirectory
 } from "@/lib/utils"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
@@ -1427,14 +1428,28 @@ export class Offline {
 
 				if (transferred) {
 					const entries: DirectoryOfflineMeta["entries"] = {}
-					const dataDirectoryUriNormalized = normalizeFilePathForSdk(dataDirectory.uri)
 
+					// Anchor the SDK-returned paths on the directory's UUID rather than
+					// slicing by a known prefix. The SDK returns canonical/realpath'd
+					// paths (iOS: /private/var/mobile/..., Android: typically already
+					// canonical) while dataDirectory.uri returns the platform-specific
+					// symlinked form. Lexical prefix comparison can't reconcile that
+					// difference and silently corrupts entry keys, which then breaks
+					// top-level listing AND traps sync() in a constant re-download loop
+					// (localFiles never matches remoteFiles). The UUID anchor is
+					// symlink-agnostic — see extractPathInsideUuidDirectory().
 					for (const { dir, path } of transferred.directories) {
 						if (dir.tag === NonRootDir_Tags.Linked) {
 							continue
 						}
 
-						const normalizedPath = normalizeFilePathForSdk(path.slice(dataDirectoryUriNormalized.length))
+						const inside = extractPathInsideUuidDirectory(path, directory.data.uuid)
+
+						if (!inside) {
+							continue
+						}
+
+						const normalizedPath = normalizeFilePathForSdk(inside)
 
 						entries[normalizedPath] = {
 							item: unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner[0]))
@@ -1442,7 +1457,13 @@ export class Offline {
 					}
 
 					for (const { file, path } of transferred.files) {
-						const normalizedPath = normalizeFilePathForSdk(path.slice(dataDirectoryUriNormalized.length))
+						const inside = extractPathInsideUuidDirectory(path, directory.data.uuid)
+
+						if (!inside) {
+							continue
+						}
+
+						const normalizedPath = normalizeFilePathForSdk(inside)
 
 						entries[normalizedPath] = {
 							item: unwrappedFileIntoDriveItem(unwrapFileMeta(file))

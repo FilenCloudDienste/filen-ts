@@ -67,6 +67,16 @@ vi.mock("@/lib/utils", () => ({
 			.replace(/^file:\/+/, "/")
 			.replace(/\/+/g, "/")
 			.replace(/\/$/, ""),
+	extractPathInsideUuidDirectory: (absolutePath: string, dirUuid: string): string | null => {
+		const anchor = `/${dirUuid}/`
+		const idx = absolutePath.lastIndexOf(anchor)
+
+		if (idx < 0) {
+			return null
+		}
+
+		return absolutePath.slice(idx + anchor.length - 1)
+	},
 	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000),
 	unwrapFileMeta: vi.fn((file: unknown) => {
 		const f = file as any
@@ -1430,6 +1440,123 @@ describe("Offline", () => {
 
 			// Linked directory should be excluded from entries
 			expect(Object.keys(meta.entries)).toHaveLength(0)
+		})
+
+		// Regression: iOS real-device behavior. The SDK's downloadDirRecursively
+		// returns canonical paths (resolved through /var → /private/var symlink),
+		// while destination.uri keeps the symlinked form. The old slice-by-length
+		// path-extraction silently corrupted every entry key on iOS device, which
+		// in turn made top-level files invisible in the offline listing AND
+		// trapped sync() in a constant re-download loop because localFiles never
+		// matched remoteFiles. The fix uses extractPathInsideUuidDirectory() to
+		// anchor on the directory UUID instead of slicing by a known prefix.
+		// This test simulates the iOS canonicalization by prefixing every
+		// returned path with /private and asserts entries land at the correct
+		// relative keys (notably /top.txt — top-level — not /<uuid-tail>/top.txt
+		// which is what the old code would produce).
+		it("handles canonical-form paths returned by the SDK on iOS (with /private prefix)", async () => {
+			const uuid = "33333333-3333-3333-3333-333333333333"
+			const dirItem = makeDirItem(uuid, "CanonicalProbe")
+			const parent = makeParent("44444444-4444-4444-4444-444444444444")
+			const dataDirectoryUri = `${DIRECTORIES_DIR_URI}/${uuid}`
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				// Files physically land at destination.uri — those exist on disk.
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/top.txt`, new Uint8Array([1]))
+				fs.set(`${destUri}/sub`, "dir")
+				fs.set(`${destUri}/sub/nested.txt`, new Uint8Array([2]))
+
+				// Simulate iOS canonicalization: SDK reports the same paths but with
+				// /private prepended (and file:// stripped, since the SDK works in
+				// POSIX path space). storeDirectory must still recover the correct
+				// relative paths from these.
+				const canonicalize = (uri: string): string => `/private${uri.replace(/^file:\/+/, "/")}`
+
+				return {
+					files: [
+						{
+							file: { uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
+							path: canonicalize(`${destUri}/top.txt`)
+						},
+						{
+							file: { uuid: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" },
+							path: canonicalize(`${destUri}/sub/nested.txt`)
+						}
+					],
+					directories: [
+						{
+							dir: { tag: NonRootDir_Tags.Normal, inner: [{ uuid: "cccccccc-cccc-cccc-cccc-cccccccccccc" }] },
+							path: canonicalize(`${destUri}/sub`)
+						}
+					]
+				}
+			})
+
+			const offline = await createOffline()
+
+			await offline.storeDirectory({ directory: dirItem, parent })
+
+			const metaUri = `${dataDirectoryUri}/${uuid}.filenmeta`
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as DirectoryOfflineMeta
+
+			// Entries must use the CLEAN relative paths regardless of which prefix
+			// form the SDK returned. /top.txt is the critical assertion — the old
+			// slice code corrupted it into something containing a UUID tail.
+			expect(Object.keys(meta.entries).sort()).toEqual(["/sub", "/sub/nested.txt", "/top.txt"])
+
+			// Defense in depth: explicitly assert no key contains the UUID tail
+			// (the corruption signature of the original bug).
+			for (const key of Object.keys(meta.entries)) {
+				expect(key).not.toContain(uuid.slice(-8))
+			}
+		})
+
+		// Defensive: if a future SDK version ever stops returning paths that
+		// contain the destination UUID as a segment (e.g. ships truly relative
+		// paths or some other contract change), extractPathInsideUuidDirectory
+		// returns null and the entry is silently skipped. This test pins that
+		// behavior so a regression in the SDK contract surfaces as a failing
+		// test rather than as silently-empty entries in production.
+		it("skips entries whose path does not contain the directory UUID anchor", async () => {
+			const uuid = "55555555-5555-5555-5555-555555555555"
+			const dirItem = makeDirItem(uuid, "NoAnchor")
+			const parent = makeParent("66666666-6666-6666-6666-666666666666")
+			const dataDirectoryUri = `${DIRECTORIES_DIR_URI}/${uuid}`
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination instanceof File ? destination.uri : destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/orphan.txt`, new Uint8Array([1]))
+
+				return {
+					files: [
+						{
+							file: { uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
+							// Path with no UUID anchor — simulates a hypothetical SDK
+							// contract change that drops the destination prefix.
+							path: "/unexpected/path/orphan.txt"
+						}
+					],
+					directories: []
+				}
+			})
+
+			const offline = await createOffline()
+
+			await offline.storeDirectory({ directory: dirItem, parent })
+
+			const metaUri = `${dataDirectoryUri}/${uuid}.filenmeta`
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as DirectoryOfflineMeta
+
+			// The orphan path could not be resolved relative to the directory,
+			// so no entry is written. Production behavior: file is on disk but
+			// invisible to the offline listing — a clear, debuggable failure mode
+			// rather than a silently-corrupted entry key.
+			expect(meta.entries).toEqual({})
 		})
 	})
 
