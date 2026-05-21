@@ -132,7 +132,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			"USE_BIOMETRIC",
 			"SYSTEM_ALERT_WINDOW",
 			"ACTION_OPEN_DOCUMENT",
-			"ACTION_OPEN_DOCUMENT_TREE"
+			"ACTION_OPEN_DOCUMENT_TREE",
+			"MANAGE_DOCUMENTS"
 		]
 	},
 	plugins: [
@@ -280,6 +281,32 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"./plugins/withAndroidLargeHeapAndHardwareAcceleration",
 		"./plugins/withGradleMemory",
 		"./plugins/withNotifeeForegroundServiceType",
+		[
+			"./plugins/withAndroidArchitectures",
+			{
+				architectures: "arm64-v8a,x86_64"
+			}
+		],
+		[
+			"./plugins/withFileProvider",
+			{
+				crateName: "filen-mobile-native-cache",
+				libName: "filen_mobile_native_cache",
+				targets: ["aarch64-apple-ios", "aarch64-apple-ios-sim"],
+				cargoArgs: "-F heif-decoder",
+				developmentTeamId: APPLE_TEAM_ID,
+				iosAppGroupIdentifier: IOS_APP_GROUP_ID
+			}
+		],
+		[
+			"./plugins/withAndroidRustBuild",
+			{
+				crateName: "filen-mobile-native-cache",
+				libName: "filen_mobile_native_cache",
+				targets: ["x86_64", "arm64-v8a"],
+				cargoArgs: "-F heif-decoder"
+			}
+		],
 		[
 			"react-native-document-scanner-plugin",
 			{
