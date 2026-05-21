@@ -898,6 +898,35 @@ export function normalizeFilePathForExpo(filePath: string): string {
 	return `file://${normalizedPath}`
 }
 
+/**
+ * Returns the path inside a UUID-named parent directory, relative to that
+ * parent (with leading "/"). Anchors on the UUID instead of slicing by a
+ * known prefix, which means the result is independent of any symlink
+ * differences between the absolutePath's origin and a JS-constructed
+ * reference. Examples that all yield "/file.jpg":
+ *
+ *   /var/mobile/.../UUID/file.jpg                    (iOS, symlinked form)
+ *   /private/var/mobile/.../UUID/file.jpg            (iOS, canonical form — what the SDK returns)
+ *   /data/data/com.app/.../UUID/file.jpg             (Android)
+ *   /Users/.../CoreSimulator/.../UUID/file.jpg       (iOS simulator)
+ *
+ * The UUID is an RFC 4122 v4 identifier (36 chars, hex + hyphens), so the
+ * `/${uuid}/` anchor is unique enough in any reasonable filesystem path tree
+ * that we don't need lexical prefix comparison. Returns null when the
+ * anchor is not present (e.g. the absolutePath is the parent itself, or an
+ * unrelated path was passed by mistake).
+ */
+export function extractPathInsideUuidDirectory(absolutePath: string, dirUuid: string): string | null {
+	const anchor = `/${dirUuid}/`
+	const idx = absolutePath.lastIndexOf(anchor)
+
+	if (idx < 0) {
+		return null
+	}
+
+	return absolutePath.slice(idx + anchor.length - 1)
+}
+
 export function normalizeFilePathForBlobUtil(filePath: string): string {
 	let normalizedPath = normalizeFilePathForSdk(filePath)
 		.split("/")
