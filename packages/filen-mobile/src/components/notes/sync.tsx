@@ -215,6 +215,20 @@ export const SyncHost = memo(() => {
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
 				sync.executeNow()
+
+				return
+			}
+
+			// Active transition: cover the gap where (a) the previous offline-gate
+			// bail consumed the debounce without rescheduling, (b) the user came
+			// back to the app after writing offline and there's been no new
+			// keystroke to trigger the debounce, or (c) reconnect.ts missed the
+			// transition because onlineManager.isOnline() was already true at
+			// boot. forceSync() awaits sync() directly and re-evaluates the
+			// online gate at call time, so a stale inflight is flushed as soon
+			// as the runtime is actually online.
+			if (nextAppState === "active") {
+				sync.forceSync().catch(console.error)
 			}
 		})
 
