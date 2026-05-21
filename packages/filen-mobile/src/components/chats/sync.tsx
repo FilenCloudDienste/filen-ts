@@ -74,9 +74,7 @@ export class Sync {
 		await this.initPromise
 
 		const result = await run(async () => {
-			const filtered = Object.fromEntries(
-				Object.entries(inflightChatMessages).filter(([_, { messages }]) => messages.length > 0)
-			)
+			const filtered = Object.fromEntries(Object.entries(inflightChatMessages).filter(([_, { messages }]) => messages.length > 0))
 
 			if (Object.keys(filtered).length === 0) {
 				await sqlite.kvAsync.remove(this.sqliteKvKey)
@@ -93,9 +91,6 @@ export class Sync {
 	}
 
 	private async sync(): Promise<void> {
-		// No network → no point firing chats.sendMessage. Inflight messages stay
-		// in the inflight store + SQLite; the reconnect listener calls forceSync()
-		// when we come back online.
 		if (!onlineManager.isOnline()) {
 			return
 		}
@@ -161,11 +156,7 @@ export class Sync {
 								}
 
 								updated[message.inflightId] =
-									e instanceof Error
-										? e
-										: FilenSdkError.hasInner(e)
-											? FilenSdkError.getInner(e)
-											: new Error(String(e))
+									e instanceof Error ? e : FilenSdkError.hasInner(e) ? FilenSdkError.getInner(e) : new Error(String(e))
 
 								return updated
 							})
@@ -181,9 +172,7 @@ export class Sync {
 							if (updated[chatUuid]) {
 								updated[chatUuid] = {
 									...updated[chatUuid],
-									messages: (updated[chatUuid]?.messages ?? []).filter(
-										m => m.inflightId !== message.inflightId
-									)
+									messages: (updated[chatUuid]?.messages ?? []).filter(m => m.inflightId !== message.inflightId)
 								}
 
 								if (updated[chatUuid].messages.length === 0) {
@@ -219,12 +208,6 @@ export class Sync {
 	public syncNow(): void {
 		this.sync().catch(console.error)
 	}
-
-	// Awaitable variant used by the reconnect listener (src/lib/reconnect.ts).
-	// syncNow() is fire-and-forget; forceSync() lets the listener catch errors.
-	public async forceSync(): Promise<void> {
-		await this.sync()
-	}
 }
 
 export const sync = new Sync()
@@ -234,20 +217,10 @@ export const SyncHost = memo(() => {
 		sync.start()
 
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "background") {
+			if (nextAppState === "background" || nextAppState === "active") {
 				sync.syncNow()
 
 				return
-			}
-
-			// Active transition: syncNow is fire-and-forget and bails silently
-			// on the offline gate, so a message sent offline before a background
-			// trip never retries on resume unless the user sends another. Hit
-			// forceSync() on every active transition so inflight is flushed as
-			// soon as the runtime is actually online — covers reopen-after-offline
-			// AND the close-and-reopen scenario.
-			if (nextAppState === "active") {
-				sync.forceSync().catch(console.error)
 			}
 		})
 

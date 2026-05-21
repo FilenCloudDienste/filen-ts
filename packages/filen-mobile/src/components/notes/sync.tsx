@@ -105,8 +105,6 @@ export class Sync {
 	}
 
 	private async sync(): Promise<void> {
-		// No network → no point firing notes.setContent. Inflight content stays in
-		// SQLite; the reconnect listener calls forceSync() once we come back online.
 		if (!onlineManager.isOnline()) {
 			return
 		}
@@ -196,14 +194,6 @@ export class Sync {
 	public executeNow(): void {
 		this.syncTimeout?.execute()
 	}
-
-	// Forces an immediate sync attempt regardless of pending debounce state.
-	// Used by the reconnect listener (src/lib/reconnect.ts) since executeNow()
-	// only fires whatever debounce happens to be queued — and an offline-induced
-	// early-return inside sync() will have already consumed any prior debounce.
-	public async forceSync(): Promise<void> {
-		await this.sync()
-	}
 }
 
 export const sync = new Sync()
@@ -213,22 +203,10 @@ export const SyncHost = memo(() => {
 		sync.start()
 
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "background") {
+			if (nextAppState === "background" || nextAppState === "active") {
 				sync.executeNow()
 
 				return
-			}
-
-			// Active transition: cover the gap where (a) the previous offline-gate
-			// bail consumed the debounce without rescheduling, (b) the user came
-			// back to the app after writing offline and there's been no new
-			// keystroke to trigger the debounce, or (c) reconnect.ts missed the
-			// transition because onlineManager.isOnline() was already true at
-			// boot. forceSync() awaits sync() directly and re-evaluates the
-			// online gate at call time, so a stale inflight is flushed as soon
-			// as the runtime is actually online.
-			if (nextAppState === "active") {
-				sync.forceSync().catch(console.error)
 			}
 		})
 
