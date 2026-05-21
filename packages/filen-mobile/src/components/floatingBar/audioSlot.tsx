@@ -111,6 +111,4 @@ const AudioSlot = memo(() => {
 	)
 })
 
-AudioSlot.displayName = "AudioSlot"
-
 export default AudioSlot

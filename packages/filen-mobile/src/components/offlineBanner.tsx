@@ -34,8 +34,6 @@ const Banner = memo(({ status }: { status: Exclude<Status, "online"> }) => {
 	)
 })
 
-Banner.displayName = "OfflineBannerInner"
-
 const OfflineBanner = memo(() => {
 	const isOnline = useIsOnline()
 	const isActive = useIsAppActive()
@@ -97,7 +95,5 @@ const OfflineBanner = memo(() => {
 	// the connectivity-aware list at that point.
 	return <Banner status={status} />
 })
-
-OfflineBanner.displayName = "OfflineBanner"
 
 export default OfflineBanner

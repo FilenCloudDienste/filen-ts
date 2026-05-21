@@ -91,6 +91,4 @@ const AccountReminders = memo(() => {
 	return null
 })
 
-AccountReminders.displayName = "AccountReminders"
-
 export default AccountReminders

@@ -63,6 +63,4 @@ const TransfersSlot = memo(() => {
 	)
 })
 
-TransfersSlot.displayName = "TransfersSlot"
-
 export default TransfersSlot

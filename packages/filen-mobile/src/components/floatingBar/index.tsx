@@ -66,6 +66,4 @@ const FloatingBar = memo(() => {
 	)
 })
 
-FloatingBar.displayName = "FloatingBar"
-
 export default FloatingBar
