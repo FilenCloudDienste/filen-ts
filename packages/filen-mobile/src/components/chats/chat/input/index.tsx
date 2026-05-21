@@ -23,7 +23,7 @@ import { customEmojis } from "@/assets/customEmojis"
 import { randomUUID } from "expo-crypto"
 import chats from "@/lib/chats"
 import { sync } from "@/components/chats/sync"
-import useNetInfo from "@/hooks/useNetInfo"
+import useIsOnline from "@/hooks/useIsOnline"
 import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import events from "@/lib/events"
@@ -547,9 +547,9 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 	const sendTypingEventSemaphoreRef = useRef<Semaphore>(new Semaphore(1))
 	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
 	const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
+	const isOnline = useIsOnline()
 
 	const accountQuery = useAccountQuery()
-	const { hasInternet } = useNetInfo()
 
 	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
 
@@ -794,7 +794,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 			>
 				<Menu
 					type="dropdown"
-					disabled={!userIsSubbed || !hasInternet}
+					disabled={!userIsSubbed || !isOnline}
 					buttons={[
 						{
 							id: "addMedia",

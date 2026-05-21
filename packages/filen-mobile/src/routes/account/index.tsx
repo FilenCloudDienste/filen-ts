@@ -26,7 +26,7 @@ import * as Linking from "expo-linking"
 import * as ImageManipulator from "expo-image-manipulator"
 import { serialize } from "@/lib/serializer"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
-import useNetInfo from "@/hooks/useNetInfo"
+import useIsOnline from "@/hooks/useIsOnline"
 
 type BigIntToNumber<T> = T extends bigint
 	? number
@@ -78,9 +78,9 @@ const Account = memo(() => {
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const textRed500 = useResolveClassNames("text-red-500")
+	const isOnline = useIsOnline()
 
 	const accountQuery = useAccountQuery()
-	const { hasInternet } = useNetInfo()
 
 	return (
 		<Fragment>
@@ -139,11 +139,11 @@ const Account = memo(() => {
 						<PressableScale
 							className={cn(
 								"bg-background-tertiary rounded-3xl overflow-hidden flex-row gap-4 items-center p-4",
-								!hasInternet && "opacity-50"
+								!isOnline && "opacity-50"
 							)}
 							rippleColor="transparent"
 							onPress={async () => {
-								if (!hasInternet) {
+								if (!isOnline) {
 									return
 								}
 
@@ -295,7 +295,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_change_email_address",
 									subTitle: accountQuery.data.email,
-									disabled: !hasInternet,
+									disabled: !isOnline,
 									onPress: async () => {
 										const newEmailPromptResult = await run(async () => {
 											return await prompts.input({
@@ -404,7 +404,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_change_nickname",
 									subTitle: accountQuery.data.nickName,
-									disabled: !hasInternet,
+									disabled: !isOnline,
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.input({
@@ -465,7 +465,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_gdpr_information",
 									subTitle: "tbd_gdpr_information_description",
-									disabled: !hasInternet,
+									disabled: !isOnline,
 									onPress: async () => {
 										const result = await runWithLoading(async () => {
 											const { authedSdkClient } = await auth.getSdkClients()
@@ -570,7 +570,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_file_versioning",
 									subTitle: "tbd_file_versioning_description",
-									disabled: !hasInternet,
+									disabled: !isOnline,
 									rightItem: {
 										type: "switch",
 										value: accountQuery.data.versioningEnabled,
@@ -595,7 +595,7 @@ const Account = memo(() => {
 									icon: "time-outline",
 									title: "tbd_login_alerts",
 									subTitle: "tbd_login_alerts_description",
-									disabled: !hasInternet,
+									disabled: !isOnline,
 									rightItem: {
 										type: "switch",
 										value: accountQuery.data.loginAlertsEnabled,
@@ -673,7 +673,7 @@ const Account = memo(() => {
 										title: "tbd_delete_versioned_files",
 										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.versionedStorage)),
-										disabled: !hasInternet,
+										disabled: !isOnline,
 										onPress: async () => {
 											if (accountQuery.data.versionedStorage <= 0) {
 												return
@@ -742,7 +742,7 @@ const Account = memo(() => {
 										title: "tbd_delete_all_files_and_directories",
 										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.storageUsed)),
-										disabled: !hasInternet,
+										disabled: !isOnline,
 										onPress: async () => {
 											if (accountQuery.data.storageUsed <= 0) {
 												return
@@ -811,7 +811,7 @@ const Account = memo(() => {
 										title: "tbd_request_account_deletion",
 										titleClassName: "text-red-500",
 										subTitle: "tbd_request_account_deletion_description",
-										disabled: !hasInternet,
+										disabled: !isOnline,
 										onPress: async () => {
 											const promptResult = await run(async () => {
 												return await prompts.alert({
