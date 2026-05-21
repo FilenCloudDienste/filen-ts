@@ -5,7 +5,7 @@ import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
 import withOPSQLiteAppGroup from "./plugins/withOpSqliteAppGroup"
 
-const VERSION: string = "3.1.0"
+const VERSION: string = "4.0.1"
 
 const APPLE_TEAM_ID: string = "7YTW5D2K7P"
 const IOS_APP_GROUP_ID: string = "group.io.filen.app"
@@ -16,7 +16,7 @@ const ANDROID_COMPILE_SDK_VERSION: number = 36
 const ANDROID_BUILD_TOOLS_VERSION: string = "36.0.0"
 const IOS_DEPLOYMENT_TARGET: string = "26.0"
 const NAME: string = "Filen"
-const IDENTIFIER: string = "com.anonymous.filenmobile" // "io.filen.app"
+const IDENTIFIER: string = "io.filen.app"
 
 function semverToNumber(version: string): number {
 	const parts = version.replace(/^v/, "").split(".").map(Number)
