@@ -116,6 +116,13 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const driveItems = driveItemsQuery.status === "success" ? driveItemsQuery.data : []
 
 	const parent: AnyNormalDir | null = (() => {
+		// If we're at the root of the drive and we have the root uuid in cache, we can return a AnyNormalDir for the root directory
+		if (drivePath.type === "drive" && drivePath.uuid === null && cache.rootUuid) {
+			return new AnyNormalDir.Root({
+				uuid: cache.rootUuid
+			})
+		}
+
 		// We can check if the parent uuid of the current drive path is in the anyNormalDir cache
 		// If it is, it's a directory that belongs to the user (not shared in)
 		const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
