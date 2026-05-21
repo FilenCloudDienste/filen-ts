@@ -1,0 +1,9 @@
+[submodule "packages/filen-mobile/filen-ios-file-provider"]
+	path = packages/filen-mobile/filen-ios-file-provider
+	url = https://github.com/FilenCloudDienste/filen-ios-file-provider.git
+[submodule "packages/filen-mobile/filen-android-documents-provider"]
+	path = packages/filen-mobile/filen-android-documents-provider
+	url = https://github.com/FilenCloudDienste/filen-android-documents-provider.git
+[submodule "packages/filen-mobile/filen-rs"]
+	path = packages/filen-mobile/filen-rs
+	url = https://github.com/FilenCloudDienste/filen-rs.git
