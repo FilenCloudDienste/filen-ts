@@ -63,6 +63,4 @@ const AnimatedProgressBar = memo(() => {
 	)
 })
 
-AnimatedProgressBar.displayName = "AnimatedProgressBar"
-
 export default AnimatedProgressBar

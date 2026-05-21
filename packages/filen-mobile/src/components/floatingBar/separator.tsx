@@ -12,6 +12,4 @@ const Separator = memo(() => {
 	)
 })
 
-Separator.displayName = "FloatingBarSeparator"
-
 export default Separator
