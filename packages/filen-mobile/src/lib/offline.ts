@@ -2244,22 +2244,25 @@ export class Offline {
 		const fileEntry = index.files[item.data.uuid]
 
 		if (
-			!fileEntry ||
-			(fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile" && fileEntry.item.type !== "sharedRootFile")
+			fileEntry &&
+			(fileEntry.item.type === "file" || fileEntry.item.type === "sharedFile" || fileEntry.item.type === "sharedRootFile")
 		) {
-			return null
+			const file = new FileSystem.File(
+				FileSystem.Paths.join(FILES_DIRECTORY.uri, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
+			)
+
+			if (file.exists) {
+				this.getLocalFileCache.set(item.data.uuid, file)
+
+				return file
+			}
 		}
 
-		const file = new FileSystem.File(
-			FileSystem.Paths.join(FILES_DIRECTORY.uri, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
-		)
-
-		if (file.exists) {
-			this.getLocalFileCache.set(item.data.uuid, file)
-
-			return file
-		}
-
+		// Standalone lookup missed (either no index entry or the file isn't on
+		// disk at the standalone path). Fall through to the directory-tree search
+		// below — the item may live inside a marked-offline directory rather than
+		// marked standalone, and `buildUuidToTopLevelIndex` includes the uuids of
+		// every nested file entry across all marked-offline directories.
 		const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
 		const topLevelUuid = uuidToTopLevel.get(item.data.uuid)
 
