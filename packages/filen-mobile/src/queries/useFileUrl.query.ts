@@ -3,11 +3,12 @@ import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import { AnyFile } from "@filen/sdk-rs"
 import cache from "@/lib/cache"
-import fileCache from "@/lib/fileCache"
 import useHttpStore from "@/stores/useHttp.store"
 import { normalizeFilePathForExpo } from "@/lib/utils"
 import type { DriveItemFileExtracted } from "@/types"
 import type { FileSource } from "@/queries/fileSource"
+import offline from "@/lib/offline"
+import fileCache from "@/lib/fileCache"
 
 export const BASE_QUERY_KEY = "useFileUrlQuery"
 
@@ -47,13 +48,21 @@ export async function fetchData(
 		return null
 	}
 
-	// Check offline store + file cache in one non-fetching call. Both surface
-	// streaming-style previews (image/video/audio) from local disk without
-	// involving the HTTP provider, which would otherwise stall offline.
-	const cachedUri = await fileCache.getCachedUri({ type: "drive", data: item })
+	const fileCacheFile = await fileCache.get({
+		item: {
+			type: "drive",
+			data: item
+		}
+	})
 
-	if (cachedUri) {
-		return normalizeFilePathForExpo(cachedUri)
+	if (fileCacheFile?.exists) {
+		return normalizeFilePathForExpo(fileCacheFile.uri)
+	}
+
+	const offlineFile = await offline.getLocalFile(item)
+
+	if (offlineFile?.exists) {
+		return normalizeFilePathForExpo(offlineFile.uri)
 	}
 
 	// No local copy. If we're offline, bail with null — the HTTP provider URL
@@ -82,6 +91,7 @@ export function useFileUrlQuery(
 		...DEFAULT_QUERY_OPTIONS,
 		// Evict immediately when the last subscriber unmounts. URLs are bound to the localhost HTTP provider's session-scoped port, so re-deriving on next mount is the correct behavior anyway.
 		gcTime: 0,
+		staleTime: 0,
 		// Override the global "offlineFirst" default — this query's fetchData is
 		// pure-local computation (offline store / file cache / HTTP-provider URL
 		// resolution), so it must never be paused by TanStack's offline gating.
