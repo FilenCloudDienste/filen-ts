@@ -13,7 +13,7 @@ import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import useNetInfo from "@/hooks/useNetInfo"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -44,12 +44,12 @@ const Register = memo(() => {
 	const [email, setEmail] = useState<string>("")
 	const [password, setPassword] = useState<string>("")
 	const [confirmPassword, setConfirmPassword] = useState<string>("")
-	const { hasInternet } = useNetInfo()
+	const isOnline = useIsOnline()
 
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const emailValid = isValidEmail(email)
 	const passwordsMatch = password.length > 0 && password === confirmPassword
-	const canSubmit = emailValid && passwordsMatch && passwordStrength !== null && hasInternet
+	const canSubmit = emailValid && passwordsMatch && passwordStrength !== null && isOnline
 
 	const dismiss = (): void => {
 		navigation.getParent()?.goBack()
@@ -82,10 +82,7 @@ const Register = memo(() => {
 	}
 
 	const handleResendConfirmation = async (): Promise<void> => {
-		// Defense in depth: PressableOpacity is gated on hasInternet, but if
-		// it fires through any other path (race during NetInfo flip, keyboard
-		// shortcut, etc.) we still want the SDK call to no-op.
-		if (!hasInternet) {
+		if (!isOnline) {
 			return
 		}
 
@@ -280,8 +277,8 @@ const Register = memo(() => {
 						</PressableOpacity>
 						<PressableOpacity
 							onPress={handleResendConfirmation}
-							enabled={hasInternet}
-							className={cn(!hasInternet && "opacity-50")}
+							enabled={isOnline}
+							className={cn(!isOnline && "opacity-50 pointer-events-none")}
 						>
 							<Text className="text-primary text-sm text-center">tbd_resend_confirmation_email</Text>
 						</PressableOpacity>

@@ -13,7 +13,7 @@ import {
 	type MenuPreviewConfig
 } from "react-native-ios-context-menu"
 import { Image as SwiftUiImage } from "@expo/ui/swift-ui"
-import useNetInfo from "@/hooks/useNetInfo"
+import useIsOnline from "@/hooks/useIsOnline"
 
 export type MenuButton = {
 	onPress?: () => void
@@ -26,13 +26,6 @@ export type MenuButton = {
 	destructive?: boolean
 	hidden?: boolean
 	disabled?: boolean
-	/**
-	 * When true, the button is auto-disabled while the device is offline. This is the
-	 * canonical way for ~15 menu consumers (drive item, note menu, chat list menu,
-	 * file versions, etc.) to mark SDK-touching actions without each one wiring
-	 * useNetInfo individually. The Menu component reads `useNetInfo().hasInternet`
-	 * once and merges this flag into the effective `disabled` value per button.
-	 */
 	requiresOnline?: boolean
 	icon?: Icons
 	title?: string
@@ -572,11 +565,11 @@ const MenuInnerAndroid = memo(({ children, ...props }: MenuProps) => {
 })
 
 const MenuInner = memo(({ children, ...props }: MenuProps) => {
-	const { hasInternet } = useNetInfo()
+	const isOnline = useIsOnline()
 
 	// Apply the per-button requiresOnline gate once; downstream iOS/Android
 	// rendering paths see a fully-resolved `disabled` value per button.
-	const buttons = props.buttons?.map(button => applyOfflineGate(button, hasInternet))
+	const buttons = props.buttons?.map(button => applyOfflineGate(button, isOnline))
 	const effectiveProps: Omit<MenuProps, "children"> = { ...props, buttons }
 
 	if (effectiveProps.disabled) {

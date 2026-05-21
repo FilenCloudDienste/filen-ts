@@ -13,9 +13,9 @@ import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import { useStartScreen, buildStartScreenHref } from "@/lib/startScreen"
 import { unwrapSdkError } from "@/lib/utils"
-import useNetInfo from "@/hooks/useNetInfo"
+import useIsOnline from "@/hooks/useIsOnline"
+import { reloadAppAsync } from "expo"
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -40,19 +40,24 @@ function isTwoFactorRequiredError(error: unknown): boolean {
 }
 
 const Login = memo(() => {
-	const [startScreen] = useStartScreen()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
-
+	const isOnline = useIsOnline()
 	const [email, setEmail] = useState<string>("")
 	const [password, setPassword] = useState<string>("")
-	const { hasInternet } = useNetInfo()
 
-	const canSubmit = isValidEmail(email) && password.length > 0 && hasInternet
+	const canSubmit = isValidEmail(email) && password.length > 0 && isOnline
 
-	const finishLogin = async (): Promise<void> => {
-		const { authedSdkClient } = await auth.getSdkClients()
+	const finishLogin = async () => {
+		const result = await runWithLoading(async () => {
+			await reloadAppAsync()
+		})
 
-		router.replace(buildStartScreenHref(startScreen, authedSdkClient.root().uuid))
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
 	}
 
 	const promptForTwoFactor = async (): Promise<string | null> => {
@@ -139,7 +144,7 @@ const Login = memo(() => {
 		// Defense in depth: PressableOpacity is gated on hasInternet, but if
 		// it fires through any other path (race during NetInfo flip, keyboard
 		// shortcut, etc.) we still want the SDK call to no-op.
-		if (!hasInternet) {
+		if (!isOnline) {
 			return
 		}
 
@@ -271,8 +276,8 @@ const Login = memo(() => {
 						</PressableOpacity>
 						<PressableOpacity
 							onPress={handleForgotPassword}
-							enabled={hasInternet}
-							className={cn(!hasInternet && "opacity-50")}
+							enabled={isOnline}
+							className={cn(!isOnline && "opacity-50 pointer-events-none")}
 						>
 							<Text className="text-primary text-sm text-center">tbd_forgot_password</Text>
 						</PressableOpacity>
