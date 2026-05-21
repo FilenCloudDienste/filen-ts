@@ -244,6 +244,10 @@ const RootLayout = memo(() => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="fileProvider"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="advanced"
 												options={modalOptions}
 											/>

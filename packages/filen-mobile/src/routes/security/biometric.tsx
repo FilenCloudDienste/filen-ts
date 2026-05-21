@@ -14,6 +14,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import useLocalAuthenticationQuery from "@/queries/useLocalAuthentication.query"
 import Text from "@/components/ui/text"
 import { actionSheet } from "@/providers/actionSheet.provider"
+import fileProvider, { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/lib/fileProvider"
 
 export type Biometric =
 	| {
@@ -35,6 +36,10 @@ const BiometricComponent = memo(() => {
 	const [biometric, setBiometric] = useSecureStore<Biometric>("biometric", {
 		enabled: false
 	})
+	const [fileProviderEnabled, setFileProviderEnabled] = useSecureStore<boolean>(
+		FILE_PROVIDER_ENABLED_SECURE_STORE_KEY,
+		false
+	)
 	const localAuthenticationQuery = useLocalAuthenticationQuery()
 
 	return (
@@ -104,6 +109,46 @@ const BiometricComponent = memo(() => {
 													})
 
 													return
+												}
+
+												// If the file/documents provider is on, warn the user
+												// that enabling biometric will disable it. The native
+												// provider extensions read auth.json directly and
+												// bypass the JS biometric gate, so having both on at
+												// the same time creates a false sense of security.
+												if (fileProviderEnabled) {
+													const confirmProviderDisableResult = await run(async () => {
+														return await prompts.alert({
+															title: "tbd_biometric_disables_file_provider_title",
+															message: "tbd_biometric_disables_file_provider_message",
+															okText: "tbd_continue",
+															cancelText: "tbd_cancel"
+														})
+													})
+
+													if (!confirmProviderDisableResult.success) {
+														console.error(confirmProviderDisableResult.error)
+														alerts.error(confirmProviderDisableResult.error)
+
+														return
+													}
+
+													if (confirmProviderDisableResult.data.cancelled) {
+														return
+													}
+
+													const disableProviderResult = await run(async () => {
+														await fileProvider.disable()
+													})
+
+													if (!disableProviderResult.success) {
+														console.error(disableProviderResult.error)
+														alerts.error(disableProviderResult.error)
+
+														return
+													}
+
+													setFileProviderEnabled(false)
 												}
 
 												const fallbackPromptResult = await run(async () => {
