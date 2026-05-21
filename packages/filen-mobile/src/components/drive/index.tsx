@@ -1230,6 +1230,10 @@ const Drive = memo(() => {
 						)
 					}}
 					onRefresh={async () => {
+						if (!onlineManager.isOnline()) {
+							return
+						}
+
 						const result = await run(async () => {
 							return await driveItemsQuery.refetch()
 						})

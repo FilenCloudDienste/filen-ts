@@ -1,4 +1,5 @@
 import { Fragment, useRef, memo } from "react"
+import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
@@ -374,6 +375,10 @@ const Photos = memo(() => {
 								)
 							}}
 							onRefresh={async () => {
+								if (!onlineManager.isOnline()) {
+									return
+								}
+
 								const result = await run(async () => {
 									await driveItemsQuery.refetch()
 								})

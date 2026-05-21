@@ -1,5 +1,6 @@
 import useContactsQuery from "@/queries/useContacts.query"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
+import { onlineManager } from "@tanstack/react-query"
 import { fastLocaleCompare, run, cn } from "@filen/utils"
 import { Fragment, useState, memo, useCallback } from "react"
 import { Platform } from "react-native"
@@ -958,6 +959,10 @@ const Contacts = memo(() => {
 	}
 
 	const onRefresh = async () => {
+		if (!onlineManager.isOnline()) {
+			return
+		}
+
 		const result = await run(async () => {
 			await Promise.all([contactsQuery.refetch(), contactRequestsQuery.refetch()])
 		})

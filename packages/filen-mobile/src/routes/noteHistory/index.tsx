@@ -1,5 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
+import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
 import { deserialize, serialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
@@ -221,6 +222,10 @@ const NoteHistory = memo(() => {
 						paddingBottom: insets.bottom
 					}}
 					onRefresh={async () => {
+						if (!onlineManager.isOnline()) {
+							return
+						}
+
 						const result = await run(async () => {
 							return await noteHistoryQuery.refetch()
 						})
