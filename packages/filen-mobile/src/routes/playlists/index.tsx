@@ -1,4 +1,5 @@
 import { memo, Fragment, useEffect, useCallback } from "react"
+import { onlineManager } from "@tanstack/react-query"
 import Header from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import VirtualList from "@/components/ui/virtualList"
@@ -562,6 +563,10 @@ const Playlists = memo(() => {
 						paddingBottom: 300
 					}}
 					onRefresh={async () => {
+						if (!onlineManager.isOnline()) {
+							return
+						}
+
 						const result = await run(async () => {
 							return await playlistsQuery.refetch()
 						})

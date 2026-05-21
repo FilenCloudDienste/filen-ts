@@ -1,4 +1,5 @@
 import { Fragment, useState, memo, useCallback } from "react"
+import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
@@ -1161,6 +1162,10 @@ const Notes = memo(() => {
 	}
 
 	const onRefresh = async () => {
+		if (!onlineManager.isOnline()) {
+			return
+		}
+
 		const result = await run(async () => {
 			await notesQuery.refetch()
 		})

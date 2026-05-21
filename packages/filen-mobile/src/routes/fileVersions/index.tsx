@@ -1,5 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
+import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, useNavigation } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
@@ -288,6 +289,10 @@ const FileVersions = memo(() => {
 						paddingBottom: insets.bottom
 					}}
 					onRefresh={async () => {
+						if (!onlineManager.isOnline()) {
+							return
+						}
+
 						const result = await run(async () => {
 							return await driveItemVersionsQuery.refetch()
 						})

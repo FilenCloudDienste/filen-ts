@@ -276,6 +276,10 @@ const Events = memo(() => {
 						paddingBottom: insets.bottom
 					}}
 					onRefresh={async () => {
+						if (!onlineManager.isOnline()) {
+							return
+						}
+
 						const result = await run(async () => {
 							setHasMore(true)
 

@@ -9,6 +9,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
 import { memo } from "react"
 import { Platform } from "react-native"
+import { onlineManager } from "@tanstack/react-query"
 
 const List = memo(({ searchQuery }: { searchQuery: string }) => {
 	const chatsQuery = useChatsQuery()
@@ -66,6 +67,10 @@ const List = memo(({ searchQuery }: { searchQuery: string }) => {
 	})()
 
 	const onRefresh = async () => {
+		if (!onlineManager.isOnline()) {
+			return
+		}
+
 		const result = await run(async () => {
 			await chatsQuery.refetch()
 		})

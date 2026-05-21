@@ -17,6 +17,7 @@ import { run } from "@filen/utils"
 import chats from "@/lib/chats"
 import useViewLayout from "@/hooks/useViewLayout"
 import alerts from "@/lib/alerts"
+import { onlineManager } from "@tanstack/react-query"
 
 const Messages = memo(({ chat }: { chat: TChat }) => {
 	const insets = useSafeAreaInsets()
@@ -118,6 +119,14 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 						messages.length === 0 ||
 						!hasMoreRef.current
 					) {
+						return
+					}
+
+					// Inverted list: onEndReached fires when the user scrolls UP
+					// to load older messages. chats.listBefore is an SDK call,
+					// so bail silently offline rather than triggering throwOnError
+					// + the spinner hang it implies.
+					if (!onlineManager.isOnline()) {
 						return
 					}
 
