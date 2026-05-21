@@ -415,6 +415,13 @@ const More = memo(() => {
 								}
 							},
 							{
+								icon: "folder-open-outline",
+								title: Platform.OS === "ios" ? "tbd_file_provider" : "tbd_documents_provider",
+								onPress: () => {
+									router.push("/fileProvider")
+								}
+							},
+							{
 								icon: "color-palette-outline",
 								title: "tbd_appearance",
 								onPress: () => {

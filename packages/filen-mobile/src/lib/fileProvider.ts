@@ -2,6 +2,12 @@ import * as FileSystem from "expo-file-system"
 import { Platform } from "react-native"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import auth from "@/lib/auth"
+import secureStore from "@/lib/secureStore"
+
+// secureStore key mirroring auth.json's `providerEnabled` field for fast,
+// reactive UI reads via useSecureStore. enable() / disable() keep it in sync;
+// the source of truth for the native extensions is still auth.json itself.
+export const FILE_PROVIDER_ENABLED_SECURE_STORE_KEY = "fileProviderEnabled"
 
 // Legacy TS SDK config format
 export type TsSdkConfig = {
@@ -62,11 +68,11 @@ class FileProvider {
 	}
 
 	public async disable(): Promise<void> {
-		if (!this.authFile.exists) {
-			return
+		if (this.authFile.exists) {
+			this.authFile.delete()
 		}
 
-		this.authFile.delete()
+		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)
 	}
 
 	public async enable(): Promise<void> {
@@ -92,6 +98,8 @@ class FileProvider {
 				userId: Number(isAuthed.stringifiedClient.userId)
 			}
 		} satisfies AuthFileSchema)
+
+		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, true)
 	}
 
 	private async write(data: AuthFileSchema): Promise<void> {
