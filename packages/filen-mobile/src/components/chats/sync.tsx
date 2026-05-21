@@ -236,6 +236,18 @@ export const SyncHost = memo(() => {
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
 				sync.syncNow()
+
+				return
+			}
+
+			// Active transition: syncNow is fire-and-forget and bails silently
+			// on the offline gate, so a message sent offline before a background
+			// trip never retries on resume unless the user sends another. Hit
+			// forceSync() on every active transition so inflight is flushed as
+			// soon as the runtime is actually online — covers reopen-after-offline
+			// AND the close-and-reopen scenario.
+			if (nextAppState === "active") {
+				sync.forceSync().catch(console.error)
 			}
 		})
 
