@@ -3,7 +3,15 @@ import path from "node:path"
 
 export default defineConfig({
 	test: {
-		environment: "node"
+		environment: "node",
+		exclude: [
+			"**/node_modules/**",
+			"**/dist/**",
+			"**/.{idea,git,cache,output,temp}/**",
+			"filen-rs/**",
+			"filen-ios-file-provider/**",
+			"filen-android-documents-provider/**"
+		]
 	},
 	resolve: {
 		alias: {

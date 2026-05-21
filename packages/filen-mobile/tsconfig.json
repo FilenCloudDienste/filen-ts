@@ -68,5 +68,12 @@
 		"modules/**/*.tsx",
 		"modules/**/*.d.ts"
 	],
-	"exclude": ["android/**/*", "ios/**/*", ".expo/**/*"]
+	"exclude": [
+		"android/**/*",
+		"ios/**/*",
+		".expo/**/*",
+		"filen-rs/**/*",
+		"filen-ios-file-provider/**/*",
+		"filen-android-documents-provider/**/*"
+	]
 }
