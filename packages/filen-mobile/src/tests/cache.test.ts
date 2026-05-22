@@ -32,6 +32,35 @@ vi.mock("@/lib/utils", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
+// Stub SDK runtime values referenced by cache helpers. cache.ts now imports
+// AnyNormalDir + AnyDirWithContext as runtime values for the cacheNewNormalDir
+// helper — without this mock the real SDK module would load its WASM bridge,
+// which references `self` (undefined in node).
+vi.mock("@filen/sdk-rs", () => {
+	class StubDir {
+		public readonly tag = "Dir"
+		public readonly inner: [unknown]
+
+		public constructor(dir: unknown) {
+			this.inner = [dir]
+		}
+	}
+
+	class StubNormal {
+		public readonly tag = "Normal"
+		public readonly inner: [unknown]
+
+		public constructor(dir: unknown) {
+			this.inner = [dir]
+		}
+	}
+
+	return {
+		AnyNormalDir: { Dir: StubDir },
+		AnyDirWithContext: { Normal: StubNormal }
+	}
+})
+
 import { PersistentMap, GLOBAL_PREFIX } from "@/lib/cache"
 import { serialize, deserialize } from "@/lib/serializer"
 

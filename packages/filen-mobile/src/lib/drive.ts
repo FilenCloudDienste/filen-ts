@@ -30,7 +30,7 @@ import {
 	normalizeFilePathForSdk,
 	unwrapSdkError
 } from "@/lib/utils"
-import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate, driveItemsQueryGet } from "@/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/queries/useDriveItemVersions.query"
 import cache from "@/lib/cache"
 import { driveItemPublicLinkStatusQueryUpdate } from "@/queries/useDriveItemPublicLinkStatus.query"
@@ -71,6 +71,13 @@ class Drive {
 
 		if (item.type !== "directory" && item.type !== "file") {
 			throw new Error("Invalid item type")
+		}
+
+		// Sync persistent caches — `favorited` flag changed on the raw Dir/File.
+		if (item.type === "directory" && modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
+			cache.cacheNewNormalDir(modifiedItem.inner[0], item)
+		} else if (item.type === "file" && modifiedItem.tag === NonRootNormalItem_Tags.File) {
+			cache.cacheNewFile(modifiedItem.inner[0], item)
 		}
 
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
@@ -169,6 +176,13 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
+		// Sync persistent caches — name (decryptedMeta) changed on the raw Dir/File.
+		if (item.type === "file" && "region" in modifiedItem) {
+			cache.cacheNewFile(modifiedItem, item)
+		} else if (item.type === "directory" && !("region" in modifiedItem)) {
+			cache.cacheNewNormalDir(modifiedItem, item)
+		}
+
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
@@ -208,6 +222,8 @@ class Drive {
 					: undefined
 			)
 		}
+
+		cache.forgetItem(item.data.uuid)
 
 		if (unwrappedParentUuidPrevious) {
 			driveItemsQueryUpdateGlobal({
@@ -251,6 +267,14 @@ class Drive {
 			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
 		} else {
 			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
+		}
+
+		// Sync persistent caches — `trash` flag flipped on the raw Dir/File. Item
+		// still exists, just lives in the trash listing now.
+		if (item.type === "file" && "region" in modifiedItem) {
+			cache.cacheNewFile(modifiedItem, item)
+		} else if (item.type === "directory" && !("region" in modifiedItem)) {
+			cache.cacheNewNormalDir(modifiedItem, item)
 		}
 
 		if (unwrappedParentUuidPrevious) {
@@ -306,6 +330,9 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
+		// Sync persistent caches — `color` changed on the raw Dir.
+		cache.cacheNewNormalDir(modifiedDir, item)
+
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
@@ -339,6 +366,9 @@ class Drive {
 		if (item.type !== "file") {
 			throw new Error("Invalid item type")
 		}
+
+		// Sync persistent caches — file size / chunks changed after version restore.
+		cache.cacheNewFile(modifiedFile, item)
 
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
@@ -374,6 +404,21 @@ class Drive {
 					}
 				: undefined
 		)
+
+		// Forget every previously-trashed item so cache.uuidToAnyDriveItem doesn't
+		// retain zombies. Read the trash listing before clearing it.
+		const trashed = driveItemsQueryGet({
+			path: {
+				type: "trash",
+				uuid: null
+			}
+		})
+
+		if (trashed) {
+			for (const item of trashed) {
+				cache.forgetItem(item.data.uuid)
+			}
+		}
 
 		driveItemsQueryUpdate({
 			params: {
@@ -446,6 +491,13 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
+		// Refresh persistent caches with the restored item (its trash flag flipped).
+		if (item.type === "file" && "region" in modifiedItem) {
+			cache.cacheNewFile(modifiedItem, item)
+		} else if (item.type === "directory" && !("region" in modifiedItem)) {
+			cache.cacheNewNormalDir(modifiedItem, item)
+		}
+
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
@@ -493,6 +545,9 @@ class Drive {
 					}
 				: undefined
 		)
+
+		// Item leaves the user's sharedIn/sharedOut view entirely — forget caches.
+		cache.forgetItem(item.data.uuid)
 
 		if (parentUuid) {
 			driveItemsQueryUpdate({
@@ -642,6 +697,8 @@ class Drive {
 			throw new Error("Invalid item type")
 		}
 
+		cache.cacheNewNormalDir(createdDir, createdDriveItem)
+
 		driveItemsQueryUpdate({
 			params: {
 				path: {
@@ -736,6 +793,13 @@ class Drive {
 
 		if (item.type !== "directory" && item.type !== "file") {
 			throw new Error("Invalid item type")
+		}
+
+		// Refresh persistent caches with the moved item (its parent changed).
+		if (item.type === "file" && "region" in modifiedItem) {
+			cache.cacheNewFile(modifiedItem, item)
+		} else if (item.type === "directory" && !("region" in modifiedItem)) {
+			cache.cacheNewNormalDir(modifiedItem, item)
 		}
 
 		if (unwrappedParentUuidPrevious) {
@@ -865,6 +929,13 @@ class Drive {
 
 		if (item.type !== "directory" && item.type !== "file") {
 			throw new Error("Invalid item type")
+		}
+
+		// Sync persistent caches — timestamps changed on the raw Dir/File.
+		if (item.type === "file" && "region" in modifiedItem) {
+			cache.cacheNewFile(modifiedItem, item)
+		} else if (item.type === "directory" && !("region" in modifiedItem)) {
+			cache.cacheNewNormalDir(modifiedItem, item)
 		}
 
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)

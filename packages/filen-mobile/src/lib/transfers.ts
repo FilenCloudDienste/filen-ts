@@ -589,6 +589,20 @@ class Transfers {
 		const unwrappedFileMeta = unwrapFileMeta(result.data)
 
 		if (!unwrappedFileMeta.shared) {
+			const driveItem = {
+				type: "file" as const,
+				data: {
+					...unwrappedFileMeta.file,
+					decryptedMeta: unwrappedFileMeta.meta
+				}
+			}
+
+			// Mirror the new file into the PersistentMap caches so downstream
+			// reads (useFileUrlQuery, drive item info, etc.) work without a
+			// manual refetch. Matches what useDriveItems.query.ts:fetchData()
+			// does inline on each fetch.
+			cache.cacheNewFile(result.data, driveItem)
+
 			driveItemsQueryUpdate({
 				params: {
 					path: {
@@ -602,13 +616,7 @@ class Transfers {
 							item.data.uuid !== result.data.uuid &&
 							item.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
 					),
-					{
-						type: "file",
-						data: {
-							...unwrappedFileMeta.file,
-							decryptedMeta: unwrappedFileMeta.meta
-						}
-					}
+					driveItem
 				]
 			})
 		}

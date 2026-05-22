@@ -1,4 +1,14 @@
-import type { Note, Chat, AnyNormalDir, AnySharedDirWithContext, AnyDirWithContext, File, AnyLinkedDir, DirPublicLink } from "@filen/sdk-rs"
+import {
+	AnyNormalDir,
+	AnyDirWithContext,
+	type Note,
+	type Chat,
+	type AnySharedDirWithContext,
+	type File,
+	type AnyLinkedDir,
+	type DirPublicLink,
+	type Dir
+} from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -432,6 +442,70 @@ class Cache {
 		if (!this.persisting) {
 			this.persistNow()
 		}
+	}
+
+	/**
+	 * Mirror a newly-known file into every persistent cache that downstream
+	 * code reads from. Call after any optimistic `driveItemsQueryUpdate()` that
+	 * adds a file (upload completion, socket FileNew/FileRestore/FileArchiveRestored,
+	 * move-to-destination, etc.). The reference implementation that this mirrors
+	 * lives inline in `src/queries/useDriveItems.query.ts:fetchData()`.
+	 */
+	public cacheNewFile(file: File, driveItem: Extract<DriveItem, { type: "file" }>): void {
+		this.uuidToAnyDriveItem.set(file.uuid, driveItem)
+		this.fileUuidToNormalFile.set(file.uuid, file)
+	}
+
+	/**
+	 * Mirror a newly-known (own / non-shared) directory into every persistent
+	 * cache. Use after any optimistic add of a directory to the TanStack listing
+	 * (createDirectory, socket FolderSubCreated/FolderRestore, move-to-destination).
+	 */
+	public cacheNewNormalDir(dir: Dir, driveItem: Extract<DriveItem, { type: "directory" }>): void {
+		this.uuidToAnyDriveItem.set(dir.uuid, driveItem)
+
+		if (driveItem.data.decryptedMeta?.name) {
+			this.directoryUuidToName.set(dir.uuid, driveItem.data.decryptedMeta.name)
+		}
+
+		const normalDir = new AnyNormalDir.Dir(dir)
+
+		this.directoryUuidToAnyNormalDir.set(dir.uuid, normalDir)
+		this.directoryUuidToAnyDirWithContext.set(dir.uuid, new AnyDirWithContext.Normal(normalDir))
+	}
+
+	/**
+	 * Refresh the cached value for an item that already exists in the persistent
+	 * caches. Use after any in-place mutation (rename / favorite / color /
+	 * timestamps / public-link toggle / version restore / metadata-changed event).
+	 * For files, pass the updated raw SDK `File` if available so subsequent socket
+	 * reads of `fileUuidToNormalFile` see the new shape.
+	 */
+	public refreshCachedItem(driveItem: DriveItem, file?: File): void {
+		this.uuidToAnyDriveItem.set(driveItem.data.uuid, driveItem)
+
+		if (file && (driveItem.type === "file" || driveItem.type === "sharedFile" || driveItem.type === "sharedRootFile")) {
+			this.fileUuidToNormalFile.set(file.uuid, file)
+		}
+
+		if (driveItem.type === "directory" && driveItem.data.decryptedMeta?.name) {
+			this.directoryUuidToName.set(driveItem.data.uuid, driveItem.data.decryptedMeta.name)
+		}
+	}
+
+	/**
+	 * Forget every persistent-cache entry for a uuid. Use after a permanent
+	 * delete (FileDeletedPermanent / FolderDeletedPermanent, deletePermanently,
+	 * emptyTrash). Do NOT use for trash/archive — the item still exists, just
+	 * lives in a different listing.
+	 */
+	public forgetItem(uuid: string): void {
+		this.uuidToAnyDriveItem.delete(uuid)
+		this.fileUuidToNormalFile.delete(uuid)
+		this.directoryUuidToName.delete(uuid)
+		this.directoryUuidToAnyNormalDir.delete(uuid)
+		this.directoryUuidToAnyDirWithContext.delete(uuid)
+		this.directoryUuidToAnySharedDirWithContext.delete(uuid)
 	}
 
 	public clear(): void {
