@@ -17,14 +17,39 @@ export type ChatSelectionFlags = {
 	 * leave; owners delete).
 	 */
 	selfIsParticipantNotOwnerOfEvery: boolean
+	/**
+	 * True iff any selected chat has at least one unread message from someone
+	 * other than the current user and isn't muted. Computed from `lastFocus`
+	 * vs. `lastMessage.sentTimestamp` — the same predicate
+	 * `useChatUnreadCount` uses, but at the Chat level (no per-chat message
+	 * query needed). Gates the bulk Mark-as-read action.
+	 */
+	includesUnread: boolean
 }
 
 export const EMPTY_CHAT_FLAGS: ChatSelectionFlags = Object.freeze({
 	count: 0,
 	includesMuted: false,
 	everyOwnedBySelf: false,
-	selfIsParticipantNotOwnerOfEvery: false
+	selfIsParticipantNotOwnerOfEvery: false,
+	includesUnread: false
 }) as ChatSelectionFlags
+
+export function chatHasUnread(c: Chat, userId: bigint): boolean {
+	if (c.muted) {
+		return false
+	}
+
+	if (!c.lastMessage || !c.lastFocus) {
+		return false
+	}
+
+	if (c.lastMessage.inner.senderId === userId) {
+		return false
+	}
+
+	return c.lastMessage.sentTimestamp > c.lastFocus
+}
 
 export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigint | undefined): ChatSelectionFlags {
 	if (chats.length === 0 || userId === undefined) {
@@ -34,6 +59,7 @@ export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigi
 	let includesMuted = false
 	let everyOwnedBySelf = true
 	let selfIsParticipantNotOwnerOfEvery = true
+	let includesUnread = false
 
 	for (let i = 0; i < chats.length; i++) {
 		const c = chats[i]!
@@ -52,12 +78,17 @@ export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigi
 		if (isOwner || !isParticipant) {
 			selfIsParticipantNotOwnerOfEvery = false
 		}
+
+		if (chatHasUnread(c, userId)) {
+			includesUnread = true
+		}
 	}
 
 	return {
 		count: chats.length,
 		includesMuted,
 		everyOwnedBySelf,
-		selfIsParticipantNotOwnerOfEvery
+		selfIsParticipantNotOwnerOfEvery,
+		includesUnread
 	}
 }

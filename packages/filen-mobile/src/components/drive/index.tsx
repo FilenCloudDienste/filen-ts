@@ -40,6 +40,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { onlineManager } from "@tanstack/react-query"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
+import { downloadDriveItemToDevice } from "@/lib/driveDownload"
 
 function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
@@ -789,6 +790,36 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					}
 				})
 			} else {
+				// Download to device — applies to every read-capable variant
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "recents" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedIn" ||
+					drivePath.type === "sharedOut" ||
+					drivePath.type === "links"
+				) {
+					menuButtons.push({
+						id: "bulkDownload",
+						title: "tbd_download_selected",
+						icon: "archive",
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: async item => {
+									const result = await downloadDriveItemToDevice({ item })
+
+									if (!result.success) {
+										throw result.error
+									}
+								}
+							})
+						}
+					})
+				}
+
 				// Favorite/Unfavorite — applies to variants where items carry a favorited bit
 				if (
 					drivePath.type === "drive" ||

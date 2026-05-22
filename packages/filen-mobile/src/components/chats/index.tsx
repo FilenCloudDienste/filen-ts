@@ -15,7 +15,7 @@ import alerts from "@/lib/alerts"
 import type { MenuButton } from "@/components/ui/menu"
 import { selectContacts } from "@/routes/contacts"
 import { runBulk } from "@/lib/bulkOps"
-import { aggregateChatSelectionFlags } from "@/lib/chatSelectors"
+import { aggregateChatSelectionFlags, chatHasUnread } from "@/lib/chatSelectors"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const stringigiedClient = useStringifiedClient()
@@ -112,6 +112,29 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		}
 
 		if (selectedChats.length > 0) {
+			if (chatFlags.includesUnread) {
+				const unreadChats = selectedChats.filter(c => chatHasUnread(c, stringigiedClient?.userId ?? 0n))
+
+				menuButtons.push({
+					id: "bulkMarkAsRead",
+					requiresOnline: true,
+					title: "tbd_mark_as_read",
+					icon: "select",
+					onPress: async () => {
+						// Mirror the single-item path in chats/list/chat/menu.tsx — call
+						// both markRead AND updateLastFocusTimesNow per chat. Only the
+						// chats with actual unread go through to avoid no-op SDK calls.
+						await runBulk({
+							items: unreadChats,
+							clearSelection: () => useChatsStore.getState().clearSelectedChats(),
+							op: async chat => {
+								await Promise.all([chatsLib.markRead({ chat }), chatsLib.updateLastFocusTimesNow({ chats: [chat] })])
+							}
+						})
+					}
+				})
+			}
+
 			menuButtons.push({
 				id: "bulkMute",
 				requiresOnline: true,
