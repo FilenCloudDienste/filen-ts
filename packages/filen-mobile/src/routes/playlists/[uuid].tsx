@@ -1,10 +1,10 @@
-import { memo, Fragment } from "react"
-import Header from "@/components/ui/header"
+import { memo, Fragment, useCallback } from "react"
+import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import ListEmpty from "@/components/ui/listEmpty"
-import { router, useLocalSearchParams } from "expo-router"
+import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
 import usePlaylistsQuery from "@/queries/usePlaylists.query"
 import { run, formatBytes, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -23,11 +23,19 @@ import prompts from "@/lib/prompts"
 import type { MenuButton } from "@/components/ui/menu"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { selectPlaylists } from "@/routes/playlists"
+import usePlaylistTracksStore from "@/stores/usePlaylistTracks.store"
+import { useShallow } from "zustand/shallow"
+import { runBulk } from "@/lib/bulkOps"
+import { Checkbox } from "@/components/ui/checkbox"
+import { AnimatedView } from "@/components/ui/animated"
+import { FadeIn, FadeOut } from "react-native-reanimated"
 
 const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][number]; playlist: PlaylistWithItems }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const drag = useReorderableDrag()
 	const { queueItem } = useAudioQueue()
+	const isSelected = usePlaylistTracksStore(useShallow(state => state.selectedTracks.some(t => t.uuid === track.uuid)))
+	const areTracksSelected = usePlaylistTracksStore(useShallow(state => state.selectedTracks.length > 0))
 
 	const isCurrent = !!queueItem && track.uuid === queueItem.item.data.uuid
 
@@ -40,11 +48,23 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 
 	return (
 		<PressableScale
-			className="bg-transparent flex-row items-center px-4 gap-3"
-			onLongPress={drag}
+			className={cn("bg-transparent flex-row items-center px-4 gap-3", isSelected && "bg-background-tertiary")}
+			onLongPress={areTracksSelected ? undefined : drag}
 			onPress={() => {
+				if (areTracksSelected) {
+					usePlaylistTracksStore.getState().toggleSelectedTrack(track)
+
+					return
+				}
+
 				actionSheet.show({
 					buttons: [
+						{
+							title: "tbd_select",
+							onPress: () => {
+								usePlaylistTracksStore.getState().toggleSelectedTrack(track)
+							}
+						},
 						{
 							title: "tbd_play",
 							onPress: async () => {
@@ -190,6 +210,15 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 				})
 			}}
 		>
+			{areTracksSelected && (
+				<AnimatedView
+					className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
+					entering={FadeIn}
+					exiting={FadeOut}
+				>
+					<Checkbox value={isSelected} />
+				</AnimatedView>
+			)}
 			{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureBase64 ? (
 				<Image
 					className={cn(
@@ -240,9 +269,20 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 const Playlist = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const selectedTracks = usePlaylistTracksStore(useShallow(state => state.selectedTracks))
 	const { uuid } = useLocalSearchParams<{
 		uuid?: string
 	}>()
+
+	useFocusEffect(
+		useCallback(() => {
+			usePlaylistTracksStore.getState().clearSelectedTracks()
+
+			return () => {
+				usePlaylistTracksStore.getState().clearSelectedTracks()
+			}
+		}, [])
+	)
 
 	const playlistsQuery = usePlaylistsQuery({
 		enabled: false
@@ -254,10 +294,86 @@ const Playlist = memo(() => {
 		return null
 	}
 
+	const tracksInSelectionMode = selectedTracks.length > 0
+
+	const baseRightMenuButtons: MenuButton[] = []
+
+	if (tracksInSelectionMode) {
+		baseRightMenuButtons.push({
+			id: "selectAllTracks",
+			title: selectedTracks.length === playlist.files.length ? "tbd_deselect_all" : "tbd_select_all",
+			icon: "select",
+			onPress: () => {
+				if (selectedTracks.length === playlist.files.length) {
+					usePlaylistTracksStore.getState().clearSelectedTracks()
+
+					return
+				}
+
+				usePlaylistTracksStore.getState().selectAllTracks(playlist.files)
+			}
+		})
+
+		baseRightMenuButtons.push({
+			id: "bulkAddToQueue",
+			title: "tbd_add_to_queue",
+			icon: "plus",
+			onPress: async () => {
+				const playlistUuid = playlist.uuid
+
+				await runBulk({
+					items: selectedTracks,
+					clearSelection: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
+					op: async track => {
+						await audio.addToQueue({
+							item: {
+								playlistUuid,
+								item: track.item
+							}
+						})
+					}
+				})
+			}
+		})
+
+		baseRightMenuButtons.push({
+			id: "bulkRemoveTracks",
+			title: "tbd_remove_from_playlist",
+			icon: "delete",
+			destructive: true,
+			requiresOnline: true,
+			onPress: async () => {
+				const currentPlaylist = playlist
+				const selectedUuids = new Set(selectedTracks.map(t => t.uuid))
+
+				await runBulk({
+					items: [currentPlaylist],
+					clearSelection: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
+					confirm: {
+						title: "tbd_remove_from_playlist",
+						message: "tbd_are_you_sure_remove_selected_from_playlist",
+						okText: "tbd_remove",
+						cancelText: "tbd_cancel",
+						destructive: true
+					},
+					op: async p => {
+						await audio.savePlaylist({
+							playlist: {
+								...p,
+								files: p.files.filter(f => !selectedUuids.has(f.uuid)),
+								updated: Date.now()
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+
 	return (
 		<Fragment>
 			<Header
-				title={playlist.name}
+				title={tracksInSelectionMode ? `${selectedTracks.length} tbd_selected` : playlist.name}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -265,25 +381,63 @@ const Playlist = memo(() => {
 					ios: undefined,
 					default: bgBackgroundSecondary.backgroundColor as string
 				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "chevron-back-outline",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.back()
+				leftItems={
+					tracksInSelectionMode
+						? ([
+								{
+									type: "button",
+									icon: {
+										name: "close-outline",
+										color: textForeground.color,
+										size: 20
+									},
+									props: {
+										onPress: () => {
+											usePlaylistTracksStore.getState().clearSelectedTracks()
+										}
+									}
 								}
-							}
-						}
-					],
-					default: undefined
-				})}
-				rightItems={[
+							] satisfies HeaderItem[])
+						: Platform.select({
+								ios: [
+									{
+										type: "button",
+										icon: {
+											name: "chevron-back-outline",
+											color: textForeground.color,
+											size: 20
+										},
+										props: {
+											onPress: () => {
+												router.back()
+											}
+										}
+									}
+								],
+								default: undefined
+							})
+				}
+				rightItems={
+					tracksInSelectionMode
+						? [
+								{
+									type: "menu",
+									props: {
+										type: "dropdown",
+										hitSlop: 20,
+										buttons: baseRightMenuButtons
+									},
+									triggerProps: {
+										hitSlop: 20
+									},
+									icon: {
+										name: "ellipsis-horizontal",
+										size: 24,
+										color: textForeground.color
+									}
+								}
+							]
+						: [
 					{
 						type: "menu",
 						props: {

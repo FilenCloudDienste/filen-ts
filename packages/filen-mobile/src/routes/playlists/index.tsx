@@ -1,6 +1,6 @@
 import { memo, Fragment, useEffect, useCallback } from "react"
 import { onlineManager } from "@tanstack/react-query"
-import Header from "@/components/ui/header"
+import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import VirtualList from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -27,6 +27,8 @@ import events from "@/lib/events"
 import usePlaylistsStore from "@/stores/usePlaylists.store"
 import { useShallow } from "zustand/shallow"
 import { Checkbox } from "@/components/ui/checkbox"
+import { runBulk } from "@/lib/bulkOps"
+import type { MenuButton } from "@/components/ui/menu"
 
 export type SelectOptions = {
 	id: string
@@ -81,6 +83,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 	const textForeground = useResolveClassNames("text-foreground")
 	const { queueItem } = useAudioQueue()
 	const isSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.some(p => p.uuid === playlist.uuid)))
+	const arePlaylistsSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.length > 0))
 
 	const isCurrent = !!queueItem && playlist.uuid === queueItem.playlistUuid
 	const disabled =
@@ -93,13 +96,16 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 		}
 
 		if (selectOptions) {
-			usePlaylistsStore.getState().setSelectedPlaylists(prev => {
-				if (prev.some(p => p.uuid === playlist.uuid)) {
-					return prev.filter(p => p.uuid !== playlist.uuid)
-				}
+			usePlaylistsStore.getState().toggleSelectedPlaylist(playlist)
 
-				return [...prev, playlist]
-			})
+			return
+		}
+
+		// In bulk-selection mode (selection started via the actionSheet "Select"
+		// item), a regular tap toggles the row instead of navigating into the
+		// playlist. Matches the Drive / Notes / Chats pattern.
+		if (arePlaylistsSelected) {
+			usePlaylistsStore.getState().toggleSelectedPlaylist(playlist)
 
 			return
 		}
@@ -123,6 +129,12 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 
 				actionSheet.show({
 					buttons: [
+						{
+							title: "tbd_select",
+							onPress: () => {
+								usePlaylistsStore.getState().toggleSelectedPlaylist(playlist)
+							}
+						},
 						{
 							title: "tbd_rename",
 							onPress: async () => {
@@ -404,6 +416,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 const Playlists = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const selectedPlaylists = usePlaylistsStore(useShallow(state => state.selectedPlaylists))
 	const { selectOptions: selectOptionsSerialized } = useLocalSearchParams<{
 		selectOptions?: string
 	}>()
@@ -441,18 +454,178 @@ const Playlists = memo(() => {
 
 	useFocusEffect(
 		useCallback(() => {
-			usePlaylistsStore.getState().setSelectedPlaylists([])
+			usePlaylistsStore.getState().clearSelectedPlaylists()
 
 			return () => {
-				usePlaylistsStore.getState().setSelectedPlaylists([])
+				usePlaylistsStore.getState().clearSelectedPlaylists()
 			}
 		}, [])
 	)
 
+	const allPlaylists =
+		playlistsQuery.status === "success" ? playlistsQuery.data.sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
+
+	const headerLeftItems = ((): HeaderItem[] | undefined => {
+		if (selectedPlaylists.length > 0 && !selectOptions) {
+			return [
+				{
+					type: "button",
+					icon: {
+						name: "close-outline",
+						color: textForeground.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							usePlaylistsStore.getState().clearSelectedPlaylists()
+						}
+					}
+				}
+			]
+		}
+
+		return Platform.select({
+			ios: [
+				{
+					type: "button",
+					icon: {
+						name: "chevron-back-outline",
+						color: textForeground.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							router.back()
+						}
+					}
+				}
+			],
+			default: undefined
+		})
+	})()
+
+	const headerRightItems = ((): HeaderItem[] => {
+		const menuButtons: MenuButton[] = []
+
+		if (selectedPlaylists.length > 0 && !selectOptions) {
+			menuButtons.push({
+				id: "selectAll",
+				title: selectedPlaylists.length === allPlaylists.length ? "tbd_deselect_all" : "tbd_select_all",
+				icon: "select",
+				onPress: () => {
+					if (selectedPlaylists.length === allPlaylists.length) {
+						usePlaylistsStore.getState().clearSelectedPlaylists()
+
+						return
+					}
+
+					usePlaylistsStore.getState().selectAllPlaylists(allPlaylists)
+				}
+			})
+
+			menuButtons.push({
+				id: "bulkDelete",
+				title: "tbd_delete_selected",
+				icon: "delete",
+				destructive: true,
+				requiresOnline: true,
+				onPress: async () => {
+					await runBulk({
+						items: selectedPlaylists,
+						clearSelection: () => usePlaylistsStore.getState().clearSelectedPlaylists(),
+						confirm: {
+							title: "tbd_delete_selected",
+							message: "tbd_delete_selected_playlists_confirm",
+							okText: "tbd_delete",
+							cancelText: "tbd_cancel",
+							destructive: true
+						},
+						op: playlist => audio.deletePlaylist({ playlist })
+					})
+				}
+			})
+		} else {
+			menuButtons.push({
+				id: "create",
+				icon: "plus",
+				title: "tbd_create_playlist",
+				requiresOnline: true,
+				onPress: async () => {
+					const promptResult = await run(async () => {
+						return await prompts.input({
+							title: "tbd_new_playlist",
+							message: "tbd_enter_playlist_name",
+							placeholder: "tbd_playlist_name_placeholder",
+							cancelText: "tbd_cancel",
+							okText: "tbd_create"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+						return
+					}
+
+					const newName = promptResult.data.value.trim()
+
+					if (newName.length === 0) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await audio.savePlaylist({
+							playlist: {
+								name: newName,
+								files: [],
+								uuid: randomUUID(),
+								updated: Date.now(),
+								created: Date.now()
+							}
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+				}
+			})
+		}
+
+		return [
+			{
+				type: "menu",
+				props: {
+					type: "dropdown",
+					hitSlop: 20,
+					buttons: menuButtons
+				},
+				triggerProps: {
+					hitSlop: 20
+				},
+				icon: {
+					name: "ellipsis-horizontal",
+					size: 24,
+					color: textForeground.color
+				}
+			}
+		]
+	})()
+
+	const title = selectedPlaylists.length > 0 && !selectOptions ? `${selectedPlaylists.length} tbd_selected` : "tbd_playlists"
+
 	return (
 		<Fragment>
 			<Header
-				title="tbd_playlists"
+				title={title}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -460,95 +633,8 @@ const Playlists = memo(() => {
 					ios: undefined,
 					default: bgBackgroundSecondary.backgroundColor as string
 				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "chevron-back-outline",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.back()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
-				rightItems={[
-					{
-						type: "menu",
-						props: {
-							type: "dropdown",
-							hitSlop: 20,
-							buttons: [
-								{
-									id: "create",
-									icon: "plus",
-									title: "tbd_create_playlist",
-									onPress: async () => {
-										const promptResult = await run(async () => {
-											return await prompts.input({
-												title: "tbd_new_playlist",
-												message: "tbd_enter_playlist_name",
-												placeholder: "tbd_playlist_name_placeholder",
-												cancelText: "tbd_cancel",
-												okText: "tbd_create"
-											})
-										})
-
-										if (!promptResult.success) {
-											console.error(promptResult.error)
-											alerts.error(promptResult.error)
-
-											return
-										}
-
-										if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-											return
-										}
-
-										const newName = promptResult.data.value.trim()
-
-										if (newName.length === 0) {
-											return
-										}
-
-										const result = await runWithLoading(async () => {
-											await audio.savePlaylist({
-												playlist: {
-													name: newName,
-													files: [],
-													uuid: randomUUID(),
-													updated: Date.now(),
-													created: Date.now()
-												}
-											})
-										})
-
-										if (!result.success) {
-											console.error(result.error)
-											alerts.error(result.error)
-
-											return
-										}
-									}
-								}
-							]
-						},
-						triggerProps: {
-							hitSlop: 20
-						},
-						icon: {
-							name: "ellipsis-horizontal",
-							size: 24,
-							color: textForeground.color
-						}
-					}
-				]}
+				leftItems={headerLeftItems}
+				rightItems={headerRightItems}
 			/>
 			<SafeAreaView
 				className="bg-background-secondary"
@@ -556,7 +642,7 @@ const Playlists = memo(() => {
 			>
 				<VirtualList
 					className="flex-1 bg-background-secondary"
-					data={playlistsQuery.status === "success" ? playlistsQuery.data.sort((a, b) => b.updated - a.updated) : []}
+					data={allPlaylists}
 					loading={playlistsQuery.status !== "success"}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
