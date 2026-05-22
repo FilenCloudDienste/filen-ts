@@ -339,6 +339,35 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			}
 
 			if (selectedNotes.length > 0) {
+				// Toggles (pin / favorite) sit first — one-tap, most-tapped.
+				menuButtons.push({
+					id: "bulkPin",
+					title: noteFlags.includesPinned ? "tbd_unpin_selected" : "tbd_pin_selected",
+					icon: "pin",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedNotes,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
+						})
+					}
+				})
+
+				menuButtons.push({
+					id: "bulkFavorite",
+					title: noteFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+					icon: "heart",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedNotes,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
+						})
+					}
+				})
+
 				if (noteFlags.hasWriteAccessToAll) {
 					menuButtons.push({
 						id: "type",
@@ -400,34 +429,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						)
 					})
 				}
-
-				menuButtons.push({
-					id: "bulkPin",
-					title: noteFlags.includesPinned ? "tbd_unpin_selected" : "tbd_pin_selected",
-					icon: "pin",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotes,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
-						})
-					}
-				})
-
-				menuButtons.push({
-					id: "bulkFavorite",
-					title: noteFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
-					icon: "heart",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotes,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
-						})
-					}
-				})
 
 				menuButtons.push({
 					id: "bulkTag",
