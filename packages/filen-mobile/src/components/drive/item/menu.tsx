@@ -52,9 +52,11 @@ export function createMenuButtons({
 	// Bulk-selection entry: the row's Menu owns iOS long-press (contextmenu),
 	// so we can't add an onLongPress to the inner Pressable. The Menu's
 	// "Select" item is the entry point — matches the pattern in notes / chats
-	// / file versions / contacts. Suppress in picker mode (driveSelect uses a
-	// different store and entry mechanism).
-	if (!drivePath.selectOptions) {
+	// / file versions / contacts. Suppress in:
+	//  - picker mode (driveSelect uses a different store)
+	//  - photos surface (no selection chrome implemented yet — tapping
+	//    Select here mutates useDriveStore with zero visual feedback)
+	if (!drivePath.selectOptions && drivePath.type !== "photos") {
 		const isSelected = useDriveStore.getState().selectedItems.some(i => i.data.uuid === item.data.uuid)
 
 		menuButtons.push({

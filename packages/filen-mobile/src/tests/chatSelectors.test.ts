@@ -1,12 +1,19 @@
 import { describe, it, expect } from "vitest"
-import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS } from "@/lib/chatSelectors"
-import type { Chat, ChatParticipant } from "@filen/sdk-rs"
+import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS, chatHasUnread } from "@/lib/chatSelectors"
+import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 
 const ME = 100n
 const SOMEONE_ELSE = 200n
 
 function participant(userId: bigint): ChatParticipant {
 	return { userId } as ChatParticipant
+}
+
+function chatMessage(senderId: bigint, sentTimestamp: bigint): ChatMessage {
+	return {
+		sentTimestamp,
+		inner: { senderId }
+	} as unknown as ChatMessage
 }
 
 function chat(overrides: Partial<Chat> = {}): Chat {
@@ -93,5 +100,74 @@ describe("aggregateChatSelectionFlags", () => {
 		expect(flags.includesMuted).toBe(true)
 		expect(flags.everyOwnedBySelf).toBe(false)
 		expect(flags.selfIsParticipantNotOwnerOfEvery).toBe(false)
+	})
+})
+
+describe("chatHasUnread", () => {
+	it("false when chat is muted", () => {
+		const c = chat({
+			muted: true,
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(false)
+	})
+
+	it("false when no lastMessage", () => {
+		const c = chat({ lastFocus: 100n as unknown as Chat["lastFocus"] })
+
+		expect(chatHasUnread(c, ME)).toBe(false)
+	})
+
+	it("false when no lastFocus (never opened)", () => {
+		const c = chat({ lastMessage: chatMessage(SOMEONE_ELSE, 200n) })
+
+		expect(chatHasUnread(c, ME)).toBe(false)
+	})
+
+	it("false when last message is from self", () => {
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(ME, 200n)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(false)
+	})
+
+	it("false when lastMessage is older than lastFocus", () => {
+		const c = chat({
+			lastFocus: 300n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(false)
+	})
+
+	it("true when other user sent a newer message after lastFocus", () => {
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(true)
+	})
+})
+
+describe("aggregateChatSelectionFlags includesUnread", () => {
+	it("false when no chats have unread", () => {
+		const all = chat()
+
+		expect(aggregateChatSelectionFlags([all, all], ME).includesUnread).toBe(false)
+	})
+
+	it("true when any chat has unread", () => {
+		const read = chat()
+		const unread = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(aggregateChatSelectionFlags([read, unread], ME).includesUnread).toBe(true)
 	})
 })
