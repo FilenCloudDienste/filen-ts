@@ -226,7 +226,11 @@ vi.mock("@/queries/useDriveItems.query", () => ({
 
 vi.mock("@/lib/cache", () => ({
 	default: {
-		directoryUuidToAnySharedDirWithContext: new Map()
+		directoryUuidToAnySharedDirWithContext: new Map(),
+		cacheNewFile: vi.fn(),
+		cacheNewNormalDir: vi.fn(),
+		refreshCachedItem: vi.fn(),
+		forgetItem: vi.fn()
 	}
 }))
 

@@ -107,6 +107,13 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 						const unwrappedParentUuid = unwrapParentUuid(inner.file.parent)
 						const unwrappedFileMeta = unwrapFileMeta(inner.file)
+						const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
+
+						// Mirror into persistent caches so useFileUrlQuery /
+						// driveItemInfo / etc. resolve the item without a refetch.
+						if (driveItem.type === "file") {
+							cache.cacheNewFile(inner.file, driveItem)
+						}
 
 						if (unwrappedParentUuid) {
 							driveItemsQueryUpdate({
@@ -123,7 +130,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 											i.data.decryptedMeta?.name.toLowerCase().trim() !==
 												unwrappedFileMeta.meta?.name.toLowerCase().trim()
 									),
-									unwrappedFileIntoDriveItem(unwrappedFileMeta)
+									driveItem
 								]
 							})
 						}
@@ -162,6 +169,16 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 							}
 						}
 
+						// Permanent delete — forget all cache entries. FileArchived
+						// is NOT a forget (item still exists, just moves to the
+						// archive listing — left in cache so it's previewable there).
+						if (
+							eventInner.inner.tag === DriveEvent_Tags.FileDeletedPermanent ||
+							eventInner.inner.tag === DriveEvent_Tags.FolderDeletedPermanent
+						) {
+							cache.forgetItem(inner.uuid)
+						}
+
 						break
 					}
 
@@ -171,19 +188,24 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 						const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
 						if (fromCache) {
-							const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
-							const unwrappedFileMeta = unwrapFileMeta({
+							const updatedRawFile = {
 								...fromCache,
 								meta: inner.metadata
-							})
+							}
+							const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
+							const unwrappedFileMeta = unwrapFileMeta(updatedRawFile)
+							const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
+
+							// Sync persistent caches — file metadata changed; downstream
+							// readers must see the new shape immediately.
+							if (driveItem.type === "file") {
+								cache.cacheNewFile(updatedRawFile, driveItem)
+							}
 
 							if (unwrappedParentUuid) {
 								driveItemsQueryUpdateGlobal({
 									parentUuid: unwrappedParentUuid,
-									updater: prev =>
-										prev.map(i =>
-											i.data.uuid === unwrappedFileMeta.file.uuid ? unwrappedFileIntoDriveItem(unwrappedFileMeta) : i
-										)
+									updater: prev => prev.map(i => (i.data.uuid === unwrappedFileMeta.file.uuid ? driveItem : i))
 								})
 							}
 						}
@@ -200,6 +222,12 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 							const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.parent)
 							const unwrappedParentUuidNew = unwrapParentUuid(inner.file.parent)
 							const unwrappedFileMeta = unwrapFileMeta(inner.file)
+							const driveItem = unwrappedFileIntoDriveItem(unwrappedFileMeta)
+
+							// Sync persistent caches — File.parent changed.
+							if (driveItem.type === "file") {
+								cache.cacheNewFile(inner.file, driveItem)
+							}
 
 							if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
 								driveItemsQueryUpdate({
@@ -226,7 +254,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 												i.data.decryptedMeta?.name.toLowerCase().trim() !==
 													unwrappedFileMeta.meta?.name.toLowerCase().trim()
 										),
-										unwrappedFileIntoDriveItem(unwrappedFileMeta)
+										driveItem
 									]
 								})
 							}
@@ -244,6 +272,12 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 							const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.inner[0].parent)
 							const unwrappedParentUuidNew = unwrapParentUuid(inner.dir.parent)
 							const unwrappedDirMeta = unwrapDirMeta(inner.dir)
+							const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
+
+							// Sync persistent caches — Dir.parent changed.
+							if (driveItem.type === "directory") {
+								cache.cacheNewNormalDir(inner.dir, driveItem)
+							}
 
 							if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
 								driveItemsQueryUpdate({
@@ -270,7 +304,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 												i.data.decryptedMeta?.name.toLowerCase().trim() !==
 													unwrappedDirMeta.meta?.name.toLowerCase().trim()
 										),
-										unwrappedDirIntoDriveItem(unwrappedDirMeta)
+										driveItem
 									]
 								})
 							}
@@ -285,19 +319,23 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 						const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
 						if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
-							const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
-							const unwrappedDirMeta = unwrapDirMeta({
+							const updatedRawDir = {
 								...fromCache.inner[0],
 								meta: inner.meta
-							})
+							}
+							const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+							const unwrappedDirMeta = unwrapDirMeta(updatedRawDir)
+							const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
+
+							// Sync persistent caches — dir metadata (name etc.) changed.
+							if (driveItem.type === "directory") {
+								cache.cacheNewNormalDir(updatedRawDir, driveItem)
+							}
 
 							if (unwrappedParentUuid) {
 								driveItemsQueryUpdateGlobal({
 									parentUuid: unwrappedParentUuid,
-									updater: prev =>
-										prev.map(i =>
-											i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i
-										)
+									updater: prev => prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? driveItem : i))
 								})
 							}
 						}
@@ -425,6 +463,13 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 						const unwrappedParentUuid = unwrapParentUuid(inner.dir.parent)
 						const unwrappedDirMeta = unwrapDirMeta(inner.dir)
+						const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
+
+						// Mirror into persistent caches so the new folder is
+						// immediately navigable / previewable without a refetch.
+						if (driveItem.type === "directory") {
+							cache.cacheNewNormalDir(inner.dir, driveItem)
+						}
 
 						if (unwrappedParentUuid) {
 							driveItemsQueryUpdate({
@@ -441,7 +486,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 											i.data.decryptedMeta?.name.toLowerCase().trim() !==
 												unwrappedDirMeta.meta?.name.toLowerCase().trim()
 									),
-									unwrappedDirIntoDriveItem(unwrappedDirMeta)
+									driveItem
 								]
 							})
 						}
