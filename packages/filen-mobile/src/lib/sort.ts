@@ -520,7 +520,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-pinned",
-				title: "tbd_pinned"
+				title: "tbd_pinned",
+				icon: "pin-outline"
 			})
 
 			for (let i = 0; i < pinned.length; i++) {
@@ -543,7 +544,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-favorited",
-				title: "tbd_favorited"
+				title: "tbd_favorited",
+				icon: "heart-outline"
 			})
 
 			for (let i = 0; i < favorited.length; i++) {
@@ -566,7 +568,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-today",
-				title: "tbd_today"
+				title: "tbd_today",
+				icon: "today-outline"
 			})
 
 			for (let i = 0; i < today.length; i++) {
@@ -589,7 +592,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-7days",
-				title: "tbd_prev_7_days"
+				title: "tbd_prev_7_days",
+				icon: "calendar-outline"
 			})
 
 			for (let i = 0; i < last7Days.length; i++) {
@@ -612,7 +616,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-30days",
-				title: "tbd_prev_30_days"
+				title: "tbd_prev_30_days",
+				icon: "calendar-outline"
 			})
 
 			for (let i = 0; i < last30Days.length; i++) {
@@ -637,7 +642,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-month1",
-				title: `tbd_month_${date.getMonth().toString()}`
+				title: `tbd_month_${date.getMonth().toString()}`,
+				icon: "calendar-outline"
 			})
 
 			for (let i = 0; i < previousMonth1.length; i++) {
@@ -662,7 +668,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-month2",
-				title: `tbd_month_${date.getMonth().toString()}`
+				title: `tbd_month_${date.getMonth().toString()}`,
+				icon: "calendar-outline"
 			})
 
 			for (let i = 0; i < previousMonth2.length; i++) {
@@ -701,7 +708,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: `header-${year}`,
-				title: year.toString()
+				title: year.toString(),
+				icon: "calendar-outline"
 			})
 
 			for (let j = 0; j < yearNotes.length; j++) {
@@ -724,7 +732,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-archived",
-				title: "tbd_archived"
+				title: "tbd_archived",
+				icon: "archive-outline"
 			})
 
 			for (let i = 0; i < archived.length; i++) {
@@ -747,7 +756,8 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-trashed",
-				title: "tbd_trashed"
+				title: "tbd_trashed",
+				icon: "trash-outline"
 			})
 
 			for (let i = 0; i < trashed.length; i++) {

@@ -435,39 +435,45 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 							id: "settings",
 							title: "tbd_settings",
 							onPress: () => router.push("/cameraUpload"),
-							icon: "edit"
+							icon: "gear"
 						},
 						{
 							id: "gridTiles",
 							title: `${photosGridTiles} ${photosGridTiles === 1 ? "tbd_photo_per_row" : "tbd_photos_per_row"}`,
+							icon: "grid",
 							subButtons: [
 								{
 									id: "gridTiles1",
 									title: "1",
+									icon: "grid",
 									checked: photosGridTiles === 1,
 									onPress: () => setPhotosGridTiles(1)
 								},
 								{
 									id: "gridTiles2",
 									title: "2",
+									icon: "grid",
 									checked: photosGridTiles === 2,
 									onPress: () => setPhotosGridTiles(2)
 								},
 								{
 									id: "gridTiles3",
 									title: "3",
+									icon: "grid",
 									checked: photosGridTiles === 3,
 									onPress: () => setPhotosGridTiles(3)
 								},
 								{
 									id: "gridTiles4",
 									title: "4",
+									icon: "grid",
 									checked: photosGridTiles === 4,
 									onPress: () => setPhotosGridTiles(4)
 								},
 								{
 									id: "gridTiles5",
 									title: "5",
+									icon: "grid",
 									checked: photosGridTiles === 5,
 									onPress: () => setPhotosGridTiles(5)
 								}

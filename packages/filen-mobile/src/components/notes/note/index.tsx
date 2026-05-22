@@ -28,6 +28,7 @@ export type SectionHeader = {
 	type: "header"
 	id: string
 	title: string
+	icon?: React.ComponentProps<typeof Ionicons>["name"]
 }
 
 export type DataItem = Item & {
@@ -91,7 +92,14 @@ const Note = memo(
 
 		if (info.item.type === "header") {
 			return (
-				<View className="w-full h-auto px-4 py-4 pb-2">
+				<View className="w-full h-auto px-4 py-4 pb-2 flex-row items-center gap-2">
+					{info.item.icon && (
+						<Ionicons
+							name={info.item.icon}
+							size={18}
+							color={textForeground.color}
+						/>
+					)}
 					<Text className="text-lg">{info.item.title}</Text>
 				</View>
 			)
