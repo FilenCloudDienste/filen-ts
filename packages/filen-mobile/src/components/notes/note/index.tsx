@@ -64,19 +64,7 @@ const Note = memo(
 			}
 
 			if (useNotesStore.getState().selectedNotes.length > 0) {
-				useNotesStore.getState().setSelectedNotes(prev => {
-					if (info.item.type === "header") {
-						return prev
-					}
-
-					const prevSelected = prev.some(n => n.uuid === itemUuid)
-
-					if (prevSelected) {
-						return prev.filter(n => n.uuid !== itemUuid)
-					}
-
-					return [...prev.filter(n => n.uuid !== itemUuid), info.item]
-				})
+				useNotesStore.getState().toggleSelectedNote(info.item)
 
 				return
 			}

@@ -40,13 +40,7 @@ export function createMenuButtons({
 			icon: "select",
 			checked: isSelected,
 			onPress: () => {
-				useNotesStore.getState().setSelectedNotes(prev => {
-					if (isSelected) {
-						return prev.filter(n => n.uuid !== note.uuid)
-					} else {
-						return [...prev.filter(n => n.uuid !== note.uuid), note]
-					}
-				})
+				useNotesStore.getState().toggleSelectedNote(note)
 			}
 		})
 	}
