@@ -38,6 +38,8 @@ import * as DocumentPicker from "expo-document-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { onlineManager } from "@tanstack/react-query"
+import { runBulk } from "@/lib/bulkOps"
+import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
 
 function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
@@ -148,7 +150,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					id: "deselectAll",
 					title: "tbd_deselect_all",
 					onPress: () => {
-						useDriveStore.getState().setSelectedItems([])
+						useDriveStore.getState().clearSelectedItems()
 					}
 				})
 			} else {
@@ -156,7 +158,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					id: "selectAll",
 					title: "tbd_select_all",
 					onPress: () => {
-						useDriveStore.getState().setSelectedItems(driveItems)
+						useDriveStore.getState().selectAllItems(driveItems)
 					}
 				})
 			}
@@ -740,92 +742,186 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			}
 		})
 
-		if (selectedDriveItems.length > 0 && drivePath.type === "trash") {
-			menuButtons.push({
-				id: "restoreSelected",
-				title: "tbd_restore_selected",
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: "tbd_restore_selected",
-							message: "tbd_are_you_sure_restore_selected",
-							cancelText: "tbd_cancel",
-							okText: "tbd_restore"
+		if (selectedDriveItems.length > 0) {
+			const driveFlags = aggregateDriveSelectionFlags(selectedDriveItems)
+			const isAtRoot = !drivePath.uuid
+
+			if (drivePath.type === "trash") {
+				menuButtons.push({
+					id: "restoreSelected",
+					title: "tbd_restore_selected",
+					icon: "restore",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedDriveItems,
+							clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+							confirm: {
+								title: "tbd_restore_selected",
+								message: "tbd_are_you_sure_restore_selected",
+								okText: "tbd_restore",
+								cancelText: "tbd_cancel"
+							},
+							op: item => drive.restore({ item, signal: undefined })
 						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
 					}
+				})
 
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await Promise.all(
-							selectedDriveItems.map(item => {
-								return drive.restore({
-									item,
-									signal: undefined
-								})
-							})
-						)
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-					}
-				}
-			})
-
-			menuButtons.push({
-				id: "deleteSelectedPermanently",
-				title: "tbd_delete_selected_permanently",
-				destructive: true,
-				icon: "delete",
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: "tbd_delete_selected_permanently",
-							message: "tbd_are_you_sure_delete_selected_permanently",
-							cancelText: "tbd_cancel",
-							okText: "tbd_delete"
+				menuButtons.push({
+					id: "deleteSelectedPermanently",
+					title: "tbd_delete_selected_permanently",
+					destructive: true,
+					icon: "delete",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedDriveItems,
+							clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+							confirm: {
+								title: "tbd_delete_selected_permanently",
+								message: "tbd_are_you_sure_delete_selected_permanently",
+								okText: "tbd_delete",
+								cancelText: "tbd_cancel",
+								destructive: true
+							},
+							op: item => drive.deletePermanently({ item, signal: undefined })
 						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
 					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await Promise.all(
-							selectedDriveItems.map(item => {
-								return drive.deletePermanently({
-									item,
-									signal: undefined
-								})
+				})
+			} else {
+				// Favorite/Unfavorite — applies to variants where items carry a favorited bit
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "recents" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedOut"
+				) {
+					menuButtons.push({
+						id: "bulkFavorite",
+						title: driveFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+						icon: "heart",
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: item =>
+									drive.favorite({
+										item,
+										favorited: !driveFlags.includesFavorited,
+										signal: undefined
+									})
 							})
-						)
+						}
 					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-					}
 				}
-			})
+
+				// Trash — owned content the user can move to trash (excludes sharedIn / offline)
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedOut" ||
+					drivePath.type === "links" ||
+					drivePath.type === "recents"
+				) {
+					menuButtons.push({
+						id: "bulkTrash",
+						title: "tbd_trash_selected",
+						icon: "trash",
+						destructive: true,
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								confirm: {
+									title: "tbd_trash_selected",
+									message: "tbd_are_you_sure_trash_selected",
+									okText: "tbd_trash",
+									cancelText: "tbd_cancel",
+									destructive: true
+								},
+								op: item => drive.trash({ item, signal: undefined })
+							})
+						}
+					})
+				}
+
+				// Stop-sharing — sharedOut at root only
+				if (drivePath.type === "sharedOut" && isAtRoot) {
+					menuButtons.push({
+						id: "bulkStopSharing",
+						title: "tbd_stop_sharing_selected",
+						icon: "delete",
+						destructive: true,
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								confirm: {
+									title: "tbd_stop_sharing_selected",
+									message: "tbd_are_you_sure_stop_sharing_selected",
+									okText: "tbd_stop_sharing",
+									cancelText: "tbd_cancel",
+									destructive: true
+								},
+								op: item => drive.removeShare({ item, signal: undefined })
+							})
+						}
+					})
+				}
+
+				// Remove-share — sharedIn at root only (declines a share invite for selected items)
+				if (drivePath.type === "sharedIn" && isAtRoot) {
+					menuButtons.push({
+						id: "bulkRemoveShare",
+						title: "tbd_remove_share_selected",
+						icon: "delete",
+						destructive: true,
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								confirm: {
+									title: "tbd_remove_share_selected",
+									message: "tbd_are_you_sure_remove_share_selected",
+									okText: "tbd_remove",
+									cancelText: "tbd_cancel",
+									destructive: true
+								},
+								op: item => drive.removeShare({ item, signal: undefined })
+							})
+						}
+					})
+				}
+
+				// Disable public link — links variant root only
+				if (drivePath.type === "links" && isAtRoot) {
+					menuButtons.push({
+						id: "bulkDisablePublicLink",
+						title: "tbd_disable_public_link_selected",
+						icon: "delete",
+						destructive: true,
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								confirm: {
+									title: "tbd_disable_public_link_selected",
+									message: "tbd_are_you_sure_disable_public_link_selected",
+									okText: "tbd_disable",
+									cancelText: "tbd_cancel",
+									destructive: true
+								},
+								op: item => drive.disablePublicLink({ item, signal: undefined })
+							})
+						}
+					})
+				}
+			}
 		}
 
 		if (drivePath.type === "trash") {
@@ -929,7 +1025,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					},
 					props: {
 						onPress: () => {
-							useDriveStore.getState().setSelectedItems([])
+							useDriveStore.getState().clearSelectedItems()
 						}
 					}
 				}
@@ -1198,10 +1294,10 @@ const Drive = memo(() => {
 
 	useFocusEffect(
 		useCallback(() => {
-			useDriveStore.getState().setSelectedItems([])
+			useDriveStore.getState().clearSelectedItems()
 
 			return () => {
-				useDriveStore.getState().setSelectedItems([])
+				useDriveStore.getState().clearSelectedItems()
 			}
 		}, [])
 	)
