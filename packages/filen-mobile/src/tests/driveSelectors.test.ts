@@ -2,10 +2,14 @@ import { describe, it, expect } from "vitest"
 import { aggregateDriveSelectionFlags, EMPTY_DRIVE_FLAGS } from "@/lib/driveSelectors"
 import type { DriveItem } from "@/types"
 
-function file(uuid: string, favorited = false): DriveItem {
+function file(uuid: string, favorited = false, name?: string): DriveItem {
 	return {
 		type: "file",
-		data: { uuid, favorited } as DriveItem["data"]
+		data: {
+			uuid,
+			favorited,
+			decryptedMeta: name ? ({ name } as DriveItem["data"]["decryptedMeta"]) : null
+		} as DriveItem["data"]
 	} as DriveItem
 }
 
@@ -68,5 +72,57 @@ describe("aggregateDriveSelectionFlags", () => {
 
 		expect(flags.everyFile).toBe(false)
 		expect(flags.everyDirectory).toBe(false)
+	})
+
+	it("everyImageOrVideoFile false when selection includes any directory", () => {
+		expect(
+			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), dir("b")]).everyImageOrVideoFile
+		).toBe(false)
+	})
+
+	it("everyImageOrVideoFile false when any file lacks decryptedMeta", () => {
+		expect(
+			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b")]).everyImageOrVideoFile
+		).toBe(false)
+	})
+
+	it("everyImageOrVideoFile false when any file is a non-image/video extension", () => {
+		expect(
+			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "doc.pdf")])
+				.everyImageOrVideoFile
+		).toBe(false)
+	})
+
+	it("everyImageOrVideoFile true for all-image selection", () => {
+		expect(
+			aggregateDriveSelectionFlags([
+				file("a", false, "photo.jpg"),
+				file("b", false, "graphic.PNG"),
+				file("c", false, "still.heic")
+			]).everyImageOrVideoFile
+		).toBe(true)
+	})
+
+	it("everyImageOrVideoFile true for mixed image + video selection", () => {
+		expect(
+			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "clip.mp4")])
+				.everyImageOrVideoFile
+		).toBe(true)
+	})
+
+	it("everyImageOrVideoFile true when sharedRootFile carries an image extension", () => {
+		const sharedImg: DriveItem = {
+			type: "sharedRootFile",
+			data: {
+				uuid: "s1",
+				decryptedMeta: { name: "shared.jpg" }
+			} as DriveItem["data"]
+		} as DriveItem
+
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), sharedImg]).everyImageOrVideoFile).toBe(true)
+	})
+
+	it("everyImageOrVideoFile false on empty selection (EMPTY_DRIVE_FLAGS)", () => {
+		expect(aggregateDriveSelectionFlags([]).everyImageOrVideoFile).toBe(false)
 	})
 })
