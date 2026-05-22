@@ -29,13 +29,15 @@ import transfers from "@/lib/transfers"
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import { newTmpDir } from "@/lib/tmp"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem, normalizeFilePathForExpo } from "@/lib/utils"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, normalizeFilePathForExpo, getRealDriveItemParent } from "@/lib/utils"
+import offline from "@/lib/offline"
 import DocumentScanner, {
 	ResponseType as DocumentScannerResponseType,
 	ScanDocumentResponseStatus
 } from "react-native-document-scanner-plugin"
 import * as DocumentPicker from "expo-document-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import * as MediaLibrary from "expo-media-library"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { onlineManager } from "@tanstack/react-query"
 import { runBulk } from "@/lib/bulkOps"
@@ -868,12 +870,151 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					})
 				}
 
+				// Make offline / Remove offline — keep them as two separate buttons
+				// instead of a single toggle. Toggling would need per-item offline
+				// status (via N useDriveItemStoredOfflineQuery calls or a query
+				// helper) and the user's intent for a mixed selection is
+				// ambiguous anyway. The lib's idempotent semantics make
+				// already-offline / already-online items no-ops, so showing both
+				// is safe.
+				// Save to photos — every selected item must be a file with an
+				// image/video preview type (the OS photo library only accepts
+				// those). Aggregator flag is computed once via getPreviewType
+				// over decryptedMeta.name.
+				if (
+					driveFlags.everyImageOrVideoFile &&
+					(drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites")
+				) {
+					menuButtons.push({
+						id: "bulkSaveToPhotos",
+						title: "tbd_save_to_photos_selected",
+						icon: "archive",
+						requiresOnline: true,
+						onPress: async () => {
+							const permissionsResult = await run(async () => {
+								return await hasAllNeededMediaPermissions({ shouldRequest: true })
+							})
+
+							if (!permissionsResult.success) {
+								console.error(permissionsResult.error)
+								alerts.error(permissionsResult.error)
+
+								return
+							}
+
+							if (!permissionsResult.data) {
+								alerts.error("tbd_no_permissions_enable_manually")
+
+								return
+							}
+
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: async item => {
+									if (!item.data.decryptedMeta) {
+										return
+									}
+
+									await run(async defer => {
+										const destination = new FileSystem.File(
+											FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta!.name)
+										)
+
+										defer(() => {
+											if (destination.parentDirectory.exists) {
+												destination.parentDirectory.delete()
+											}
+										})
+
+										if (!destination.parentDirectory.exists) {
+											destination.parentDirectory.create({
+												intermediates: true,
+												idempotent: true
+											})
+										}
+
+										if (destination.exists) {
+											destination.delete()
+										}
+
+										const downloadResult = await transfers.download({ item, destination })
+
+										if (!downloadResult) {
+											return
+										}
+
+										await MediaLibrary.saveToLibraryAsync(destination.uri)
+									})
+								}
+							})
+						}
+					})
+				}
+
+				if (drivePath.type === "drive" || drivePath.type === "favorites") {
+					menuButtons.push({
+						id: "bulkMakeOffline",
+						title: "tbd_make_available_offline_selected",
+						icon: "archive",
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: async item => {
+									const parent = getRealDriveItemParent({ item, drivePath })
+
+									if (!parent) {
+										return
+									}
+
+									if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+										await offline.storeFile({ file: item, parent })
+									} else {
+										await offline.storeDirectory({ directory: item, parent })
+									}
+								}
+							})
+						}
+					})
+				}
+
+				// Remove offline — works on the offline view (the canonical place
+				// for this) and anywhere else (lib treats not-stored as no-op).
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "favorites" ||
+					(drivePath.type === "offline" && !drivePath.uuid)
+				) {
+					menuButtons.push({
+						id: "bulkRemoveOffline",
+						title: "tbd_remove_offline_selected",
+						icon: "trash",
+						destructive: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								confirm: {
+									title: "tbd_remove_offline_selected",
+									message: "tbd_confirm_remove_offline_selected",
+									okText: "tbd_remove_offline",
+									cancelText: "tbd_cancel",
+									destructive: true
+								},
+								op: item => offline.removeItem(item)
+							})
+						}
+					})
+				}
+
 				// NOTE: Share-with-Filen-user bulk action intentionally NOT wired —
 				// the single-item handler in drive/item/menu.tsx:613 only opens
 				// the contacts picker but never calls a share API with the result
-				// (stub). Adding a bulk version would just open the picker for
-				// nothing. Bring this back if/when single-item is completed in
-				// the lib layer.
+				// (stub). The SDK has `authedSdkClient.shareDir` + `shareFile`,
+				// so this is wireable — pending user approval to add a lib helper
+				// and wire both single-item + bulk paths.
 
 				// Favorite/Unfavorite — applies to variants where items carry a favorited bit
 				if (
