@@ -344,7 +344,6 @@ const Playlist = memo(() => {
 			requiresOnline: true,
 			onPress: async () => {
 				const currentPlaylist = playlist
-				const selectedUuids = new Set(selectedTracks.map(t => t.uuid))
 
 				await runBulk({
 					items: [currentPlaylist],
@@ -357,10 +356,17 @@ const Playlist = memo(() => {
 						destructive: true
 					},
 					op: async p => {
+						// Re-read selection from the live store rather than the
+						// render-time closure — between menu open and confirm,
+						// the user can still toggle tracks.
+						const liveSelectedUuids = new Set(
+							usePlaylistTracksStore.getState().selectedTracks.map(t => t.uuid)
+						)
+
 						await audio.savePlaylist({
 							playlist: {
 								...p,
-								files: p.files.filter(f => !selectedUuids.has(f.uuid)),
+								files: p.files.filter(f => !liveSelectedUuids.has(f.uuid)),
 								updated: Date.now()
 							}
 						})
