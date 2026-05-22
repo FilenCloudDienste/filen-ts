@@ -568,88 +568,9 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		downloadSubButtons.length > 0 &&
-		drivePath.type !== "offline" &&
-		(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-			? (item.data.decryptedMeta?.size ?? 0) > 0
-			: true)
-	) {
-		menuButtons.push({
-			id: "download",
-			title: "tbd_download",
-			icon: "download",
-			subButtons: downloadSubButtons
-		})
-	}
-
-	if (
-		(item.type === "file" || item.type === "directory") &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "links" ||
-			drivePath.type === "recents" ||
-			drivePath.type === "photos")
-	) {
-		menuButtons.push({
-			id: "share",
-			title: "tbd_share",
-			icon: "share",
-			subButtons: [
-				{
-					id: "sharePublicLink",
-					requiresOnline: true,
-					title: "tbd_share_public_link",
-					icon: "link",
-					onPress: () => {
-						router.push({
-							pathname: "/publicLink",
-							params: {
-								item: serialize(item)
-							}
-						})
-					}
-				},
-				{
-					id: "shareFilenUser",
-					requiresOnline: true,
-					title: "tbd_share_filen_user",
-					icon: "users",
-					onPress: async () => {
-						const pickResult = await run(async () => {
-							return await selectContacts({
-								multiple: true,
-								userIdsToExclude: []
-							})
-						})
-
-						if (!pickResult.success) {
-							console.error(pickResult.error)
-							alerts.error(pickResult.error)
-
-							return
-						}
-
-						if (pickResult.data.cancelled || pickResult.data.selectedContacts.length === 0) {
-							return
-						}
-
-						const contacts = pickResult.data.selectedContacts
-
-						const result = await runWithLoading(async () => {
-							await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-						}
-					}
-				}
-			]
-		})
-	}
+	// download + share moved further down (after rename/move) so the menu
+	// reads: meta (favorite/info/versions/color) → modify (rename/move) →
+	// output (download/share) → destructive. Matches iOS Files conventions.
 
 	if (
 		(item.type === "file" || item.type === "directory") &&
@@ -842,6 +763,89 @@ export function createMenuButtons({
 				}
 			})
 		}
+	}
+
+	if (
+		downloadSubButtons.length > 0 &&
+		drivePath.type !== "offline" &&
+		(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+			? (item.data.decryptedMeta?.size ?? 0) > 0
+			: true)
+	) {
+		menuButtons.push({
+			id: "download",
+			title: "tbd_download",
+			icon: "download",
+			subButtons: downloadSubButtons
+		})
+	}
+
+	if (
+		(item.type === "file" || item.type === "directory") &&
+		(drivePath.type === "drive" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "links" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "photos")
+	) {
+		menuButtons.push({
+			id: "share",
+			title: "tbd_share",
+			icon: "share",
+			subButtons: [
+				{
+					id: "sharePublicLink",
+					requiresOnline: true,
+					title: "tbd_share_public_link",
+					icon: "link",
+					onPress: () => {
+						router.push({
+							pathname: "/publicLink",
+							params: {
+								item: serialize(item)
+							}
+						})
+					}
+				},
+				{
+					id: "shareFilenUser",
+					requiresOnline: true,
+					title: "tbd_share_filen_user",
+					icon: "users",
+					onPress: async () => {
+						const pickResult = await run(async () => {
+							return await selectContacts({
+								multiple: true,
+								userIdsToExclude: []
+							})
+						})
+
+						if (!pickResult.success) {
+							console.error(pickResult.error)
+							alerts.error(pickResult.error)
+
+							return
+						}
+
+						if (pickResult.data.cancelled || pickResult.data.selectedContacts.length === 0) {
+							return
+						}
+
+						const contacts = pickResult.data.selectedContacts
+
+						const result = await runWithLoading(async () => {
+							await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+						}
+					}
+				}
+			]
+		})
 	}
 
 	// Removing offline files should only be allowed when inside the root of the offline view or when it is already stored offline

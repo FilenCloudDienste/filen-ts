@@ -602,55 +602,11 @@ const Contact = memo(
 			}
 
 			if (info.item.type === "contact") {
-				buttons.push({
-					id: "block",
-				requiresOnline: true,
-					title: "tbd_block",
-					destructive: true,
-					icon: "delete",
-					onPress: async () => {
-						const promptResponse = await run(async () => {
-							return await prompts.alert({
-								title: "tbd_block_contact",
-								message: "tbd_block_contact_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_block"
-							})
-						})
-
-						if (!promptResponse.success) {
-							console.error(promptResponse.error)
-							alerts.error(promptResponse.error)
-
-							return
-						}
-
-						if (promptResponse.data.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async () => {
-							if (info.item.type !== "contact") {
-								throw new Error("Invalid contact type")
-							}
-
-							await contacts.block({
-								email: info.item.data.email
-							})
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
-					}
-				})
-
+				// Remove first (less harsh: drops them from your contact list).
+				// Block last (most harsh: also prevents them from contacting you).
 				buttons.push({
 					id: "remove",
-				requiresOnline: true,
+					requiresOnline: true,
 					title: "tbd_remove",
 					destructive: true,
 					icon: "delete",
@@ -693,15 +649,61 @@ const Contact = memo(
 						}
 					}
 				})
+
+				buttons.push({
+					id: "block",
+					requiresOnline: true,
+					title: "tbd_block",
+					destructive: true,
+					icon: "delete",
+					onPress: async () => {
+						const promptResponse = await run(async () => {
+							return await prompts.alert({
+								title: "tbd_block_contact",
+								message: "tbd_block_contact_confirmation",
+								cancelText: "tbd_cancel",
+								okText: "tbd_block"
+							})
+						})
+
+						if (!promptResponse.success) {
+							console.error(promptResponse.error)
+							alerts.error(promptResponse.error)
+
+							return
+						}
+
+						if (promptResponse.data.cancelled) {
+							return
+						}
+
+						const result = await runWithLoading(async () => {
+							if (info.item.type !== "contact") {
+								throw new Error("Invalid contact type")
+							}
+
+							await contacts.block({
+								email: info.item.data.email
+							})
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
+						}
+					}
+				})
 			}
 
 			if (info.item.type === "blocked") {
+				// Unblock is constructive (lifts a restriction), not destructive.
 				buttons.push({
 					id: "unblock",
-				requiresOnline: true,
+					requiresOnline: true,
 					title: "tbd_unblock",
-					destructive: true,
-					icon: "delete",
+					icon: "select",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({

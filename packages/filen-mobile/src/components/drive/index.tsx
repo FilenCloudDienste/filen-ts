@@ -802,6 +802,34 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					}
 				})
 			} else {
+				// Favorite/Unfavorite first — toggle is the most-tapped bulk
+				// action, belongs at the top of the menu.
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "recents" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedOut"
+				) {
+					menuButtons.push({
+						id: "bulkFavorite",
+						title: driveFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+						icon: "heart",
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: item =>
+									drive.favorite({
+										item,
+										favorited: !driveFlags.includesFavorited,
+										signal: undefined
+									})
+							})
+						}
+					})
+				}
+
 				// Download to device — applies to every read-capable variant
 				if (
 					drivePath.type === "drive" ||
@@ -1059,33 +1087,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								op: async item => {
 									await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
 								}
-							})
-						}
-					})
-				}
-
-				// Favorite/Unfavorite — applies to variants where items carry a favorited bit
-				if (
-					drivePath.type === "drive" ||
-					drivePath.type === "recents" ||
-					drivePath.type === "favorites" ||
-					drivePath.type === "sharedOut"
-				) {
-					menuButtons.push({
-						id: "bulkFavorite",
-						title: driveFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
-						icon: "heart",
-						requiresOnline: true,
-						onPress: async () => {
-							await runBulk({
-								items: selectedDriveItems,
-								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-								op: item =>
-									drive.favorite({
-										item,
-										favorited: !driveFlags.includesFavorited,
-										signal: undefined
-									})
 							})
 						}
 					})
