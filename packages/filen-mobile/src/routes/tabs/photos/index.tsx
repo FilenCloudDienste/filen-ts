@@ -1,24 +1,24 @@
-import { Fragment, useRef, memo } from "react"
+import { Fragment, useRef, memo, useCallback } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import StackHeader from "@/components/ui/header"
+import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
-import type { DriveItemFileExtracted } from "@/types"
+import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import { itemSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
 import { type View as RNView, Platform, type ViewStyle } from "react-native"
-import { run } from "@filen/utils"
+import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import useViewLayout from "@/hooks/useViewLayout"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType, getRealDriveItemParent } from "@/lib/utils"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
 import { PressableOpacity } from "@/components/ui/pressables"
 import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
-import { router } from "expo-router"
+import { router, useFocusEffect } from "expo-router"
 import Menu from "@/components/drive/item/menu"
 import cameraUpload, { useCameraUpload } from "@/lib/cameraUpload"
 import Text from "@/components/ui/text"
@@ -33,6 +33,17 @@ import { useSecureStore } from "@/lib/secureStore"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import * as FileSystem from "expo-file-system"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import useDriveStore from "@/stores/useDrive.store"
+import { runBulk } from "@/lib/bulkOps"
+import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
+import { downloadDriveItemToDevice } from "@/lib/driveDownload"
+import drive from "@/lib/drive"
+import offline from "@/lib/offline"
+import transfers from "@/lib/transfers"
+import { newTmpDir } from "@/lib/tmp"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import * as MediaLibrary from "expo-media-library"
+import type { MenuButton } from "@/components/ui/menu"
 
 const Photo = memo(
 	({
@@ -47,6 +58,8 @@ const Photo = memo(
 		getListItems: () => DriveItemFileExtracted[]
 	}) => {
 		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
+		const isSelected = useDriveStore(useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid)))
+		const arePhotosSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
 			uuid: info.item.data.uuid,
@@ -56,6 +69,29 @@ const Photo = memo(
 		const viewStyle: ViewStyle = {
 			width: size,
 			height: size
+		}
+
+		const onPress = () => {
+			// In selection mode, tap toggles. Else open the preview.
+			if (arePhotosSelected) {
+				useDriveStore.getState().toggleSelectedItem(info.item)
+
+				return
+			}
+
+			useDrivePreviewStore.getState().open({
+				initialItem: {
+					type: "drive",
+					data: {
+						item: info.item,
+						drivePath
+					}
+				},
+				items: getListItems().map(item => ({
+					type: "drive",
+					data: item
+				}))
+			})
 		}
 
 		return (
@@ -73,22 +109,8 @@ const Photo = memo(
 				>
 					<View style={viewStyle}>
 						<PressableOpacity
-							className="items-center justify-center flex-1 overflow-hidden"
-							onPress={() => {
-								useDrivePreviewStore.getState().open({
-									initialItem: {
-										type: "drive",
-										data: {
-											item: info.item,
-											drivePath
-										}
-									},
-									items: getListItems().map(item => ({
-										type: "drive",
-										data: item
-									}))
-								})
-							}}
+							className={cn("items-center justify-center flex-1 overflow-hidden", isSelected && "opacity-60")}
+							onPress={onPress}
 							style={viewStyle}
 						>
 							{previewType === "video" && (
@@ -118,6 +140,22 @@ const Photo = memo(
 									/>
 								</View>
 							)}
+							{arePhotosSelected && (
+								<View
+									className={cn(
+										"size-5 absolute top-0.5 left-0.5 z-10 flex-row items-center justify-center rounded-full",
+										isSelected ? "bg-blue-500" : "bg-black/40 border border-white"
+									)}
+								>
+									{isSelected && (
+										<Ionicons
+											name="checkmark"
+											size={14}
+											color="white"
+										/>
+									)}
+								</View>
+							)}
 							<Thumbnail
 								item={info.item}
 								target={info.target}
@@ -135,100 +173,244 @@ const Photo = memo(
 	}
 )
 
-const Header = memo(() => {
+const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; drivePath: DrivePath }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const syncing = useCameraUploadStore(useShallow(state => state.syncing))
 	const hasErrors = useCameraUploadStore(useShallow(state => state.errors.length > 0))
 	const textRed500 = useResolveClassNames("text-red-500")
 	const [photosGridTiles, setPhotosGridTiles] = useSecureStore<number>("photosGridTiles", 4)
+	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
+	const inSelectionMode = selectedItems.length > 0
+	const driveFlags = aggregateDriveSelectionFlags(selectedItems)
 
-	return (
-		<StackHeader
-			title="tbd_photos"
-			transparent={Platform.OS === "ios"}
-			leftItems={() => {
-				if (hasErrors) {
-					return [
-						{
-							type: "button",
-							icon: {
-								name: "warning-outline",
-								color: textRed500.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.push("/cameraUploadErrors")
+	const leftItems = ((): HeaderItem[] | undefined => {
+		if (inSelectionMode) {
+			return [
+				{
+					type: "button",
+					icon: {
+						name: "close-outline",
+						color: textForeground.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							useDriveStore.getState().clearSelectedItems()
+						}
+					}
+				}
+			]
+		}
+
+		if (hasErrors) {
+			return [
+				{
+					type: "button",
+					icon: {
+						name: "warning-outline",
+						color: textRed500.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							router.push("/cameraUploadErrors")
+						}
+					}
+				}
+			]
+		}
+
+		if (syncing) {
+			return [
+				{
+					type: "loader",
+					props: {
+						color: textForeground.color,
+						size: "small"
+					}
+				}
+			]
+		}
+
+		return undefined
+	})()
+
+	const rightItems = ((): HeaderItem[] => {
+		if (inSelectionMode) {
+			const bulkButtons: MenuButton[] = []
+
+			bulkButtons.push({
+				id: "selectAll",
+				title: selectedItems.length === items.length ? "tbd_deselect_all" : "tbd_select_all",
+				icon: "select",
+				onPress: () => {
+					if (selectedItems.length === items.length) {
+						useDriveStore.getState().clearSelectedItems()
+
+						return
+					}
+
+					useDriveStore.getState().selectAllItems(items as unknown as DriveItem[])
+				}
+			})
+
+			bulkButtons.push({
+				id: "bulkFavorite",
+				title: driveFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+				icon: "heart",
+				requiresOnline: true,
+				onPress: async () => {
+					await runBulk({
+						items: selectedItems,
+						clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+						op: item =>
+							drive.favorite({
+								item,
+								favorited: !driveFlags.includesFavorited,
+								signal: undefined
+							})
+					})
+				}
+			})
+
+			if (driveFlags.everyImageOrVideoFile) {
+				bulkButtons.push({
+					id: "bulkSaveToPhotos",
+					title: "tbd_save_to_photos_selected",
+					icon: "archive",
+					requiresOnline: true,
+					onPress: async () => {
+						const permissionsResult = await run(async () => {
+							return await hasAllNeededMediaPermissions({ shouldRequest: true })
+						})
+
+						if (!permissionsResult.success) {
+							console.error(permissionsResult.error)
+							alerts.error(permissionsResult.error)
+
+							return
+						}
+
+						if (!permissionsResult.data) {
+							alerts.error("tbd_no_permissions_enable_manually")
+
+							return
+						}
+
+						await runBulk({
+							items: selectedItems,
+							clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+							op: async item => {
+								if (!item.data.decryptedMeta) {
+									return
 								}
+
+								await run(async defer => {
+									const destination = new FileSystem.File(
+										FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta!.name)
+									)
+
+									defer(() => {
+										if (destination.parentDirectory.exists) {
+											destination.parentDirectory.delete()
+										}
+									})
+
+									if (!destination.parentDirectory.exists) {
+										destination.parentDirectory.create({ intermediates: true, idempotent: true })
+									}
+
+									if (destination.exists) {
+										destination.delete()
+									}
+
+									const downloadResult = await transfers.download({ item, destination })
+
+									if (!downloadResult) {
+										return
+									}
+
+									await MediaLibrary.saveToLibraryAsync(destination.uri)
+								})
+							}
+						})
+					}
+				})
+			}
+
+			bulkButtons.push({
+				id: "bulkDownload",
+				title: "tbd_download_selected",
+				icon: "archive",
+				requiresOnline: true,
+				onPress: async () => {
+					await runBulk({
+						items: selectedItems,
+						clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+						op: async item => {
+							const result = await downloadDriveItemToDevice({ item })
+
+							if (!result.success) {
+								throw result.error
 							}
 						}
-					]
+					})
 				}
+			})
 
-				if (syncing) {
-					return [
-						{
-							type: "loader",
-							props: {
-								color: textForeground.color,
-								size: "small"
+			bulkButtons.push({
+				id: "bulkMakeOffline",
+				title: "tbd_make_available_offline_selected",
+				icon: "archive",
+				requiresOnline: true,
+				onPress: async () => {
+					await runBulk({
+						items: selectedItems,
+						clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+						op: async item => {
+							const parent = getRealDriveItemParent({ item, drivePath })
+
+							if (!parent) {
+								return
+							}
+
+							if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+								await offline.storeFile({ file: item, parent })
 							}
 						}
-					]
+					})
 				}
+			})
 
-				return undefined
-			}}
-			rightItems={[
+			bulkButtons.push({
+				id: "bulkTrash",
+				title: "tbd_trash_selected",
+				icon: "trash",
+				destructive: true,
+				requiresOnline: true,
+				onPress: async () => {
+					await runBulk({
+						items: selectedItems,
+						clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+						confirm: {
+							title: "tbd_trash_selected",
+							message: "tbd_are_you_sure_trash_selected",
+							okText: "tbd_trash",
+							cancelText: "tbd_cancel",
+							destructive: true
+						},
+						op: item => drive.trash({ item, signal: undefined })
+					})
+				}
+			})
+
+			return [
 				{
 					type: "menu",
 					props: {
 						type: "dropdown",
 						hitSlop: 20,
-						buttons: [
-							{
-								id: "settings",
-								title: "tbd_settings",
-								onPress: () => router.push("/cameraUpload"),
-								icon: "edit"
-							},
-							{
-								id: "gridTiles",
-								title: `${photosGridTiles} ${photosGridTiles === 1 ? "tbd_photo_per_row" : "tbd_photos_per_row"}`,
-								subButtons: [
-									{
-										id: "gridTiles1",
-										title: "1",
-										checked: photosGridTiles === 1,
-										onPress: () => setPhotosGridTiles(1)
-									},
-									{
-										id: "gridTiles2",
-										title: "2",
-										checked: photosGridTiles === 2,
-										onPress: () => setPhotosGridTiles(2)
-									},
-									{
-										id: "gridTiles3",
-										title: "3",
-										checked: photosGridTiles === 3,
-										onPress: () => setPhotosGridTiles(3)
-									},
-									{
-										id: "gridTiles4",
-										title: "4",
-										checked: photosGridTiles === 4,
-										onPress: () => setPhotosGridTiles(4)
-									},
-									{
-										id: "gridTiles5",
-										title: "5",
-										checked: photosGridTiles === 5,
-										onPress: () => setPhotosGridTiles(5)
-									}
-								]
-							}
-						]
+						buttons: bulkButtons
 					},
 					triggerProps: {
 						hitSlop: 20
@@ -239,7 +421,78 @@ const Header = memo(() => {
 						color: textForeground.color
 					}
 				}
-			]}
+			]
+		}
+
+		return [
+			{
+				type: "menu",
+				props: {
+					type: "dropdown",
+					hitSlop: 20,
+					buttons: [
+						{
+							id: "settings",
+							title: "tbd_settings",
+							onPress: () => router.push("/cameraUpload"),
+							icon: "edit"
+						},
+						{
+							id: "gridTiles",
+							title: `${photosGridTiles} ${photosGridTiles === 1 ? "tbd_photo_per_row" : "tbd_photos_per_row"}`,
+							subButtons: [
+								{
+									id: "gridTiles1",
+									title: "1",
+									checked: photosGridTiles === 1,
+									onPress: () => setPhotosGridTiles(1)
+								},
+								{
+									id: "gridTiles2",
+									title: "2",
+									checked: photosGridTiles === 2,
+									onPress: () => setPhotosGridTiles(2)
+								},
+								{
+									id: "gridTiles3",
+									title: "3",
+									checked: photosGridTiles === 3,
+									onPress: () => setPhotosGridTiles(3)
+								},
+								{
+									id: "gridTiles4",
+									title: "4",
+									checked: photosGridTiles === 4,
+									onPress: () => setPhotosGridTiles(4)
+								},
+								{
+									id: "gridTiles5",
+									title: "5",
+									checked: photosGridTiles === 5,
+									onPress: () => setPhotosGridTiles(5)
+								}
+							]
+						}
+					]
+				},
+				triggerProps: {
+					hitSlop: 20
+				},
+				icon: {
+					name: "ellipsis-horizontal",
+					size: 24,
+					color: textForeground.color
+				}
+			}
+		]
+	})()
+
+	return (
+		<StackHeader
+			title={inSelectionMode ? `${selectedItems.length} tbd_selected` : "tbd_photos"}
+			transparent={Platform.OS === "ios"}
+			leftItems={leftItems}
+			rightItems={rightItems}
 		/>
 	)
 })
@@ -286,6 +539,16 @@ const Photos = memo(() => {
 	const drivePath = useDrivePath()
 	const [photosGridTiles] = useSecureStore<number>("photosGridTiles", 4)
 
+	useFocusEffect(
+		useCallback(() => {
+			useDriveStore.getState().clearSelectedItems()
+
+			return () => {
+				useDriveStore.getState().clearSelectedItems()
+			}
+		}, [])
+	)
+
 	const driveItemsQuery = useDriveItemsQuery(
 		{
 			path: drivePath
@@ -324,7 +587,10 @@ const Photos = memo(() => {
 
 	return (
 		<Fragment>
-			<Header />
+			<Header
+				items={items}
+				drivePath={drivePath}
+			/>
 			<SafeAreaView edges={["left", "right"]}>
 				<View
 					ref={viewRef}
