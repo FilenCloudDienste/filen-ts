@@ -113,6 +113,7 @@ const Button = memo(
 						{
 							id: "open",
 							title: "tbd_open",
+							icon: "openExternal" as const,
 							onPress: () => {
 								if (type !== "link" || !formats.link) {
 									return
@@ -124,6 +125,7 @@ const Button = memo(
 						{
 							id: "edit",
 							title: "tbd_edit",
+							icon: "edit" as const,
 							onPress: () => {
 								if (type !== "link" || !formats.link) {
 									return
@@ -153,6 +155,7 @@ const Button = memo(
 						{
 							id: "remove",
 							title: "tbd_remove",
+							icon: "minus" as const,
 							onPress: () => {
 								if (type !== "link" || !formats.link) {
 									return
@@ -171,6 +174,7 @@ const Button = memo(
 						{
 							id: "ordered",
 							title: "tbd_ordered",
+							icon: "listOrdered" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleList",
@@ -181,6 +185,7 @@ const Button = memo(
 						{
 							id: "bullet",
 							title: "tbd_bullet",
+							icon: "listBullet" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleList",
@@ -191,6 +196,7 @@ const Button = memo(
 						{
 							id: "checklist",
 							title: "tbd_checklist",
+							icon: "checklist" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleList",
@@ -203,6 +209,7 @@ const Button = memo(
 									{
 										id: "remove",
 										title: "tbd_remove",
+										icon: "minus" as const,
 										onPress: () => {
 											postMessage({
 												type: "quillRemoveList"

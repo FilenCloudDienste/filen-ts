@@ -156,6 +156,7 @@ const GalleryHeader = memo(
 											{
 												id: "openLink",
 												title: "tbd_open_link",
+												icon: "openExternal",
 												onPress: async () => {
 													const parsedDomain = (() => {
 														try {

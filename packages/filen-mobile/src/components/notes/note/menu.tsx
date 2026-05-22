@@ -271,7 +271,7 @@ export function createMenuButtons({
 		id: "duplicate",
 		requiresOnline: true,
 		title: "tbd_duplicate",
-		icon: "copy",
+		icon: "duplicate",
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
 				await notes.duplicate({

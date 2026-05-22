@@ -81,6 +81,7 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "open",
 			title: "tbd_open",
+			icon: "folder",
 			onPress: () => {
 				router.push({
 					pathname: drivePath.selectOptions
@@ -122,6 +123,7 @@ export function createMenuButtons({
 		downloadSubButtons.push({
 			id: "downloadToDevice",
 			title: "tbd_download_to_device",
+			icon: "download",
 			requiresOnline: true,
 			onPress: async () => {
 				const result = await run(async defer => {
@@ -240,6 +242,7 @@ export function createMenuButtons({
 			id: "makeAvailableOffline",
 			requiresOnline: true,
 			title: "tbd_make_available_offline",
+			icon: "archive",
 			onPress: async () => {
 				if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
 					const result = await run(async () => {
@@ -283,6 +286,7 @@ export function createMenuButtons({
 			id: "saveToPhotos",
 			requiresOnline: true,
 			title: "tbd_save_to_photos",
+			icon: "image",
 			onPress: async () => {
 				const permissionsResult = await run(async () => {
 					return await hasAllNeededMediaPermissions({
@@ -354,6 +358,7 @@ export function createMenuButtons({
 			id: "export",
 			requiresOnline: true,
 			title: "tbd_export",
+			icon: "export",
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
 					if (!item.data.decryptedMeta) {
@@ -445,6 +450,7 @@ export function createMenuButtons({
 			id: "import",
 			requiresOnline: true,
 			title: "tbd_import",
+			icon: "import",
 			onPress: async () => {
 				const selectResult = await run(async () => {
 					return await selectDriveItems({
@@ -572,7 +578,7 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "download",
 			title: "tbd_download",
-			icon: "archive",
+			icon: "download",
 			subButtons: downloadSubButtons
 		})
 	}
@@ -589,11 +595,13 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "share",
 			title: "tbd_share",
+			icon: "share",
 			subButtons: [
 				{
 					id: "sharePublicLink",
-				requiresOnline: true,
+					requiresOnline: true,
 					title: "tbd_share_public_link",
+					icon: "link",
 					onPress: () => {
 						router.push({
 							pathname: "/publicLink",
@@ -607,6 +615,7 @@ export function createMenuButtons({
 					id: "shareFilenUser",
 					requiresOnline: true,
 					title: "tbd_share_filen_user",
+					icon: "users",
 					onPress: async () => {
 						const pickResult = await run(async () => {
 							return await selectContacts({
@@ -687,6 +696,7 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "info",
 			title: "tbd_info",
+			icon: "info",
 			onPress: () => {
 				router.push({
 					pathname: "/driveItemInfo",
@@ -701,7 +711,7 @@ export function createMenuButtons({
 			menuButtons.push({
 				id: "versions",
 				title: "tbd_versions",
-				icon: "clock",
+				icon: "versions",
 				onPress: () => {
 					router.push({
 						pathname: "/fileVersions",
@@ -725,6 +735,7 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "color",
 			title: "tbd_color",
+			icon: "color",
 			onPress: () => {
 				router.push({
 					pathname: "/changeDirectoryColor",
@@ -799,7 +810,7 @@ export function createMenuButtons({
 				id: "move",
 				requiresOnline: true,
 				title: "tbd_move",
-				icon: "edit",
+				icon: "move",
 				onPress: async () => {
 					const driveRootUuidResult = await run(async () => {
 						const { authedSdkClient } = await auth.getSdkClients()
