@@ -120,7 +120,11 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 
 	return (
 		<PressableScale
-			className={cn("bg-transparent flex-row items-center px-4 gap-3", disabled && "opacity-50 pointer-events-none")}
+			className={cn(
+				"flex-row items-center px-4 gap-3",
+				disabled && "opacity-50 pointer-events-none",
+				isSelected && !selectOptions ? "bg-background-tertiary" : "bg-transparent"
+			)}
 			onPress={onPress}
 			onLongPress={() => {
 				if (selectOptions) {
@@ -370,7 +374,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 				})
 			}}
 		>
-			{selectOptions && (
+			{(selectOptions || arePlaylistsSelected) && (
 				<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
 					<Checkbox
 						value={isSelected}
