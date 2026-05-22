@@ -1,16 +1,16 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
-import { useLocalSearchParams, useNavigation } from "expo-router"
+import { useLocalSearchParams, useNavigation, useFocusEffect } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
-import Header from "@/components/ui/header"
-import { Fragment, memo } from "react"
+import Header, { type HeaderItem } from "@/components/ui/header"
+import { Fragment, memo, useCallback } from "react"
 import { useResolveClassNames } from "uniwind"
-import { run, formatBytes } from "@filen/utils"
+import { run, formatBytes, cn } from "@filen/utils"
 import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
@@ -20,37 +20,72 @@ import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import type { FileVersion } from "@filen/sdk-rs"
-import Menu from "@/components/ui/menu"
+import Menu, { type MenuButton } from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import DismissStack from "@/components/dismissStack"
+import useFileVersionsStore from "@/stores/useFileVersions.store"
+import { useShallow } from "zustand/shallow"
+import { runBulk } from "@/lib/bulkOps"
+import { Checkbox } from "@/components/ui/checkbox"
+import { AnimatedView } from "@/components/ui/animated"
+import { FadeIn, FadeOut } from "react-native-reanimated"
 
 const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const textForeground = useResolveClassNames("text-foreground")
+	const isSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.some(v => v.uuid === version.uuid)))
+	const areVersionsSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.length > 0))
 
 	return (
-		<View className="flex-row items-center px-4 bg-transparent">
-			<View className="flex-row items-center gap-4 py-2 bg-transparent border-b border-border">
-				<View className="flex-col bg-transparent flex-1 gap-0.5">
-					<Text
-						className="text-foreground"
-						numberOfLines={1}
-						ellipsizeMode="middle"
+		<View className={cn("flex-row items-center px-4 bg-transparent", isSelected && "bg-background-tertiary")}>
+			<View className="flex-row items-center gap-4 py-2 bg-transparent border-b border-border flex-1">
+				{areVersionsSelected && (
+					<AnimatedView
+						className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
+						entering={FadeIn}
+						exiting={FadeOut}
 					>
-						{simpleDate(Number(version.timestamp))}
-					</Text>
-					<Text
-						className="text-muted-foreground text-xs"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{formatBytes(Number(version.size))}
-					</Text>
-				</View>
+						<Checkbox value={isSelected} />
+					</AnimatedView>
+				)}
+				<PressableScale
+					className="flex-row flex-1 bg-transparent"
+					onPress={() => {
+						if (areVersionsSelected) {
+							useFileVersionsStore.getState().toggleSelectedVersion(version)
+						}
+					}}
+				>
+					<View className="flex-col bg-transparent flex-1 gap-0.5">
+						<Text
+							className="text-foreground"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{simpleDate(Number(version.timestamp))}
+						</Text>
+						<Text
+							className="text-muted-foreground text-xs"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{formatBytes(Number(version.size))}
+						</Text>
+					</View>
+				</PressableScale>
 				<View className="flex-row items-center gap-4 bg-transparent">
 					<Menu
 						type="dropdown"
 						buttons={[
+							{
+								id: "select",
+								title: isSelected ? "tbd_deselect" : "tbd_select",
+								icon: "select",
+								checked: isSelected,
+								onPress: () => {
+									useFileVersionsStore.getState().toggleSelectedVersion(version)
+								}
+							},
 							{
 								id: "restore",
 								title: "tbd_restore",
@@ -160,6 +195,17 @@ const FileVersions = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
+	const selectedVersions = useFileVersionsStore(useShallow(state => state.selectedVersions))
+
+	useFocusEffect(
+		useCallback(() => {
+			useFileVersionsStore.getState().clearSelectedVersions()
+
+			return () => {
+				useFileVersionsStore.getState().clearSelectedVersions()
+			}
+		}, [])
+	)
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -191,10 +237,170 @@ const FileVersions = memo(() => {
 		return <DismissStack />
 	}
 
+	const inSelectionMode = selectedVersions.length > 0
+
+	const rightItems = ((): HeaderItem[] | undefined => {
+		if (inSelectionMode) {
+			const menuButtons: MenuButton[] = [
+				{
+					id: "selectAll",
+					title: selectedVersions.length === versions.length ? "tbd_deselect_all" : "tbd_select_all",
+					icon: "select",
+					onPress: () => {
+						if (selectedVersions.length === versions.length) {
+							useFileVersionsStore.getState().clearSelectedVersions()
+
+							return
+						}
+
+						useFileVersionsStore.getState().selectAllVersions(versions)
+					}
+				},
+				{
+					id: "bulkDelete",
+					title: "tbd_delete_selected",
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedVersions,
+							clearSelection: () => useFileVersionsStore.getState().clearSelectedVersions(),
+							confirm: {
+								title: "tbd_delete_selected",
+								message: "tbd_delete_selected_versions_confirmation",
+								okText: "tbd_delete",
+								cancelText: "tbd_cancel",
+								destructive: true
+							},
+							op: version => drive.deleteVersion({ item, version })
+						})
+					}
+				}
+			]
+
+			return [
+				{
+					type: "menu",
+					props: {
+						type: "dropdown",
+						hitSlop: 20,
+						buttons: menuButtons
+					},
+					triggerProps: {
+						hitSlop: 20
+					},
+					icon: {
+						name: "ellipsis-horizontal",
+						size: 24,
+						color: textForeground.color
+					}
+				}
+			]
+		}
+
+		if (versions.length === 0) {
+			return undefined
+		}
+
+		return [
+			{
+				type: "button",
+				icon: {
+					name: "trash-bin-outline",
+					color: textForeground.color,
+					size: 20
+				},
+				props: {
+					onPress: async () => {
+						const promptResponse = await run(async () => {
+							return await prompts.alert({
+								title: "tbd_delete__all_cversion",
+								message: "tbd_delete_version_c_all_confirmation",
+								cancelText: "tbd_cancel",
+								okText: "tbd_delete_all_c",
+								destructive: true
+							})
+						})
+
+						if (!promptResponse.success) {
+							console.error(promptResponse.error)
+							alerts.error(promptResponse.error)
+
+							return
+						}
+
+						if (promptResponse.data.cancelled) {
+							return
+						}
+
+						const result = await runWithLoading(async () => {
+							await Promise.all(
+								versions.map(version => {
+									return drive.deleteVersion({
+										item,
+										version
+									})
+								})
+							)
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
+						}
+					}
+				}
+			}
+		]
+	})()
+
+	const leftItems: HeaderItem[] = (() => {
+		if (inSelectionMode) {
+			return [
+				{
+					type: "button",
+					icon: {
+						name: "close-outline",
+						color: textForeground.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							useFileVersionsStore.getState().clearSelectedVersions()
+						}
+					}
+				}
+			]
+		}
+
+		if (Platform.OS === "ios") {
+			return [
+				{
+					type: "button",
+					icon: {
+						name: "close",
+						color: textForeground.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							navigation.getParent()?.goBack()
+						}
+					}
+				}
+			]
+		}
+
+		return []
+	})()
+
 	return (
 		<Fragment>
 			<Header
-				title="tbd_file_versions"
+				title={inSelectionMode ? `${selectedVersions.length} tbd_selected` : "tbd_file_versions"}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -202,80 +408,8 @@ const FileVersions = memo(() => {
 					ios: undefined,
 					default: bgBackgroundSecondary.backgroundColor as string
 				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
-				rightItems={
-					versions.length > 0
-						? [
-								{
-									type: "button",
-									icon: {
-										name: "trash-bin-outline",
-										color: textForeground.color,
-										size: 20
-									},
-									props: {
-										onPress: async () => {
-											const promptResponse = await run(async () => {
-												return await prompts.alert({
-													title: "tbd_delete__all_cversion",
-													message: "tbd_delete_version_c_all_confirmation",
-													cancelText: "tbd_cancel",
-													okText: "tbd_delete_all_c",
-													destructive: true
-												})
-											})
-
-											if (!promptResponse.success) {
-												console.error(promptResponse.error)
-												alerts.error(promptResponse.error)
-
-												return
-											}
-
-											if (promptResponse.data.cancelled) {
-												return
-											}
-
-											const result = await runWithLoading(async () => {
-												await Promise.all(
-													versions.map(version => {
-														return drive.deleteVersion({
-															item,
-															version
-														})
-													})
-												)
-											})
-
-											if (!result.success) {
-												console.error(result.error)
-												alerts.error(result.error)
-
-												return
-											}
-										}
-									}
-								}
-							]
-						: undefined
-				}
+				leftItems={leftItems}
+				rightItems={rightItems}
 			/>
 			<SafeAreaView
 				className="flex-1 bg-background-secondary"
