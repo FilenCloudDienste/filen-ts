@@ -20,7 +20,8 @@ import { PressableScale } from "@/components/ui/pressables"
 import contacts from "@/lib/contacts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
-import useContactsStore, { type ContactListItemWithHeader } from "@/stores/useContacts.store"
+import useContactsStore, { type ContactListItem, type ContactListItemWithHeader } from "@/stores/useContacts.store"
+import { runBulk } from "@/lib/bulkOps"
 import { router, useLocalSearchParams, useFocusEffect, useNavigation } from "expo-router"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import { randomUUID } from "expo-crypto"
@@ -116,6 +117,17 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const selectedContacts = useContactsStore(
 		useShallow(state => state.selectedContacts.filter(c => c.type === "contact").map(c => c.data as TContact))
 	)
+	const selectedAll = useContactsStore(useShallow(state => state.selectedContacts))
+	const bulkMode = useContactsStore(useShallow(state => state.bulkMode))
+
+	const inBulkMode = bulkMode && !selectOptions && selectedAll.length > 0
+
+	const selectedByType = {
+		contacts: selectedAll.filter((c): c is Extract<ContactListItem, { type: "contact" }> => c.type === "contact"),
+		incoming: selectedAll.filter((c): c is Extract<ContactListItem, { type: "incomingRequest" }> => c.type === "incomingRequest"),
+		outgoing: selectedAll.filter((c): c is Extract<ContactListItem, { type: "outgoingRequest" }> => c.type === "outgoingRequest"),
+		blocked: selectedAll.filter((c): c is Extract<ContactListItem, { type: "blocked" }> => c.type === "blocked")
+	}
 
 	const headerRightItems = (() => {
 		if (selectOptions && selectedContacts.length > 0) {
@@ -145,52 +157,184 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
 
-		menuButtons.push({
-			id: "add",
-			title: "tbd_add_contact",
-			icon: "plus",
-			requiresOnline: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
-						title: "tbd_add_contact",
-						message: "tbd_enter_contact_filen_email",
-						cancelText: "tbd_cancel",
-						okText: "tbd_add"
-					})
+		if (inBulkMode) {
+			if (selectedByType.contacts.length > 0) {
+				menuButtons.push({
+					id: "bulkBlockContacts",
+					title: `tbd_block (${selectedByType.contacts.length})`,
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.contacts,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: "tbd_block",
+								message: "tbd_block_selected_contacts_confirmation",
+								okText: "tbd_block",
+								cancelText: "tbd_cancel",
+								destructive: true
+							},
+							op: c => contacts.block({ email: (c.data as TContact).email })
+						})
+					}
 				})
 
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-					return
-				}
-
-				const email = promptResult.data.value.trim()
-
-				if (email.length === 0) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await contacts.sendRequest({
-						email
-					})
+				menuButtons.push({
+					id: "bulkRemoveContacts",
+					title: `tbd_remove (${selectedByType.contacts.length})`,
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.contacts,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: "tbd_remove",
+								message: "tbd_remove_selected_contacts_confirmation",
+								okText: "tbd_remove",
+								cancelText: "tbd_cancel",
+								destructive: true
+							},
+							op: c => contacts.delete({ uuid: c.data.uuid })
+						})
+					}
 				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
 			}
-		})
+
+			if (selectedByType.incoming.length > 0) {
+				menuButtons.push({
+					id: "bulkAcceptIncoming",
+					title: `tbd_accept (${selectedByType.incoming.length})`,
+					icon: "select",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.incoming,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							op: c => contacts.acceptRequest({ uuid: c.data.uuid })
+						})
+					}
+				})
+
+				menuButtons.push({
+					id: "bulkDenyIncoming",
+					title: `tbd_deny (${selectedByType.incoming.length})`,
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.incoming,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: "tbd_deny",
+								message: "tbd_deny_selected_requests_confirmation",
+								okText: "tbd_deny",
+								cancelText: "tbd_cancel",
+								destructive: true
+							},
+							op: c => contacts.denyRequest({ uuid: c.data.uuid })
+						})
+					}
+				})
+			}
+
+			if (selectedByType.outgoing.length > 0) {
+				menuButtons.push({
+					id: "bulkCancelOutgoing",
+					title: `tbd_cancel_request (${selectedByType.outgoing.length})`,
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.outgoing,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: "tbd_cancel_request",
+								message: "tbd_cancel_selected_outgoing_confirmation",
+								okText: "tbd_cancel_request",
+								cancelText: "tbd_cancel",
+								destructive: true
+							},
+							op: c => contacts.cancelRequest({ uuid: c.data.uuid })
+						})
+					}
+				})
+			}
+
+			if (selectedByType.blocked.length > 0) {
+				menuButtons.push({
+					id: "bulkUnblock",
+					title: `tbd_unblock (${selectedByType.blocked.length})`,
+					icon: "delete",
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.blocked,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: "tbd_unblock",
+								message: "tbd_unblock_selected_confirmation",
+								okText: "tbd_unblock",
+								cancelText: "tbd_cancel"
+							},
+							op: c => contacts.unblock({ uuid: c.data.uuid })
+						})
+					}
+				})
+			}
+		} else {
+			menuButtons.push({
+				id: "add",
+				title: "tbd_add_contact",
+				icon: "plus",
+				requiresOnline: true,
+				onPress: async () => {
+					const promptResult = await run(async () => {
+						return await prompts.input({
+							title: "tbd_add_contact",
+							message: "tbd_enter_contact_filen_email",
+							cancelText: "tbd_cancel",
+							okText: "tbd_add"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+						return
+					}
+
+					const email = promptResult.data.value.trim()
+
+					if (email.length === 0) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await contacts.sendRequest({
+							email
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+				}
+			})
+		}
 
 		if (menuButtons.length > 0) {
 			items.push({
@@ -215,6 +359,24 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	})()
 
 	const headerLeftItems = (() => {
+		if (inBulkMode) {
+			return [
+				{
+					type: "button",
+					icon: {
+						name: "close-outline",
+						color: textForeground.color,
+						size: 20
+					},
+					props: {
+						onPress: () => {
+							useContactsStore.getState().clearSelectedContacts()
+						}
+					}
+				}
+			] satisfies HeaderItem[]
+		}
+
 		return [
 			{
 				type: "button",
@@ -236,10 +398,12 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		] satisfies HeaderItem[]
 	})()
 
+	const title = inBulkMode ? `${selectedAll.length} tbd_selected` : "tbd_contacts"
+
 	return (
 		<StackHeader
 			transparent={Platform.OS === "ios"}
-			title="tbd_contacts"
+			title={title}
 			leftItems={headerLeftItems}
 			backgroundColor={Platform.select({
 				ios: undefined,
@@ -283,6 +447,8 @@ const Contact = memo(
 			useShallow(state => state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid))
 		)
 		const selectedCount = useContactsStore(useShallow(state => state.selectedContacts.length))
+		const bulkMode = useContactsStore(useShallow(state => state.bulkMode))
+		const showCheckbox = !!selectOptions || bulkMode
 
 		const onAccept = async () => {
 			const result = await runWithLoading(async () => {
@@ -394,6 +560,20 @@ const Contact = memo(
 
 		const menuButtons = (() => {
 			const buttons: MenuButton[] = []
+
+			if (!selectOptions && info.item.type !== "header") {
+				const target = info.item
+				buttons.push({
+					id: isSelected ? "deselect" : "select",
+					title: isSelected ? "tbd_deselect" : "tbd_select",
+					icon: "select",
+					checked: isSelected,
+					onPress: () => {
+						useContactsStore.getState().setBulkMode(true)
+						useContactsStore.getState().toggleSelectedContact(target)
+					}
+				})
+			}
 
 			if (info.item.type === "contact") {
 				buttons.push({
@@ -739,7 +919,7 @@ const Contact = memo(
 									nextItem && nextItem.type !== "header" && "border-b border-border"
 								)}
 							>
-								{selectOptions && (
+								{showCheckbox && (
 									<AnimatedView
 										className="flex-row h-full items-center justify-center bg-transparent shrink-0"
 										entering={FadeIn}
@@ -982,12 +1162,18 @@ const Contacts = memo(() => {
 
 	useFocusEffect(
 		useCallback(() => {
-			useContactsStore.getState().setSelectedContacts([])
+			// On focus, only keep selection if we're in bulkMode AND not in
+			// picker mode. bulkMode is a user-driven state (Select menu item)
+			// and surviving a re-focus keeps the selection alive while the
+			// user works. Picker mode always starts fresh.
+			if (selectOptions || !useContactsStore.getState().bulkMode) {
+				useContactsStore.getState().clearSelectedContacts()
+			}
 
 			return () => {
-				useContactsStore.getState().setSelectedContacts([])
+				useContactsStore.getState().clearSelectedContacts()
 			}
-		}, [])
+		}, [selectOptions])
 	)
 
 	return (
