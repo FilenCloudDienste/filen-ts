@@ -237,6 +237,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"expo-secure-store",
 		"expo-navigation-bar",
 		"expo-asset",
+		"expo-font",
 		[
 			"expo-sharing",
 			{
