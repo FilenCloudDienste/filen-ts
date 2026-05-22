@@ -184,6 +184,7 @@
     "@types/uuid": "^11.0.0",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "babel-plugin-transform-remove-console": "^6.9.4",
+    "babel-preset-expo": "~55.0.22",
     "eslint": "^9.39.2",
     "eslint-config-expo": "~55.0.1",
     "eslint-import-resolver-typescript": "^4.4.4",
