@@ -12,29 +12,17 @@ import { useResolveClassNames } from "uniwind"
 import chatsLib from "@/lib/chats"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
-import { run } from "@filen/utils"
-import prompts from "@/lib/prompts"
 import type { MenuButton } from "@/components/ui/menu"
 import { selectContacts } from "@/routes/contacts"
+import { runBulk } from "@/lib/bulkOps"
+import { aggregateChatSelectionFlags } from "@/lib/chatSelectors"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
-	const selectedChatsIncludesMuted = useChatsStore(useShallow(state => state.selectedChats.some(chat => chat.muted)))
-	const everySelectedChatOwnedBySelf = useChatsStore(
-		useShallow(state => state.selectedChats.every(chat => chat.ownerId === stringigiedClient?.userId))
-	)
-	const selfIsParticipantAndNotOwnerOfEverySelectedChat = useChatsStore(
-		useShallow(state =>
-			state.selectedChats.every(
-				chat =>
-					chat.ownerId !== stringigiedClient?.userId &&
-					chat.participants.some(participant => participant.userId === stringigiedClient?.userId)
-			)
-		)
-	)
+	const chatFlags = aggregateChatSelectionFlags(selectedChats, stringigiedClient?.userId)
 
 	const chatsQuery = useChatsQuery({
 		enabled: false
@@ -63,7 +51,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				},
 				props: {
 					onPress: () => {
-						useChatsStore.getState().setSelectedChats([])
+						useChatsStore.getState().clearSelectedChats()
 					}
 				}
 			}
@@ -80,12 +68,12 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			icon: "select",
 			onPress: () => {
 				if (selectedChats.length === chats.length) {
-					useChatsStore.getState().setSelectedChats([])
+					useChatsStore.getState().clearSelectedChats()
 
 					return
 				}
 
-				useChatsStore.getState().setSelectedChats(chats)
+				useChatsStore.getState().selectAllChats(chats)
 			}
 		})
 
@@ -127,34 +115,18 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			menuButtons.push({
 				id: "bulkMute",
 				requiresOnline: true,
-				title: selectedChatsIncludesMuted ? "tbd_unmute_all" : "tbd_mute_all",
+				title: chatFlags.includesMuted ? "tbd_unmute_all" : "tbd_mute_all",
 				icon: "plus",
 				onPress: async () => {
-					const result = await runWithLoading(async defer => {
-						defer(() => {
-							useChatsStore.getState().setSelectedChats([])
-						})
-
-						return await Promise.all(
-							selectedChats.map(chat =>
-								chatsLib.mute({
-									chat,
-									mute: !selectedChatsIncludesMuted
-								})
-							)
-						)
+					await runBulk({
+						items: selectedChats,
+						clearSelection: () => useChatsStore.getState().clearSelectedChats(),
+						op: chat => chatsLib.mute({ chat, mute: !chatFlags.includesMuted })
 					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
 				}
 			})
 
-			if (everySelectedChatOwnedBySelf) {
+			if (chatFlags.everyOwnedBySelf) {
 				menuButtons.push({
 					id: "bulkDelete",
 					requiresOnline: true,
@@ -162,53 +134,23 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					icon: "delete",
 					destructive: true,
 					onPress: async () => {
-						const promptResponse = await run(async () => {
-							return await prompts.alert({
+						await runBulk({
+							items: selectedChats,
+							clearSelection: () => useChatsStore.getState().clearSelectedChats(),
+							confirm: {
 								title: "tbd_delete_all_chats",
 								message: "tbd_delete_all_chats_confirmation",
+								okText: "tbd_delete_all",
 								cancelText: "tbd_cancel",
-								okText: "tbd_delete_all"
-							})
+								destructive: true
+							},
+							op: chat => chatsLib.delete({ chat })
 						})
-
-						if (!promptResponse.success) {
-							console.error(promptResponse.error)
-							alerts.error(promptResponse.error)
-
-							return
-						}
-
-						if (promptResponse.data.cancelled) {
-							useChatsStore.getState().setSelectedChats([])
-
-							return
-						}
-
-						const result = await runWithLoading(async defer => {
-							defer(() => {
-								useChatsStore.getState().setSelectedChats([])
-							})
-
-							return await Promise.all(
-								selectedChats.map(chat =>
-									chatsLib.delete({
-										chat
-									})
-								)
-							)
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
 					}
 				})
 			}
 
-			if (selfIsParticipantAndNotOwnerOfEverySelectedChat) {
+			if (chatFlags.selfIsParticipantNotOwnerOfEvery) {
 				menuButtons.push({
 					id: "bulkLeave",
 					requiresOnline: true,
@@ -216,46 +158,18 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					icon: "exit",
 					destructive: true,
 					onPress: async () => {
-						const promptResponse = await run(async () => {
-							return await prompts.alert({
+						await runBulk({
+							items: selectedChats,
+							clearSelection: () => useChatsStore.getState().clearSelectedChats(),
+							confirm: {
 								title: "tbd_leave_all_chats",
 								message: "tbd_leave_all_chats_confirmation",
+								okText: "tbd_leave_all",
 								cancelText: "tbd_cancel",
-								okText: "tbd_leave_all"
-							})
+								destructive: true
+							},
+							op: chat => chatsLib.leave({ chat })
 						})
-
-						if (!promptResponse.success) {
-							console.error(promptResponse.error)
-							alerts.error(promptResponse.error)
-
-							return
-						}
-
-						if (promptResponse.data.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async defer => {
-							defer(() => {
-								useChatsStore.getState().setSelectedChats([])
-							})
-
-							return await Promise.all(
-								selectedChats.map(chat =>
-									chatsLib.leave({
-										chat
-									})
-								)
-							)
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
 					}
 				})
 			}
@@ -316,10 +230,10 @@ export const Chats = memo(() => {
 
 	useFocusEffect(
 		useCallback(() => {
-			useChatsStore.getState().setSelectedChats([])
+			useChatsStore.getState().clearSelectedChats()
 
 			return () => {
-				useChatsStore.getState().setSelectedChats([])
+				useChatsStore.getState().clearSelectedChats()
 			}
 		}, [])
 	)

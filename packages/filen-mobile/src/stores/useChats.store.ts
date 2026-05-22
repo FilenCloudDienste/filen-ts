@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { type ChatTyping, type ChatMessage, type Chat, FilenSdkError } from "@filen/sdk-rs"
+import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type InputViewLayout = {
 	width: number
@@ -36,6 +37,9 @@ export type ChatsStore = {
 	inflightErrors: Record<string, Error | FilenSdkError>
 	selectedChats: Chat[]
 	setSelectedChats: (fn: Chat[] | ((prev: Chat[]) => Chat[])) => void
+	toggleSelectedChat: (chat: Chat) => void
+	clearSelectedChats: () => void
+	selectAllChats: (chats: Chat[]) => void
 	setInflightErrors: (
 		fn: Record<string, Error | FilenSdkError> | ((prev: Record<string, Error | FilenSdkError>) => Record<string, Error | FilenSdkError>)
 	) => void
@@ -78,6 +82,17 @@ export const useChatsStore = create<ChatsStore>(set => ({
 		set(state => ({
 			selectedChats: typeof selectedChats === "function" ? selectedChats(state.selectedChats) : selectedChats
 		}))
+	},
+	toggleSelectedChat(chat) {
+		set(state => ({
+			selectedChats: toggleInArray(state.selectedChats, chat, c => c.uuid)
+		}))
+	},
+	clearSelectedChats() {
+		set({ selectedChats: [] })
+	},
+	selectAllChats(chats) {
+		set({ selectedChats: chats })
 	},
 	setInflightErrors(inflightErrors) {
 		set(state => ({
