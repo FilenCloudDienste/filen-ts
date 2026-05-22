@@ -175,29 +175,58 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				}
 			})
 
-			if (selectedByType.contacts.length > 0) {
+			// Order: affirmative actions first (unblock / accept), then less-harsh
+			// removals (remove from contacts), then most-harsh destructive (block,
+			// deny request, cancel sent request).
+
+			if (selectedByType.blocked.length > 0) {
 				menuButtons.push({
-					id: "bulkBlockContacts",
-					title: `tbd_block (${selectedByType.contacts.length})`,
-					icon: "delete",
-					destructive: true,
+					id: "bulkUnblock",
+					title: `tbd_unblock (${selectedByType.blocked.length})`,
+					icon: "select",
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({
-							items: selectedByType.contacts,
+							items: selectedByType.blocked,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
 							confirm: {
-								title: "tbd_block",
-								message: "tbd_block_selected_contacts_confirmation",
-								okText: "tbd_block",
-								cancelText: "tbd_cancel",
-								destructive: true
+								title: "tbd_unblock",
+								message: "tbd_unblock_selected_confirmation",
+								okText: "tbd_unblock",
+								cancelText: "tbd_cancel"
 							},
-							op: c => contacts.block({ email: (c.data as TContact).email })
+							op: c => contacts.unblock({ uuid: c.data.uuid })
 						})
 					}
 				})
+			}
 
+			if (selectedByType.incoming.length > 0) {
+				menuButtons.push({
+					id: "bulkAcceptIncoming",
+					title: `tbd_accept (${selectedByType.incoming.length})`,
+					icon: "checkmark",
+					requiresOnline: true,
+					onPress: async () => {
+						const ok = await runBulk({
+							items: selectedByType.incoming,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							op: c => contacts.acceptRequest({ uuid: c.data.uuid })
+						})
+
+						// Single amortized invalidation instead of N refetches
+						// triggered by per-call contactsQueryUpdate(). Accepted
+						// requests promote to contacts, so both queries need a
+						// fresh fetch.
+						if (ok) {
+							queryClient.invalidateQueries({ queryKey: ["contacts"] })
+							queryClient.invalidateQueries({ queryKey: ["contactRequests"] })
+						}
+					}
+				})
+			}
+
+			if (selectedByType.contacts.length > 0) {
 				menuButtons.push({
 					id: "bulkRemoveContacts",
 					title: `tbd_remove (${selectedByType.contacts.length})`,
@@ -219,32 +248,31 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						})
 					}
 				})
+
+				menuButtons.push({
+					id: "bulkBlockContacts",
+					title: `tbd_block (${selectedByType.contacts.length})`,
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.contacts,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: "tbd_block",
+								message: "tbd_block_selected_contacts_confirmation",
+								okText: "tbd_block",
+								cancelText: "tbd_cancel",
+								destructive: true
+							},
+							op: c => contacts.block({ email: (c.data as TContact).email })
+						})
+					}
+				})
 			}
 
 			if (selectedByType.incoming.length > 0) {
-				menuButtons.push({
-					id: "bulkAcceptIncoming",
-					title: `tbd_accept (${selectedByType.incoming.length})`,
-					icon: "select",
-					requiresOnline: true,
-					onPress: async () => {
-						const ok = await runBulk({
-							items: selectedByType.incoming,
-							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
-							op: c => contacts.acceptRequest({ uuid: c.data.uuid })
-						})
-
-						// Single amortized invalidation instead of N refetches
-						// triggered by per-call contactsQueryUpdate(). Accepted
-						// requests promote to contacts, so both queries need a
-						// fresh fetch.
-						if (ok) {
-							queryClient.invalidateQueries({ queryKey: ["contacts"] })
-							queryClient.invalidateQueries({ queryKey: ["contactRequests"] })
-						}
-					}
-				})
-
 				menuButtons.push({
 					id: "bulkDenyIncoming",
 					title: `tbd_deny (${selectedByType.incoming.length})`,
@@ -272,7 +300,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				menuButtons.push({
 					id: "bulkCancelOutgoing",
 					title: `tbd_cancel_request (${selectedByType.outgoing.length})`,
-					icon: "delete",
+					icon: "cancel",
 					destructive: true,
 					requiresOnline: true,
 					onPress: async () => {
@@ -287,28 +315,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								destructive: true
 							},
 							op: c => contacts.cancelRequest({ uuid: c.data.uuid })
-						})
-					}
-				})
-			}
-
-			if (selectedByType.blocked.length > 0) {
-				menuButtons.push({
-					id: "bulkUnblock",
-					title: `tbd_unblock (${selectedByType.blocked.length})`,
-					icon: "select",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedByType.blocked,
-							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
-							confirm: {
-								title: "tbd_unblock",
-								message: "tbd_unblock_selected_confirmation",
-								okText: "tbd_unblock",
-								cancelText: "tbd_cancel"
-							},
-							op: c => contacts.unblock({ uuid: c.data.uuid })
 						})
 					}
 				})

@@ -75,19 +75,6 @@ export function createMenuButtons({
 				]
 			: []),
 		{
-			id: "participants",
-			title: "tbd_participants",
-			icon: "users",
-			onPress: () => {
-				router.push({
-					pathname: "/chatParticipants",
-					params: {
-						chat: serialize(chat)
-					}
-				})
-			}
-		},
-		{
 			id: "muted",
 			requiresOnline: true,
 			title: "tbd_muted",
@@ -107,6 +94,19 @@ export function createMenuButtons({
 
 					return
 				}
+			}
+		},
+		{
+			id: "participants",
+			title: "tbd_participants",
+			icon: "users",
+			onPress: () => {
+				router.push({
+					pathname: "/chatParticipants",
+					params: {
+						chat: serialize(chat)
+					}
+				})
 			}
 		},
 		...(chat.ownerId === userId

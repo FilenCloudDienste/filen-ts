@@ -521,57 +521,6 @@ const Playlist = memo(() => {
 							type: "dropdown",
 							hitSlop: 20,
 							buttons: [
-								{
-									id: "rename",
-									icon: "edit",
-									title: "tbd_rename_playlist",
-									onPress: async () => {
-										const promptResult = await run(async () => {
-											return await prompts.input({
-												title: "tbd_rename_playlist",
-												message: "tbd_enter_playlist_name",
-												placeholder: "tbd_playlist_name_placeholder",
-												cancelText: "tbd_cancel",
-												okText: "tbd_rename",
-												defaultValue: playlist.name
-											})
-										})
-
-										if (!promptResult.success) {
-											console.error(promptResult.error)
-											alerts.error(promptResult.error)
-
-											return
-										}
-
-										if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-											return
-										}
-
-										const newName = promptResult.data.value.trim()
-
-										if (newName.length === 0) {
-											return
-										}
-
-										const result = await runWithLoading(async () => {
-											await audio.savePlaylist({
-												playlist: {
-													...playlist,
-													name: newName,
-													updated: Date.now()
-												}
-											})
-										})
-
-										if (!result.success) {
-											console.error(result.error)
-											alerts.error(result.error)
-
-											return
-										}
-									}
-								},
 								...(playlist.files.length > 0
 									? ([
 											{
@@ -635,6 +584,57 @@ const Playlist = memo(() => {
 											}
 										] satisfies MenuButton[])
 									: []),
+								{
+									id: "rename",
+									icon: "edit",
+									title: "tbd_rename_playlist",
+									onPress: async () => {
+										const promptResult = await run(async () => {
+											return await prompts.input({
+												title: "tbd_rename_playlist",
+												message: "tbd_enter_playlist_name",
+												placeholder: "tbd_playlist_name_placeholder",
+												cancelText: "tbd_cancel",
+												okText: "tbd_rename",
+												defaultValue: playlist.name
+											})
+										})
+
+										if (!promptResult.success) {
+											console.error(promptResult.error)
+											alerts.error(promptResult.error)
+
+											return
+										}
+
+										if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+											return
+										}
+
+										const newName = promptResult.data.value.trim()
+
+										if (newName.length === 0) {
+											return
+										}
+
+										const result = await runWithLoading(async () => {
+											await audio.savePlaylist({
+												playlist: {
+													...playlist,
+													name: newName,
+													updated: Date.now()
+												}
+											})
+										})
+
+										if (!result.success) {
+											console.error(result.error)
+											alerts.error(result.error)
+
+											return
+										}
+									}
+								},
 								{
 									id: "add",
 									icon: "plus",

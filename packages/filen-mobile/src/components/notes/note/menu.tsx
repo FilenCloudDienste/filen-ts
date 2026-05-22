@@ -45,6 +45,52 @@ export function createMenuButtons({
 		})
 	}
 
+	// Toggles (pin / favorite) sit first — they're one-tap and the most-tapped
+	// actions in the menu.
+	buttons.push({
+		id: note.pinned ? "unpin" : "pin",
+		title: note.pinned ? "tbd_unpin" : "tbd_pin",
+		icon: "pin",
+		requiresOnline: true,
+		onPress: async () => {
+			const result = await runWithLoading(async () => {
+				await notes.setPinned({
+					note,
+					pinned: !note.pinned
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+
+				return
+			}
+		}
+	})
+
+	buttons.push({
+		id: note.favorite ? "unfavorite" : "favorite",
+		title: note.favorite ? "tbd_unfavorite" : "tbd_favorite",
+		icon: "heart",
+		requiresOnline: true,
+		onPress: async () => {
+			const result = await runWithLoading(async () => {
+				await notes.setFavorited({
+					note,
+					favorite: !note.favorite
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+
+				return
+			}
+		}
+	})
+
 	if (writeAccess) {
 		buttons.push({
 			id: "type",
@@ -127,50 +173,6 @@ export function createMenuButtons({
 			)
 		})
 	}
-
-	buttons.push({
-		id: note.pinned ? "unpin" : "pin",
-		title: note.pinned ? "tbd_unpin" : "tbd_pin",
-		icon: "pin",
-		requiresOnline: true,
-		onPress: async () => {
-			const result = await runWithLoading(async () => {
-				await notes.setPinned({
-					note,
-					pinned: !note.pinned
-				})
-			})
-
-			if (!result.success) {
-				console.error(result.error)
-				alerts.error(result.error)
-
-				return
-			}
-		}
-	})
-
-	buttons.push({
-		id: note.favorite ? "unfavorite" : "favorite",
-		title: note.favorite ? "tbd_unfavorite" : "tbd_favorite",
-		icon: "heart",
-		requiresOnline: true,
-		onPress: async () => {
-			const result = await runWithLoading(async () => {
-				await notes.setFavorited({
-					note,
-					favorite: !note.favorite
-				})
-			})
-
-			if (!result.success) {
-				console.error(result.error)
-				alerts.error(result.error)
-
-				return
-			}
-		}
-	})
 
 	buttons.push({
 		id: "tags",
