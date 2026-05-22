@@ -199,7 +199,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 	return (
 		<StackHeader
-			title="tbd_chats"
+			title={selectedChats.length > 0 ? `${selectedChats.length} tbd_selected` : "tbd_chats"}
 			transparent={Platform.OS === "ios"}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}

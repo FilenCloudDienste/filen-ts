@@ -1069,6 +1069,13 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	})()
 
 	const headerTitle = (() => {
+		// In bulk-selection mode, swap the directory name out for the count —
+		// matches Notes / Tracks / Contacts / Participants / Versions.
+		// Picker mode (drivePath.selectOptions) keeps its own destination title.
+		if (selectedDriveItems.length > 0 && !drivePath.selectOptions) {
+			return `${selectedDriveItems.length} tbd_selected`
+		}
+
 		if (drivePath.selectOptions) {
 			switch (drivePath.selectOptions.intention) {
 				case "move": {
