@@ -116,49 +116,6 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 									}
 								},
 								{
-									id: "remove",
-									title: "tbd_remove",
-									destructive: true,
-									icon: "delete",
-									requiresOnline: true,
-									onPress: async () => {
-										const promptResponse = await run(async () => {
-											return await prompts.alert({
-												title: "tbd_remove_participant",
-												message: "tbd_remove_participant_confirmation",
-												cancelText: "tbd_cancel",
-												okText: "tbd_remove",
-												destructive: true
-											})
-										})
-
-										if (!promptResponse.success) {
-											console.error(promptResponse.error)
-											alerts.error(promptResponse.error)
-
-											return
-										}
-
-										if (promptResponse.data.cancelled) {
-											return
-										}
-
-										const result = await runWithLoading(async () => {
-											await notes.removeParticipant({
-												note,
-												participantUserId: participant.userId
-											})
-										})
-
-										if (!result.success) {
-											console.error(result.error)
-											alerts.error(result.error)
-
-											return
-										}
-									}
-								},
-								{
 									id: "permissions",
 									title: "tbd_permissions",
 									icon: participant.permissionsWrite ? "edit" : "eye",
@@ -210,6 +167,49 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 											}
 										}
 									]
+								},
+								{
+									id: "remove",
+									title: "tbd_remove",
+									destructive: true,
+									icon: "delete",
+									requiresOnline: true,
+									onPress: async () => {
+										const promptResponse = await run(async () => {
+											return await prompts.alert({
+												title: "tbd_remove_participant",
+												message: "tbd_remove_participant_confirmation",
+												cancelText: "tbd_cancel",
+												okText: "tbd_remove",
+												destructive: true
+											})
+										})
+
+										if (!promptResponse.success) {
+											console.error(promptResponse.error)
+											alerts.error(promptResponse.error)
+
+											return
+										}
+
+										if (promptResponse.data.cancelled) {
+											return
+										}
+
+										const result = await runWithLoading(async () => {
+											await notes.removeParticipant({
+												note,
+												participantUserId: participant.userId
+											})
+										})
+
+										if (!result.success) {
+											console.error(result.error)
+											alerts.error(result.error)
+
+											return
+										}
+									}
 								}
 							]}
 						>

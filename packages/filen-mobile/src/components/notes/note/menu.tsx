@@ -47,36 +47,6 @@ export function createMenuButtons({
 
 	if (writeAccess) {
 		buttons.push({
-			id: "history",
-			title: "tbd_history",
-			icon: "clock",
-			onPress: () => {
-				router.push({
-					pathname: "/noteHistory",
-					params: {
-						note: serialize(note)
-					}
-				})
-			}
-		})
-	}
-
-	buttons.push({
-		id: "participants",
-		title: "tbd_participants",
-		icon: "users",
-		onPress: () => {
-			router.push({
-				pathname: "/noteParticipants",
-				params: {
-					note: serialize(note)
-				}
-			})
-		}
-	})
-
-	if (writeAccess) {
-		buttons.push({
 			id: "type",
 			title: "tbd_type",
 			icon:
@@ -287,6 +257,36 @@ export function createMenuButtons({
 			}
 		}
 	})
+
+	buttons.push({
+		id: "participants",
+		title: "tbd_participants",
+		icon: "users",
+		onPress: () => {
+			router.push({
+				pathname: "/noteParticipants",
+				params: {
+					note: serialize(note)
+				}
+			})
+		}
+	})
+
+	if (writeAccess) {
+		buttons.push({
+			id: "history",
+			title: "tbd_history",
+			icon: "clock",
+			onPress: () => {
+				router.push({
+					pathname: "/noteHistory",
+					params: {
+						note: serialize(note)
+					}
+				})
+			}
+		})
+	}
 
 	buttons.push({
 		id: "export",
