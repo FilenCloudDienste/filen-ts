@@ -16,6 +16,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { unwrapSdkError } from "@/lib/utils"
 import useIsOnline from "@/hooks/useIsOnline"
 import { reloadAppAsync } from "expo"
+import { ErrorKind } from "@filen/sdk-rs"
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -23,15 +24,15 @@ function isValidEmail(email: string): boolean {
 	return EMAIL_REGEX.test(email.trim())
 }
 
-// The SDK (@filen/sdk-rs 0.4.20) does not expose ErrorKind.TwoFactorRequired.
-// When 2FA is required, the server message is propagated via ErrorKind.Server
-// or .Unauthenticated. Detect by substring on the unwrapped message.
-// TODO: replace with `kind === ErrorKind.TwoFactorRequired` when the SDK lands it.
 function isTwoFactorRequiredError(error: unknown): boolean {
 	const unwrapped = unwrapSdkError(error)
 
 	if (!unwrapped) {
 		return false
+	}
+
+	if (unwrapped.kind() === ErrorKind.Enter2fa || unwrapped.kind() === ErrorKind.Wrong2fa) {
+		return true
 	}
 
 	const message = unwrapped.message().toLowerCase()

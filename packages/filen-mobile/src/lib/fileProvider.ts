@@ -76,26 +76,22 @@ class FileProvider {
 	}
 
 	public async enable(): Promise<void> {
-		const isAuthed = await auth.isAuthed()
-
-		if (!isAuthed.isAuthed) {
-			throw new Error("Cannot enable file provider when not authenticated")
-		}
-
 		const current = await this.read()
+		const { authedSdkClient } = await auth.getSdkClients()
+		const sdkConfig = authedSdkClient.toSdkConfig()
 
 		await this.write({
 			...(current ? current : {}),
 			providerEnabled: true,
 			sdkConfig: {
-				email: isAuthed.stringifiedClient.email,
-				masterKeys: [], // TODO: Fix
-				apiKey: isAuthed.stringifiedClient.apiKey,
-				publicKey: "", // TODO: Fix
-				privateKey: isAuthed.stringifiedClient.privateKey,
-				authVersion: isAuthed.stringifiedClient.authVersion,
-				baseFolderUUID: isAuthed.stringifiedClient.rootUuid,
-				userId: Number(isAuthed.stringifiedClient.userId)
+				email: sdkConfig.email,
+				masterKeys: sdkConfig.masterKeys,
+				apiKey: sdkConfig.apiKey,
+				publicKey: sdkConfig.publicKey,
+				privateKey: sdkConfig.privateKey,
+				authVersion: Number(sdkConfig.authVersion),
+				baseFolderUUID: sdkConfig.baseFolderUuid,
+				userId: Number(sdkConfig.userId)
 			}
 		} satisfies AuthFileSchema)
 
