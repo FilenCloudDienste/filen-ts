@@ -49,7 +49,7 @@ export function createMenuButtons({
 					{
 						id: "markAsRead",
 						title: "tbd_mark_as_read",
-						icon: "archive",
+						icon: "envelopeOpen",
 						checked: isSelected,
 						requiresOnline: true,
 						onPress: async () => {
@@ -91,6 +91,7 @@ export function createMenuButtons({
 			id: "muted",
 			requiresOnline: true,
 			title: "tbd_muted",
+			icon: "mute",
 			checked: chat.muted,
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
@@ -209,7 +210,7 @@ export function createMenuButtons({
 						requiresOnline: true,
 						title: "tbd_leave",
 						destructive: true,
-						icon: "delete",
+						icon: "exit",
 						onPress: async () => {
 							const promptResponse = await run(async () => {
 								return await prompts.alert({

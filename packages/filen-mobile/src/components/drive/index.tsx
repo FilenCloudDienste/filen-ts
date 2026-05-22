@@ -227,12 +227,12 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			menuButtons.push({
 				id: "upload",
 				title: "tbd_upload",
-				icon: "plus",
+				icon: "upload",
 				subButtons: [
 					{
 						id: "uploadFiles",
 						title: "tbd_upload_files",
-						icon: "plus",
+						icon: "upload",
 						requiresOnline: true,
 						onPress: async () => {
 							const documentPickerResult = await run(async () => {
@@ -314,7 +314,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						id: "uploadPhotosOrVideos",
 						requiresOnline: true,
 						title: "tbd_upload_photos_or_videos",
-						icon: "plus",
+						icon: "image",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
 								return await hasAllNeededMediaPermissions({
@@ -418,7 +418,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					{
 						id: "takePhotoOrVideo",
 						title: "tbd_take_photo_or_video",
-						icon: "plus",
+						icon: "camera",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
 								return await hasAllNeededMediaPermissions({
@@ -525,7 +525,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						id: "scanDocument",
 						requiresOnline: true,
 						title: "tbd_scan_document",
-						icon: "plus",
+						icon: "scan",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
 								return await hasAllNeededMediaPermissions({
@@ -624,7 +624,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					{
 						id: "createTextFile",
 						title: "tbd_create_text_file",
-						icon: "plus",
+						icon: "text",
 						onPress: async () => {
 							const promptResult = await run(async () => {
 								return await prompts.input({
@@ -806,7 +806,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					menuButtons.push({
 						id: "bulkDownload",
 						title: "tbd_download_selected",
-						icon: "archive",
+						icon: "download",
 						requiresOnline: true,
 						onPress: async () => {
 							await runBulk({
@@ -837,7 +837,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					menuButtons.push({
 						id: "bulkMove",
 						title: "tbd_move_selected",
-						icon: "edit",
+						icon: "move",
 						requiresOnline: true,
 						onPress: async () => {
 							const driveRootUuidResult = await run(async () => {
@@ -889,7 +889,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					menuButtons.push({
 						id: "bulkSaveToPhotos",
 						title: "tbd_save_to_photos_selected",
-						icon: "archive",
+						icon: "image",
 						requiresOnline: true,
 						onPress: async () => {
 							const permissionsResult = await run(async () => {

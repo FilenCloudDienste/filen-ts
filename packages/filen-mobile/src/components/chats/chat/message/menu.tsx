@@ -37,6 +37,7 @@ export const Menu = memo(
 			{
 				id: "reply",
 				title: "tbd_reply",
+				icon: "reply" as const,
 				onPress: () => {
 					setChatReplyTo(info.item)
 
@@ -48,6 +49,7 @@ export const Menu = memo(
 			{
 				id: "copy",
 				title: "tbd_copy",
+				icon: "copy" as const,
 				onPress: async () => {
 					const result = await run(async () => {
 						if (!info.item.inner.message) {
@@ -72,6 +74,7 @@ export const Menu = memo(
 						{
 							id: "edit",
 							title: "tbd_edit",
+							icon: "edit" as const,
 							requiresOnline: true,
 							onPress: () => {
 								if (!info.item.inner.message) {
@@ -94,6 +97,7 @@ export const Menu = memo(
 						{
 							id: "delete",
 							title: "tbd_delete",
+							icon: "delete" as const,
 							destructive: true,
 							requiresOnline: true,
 							onPress: async () => {

@@ -799,6 +799,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						{
 							id: "addMedia",
 							title: "tbd_add_photos_or_videos_from_gallery",
+							icon: "image",
 							onPress: async () => {
 								const permissionsResult = await run(async () => {
 									return await hasAllNeededMediaPermissions({
@@ -888,6 +889,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						{
 							id: "takeMedia",
 							title: "tbd_take_photo_or_video",
+							icon: "camera",
 							onPress: async () => {
 								const permissionsResult = await run(async () => {
 									return await hasAllNeededMediaPermissions({
@@ -977,6 +979,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						{
 							id: "addFiles",
 							title: "tbd_add_files",
+							icon: "upload",
 							onPress: async () => {
 								const documentPickerResult = await run(async () => {
 									return await DocumentPicker.getDocumentAsync({
@@ -1035,6 +1038,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						{
 							id: "addDriveItems",
 							title: "tbd_add_drive_items",
+							icon: "folder",
 							onPress: async () => {
 								const selectDriveItemsResult = await run(async () => {
 									return await selectDriveItems({

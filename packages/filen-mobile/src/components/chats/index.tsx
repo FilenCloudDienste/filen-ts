@@ -119,7 +119,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					id: "bulkMarkAsRead",
 					requiresOnline: true,
 					title: "tbd_mark_as_read",
-					icon: "select",
+					icon: "envelopeOpen",
 					onPress: async () => {
 						// Mirror the single-item path in chats/list/chat/menu.tsx — call
 						// both markRead AND updateLastFocusTimesNow per chat. Only the
@@ -139,7 +139,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				id: "bulkMute",
 				requiresOnline: true,
 				title: chatFlags.includesMuted ? "tbd_unmute_all" : "tbd_mute_all",
-				icon: "plus",
+				icon: "mute",
 				onPress: async () => {
 					await runBulk({
 						items: selectedChats,

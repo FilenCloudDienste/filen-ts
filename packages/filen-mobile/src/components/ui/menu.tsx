@@ -91,6 +91,31 @@ export type Icons =
 	| "eye"
 	| "list"
 	| "grid"
+	| "download"
+	| "import"
+	| "info"
+	| "move"
+	| "folder"
+	| "link"
+	| "reply"
+	| "mute"
+	| "image"
+	| "play"
+	| "pause"
+	| "cancel"
+	| "openExternal"
+	| "gear"
+	| "listOrdered"
+	| "listBullet"
+	| "minus"
+	| "scan"
+	| "upload"
+	| "envelopeOpen"
+	| "camera"
+	| "color"
+	| "share"
+	| "versions"
+	| "shield"
 
 function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWithoutRef<typeof SwiftUiImage>["systemName"] {
 	switch (name) {
@@ -204,6 +229,106 @@ function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWit
 
 		case "grid": {
 			return fill ? "square.grid.2x2.fill" : "square.grid.2x2"
+		}
+
+		case "download": {
+			return fill ? "arrow.down.circle.fill" : "arrow.down.circle"
+		}
+
+		case "import": {
+			return fill ? "square.and.arrow.down.fill" : "square.and.arrow.down"
+		}
+
+		case "info": {
+			return fill ? "info.circle.fill" : "info.circle"
+		}
+
+		case "move": {
+			return fill ? "folder.fill" : "folder"
+		}
+
+		case "folder": {
+			return fill ? "folder.fill" : "folder"
+		}
+
+		case "link": {
+			return "link"
+		}
+
+		case "reply": {
+			return fill ? "arrowshape.turn.up.left.fill" : "arrowshape.turn.up.left"
+		}
+
+		case "mute": {
+			return fill ? "speaker.slash.fill" : "speaker.slash"
+		}
+
+		case "image": {
+			return fill ? "photo.fill" : "photo"
+		}
+
+		case "play": {
+			return fill ? "play.fill" : "play"
+		}
+
+		case "pause": {
+			return fill ? "pause.fill" : "pause"
+		}
+
+		case "cancel": {
+			return "xmark"
+		}
+
+		case "openExternal": {
+			return fill ? "arrow.up.forward.app.fill" : "arrow.up.forward.app"
+		}
+
+		case "gear": {
+			return fill ? "gearshape.fill" : "gearshape"
+		}
+
+		case "listOrdered": {
+			return "list.number"
+		}
+
+		case "listBullet": {
+			return "list.bullet"
+		}
+
+		case "minus": {
+			return "minus.circle"
+		}
+
+		case "scan": {
+			return fill ? "doc.viewfinder.fill" : "doc.viewfinder"
+		}
+
+		case "upload": {
+			return fill ? "arrow.up.circle.fill" : "arrow.up.circle"
+		}
+
+		case "envelopeOpen": {
+			return fill ? "envelope.open.fill" : "envelope.open"
+		}
+
+		case "camera": {
+			return fill ? "camera.fill" : "camera"
+		}
+
+		case "color": {
+			return fill ? "paintpalette.fill" : "paintpalette"
+		}
+
+		case "share": {
+			return fill ? "square.and.arrow.up.fill" : "square.and.arrow.up"
+		}
+
+		case "versions": {
+			return fill ? "clock.arrow.circlepath" : "clock.arrow.circlepath"
+		}
+
+		case "shield": {
+			return fill ? "checkmark.shield.fill" : "checkmark.shield"
 		}
 	}
 }

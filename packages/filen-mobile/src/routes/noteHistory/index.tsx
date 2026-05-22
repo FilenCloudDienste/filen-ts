@@ -66,6 +66,7 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 							{
 								id: "view",
 								title: "tbd_view",
+								icon: "eye",
 								onPress: () => {
 									router.push({
 										pathname: "/note/[uuid]",
@@ -79,6 +80,7 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 							{
 								id: "restore",
 								title: "tbd_restore",
+								icon: "restore",
 								requiresOnline: true,
 								onPress: async () => {
 									const promptResponse = await run(async () => {

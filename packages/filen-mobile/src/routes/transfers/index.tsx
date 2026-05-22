@@ -82,6 +82,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 										{
 											id: "resume",
 											title: "tbd_resume",
+											icon: "play" as const,
 											onPress: () => {
 												transfer.resume()
 											}
@@ -91,6 +92,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 										{
 											id: "pause",
 											title: "tbd_pause",
+											icon: "pause" as const,
 											onPress: () => {
 												transfer.pause()
 											}
@@ -99,7 +101,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 							{
 								id: "cancel",
 								title: "tbd_cancel",
-								icon: "delete",
+								icon: "cancel",
 								onPress: () => {
 									transfer.abort()
 								}
@@ -172,6 +174,7 @@ const Transfers = memo(() => {
 														{
 															id: "resumeAll",
 															title: "tbd_resume_all",
+															icon: "play" as const,
 															onPress: () => {
 																transfersLib.resumeAll()
 
@@ -183,6 +186,7 @@ const Transfers = memo(() => {
 														{
 															id: "pauseAll",
 															title: "tbd_pause_all",
+															icon: "pause" as const,
 															onPress: () => {
 																transfersLib.pauseAll()
 
@@ -193,7 +197,7 @@ const Transfers = memo(() => {
 											{
 												id: "abortAll",
 												title: "tbd_cancel_all",
-												icon: "delete",
+												icon: "cancel",
 												onPress: () => {
 													transfersLib.cancelAll()
 												}
