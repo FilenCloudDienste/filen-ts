@@ -17,7 +17,8 @@ import {
 	type File,
 	FileMeta,
 	ParentUuid,
-	MaybeEncryptedUniffi_Tags
+	MaybeEncryptedUniffi_Tags,
+	type Contact
 } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import {
@@ -92,6 +93,29 @@ class Drive {
 		})
 
 		return item
+	}
+
+	/**
+	 * Share a single owned file or directory with another Filen user. Dispatches
+	 * to the right SDK call based on the item type. Re-encrypts directory
+	 * contents under the recipient's public key (the SDK handles the heavy
+	 * lifting; we pass a `undefined` progress callback for now). Throws on
+	 * error so callers can wrap in `run()` / `runBulk` for UI feedback.
+	 */
+	public async shareWithFilenUser({ item, contact, signal }: { item: DriveItem; contact: Contact; signal?: AbortSignal }) {
+		if (item.type !== "directory" && item.type !== "file") {
+			throw new Error("Invalid item type for share")
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+
+		if (item.type === "directory") {
+			await authedSdkClient.shareDir(item.data, contact, undefined, signal ? { signal } : undefined)
+
+			return
+		}
+
+		await authedSdkClient.shareFile(item.data, contact, signal ? { signal } : undefined)
 	}
 
 	public async rename({ item, newName, signal }: { item: DriveItem; newName: string; signal?: AbortSignal }) {

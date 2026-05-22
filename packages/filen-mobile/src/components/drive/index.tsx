@@ -44,6 +44,7 @@ import { runBulk } from "@/lib/bulkOps"
 import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
 import { downloadDriveItemToDevice } from "@/lib/driveDownload"
 import { serialize } from "@/lib/serializer"
+import { selectContacts } from "@/routes/contacts"
 
 function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
@@ -1009,12 +1010,51 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					})
 				}
 
-				// NOTE: Share-with-Filen-user bulk action intentionally NOT wired —
-				// the single-item handler in drive/item/menu.tsx:613 only opens
-				// the contacts picker but never calls a share API with the result
-				// (stub). The SDK has `authedSdkClient.shareDir` + `shareFile`,
-				// so this is wireable — pending user approval to add a lib helper
-				// and wire both single-item + bulk paths.
+				// Share with Filen user — re-encrypts each item under each
+				// recipient's public key (SDK shareDir / shareFile). The picker
+				// is the confirmation gesture; no extra confirm dialog.
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "recents" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedOut"
+				) {
+					menuButtons.push({
+						id: "bulkShareFilenUser",
+						title: "tbd_share_filen_user_selected",
+						icon: "users",
+						requiresOnline: true,
+						onPress: async () => {
+							const pickResult = await run(async () => {
+								return await selectContacts({
+									multiple: true,
+									userIdsToExclude: []
+								})
+							})
+
+							if (!pickResult.success) {
+								console.error(pickResult.error)
+								alerts.error(pickResult.error)
+
+								return
+							}
+
+							if (pickResult.data.cancelled || pickResult.data.selectedContacts.length === 0) {
+								return
+							}
+
+							const contacts = pickResult.data.selectedContacts
+
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: async item => {
+									await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
+								}
+							})
+						}
+					})
+				}
 
 				// Favorite/Unfavorite — applies to variants where items carry a favorited bit
 				if (

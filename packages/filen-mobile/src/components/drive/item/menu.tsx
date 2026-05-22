@@ -607,13 +607,37 @@ export function createMenuButtons({
 				},
 				{
 					id: "shareFilenUser",
-				requiresOnline: true,
+					requiresOnline: true,
 					title: "tbd_share_filen_user",
 					onPress: async () => {
-						await selectContacts({
-							multiple: false,
-							userIdsToExclude: []
+						const pickResult = await run(async () => {
+							return await selectContacts({
+								multiple: true,
+								userIdsToExclude: []
+							})
 						})
+
+						if (!pickResult.success) {
+							console.error(pickResult.error)
+							alerts.error(pickResult.error)
+
+							return
+						}
+
+						if (pickResult.data.cancelled || pickResult.data.selectedContacts.length === 0) {
+							return
+						}
+
+						const contacts = pickResult.data.selectedContacts
+
+						const result = await runWithLoading(async () => {
+							await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+						}
 					}
 				}
 			]
