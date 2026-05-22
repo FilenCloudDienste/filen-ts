@@ -39,13 +39,7 @@ export function createMenuButtons({
 						icon: "select",
 						checked: isSelected,
 						onPress: () => {
-							useChatsStore.getState().setSelectedChats(prev => {
-								if (isSelected) {
-									return prev.filter(n => n.uuid !== chat.uuid)
-								} else {
-									return [...prev.filter(n => n.uuid !== chat.uuid), chat]
-								}
-							})
+							useChatsStore.getState().toggleSelectedChat(chat)
 						}
 					} satisfies MenuButton
 				]
