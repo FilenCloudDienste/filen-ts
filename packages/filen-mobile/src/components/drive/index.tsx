@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, memo, useCallback } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import useDrivePath from "@/hooks/useDrivePath"
+import useDrivePath, { type SelectOptions } from "@/hooks/useDrivePath"
 import useDriveItemsQuery from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import { itemSorter, type SortByType } from "@/lib/sort"
@@ -20,7 +20,7 @@ import drive from "@/lib/drive"
 import useDriveStore from "@/stores/useDrive.store"
 import { useShallow } from "zustand/shallow"
 import type { MenuButton } from "@/components/ui/menu"
-import { useStringifiedClient } from "@/lib/auth"
+import auth, { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import { debounce } from "es-toolkit/function"
@@ -41,6 +41,7 @@ import { onlineManager } from "@tanstack/react-query"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
 import { downloadDriveItemToDevice } from "@/lib/driveDownload"
+import { serialize } from "@/lib/serializer"
 
 function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
@@ -819,6 +820,60 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						}
 					})
 				}
+
+				// Move — owned content the user can relocate. driveSelectToolbar
+				// already handles `Promise.all` over the items it receives, so the
+				// bulk handler just opens the picker with all selected items.
+				// useFocusEffect on Drive clears selection when we return.
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedOut" ||
+					drivePath.type === "links"
+				) {
+					menuButtons.push({
+						id: "bulkMove",
+						title: "tbd_move_selected",
+						icon: "edit",
+						requiresOnline: true,
+						onPress: async () => {
+							const driveRootUuidResult = await run(async () => {
+								const { authedSdkClient } = await auth.getSdkClients()
+
+								return authedSdkClient.root().uuid
+							})
+
+							if (!driveRootUuidResult.success) {
+								console.error(driveRootUuidResult.error)
+								alerts.error(driveRootUuidResult.error)
+
+								return
+							}
+
+							router.push({
+								pathname: "/driveSelect/[uuid]",
+								params: {
+									uuid: driveRootUuidResult.data,
+									selectOptions: serialize({
+										type: "single",
+										files: false,
+										directories: true,
+										intention: "move",
+										items: selectedDriveItems,
+										id: randomUUID()
+									} satisfies SelectOptions)
+								}
+							})
+						}
+					})
+				}
+
+				// NOTE: Share-with-Filen-user bulk action intentionally NOT wired —
+				// the single-item handler in drive/item/menu.tsx:613 only opens
+				// the contacts picker but never calls a share API with the result
+				// (stub). Adding a bulk version would just open the picker for
+				// nothing. Bring this back if/when single-item is completed in
+				// the lib layer.
 
 				// Favorite/Unfavorite — applies to variants where items carry a favorited bit
 				if (

@@ -336,6 +336,77 @@ const Playlist = memo(() => {
 			}
 		})
 
+		// Add to another playlist (the picker excludes the current playlist).
+		// For each target playlist, append all selected tracks (deduped by uuid)
+		// and save once per target — that's the per-item op of runBulk, where
+		// "item" is the target playlist, not the source track.
+		baseRightMenuButtons.push({
+			id: "bulkAddToPlaylist",
+			title: "tbd_add_to_playlist",
+			icon: "plus",
+			requiresOnline: true,
+			onPress: async () => {
+				const selectResult = await run(async () => {
+					return await selectPlaylists({
+						multiple: true,
+						playlistUuidsToExclude: [playlist.uuid]
+					})
+				})
+
+				if (!selectResult.success) {
+					console.error(selectResult.error)
+					alerts.error(selectResult.error)
+
+					return
+				}
+
+				if (selectResult.data.cancelled || selectResult.data.selectedPlaylists.length === 0) {
+					return
+				}
+
+				const targets = selectResult.data.selectedPlaylists
+
+				await runBulk({
+					items: targets,
+					clearSelection: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
+					op: async target => {
+						// Re-read selected tracks from the live store so a tap that
+						// arrives between picker close and op execution still gets
+						// the correct set.
+						const liveTracks = usePlaylistTracksStore.getState().selectedTracks
+						const existing = new Set(target.files.map(f => f.uuid))
+						const toAppend = liveTracks
+							.filter(t => !existing.has(t.uuid))
+							.map(t => ({
+								uuid: t.uuid,
+								name: t.name,
+								mime: t.mime,
+								size: t.size,
+								bucket: t.bucket,
+								key: t.key,
+								version: t.version,
+								chunks: t.chunks,
+								region: t.region,
+								playlist: target.uuid,
+								item: t.item
+							}))
+
+						if (toAppend.length === 0) {
+							return
+						}
+
+						await audio.savePlaylist({
+							playlist: {
+								...target,
+								files: [...target.files, ...toAppend],
+								updated: Date.now()
+							}
+						})
+					}
+				})
+			}
+		})
+
 		baseRightMenuButtons.push({
 			id: "bulkRemoveTracks",
 			title: "tbd_remove_from_playlist",
