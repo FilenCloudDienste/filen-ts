@@ -35,6 +35,7 @@ const Button = memo(
 						{
 							id: "header-1",
 							title: "1",
+							icon: "headerH" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleHeader",
@@ -45,6 +46,7 @@ const Button = memo(
 						{
 							id: "header-2",
 							title: "2",
+							icon: "headerH" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleHeader",
@@ -55,6 +57,7 @@ const Button = memo(
 						{
 							id: "header-3",
 							title: "3",
+							icon: "headerH" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleHeader",
@@ -65,6 +68,7 @@ const Button = memo(
 						{
 							id: "header-4",
 							title: "4",
+							icon: "headerH" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleHeader",
@@ -75,6 +79,7 @@ const Button = memo(
 						{
 							id: "header-5",
 							title: "5",
+							icon: "headerH" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleHeader",
@@ -85,6 +90,7 @@ const Button = memo(
 						{
 							id: "header-6",
 							title: "6",
+							icon: "headerH" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillToggleHeader",
@@ -95,6 +101,7 @@ const Button = memo(
 						{
 							id: "header-normal",
 							title: "normal",
+							icon: "text" as const,
 							onPress: () => {
 								postMessage({
 									type: "quillRemoveHeader"

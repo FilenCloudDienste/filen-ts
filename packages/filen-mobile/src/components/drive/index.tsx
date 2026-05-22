@@ -62,21 +62,25 @@ function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) =>
 			{
 				id: "sort.name",
 				title: "tbd_sort_name",
+				icon: "text",
 				subButtons: [leaf("sort.nameAsc", "tbd_sort_name_asc", "nameAsc"), leaf("sort.nameDesc", "tbd_sort_name_desc", "nameDesc")]
 			},
 			{
 				id: "sort.size",
 				title: "tbd_sort_size",
+				icon: "size",
 				subButtons: [leaf("sort.sizeAsc", "tbd_sort_size_asc", "sizeAsc"), leaf("sort.sizeDesc", "tbd_sort_size_desc", "sizeDesc")]
 			},
 			{
 				id: "sort.type",
 				title: "tbd_sort_type",
+				icon: "doc",
 				subButtons: [leaf("sort.mimeAsc", "tbd_sort_type_asc", "mimeAsc"), leaf("sort.mimeDesc", "tbd_sort_type_desc", "mimeDesc")]
 			},
 			{
 				id: "sort.modified",
 				title: "tbd_sort_modified",
+				icon: "clock",
 				subButtons: [
 					leaf("sort.lastModifiedAsc", "tbd_sort_modified_asc", "lastModifiedAsc"),
 					leaf("sort.lastModifiedDesc", "tbd_sort_modified_desc", "lastModifiedDesc")
@@ -85,6 +89,7 @@ function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) =>
 			{
 				id: "sort.uploaded",
 				title: "tbd_sort_uploaded",
+				icon: "upload",
 				subButtons: [
 					leaf("sort.uploadDateAsc", "tbd_sort_uploaded_asc", "uploadDateAsc"),
 					leaf("sort.uploadDateDesc", "tbd_sort_uploaded_desc", "uploadDateDesc")
@@ -93,6 +98,7 @@ function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) =>
 			{
 				id: "sort.created",
 				title: "tbd_sort_created",
+				icon: "calendar",
 				subButtons: [
 					leaf("sort.creationAsc", "tbd_sort_created_asc", "creationAsc"),
 					leaf("sort.creationDesc", "tbd_sort_created_desc", "creationDesc")
@@ -154,6 +160,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				menuButtons.push({
 					id: "deselectAll",
 					title: "tbd_deselect_all",
+					icon: "select",
 					onPress: () => {
 						useDriveStore.getState().clearSelectedItems()
 					}
@@ -162,6 +169,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				menuButtons.push({
 					id: "selectAll",
 					title: "tbd_select_all",
+					icon: "select",
 					onPress: () => {
 						useDriveStore.getState().selectAllItems(driveItems)
 					}

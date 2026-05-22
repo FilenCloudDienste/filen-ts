@@ -116,6 +116,12 @@ export type Icons =
 	| "share"
 	| "versions"
 	| "shield"
+	| "doc"
+	| "calendar"
+	| "size"
+	| "headerH"
+	| "checkmark"
+	| "queue"
 
 function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWithoutRef<typeof SwiftUiImage>["systemName"] {
 	switch (name) {
@@ -329,6 +335,30 @@ function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWit
 
 		case "shield": {
 			return fill ? "checkmark.shield.fill" : "checkmark.shield"
+		}
+
+		case "doc": {
+			return fill ? "doc.fill" : "doc"
+		}
+
+		case "calendar": {
+			return "calendar"
+		}
+
+		case "size": {
+			return "ruler"
+		}
+
+		case "headerH": {
+			return fill ? "textformat.size" : "textformat.size"
+		}
+
+		case "checkmark": {
+			return fill ? "checkmark" : "checkmark"
+		}
+
+		case "queue": {
+			return fill ? "text.line.last.and.arrowtriangle.forward" : "text.line.last.and.arrowtriangle.forward"
 		}
 	}
 }

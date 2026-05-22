@@ -577,6 +577,7 @@ const Playlist = memo(() => {
 											{
 												id: "play",
 												title: "tbd_play",
+												icon: "play",
 												onPress: async () => {
 													const result = await runWithLoading(async () => {
 														await audio.clearQueue()
@@ -603,6 +604,7 @@ const Playlist = memo(() => {
 											{
 												id: "addToQueue",
 												title: "tbd_add_to_queue",
+												icon: "queue",
 												onPress: async () => {
 													const result = await runWithLoading(async () => {
 														const queueLengthBefore = audio.getQueue().length
