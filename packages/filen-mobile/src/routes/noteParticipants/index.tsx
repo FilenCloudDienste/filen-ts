@@ -341,6 +341,7 @@ const NoteParticipants = memo(() => {
 					id: "bulkPermissions",
 					title: "tbd_permissions",
 					icon: "edit",
+					requiresOnline: true,
 					subButtons: [
 						{
 							id: "bulkPermissionRead",

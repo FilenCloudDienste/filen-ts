@@ -22,6 +22,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import useContactsStore, { type ContactListItem, type ContactListItemWithHeader } from "@/stores/useContacts.store"
 import { runBulk } from "@/lib/bulkOps"
+import { queryClient } from "@/queries/client"
 import { router, useLocalSearchParams, useFocusEffect, useNavigation } from "expo-router"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import { randomUUID } from "expo-crypto"
@@ -49,6 +50,13 @@ export async function selectContacts(options: Omit<SelectOptions, "id">): Promis
 > {
 	return new Promise(resolve => {
 		const id = randomUUID()
+
+		// Ensure clean state when entering picker mode. If the user had bulk
+		// mode active before (long-press → Select on the standalone contacts
+		// screen), the picker would otherwise render checkboxes on the first
+		// paint with stale bulk state. clearSelectedContacts() resets BOTH
+		// selectedContacts and bulkMode.
+		useContactsStore.getState().clearSelectedContacts()
 
 		const sub = events.subscribe("contactsSelect", data => {
 			if (data.id === id) {
@@ -158,6 +166,15 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		const menuButtons: MenuButton[] = []
 
 		if (inBulkMode) {
+			menuButtons.push({
+				id: "selectAll",
+				title: "tbd_deselect_all",
+				icon: "select",
+				onPress: () => {
+					useContactsStore.getState().clearSelectedContacts()
+				}
+			})
+
 			if (selectedByType.contacts.length > 0) {
 				menuButtons.push({
 					id: "bulkBlockContacts",
@@ -211,11 +228,20 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					icon: "select",
 					requiresOnline: true,
 					onPress: async () => {
-						await runBulk({
+						const ok = await runBulk({
 							items: selectedByType.incoming,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
 							op: c => contacts.acceptRequest({ uuid: c.data.uuid })
 						})
+
+						// Single amortized invalidation instead of N refetches
+						// triggered by per-call contactsQueryUpdate(). Accepted
+						// requests promote to contacts, so both queries need a
+						// fresh fetch.
+						if (ok) {
+							queryClient.invalidateQueries({ queryKey: ["contacts"] })
+							queryClient.invalidateQueries({ queryKey: ["contactRequests"] })
+						}
 					}
 				})
 
@@ -270,7 +296,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				menuButtons.push({
 					id: "bulkUnblock",
 					title: `tbd_unblock (${selectedByType.blocked.length})`,
-					icon: "delete",
+					icon: "select",
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({

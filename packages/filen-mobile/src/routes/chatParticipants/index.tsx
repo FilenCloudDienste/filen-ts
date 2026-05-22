@@ -15,7 +15,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import type { Note, ChatParticipant, Chat } from "@filen/sdk-rs"
+import type { ChatParticipant, Chat } from "@filen/sdk-rs"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -187,7 +187,7 @@ const ChatParticipants = memo(() => {
 		}
 
 		try {
-			return deserialize(chatSerialized) as Note
+			return deserialize(chatSerialized) as Chat
 		} catch {
 			return null
 		}

@@ -25,6 +25,7 @@ import auth from "@/lib/auth"
 import { selectContacts } from "@/routes/contacts"
 import cache from "@/lib/cache"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
+import useDriveStore from "@/stores/useDrive.store"
 
 export function createMenuButtons({
 	item,
@@ -47,6 +48,25 @@ export function createMenuButtons({
 	})
 
 	const isOwner = !(drivePath.type === "sharedIn")
+
+	// Bulk-selection entry: the row's Menu owns iOS long-press (contextmenu),
+	// so we can't add an onLongPress to the inner Pressable. The Menu's
+	// "Select" item is the entry point — matches the pattern in notes / chats
+	// / file versions / contacts. Suppress in picker mode (driveSelect uses a
+	// different store and entry mechanism).
+	if (!drivePath.selectOptions) {
+		const isSelected = useDriveStore.getState().selectedItems.some(i => i.data.uuid === item.data.uuid)
+
+		menuButtons.push({
+			id: isSelected ? "deselect" : "select",
+			title: isSelected ? "tbd_deselect" : "tbd_select",
+			icon: "select",
+			checked: isSelected,
+			onPress: () => {
+				useDriveStore.getState().toggleSelectedItem(item)
+			}
+		})
+	}
 
 	if (
 		(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") &&
