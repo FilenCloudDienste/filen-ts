@@ -1,7 +1,7 @@
 # filen-mobile
 
 Encrypted cloud storage mobile app — Expo 55 / React Native 0.83.6 / React 19 / Hermes.
-All server communication, encryption, and auth handled by Rust SDK (`@filen/sdk-rs@^0.4.20`).
+All server communication, encryption, and auth handled by Rust SDK (`@filen/sdk-rs@^0.4.21`).
 
 ## Architecture
 
@@ -36,7 +36,7 @@ Building the native cache requires **cargo-ndk pinned to 3.5.4** (see README —
 
 `src/lib/fileProvider.ts` is the TS bridge that writes `auth.json` to the shared location both extensions read from (iOS app group container; Android `filesDir`). Mirrored boolean state lives in secureStore under `FILE_PROVIDER_ENABLED_SECURE_STORE_KEY` for fast reactive UI reads.
 
-**Schema deferral**: `auth.json`'s `masterKeys` and `publicKey` fields are currently empty stubs (the Rust SDK's `StringifiedClient` doesn't expose them yet). The extensions install and load but `queryRoots()` returns empty until that's fixed, so the provider does not yet appear in the OS file picker even when toggled on. Don't touch the schema until the SDK types are updated.
+`auth.json`'s SDK config (`masterKeys`, `publicKey`, `apiKey`, `privateKey`, etc.) is populated from `authedSdkClient.toSdkConfig()` since SDK 0.4.21 exposes the full shape. The extensions should now resolve `queryRoots()` against a fully-authenticated SDK — pending end-to-end verification on real devices (iOS Files app / Android Documents picker).
 
 ## Navigation (expo-router)
 
@@ -137,7 +137,7 @@ src/tests/          Vitest tests + mocks for native modules
 | `prompts.ts` | Native alert/input dialogs (@blazejkustra/react-native-alert) |
 | `alerts.tsx` | Toast notifications (Burnt) and error banners (Notifier) with FilenSdkError unwrapping |
 | `setup.ts` | App init: auth check → SDK → SecureStore → SQLite → restore queries → restore cache (Semaphore-protected) |
-| `fileProvider.ts` | iOS/Android document provider bridge: writes `auth.json` to the iOS app group container / Android `filesDir`. Mirrors `providerEnabled` to secureStore under `FILE_PROVIDER_ENABLED_SECURE_STORE_KEY` for reactive UI. `masterKeys`/`publicKey` are stubbed empty pending SDK type update. |
+| `fileProvider.ts` | iOS/Android document provider bridge: writes `auth.json` (full SDK config from `authedSdkClient.toSdkConfig()`) to the iOS app group container / Android `filesDir`. Mirrors `providerEnabled` to secureStore under `FILE_PROVIDER_ENABLED_SECURE_STORE_KEY` for reactive UI. |
 | `reconnect.ts` | Online-transition handler — on offline→online flip, kicks `cameraUpload.sync()`, `offline.sync()`, `notesSync.executeNow()`, `chatsSync.syncNow()` |
 | `memo.ts` | Custom memo/useCallback/useMemo with deep equality (react-fast-compare) in prod, standard React in dev |
 | `exif.ts` | EXIF date parsing (DateTimeOriginal/Digitized/DateTime + SubSec + Offset) + orientation from raw bytes (JPEG/TIFF/HEIC/WebP) |
