@@ -746,8 +746,9 @@ const Contact = memo(
 			if (info.item.type === "incomingRequest") {
 				buttons.push({
 					id: "accept",
-				requiresOnline: true,
+					requiresOnline: true,
 					title: "tbd_accept",
+					icon: "checkmark",
 					onPress: async () => {
 						const result = await runWithLoading(async () => {
 							if (info.item.type !== "incomingRequest") {
@@ -818,10 +819,10 @@ const Contact = memo(
 			if (info.item.type === "outgoingRequest") {
 				buttons.push({
 					id: "cancel",
-				requiresOnline: true,
+					requiresOnline: true,
 					title: "tbd_cancel",
 					destructive: true,
-					icon: "delete",
+					icon: "cancel",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
