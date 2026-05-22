@@ -830,40 +830,11 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					})
 				}
 
-				// Download to device — applies to every read-capable variant
-				if (
-					drivePath.type === "drive" ||
-					drivePath.type === "recents" ||
-					drivePath.type === "favorites" ||
-					drivePath.type === "sharedIn" ||
-					drivePath.type === "sharedOut" ||
-					drivePath.type === "links"
-				) {
-					menuButtons.push({
-						id: "bulkDownload",
-						title: "tbd_download_selected",
-						icon: "download",
-						requiresOnline: true,
-						onPress: async () => {
-							await runBulk({
-								items: selectedDriveItems,
-								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-								op: async item => {
-									const result = await downloadDriveItemToDevice({ item })
-
-									if (!result.success) {
-										throw result.error
-									}
-								}
-							})
-						}
-					})
-				}
-
-				// Move — owned content the user can relocate. driveSelectToolbar
-				// already handles `Promise.all` over the items it receives, so the
-				// bulk handler just opens the picker with all selected items.
-				// useFocusEffect on Drive clears selection when we return.
+				// Move — modify (location) comes before output (download/share).
+				// driveSelectToolbar already handles `Promise.all` over the items
+				// it receives, so the bulk handler just opens the picker with all
+				// selected items. useFocusEffect on Drive clears selection when
+				// we return.
 				if (
 					drivePath.type === "drive" ||
 					drivePath.type === "favorites" ||
@@ -907,13 +878,36 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					})
 				}
 
-				// Make offline / Remove offline — keep them as two separate buttons
-				// instead of a single toggle. Toggling would need per-item offline
-				// status (via N useDriveItemStoredOfflineQuery calls or a query
-				// helper) and the user's intent for a mixed selection is
-				// ambiguous anyway. The lib's idempotent semantics make
-				// already-offline / already-online items no-ops, so showing both
-				// is safe.
+				// Download to device — applies to every read-capable variant.
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "recents" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedIn" ||
+					drivePath.type === "sharedOut" ||
+					drivePath.type === "links"
+				) {
+					menuButtons.push({
+						id: "bulkDownload",
+						title: "tbd_download_selected",
+						icon: "download",
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: async item => {
+									const result = await downloadDriveItemToDevice({ item })
+
+									if (!result.success) {
+										throw result.error
+									}
+								}
+							})
+						}
+					})
+				}
+
 				// Save to photos — every selected item must be a file with an
 				// image/video preview type (the OS photo library only accepts
 				// those). Aggregator flag is computed once via getPreviewType
@@ -989,6 +983,60 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					})
 				}
 
+				// Share with Filen user — re-encrypts each item under each
+				// recipient's public key (SDK shareDir / shareFile). Grouped with
+				// the other "output" actions (download / save-to-photos). The
+				// picker is the confirmation gesture; no extra confirm dialog.
+				if (
+					drivePath.type === "drive" ||
+					drivePath.type === "recents" ||
+					drivePath.type === "favorites" ||
+					drivePath.type === "sharedOut"
+				) {
+					menuButtons.push({
+						id: "bulkShareFilenUser",
+						title: "tbd_share_filen_user_selected",
+						icon: "users",
+						requiresOnline: true,
+						onPress: async () => {
+							const pickResult = await run(async () => {
+								return await selectContacts({
+									multiple: true,
+									userIdsToExclude: []
+								})
+							})
+
+							if (!pickResult.success) {
+								console.error(pickResult.error)
+								alerts.error(pickResult.error)
+
+								return
+							}
+
+							if (pickResult.data.cancelled || pickResult.data.selectedContacts.length === 0) {
+								return
+							}
+
+							const contacts = pickResult.data.selectedContacts
+
+							await runBulk({
+								items: selectedDriveItems,
+								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+								op: async item => {
+									await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
+								}
+							})
+						}
+					})
+				}
+
+				// Make offline / Remove offline — keep them as two separate buttons
+				// instead of a single toggle. Toggling would need per-item offline
+				// status (via N useDriveItemStoredOfflineQuery calls or a query
+				// helper) and the user's intent for a mixed selection is
+				// ambiguous anyway. The lib's idempotent semantics make
+				// already-offline / already-online items no-ops, so showing both
+				// is safe.
 				if (drivePath.type === "drive" || drivePath.type === "favorites") {
 					menuButtons.push({
 						id: "bulkMakeOffline",
@@ -1041,52 +1089,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 									destructive: true
 								},
 								op: item => offline.removeItem(item)
-							})
-						}
-					})
-				}
-
-				// Share with Filen user — re-encrypts each item under each
-				// recipient's public key (SDK shareDir / shareFile). The picker
-				// is the confirmation gesture; no extra confirm dialog.
-				if (
-					drivePath.type === "drive" ||
-					drivePath.type === "recents" ||
-					drivePath.type === "favorites" ||
-					drivePath.type === "sharedOut"
-				) {
-					menuButtons.push({
-						id: "bulkShareFilenUser",
-						title: "tbd_share_filen_user_selected",
-						icon: "users",
-						requiresOnline: true,
-						onPress: async () => {
-							const pickResult = await run(async () => {
-								return await selectContacts({
-									multiple: true,
-									userIdsToExclude: []
-								})
-							})
-
-							if (!pickResult.success) {
-								console.error(pickResult.error)
-								alerts.error(pickResult.error)
-
-								return
-							}
-
-							if (pickResult.data.cancelled || pickResult.data.selectedContacts.length === 0) {
-								return
-							}
-
-							const contacts = pickResult.data.selectedContacts
-
-							await runBulk({
-								items: selectedDriveItems,
-								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-								op: async item => {
-									await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
-								}
 							})
 						}
 					})
