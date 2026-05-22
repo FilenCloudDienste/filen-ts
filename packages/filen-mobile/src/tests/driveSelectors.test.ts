@@ -1,0 +1,72 @@
+import { describe, it, expect } from "vitest"
+import { aggregateDriveSelectionFlags, EMPTY_DRIVE_FLAGS } from "@/lib/driveSelectors"
+import type { DriveItem } from "@/types"
+
+function file(uuid: string, favorited = false): DriveItem {
+	return {
+		type: "file",
+		data: { uuid, favorited } as DriveItem["data"]
+	} as DriveItem
+}
+
+function dir(uuid: string, favorited = false): DriveItem {
+	return {
+		type: "directory",
+		data: { uuid, favorited } as DriveItem["data"]
+	} as DriveItem
+}
+
+function sharedRootFile(uuid: string, favorited = false): DriveItem {
+	return {
+		type: "sharedRootFile",
+		data: { uuid, favorited } as DriveItem["data"]
+	} as DriveItem
+}
+
+function sharedRootDir(uuid: string, favorited = false): DriveItem {
+	return {
+		type: "sharedRootDirectory",
+		data: { uuid, favorited } as DriveItem["data"]
+	} as DriveItem
+}
+
+describe("aggregateDriveSelectionFlags", () => {
+	it("returns EMPTY_DRIVE_FLAGS on empty selection", () => {
+		expect(aggregateDriveSelectionFlags([])).toBe(EMPTY_DRIVE_FLAGS)
+	})
+
+	it("EMPTY_DRIVE_FLAGS is frozen", () => {
+		expect(Object.isFrozen(EMPTY_DRIVE_FLAGS)).toBe(true)
+	})
+
+	it("counts selected items", () => {
+		expect(aggregateDriveSelectionFlags([file("a"), dir("b"), file("c")]).count).toBe(3)
+	})
+
+	it("includesFavorited true when any item is favorited", () => {
+		expect(aggregateDriveSelectionFlags([file("a"), file("b", true)]).includesFavorited).toBe(true)
+	})
+
+	it("includesFavorited false when none favorited", () => {
+		expect(aggregateDriveSelectionFlags([file("a"), file("b")]).includesFavorited).toBe(false)
+	})
+
+	it("everyFile true only when every item is a file (any of the 3 file variants)", () => {
+		expect(aggregateDriveSelectionFlags([file("a"), file("b")]).everyFile).toBe(true)
+		expect(aggregateDriveSelectionFlags([file("a"), sharedRootFile("b")]).everyFile).toBe(true)
+		expect(aggregateDriveSelectionFlags([file("a"), dir("b")]).everyFile).toBe(false)
+	})
+
+	it("everyDirectory true only when every item is a directory variant", () => {
+		expect(aggregateDriveSelectionFlags([dir("a"), dir("b")]).everyDirectory).toBe(true)
+		expect(aggregateDriveSelectionFlags([dir("a"), sharedRootDir("b")]).everyDirectory).toBe(true)
+		expect(aggregateDriveSelectionFlags([dir("a"), file("b")]).everyDirectory).toBe(false)
+	})
+
+	it("everyFile and everyDirectory both false on mixed selection", () => {
+		const flags = aggregateDriveSelectionFlags([file("a"), dir("b")])
+
+		expect(flags.everyFile).toBe(false)
+		expect(flags.everyDirectory).toBe(false)
+	})
+})
