@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import type { Note, NoteTag } from "@filen/sdk-rs"
+import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type InflightContent = Record<
 	string,
@@ -21,7 +22,16 @@ export type NotesStore = {
 	setSelectedNotes: (fn: Note[] | ((prev: Note[]) => Note[])) => void
 	setSelectedTags: (fn: NoteTag[] | ((prev: NoteTag[]) => NoteTag[])) => void
 	setInflightContent: (fn: InflightContent | ((prev: InflightContent) => InflightContent)) => void
+	toggleSelectedNote: (note: Note) => void
+	clearSelectedNotes: () => void
+	selectAllNotes: (notes: Note[]) => void
+	toggleSelectedTag: (tag: NoteTag) => void
+	clearSelectedTags: () => void
+	selectAllTags: (tags: NoteTag[]) => void
 }
+
+const noteId = (n: Note) => n.uuid
+const tagId = (t: NoteTag) => t.uuid
 
 export const useNotesStore = create<NotesStore>(set => ({
 	inflightContent: {},
@@ -53,6 +63,28 @@ export const useNotesStore = create<NotesStore>(set => ({
 		set(state => ({
 			inflightContent: typeof fn === "function" ? fn(state.inflightContent) : fn
 		}))
+	},
+	toggleSelectedNote(note) {
+		set(state => ({
+			selectedNotes: toggleInArray(state.selectedNotes, note, noteId)
+		}))
+	},
+	clearSelectedNotes() {
+		set({ selectedNotes: [] })
+	},
+	selectAllNotes(notes) {
+		set({ selectedNotes: notes })
+	},
+	toggleSelectedTag(tag) {
+		set(state => ({
+			selectedTags: toggleInArray(state.selectedTags, tag, tagId)
+		}))
+	},
+	clearSelectedTags() {
+		set({ selectedTags: [] })
+	},
+	selectAllTags(tags) {
+		set({ selectedTags: tags })
 	}
 }))
 

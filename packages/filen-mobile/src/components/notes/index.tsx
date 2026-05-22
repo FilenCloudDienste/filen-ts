@@ -26,6 +26,8 @@ import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import * as Sharing from "expo-sharing"
 import * as DocumentPicker from "expo-document-picker"
+import { runBulk } from "@/lib/bulkOps"
+import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/lib/notesSelectors"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const stringifiedClient = useStringifiedClient()
@@ -37,31 +39,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
 	}>()
-	const selectedNotesIncludesFavorited = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.favorite)))
-	const selectedNotesIncludesPinned = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.pinned)))
-	const selectedTagsIncludesFavorited = useNotesStore(useShallow(state => state.selectedTags.some(t => t.favorite)))
-	const hasWriteAccessToAllSelectedNotes = useNotesStore(
-		useShallow(state =>
-			state.selectedNotes.every(
-				n =>
-					n.ownerId === stringifiedClient?.userId ||
-					n.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
-			)
-		)
-	)
-	const everySelectedNoteTrashed = useNotesStore(useShallow(state => state.selectedNotes.every(n => n.trash)))
-	const everySelectedNoteArchived = useNotesStore(useShallow(state => state.selectedNotes.every(n => n.archive)))
-	const everySelectedNoteOwned = useNotesStore(
-		useShallow(state => state.selectedNotes.every(n => n.ownerId === stringifiedClient?.userId))
-	)
-	const selectedNotesIncludesTrashed = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.trash)))
-	const participantOfEverySelectedNote = useNotesStore(
-		useShallow(state =>
-			state.selectedNotes.every(
-				n => n.participants.some(p => p.userId === stringifiedClient?.userId) && n.ownerId !== stringifiedClient?.userId
-			)
-		)
-	)
+	const noteFlags = aggregateNoteSelectionFlags(selectedNotes, stringifiedClient?.userId)
+	const tagFlags = aggregateNoteTagSelectionFlags(selectedTags)
 
 	const notesTagsQuery = useNotesTagsQuery({
 		enabled: false
@@ -164,12 +143,12 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					icon: "select",
 					onPress: () => {
 						if (selectedNotes.length === onlyNotes.length) {
-							useNotesStore.getState().setSelectedNotes([])
+							useNotesStore.getState().clearSelectedNotes()
 
 							return
 						}
 
-						useNotesStore.getState().setSelectedNotes(onlyNotes)
+						useNotesStore.getState().selectAllNotes(onlyNotes)
 					}
 				})
 			}
@@ -360,11 +339,12 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			}
 
 			if (selectedNotes.length > 0) {
-				if (hasWriteAccessToAllSelectedNotes) {
+				if (noteFlags.hasWriteAccessToAll) {
 					menuButtons.push({
 						id: "type",
 						title: "tbd_type_change_selected",
 						icon: "text",
+						requiresOnline: true,
 						subButtons: [
 							{
 								type: NoteType.Text,
@@ -404,33 +384,17 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 															? "markdown"
 															: undefined,
 									keepMenuOpenOnPress: Platform.OS === "android",
+									requiresOnline: true,
 									onPress: async () => {
-										const result = await runWithLoading(async defer => {
-											defer(() => {
-												useNotesStore.getState().setSelectedNotes([])
-											})
+										await runBulk({
+											items: selectedNotes,
+											clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+											op: async n => {
+												const content = await notesLib.getContent({ note: n })
 
-											return await Promise.all(
-												selectedNotes.map(async n => {
-													const content = await notesLib.getContent({
-														note: n
-													})
-
-													await notesLib.setType({
-														note: n,
-														type,
-														knownContent: content
-													})
-												})
-											)
+												await notesLib.setType({ note: n, type, knownContent: content })
+											}
 										})
-
-										if (!result.success) {
-											console.error(result.error)
-											alerts.error(result.error)
-
-											return
-										}
 									}
 								}) satisfies MenuButton
 						)
@@ -439,59 +403,29 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 				menuButtons.push({
 					id: "bulkPin",
-					title: selectedNotesIncludesPinned ? "tbd_unpin_selected" : "tbd_pin_selected",
+					title: noteFlags.includesPinned ? "tbd_unpin_selected" : "tbd_pin_selected",
 					icon: "pin",
+					requiresOnline: true,
 					onPress: async () => {
-						const result = await runWithLoading(async defer => {
-							defer(() => {
-								useNotesStore.getState().setSelectedNotes([])
-							})
-
-							return await Promise.all(
-								selectedNotes.map(n =>
-									notesLib.setPinned({
-										note: n,
-										pinned: !selectedNotesIncludesPinned
-									})
-								)
-							)
+						await runBulk({
+							items: selectedNotes,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
 						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
 					}
 				})
 
 				menuButtons.push({
 					id: "bulkFavorite",
-					title: selectedNotesIncludesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+					title: noteFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
 					icon: "heart",
+					requiresOnline: true,
 					onPress: async () => {
-						const result = await runWithLoading(async defer => {
-							defer(() => {
-								useNotesStore.getState().setSelectedNotes([])
-							})
-
-							return await Promise.all(
-								selectedNotes.map(n =>
-									notesLib.setFavorited({
-										note: n,
-										favorite: !selectedNotesIncludesFavorited
-									})
-								)
-							)
+						await runBulk({
+							items: selectedNotes,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
 						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
 					}
 				})
 
@@ -499,34 +433,20 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					id: "bulkTag",
 					title: "tbd_bulk_tag_selected",
 					icon: "tag",
+					requiresOnline: true,
 					subButtons: notesTags.map(subButton => {
 						return {
 							id: `bulkTag_${subButton.uuid}`,
 							title: subButton.name ?? subButton.uuid,
 							icon: "tag",
 							keepMenuOpenOnPress: Platform.OS === "android",
+							requiresOnline: true,
 							onPress: async () => {
-								const result = await runWithLoading(async defer => {
-									defer(() => {
-										useNotesStore.getState().setSelectedNotes([])
-									})
-
-									return await Promise.all(
-										selectedNotes.map(n =>
-											notesLib.addTag({
-												note: n,
-												tag: subButton
-											})
-										)
-									)
+								await runBulk({
+									items: selectedNotes,
+									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+									op: n => notesLib.addTag({ note: n, tag: subButton })
 								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
 							}
 						}
 					})
@@ -536,27 +456,13 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					id: "bulkDuplicate",
 					title: "tbd_duplicate_selected",
 					icon: "duplicate",
+					requiresOnline: true,
 					onPress: async () => {
-						const result = await runWithLoading(async defer => {
-							defer(() => {
-								useNotesStore.getState().setSelectedNotes([])
-							})
-
-							return await Promise.all(
-								selectedNotes.map(n =>
-									notesLib.duplicate({
-										note: n
-									})
-								)
-							)
+						await runBulk({
+							items: selectedNotes,
+							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+							op: n => notesLib.duplicate({ note: n })
 						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
 					}
 				})
 
@@ -564,12 +470,9 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					id: "bulkExport",
 					title: "tbd_export_selected",
 					icon: "export",
+					requiresOnline: true,
 					onPress: async () => {
-						const exportResult = await runWithLoading(async defer => {
-							defer(() => {
-								useNotesStore.getState().setSelectedNotes([])
-							})
-
+						const exportResult = await runWithLoading(async () => {
 							if (selectedNotes.length === 1 && selectedNotes[0]) {
 								return await notesLib.export({
 									note: selectedNotes[0]
@@ -587,6 +490,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 							return
 						}
+
+						useNotesStore.getState().clearSelectedNotes()
 
 						const result = await run(async defer => {
 							defer(() => {
@@ -611,94 +516,59 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					}
 				})
 
-				if (everySelectedNoteOwned) {
-					if (!everySelectedNoteArchived && !selectedNotesIncludesTrashed) {
+				if (noteFlags.everyOwned) {
+					if (!noteFlags.everyArchived && !noteFlags.includesTrashed) {
 						menuButtons.push({
 							id: "bulkArchive",
 							title: "tbd_archive_selected",
 							icon: "archive",
+							requiresOnline: true,
 							onPress: async () => {
-								const result = await runWithLoading(async defer => {
-									defer(() => {
-										useNotesStore.getState().setSelectedNotes([])
-									})
-
-									return await Promise.all(
-										selectedNotes.map(n =>
-											notesLib.archive({
-												note: n
-											})
-										)
-									)
+								await runBulk({
+									items: selectedNotes,
+									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+									op: n => notesLib.archive({ note: n })
 								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
 							}
 						})
 					}
 
-					if (everySelectedNoteArchived || everySelectedNoteTrashed) {
+					if (noteFlags.everyArchived || noteFlags.everyTrashed) {
 						menuButtons.push({
 							id: "bulkRestore",
 							title: "tbd_restore_selected",
 							icon: "restore",
+							requiresOnline: true,
 							onPress: async () => {
-								const result = await runWithLoading(async defer => {
-									defer(() => {
-										useNotesStore.getState().setSelectedNotes([])
-									})
-
-									return await Promise.all(
-										selectedNotes.map(n =>
-											notesLib.restore({
-												note: n
-											})
-										)
-									)
+								await runBulk({
+									items: selectedNotes,
+									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+									op: n => notesLib.restore({ note: n })
 								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
 							}
 						})
 					}
 
-					if (!everySelectedNoteTrashed) {
+					if (!noteFlags.everyTrashed) {
 						menuButtons.push({
 							id: "bulkTrash",
 							title: "tbd_trash_selected",
 							icon: "trash",
 							destructive: true,
+							requiresOnline: true,
 							onPress: async () => {
-								const result = await runWithLoading(async defer => {
-									defer(() => {
-										useNotesStore.getState().setSelectedNotes([])
-									})
-
-									return await Promise.all(
-										selectedNotes.map(n =>
-											notesLib.trash({
-												note: n
-											})
-										)
-									)
+								await runBulk({
+									items: selectedNotes,
+									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+									confirm: {
+										title: "tbd_trash_selected",
+										message: "tbd_are_you_sure_trash_selected_notes",
+										okText: "tbd_trash",
+										cancelText: "tbd_cancel",
+										destructive: true
+									},
+									op: n => notesLib.trash({ note: n })
 								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
 							}
 						})
 					} else {
@@ -707,59 +577,45 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							title: "tbd_delete_selected",
 							icon: "delete",
 							destructive: true,
+							requiresOnline: true,
 							onPress: async () => {
-								const result = await runWithLoading(async defer => {
-									defer(() => {
-										useNotesStore.getState().setSelectedNotes([])
-									})
-
-									return await Promise.all(
-										selectedNotes.map(n =>
-											notesLib.delete({
-												note: n
-											})
-										)
-									)
+								await runBulk({
+									items: selectedNotes,
+									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+									confirm: {
+										title: "tbd_delete_selected",
+										message: "tbd_are_you_sure_delete_selected_notes",
+										okText: "tbd_delete",
+										cancelText: "tbd_cancel",
+										destructive: true
+									},
+									op: n => notesLib.delete({ note: n })
 								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
 							}
 						})
 					}
 				}
 
-				if (participantOfEverySelectedNote) {
+				if (noteFlags.participantOfEveryAndNotOwner) {
 					menuButtons.push({
 						id: "bulkLeave",
 						title: "tbd_leave_selected",
 						icon: "exit",
 						destructive: true,
+						requiresOnline: true,
 						onPress: async () => {
-							const result = await runWithLoading(async defer => {
-								defer(() => {
-									useNotesStore.getState().setSelectedNotes([])
-								})
-
-								return await Promise.all(
-									selectedNotes.map(n =>
-										notesLib.leave({
-											note: n
-										})
-									)
-								)
+							await runBulk({
+								items: selectedNotes,
+								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+								confirm: {
+									title: "tbd_leave_selected",
+									message: "tbd_are_you_sure_leave_selected_notes",
+									okText: "tbd_leave",
+									cancelText: "tbd_cancel",
+									destructive: true
+								},
+								op: n => notesLib.leave({ note: n })
 							})
-
-							if (!result.success) {
-								console.error(result.error)
-								alerts.error(result.error)
-
-								return
-							}
 						}
 					})
 				}
@@ -772,12 +628,12 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					icon: "select",
 					onPress: () => {
 						if (selectedTags.length === notesTags.length) {
-							useNotesStore.getState().setSelectedTags([])
+							useNotesStore.getState().clearSelectedTags()
 
 							return
 						}
 
-						useNotesStore.getState().setSelectedTags(notesTags)
+						useNotesStore.getState().selectAllTags(notesTags)
 					}
 				})
 			}
@@ -785,30 +641,15 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedTags.length > 0) {
 				menuButtons.push({
 					id: "bulkFavorite",
-					title: selectedTagsIncludesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+					title: tagFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
 					icon: "heart",
+					requiresOnline: true,
 					onPress: async () => {
-						const result = await runWithLoading(async defer => {
-							defer(() => {
-								useNotesStore.getState().setSelectedTags([])
-							})
-
-							return await Promise.all(
-								selectedTags.map(t =>
-									notesLib.favoriteTag({
-										tag: t,
-										favorite: !selectedTagsIncludesFavorited
-									})
-								)
-							)
+						await runBulk({
+							items: selectedTags,
+							clearSelection: () => useNotesStore.getState().clearSelectedTags(),
+							op: t => notesLib.favoriteTag({ tag: t, favorite: !tagFlags.includesFavorited })
 						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
 					}
 				})
 
@@ -817,47 +658,20 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					title: "tbd_delete_selected",
 					icon: "delete",
 					destructive: true,
+					requiresOnline: true,
 					onPress: async () => {
-						const promptResponse = await run(async () => {
-							return await prompts.alert({
+						await runBulk({
+							items: selectedTags,
+							clearSelection: () => useNotesStore.getState().clearSelectedTags(),
+							confirm: {
 								title: "tbd_delete_all_tags",
 								message: "tbd_delete_all_tags_confirmation",
+								okText: "tbd_delete_all",
 								cancelText: "tbd_cancel",
-								okText: "tbd_delete_all"
-							})
+								destructive: true
+							},
+							op: t => notesLib.deleteTag({ tag: t })
 						})
-
-						if (!promptResponse.success) {
-							console.error(promptResponse.error)
-							alerts.error(promptResponse.error)
-
-							return
-						}
-
-						if (promptResponse.data.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async defer => {
-							defer(() => {
-								useNotesStore.getState().setSelectedTags([])
-							})
-
-							return await Promise.all(
-								selectedTags.map(t =>
-									notesLib.deleteTag({
-										tag: t
-									})
-								)
-							)
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
 					}
 				})
 			}
@@ -923,8 +737,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						icon: "list",
 						checked: notesViewMode === "notes",
 						onPress: () => {
-							useNotesStore.getState().setSelectedNotes([])
-							useNotesStore.getState().setSelectedTags([])
+							useNotesStore.getState().clearSelectedNotes()
+							useNotesStore.getState().clearSelectedTags()
 
 							setNotesViewMode("notes")
 						}
@@ -935,8 +749,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						icon: "tag",
 						checked: notesViewMode === "tags",
 						onPress: () => {
-							useNotesStore.getState().setSelectedNotes([])
-							useNotesStore.getState().setSelectedTags([])
+							useNotesStore.getState().clearSelectedNotes()
+							useNotesStore.getState().clearSelectedTags()
 
 							setNotesViewMode("tags")
 						}
@@ -982,8 +796,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				},
 				props: {
 					onPress: () => {
-						useNotesStore.getState().setSelectedNotes([])
-						useNotesStore.getState().setSelectedTags([])
+						useNotesStore.getState().clearSelectedNotes()
+						useNotesStore.getState().clearSelectedTags()
 					}
 				}
 			}
@@ -1180,12 +994,12 @@ const Notes = memo(() => {
 
 	useFocusEffect(
 		useCallback(() => {
-			useNotesStore.getState().setSelectedNotes([])
-			useNotesStore.getState().setSelectedTags([])
+			useNotesStore.getState().clearSelectedNotes()
+			useNotesStore.getState().clearSelectedTags()
 
 			return () => {
-				useNotesStore.getState().setSelectedNotes([])
-				useNotesStore.getState().setSelectedTags([])
+				useNotesStore.getState().clearSelectedNotes()
+				useNotesStore.getState().clearSelectedTags()
 			}
 		}, [])
 	)
