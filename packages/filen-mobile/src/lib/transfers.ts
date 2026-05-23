@@ -28,7 +28,7 @@ import {
 	createCompositePauseSignal,
 	unwrapParentUuid
 } from "@/lib/utils"
-import { driveItemsQueryUpdate, driveItemsQueryUpdateForNormalParent } from "@/queries/useDriveItems.query"
+import { driveItemsQueryUpdateForNormalParent } from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
@@ -296,13 +296,19 @@ class Transfers {
 								const dirParentUuid = unwrapParentUuid(uploadedDir.parent)
 
 								if (!unwrappedDirMeta.shared && dirParentUuid) {
-									driveItemsQueryUpdate({
-										params: {
-											path: {
-												type: "drive",
-												uuid: dirParentUuid
-											}
-										},
+									const driveItem = {
+										type: "directory" as const,
+										data: {
+											...unwrappedDirMeta.dir,
+											size: 0n,
+											decryptedMeta: unwrappedDirMeta.meta
+										}
+									}
+
+									cache.cacheNewNormalDir(uploadedDir, driveItem)
+
+									driveItemsQueryUpdateForNormalParent({
+										parentUuid: dirParentUuid,
 										updater: prev => [
 											...prev.filter(
 												item =>
@@ -310,14 +316,7 @@ class Transfers {
 													item.data.decryptedMeta?.name.toLowerCase().trim() !==
 														unwrappedDirMeta.meta?.name.toLowerCase().trim()
 											),
-											{
-												type: "directory",
-												data: {
-													...unwrappedDirMeta.dir,
-													size: 0n,
-													decryptedMeta: unwrappedDirMeta.meta
-												}
-											}
+											driveItem
 										]
 									})
 								}
@@ -330,13 +329,18 @@ class Transfers {
 								const fileParentUuid = unwrapParentUuid(uploadedFile.parent)
 
 								if (!unwrappedFileMeta.shared && fileParentUuid) {
-									driveItemsQueryUpdate({
-										params: {
-											path: {
-												type: "drive",
-												uuid: fileParentUuid
-											}
-										},
+									const driveItem = {
+										type: "file" as const,
+										data: {
+											...unwrappedFileMeta.file,
+											decryptedMeta: unwrappedFileMeta.meta
+										}
+									}
+
+									cache.cacheNewFile(uploadedFile, driveItem)
+
+									driveItemsQueryUpdateForNormalParent({
+										parentUuid: fileParentUuid,
 										updater: prev => [
 											...prev.filter(
 												item =>
@@ -344,13 +348,7 @@ class Transfers {
 													item.data.decryptedMeta?.name.toLowerCase().trim() !==
 														unwrappedFileMeta.meta?.name.toLowerCase().trim()
 											),
-											{
-												type: "file",
-												data: {
-													...unwrappedFileMeta.file,
-													decryptedMeta: unwrappedFileMeta.meta
-												}
-											}
+											driveItem
 										]
 									})
 								}
