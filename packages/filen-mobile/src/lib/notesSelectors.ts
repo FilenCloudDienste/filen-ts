@@ -16,10 +16,19 @@ export type NoteSelectionFlags = {
 	count: number
 	includesFavorited: boolean
 	includesPinned: boolean
+	/** True iff at least one selected note has `archive: true`. */
+	includesArchived: boolean
+	/** True iff at least one selected note has `trash: true`. */
 	includesTrashed: boolean
 	everyOwned: boolean
 	everyArchived: boolean
 	everyTrashed: boolean
+	/**
+	 * True iff every selected note is in a "non-active" state — i.e., each note
+	 * has `archive: true` OR `trash: true`. Gates the bulk Restore action: only
+	 * non-active notes can be restored (active ones would be a SDK-side no-op).
+	 */
+	everyArchivedOrTrashed: boolean
 	hasWriteAccessToAll: boolean
 	/**
 	 * True iff every selected note has the current user as a participant AND
@@ -33,10 +42,12 @@ export const EMPTY_NOTE_FLAGS: NoteSelectionFlags = Object.freeze({
 	count: 0,
 	includesFavorited: false,
 	includesPinned: false,
+	includesArchived: false,
 	includesTrashed: false,
 	everyOwned: false,
 	everyArchived: false,
 	everyTrashed: false,
+	everyArchivedOrTrashed: false,
 	hasWriteAccessToAll: false,
 	participantOfEveryAndNotOwner: false
 }) as NoteSelectionFlags
@@ -48,10 +59,12 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], userId: bigi
 
 	let includesFavorited = false
 	let includesPinned = false
+	let includesArchived = false
 	let includesTrashed = false
 	let everyOwned = true
 	let everyArchived = true
 	let everyTrashed = true
+	let everyArchivedOrTrashed = true
 	let hasWriteAccessToAll = true
 	let participantOfEveryAndNotOwner = true
 
@@ -66,6 +79,10 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], userId: bigi
 			includesPinned = true
 		}
 
+		if (n.archive) {
+			includesArchived = true
+		}
+
 		if (n.trash) {
 			includesTrashed = true
 		}
@@ -76,6 +93,10 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], userId: bigi
 
 		if (!n.trash) {
 			everyTrashed = false
+		}
+
+		if (!n.archive && !n.trash) {
+			everyArchivedOrTrashed = false
 		}
 
 		const isOwner = n.ownerId === userId
@@ -99,10 +120,12 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], userId: bigi
 		count: notes.length,
 		includesFavorited,
 		includesPinned,
+		includesArchived,
 		includesTrashed,
 		everyOwned,
 		everyArchived,
 		everyTrashed,
+		everyArchivedOrTrashed,
 		hasWriteAccessToAll,
 		participantOfEveryAndNotOwner
 	}

@@ -518,7 +518,18 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				})
 
 				if (noteFlags.everyOwned) {
-					if (!noteFlags.everyArchived && !noteFlags.includesTrashed) {
+					// State machine for notes:
+					//   active  (!archive, !trash) → archive | trash
+					//   archived (archive, !trash) → restore | trash
+					//   trashed (trash)             → restore | delete-permanently
+					//
+					// Bulk gating must only enable an action when EVERY selected
+					// note is in a state where that action is valid. The lib
+					// guards each op so mixed-state slips would be silent no-ops,
+					// but UX-wise we hide invalid actions instead.
+
+					// Archive: every note must be active (no archived, no trashed).
+					if (!noteFlags.includesArchived && !noteFlags.includesTrashed) {
 						menuButtons.push({
 							id: "bulkArchive",
 							title: "tbd_archive_selected",
@@ -534,7 +545,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						})
 					}
 
-					if (noteFlags.everyArchived || noteFlags.everyTrashed) {
+					// Restore: every note must be archived OR trashed (no active).
+					if (noteFlags.everyArchivedOrTrashed) {
 						menuButtons.push({
 							id: "bulkRestore",
 							title: "tbd_restore_selected",
@@ -550,7 +562,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						})
 					}
 
-					if (!noteFlags.everyTrashed) {
+					// Trash: every note must be active OR archived (no trashed).
+					if (!noteFlags.includesTrashed) {
 						menuButtons.push({
 							id: "bulkTrash",
 							title: "tbd_trash_selected",
@@ -572,7 +585,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								})
 							}
 						})
-					} else {
+					}
+
+					// Permanent delete: every note must already be trashed.
+					if (noteFlags.everyTrashed) {
 						menuButtons.push({
 							id: "bulkDelete",
 							title: "tbd_delete_selected",
