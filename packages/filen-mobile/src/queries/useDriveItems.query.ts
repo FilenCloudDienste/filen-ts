@@ -675,6 +675,40 @@ export function driveItemsQueryUpdate({
 	})
 }
 
+/**
+ * Patch the drive listing for a parent that's known to be a normal directory
+ * (own / non-shared). Handles the root special case: the drive-root view can be
+ * keyed either by `uuid: rootUuid` (deep-link or startScreen) or `uuid: null`
+ * (native-tab nav lands at `/tabs/drive/` with no segment). Optimistic adds at
+ * root must hit BOTH keys or the listing won't refresh until pull-to-refresh.
+ *
+ * Use from upload completion, createDirectory, restore, move-destination, and
+ * the socket FileNew / FolderSubCreated / FileMove / FolderMove handlers.
+ */
+export function driveItemsQueryUpdateForNormalParent({
+	parentUuid,
+	updater
+}: {
+	parentUuid: string
+	updater:
+		| Awaited<ReturnType<typeof fetchData>>
+		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+}): void {
+	driveItemsQueryUpdate({
+		params: { path: { type: "drive", uuid: parentUuid } },
+		updater
+	})
+
+	// Mirror to the `uuid: null` key when the parent is the user's root, since
+	// the root listing is observed under either key depending on entry path.
+	if (cache.rootUuid && parentUuid === cache.rootUuid) {
+		driveItemsQueryUpdate({
+			params: { path: { type: "drive", uuid: null } },
+			updater
+		})
+	}
+}
+
 export function driveItemsQueryUpdateGlobal({
 	updater,
 	parentUuid
