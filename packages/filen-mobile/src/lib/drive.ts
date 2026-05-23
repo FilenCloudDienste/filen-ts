@@ -30,7 +30,12 @@ import {
 	normalizeFilePathForSdk,
 	unwrapSdkError
 } from "@/lib/utils"
-import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate, driveItemsQueryGet } from "@/queries/useDriveItems.query"
+import {
+	driveItemsQueryUpdateGlobal,
+	driveItemsQueryUpdate,
+	driveItemsQueryUpdateForNormalParent,
+	driveItemsQueryGet
+} from "@/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/queries/useDriveItemVersions.query"
 import cache from "@/lib/cache"
 import { driveItemPublicLinkStatusQueryUpdate } from "@/queries/useDriveItemPublicLinkStatus.query"
@@ -501,13 +506,8 @@ class Drive {
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "drive",
-						uuid: unwrappedParentUuid
-					}
-				},
+			driveItemsQueryUpdateForNormalParent({
+				parentUuid: unwrappedParentUuid,
 				updater: prev => [
 					...prev.filter(
 						i =>
@@ -699,13 +699,8 @@ class Drive {
 
 		cache.cacheNewNormalDir(createdDir, createdDriveItem)
 
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "drive",
-					uuid: parentDir.inner[0].uuid
-				}
-			},
+		driveItemsQueryUpdateForNormalParent({
+			parentUuid: parentDir.inner[0].uuid,
 			updater: prev => [
 				...prev.filter(
 					i =>
@@ -803,13 +798,8 @@ class Drive {
 		}
 
 		if (unwrappedParentUuidPrevious) {
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "drive",
-						uuid: unwrappedParentUuidPrevious
-					}
-				},
+			driveItemsQueryUpdateForNormalParent({
+				parentUuid: unwrappedParentUuidPrevious,
 				updater: prev => prev.filter(i => i.data.uuid !== oldItemUuid)
 			})
 		}
@@ -817,13 +807,8 @@ class Drive {
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "drive",
-						uuid: unwrappedParentUuid
-					}
-				},
+			driveItemsQueryUpdateForNormalParent({
+				parentUuid: unwrappedParentUuid,
 				updater: prev => [
 					...prev.filter(
 						i =>

@@ -221,7 +221,8 @@ vi.mock("@/stores/useTransfers.store", () => ({
 }))
 
 vi.mock("@/queries/useDriveItems.query", () => ({
-	driveItemsQueryUpdate: mockDriveItemsQueryUpdate
+	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
+	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdate
 }))
 
 vi.mock("@/lib/cache", () => ({
@@ -376,12 +377,7 @@ describe("Transfers", () => {
 				expect(result!.directories).toHaveLength(0)
 				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledWith(
 					expect.objectContaining({
-						params: {
-							path: {
-								type: "drive",
-								uuid: "parent-uuid"
-							}
-						}
+						parentUuid: "parent-uuid"
 					})
 				)
 			})

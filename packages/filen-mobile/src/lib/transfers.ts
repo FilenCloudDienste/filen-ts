@@ -28,7 +28,7 @@ import {
 	createCompositePauseSignal,
 	unwrapParentUuid
 } from "@/lib/utils"
-import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import { driveItemsQueryUpdate, driveItemsQueryUpdateForNormalParent } from "@/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
@@ -603,13 +603,8 @@ class Transfers {
 			// does inline on each fetch.
 			cache.cacheNewFile(result.data, driveItem)
 
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "drive",
-						uuid: parent.inner[0].uuid
-					}
-				},
+			driveItemsQueryUpdateForNormalParent({
+				parentUuid: parent.inner[0].uuid,
 				updater: prev => [
 					...prev.filter(
 						item =>

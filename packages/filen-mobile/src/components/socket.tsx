@@ -31,7 +31,7 @@ import {
 	notesWithContentQueryGet
 } from "@/queries/useNotesWithContent.query"
 import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
-import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate, driveItemsQueryUpdateForNormalParent } from "@/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
 import cache from "@/lib/cache"
 
@@ -116,13 +116,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 						}
 
 						if (unwrappedParentUuid) {
-							driveItemsQueryUpdate({
-								params: {
-									path: {
-										type: "drive",
-										uuid: unwrappedParentUuid
-									}
-								},
+							driveItemsQueryUpdateForNormalParent({
+								parentUuid: unwrappedParentUuid,
 								updater: prev => [
 									...prev.filter(
 										i =>
@@ -230,23 +225,13 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 							}
 
 							if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
-								driveItemsQueryUpdate({
-									params: {
-										path: {
-											type: "drive",
-											uuid: unwrappedParentUuidOld
-										}
-									},
+								driveItemsQueryUpdateForNormalParent({
+									parentUuid: unwrappedParentUuidOld,
 									updater: prev => prev.filter(i => i.data.uuid !== fromCacheOld.uuid)
 								})
 
-								driveItemsQueryUpdate({
-									params: {
-										path: {
-											type: "drive",
-											uuid: unwrappedParentUuidNew
-										}
-									},
+								driveItemsQueryUpdateForNormalParent({
+									parentUuid: unwrappedParentUuidNew,
 									updater: prev => [
 										...prev.filter(
 											i =>
@@ -280,23 +265,13 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 							}
 
 							if (unwrappedParentUuidNew && unwrappedParentUuidOld) {
-								driveItemsQueryUpdate({
-									params: {
-										path: {
-											type: "drive",
-											uuid: unwrappedParentUuidOld
-										}
-									},
+								driveItemsQueryUpdateForNormalParent({
+									parentUuid: unwrappedParentUuidOld,
 									updater: prev => prev.filter(i => i.data.uuid !== fromCacheOld.inner[0].uuid)
 								})
 
-								driveItemsQueryUpdate({
-									params: {
-										path: {
-											type: "drive",
-											uuid: unwrappedParentUuidNew
-										}
-									},
+								driveItemsQueryUpdateForNormalParent({
+									parentUuid: unwrappedParentUuidNew,
 									updater: prev => [
 										...prev.filter(
 											i =>
@@ -472,13 +447,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 						}
 
 						if (unwrappedParentUuid) {
-							driveItemsQueryUpdate({
-								params: {
-									path: {
-										type: "drive",
-										uuid: unwrappedParentUuid
-									}
-								},
+							driveItemsQueryUpdateForNormalParent({
+								parentUuid: unwrappedParentUuid,
 								updater: prev => [
 									...prev.filter(
 										i =>
