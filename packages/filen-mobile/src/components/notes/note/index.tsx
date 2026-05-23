@@ -79,16 +79,20 @@ const Note = memo(
 				: info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
 		const tags = info.item.type === "header" ? [] : info.item.tags.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
-		const roundedCn = cn(
-			nextNote?.type === "note" && prevNote?.type === "note" && "rounded-none",
-			nextNote?.type === "header" && prevNote?.type === "note" && "rounded-b-4xl rounded-t-none",
-			nextNote?.type === "note" && prevNote?.type === "header" && "rounded-t-4xl rounded-b-none",
-			nextNote?.type === "header" && prevNote?.type === "header" && "rounded-4xl",
-			!nextNote && prevNote?.type === "header" && "rounded-4xl",
-			!prevNote && nextNote?.type === "note" && "rounded-t-4xl rounded-b-none",
-			!nextNote && prevNote?.type === "note" && "rounded-b-4xl rounded-t-none",
-			!nextNote && !prevNote && "rounded-4xl"
-		)
+		// Notes are rendered inside a sectioned list (pinned / favorited /
+		// time-bucketed / archived / trashed) where each section starts with a
+		// SectionHeader. A note's rounded corners reflect its position within
+		// its enclosing section:
+		//   first-in-section → top corners rounded (or all, if solo)
+		//   last-in-section  → bottom corners rounded (or all, if solo)
+		//   middle           → no corners
+		//
+		// "First" means the previous list item is either a header or undefined
+		// (the list itself ends just above). "Last" is symmetric. Solo notes
+		// (first AND last) get all four corners.
+		const isFirstInSection = !prevNote || prevNote.type === "header"
+		const isLastInSection = !nextNote || nextNote.type === "header"
+		const roundedCn = cn(isFirstInSection && "rounded-t-4xl", isLastInSection && "rounded-b-4xl")
 
 		if (info.item.type === "header") {
 			return (
