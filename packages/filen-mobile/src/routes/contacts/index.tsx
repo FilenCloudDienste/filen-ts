@@ -935,16 +935,12 @@ const Contact = memo(
 						<PressableScale
 							className={cn(
 								"bg-background-tertiary px-4 flex-row items-center",
-								cn(
-									nextItem?.type !== "header" && prevItem?.type !== "header" && "rounded-none",
-									nextItem?.type === "header" && prevItem?.type !== "header" && "rounded-b-4xl rounded-t-none",
-									nextItem?.type !== "header" && prevItem?.type === "header" && "rounded-t-4xl rounded-b-none",
-									nextItem?.type === "header" && prevItem?.type === "header" && "rounded-4xl",
-									!nextItem && prevItem?.type === "header" && "rounded-4xl",
-									!prevItem && nextItem?.type !== "header" && "rounded-t-4xl rounded-b-none",
-									!nextItem && prevItem?.type !== "header" && "rounded-b-4xl rounded-t-none",
-									!nextItem && !prevItem && "rounded-4xl"
-								)
+								// Sectioned list (incoming / outgoing / contacts / blocked) — the
+								// row's rounded corners follow its position within its section.
+								// "First" / "last" means the neighbor is a section header or the
+								// list edge. Solo rows (first AND last) get all corners.
+								(!prevItem || prevItem.type === "header") && "rounded-t-4xl",
+								(!nextItem || nextItem.type === "header") && "rounded-b-4xl"
 							)}
 							onPress={onPress}
 						>
