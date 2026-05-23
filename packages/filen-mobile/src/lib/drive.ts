@@ -378,13 +378,8 @@ class Drive {
 		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
 
 		if (unwrappedParentUuid) {
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "drive",
-						uuid: unwrappedParentUuid
-					}
-				},
+			driveItemsQueryUpdateForNormalParent({
+				parentUuid: unwrappedParentUuid,
 				updater: prev => [
 					...prev.filter(
 						i =>

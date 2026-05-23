@@ -613,11 +613,11 @@ describe("Transfers", () => {
 
 				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(2)
 
-				const dirCall = mockDriveItemsQueryUpdate.mock.calls[0] as [{ params: { path: { uuid: string } } }]
-				expect(dirCall[0].params.path.uuid).toBe(subDirParentUuid)
+				const dirCall = mockDriveItemsQueryUpdate.mock.calls[0] as [{ parentUuid: string }]
+				expect(dirCall[0].parentUuid).toBe(subDirParentUuid)
 
-				const fileCall = mockDriveItemsQueryUpdate.mock.calls[1] as [{ params: { path: { uuid: string } } }]
-				expect(fileCall[0].params.path.uuid).toBe(subFileParentUuid)
+				const fileCall = mockDriveItemsQueryUpdate.mock.calls[1] as [{ parentUuid: string }]
+				expect(fileCall[0].parentUuid).toBe(subFileParentUuid)
 			})
 
 			it("skips cache update for shared directories", async () => {
