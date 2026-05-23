@@ -53,8 +53,12 @@ class FileProvider {
 
 	public async enabled(): Promise<boolean> {
 		const data = await this.read()
+		const enabled = data?.providerEnabled ?? false
 
-		return data?.providerEnabled ?? false
+		// Sync secureStore with auth.json's providerEnabled value on every read to ensure consistency for the native extensions
+		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, enabled)
+
+		return enabled
 	}
 
 	public async cacheBudget(): Promise<number> {
