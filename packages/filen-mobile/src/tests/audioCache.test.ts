@@ -187,7 +187,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 180,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -219,7 +219,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 100,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -276,7 +276,7 @@ describe("AudioCache", () => {
 				album: "Cached Album",
 				date: "2024",
 				duration: 200,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -394,7 +394,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 300,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -478,7 +478,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 150,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -509,7 +509,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 240,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -541,7 +541,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 120,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -598,7 +598,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 100,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: now - 86400 * 1000 - 1
 			}
@@ -620,7 +620,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 100,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}
@@ -654,7 +654,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 1,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now() - 86400 * 1000 - 1
 			}
@@ -679,7 +679,7 @@ describe("AudioCache", () => {
 				album: null,
 				date: null,
 				duration: 100,
-				pictureBase64: null,
+				pictureUri: null,
 				pictureBlurhash: null,
 				cachedAt: Date.now()
 			}

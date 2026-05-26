@@ -121,6 +121,14 @@ export class Audio {
 				this.handleTrackEnd().catch(console.error)
 			}
 		})
+
+		this.player.addListener("remoteNextTrack", () => {
+			this.next().catch(console.error)
+		})
+
+		this.player.addListener("remotePreviousTrack", () => {
+			this.previous().catch(console.error)
+		})
 	}
 
 	public setAudioMode(): void {
@@ -319,6 +327,13 @@ export class Audio {
 					return
 				}
 
+				// Placeholder lockscreen pass so the filename shows while audioCache.get is downloading/parsing.
+				// Refreshed below once real metadata (title/artist/album/artwork) arrives.
+				this.updateLockScreen({
+					item: entry,
+					metadata: null
+				})
+
 				const { audio, metadata } = await audioCache.get({
 					item: {
 						type: "drive",
@@ -360,7 +375,8 @@ export class Audio {
 			{
 				title: metadata?.title ?? item.item.data.decryptedMeta?.name ?? item.item.data.uuid,
 				artist: metadata?.artist ?? undefined,
-				albumTitle: metadata?.album ?? undefined
+				albumTitle: metadata?.album ?? undefined,
+				artworkUrl: metadata?.pictureUri ?? undefined
 			},
 			{
 				showSeekBackward: true,

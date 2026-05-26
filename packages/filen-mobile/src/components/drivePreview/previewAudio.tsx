@@ -53,7 +53,7 @@ const Background = memo(({ children, blurhash }: { children: React.ReactNode; bl
 	)
 })
 
-const Picture = memo(({ blurhash, pictureBase64, id }: { blurhash?: string; pictureBase64?: string; id: string }) => {
+const Picture = memo(({ blurhash, pictureUri, id }: { blurhash?: string; pictureUri?: string; id: string }) => {
 	const dimensions = useWindowDimensions()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -66,11 +66,11 @@ const Picture = memo(({ blurhash, pictureBase64, id }: { blurhash?: string; pict
 					height: Math.floor(dimensions.width * 0.5)
 				}}
 			>
-				{pictureBase64 ? (
+				{pictureUri ? (
 					<Image
 						className="size-full rounded-2xl"
 						source={{
-							uri: pictureBase64
+							uri: pictureUri
 						}}
 						contentFit="contain"
 						cachePolicy="disk"
@@ -103,7 +103,9 @@ const Picture = memo(({ blurhash, pictureBase64, id }: { blurhash?: string; pict
 		>
 			<Image
 				className="size-full rounded-2xl"
-				source={pictureBase64}
+				source={{
+					uri: pictureUri
+				}}
 				contentFit="contain"
 				cachePolicy="disk"
 				recyclingKey={`preview-audio-picture-${blurhash}`}
@@ -290,7 +292,7 @@ const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItem
 		<Background blurhash={metadata?.pictureBlurhash ?? undefined}>
 			<Picture
 				blurhash={metadata?.pictureBlurhash ?? undefined}
-				pictureBase64={metadata?.pictureBase64 ?? undefined}
+				pictureUri={metadata?.pictureUri ?? undefined}
 				id={item.type === "drive" ? item.data.data.uuid : item.data.url}
 			/>
 			<View className="flex-col mt-6 bg-transparent w-full px-4 items-center gap-1">

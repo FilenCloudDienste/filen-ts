@@ -49,10 +49,12 @@ const Toolbar = memo(() => {
 			>
 				<View className="flex-row items-center justify-between bg-transparent gap-6 flex-1">
 					<View className="flex-row items-center gap-3 bg-transparent flex-1">
-						{queueItem && audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureBase64 ? (
+						{queueItem && audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
 							<Image
 								className="size-10 rounded-lg bg-background-tertiary"
-								source={audioMetadataQuery.data.pictureBase64}
+								source={{
+									uri: audioMetadataQuery.data.pictureUri
+								}}
 								contentFit="contain"
 								cachePolicy="disk"
 								recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}

@@ -28,7 +28,7 @@ export const FILE_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(BASE_DIRECTORY_URI, "fileCache", `v${FILE_CACHE_VERSION}`)
 )
 
-export const AUDIO_CACHE_VERSION = 1
+export const AUDIO_CACHE_VERSION = 2
 export const AUDIO_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(BASE_DIRECTORY_URI, "audioCache", `v${AUDIO_CACHE_VERSION}`)
 )
