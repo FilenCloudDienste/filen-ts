@@ -52,7 +52,7 @@ function extname(filename: string): string {
 	return dot === -1 ? "" : filename.slice(dot)
 }
 
-const AUDIO_BASE_DIR = "file:///shared/group.io.filen.app/audioCache/v1"
+const AUDIO_BASE_DIR = "file:///shared/group.io.filen.app/audioCache/v2"
 const FILE_CACHE_BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
 
 function makeFileItem(uuid: string, name: string): DriveItem {
