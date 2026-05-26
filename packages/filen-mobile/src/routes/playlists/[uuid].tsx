@@ -219,13 +219,15 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 					<Checkbox value={isSelected} />
 				</AnimatedView>
 			)}
-			{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureBase64 ? (
+			{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
 				<Image
 					className={cn(
 						"size-10 rounded-lg bg-background-tertiary",
 						isCurrent ? "border border-blue-500" : "border border-transparent"
 					)}
-					source={audioMetadataQuery.data.pictureBase64}
+					source={{
+						uri: audioMetadataQuery.data.pictureUri
+					}}
 					contentFit="contain"
 					cachePolicy="disk"
 					recyclingKey={`toolbar-audio-picture-${track.item.data.uuid}`}

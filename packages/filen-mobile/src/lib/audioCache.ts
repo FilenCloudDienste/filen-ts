@@ -12,7 +12,7 @@ import type { CacheItem } from "@/types"
 import { AUDIO_CACHE_VERSION, AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 
 export type Metadata = {
-	pictureBase64?: string | null
+	pictureUri?: string | null
 	pictureBlurhash?: string | null
 	artist?: string | null
 	title?: string | null
@@ -191,16 +191,30 @@ export class AudioCache {
 						})
 
 						const picture = parsedMetadata?.common?.picture?.at(0)
-						const pictureBase64 = picture
-							? `data:${picture.format};base64,${Buffer.from(picture.data).toString("base64")}`
-							: null
+						let pictureUri: string | null = null
 						let pictureBlurhash: string | null = null
 
-						if (pictureBase64) {
+						if (picture) {
+							const cacheId = item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)
+							const ext = mimeTypes.extension(picture.format) || "jpg"
+							const pictureFile = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, `${cacheId}.${ext}`))
+
+							if (pictureFile.exists) {
+								pictureFile.delete()
+							}
+
+							pictureFile.create({
+								intermediates: true
+							})
+
+							pictureFile.write(picture.data)
+
+							pictureUri = pictureFile.uri
+
 							let image: ImageRef | null = null
 
 							try {
-								image = await Image.loadAsync(pictureBase64)
+								image = await Image.loadAsync(pictureFile.uri)
 								pictureBlurhash = await Image.generateBlurhashAsync(image, [4, 3])
 							} catch (e) {
 								console.error(e)
@@ -214,7 +228,7 @@ export class AudioCache {
 						}
 
 						metadata = {
-							pictureBase64,
+							pictureUri,
 							pictureBlurhash,
 							artist: parsedMetadata.common?.artist ?? null,
 							title: parsedMetadata.common?.title ?? null,
@@ -285,6 +299,18 @@ export class AudioCache {
 			const { metadata: metadataFile } = this.getFiles(item)
 
 			if (metadataFile.exists) {
+				const parseResult = await run(async () => {
+					return deserialize(await metadataFile.text()) as Metadata
+				})
+
+				if (parseResult.success && parseResult.data?.pictureUri) {
+					const pictureFile = new FileSystem.File(parseResult.data.pictureUri)
+
+					if (pictureFile.exists) {
+						pictureFile.delete()
+					}
+				}
+
 				metadataFile.delete()
 			}
 		})
@@ -309,10 +335,20 @@ export class AudioCache {
 						return
 					}
 
+					// Picture files (e.g. *.jpg, *.png) are not metadata sidecars — leave them
+					// alone here. They get cleaned up when their owning .filenmeta is deleted,
+					// or via clear() on full cache wipe.
+					if (!entry.name.endsWith(".filenmeta")) {
+						return
+					}
+
 					let shouldDelete = false
+					let pictureUri: string | null = null
 
 					const parseResult = await run(async () => {
 						const metadata = deserialize(await entry.text()) as Metadata
+
+						pictureUri = metadata?.pictureUri ?? null
 
 						return Object.keys(metadata ?? {}).length === 0 || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
 					})
@@ -335,6 +371,14 @@ export class AudioCache {
 					defer(() => {
 						mutex.release()
 					})
+
+					if (pictureUri) {
+						const pictureFile = new FileSystem.File(pictureUri)
+
+						if (pictureFile.exists) {
+							pictureFile.delete()
+						}
+					}
 
 					if (entry.exists) {
 						entry.delete()

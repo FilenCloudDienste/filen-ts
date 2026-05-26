@@ -51,10 +51,12 @@ const AudioSlot = memo(() => {
 			onPress={onBodyPress}
 		>
 			<View className="flex-row items-center gap-2 bg-transparent flex-1">
-				{queueItem && audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureBase64 ? (
+				{queueItem && audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
 					<Image
 						className="size-8 rounded-lg bg-background-tertiary"
-						source={audioMetadataQuery.data.pictureBase64}
+						source={{
+							uri: audioMetadataQuery.data.pictureUri
+						}}
 						contentFit="contain"
 						cachePolicy="disk"
 						recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}
