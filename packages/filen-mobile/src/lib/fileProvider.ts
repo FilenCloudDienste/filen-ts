@@ -19,21 +19,28 @@ export const AUTH_FILE = new FileSystem.File(
 	)
 )
 
-// Legacy TS SDK config format
+// Mirrors the Rust `FilenSDKConfig` struct in filen-rs/filen-types/src/auth.rs.
+// Every field is required — serde rejects the whole AuthFile if any of these
+// is missing, which collapses the extension to "auth required".
 export type TsSdkConfig = {
-	email?: string
-	masterKeys?: string[]
-	apiKey?: string
-	publicKey?: string
-	privateKey?: string
-	authVersion?: number
-	baseFolderUUID?: string
-	userId?: number
+	email: string
+	password: string
+	twoFactorCode: string
+	masterKeys: string[]
+	apiKey: string
+	publicKey: string
+	privateKey: string
+	authVersion: number
+	baseFolderUUID: string
+	userId: number
+	metadataCache: boolean
+	tmpPath: string
+	connectToSocket: boolean
 }
 
 export type AuthFileSchema = {
 	providerEnabled: boolean
-	sdkConfig: Required<TsSdkConfig> | null
+	sdkConfig: TsSdkConfig | null
 	maxThumbnailFilesBudget?: number | null
 	maxCacheFilesBudget?: number | null
 }
@@ -89,13 +96,21 @@ class FileProvider {
 			providerEnabled: true,
 			sdkConfig: {
 				email: sdkConfig.email,
+				// The extension never re-authenticates from password/2FA — it only uses apiKey + masterKeys.
+				// Forwarding the SDK's password to disk would be an unnecessary credential leak, so we hardcode
+				// a placeholder. The Rust SDK accepts this once apiKey + masterKeys are present.
+				password: "redacted",
+				twoFactorCode: "redacted",
 				masterKeys: sdkConfig.masterKeys,
 				apiKey: sdkConfig.apiKey,
 				publicKey: sdkConfig.publicKey,
 				privateKey: sdkConfig.privateKey,
 				authVersion: Number(sdkConfig.authVersion),
 				baseFolderUUID: sdkConfig.baseFolderUuid,
-				userId: Number(sdkConfig.userId)
+				userId: Number(sdkConfig.userId),
+				metadataCache: sdkConfig.metadataCache,
+				tmpPath: sdkConfig.tmpPath,
+				connectToSocket: sdkConfig.connectToSocket
 			}
 		} satisfies AuthFileSchema)
 
