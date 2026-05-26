@@ -25,7 +25,8 @@ function makeItem(
 				mime: overrides?.mime ?? "application/octet-stream",
 				modified: overrides?.modified ?? overrides?.timestamp ?? 1000,
 				created: overrides?.created ?? overrides?.timestamp ?? 1000
-			}
+			},
+			undecryptable: false
 		}
 	} as unknown as DriveItem
 }
@@ -169,7 +170,8 @@ describe("itemSorter", () => {
 					uuid: uuid1,
 					size: 0n,
 					timestamp: 1000,
-					decryptedMeta: null
+					decryptedMeta: null,
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 
@@ -179,7 +181,8 @@ describe("itemSorter", () => {
 					uuid: uuid2,
 					size: 0n,
 					timestamp: 1000,
-					decryptedMeta: null
+					decryptedMeta: null,
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 

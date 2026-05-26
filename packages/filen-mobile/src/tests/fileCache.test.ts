@@ -87,6 +87,7 @@ function makeFileItem(uuid: string, name: string): DriveItem {
 				created: 900,
 				mime: "application/octet-stream"
 			},
+			undecryptable: false,
 			size: 100n
 		}
 	} as unknown as DriveItem
@@ -97,7 +98,8 @@ function makeDirItem(uuid: string, name: string): DriveItem {
 		type: "directory",
 		data: {
 			uuid,
-			decryptedMeta: { name, size: 0n, modified: 1000, created: 900 }
+			decryptedMeta: { name, size: 0n, modified: 1000, created: 900 },
+			undecryptable: false
 		}
 	} as unknown as DriveItem
 }
@@ -190,7 +192,7 @@ describe("FileCache", () => {
 			const cache = await createFileCache()
 			const item: CacheItem = {
 				type: "drive",
-				data: { type: "file", data: { uuid: "no-meta" } } as unknown as DriveItem
+				data: { type: "file", data: { uuid: "no-meta", undecryptable: true } } as unknown as DriveItem
 			}
 
 			expect(() => cache.getFiles(item)).toThrow("Item does not have decrypted metadata")

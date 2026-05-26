@@ -67,6 +67,7 @@ function makeFileItem(uuid: string, name: string): DriveItem {
 				created: 900,
 				mime: "audio/mpeg"
 			},
+			undecryptable: false,
 			size: 100n
 		}
 	} as unknown as DriveItem
@@ -77,7 +78,8 @@ function makeDirItem(uuid: string): DriveItem {
 		type: "directory",
 		data: {
 			uuid,
-			decryptedMeta: { name: "test-dir" }
+			decryptedMeta: { name: "test-dir" },
+			undecryptable: false
 		}
 	} as unknown as DriveItem
 }
@@ -349,6 +351,7 @@ describe("AudioCache", () => {
 				data: {
 					uuid: "uuid-11",
 					decryptedMeta: null,
+					undecryptable: false,
 					size: 100n
 				}
 			} as unknown as DriveItem)
@@ -463,6 +466,7 @@ describe("AudioCache", () => {
 						created: 900,
 						mime: "audio/mpeg"
 					},
+					undecryptable: false,
 					size: 100n
 				}
 			} as unknown as DriveItem)

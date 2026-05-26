@@ -1,4 +1,5 @@
 import { type DriveItem, type Note, type Chat, type ChatMessage, type NoteTag } from "@/types"
+import { fastLocaleCompare } from "@filen/utils"
 
 export function cannotDecryptPlaceholder(uuid: string): string {
 	return `cannot_decrypt_${uuid}`
@@ -60,7 +61,11 @@ export function chatDisplayName(chat: Chat, currentUserId: bigint): string {
 		}
 	}
 
-	return others.map(p => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email)).join(", ")
+	// Multi-party: render the joined list of display names, sorted to match the pre-decryption-feature behavior
+	// (chats/list/chat/index.tsx previously sorted via fastLocaleCompare before joining).
+	const displayNames = others.map(p => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email))
+
+	return displayNames.sort(fastLocaleCompare).join(", ")
 }
 
 export function messageDisplayBody(message: ChatMessage): string {
