@@ -57,18 +57,7 @@ type State = {
 	loading: boolean
 }
 
-// Throttle the undecryptable toast so a queue with many filtered items only surfaces it once per short window.
-let cannotDecryptToastLastShownAt = 0
-
 function surfaceCannotDecryptToast(): void {
-	const now = Date.now()
-
-	if (now - cannotDecryptToastLastShownAt < 3000) {
-		return
-	}
-
-	cannotDecryptToastLastShownAt = now
-
 	alerts.normal("tbd_cannot_decrypt_toast")
 }
 

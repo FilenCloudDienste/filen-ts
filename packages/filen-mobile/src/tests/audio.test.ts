@@ -161,6 +161,7 @@ function makeFileItem(uuid: string, name: string): DriveItemFileExtracted {
 				created: 900,
 				mime: "audio/mpeg"
 			},
+			undecryptable: false,
 			size: 100n
 		}
 	} as unknown as DriveItemFileExtracted

@@ -154,8 +154,7 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 
 						return moreMessages.map(m => ({
 							...m,
-							inflightId: "", // Placeholder, actual inflightId is only needed for send sync
-							undecryptable: m.inner.message === undefined
+							inflightId: "" // Placeholder, actual inflightId is only needed for send sync
 						})) satisfies ChatMessageWithInflightId[]
 					})
 

@@ -31,10 +31,10 @@ function wrapMessage(message: SdkChatMessage): ChatMessage {
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
 
-	public async listBefore({ chat, before, signal }: { chat: Chat; before: bigint; signal?: AbortSignal }) {
+	public async listBefore({ chat, before, signal }: { chat: Chat; before: bigint; signal?: AbortSignal }): Promise<ChatMessage[]> {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		return await authedSdkClient.listMessagesBefore(
+		const messages = await authedSdkClient.listMessagesBefore(
 			chat,
 			before,
 			signal
@@ -43,6 +43,8 @@ class Chats {
 					}
 				: undefined
 		)
+
+		return messages.map(wrapMessage)
 	}
 
 	public async sendMessage({
@@ -451,10 +453,10 @@ class Chats {
 		return chat
 	}
 
-	public async markRead({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
+	public async markRead({ chat, signal }: { chat: Chat; signal?: AbortSignal }): Promise<void> {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		return await authedSdkClient.markChatRead(
+		await authedSdkClient.markChatRead(
 			chat,
 			signal
 				? {

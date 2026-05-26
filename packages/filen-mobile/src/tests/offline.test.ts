@@ -286,7 +286,8 @@ function makeFileItem(uuid: string, name: string): DriveItem {
 				size: 100n,
 				modified: 1000,
 				created: 900
-			}
+			},
+			undecryptable: false
 		}
 	} as unknown as DriveItem
 }
@@ -301,7 +302,8 @@ function makeDirItem(uuid: string, name: string): DriveItem {
 				size: 0n,
 				modified: 1000,
 				created: 900
-			}
+			},
+			undecryptable: false
 		}
 	} as unknown as DriveItem
 }
@@ -316,7 +318,8 @@ function makeFileItemWithSize(uuid: string, name: string, size: bigint): DriveIt
 				size,
 				modified: 1000,
 				created: 900
-			}
+			},
+			undecryptable: false
 		}
 	} as unknown as DriveItem
 }
@@ -1233,7 +1236,8 @@ describe("Offline", () => {
 				type: "file",
 				data: {
 					uuid: "11111111-1111-1111-1111-111111111111",
-					decryptedMeta: null
+					decryptedMeta: null,
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
@@ -1368,7 +1372,8 @@ describe("Offline", () => {
 				type: "directory",
 				data: {
 					uuid: "11111111-1111-1111-1111-111111111111",
-					decryptedMeta: null
+					decryptedMeta: null,
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
@@ -3066,7 +3071,8 @@ describe("Offline", () => {
 				type: "sharedFile",
 				data: {
 					uuid,
-					decryptedMeta: { name: "shared.txt", size: 50n, modified: 1000, created: 900 }
+					decryptedMeta: { name: "shared.txt", size: 50n, modified: 1000, created: 900 },
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 
@@ -3088,7 +3094,8 @@ describe("Offline", () => {
 				type: "sharedDirectory",
 				data: {
 					uuid,
-					decryptedMeta: { name: "shared-dir" }
+					decryptedMeta: { name: "shared-dir" },
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 
@@ -3110,7 +3117,8 @@ describe("Offline", () => {
 				type: "sharedRootDirectory",
 				data: {
 					uuid,
-					decryptedMeta: { name: "shared-root" }
+					decryptedMeta: { name: "shared-root" },
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 
@@ -3166,7 +3174,8 @@ describe("Offline", () => {
 				type: "file",
 				data: {
 					uuid: "11111111-1111-1111-1111-111111111111",
-					decryptedMeta: null
+					decryptedMeta: null,
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 
@@ -3714,6 +3723,7 @@ describe("Offline", () => {
 				data: {
 					uuid: topUuid,
 					decryptedMeta: { name: "SharedRoot", size: 0n, modified: 1000, created: 900 },
+					undecryptable: false,
 					sharingRole: { tag: SharingRole_Tags.Receiver }
 				}
 			} as unknown as DriveItem
@@ -3754,6 +3764,7 @@ describe("Offline", () => {
 				data: {
 					uuid: sharedSubDirUuid,
 					decryptedMeta: { name: "SharedSub", size: 0n, modified: 1000, created: 900 },
+					undecryptable: false,
 					inner: { parent: sharedParentUuid }
 				}
 			} as unknown as DriveItem
@@ -4646,7 +4657,8 @@ describe("Offline", () => {
 				type: "file",
 				data: {
 					uuid,
-					decryptedMeta: null
+					decryptedMeta: null,
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 
@@ -4778,7 +4790,8 @@ describe("Offline", () => {
 				type: "sharedRootFile",
 				data: {
 					uuid,
-					decryptedMeta: { name: "shared-root.txt", size: 50n, modified: 1000, created: 900 }
+					decryptedMeta: { name: "shared-root.txt", size: 50n, modified: 1000, created: 900 },
+					undecryptable: false
 				}
 			} as unknown as DriveItem
 
