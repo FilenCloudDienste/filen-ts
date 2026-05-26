@@ -1,4 +1,18 @@
-import type { File, Dir, DecryptedFileMeta, DecryptedDirMeta, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk-rs"
+import {
+	type File,
+	type Dir,
+	type DecryptedFileMeta,
+	type DecryptedDirMeta,
+	type SharedDir,
+	type SharedFile,
+	type SharedRootDir,
+	type Note as SdkNote,
+	type Chat as SdkChat,
+	type ChatMessage as SdkChatMessage,
+	type NoteTag as SdkNoteTag,
+	type NoteHistory as SdkNoteHistory,
+	type NoteParticipant as SdkNoteParticipant
+} from "@filen/sdk-rs"
 
 export type Prettify<T> = {
 	[K in keyof T]: T[K]
@@ -7,6 +21,7 @@ export type Prettify<T> = {
 export type ExtraData = {
 	size: bigint
 	uuid: string
+	undecryptable: boolean
 }
 
 export type DriveItemFile = Prettify<
@@ -114,3 +129,23 @@ export type CacheItem =
 				name: string
 			}
 	  }
+
+export type Note = SdkNote & {
+	undecryptable: boolean
+}
+
+export type Chat = SdkChat & {
+	undecryptable: boolean
+}
+
+export type ChatMessage = SdkChatMessage & {
+	undecryptable: boolean
+}
+
+export type NoteTag = SdkNoteTag & {
+	undecryptable: boolean
+}
+
+export type NoteHistory = SdkNoteHistory
+
+export type NoteParticipant = SdkNoteParticipant

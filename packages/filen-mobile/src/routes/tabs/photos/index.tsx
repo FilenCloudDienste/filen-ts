@@ -13,6 +13,7 @@ import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import useViewLayout from "@/hooks/useViewLayout"
 import { getPreviewType, getRealDriveItemParent } from "@/lib/utils"
+import { driveItemDisplayName } from "@/lib/decryption"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
@@ -57,7 +58,7 @@ const Photo = memo(
 		drivePath: DrivePath
 		getListItems: () => DriveItemFileExtracted[]
 	}) => {
-		const previewType = getPreviewType(info.item.data.decryptedMeta?.name ?? "")
+		const previewType = getPreviewType(driveItemDisplayName(info.item))
 		const isSelected = useDriveStore(useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid)))
 		const arePhotosSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
 

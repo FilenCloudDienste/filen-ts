@@ -1,12 +1,13 @@
 import useChatsQuery from "@/queries/useChats.query"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
-import type { Chat as TChat } from "@filen/sdk-rs"
+import { type Chat as TChat } from "@/types"
 import { parseNumbersFromString, run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import Chat from "@/components/chats/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
+import { chatDisplayName } from "@/lib/decryption"
 import { memo } from "react"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
@@ -35,9 +36,13 @@ const List = memo(({ searchQuery }: { searchQuery: string }) => {
 
 		if (searchQuery && searchQuery.length > 0) {
 			const searchQueryNormalized = searchQuery.toLowerCase().trim()
+			const currentUserId = stringigiedClient?.userId
 
 			chats = chats.filter(chat => {
-				if (chat.name && chat.name.toLowerCase().includes(searchQueryNormalized)) {
+				if (
+					currentUserId !== undefined &&
+					chatDisplayName(chat, currentUserId).toLowerCase().includes(searchQueryNormalized)
+				) {
 					return true
 				}
 

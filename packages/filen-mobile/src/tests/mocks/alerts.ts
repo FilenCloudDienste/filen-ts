@@ -9,5 +9,6 @@
 import { vi } from "vitest"
 
 export default {
-	error: vi.fn()
+	error: vi.fn(),
+	normal: vi.fn()
 }

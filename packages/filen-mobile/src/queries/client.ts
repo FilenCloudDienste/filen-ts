@@ -11,7 +11,7 @@ import { AppState } from "react-native"
 import auth from "@/lib/auth"
 
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
+export const VERSION = 2
 export const QUERY_CLIENT_PERSISTER_PREFIX = `reactQuery_v${VERSION}`
 export const QUERY_CLIENT_CACHE_TIME = 86400 * 365 * 1000 * 10 // 10 years, effectively infinite for our use case
 

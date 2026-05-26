@@ -35,7 +35,8 @@ export async function fetchData(
 
 	return messages.map(m => ({
 		...m,
-		inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+		inflightId: "", // Placeholder, actual inflightId is only needed for send sync
+		undecryptable: m.inner.message === undefined
 	})) satisfies ChatMessageWithInflightId[]
 }
 

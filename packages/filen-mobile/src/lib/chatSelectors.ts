@@ -1,4 +1,4 @@
-import type { Chat } from "@filen/sdk-rs"
+import { type Chat } from "@/types"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.
@@ -25,6 +25,12 @@ export type ChatSelectionFlags = {
 	 * query needed). Gates the bulk Mark-as-read action.
 	 */
 	includesUnread: boolean
+	/**
+	 * True iff any selected chat is undecryptable (e.g. encryption key didn't
+	 * decrypt). Gates non-Delete/Leave bulk actions away to avoid issuing SDK
+	 * calls that would no-op or fail on placeholder data.
+	 */
+	includesUndecryptable: boolean
 }
 
 export const EMPTY_CHAT_FLAGS: ChatSelectionFlags = Object.freeze({
@@ -32,7 +38,8 @@ export const EMPTY_CHAT_FLAGS: ChatSelectionFlags = Object.freeze({
 	includesMuted: false,
 	everyOwnedBySelf: false,
 	selfIsParticipantNotOwnerOfEvery: false,
-	includesUnread: false
+	includesUnread: false,
+	includesUndecryptable: false
 }) as ChatSelectionFlags
 
 export function chatHasUnread(c: Chat, userId: bigint): boolean {
@@ -60,6 +67,7 @@ export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigi
 	let everyOwnedBySelf = true
 	let selfIsParticipantNotOwnerOfEvery = true
 	let includesUnread = false
+	let includesUndecryptable = false
 
 	for (let i = 0; i < chats.length; i++) {
 		const c = chats[i]!
@@ -82,6 +90,10 @@ export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigi
 		if (chatHasUnread(c, userId)) {
 			includesUnread = true
 		}
+
+		if (c.undecryptable) {
+			includesUndecryptable = true
+		}
 	}
 
 	return {
@@ -89,6 +101,7 @@ export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigi
 		includesMuted,
 		everyOwnedBySelf,
 		selfIsParticipantNotOwnerOfEvery,
-		includesUnread
+		includesUnread,
+		includesUndecryptable
 	}
 }

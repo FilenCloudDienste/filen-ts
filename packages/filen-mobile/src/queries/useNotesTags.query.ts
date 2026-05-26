@@ -7,13 +7,18 @@ export const BASE_QUERY_KEY = "useNotesTagsQuery"
 export async function fetchData(params?: { signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
-	return await authedSdkClient.listNoteTags(
+	const tags = await authedSdkClient.listNoteTags(
 		params?.signal
 			? {
 					signal: params.signal
 				}
 			: undefined
 	)
+
+	return tags.map(tag => ({
+		...tag,
+		undecryptable: tag.name === undefined
+	}))
 }
 
 export function useNotesTagsQuery(

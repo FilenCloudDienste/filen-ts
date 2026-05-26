@@ -1,4 +1,5 @@
-import { type Note, NoteType, type NoteHistory, type NoteContentEdited } from "@filen/sdk-rs"
+import { NoteType, type NoteContentEdited } from "@filen/sdk-rs"
+import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
 import useNoteContentQuery from "@/queries/useNoteContent.query"
 import Checklist from "@/components/notes/content/checklist"

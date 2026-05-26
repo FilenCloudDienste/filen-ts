@@ -13,7 +13,8 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import type { Note, NoteTag } from "@filen/sdk-rs"
+import { type Note, type NoteTag } from "@/types"
+import { tagDisplayName } from "@/lib/decryption"
 import Menu from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
@@ -165,7 +166,7 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 					numberOfLines={1}
 					ellipsizeMode="middle"
 				>
-					{tag.name}
+					{tagDisplayName(tag)}
 				</Text>
 			</PressableScale>
 		</Menu>
@@ -205,7 +206,7 @@ const NoteTags = memo(() => {
 	const notesTagsQuery = useNotesTagsQuery()
 
 	const tags =
-		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid)) : []
+		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b))) : []
 
 	if (!note) {
 		return <DismissStack />

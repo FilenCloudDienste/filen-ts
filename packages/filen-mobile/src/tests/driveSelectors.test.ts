@@ -2,35 +2,36 @@ import { describe, it, expect } from "vitest"
 import { aggregateDriveSelectionFlags, EMPTY_DRIVE_FLAGS } from "@/lib/driveSelectors"
 import type { DriveItem } from "@/types"
 
-function file(uuid: string, favorited = false, name?: string): DriveItem {
+function file(uuid: string, favorited = false, name?: string, undecryptable = false): DriveItem {
 	return {
 		type: "file",
 		data: {
 			uuid,
 			favorited,
+			undecryptable,
 			decryptedMeta: name ? ({ name } as DriveItem["data"]["decryptedMeta"]) : null
 		} as DriveItem["data"]
 	} as DriveItem
 }
 
-function dir(uuid: string, favorited = false): DriveItem {
+function dir(uuid: string, favorited = false, undecryptable = false): DriveItem {
 	return {
 		type: "directory",
-		data: { uuid, favorited } as DriveItem["data"]
+		data: { uuid, favorited, undecryptable } as DriveItem["data"]
 	} as DriveItem
 }
 
-function sharedRootFile(uuid: string, favorited = false): DriveItem {
+function sharedRootFile(uuid: string, favorited = false, undecryptable = false): DriveItem {
 	return {
 		type: "sharedRootFile",
-		data: { uuid, favorited } as DriveItem["data"]
+		data: { uuid, favorited, undecryptable } as DriveItem["data"]
 	} as DriveItem
 }
 
-function sharedRootDir(uuid: string, favorited = false): DriveItem {
+function sharedRootDir(uuid: string, favorited = false, undecryptable = false): DriveItem {
 	return {
 		type: "sharedRootDirectory",
-		data: { uuid, favorited } as DriveItem["data"]
+		data: { uuid, favorited, undecryptable } as DriveItem["data"]
 	} as DriveItem
 }
 
@@ -124,5 +125,22 @@ describe("aggregateDriveSelectionFlags", () => {
 
 	it("everyImageOrVideoFile false on empty selection (EMPTY_DRIVE_FLAGS)", () => {
 		expect(aggregateDriveSelectionFlags([]).everyImageOrVideoFile).toBe(false)
+	})
+
+	it("includesUndecryptable true when any item is undecryptable", () => {
+		const decryptable = file("a", false, "photo.jpg")
+		const undecryptable = file("b", false, undefined, true)
+
+		expect(aggregateDriveSelectionFlags([decryptable, undecryptable]).includesUndecryptable).toBe(true)
+	})
+
+	it("includesUndecryptable false when no item is undecryptable", () => {
+		const decryptable = file("a", false, "photo.jpg")
+
+		expect(aggregateDriveSelectionFlags([decryptable]).includesUndecryptable).toBe(false)
+	})
+
+	it("includesUndecryptable false on empty selection (EMPTY_DRIVE_FLAGS)", () => {
+		expect(aggregateDriveSelectionFlags([]).includesUndecryptable).toBe(false)
 	})
 })

@@ -19,6 +19,7 @@ import { ScrollView } from "react-native-gesture-handler"
 import { Information } from "@/routes/driveItemInfo"
 import DismissStack from "@/components/dismissStack"
 import useIsOnline from "@/hooks/useIsOnline"
+import { driveItemDisplayName } from "@/lib/decryption"
 
 const ChangeDirectoryColor = memo(() => {
 	const { item: itemSerialized } = useLocalSearchParams<{
@@ -144,7 +145,7 @@ const ChangeDirectoryColor = memo(() => {
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{item.data.decryptedMeta?.name ?? item.data.uuid}
+							{driveItemDisplayName(item)}
 						</Text>
 						<Text className="text-muted-foreground">tbd_directory</Text>
 					</View>

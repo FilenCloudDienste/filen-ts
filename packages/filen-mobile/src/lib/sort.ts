@@ -1,6 +1,5 @@
 import { parseNumbersFromString } from "@filen/utils"
-import type { DriveItem } from "@/types"
-import type { Note, NoteTag } from "@filen/sdk-rs"
+import { type DriveItem, type Note, type NoteTag } from "@/types"
 import type { ListItem as NoteListItem, Item as NoteItem } from "@/components/notes/note"
 
 export type SortByType =

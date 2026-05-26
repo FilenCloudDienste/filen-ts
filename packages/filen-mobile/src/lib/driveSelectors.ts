@@ -32,6 +32,12 @@ export type DriveSelectionFlags = {
 	 * action (the OS photo library only accepts those two media types).
 	 */
 	everyImageOrVideoFile: boolean
+	/**
+	 * True iff any selected item is undecryptable. Gates bulk actions that
+	 * require decrypted metadata (download, share, rename, move, favorite,
+	 * etc.) so the toolbar can downgrade to a minimal Trash-only mode.
+	 */
+	includesUndecryptable: boolean
 }
 
 export const EMPTY_DRIVE_FLAGS: DriveSelectionFlags = Object.freeze({
@@ -39,7 +45,8 @@ export const EMPTY_DRIVE_FLAGS: DriveSelectionFlags = Object.freeze({
 	includesFavorited: false,
 	everyFile: false,
 	everyDirectory: false,
-	everyImageOrVideoFile: false
+	everyImageOrVideoFile: false,
+	includesUndecryptable: false
 }) as DriveSelectionFlags
 
 const FILE_TYPES = new Set<DriveItem["type"]>(["file", "sharedFile", "sharedRootFile"])
@@ -54,6 +61,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 	let everyFile = true
 	let everyDirectory = true
 	let everyImageOrVideoFile = true
+	let includesUndecryptable = false
 
 	for (let i = 0; i < items.length; i++) {
 		const it = items[i]!
@@ -61,6 +69,10 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		// SharedRoot* item types don't carry a `favorited` field — guard the access.
 		if ("favorited" in it.data && it.data.favorited) {
 			includesFavorited = true
+		}
+
+		if (it.data.undecryptable === true) {
+			includesUndecryptable = true
 		}
 
 		const isFile = FILE_TYPES.has(it.type)
@@ -86,6 +98,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		includesFavorited,
 		everyFile,
 		everyDirectory,
-		everyImageOrVideoFile
+		everyImageOrVideoFile,
+		includesUndecryptable
 	}
 }

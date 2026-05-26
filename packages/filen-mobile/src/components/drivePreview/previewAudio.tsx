@@ -14,6 +14,7 @@ import { runOnJS } from "react-native-worklets"
 import { Paths } from "expo-file-system"
 import { type Metadata } from "@/lib/audioCache"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { driveItemDisplayName } from "@/lib/decryption"
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
 import audio from "@/lib/audio"
 import useEffectOnce from "@/hooks/useEffectOnce"
@@ -329,7 +330,7 @@ const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItem
 						>
 							{
 								Paths.parse(
-									item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? item.data.data.uuid) : item.data.name
+									item.type === "drive" ? driveItemDisplayName(item.data) : item.data.name
 								).name
 							}
 						</Text>

@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { NoteParticipant } from "@filen/sdk-rs"
+import { type NoteParticipant } from "@/types"
 import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type NoteParticipantsStore = {

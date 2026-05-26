@@ -12,6 +12,7 @@ import DriveItemMenu from "@/components/drive/item/menu"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
 import { useShallow } from "zustand/shallow"
 import { getPreviewType } from "@/lib/utils"
+import { driveItemDisplayName } from "@/lib/decryption"
 import { cn, run } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
 import Menu from "@/components/ui/menu"
@@ -40,7 +41,7 @@ const GalleryHeader = memo(
 		const drivePath = useDrivePreviewStore(useShallow(state => state.drivePath))
 
 		const currentItemPreviewType = getPreviewType(
-			currentItem ? (currentItem.type === "drive" ? (currentItem.data.data.decryptedMeta?.name ?? "") : currentItem.data.name) : ""
+			currentItem ? (currentItem.type === "drive" ? driveItemDisplayName(currentItem.data) : currentItem.data.name) : ""
 		)
 
 		const solidHeader = currentItemPreviewType === "docx" || currentItemPreviewType === "pdf" || currentItemPreviewType === "video"
@@ -111,7 +112,7 @@ const GalleryHeader = memo(
 						>
 							{currentItem
 								? currentItem.type === "drive"
-									? (currentItem.data.data.decryptedMeta?.name ?? "")
+									? driveItemDisplayName(currentItem.data)
 									: currentItem.data.name
 								: ""}
 						</Text>

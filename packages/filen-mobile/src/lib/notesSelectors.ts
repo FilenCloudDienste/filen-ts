@@ -1,4 +1,4 @@
-import type { Note, NoteTag } from "@filen/sdk-rs"
+import { type Note, type NoteTag } from "@/types"
 
 /**
  * Aggregated boolean flags for a Notes selection, computed in a single pass.
@@ -20,6 +20,8 @@ export type NoteSelectionFlags = {
 	includesArchived: boolean
 	/** True iff at least one selected note has `trash: true`. */
 	includesTrashed: boolean
+	/** True iff at least one selected note has `undecryptable: true`. */
+	includesUndecryptable: boolean
 	everyOwned: boolean
 	everyArchived: boolean
 	everyTrashed: boolean
@@ -44,6 +46,7 @@ export const EMPTY_NOTE_FLAGS: NoteSelectionFlags = Object.freeze({
 	includesPinned: false,
 	includesArchived: false,
 	includesTrashed: false,
+	includesUndecryptable: false,
 	everyOwned: false,
 	everyArchived: false,
 	everyTrashed: false,
@@ -61,6 +64,7 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], userId: bigi
 	let includesPinned = false
 	let includesArchived = false
 	let includesTrashed = false
+	let includesUndecryptable = false
 	let everyOwned = true
 	let everyArchived = true
 	let everyTrashed = true
@@ -85,6 +89,10 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], userId: bigi
 
 		if (n.trash) {
 			includesTrashed = true
+		}
+
+		if (n.undecryptable) {
+			includesUndecryptable = true
 		}
 
 		if (!n.archive) {
@@ -122,6 +130,7 @@ export function aggregateNoteSelectionFlags(notes: readonly Note[], userId: bigi
 		includesPinned,
 		includesArchived,
 		includesTrashed,
+		includesUndecryptable,
 		everyOwned,
 		everyArchived,
 		everyTrashed,

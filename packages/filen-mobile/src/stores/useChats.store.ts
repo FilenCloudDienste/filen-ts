@@ -1,5 +1,6 @@
 import { create } from "zustand"
-import { type ChatTyping, type ChatMessage, type Chat, FilenSdkError } from "@filen/sdk-rs"
+import { type ChatTyping, FilenSdkError } from "@filen/sdk-rs"
+import { type Chat, type ChatMessage } from "@/types"
 import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type InputViewLayout = {

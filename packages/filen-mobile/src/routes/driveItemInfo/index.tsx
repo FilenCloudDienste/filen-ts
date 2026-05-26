@@ -16,8 +16,10 @@ import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.
 import { simpleDate } from "@/lib/time"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { getPreviewType } from "@/lib/utils"
+import { driveItemDisplayName } from "@/lib/decryption"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import DismissStack from "@/components/dismissStack"
+import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 
 export const Information = memo(({ item, linked }: { item: DriveItem; linked?: boolean }) => {
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -71,7 +73,7 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 							type: "previewType",
 							title: "tbd_preview_type",
 							value: (() => {
-								const previewType = getPreviewType(item.data.decryptedMeta?.name ?? "")
+								const previewType = getPreviewType(driveItemDisplayName(item))
 
 								switch (previewType) {
 									case "audio": {
@@ -358,6 +360,18 @@ const DriveItemInfo = memo(() => {
 		return <DismissStack />
 	}
 
+	// Deep-link defensive guard: if the user opens info for an undecryptable
+	// item, show the cannot-decrypt screen instead of an info sheet that would
+	// surface uuid-only fallbacks for every metadata row.
+	if (item.data.undecryptable) {
+		return (
+			<CannotDecryptScreen
+				uuid={item.data.uuid}
+				surface="driveInfo"
+			/>
+		)
+	}
+
 	return (
 		<Fragment>
 			<Header
@@ -420,7 +434,7 @@ const DriveItemInfo = memo(() => {
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{item.data.decryptedMeta?.name ?? item.data.uuid}
+							{driveItemDisplayName(item)}
 						</Text>
 						<Text className="text-muted-foreground">
 							{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"

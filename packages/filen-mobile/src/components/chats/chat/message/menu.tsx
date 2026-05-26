@@ -1,4 +1,4 @@
-import type { Chat as TChat } from "@filen/sdk-rs"
+import { type Chat as TChat } from "@/types"
 import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
@@ -33,118 +33,125 @@ export const Menu = memo(
 		const stringifiedClient = useStringifiedClient()
 		const [, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
 
-		const buttons = [
-			{
-				id: "reply",
-				title: "tbd_reply",
-				icon: "reply" as const,
-				onPress: () => {
-					setChatReplyTo(info.item)
+		const isOwner = info.item.inner.senderId === stringifiedClient?.userId
 
-					events.emit("focusChatInput", {
-						chatUuid: chat.uuid
+		const deleteButton = {
+			id: "delete",
+			title: "tbd_delete",
+			icon: "delete" as const,
+			destructive: true,
+			requiresOnline: true,
+			onPress: async () => {
+				const promptResponse = await run(async () => {
+					return await prompts.alert({
+						title: "tbd_delete_message",
+						message: "tbd_delete_message_confirmation",
+						cancelText: "tbd_cancel",
+						okText: "tbd_delete"
 					})
+				})
+
+				if (!promptResponse.success) {
+					console.error(promptResponse.error)
+					alerts.error(promptResponse.error)
+
+					return
 				}
-			},
-			{
-				id: "copy",
-				title: "tbd_copy",
-				icon: "copy" as const,
-				onPress: async () => {
-					const result = await run(async () => {
-						if (!info.item.inner.message) {
-							return
+
+				if (promptResponse.data.cancelled) {
+					return
+				}
+
+				const result = await runWithLoading(async () => {
+					await chats.deleteMessage({
+						chat,
+						message: info.item
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+			}
+		} satisfies MenuButton
+
+		const buttons = info.item.undecryptable
+			? (isOwner ? [deleteButton] : ([] as MenuButton[]))
+			: ([
+					{
+						id: "reply",
+						title: "tbd_reply",
+						icon: "reply" as const,
+						onPress: () => {
+							setChatReplyTo(info.item)
+
+							events.emit("focusChatInput", {
+								chatUuid: chat.uuid
+							})
 						}
-
-						return await Clipboard.setStringAsync(info.item.inner.message)
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					alerts.normal("tbd_copied_to_clipboard")
-				}
-			},
-			...(info.item.inner.senderId === stringifiedClient?.userId
-				? [
-						{
-							id: "edit",
-							title: "tbd_edit",
-							icon: "edit" as const,
-							requiresOnline: true,
-							onPress: () => {
+					},
+					{
+						id: "copy",
+						title: "tbd_copy",
+						icon: "copy" as const,
+						onPress: async () => {
+							const result = await run(async () => {
 								if (!info.item.inner.message) {
 									return
 								}
 
-								setChatEditMessage(info.item)
-								setChatInputValue(info.item.inner.message)
+								return await Clipboard.setStringAsync(info.item.inner.message)
+							})
 
-								useChatsStore.getState().setInputSelection({
-									start: 0,
-									end: 0
-								})
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
 
-								events.emit("focusChatInput", {
-									chatUuid: chat.uuid
-								})
+								return
 							}
-						},
-						{
-							id: "delete",
-							title: "tbd_delete",
-							icon: "delete" as const,
-							destructive: true,
-							requiresOnline: true,
-							onPress: async () => {
-								const promptResponse = await run(async () => {
-									return await prompts.alert({
-										title: "tbd_delete_message",
-										message: "tbd_delete_message_confirmation",
-										cancelText: "tbd_cancel",
-										okText: "tbd_delete"
-									})
-								})
 
-								if (!promptResponse.success) {
-									console.error(promptResponse.error)
-									alerts.error(promptResponse.error)
-
-									return
-								}
-
-								if (promptResponse.data.cancelled) {
-									return
-								}
-
-								const result = await runWithLoading(async () => {
-									await chats.deleteMessage({
-										chat,
-										message: info.item
-									})
-								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
-							}
+							alerts.normal("tbd_copied_to_clipboard")
 						}
-					]
-				: [])
-		] satisfies MenuButton[]
+					},
+					...(isOwner
+						? [
+								{
+									id: "edit",
+									title: "tbd_edit",
+									icon: "edit" as const,
+									requiresOnline: true,
+									onPress: () => {
+										if (!info.item.inner.message) {
+											return
+										}
+
+										setChatEditMessage(info.item)
+										setChatInputValue(info.item.inner.message)
+
+										useChatsStore.getState().setInputSelection({
+											start: 0,
+											end: 0
+										})
+
+										events.emit("focusChatInput", {
+											chatUuid: chat.uuid
+										})
+									}
+								},
+								deleteButton
+							]
+						: [])
+				] satisfies MenuButton[])
 
 		return (
 			<MenuComponent
 				type="context"
 				title={simpleDate(Number(info.item.sentTimestamp))}
 				buttons={buttons}
+				disabled={buttons.length === 0}
 				className={className}
 				isAnchoredToRight={isAnchoredToRight}
 			>

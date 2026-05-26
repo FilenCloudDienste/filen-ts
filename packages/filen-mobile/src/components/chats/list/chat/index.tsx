@@ -1,12 +1,13 @@
 import Text from "@/components/ui/text"
 import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
-import type { Chat as TChat } from "@filen/sdk-rs"
+import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
 import Avatar from "@/components/ui/avatar"
 import { PressableScale } from "@/components/ui/pressables"
 import Menu from "@/components/chats/list/chat/menu"
 import { contactDisplayName } from "@/lib/utils"
+import { chatDisplayName } from "@/lib/decryption"
 import { useRouter } from "expo-router"
 import { useStringifiedClient } from "@/lib/auth"
 import { fastLocaleCompare, cn } from "@filen/utils"
@@ -36,24 +37,7 @@ const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 
 	const participantsWithoutSelf = info.item.participants.filter(p => p.userId !== stringifiedClient?.userId)
 
-	const title = (() => {
-		if (info.item.name && info.item.name.length > 0) {
-			return info.item.name
-		}
-
-		if (participantsWithoutSelf.length === 1) {
-			const otherParticipant = participantsWithoutSelf[0]
-
-			if (otherParticipant) {
-				return contactDisplayName(otherParticipant)
-			}
-		}
-
-		return participantsWithoutSelf
-			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-			.map(p => contactDisplayName(p))
-			.join(", ")
-	})()
+	const title = stringifiedClient ? chatDisplayName(info.item, stringifiedClient.userId) : ""
 
 	const participantsWithAvatars = participantsWithoutSelf
 		.filter(p => p.avatar && p.avatar.startsWith("http"))

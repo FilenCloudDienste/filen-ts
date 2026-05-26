@@ -1,4 +1,6 @@
-import { type Note as TNote, NoteType } from "@filen/sdk-rs"
+import { NoteType } from "@filen/sdk-rs"
+import { type Note as TNote } from "@/types"
+import { noteDisplayTitle } from "@/lib/decryption"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
 import { memo } from "react"
 import View from "@/components/ui/view"
@@ -32,6 +34,171 @@ export function createMenuButtons({
 	isOwner: boolean
 }): MenuButton[] {
 	const buttons: MenuButton[] = []
+
+	if (note.undecryptable) {
+		if (note.trash) {
+			buttons.push({
+				id: "restore",
+				requiresOnline: true,
+				title: "tbd_restore",
+				icon: "restore",
+				onPress: async () => {
+					const result = await runWithLoading(async () => {
+						await notes.restore({
+							note
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+				}
+			})
+
+			buttons.push({
+				id: "delete",
+				requiresOnline: true,
+				title: "tbd_delete",
+				icon: "delete",
+				destructive: true,
+				onPress: async () => {
+					const promptResult = await run(async () => {
+						return await prompts.alert({
+							title: "tbd_delete_note",
+							message: "tbd_are_you_sure_delete_note",
+							cancelText: "tbd_cancel",
+							okText: "tbd_delete"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await notes.delete({
+							note
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
+						router.back()
+					}
+				}
+			})
+		} else if (isOwner) {
+			buttons.push({
+				id: "trash",
+				requiresOnline: true,
+				title: "tbd_trash",
+				icon: "trash",
+				destructive: true,
+				onPress: async () => {
+					const promptResult = await run(async () => {
+						return await prompts.alert({
+							title: "tbd_trash_note",
+							message: "tbd_are_you_sure_trash_note",
+							cancelText: "tbd_cancel",
+							okText: "tbd_dtrash"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await notes.trash({
+							note
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
+						router.back()
+					}
+				}
+			})
+		} else {
+			buttons.push({
+				id: "leave",
+				requiresOnline: true,
+				title: "tbd_leave",
+				icon: "exit",
+				destructive: true,
+				onPress: async () => {
+					const promptResult = await run(async () => {
+						return await prompts.alert({
+							title: "tbd_leave_note",
+							message: "tbd_are_you_sure_leave_note",
+							cancelText: "tbd_cancel",
+							okText: "tbd_leave"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await notes.leave({
+							note
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
+						router.back()
+					}
+				}
+			})
+		}
+
+		return buttons
+	}
 
 	if (origin === "notes" || origin === "search") {
 		buttons.push({
@@ -199,7 +366,7 @@ export function createMenuButtons({
 					return await prompts.input({
 						title: "tbd_rename_note",
 						message: "tbd_enter_new_name",
-						defaultValue: note.title,
+						defaultValue: noteDisplayTitle(note),
 						cancelText: "tbd_cancel",
 						okText: "tbd_rename"
 					})

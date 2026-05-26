@@ -1,5 +1,6 @@
 import auth from "@/lib/auth"
-import { type Note, NoteType, type NoteTag, type Contact, type NoteParticipant, type NoteHistory } from "@filen/sdk-rs"
+import { NoteType, type Contact, type Note as SdkNote, type NoteTag as SdkNoteTag } from "@filen/sdk-rs"
+import { type Note, type NoteTag, type NoteParticipant, type NoteHistory } from "@/types"
 import { noteContentQueryUpdate } from "@/queries/useNoteContent.query"
 import { createNotePreviewFromContentText } from "@filen/utils"
 import { notesTagsQueryUpdate } from "@/queries/useNotesTags.query"
@@ -7,6 +8,20 @@ import { notesWithContentQueryUpdate } from "@/queries/useNotesWithContent.query
 import JSZip from "jszip"
 import { sanitizeFileName } from "@/lib/utils"
 import { newTmpFile } from "@/lib/tmp"
+
+function wrapSdkNote(sdk: SdkNote): Note {
+	return {
+		...sdk,
+		undecryptable: sdk.encryptionKey === undefined
+	}
+}
+
+function wrapSdkNoteTag(sdk: SdkNoteTag): NoteTag {
+	return {
+		...sdk,
+		undecryptable: sdk.name === undefined
+	}
+}
 
 class Notes {
 	public async getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
@@ -35,18 +50,20 @@ class Notes {
 	}) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.setNoteContent(
-			note,
-			content,
-			createNotePreviewFromContentText(
-				note.noteType === NoteType.Checklist ? "checklist" : note.noteType === NoteType.Rich ? "rich" : "other",
-				content
-			),
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.setNoteContent(
+				note,
+				content,
+				createNotePreviewFromContentText(
+					note.noteType === NoteType.Checklist ? "checklist" : note.noteType === NoteType.Rich ? "rich" : "other",
+					content
+				),
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -90,15 +107,17 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.setNoteType(
-			note,
-			type,
-			knownContent,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.setNoteType(
+				note,
+				type,
+				knownContent,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -123,14 +142,16 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.setNotePinned(
-			note,
-			pinned,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.setNotePinned(
+				note,
+				pinned,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -155,14 +176,16 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.setNoteFavorited(
-			note,
-			favorite,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.setNoteFavorited(
+				note,
+				favorite,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -182,7 +205,7 @@ class Notes {
 
 	public async duplicate({ note, signal }: { note: Note; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
-		const [{ original, duplicated }, content] = await Promise.all([
+		const [sdkResult, content] = await Promise.all([
 			authedSdkClient.duplicateNote(
 				note,
 				signal
@@ -197,16 +220,20 @@ class Notes {
 			})
 		])
 
+		const original = wrapSdkNote(sdkResult.original)
+		const duplicated = wrapSdkNote(sdkResult.duplicated)
+		const safeContent = content ?? ""
+
 		notesWithContentQueryUpdate({
 			updater: prev => [
 				...prev.filter(n => n.uuid !== original.uuid && n.uuid !== duplicated.uuid),
 				{
 					...original,
-					content
+					content: safeContent
 				},
 				{
 					...duplicated,
-					content
+					content: safeContent
 				}
 			]
 		})
@@ -218,6 +245,10 @@ class Notes {
 	}
 
 	public async export({ note, signal }: { note: Note; signal?: AbortSignal }) {
+		if (note.undecryptable) {
+			throw new Error("Cannot export an undecryptable note")
+		}
+
 		const content = await this.getContent({
 			note,
 			signal
@@ -248,10 +279,16 @@ class Notes {
 	}
 
 	public async exportMultiple({ signal, notes }: { signal?: AbortSignal; notes: Note[] }) {
+		const exportable = notes.filter(n => !n.undecryptable)
+
+		if (exportable.length === 0) {
+			throw new Error("No exportable notes provided")
+		}
+
 		const zip = new JSZip()
 
 		await Promise.all(
-			notes.map(async note => {
+			exportable.map(async note => {
 				const content = await this.getContent({
 					note,
 					signal
@@ -293,13 +330,15 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.archiveNote(
-			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.archiveNote(
+				note,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -324,13 +363,15 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.restoreNote(
-			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.restoreNote(
+				note,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -351,14 +392,16 @@ class Notes {
 	public async restoreFromHistory({ note, history, signal }: { note: Note; history: NoteHistory; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.restoreNoteFromHistory(
-			note,
-			history,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.restoreNoteFromHistory(
+				note,
+				history,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -383,13 +426,15 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.trashNote(
-			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.trashNote(
+				note,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -445,14 +490,16 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.setNoteTitle(
-			note,
-			newTitle,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.setNoteTitle(
+				note,
+				newTitle,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -476,7 +523,7 @@ class Notes {
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
-		const { note: modifiedNote } = await authedSdkClient.addTagToNote(
+		const { note: modifiedNoteSdk } = await authedSdkClient.addTagToNote(
 			note,
 			tag,
 			signal
@@ -485,6 +532,8 @@ class Notes {
 					}
 				: undefined
 		)
+
+		const modifiedNote = wrapSdkNote(modifiedNoteSdk)
 
 		notesWithContentQueryUpdate({
 			updater: prev =>
@@ -508,14 +557,16 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.removeTagFromNote(
-			note,
-			tag,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.removeTagFromNote(
+				note,
+				tag,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -535,13 +586,15 @@ class Notes {
 
 	public async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
-		const note = await authedSdkClient.createNote(
-			title,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		const note = wrapSdkNote(
+			await authedSdkClient.createNote(
+				title,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		await this.setType({
@@ -573,13 +626,15 @@ class Notes {
 
 	public async createTag({ name, signal }: { name: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
-		const tag = await authedSdkClient.createNoteTag(
-			name,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		const tag = wrapSdkNoteTag(
+			await authedSdkClient.createNoteTag(
+				name,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesTagsQueryUpdate({
@@ -596,14 +651,16 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		tag = await authedSdkClient.renameNoteTag(
-			tag,
-			newName,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		tag = wrapSdkNoteTag(
+			await authedSdkClient.renameNoteTag(
+				tag,
+				newName,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesTagsQueryUpdate({
@@ -637,14 +694,16 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		tag = await authedSdkClient.setNoteTagFavorited(
-			tag,
-			favorite,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		tag = wrapSdkNoteTag(
+			await authedSdkClient.setNoteTagFavorited(
+				tag,
+				favorite,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesTagsQueryUpdate({
@@ -657,14 +716,16 @@ class Notes {
 	public async leave({ note, signal }: { note: Note; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.removeNoteParticipant(
-			note,
-			(await authedSdkClient.toStringified()).userId,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.removeNoteParticipant(
+				note,
+				(await authedSdkClient.toStringified()).userId,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
@@ -691,14 +752,16 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.removeNoteParticipant(
-			note,
-			participantUserId,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.removeNoteParticipant(
+				note,
+				participantUserId,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
@@ -733,15 +796,17 @@ class Notes {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		note = await authedSdkClient.addNoteParticipant(
-			note,
-			contact,
-			permissionsWrite,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		note = wrapSdkNote(
+			await authedSdkClient.addNoteParticipant(
+				note,
+				contact,
+				permissionsWrite,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		notesWithContentQueryUpdate({
