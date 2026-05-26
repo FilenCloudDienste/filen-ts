@@ -327,13 +327,6 @@ export class Audio {
 					return
 				}
 
-				// Placeholder lockscreen pass so the filename shows while audioCache.get is downloading/parsing.
-				// Refreshed below once real metadata (title/artist/album/artwork) arrives.
-				this.updateLockScreen({
-					item: entry,
-					metadata: null
-				})
-
 				const { audio, metadata } = await audioCache.get({
 					item: {
 						type: "drive",
