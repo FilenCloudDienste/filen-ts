@@ -1,4 +1,4 @@
-import type { Chat } from "@filen/sdk-rs"
+import { type Chat } from "@/types"
 import useChatMessagesQuery from "@/queries/useChatMessages.query"
 import { useStringifiedClient } from "@/lib/auth"
 

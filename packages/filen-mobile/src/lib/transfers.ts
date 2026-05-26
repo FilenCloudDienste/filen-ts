@@ -301,7 +301,8 @@ class Transfers {
 										data: {
 											...unwrappedDirMeta.dir,
 											size: 0n,
-											decryptedMeta: unwrappedDirMeta.meta
+											decryptedMeta: unwrappedDirMeta.meta,
+											undecryptable: unwrappedDirMeta.meta === null
 										}
 									}
 
@@ -333,7 +334,8 @@ class Transfers {
 										type: "file" as const,
 										data: {
 											...unwrappedFileMeta.file,
-											decryptedMeta: unwrappedFileMeta.meta
+											decryptedMeta: unwrappedFileMeta.meta,
+											undecryptable: unwrappedFileMeta.meta === null
 										}
 									}
 
@@ -591,7 +593,8 @@ class Transfers {
 				type: "file" as const,
 				data: {
 					...unwrappedFileMeta.file,
-					decryptedMeta: unwrappedFileMeta.meta
+					decryptedMeta: unwrappedFileMeta.meta,
+					undecryptable: unwrappedFileMeta.meta === null
 				}
 			}
 

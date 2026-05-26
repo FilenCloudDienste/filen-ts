@@ -1,4 +1,6 @@
-import { type Chat, type ChatParticipant, ChatTypingType, AnyNormalDir } from "@filen/sdk-rs"
+import { type ChatParticipant, ChatTypingType, AnyNormalDir } from "@filen/sdk-rs"
+import { type Chat } from "@/types"
+import { messageDisplayBody } from "@/lib/decryption"
 import { useRef, useEffect, Fragment, memo, useCallback } from "react"
 import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent } from "react-native"
 import View, { KeyboardStickyView, CrossGlassContainerView, GestureHandlerScrollView } from "@/components/ui/view"
@@ -513,7 +515,7 @@ const ReplyTo = memo(({ chat }: { chat: Chat }) => {
 						numberOfLines={1}
 						ellipsizeMode="tail"
 					>
-						{chatReplyTo.inner.message}
+						{messageDisplayBody(chatReplyTo)}
 					</Text>
 				</View>
 				<PressableScale
@@ -671,7 +673,8 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 			embedDisabled: false,
 			edited: false,
 			editedTimestamp: BigInt(0),
-			sentTimestamp: BigInt(sentTimestamp)
+			sentTimestamp: BigInt(sentTimestamp),
+			undecryptable: false
 		}
 
 		chatMessagesQueryUpdate({

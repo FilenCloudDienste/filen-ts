@@ -15,6 +15,8 @@ import { Information } from "@/routes/driveItemInfo"
 import useHttpStore from "@/stores/useHttp.store"
 import { useShallow } from "zustand/shallow"
 import { createMenuButtons } from "@/components/drive/item/menu"
+import { driveItemDisplayName } from "@/lib/decryption"
+import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 
 const LinkedFile = memo(() => {
 	const { item: itemSerialized } = useLocalSearchParams<{
@@ -46,10 +48,19 @@ const LinkedFile = memo(() => {
 		return <DismissStack />
 	}
 
+	if (item.data.undecryptable) {
+		return (
+			<CannotDecryptScreen
+				uuid={item.data.uuid}
+				surface="linkedFile"
+			/>
+		)
+	}
+
 	return (
 		<Fragment>
 			<Header
-				title={item.data.decryptedMeta?.name ?? item.data.uuid}
+				title={driveItemDisplayName(item)}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -127,7 +138,7 @@ const LinkedFile = memo(() => {
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{item.data.decryptedMeta?.name ?? item.data.uuid}
+							{driveItemDisplayName(item)}
 						</Text>
 						<Text className="text-muted-foreground">tbd_file</Text>
 					</View>

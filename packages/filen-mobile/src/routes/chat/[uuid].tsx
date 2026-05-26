@@ -2,7 +2,8 @@ import { Fragment, useEffect, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { useLocalSearchParams, useRouter } from "expo-router"
-import type { Chat as TChat } from "@filen/sdk-rs"
+import { type Chat as TChat } from "@/types"
+import { chatDisplayName } from "@/lib/decryption"
 import { Platform, ActivityIndicator } from "react-native"
 import useChatsQuery from "@/queries/useChats.query"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
@@ -36,24 +37,7 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 
 	const participantsWithoutSelf = chat.participants.filter(p => p.userId !== stringifiedClient?.userId)
 
-	const title = (() => {
-		if (chat.name && chat.name.length > 0) {
-			return chat.name
-		}
-
-		if (participantsWithoutSelf.length === 1) {
-			const otherParticipant = participantsWithoutSelf[0]
-
-			if (otherParticipant) {
-				return contactDisplayName(otherParticipant)
-			}
-		}
-
-		return participantsWithoutSelf
-			.sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
-			.map(p => contactDisplayName(p))
-			.join(", ")
-	})()
+	const title = stringifiedClient ? chatDisplayName(chat, stringifiedClient.userId) : ""
 
 	const participantsWithAvatars = participantsWithoutSelf
 		.filter(p => p.avatar && p.avatar.startsWith("http"))

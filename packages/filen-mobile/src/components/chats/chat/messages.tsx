@@ -1,5 +1,5 @@
 import { useRef, useState, memo } from "react"
-import type { Chat as TChat } from "@filen/sdk-rs"
+import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useChatMessagesQuery from "@/queries/useChatMessages.query"
@@ -154,7 +154,8 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 
 						return moreMessages.map(m => ({
 							...m,
-							inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+							inflightId: "", // Placeholder, actual inflightId is only needed for send sync
+							undecryptable: m.inner.message === undefined
 						})) satisfies ChatMessageWithInflightId[]
 					})
 

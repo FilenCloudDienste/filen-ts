@@ -9,6 +9,7 @@ import { useResolveClassNames } from "uniwind"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
 import Image from "@/components/ui/image"
 import Ionicons from "@expo/vector-icons/Ionicons"
+import { driveItemDisplayName } from "@/lib/decryption"
 
 const AudioSlot = memo(() => {
 	const { status, loading, queueItem } = useAudio()
@@ -77,7 +78,9 @@ const AudioSlot = memo(() => {
 						ellipsizeMode="middle"
 					>
 						{queueItem && audioMetadataQuery.status === "success"
-							? (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? "tbd_unknown_title")
+							? queueItem.item.data.undecryptable
+								? driveItemDisplayName(queueItem.item)
+								: (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? "tbd_unknown_title")
 							: "tbd_not_playing"}
 					</Text>
 					<Text

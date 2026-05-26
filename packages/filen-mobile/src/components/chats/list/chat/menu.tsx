@@ -1,4 +1,4 @@
-import type { Chat as TChat } from "@filen/sdk-rs"
+import { type Chat as TChat } from "@/types"
 import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
@@ -30,6 +30,125 @@ export function createMenuButtons({
 	isSelected: boolean
 	unreadCount: number
 }): MenuButton[] {
+	const isOwner = chat.ownerId === userId
+
+	if (chat.undecryptable) {
+		const selectButton: MenuButton[] =
+			origin !== "chat"
+				? [
+						{
+							id: isSelected ? "deselect" : "select",
+							title: isSelected ? "tbd_deselect" : "tbd_select",
+							icon: "select",
+							checked: isSelected,
+							onPress: () => {
+								useChatsStore.getState().toggleSelectedChat(chat)
+							}
+						}
+					]
+				: []
+
+		if (isOwner) {
+			return [
+				...selectButton,
+				{
+					id: "delete",
+					requiresOnline: true,
+					title: "tbd_delete",
+					destructive: true,
+					icon: "delete",
+					onPress: async () => {
+						const promptResponse = await run(async () => {
+							return await prompts.alert({
+								title: "tbd_delete_chat",
+								message: "tbd_delete_chat_confirmation",
+								cancelText: "tbd_cancel",
+								okText: "tbd_delete"
+							})
+						})
+
+						if (!promptResponse.success) {
+							console.error(promptResponse.error)
+							alerts.error(promptResponse.error)
+
+							return
+						}
+
+						if (promptResponse.data.cancelled) {
+							return
+						}
+
+						const result = await runWithLoading(async () => {
+							await chats.delete({
+								chat
+							})
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
+						}
+
+						if (useAppStore.getState().pathname.startsWith(`/chat/${chat.uuid}`) && router.canGoBack()) {
+							router.back()
+						}
+					}
+				}
+			]
+		}
+
+		return [
+			...selectButton,
+			{
+				id: "leave",
+				requiresOnline: true,
+				title: "tbd_leave",
+				destructive: true,
+				icon: "exit",
+				onPress: async () => {
+					const promptResponse = await run(async () => {
+						return await prompts.alert({
+							title: "tbd_leave_chat",
+							message: "tbd_leave_chat_confirmation",
+							cancelText: "tbd_cancel",
+							okText: "tbd_leave"
+						})
+					})
+
+					if (!promptResponse.success) {
+						console.error(promptResponse.error)
+						alerts.error(promptResponse.error)
+
+						return
+					}
+
+					if (promptResponse.data.cancelled) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await chats.leave({
+							chat
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					if (useAppStore.getState().pathname.startsWith(`/chat/${chat.uuid}`) && router.canGoBack()) {
+						router.back()
+					}
+				}
+			}
+		]
+	}
+
 	return [
 		...(origin !== "chat"
 			? [
@@ -109,7 +228,7 @@ export function createMenuButtons({
 				})
 			}
 		},
-		...(chat.ownerId === userId
+		...(isOwner
 			? ([
 					{
 						id: "editName",

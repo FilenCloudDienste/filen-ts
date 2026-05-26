@@ -1,22 +1,20 @@
 import {
 	AnyNormalDir,
 	AnyDirWithContext,
-	type Note,
-	type Chat,
 	type AnySharedDirWithContext,
 	type File,
 	type AnyLinkedDir,
 	type DirPublicLink,
 	type Dir
 } from "@filen/sdk-rs"
-import type { DriveItem } from "@/types"
+import { type DriveItem, type Note, type Chat } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { serialize, deserialize } from "@/lib/serializer"
 import { debounce } from "es-toolkit/function"
 import { AppState } from "react-native"
 
 // Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
-export const VERSION = 1
+export const VERSION = 2
 export const GLOBAL_PREFIX = `cache:v${VERSION}`
 
 const PERSIST_DEBOUNCE = 1000

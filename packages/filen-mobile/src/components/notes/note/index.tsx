@@ -1,6 +1,7 @@
 import Text from "@/components/ui/text"
 import View from "@/components/ui/view"
-import type { Note as TNote } from "@filen/sdk-rs"
+import { type Note as TNote } from "@/types"
+import { noteDisplayTitle } from "@/lib/decryption"
 import { ActivityIndicator, Platform } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import { useRouter } from "expo-router"
@@ -61,6 +62,10 @@ const Note = memo(
 
 		const onPress = () => {
 			if (info.item.type === "header") {
+				return
+			}
+
+			if (info.item.undecryptable) {
 				return
 			}
 
@@ -205,7 +210,7 @@ const Note = memo(
 										numberOfLines={1}
 										ellipsizeMode="middle"
 									>
-										{info.item.title ?? info.item.uuid}
+										{noteDisplayTitle(info.item)}
 									</Text>
 									{info.item.preview && (
 										<Text

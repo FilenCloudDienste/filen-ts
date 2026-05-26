@@ -1,6 +1,7 @@
 import Text from "@/components/ui/text"
 import View from "@/components/ui/view"
-import type { NoteTag, Note } from "@filen/sdk-rs"
+import { type NoteTag, type Note } from "@/types"
+import { tagDisplayName } from "@/lib/decryption"
 import { Platform, ActivityIndicator } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import { useRouter } from "expo-router"
@@ -144,7 +145,7 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 										ellipsizeMode="middle"
 										className="flex-1"
 									>
-										{info.item.name ?? info.item.uuid}
+										{tagDisplayName(info.item)}
 									</Text>
 								</View>
 								<Text

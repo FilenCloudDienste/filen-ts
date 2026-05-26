@@ -12,6 +12,7 @@ import { wrapAbortSignalForSdk } from "@/lib/utils"
 import { playlistsQueryUpdate } from "@/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
+import alerts from "@/lib/alerts"
 
 export type LoopMode = "none" | "track" | "queue"
 
@@ -54,6 +55,21 @@ type State = {
 	queue: QueueItem[]
 	position: number
 	loading: boolean
+}
+
+// Throttle the undecryptable toast so a queue with many filtered items only surfaces it once per short window.
+let cannotDecryptToastLastShownAt = 0
+
+function surfaceCannotDecryptToast(): void {
+	const now = Date.now()
+
+	if (now - cannotDecryptToastLastShownAt < 3000) {
+		return
+	}
+
+	cannotDecryptToastLastShownAt = now
+
+	alerts.normal("tbd_cannot_decrypt_toast")
 }
 
 export class Audio {
@@ -379,6 +395,12 @@ export class Audio {
 	}
 
 	public async addToQueue({ item, position = "end" }: { item: QueueItem; position?: "start" | "end" }): Promise<void> {
+		if (item.item.data.undecryptable) {
+			surfaceCannotDecryptToast()
+
+			return
+		}
+
 		const shuffle = await this.isShuffleEnabled()
 
 		if (position === "start") {
@@ -419,13 +441,22 @@ export class Audio {
 	}
 
 	public async replaceQueue({ items, startingPosition = 0 }: { items: QueueItem[]; startingPosition?: number }): Promise<void> {
-		this.state.queue = items
-		this.state.position = startingPosition
+		const droppedBeforePosition = items.slice(0, startingPosition).filter(i => i.item.data.undecryptable).length
+		const filteredItems = items.filter(i => !i.item.data.undecryptable)
+		const adjustedPosition =
+			filteredItems.length === 0 ? 0 : Math.max(0, Math.min(filteredItems.length - 1, startingPosition - droppedBeforePosition))
+
+		if (items.length > filteredItems.length) {
+			surfaceCannotDecryptToast()
+		}
+
+		this.state.queue = filteredItems
+		this.state.position = adjustedPosition
 
 		const shuffle = await this.isShuffleEnabled()
 
-		if (shuffle && items.length > 0) {
-			this.shuffleOrder = this.generateShuffleOrder(startingPosition)
+		if (shuffle && filteredItems.length > 0) {
+			this.shuffleOrder = this.generateShuffleOrder(adjustedPosition)
 			this.shufflePosition = 0
 		} else {
 			this.shuffleOrder = []
@@ -722,7 +753,8 @@ export class Audio {
 									timestamp: BigInt(now),
 									chunks: BigInt(file.chunks),
 									canMakeThumbnail: false,
-									decryptedMeta: meta
+									decryptedMeta: meta,
+									undecryptable: false
 								}
 							}
 
@@ -809,7 +841,8 @@ export class Audio {
 						timestamp: BigInt(now),
 						chunks: BigInt(file.chunks),
 						canMakeThumbnail: false,
-						decryptedMeta: meta
+						decryptedMeta: meta,
+						undecryptable: false
 					}
 				}
 

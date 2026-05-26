@@ -610,7 +610,8 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 										...prev.filter(m => m.inner.uuid !== inner.msg.inner.uuid),
 										{
 											...inner.msg,
-											inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+											inflightId: "", // Placeholder, actual inflightId is only needed for send sync
+											undecryptable: inner.msg.inner.message === undefined
 										}
 									]
 								})
@@ -758,7 +759,13 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 						const [inner] = eventInner.inner.inner
 
 						chatsQueryUpdate({
-							updater: prev => [...(prev ?? []).filter(c => c.uuid !== inner.chat.uuid), inner.chat]
+							updater: prev => [
+								...(prev ?? []).filter(c => c.uuid !== inner.chat.uuid),
+								{
+									...inner.chat,
+									undecryptable: inner.chat.key === undefined
+								}
+							]
 						})
 
 						break

@@ -5,7 +5,7 @@ import {
 	EMPTY_NOTE_FLAGS,
 	EMPTY_NOTE_TAG_FLAGS
 } from "@/lib/notesSelectors"
-import type { Note, NoteTag, NoteParticipant } from "@filen/sdk-rs"
+import { type Note, type NoteTag, type NoteParticipant } from "@/types"
 
 const ME = 100n
 const SOMEONE_ELSE = 200n
@@ -22,6 +22,7 @@ function note(overrides: Partial<Note> = {}): Note {
 		pinned: false,
 		trash: false,
 		archive: false,
+		undecryptable: false,
 		participants: [],
 		tags: [],
 		...overrides
@@ -62,6 +63,14 @@ describe("aggregateNoteSelectionFlags", () => {
 
 	it("includesTrashed mirrors any-trashed", () => {
 		expect(aggregateNoteSelectionFlags([note(), note({ trash: true })], ME).includesTrashed).toBe(true)
+	})
+
+	it("includesUndecryptable true when any note is undecryptable", () => {
+		expect(aggregateNoteSelectionFlags([note(), note({ undecryptable: true })], ME).includesUndecryptable).toBe(true)
+	})
+
+	it("includesUndecryptable false when no note is undecryptable", () => {
+		expect(aggregateNoteSelectionFlags([note(), note()], ME).includesUndecryptable).toBe(false)
 	})
 
 	it("everyOwned true only when current user owns every note", () => {
@@ -157,6 +166,7 @@ function tag(overrides: Partial<NoteTag> = {}): NoteTag {
 		uuid: "t",
 		name: "tag",
 		favorite: false,
+		undecryptable: false,
 		...overrides
 	} as NoteTag
 }

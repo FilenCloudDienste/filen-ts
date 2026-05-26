@@ -18,6 +18,7 @@ import Thumbnail from "@/components/drive/item/thumbnail"
 import { DirectoryIcon, FileIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import transfersLib from "@/lib/transfers"
+import { driveItemDisplayName } from "@/lib/decryption"
 
 const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderItemInfo<TTransfer> }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -61,7 +62,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 					>
 						{transfer.type === "uploadDirectory" || transfer.type === "uploadFile"
 							? transfer.localFileOrDir.name
-							: (transfer.item.data.decryptedMeta?.name ?? transfer.item.data.uuid)}
+							: driveItemDisplayName(transfer.item)}
 					</Text>
 				</View>
 				<View className="flex-row items-center bg-transparent gap-3 shrink-0">

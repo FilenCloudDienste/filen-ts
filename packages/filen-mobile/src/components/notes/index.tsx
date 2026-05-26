@@ -6,8 +6,10 @@ import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import { notesSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
-import { type Note as TNote, NoteType, type NoteTag } from "@filen/sdk-rs"
+import { NoteType } from "@filen/sdk-rs"
+import { type Note as TNote, type NoteTag } from "@/types"
 import { run, fastLocaleCompare, cn } from "@filen/utils"
+import { noteDisplayTitle, tagDisplayName } from "@/lib/decryption"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
@@ -39,7 +41,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
 	}>()
-	const noteFlags = aggregateNoteSelectionFlags(selectedNotes, stringifiedClient?.userId)
 	const tagFlags = aggregateNoteTagSelectionFlags(selectedTags)
 
 	const notesTagsQuery = useNotesTagsQuery({
@@ -49,6 +50,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const notesQuery = useNotesWithContentQuery({
 		enabled: false
 	})
+
+	const liveNotes = notesQuery.status === "success" ? notesQuery.data : []
+	const selectedNotesLive = selectedNotes.map(sel => liveNotes.find(live => live.uuid === sel.uuid) ?? sel)
+	const noteFlags = aggregateNoteSelectionFlags(selectedNotesLive, stringifiedClient?.userId)
 
 	const tag = (() => {
 		if (notesTagsQuery.status !== "success" || !tagUuid) {
@@ -75,7 +80,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const onlyNotes = notes.filter(n => n.type === "note")
 
 	const notesTags =
-		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid)) : []
+		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b))) : []
 
 	const createNote = async (type: NoteType) => {
 		const result = await run(async () => {
@@ -438,7 +443,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					subButtons: notesTags.map(subButton => {
 						return {
 							id: `bulkTag_${subButton.uuid}`,
-							title: subButton.name ?? subButton.uuid,
+							title: tagDisplayName(subButton),
 							icon: "tag",
 							keepMenuOpenOnPress: Platform.OS === "android",
 							requiresOnline: true,
@@ -904,7 +909,7 @@ const Notes = memo(() => {
 					return false
 				}
 
-				if (note.title && note.title.toLowerCase().includes(searchQueryNormalized)) {
+				if (noteDisplayTitle(note).toLowerCase().includes(searchQueryNormalized)) {
 					return true
 				}
 
@@ -924,13 +929,13 @@ const Notes = memo(() => {
 			return []
 		}
 
-		let notesTags = notesTagsQuery.data.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
+		let notesTags = notesTagsQuery.data.sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
 
 		if (searchQuery.length > 0) {
 			const searchQueryNormalized = searchQuery.trim().toLowerCase()
 
 			notesTags = notesTags.filter(tag => {
-				if (tag.name && tag.name.toLowerCase().includes(searchQueryNormalized)) {
+				if (tagDisplayName(tag).toLowerCase().includes(searchQueryNormalized)) {
 					return true
 				}
 

@@ -1,4 +1,5 @@
-import { type Chat as TChat, AnyFile, DirColor, MaybeEncryptedUniffi_Tags, DirMeta_Tags } from "@filen/sdk-rs"
+import { AnyFile, DirColor, MaybeEncryptedUniffi_Tags, DirMeta_Tags } from "@filen/sdk-rs"
+import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import Text from "@/components/ui/text"
@@ -25,6 +26,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
 import drive from "@/lib/drive"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { cannotDecryptPlaceholder, messageDisplayBody } from "@/lib/decryption"
 
 const Typing = memo(({ chat }: { chat: TChat }) => {
 	const typing = useChatsStore(useShallow(state => state.typing[chat.uuid] ?? []))
@@ -99,6 +101,12 @@ const VideoAttachment = memo(
 						const driveItem = linkedFileIntoDriveItem(linked.file)
 
 						if (driveItem.type !== "file") {
+							return
+						}
+
+						if (driveItem.data.decryptedMeta === null) {
+							alerts.normal("tbd_cannot_decrypt_toast")
+
 							return
 						}
 
@@ -214,6 +222,12 @@ const ImageAttachment = memo(
 							return
 						}
 
+						if (driveItem.data.decryptedMeta === null) {
+							alerts.normal("tbd_cannot_decrypt_toast")
+
+							return
+						}
+
 						useDrivePreviewStore.getState().open({
 							initialItem: {
 								type: "drive",
@@ -313,6 +327,12 @@ const InternalAttachment = memo(
 				}}
 				onPress={async () => {
 					if (data.type === "directory") {
+						if (data.info.root.inner.meta.tag !== DirMeta_Tags.Decoded) {
+							alerts.normal("tbd_cannot_decrypt_toast")
+
+							return
+						}
+
 						const result = await run(async () => {
 							return await drive.openLinkedDirectory({
 								linkUuid: data.info.link.linkUuid,
@@ -327,6 +347,12 @@ const InternalAttachment = memo(
 
 							return
 						}
+
+						return
+					}
+
+					if (data.file.name.tag !== MaybeEncryptedUniffi_Tags.Decrypted) {
+						alerts.normal("tbd_cannot_decrypt_toast")
 
 						return
 					}
@@ -352,6 +378,12 @@ const InternalAttachment = memo(
 					const driveItem = linkedFileIntoDriveItem(data.file)
 
 					if (driveItem.type !== "file") {
+						return
+					}
+
+					if (driveItem.data.decryptedMeta === null) {
+						alerts.normal("tbd_cannot_decrypt_toast")
+
 						return
 					}
 
@@ -392,7 +424,7 @@ const InternalAttachment = memo(
 							>
 								{data.info.root.inner.meta.tag === DirMeta_Tags.Decoded
 									? data.info.root.inner.meta.inner[0].name
-									: data.info.root.inner.uuid}
+									: cannotDecryptPlaceholder(data.info.root.inner.uuid)}
 							</Text>
 							<Text className="text-xs text-muted-foreground">
 								{simpleDate(
@@ -417,7 +449,9 @@ const InternalAttachment = memo(
 								numberOfLines={1}
 								ellipsizeMode="middle"
 							>
-								{data.file.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? data.file.name.inner[0] : data.file.uuid}
+								{data.file.name.tag === MaybeEncryptedUniffi_Tags.Decrypted
+									? data.file.name.inner[0]
+									: cannotDecryptPlaceholder(data.file.uuid)}
 							</Text>
 							<Text className="text-xs text-muted-foreground">{formatBytes(Number(data.file.size))}</Text>
 						</View>
@@ -449,7 +483,7 @@ const Attachments = memo(
 		const mappingHelper = useMappingHelper()
 		const [singleAttachmentLoadFailed, setSingleAttachmentLoadFailed] = useRecyclingState<boolean>(false, [message.inner.uuid])
 
-		const links = extractLinks(message.inner.message ?? "")
+		const links = message.undecryptable ? [] : extractLinks(message.inner.message ?? "")
 
 		const chatMessageLinksQuery = useChatMessageLinksQuery(
 			{
@@ -820,11 +854,22 @@ const Message = memo(
 							) : (
 								<View className="flex-col bg-transparent w-auto h-auto">
 									<View className="bg-transparent w-auto h-auto flex-row">
-										<Regexed
-											chat={chat}
-											message={info.item}
-											fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
-										/>
+										{info.item.undecryptable ? (
+											<Text
+												className={cn(
+													"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
+													info.item.inner.senderId === stringifiedClient?.userId ? "text-white" : "text-foreground"
+												)}
+											>
+												{messageDisplayBody(info.item)}
+											</Text>
+										) : (
+											<Regexed
+												chat={chat}
+												message={info.item}
+												fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
+											/>
+										)}
 									</View>
 									<Attachments
 										chat={chat}

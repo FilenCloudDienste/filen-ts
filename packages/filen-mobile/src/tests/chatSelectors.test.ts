@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS, chatHasUnread } from "@/lib/chatSelectors"
-import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
+import type { ChatParticipant } from "@filen/sdk-rs"
+import type { Chat, ChatMessage } from "@/types"
 
 const ME = 100n
 const SOMEONE_ELSE = 200n
@@ -9,10 +10,11 @@ function participant(userId: bigint): ChatParticipant {
 	return { userId } as ChatParticipant
 }
 
-function chatMessage(senderId: bigint, sentTimestamp: bigint): ChatMessage {
+function chatMessage(senderId: bigint, sentTimestamp: bigint, undecryptable = false): ChatMessage {
 	return {
 		sentTimestamp,
-		inner: { senderId }
+		inner: { senderId },
+		undecryptable
 	} as unknown as ChatMessage
 }
 
@@ -22,6 +24,7 @@ function chat(overrides: Partial<Chat> = {}): Chat {
 		ownerId: ME,
 		muted: false,
 		participants: [],
+		undecryptable: false,
 		...overrides
 	} as Chat
 }
@@ -169,5 +172,26 @@ describe("aggregateChatSelectionFlags includesUnread", () => {
 		})
 
 		expect(aggregateChatSelectionFlags([read, unread], ME).includesUnread).toBe(true)
+	})
+})
+
+describe("aggregateChatSelectionFlags includesUndecryptable", () => {
+	it("false when no chats are undecryptable", () => {
+		expect(aggregateChatSelectionFlags([chat(), chat()], ME).includesUndecryptable).toBe(false)
+	})
+
+	it("true when any chat is undecryptable", () => {
+		expect(aggregateChatSelectionFlags([chat(), chat({ undecryptable: true })], ME).includesUndecryptable).toBe(true)
+	})
+
+	it("EMPTY_CHAT_FLAGS has includesUndecryptable false", () => {
+		expect(EMPTY_CHAT_FLAGS.includesUndecryptable).toBe(false)
+	})
+
+	it("true when every chat is undecryptable", () => {
+		const u1 = chat({ undecryptable: true })
+		const u2 = chat({ uuid: "c2", undecryptable: true })
+
+		expect(aggregateChatSelectionFlags([u1, u2], ME).includesUndecryptable).toBe(true)
 	})
 })

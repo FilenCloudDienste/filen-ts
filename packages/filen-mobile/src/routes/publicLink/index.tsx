@@ -29,6 +29,8 @@ import Thumbnail from "@/components/drive/item/thumbnail"
 import { DirectoryIcon } from "@/components/itemIcons"
 import cache from "@/lib/cache"
 import useAccountQuery from "@/queries/useAccount.query"
+import { driveItemDisplayName } from "@/lib/decryption"
+import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 
 function expirationToText(expiration: PublicLinkExpiration) {
 	switch (expiration) {
@@ -118,6 +120,15 @@ const PublicLink = memo(() => {
 
 	if (!itemParsed || (itemParsed.type !== "file" && itemParsed.type !== "directory")) {
 		return <DismissStack />
+	}
+
+	if (itemParsed.data.undecryptable) {
+		return (
+			<CannotDecryptScreen
+				uuid={itemParsed.data.uuid}
+				surface="publicLink"
+			/>
+		)
 	}
 
 	return (
@@ -311,7 +322,7 @@ const PublicLink = memo(() => {
 												numberOfLines={1}
 												ellipsizeMode="middle"
 											>
-												{itemParsed.data.decryptedMeta?.name ?? itemParsed.data.uuid}
+												{driveItemDisplayName(itemParsed)}
 											</Text>
 											<Text className="text-muted-foreground">
 												{itemParsed.type === "directory" ? "tbd_directory" : "tbd_file"}

@@ -1,5 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { type Note, NoteType } from "@filen/sdk-rs"
+import { NoteType } from "@filen/sdk-rs"
+import { type Note } from "@/types"
 import { memo } from "react"
 import { useResolveClassNames } from "uniwind"
 

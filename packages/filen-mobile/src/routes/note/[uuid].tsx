@@ -3,7 +3,9 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
-import type { Note as TNote, NoteHistory } from "@filen/sdk-rs"
+import { type Note as TNote, type NoteHistory } from "@/types"
+import { noteDisplayTitle } from "@/lib/decryption"
+import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import Content from "@/components/notes/content"
 import { Platform } from "react-native"
 import useNotesStore from "@/stores/useNotes.store"
@@ -35,7 +37,7 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 
 	return (
 		<StackHeader
-			title={history ? simpleDate(Number(history.editedTimestamp)) : (note.title ?? note.uuid)}
+			title={history ? simpleDate(Number(history.editedTimestamp)) : noteDisplayTitle(note)}
 			backVisible={true}
 			transparent={Platform.OS === "ios"}
 			leftItems={Platform.select({
@@ -186,6 +188,23 @@ const Note = memo(() => {
 
 	if (!(note as TNote | undefined)) {
 		return <DismissStack />
+	}
+
+	if (note.undecryptable) {
+		return (
+			<Fragment>
+				<Header
+					note={note}
+					history={history}
+				/>
+				<SafeAreaView edges={["left", "right"]}>
+					<CannotDecryptScreen
+						uuid={note.uuid}
+						surface="note"
+					/>
+				</SafeAreaView>
+			</Fragment>
+		)
 	}
 
 	return (

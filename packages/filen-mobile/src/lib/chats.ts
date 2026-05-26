@@ -1,17 +1,32 @@
 import auth from "@/lib/auth"
 import {
-	type Chat,
 	type ChatMessagePartial,
 	ChatTypingType,
-	type ChatMessage,
 	type Contact,
 	type ChatParticipant,
+	type Chat as SdkChat,
+	type ChatMessage as SdkChatMessage,
 	AnyNormalDir,
 	DirMeta_Tags
 } from "@filen/sdk-rs"
+import { type Chat, type ChatMessage } from "@/types"
 import { chatsQueryUpdate, chatsQueryGet, fetchData as chatsQueryFetch } from "@/queries/useChats.query"
 import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/queries/useChatMessages.query"
 import { Semaphore, run } from "@filen/utils"
+
+function wrapChat(chat: SdkChat): Chat {
+	return {
+		...chat,
+		undecryptable: chat.key === undefined
+	}
+}
+
+function wrapMessage(message: SdkChatMessage): ChatMessage {
+	return {
+		...message,
+		undecryptable: message.inner.message === undefined
+	}
+}
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
@@ -51,15 +66,17 @@ class Chats {
 			signal
 		})
 
-		chat = await authedSdkClient.sendChatMessage(
-			chat,
-			message,
-			replyTo,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		chat = wrapChat(
+			await authedSdkClient.sendChatMessage(
+				chat,
+				message,
+				replyTo,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		const [[updatedChat]] = await Promise.all([
@@ -83,11 +100,13 @@ class Chats {
 			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
 		})
 
-		const lastMessage = chat.lastMessage
+		const sdkLastMessage = chat.lastMessage
 
-		if (!lastMessage) {
+		if (!sdkLastMessage) {
 			throw new Error("No last message after sending message")
 		}
+
+		const lastMessage = wrapMessage(sdkLastMessage)
 
 		chatMessagesQueryUpdate({
 			params: {
@@ -125,14 +144,16 @@ class Chats {
 	public async deleteMessage({ chat, message, signal }: { chat: Chat; message: ChatMessage; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await authedSdkClient.deleteMessage(
-			chat,
-			message,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		chat = wrapChat(
+			await authedSdkClient.deleteMessage(
+				chat,
+				message,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -166,15 +187,17 @@ class Chats {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		message = await authedSdkClient.editMessage(
-			chat,
-			message,
-			newMessage,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		message = wrapMessage(
+			await authedSdkClient.editMessage(
+				chat,
+				message,
+				newMessage,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -214,13 +237,15 @@ class Chats {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		message = await authedSdkClient.disableMessageEmbed(
-			message,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		message = wrapMessage(
+			await authedSdkClient.disableMessageEmbed(
+				message,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		const chat = chatsQueryGet()?.find(c => c.uuid === message.chat)
@@ -254,14 +279,16 @@ class Chats {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await authedSdkClient.renameChat(
-			chat,
-			newName,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		chat = wrapChat(
+			await authedSdkClient.renameChat(
+				chat,
+				newName,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -332,14 +359,16 @@ class Chats {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await authedSdkClient.muteChat(
-			chat,
-			mute,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		chat = wrapChat(
+			await authedSdkClient.muteChat(
+				chat,
+				mute,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -352,13 +381,15 @@ class Chats {
 	public async create({ contacts, signal }: { contacts: Contact[]; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		const chat = await authedSdkClient.createChat(
-			contacts,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		const chat = wrapChat(
+			await authedSdkClient.createChat(
+				contacts,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -375,14 +406,16 @@ class Chats {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await authedSdkClient.addChatParticipant(
-			chat,
-			contact,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		chat = wrapChat(
+			await authedSdkClient.addChatParticipant(
+				chat,
+				contact,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -399,14 +432,16 @@ class Chats {
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await authedSdkClient.removeChatParticipant(
-			chat,
-			participant.userId,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		chat = wrapChat(
+			await authedSdkClient.removeChatParticipant(
+				chat,
+				participant.userId,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -432,13 +467,15 @@ class Chats {
 	public async updateOnlineStatus({ chat, signal }: { chat: Chat; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = await authedSdkClient.updateChatOnlineStatus(
-			chat,
-			signal
-				? {
-						signal
-					}
-				: undefined
+		chat = wrapChat(
+			await authedSdkClient.updateChatOnlineStatus(
+				chat,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
 		)
 
 		chatsQueryUpdate({
@@ -451,14 +488,16 @@ class Chats {
 	public async updateLastFocusTimesNow({ chats, signal }: { chats: Chat[]; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chats = await authedSdkClient.updateLastChatFocusTimesNow(
-			chats,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
+		chats = (
+			await authedSdkClient.updateLastChatFocusTimesNow(
+				chats,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		).map(wrapChat)
 
 		for (const chat of chats) {
 			chatsQueryUpdate({

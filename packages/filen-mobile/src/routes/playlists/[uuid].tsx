@@ -14,6 +14,7 @@ import Text from "@/components/ui/text"
 import audio, { type PlaylistWithItems, useAudioQueue } from "@/lib/audio"
 import { PressableScale } from "@/components/ui/pressables"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
+import { driveItemDisplayName } from "@/lib/decryption"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
 import Image from "@/components/ui/image"
@@ -46,6 +47,9 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 		}
 	})
 
+	const undecryptable = track.item.data.undecryptable
+	const displayName = driveItemDisplayName(track.item)
+
 	return (
 		<PressableScale
 			className={cn("bg-transparent flex-row items-center px-4 gap-3", isSelected && "bg-background-tertiary")}
@@ -53,6 +57,46 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 			onPress={() => {
 				if (areTracksSelected) {
 					usePlaylistTracksStore.getState().toggleSelectedTrack(track)
+
+					return
+				}
+
+				if (undecryptable) {
+					actionSheet.show({
+						buttons: [
+							{
+								title: "tbd_select",
+								onPress: () => {
+									usePlaylistTracksStore.getState().toggleSelectedTrack(track)
+								}
+							},
+							{
+								title: "tbd_remove_from_playlist",
+								destructive: true,
+								onPress: async () => {
+									const result = await runWithLoading(async () => {
+										await audio.savePlaylist({
+											playlist: {
+												...playlist,
+												files: playlist.files.filter(f => f.uuid !== track.uuid)
+											}
+										})
+									})
+
+									if (!result.success) {
+										console.error(result.error)
+										alerts.error(result.error)
+
+										return
+									}
+								}
+							},
+							{
+								title: "tbd_close",
+								cancel: true
+							}
+						]
+					})
 
 					return
 				}
@@ -252,7 +296,11 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 					ellipsizeMode="middle"
 					className="shrink-0"
 				>
-					{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.title ? audioMetadataQuery.data.title : track.name}
+					{undecryptable
+						? displayName
+						: audioMetadataQuery.status === "success" && audioMetadataQuery.data?.title
+							? audioMetadataQuery.data.title
+							: track.name}
 				</Text>
 				<Text
 					numberOfLines={1}
@@ -677,6 +725,7 @@ const Playlist = memo(() => {
 												} =>
 													item.type === "driveItem" &&
 													!currentFilesUuids.has(item.data.data.uuid) &&
+													!item.data.data.undecryptable &&
 													Boolean(item.data.data.decryptedMeta) &&
 													(item.data.type === "file" ||
 														item.data.type === "sharedFile" ||
@@ -696,7 +745,7 @@ const Playlist = memo(() => {
 														...playlist.files,
 														...items.map(item => ({
 															uuid: item.data.uuid,
-															name: item.data.decryptedMeta?.name ?? item.data.uuid,
+															name: driveItemDisplayName(item),
 															mime: item.data.decryptedMeta?.mime ?? "application/octet-stream",
 															size: Number(item.data.size),
 															bucket: item.data.bucket,

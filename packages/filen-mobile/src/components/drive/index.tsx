@@ -45,6 +45,7 @@ import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
 import { downloadDriveItemToDevice } from "@/lib/driveDownload"
 import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/routes/contacts"
+import { driveItemDisplayName } from "@/lib/decryption"
 
 function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
@@ -756,7 +757,13 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		})
 
 		if (selectedDriveItems.length > 0) {
-			const driveFlags = aggregateDriveSelectionFlags(selectedDriveItems)
+			// Cross-reference selected items with the live query list before
+			// aggregating flags. Otherwise stale selection entries (e.g. an item
+			// that became undecryptable after a key change, or whose favorited
+			// state flipped via socket event) would feed outdated booleans into
+			// the bulk toolbar.
+			const liveItems = selectedDriveItems.map(sel => driveItems.find(live => live.data.uuid === sel.data.uuid) ?? sel)
+			const driveFlags = aggregateDriveSelectionFlags(liveItems)
 			const isAtRoot = !drivePath.uuid
 
 			if (drivePath.type === "trash") {
@@ -1376,33 +1383,54 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			}
 		}
 
+		// Resolve the breadcrumb title for the current directory. Prefers the
+		// cached decrypted name; falls back to the cached DriveItem's display
+		// name (which yields `cannot_decrypt_<uuid>` for undecryptable
+		// directories) before the localized default.
+		const resolveBreadcrumb = (fallback: string): string => {
+			const uuid = drivePath.uuid ?? ""
+			const cachedName = cache.directoryUuidToName.get(uuid)
+
+			if (cachedName) {
+				return cachedName
+			}
+
+			const cachedItem = cache.uuidToAnyDriveItem.get(uuid)
+
+			if (cachedItem && cachedItem.data.undecryptable) {
+				return driveItemDisplayName(cachedItem)
+			}
+
+			return fallback
+		}
+
 		switch (drivePath.type) {
 			case "drive": {
 				if (stringifiedClient && (drivePath.uuid ?? "") === stringifiedClient.rootUuid) {
 					return "tbd_drive"
 				}
 
-				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_drive"
+				return resolveBreadcrumb("tbd_drive")
 			}
 
 			case "offline": {
-				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_offline"
+				return resolveBreadcrumb("tbd_offline")
 			}
 
 			case "sharedIn": {
-				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_shared_with_me"
+				return resolveBreadcrumb("tbd_shared_with_me")
 			}
 
 			case "sharedOut": {
-				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_shared_with_others"
+				return resolveBreadcrumb("tbd_shared_with_others")
 			}
 
 			case "links": {
-				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_links"
+				return resolveBreadcrumb("tbd_links")
 			}
 
 			case "favorites": {
-				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_favorites"
+				return resolveBreadcrumb("tbd_favorites")
 			}
 
 			case "linked": {
@@ -1410,7 +1438,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					return drivePath.linked.rootName
 				}
 
-				return cache.directoryUuidToName.get(drivePath.uuid ?? "") ?? "tbd_linked"
+				return resolveBreadcrumb("tbd_linked")
 			}
 
 			case "trash": {
@@ -1495,7 +1523,9 @@ const Drive = memo(() => {
 			const searchQueryNormalized = searchQuery.trim().toLowerCase()
 
 			return itemsSorted.filter(item => {
-				if (item.data.decryptedMeta?.name && item.data.decryptedMeta?.name.toLowerCase().includes(searchQueryNormalized)) {
+				// driveItemDisplayName returns `cannot_decrypt_<uuid>` for undecryptable
+				// items so they remain searchable via the placeholder text.
+				if (driveItemDisplayName(item).toLowerCase().includes(searchQueryNormalized)) {
 					return true
 				}
 

@@ -22,7 +22,6 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
-	const chatFlags = aggregateChatSelectionFlags(selectedChats, stringigiedClient?.userId)
 
 	const chatsQuery = useChatsQuery({
 		enabled: false
@@ -35,6 +34,11 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 		return chatsQuery.data.filter(chat => chat.ownerId === stringigiedClient?.userId || chat.lastMessage)
 	})()
+
+	// Live-list cross-reference: stale selections could carry old `undecryptable`
+	// flags after a refresh. Resolve against `chats` to read the current flag.
+	const liveSelectedChats = selectedChats.map(sel => chats.find(live => live.uuid === sel.uuid) ?? sel)
+	const chatFlags = aggregateChatSelectionFlags(liveSelectedChats, stringigiedClient?.userId)
 
 	const headerLeftItems = (() => {
 		if (selectedChats.length === 0) {

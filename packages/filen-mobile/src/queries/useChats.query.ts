@@ -2,19 +2,25 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
+import { type Chat } from "@/types"
 
 export const BASE_QUERY_KEY = "useChatsQuery"
 
-export async function fetchData(params?: { signal?: AbortSignal }) {
+export async function fetchData(params?: { signal?: AbortSignal }): Promise<Chat[]> {
 	const { authedSdkClient } = await auth.getSdkClients()
 
-	const chats = await authedSdkClient.listChats(
-		params?.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
-	)
+	const chats = (
+		await authedSdkClient.listChats(
+			params?.signal
+				? {
+						signal: params.signal
+					}
+				: undefined
+		)
+	).map(chat => ({
+		...chat,
+		undecryptable: chat.key === undefined
+	}))
 
 	for (const chat of chats) {
 		cache.chatUuidToChat.set(chat.uuid, chat)

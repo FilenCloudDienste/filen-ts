@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { itemSorter, notesSorter } from "@/lib/sort"
-import { type DriveItem } from "@/types"
-import { type Note } from "@filen/sdk-rs"
+import { type DriveItem, type Note } from "@/types"
 
 function makeItem(
 	type: string,
@@ -41,6 +40,7 @@ function makeNote(overrides: Partial<Note> & { uuid: string; editedTimestamp: bi
 		noteType: "text",
 		trash: false,
 		archive: false,
+		undecryptable: false,
 		createdTimestamp: overrides.editedTimestamp,
 		participants: [],
 		...overrides

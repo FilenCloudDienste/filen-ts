@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
+import { type Note } from "@/types"
 
 export const BASE_QUERY_KEY = "useNotesWithContentQuery"
 
@@ -16,8 +17,18 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 			: undefined
 	)
 
-	const withContent = await Promise.all(
-		all.map(async note => {
+	const withContent: (Note & { content: string })[] = await Promise.all(
+		all.map(async (note): Promise<Note & { content: string }> => {
+			const undecryptable: boolean = note.encryptionKey === undefined
+
+			if (undecryptable) {
+				return {
+					...note,
+					undecryptable,
+					content: ""
+				}
+			}
+
 			const content = await authedSdkClient.getNoteContent(
 				note,
 				params?.signal
@@ -29,7 +40,8 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 
 			return {
 				...note,
-				content
+				undecryptable,
+				content: content ?? ""
 			}
 		})
 	)

@@ -1,4 +1,5 @@
-import { type NoteTag, NoteType } from "@filen/sdk-rs"
+import { NoteType } from "@filen/sdk-rs"
+import { type NoteTag } from "@/types"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
 import { memo } from "react"
 import View from "@/components/ui/view"
@@ -94,6 +95,51 @@ const Menu = memo(
 			}
 
 			const buttons: MenuButton[] = []
+
+			if (tag.undecryptable) {
+				buttons.push({
+					id: "delete",
+					title: "tbd_delete",
+					icon: "delete",
+					destructive: true,
+					onPress: async () => {
+						const promptResult = await run(async () => {
+							return await prompts.alert({
+								title: "tbd_delete_tag",
+								message: "tbd_are_you_sure_delete_tag",
+								cancelText: "tbd_cancel",
+								okText: "tbd_delete"
+							})
+						})
+
+						if (!promptResult.success) {
+							console.error(promptResult.error)
+							alerts.error(promptResult.error)
+
+							return
+						}
+
+						if (promptResult.data.cancelled) {
+							return
+						}
+
+						const result = await runWithLoading(async () => {
+							await notes.deleteTag({
+								tag
+							})
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
+						}
+					}
+				})
+
+				return buttons
+			}
 
 			if (origin === "tags") {
 				buttons.push({

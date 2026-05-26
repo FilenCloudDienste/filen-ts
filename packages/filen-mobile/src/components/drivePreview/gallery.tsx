@@ -11,6 +11,7 @@ import type { DrivePath } from "@/hooks/useDrivePath"
 import GalleryHeader from "@/components/drivePreview/header"
 import GalleryItem from "@/components/drivePreview/galleryItem"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { driveItemDisplayName } from "@/lib/decryption"
 import { runOnJS } from "react-native-worklets"
 import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
@@ -230,7 +231,7 @@ const Gallery = memo(() => {
 			}
 
 			const previewType = getPreviewType(
-				state.currentItem.type === "drive" ? (state.currentItem.data.data.decryptedMeta?.name ?? "") : state.currentItem.data.name
+				state.currentItem.type === "drive" ? driveItemDisplayName(state.currentItem.data) : state.currentItem.data.name
 			)
 
 			return {

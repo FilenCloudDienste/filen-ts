@@ -345,11 +345,20 @@ export async function fetchData(
 				])
 
 				// Offline items are already DriveItems (stored as-is in serialized meta files).
-				// Pass them through directly — no SDK type wrapping needed.
-				const offlineDirs: DriveItem[] = offlineDirectories.directories.map(({ item }) => item)
+				// Re-derive `undecryptable` for items that pre-date the v2 cache bump so
+				// older entries still flow through the undecryptable surface correctly.
+				const reDeriveUndecryptable = (item: DriveItem): DriveItem => ({
+					...item,
+					data: {
+						...item.data,
+						undecryptable: !item.data.decryptedMeta
+					}
+				} as DriveItem)
+
+				const offlineDirs: DriveItem[] = offlineDirectories.directories.map(({ item }) => reDeriveUndecryptable(item))
 				const offlineFileItems: DriveItem[] = parent
-					? offlineDirectories.files.map(({ item }) => item)
-					: offlineFiles.map(({ item }) => item)
+					? offlineDirectories.files.map(({ item }) => reDeriveUndecryptable(item))
+					: offlineFiles.map(({ item }) => reDeriveUndecryptable(item))
 
 				return {
 					dirs: offlineDirs,

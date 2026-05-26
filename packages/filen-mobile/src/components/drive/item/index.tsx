@@ -25,6 +25,7 @@ import Thumbnail from "@/components/drive/item/thumbnail"
 import { useRecyclingState } from "@shopify/flash-list"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/utils"
+import { driveItemDisplayName } from "@/lib/decryption"
 
 const Item = memo(
 	({ info, drivePath, getListItems }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath; getListItems: () => DriveItem[] }) => {
@@ -42,7 +43,7 @@ const Item = memo(
 		const selectedItemsFromDriveSelectLength = useDriveSelectStore(useShallow(state => state.selectedItems.length))
 		const previewType =
 			info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile"
-				? getPreviewType(info.item.data.decryptedMeta?.name ?? "")
+				? getPreviewType(driveItemDisplayName(info.item))
 				: null
 
 		const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
@@ -57,10 +58,22 @@ const Item = memo(
 
 			switch (drivePath.selectOptions.intention) {
 				case "move": {
+					// Undecryptable items can't be valid move/copy destinations — we
+					// don't know what they are, and the SDK can't act on them either.
+					if (info.item.data.undecryptable) {
+						return true
+					}
+
 					return drivePath.selectOptions.items.some(i => i.data.uuid === info.item.data.uuid)
 				}
 
 				case "select": {
+					// Undecryptable items aren't valid picks for any select intent —
+					// we can't know whether they'd satisfy file/directory or previewType filters.
+					if (info.item.data.undecryptable) {
+						return true
+					}
+
 					const allowedItemTypes: ("file" | "directory")[] = []
 
 					if (drivePath.selectOptions.files) {
@@ -140,6 +153,13 @@ const Item = memo(
 		}
 
 		const onPress = () => {
+			// Undecryptable items have no meaningful preview or navigation target —
+			// suppress the open intent so the row stays inert. Selection still works
+			// because that path goes through the Checkbox / Menu Select button.
+			if (info.item.data.undecryptable) {
+				return
+			}
+
 			if (disabled && !navigateOnly) {
 				return
 			}
@@ -383,7 +403,7 @@ const Item = memo(
 										ellipsizeMode="middle"
 										className="text-foreground"
 									>
-										{info.item.data.decryptedMeta?.name ?? info.item.data.uuid}
+										{driveItemDisplayName(info.item)}
 									</Text>
 									<Text
 										className="text-xs text-muted-foreground"

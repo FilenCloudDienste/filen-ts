@@ -36,6 +36,140 @@ export function createMenuButtons({
 	drivePath: DrivePath
 	isStoredOffline: boolean
 }): MenuButton[] {
+	// Undecryptable items only support destructive disposition — every other
+	// action (rename/move/share/download/info/etc.) requires decrypted meta.
+	// In trash view we surface Restore + Delete-permanently so the user can
+	// still recover or purge. Everywhere else, only Trash is available.
+	if (item.data.undecryptable) {
+		const undecryptableButtons: MenuButton[] = []
+
+		if (drivePath.type === "trash") {
+			if (item.type === "file" || item.type === "directory") {
+				undecryptableButtons.push({
+					id: "restore",
+					requiresOnline: true,
+					title: "tbd_restore",
+					icon: "restore",
+					onPress: async () => {
+						const result = await runWithLoading(async () => {
+							await drive.restore({
+								item
+							})
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
+						}
+					}
+				})
+
+				undecryptableButtons.push({
+					id: "deletePermanently",
+					requiresOnline: true,
+					title: "tbd_delete_permanently",
+					icon: "delete",
+					destructive: true,
+					onPress: async () => {
+						const promptResult = await run(async () => {
+							return await prompts.alert({
+								title: "tbd_delete_permanently_item",
+								message: "tbd_confirm_delete_permanently",
+								cancelText: "tbd_cancel",
+								okText: "tbd_delete_permanently"
+							})
+						})
+
+						if (!promptResult.success) {
+							console.error(promptResult.error)
+							alerts.error(promptResult.error)
+
+							return
+						}
+
+						if (promptResult.data.cancelled) {
+							return
+						}
+
+						const result = await runWithLoading(async () => {
+							await drive.deletePermanently({
+								item
+							})
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
+						}
+
+						if (item.type === "file" && router.canGoBack()) {
+							router.back()
+						}
+					}
+				})
+			}
+
+			return undecryptableButtons
+		}
+
+		// Normal / recents / favorites / sharedIn / sharedOut / links / offline /
+		// linked surfaces — Trash is the only path forward.
+		if (
+			drivePath.type !== "sharedIn" &&
+			drivePath.type !== "offline" &&
+			drivePath.type !== "recents" &&
+			drivePath.type !== "linked"
+		) {
+			undecryptableButtons.push({
+				id: "trash",
+				requiresOnline: true,
+				title: "tbd_trash",
+				icon: "trash",
+				destructive: true,
+				onPress: async () => {
+					const promptResult = await run(async () => {
+						return await prompts.alert({
+							title: "tbd_trash_item",
+							message: "tbd_confirm_trash",
+							cancelText: "tbd_cancel",
+							okText: "tbd_trash"
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					if (promptResult.data.cancelled) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						await drive.trash({
+							item
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+				}
+			})
+		}
+
+		return undecryptableButtons
+	}
+
 	const menuButtons: MenuButton[] = []
 	const previewType =
 		item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"

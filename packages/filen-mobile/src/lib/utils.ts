@@ -427,6 +427,7 @@ export function unwrapParentUuid(parent: ParentUuid): string | null {
 export type UnwrapDirMetaBase = {
 	meta: DecryptedDirMeta | null
 	uuid: string
+	undecryptable: boolean
 }
 
 export type UnwrapDirMetaNormal = UnwrapDirMetaBase & {
@@ -524,7 +525,8 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 					meta: decoded,
 					shared: false,
 					dir,
-					uuid: dir.uuid
+					uuid: dir.uuid,
+					undecryptable: false
 				}
 			}
 
@@ -533,7 +535,8 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 					meta: null,
 					shared: false,
 					dir,
-					uuid: dir.uuid
+					uuid: dir.uuid,
+					undecryptable: true
 				}
 			}
 		}
@@ -550,7 +553,8 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 					root: false,
 					dir,
 					uuid: dir.inner.uuid,
-					sharedTag: dir.sharedTag
+					sharedTag: dir.sharedTag,
+					undecryptable: false
 				}
 			}
 
@@ -561,7 +565,8 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 					root: false,
 					sharedTag: dir.sharedTag,
 					dir,
-					uuid: dir.inner.uuid
+					uuid: dir.inner.uuid,
+					undecryptable: true
 				}
 			}
 		}
@@ -577,7 +582,8 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 				root: true,
 				sharingRole: dir.sharingRole,
 				dir,
-				uuid: dir.inner.uuid
+				uuid: dir.inner.uuid,
+				undecryptable: false
 			}
 		}
 
@@ -588,7 +594,8 @@ export function unwrapDirMeta(dir: Dir | SharedDir | SharedRootDir | AnyDirWithC
 				root: true,
 				sharingRole: dir.sharingRole,
 				dir,
-				uuid: dir.inner.uuid
+				uuid: dir.inner.uuid,
+				undecryptable: true
 			}
 		}
 	}
@@ -603,7 +610,8 @@ export function unwrappedDirIntoDriveItem(unwrappedDir: ReturnType<typeof unwrap
 					...unwrappedDir.dir,
 					size: 0n,
 					decryptedMeta: unwrappedDir.meta,
-					uuid: unwrappedDir.uuid
+					uuid: unwrappedDir.uuid,
+					undecryptable: unwrappedDir.undecryptable
 				}
 			}
 		}
@@ -614,7 +622,8 @@ export function unwrappedDirIntoDriveItem(unwrappedDir: ReturnType<typeof unwrap
 				...unwrappedDir.dir,
 				size: 0n,
 				decryptedMeta: unwrappedDir.meta,
-				uuid: unwrappedDir.uuid
+				uuid: unwrappedDir.uuid,
+				undecryptable: unwrappedDir.undecryptable
 			}
 		}
 	}
@@ -624,13 +633,15 @@ export function unwrappedDirIntoDriveItem(unwrappedDir: ReturnType<typeof unwrap
 		data: {
 			...unwrappedDir.dir,
 			size: 0n,
-			decryptedMeta: unwrappedDir.meta
+			decryptedMeta: unwrappedDir.meta,
+			undecryptable: unwrappedDir.undecryptable
 		}
 	}
 }
 
 export type UnwrapFileMetaBase = {
 	meta: DecryptedFileMeta | null
+	undecryptable: boolean
 }
 
 export type UnwrapFileMetaRegular = Prettify<
@@ -690,7 +701,8 @@ export function unwrapFileMeta(
 					meta: decoded,
 					shared: true,
 					root: true,
-					file
+					file,
+					undecryptable: false
 				}
 			}
 
@@ -699,7 +711,8 @@ export function unwrapFileMeta(
 					meta: null,
 					shared: true,
 					root: true,
-					file
+					file,
+					undecryptable: true
 				}
 			}
 		}
@@ -717,7 +730,8 @@ export function unwrapFileMeta(
 					file: {
 						...file,
 						sharedTag: true
-					}
+					},
+					undecryptable: false
 				}
 			}
 
@@ -729,7 +743,8 @@ export function unwrapFileMeta(
 					file: {
 						...file,
 						sharedTag: true
-					}
+					},
+					undecryptable: true
 				}
 			}
 		}
@@ -743,7 +758,8 @@ export function unwrapFileMeta(
 				meta: decoded,
 				shared: false,
 				root: false,
-				file
+				file,
+				undecryptable: false
 			}
 		}
 
@@ -752,7 +768,8 @@ export function unwrapFileMeta(
 				meta: null,
 				shared: false,
 				root: false,
-				file
+				file,
+				undecryptable: true
 			}
 		}
 	}
@@ -767,7 +784,8 @@ export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwr
 					...unwrappedFile.file,
 					size: unwrappedFile.meta?.size ?? 0n,
 					decryptedMeta: unwrappedFile.meta,
-					uuid: unwrappedFile.file.uuid
+					uuid: unwrappedFile.file.uuid,
+					undecryptable: unwrappedFile.undecryptable
 				}
 			}
 		}
@@ -778,7 +796,8 @@ export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwr
 				...unwrappedFile.file,
 				size: unwrappedFile.meta?.size ?? 0n,
 				decryptedMeta: unwrappedFile.meta,
-				uuid: unwrappedFile.file.uuid
+				uuid: unwrappedFile.file.uuid,
+				undecryptable: unwrappedFile.undecryptable
 			}
 		}
 	}
@@ -787,7 +806,8 @@ export function unwrappedFileIntoDriveItem(unwrappedFile: ReturnType<typeof unwr
 		type: "file",
 		data: {
 			...unwrappedFile.file,
-			decryptedMeta: unwrappedFile.meta
+			decryptedMeta: unwrappedFile.meta,
+			undecryptable: unwrappedFile.undecryptable
 		}
 	}
 }

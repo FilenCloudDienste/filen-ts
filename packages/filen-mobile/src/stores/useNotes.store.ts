@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { Note, NoteTag } from "@filen/sdk-rs"
+import { type Note, type NoteTag } from "@/types"
 import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type InflightContent = Record<
