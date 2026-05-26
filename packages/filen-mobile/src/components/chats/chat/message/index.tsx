@@ -76,6 +76,7 @@ const VideoAttachment = memo(
 	}) => {
 		const player = useVideoPlayer(url, p => {
 			p.loop = false
+			p.staysActiveInBackground = false
 		})
 
 		const maxWH = layout.width * 0.75 - 32 - 24

@@ -13,6 +13,7 @@ const PreviewVideo = memo(({ fileUrl }: { fileUrl: string }) => {
 
 	const player = useVideoPlayer(fileUrl, p => {
 		p.loop = false
+		p.staysActiveInBackground = false
 
 		p.play()
 	})
