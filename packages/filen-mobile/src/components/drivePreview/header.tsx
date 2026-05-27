@@ -131,6 +131,7 @@ const GalleryHeader = memo(
 										isStoredOffline={
 											driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false
 										}
+										showSelectToggle={false}
 									>
 										{currentItemPreviewType === "audio" ? (
 											<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">

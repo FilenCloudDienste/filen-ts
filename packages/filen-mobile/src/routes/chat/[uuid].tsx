@@ -29,7 +29,6 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { simpleDateNoTime } from "@/lib/time"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
-import useChatsStore from "@/stores/useChats.store"
 import DismissStack from "@/components/dismissStack"
 
 const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
@@ -95,7 +94,6 @@ const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 const Header = memo(({ chat }: { chat: TChat }) => {
 	const stringigiedClient = useStringifiedClient()
 	const textForeground = useResolveClassNames("text-foreground")
-	const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === chat.uuid)))
 	const unreadCount = useChatUnreadCount(chat)
 
 	const headerRightItems = (() => {
@@ -113,7 +111,6 @@ const Header = memo(({ chat }: { chat: TChat }) => {
 						chat,
 						userId: stringigiedClient.userId,
 						origin: "chat",
-						isSelected,
 						unreadCount
 					})
 				},

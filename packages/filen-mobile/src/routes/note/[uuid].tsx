@@ -26,7 +26,6 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
-	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
 	const navigation = useNavigation()
 
 	const writeAccess =
@@ -127,7 +126,6 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 								hitSlop: 20,
 								buttons: createMenuButtons({
 									note,
-									isSelected,
 									writeAccess,
 									origin: "content",
 									isOwner

@@ -30,6 +30,7 @@ import * as Sharing from "expo-sharing"
 import * as DocumentPicker from "expo-document-picker"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/lib/notesSelectors"
+import { serialize } from "@/lib/serializer"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const stringifiedClient = useStringifiedClient()
@@ -344,183 +345,186 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			}
 
 			if (selectedNotes.length > 0) {
-				// Toggles (pin / favorite) sit first — one-tap, most-tapped.
-				menuButtons.push({
-					id: "bulkPin",
-					title: noteFlags.includesPinned ? "tbd_unpin_selected" : "tbd_pin_selected",
-					icon: "pin",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotes,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
-						})
-					}
-				})
-
-				menuButtons.push({
-					id: "bulkFavorite",
-					title: noteFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
-					icon: "heart",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotes,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
-						})
-					}
-				})
-
-				if (noteFlags.hasWriteAccessToAll) {
+				// Non-destructive bulk actions (pin / favorite / type / tag / duplicate /
+				// export) need decrypted metadata. Hide them when any selected note is
+				// undecryptable. Trash / delete / restore-from-trash / leave appear below
+				// and operate by uuid alone, so they stay visible for undecryptable too.
+				if (!noteFlags.includesUndecryptable) {
+					// Toggles (pin / favorite) sit first — one-tap, most-tapped.
 					menuButtons.push({
-						id: "type",
-						title: "tbd_type_change_selected",
-						icon: "text",
+						id: "bulkPin",
+						title: noteFlags.includesPinned ? "tbd_unpin_selected" : "tbd_pin_selected",
+						icon: "pin",
 						requiresOnline: true,
-						subButtons: [
-							{
-								type: NoteType.Text,
-								typeString: "text"
-							},
-							{
-								type: NoteType.Checklist,
-								typeString: "checklist"
-							},
-							{
-								type: NoteType.Code,
-								typeString: "code"
-							},
-							{
-								type: NoteType.Rich,
-								typeString: "rich"
-							},
-							{
-								type: NoteType.Md,
-								typeString: "md"
-							}
-						].map(
-							({ type, typeString }) =>
-								({
-									id: `type_${typeString}`,
-									title: `tbd_${typeString}`,
-									icon:
-										type === NoteType.Text
-											? "text"
-											: type === NoteType.Checklist
-												? "checklist"
-												: type === NoteType.Code
-													? "code"
-													: type === NoteType.Rich
-														? "richtext"
-														: type === NoteType.Md
-															? "markdown"
-															: undefined,
-									keepMenuOpenOnPress: Platform.OS === "android",
-									requiresOnline: true,
-									onPress: async () => {
-										await runBulk({
-											items: selectedNotes,
-											clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-											op: async n => {
-												const content = await notesLib.getContent({ note: n })
+						onPress: async () => {
+							await runBulk({
+								items: selectedNotes,
+								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+								op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
+							})
+						}
+					})
 
-												await notesLib.setType({ note: n, type, knownContent: content })
-											}
-										})
-									}
-								}) satisfies MenuButton
-						)
+					menuButtons.push({
+						id: "bulkFavorite",
+						title: noteFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+						icon: "heart",
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedNotes,
+								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+								op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
+							})
+						}
+					})
+
+					if (noteFlags.hasWriteAccessToAll) {
+						menuButtons.push({
+							id: "type",
+							title: "tbd_type_change_selected",
+							icon: "text",
+							requiresOnline: true,
+							subButtons: [
+								{
+									type: NoteType.Text,
+									typeString: "text"
+								},
+								{
+									type: NoteType.Checklist,
+									typeString: "checklist"
+								},
+								{
+									type: NoteType.Code,
+									typeString: "code"
+								},
+								{
+									type: NoteType.Rich,
+									typeString: "rich"
+								},
+								{
+									type: NoteType.Md,
+									typeString: "md"
+								}
+							].map(
+								({ type, typeString }) =>
+									({
+										id: `type_${typeString}`,
+										title: `tbd_${typeString}`,
+										icon:
+											type === NoteType.Text
+												? "text"
+												: type === NoteType.Checklist
+													? "checklist"
+													: type === NoteType.Code
+														? "code"
+														: type === NoteType.Rich
+															? "richtext"
+															: type === NoteType.Md
+																? "markdown"
+																: undefined,
+										keepMenuOpenOnPress: Platform.OS === "android",
+										requiresOnline: true,
+										onPress: async () => {
+											await runBulk({
+												items: selectedNotes,
+												clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+												op: async n => {
+													const content = await notesLib.getContent({ note: n })
+
+													await notesLib.setType({ note: n, type, knownContent: content })
+												}
+											})
+										}
+									}) satisfies MenuButton
+							)
+						})
+					}
+
+					// Bulk tag goes through the same /noteTags screen as per-note tag
+					// editing — the route accepts an array, computes tri-state per tag
+					// (all / some / none selected), and lets the user add OR remove tags
+					// across the whole selection. Add-only inline submenu was divergent
+					// from the per-note flow and lacked a removal path.
+					menuButtons.push({
+						id: "bulkTag",
+						title: "tbd_bulk_tag_selected",
+						icon: "tag",
+						requiresOnline: true,
+						onPress: () => {
+							router.push({
+								pathname: "/noteTags",
+								params: {
+									notes: serialize(selectedNotes)
+								}
+							})
+						}
+					})
+
+					menuButtons.push({
+						id: "bulkDuplicate",
+						title: "tbd_duplicate_selected",
+						icon: "duplicate",
+						requiresOnline: true,
+						onPress: async () => {
+							await runBulk({
+								items: selectedNotes,
+								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
+								op: n => notesLib.duplicate({ note: n })
+							})
+						}
+					})
+
+					menuButtons.push({
+						id: "bulkExport",
+						title: "tbd_export_selected",
+						icon: "export",
+						requiresOnline: true,
+						onPress: async () => {
+							const exportResult = await runWithLoading(async () => {
+								if (selectedNotes.length === 1 && selectedNotes[0]) {
+									return await notesLib.export({
+										note: selectedNotes[0]
+									})
+								}
+
+								return await notesLib.exportMultiple({
+									notes: selectedNotes
+								})
+							})
+
+							if (!exportResult.success) {
+								console.error(exportResult.error)
+								alerts.error(exportResult.error)
+
+								return
+							}
+
+							useNotesStore.getState().clearSelectedNotes()
+
+							const result = await run(async defer => {
+								defer(() => {
+									exportResult.data.cleanup()
+								})
+
+								// Small delay to ensure file is fully written before sharing
+								await new Promise<void>(resolve => setTimeout(resolve, 100))
+
+								await Sharing.shareAsync(exportResult.data.file.uri, {
+									mimeType: "text/plain",
+									dialogTitle: exportResult.data.file.name
+								})
+							})
+
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
+
+								return
+							}
+						}
 					})
 				}
-
-				menuButtons.push({
-					id: "bulkTag",
-					title: "tbd_bulk_tag_selected",
-					icon: "tag",
-					requiresOnline: true,
-					subButtons: notesTags.map(subButton => {
-						return {
-							id: `bulkTag_${subButton.uuid}`,
-							title: tagDisplayName(subButton),
-							icon: "tag",
-							keepMenuOpenOnPress: Platform.OS === "android",
-							requiresOnline: true,
-							onPress: async () => {
-								await runBulk({
-									items: selectedNotes,
-									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-									op: n => notesLib.addTag({ note: n, tag: subButton })
-								})
-							}
-						}
-					})
-				})
-
-				menuButtons.push({
-					id: "bulkDuplicate",
-					title: "tbd_duplicate_selected",
-					icon: "duplicate",
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNotes,
-							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
-							op: n => notesLib.duplicate({ note: n })
-						})
-					}
-				})
-
-				menuButtons.push({
-					id: "bulkExport",
-					title: "tbd_export_selected",
-					icon: "export",
-					requiresOnline: true,
-					onPress: async () => {
-						const exportResult = await runWithLoading(async () => {
-							if (selectedNotes.length === 1 && selectedNotes[0]) {
-								return await notesLib.export({
-									note: selectedNotes[0]
-								})
-							}
-
-							return await notesLib.exportMultiple({
-								notes: selectedNotes
-							})
-						})
-
-						if (!exportResult.success) {
-							console.error(exportResult.error)
-							alerts.error(exportResult.error)
-
-							return
-						}
-
-						useNotesStore.getState().clearSelectedNotes()
-
-						const result = await run(async defer => {
-							defer(() => {
-								exportResult.data.cleanup()
-							})
-
-							// Small delay to ensure file is fully written before sharing
-							await new Promise<void>(resolve => setTimeout(resolve, 100))
-
-							await Sharing.shareAsync(exportResult.data.file.uri, {
-								mimeType: "text/plain",
-								dialogTitle: exportResult.data.file.name
-							})
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
-					}
-				})
 
 				if (noteFlags.everyOwned) {
 					// State machine for notes:
@@ -533,8 +537,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					// guards each op so mixed-state slips would be silent no-ops,
 					// but UX-wise we hide invalid actions instead.
 
-					// Archive: every note must be active (no archived, no trashed).
-					if (!noteFlags.includesArchived && !noteFlags.includesTrashed) {
+					// Archive: every note must be active (no archived, no trashed) AND no
+					// undecryptable in the selection — the per-item undecryptable menu drops
+					// archive too, so the bulk mirror does the same.
+					if (!noteFlags.includesArchived && !noteFlags.includesTrashed && !noteFlags.includesUndecryptable) {
 						menuButtons.push({
 							id: "bulkArchive",
 							title: "tbd_archive_selected",
@@ -550,8 +556,11 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						})
 					}
 
-					// Restore: every note must be archived OR trashed (no active).
-					if (noteFlags.everyArchivedOrTrashed) {
+					// Restore: every note must be archived OR trashed (no active). For an
+					// undecryptable selection the per-item menu only offers restore when the
+					// note is trashed (archive isn't possible on undecryptable items), so the
+					// bulk mirror requires everyTrashed when undecryptable is in the mix.
+					if (noteFlags.everyArchivedOrTrashed && (!noteFlags.includesUndecryptable || noteFlags.everyTrashed)) {
 						menuButtons.push({
 							id: "bulkRestore",
 							title: "tbd_restore_selected",

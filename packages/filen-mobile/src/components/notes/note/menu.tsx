@@ -22,13 +22,16 @@ export type NoteMenuOrigin = "notes" | "search" | "content"
 
 export function createMenuButtons({
 	note,
-	isSelected,
+	isSelected = false,
 	writeAccess,
 	origin,
 	isOwner
 }: {
 	note: TNote
-	isSelected: boolean
+	// Optional: detail-route callers (origin === "content") don't have a meaningful
+	// selection state — the select/deselect entry is hidden for them anyway, so
+	// they can omit it. List-row callers still pass it.
+	isSelected?: boolean
 	writeAccess: boolean
 	origin: NoteMenuOrigin
 	isOwner: boolean
@@ -349,7 +352,10 @@ export function createMenuButtons({
 			router.push({
 				pathname: "/noteTags",
 				params: {
-					note: serialize(note)
+					// /noteTags accepts an array (single-note callers wrap as a one-
+					// element array). Keeps the route uniform between per-item edits
+					// and bulk tag edits from the notes list.
+					notes: serialize([note])
 				}
 			})
 		}

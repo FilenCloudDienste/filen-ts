@@ -30,11 +30,13 @@ import useDriveStore from "@/stores/useDrive.store"
 export function createMenuButtons({
 	item,
 	drivePath,
-	isStoredOffline
+	isStoredOffline,
+	showSelectToggle
 }: {
 	item: DriveItem
 	drivePath: DrivePath
 	isStoredOffline: boolean
+	showSelectToggle?: boolean
 }): MenuButton[] {
 	// Undecryptable items only support destructive disposition — every other
 	// action (rename/move/share/download/info/etc.) requires decrypted meta.
@@ -118,12 +120,7 @@ export function createMenuButtons({
 
 		// Normal / recents / favorites / sharedIn / sharedOut / links / offline /
 		// linked surfaces — Trash is the only path forward.
-		if (
-			drivePath.type !== "sharedIn" &&
-			drivePath.type !== "offline" &&
-			drivePath.type !== "recents" &&
-			drivePath.type !== "linked"
-		) {
+		if (drivePath.type !== "sharedIn" && drivePath.type !== "offline" && drivePath.type !== "linked") {
 			undecryptableButtons.push({
 				id: "trash",
 				requiresOnline: true,
@@ -187,8 +184,8 @@ export function createMenuButtons({
 	// so we can't add an onLongPress to the inner Pressable. The Menu's
 	// "Select" item is the entry point — matches the pattern in notes / chats
 	// / file versions / contacts. Suppress in picker mode (driveSelect uses a
-	// different store).
-	if (!drivePath.selectOptions) {
+	// different store) and when the caller explicitly opts out (drive preview).
+	if (showSelectToggle !== false && !drivePath.selectOptions) {
 		const isSelected = useDriveStore.getState().selectedItems.some(i => i.data.uuid === item.data.uuid)
 
 		menuButtons.push({
@@ -982,8 +979,25 @@ export function createMenuButtons({
 		})
 	}
 
-	// Removing offline files should only be allowed when inside the root of the offline view or when it is already stored offline
-	if (((drivePath.type === "offline" && !drivePath.uuid) || isStoredOffline) && drivePath.type !== "linked") {
+	// Removing offline only makes sense on items that are TOP-LEVEL stored entries.
+	// `updateIndex()` flattens every nested child of a stored directory into
+	// `index.files` / `index.directories`, so a plain "is stored offline" check
+	// (the query backing `isStoredOffline`) returns true for nested children too —
+	// but `removeItem` only operates on top-level entries, so showing the button
+	// there is a silent no-op. The sync top-level check fixes that. Cold-cache
+	// falls back to undefined → hidden, which is acceptable: the per-row query
+	// (`useDriveItemStoredOfflineQuery`) warms the caches on first read.
+	//
+	//   - At /offline (virtual root) we know every item shown IS top-level, so
+	//     skip the per-item check.
+	//   - Anywhere else (/drive, /favorites, etc.), only show on items that are
+	//     known top-level stored. /offline nested view and /linked never show.
+	if (
+		(drivePath.type === "offline" && !drivePath.uuid) ||
+		(offline.isItemTopLevelStoredSync(item) === true &&
+			drivePath.type !== "offline" &&
+			drivePath.type !== "linked")
+	) {
 		menuButtons.push({
 			id: "removeOffline",
 			title: "tbd_remove_offline",
@@ -1024,15 +1038,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		((drivePath.type === "sharedIn" && !drivePath.uuid) ||
-			(!isOwner &&
-				(item.type === "sharedFile" ||
-					item.type === "sharedRootFile" ||
-					item.type === "sharedDirectory" ||
-					item.type === "sharedRootDirectory"))) &&
-		!drivePath.uuid
-	) {
+	if (drivePath.type === "sharedIn" && !drivePath.uuid) {
 		menuButtons.push({
 			id: "removeShare",
 			requiresOnline: true,
@@ -1079,15 +1085,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		((drivePath.type === "sharedOut" && !drivePath.uuid) ||
-			(isOwner &&
-				(item.type === "sharedFile" ||
-					item.type === "sharedRootFile" ||
-					item.type === "sharedDirectory" ||
-					item.type === "sharedRootDirectory"))) &&
-		!drivePath.uuid
-	) {
+	if (drivePath.type === "sharedOut" && !drivePath.uuid) {
 		menuButtons.push({
 			id: "stopSharing",
 			requiresOnline: true,
@@ -1184,7 +1182,6 @@ export function createMenuButtons({
 		drivePath.type !== "trash" &&
 		drivePath.type !== "sharedIn" &&
 		drivePath.type !== "offline" &&
-		drivePath.type !== "recents" &&
 		drivePath.type !== "linked"
 	) {
 		menuButtons.push({
@@ -1318,7 +1315,8 @@ const Menu = memo(
 		drivePath,
 		isStoredOffline,
 		disabled,
-		style
+		style,
+		showSelectToggle
 	}: {
 		item: DriveItem
 		children: React.ReactNode
@@ -1331,13 +1329,15 @@ const Menu = memo(
 		isStoredOffline: boolean
 		disabled?: boolean
 		style?: StyleProp<ViewStyle>
+		showSelectToggle?: boolean
 	}) => {
 		const menuButtons = disabled
 			? []
 			: createMenuButtons({
 					item,
 					drivePath,
-					isStoredOffline
+					isStoredOffline,
+					showSelectToggle
 				})
 
 		return (

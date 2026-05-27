@@ -39,6 +39,7 @@ import * as DocumentPicker from "expo-document-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import * as MediaLibrary from "expo-media-library"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import useOfflineStore from "@/stores/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
@@ -116,6 +117,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const selectedDriveItems = useDriveStore(useShallow(state => state.selectedItems))
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
+	const offlineSyncing = useOfflineStore(state => state.syncing)
 	const { sort: currentSort, setSort, sortable } = useDriveSortPreference(drivePath)
 
 	const driveItemsQuery = useDriveItemsQuery(
@@ -149,10 +151,11 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			return []
 		}
 
+		const selectionMode = selectedDriveItems.length > 0
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
 
-		if (sortable) {
+		if (sortable && !selectionMode) {
 			menuButtons.push(buildSortMenuButton(currentSort, setSort))
 		}
 
@@ -183,8 +186,9 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			(drivePath.type === "drive" ||
 				drivePath.type === "links" ||
 				drivePath.type === "favorites" ||
-				drivePath.type === "sharedOut") &&
-			!drivePath.selectOptions
+				(drivePath.type === "sharedOut" && drivePath.uuid)) &&
+			!drivePath.selectOptions &&
+			!selectionMode
 		) {
 			menuButtons.push({
 				id: "createFolder",
@@ -747,14 +751,31 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			})
 		}
 
-		menuButtons.push({
-			id: "transfers",
-			title: "tbd_transfers",
-			icon: "list",
-			onPress: () => {
-				router.push("/transfers")
+		if (!selectionMode) {
+			menuButtons.push({
+				id: "transfers",
+				title: "tbd_transfers",
+				icon: "list",
+				onPress: () => {
+					router.push("/transfers")
+				}
+			})
+
+			// Manual offline-cache sync trigger. Auto-sync runs on every offline→online
+			// transition (reconnect.ts), but the offline tab is where users go when they
+			// expect their cached set to be current — surface a way to nudge it.
+			if (drivePath.type === "offline") {
+				menuButtons.push({
+					id: "syncNow",
+					title: offlineSyncing ? "tbd_syncing" : "tbd_sync_now",
+					icon: "restore",
+					disabled: offlineSyncing,
+					onPress: () => {
+						offline.sync().catch(console.error)
+					}
+				})
 			}
-		})
+		}
 
 		if (selectedDriveItems.length > 0) {
 			// Cross-reference selected items with the live query list before
@@ -846,7 +867,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					drivePath.type === "drive" ||
 					drivePath.type === "favorites" ||
 					drivePath.type === "sharedOut" ||
-					drivePath.type === "links"
+					drivePath.type === "links" ||
+					drivePath.type === "recents"
 				) {
 					menuButtons.push({
 						id: "bulkMove",
@@ -1044,7 +1066,14 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				// ambiguous anyway. The lib's idempotent semantics make
 				// already-offline / already-online items no-ops, so showing both
 				// is safe.
-				if (drivePath.type === "drive" || drivePath.type === "favorites") {
+				//
+				// Discoverability gate: per-item Make-offline hides when the item is
+				// already stored. Mirror that in bulk by hiding bulkMakeOffline when
+				// every selected item is known to be stored offline. Falls back to
+				// "show" when the per-item cache hasn't been populated yet.
+				const everySelectedKnownStoredOffline = liveItems.every(it => offline.isItemStoredSync(it) === true)
+
+				if ((drivePath.type === "drive" || drivePath.type === "favorites") && !everySelectedKnownStoredOffline) {
 					menuButtons.push({
 						id: "bulkMakeOffline",
 						title: "tbd_make_available_offline_selected",
@@ -1072,12 +1101,22 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					})
 				}
 
-				// Remove offline — works on the offline view (the canonical place
-				// for this) and anywhere else (lib treats not-stored as no-op).
+				// Remove offline — mirror the per-item rule: only show when at least
+				// one selected item is a TOP-LEVEL stored offline entry. Nested
+				// children of stored directories register as "stored" via the
+				// flattened index, but `removeItem` only operates on top-level
+				// entries, so showing the button for them would silently no-op.
+				//
+				//   - /offline (virtual root): everything shown IS top-level by
+				//     construction, so no per-item check needed.
+				//   - /drive, /favorites: must verify at least one selected item is
+				//     a known top-level stored entry. /offline nested + /linked +
+				//     other views never show this action.
+				const anySelectedTopLevelOffline = liveItems.some(it => offline.isItemTopLevelStoredSync(it) === true)
+
 				if (
-					drivePath.type === "drive" ||
-					drivePath.type === "favorites" ||
-					(drivePath.type === "offline" && !drivePath.uuid)
+					(drivePath.type === "offline" && !drivePath.uuid) ||
+					((drivePath.type === "drive" || drivePath.type === "favorites") && anySelectedTopLevelOffline)
 				) {
 					menuButtons.push({
 						id: "bulkRemoveOffline",
@@ -1209,7 +1248,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			}
 		}
 
-		if (drivePath.type === "trash") {
+		if (drivePath.type === "trash" && !selectionMode) {
 			menuButtons.push({
 				id: "empty",
 				title: "tbd_empty_trash",

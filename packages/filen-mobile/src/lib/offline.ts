@@ -425,6 +425,59 @@ export class Offline {
 		return result.data
 	}
 
+	// Cache-only sync variant of isItemStored. Returns the cached value if known,
+	// or undefined if not yet populated. For render-time menu gating where an
+	// async lookup is too expensive. Callers that prefer to err on "show the
+	// action" should treat undefined as "not known offline".
+	public isItemStoredSync(item: DriveItem): boolean | undefined {
+		return this.isItemStoredCache.get(item.data.uuid)
+	}
+
+	// Synchronously checks whether an item is a TOP-LEVEL stored offline entry.
+	// removeItem() only operates on top-level entries — nested files and dirs
+	// inside a stored tree get removed when their top-level parent is removed,
+	// not individually. updateIndex() flattens all nested items into
+	// `index.files` / `index.directories`, so a plain isItemStored check would
+	// return true for nested children too. This method consults the
+	// uuid → top-level mapping to distinguish.
+	//
+	// Returns:
+	//   true  — item itself is a top-level stored entry (safe to expose remove).
+	//   false — item is either not stored, or is a nested child of a stored
+	//           tree. Either way, removeItem is not the right action.
+	//   undefined — caches not yet populated; caller should re-render after
+	//               the per-item isItemStored query warms them.
+	public isItemTopLevelStoredSync(item: DriveItem): boolean | undefined {
+		if (!this.indexCache || !this.uuidToTopLevelCache) {
+			return undefined
+		}
+
+		const uuid = item.data.uuid
+
+		if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+			if (!this.indexCache.files[uuid]) {
+				return false
+			}
+
+			// Standalone stored files aren't in the uuid→top-level map (it's built
+			// from stored DIRECTORIES). Nested files are present and mapped to
+			// their parent directory's uuid. So "not present" === top-level.
+			return this.uuidToTopLevelCache.get(uuid) === undefined
+		}
+
+		if (!this.indexCache.directories[uuid]) {
+			return false
+		}
+
+		// A top-level stored directory maps to itself in the uuid→top-level index.
+		// A nested directory maps to its parent. Absent (cache built without this
+		// directory) is also treated as top-level — guarded by indexCache check
+		// above.
+		const mapping = this.uuidToTopLevelCache.get(uuid)
+
+		return mapping === undefined || mapping === uuid
+	}
+
 	public async isItemStored(item: DriveItem): Promise<boolean> {
 		const cachedStored = this.isItemStoredCache.get(item.data.uuid)
 
