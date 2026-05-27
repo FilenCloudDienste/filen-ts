@@ -1,7 +1,7 @@
 import { Fragment, memo, useState } from "react"
 import { Platform, TextInput, Image } from "react-native"
 import { router } from "expo-router"
-import { useResolveClassNames } from "uniwind"
+import { useResolveClassNames, useUniwind } from "uniwind"
 import { cn, run } from "@filen/utils"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import SafeAreaView from "@/components/ui/safeAreaView"
@@ -44,6 +44,7 @@ const Login = memo(() => {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const isOnline = useIsOnline()
 	const [email, setEmail] = useState<string>("")
+	const { theme } = useUniwind()
 	const [password, setPassword] = useState<string>("")
 
 	const canSubmit = isValidEmail(email) && password.length > 0 && isOnline
@@ -217,7 +218,7 @@ const Login = memo(() => {
 				>
 					<View className="items-center gap-3 pt-6">
 						<Image
-							source={require("@/assets/images/icon.png")}
+							source={theme === "dark" ? require("@/assets/images/icon-dark.png") : require("@/assets/images/icon-light.png")}
 							className="size-20 rounded-2xl"
 						/>
 						<Text className="text-foreground text-3xl font-bold">tbd_welcome_back</Text>

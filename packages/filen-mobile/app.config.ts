@@ -47,8 +47,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 	slug: "filen-mobile",
 	version: VERSION,
 	orientation: "default",
-	// icon: "./assets/images/icon.png",
-	icon: "./src/assets/images/icon.png",
+	icon: "./src/assets/images/icon-light.png",
 	scheme: "iofilenapp",
 	userInterfaceStyle: "automatic",
 	jsEngine: JS_ENGINE,
@@ -84,11 +83,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			CFBundleDevelopmentRegion: "en",
 			UIPrefersShowingLanguageSettings: true
 		},
-		// icon: {
-		// 	dark: "./assets/images/ios-dark.png",
-		// 	light: "./assets/images/ios-light.png",
-		// 	tinted: "./assets/images/ios-tinted.png"
-		// },
+		icon: {
+			light: "./src/assets/images/icon-light.png",
+			dark: "./src/assets/images/icon-dark.png",
+			tinted: "./src/assets/images/icon-tinted.png"
+		},
 		privacyManifests: {
 			NSPrivacyTracking: false
 		}
@@ -99,16 +98,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		jsEngine: JS_ENGINE,
 		allowBackup: false,
 		adaptiveIcon: {
-			backgroundColor: "#E6F4FE",
-			foregroundImage: "./src/assets/images/android-icon-foreground.png",
-			backgroundImage: "./src/assets/images/android-icon-background.png",
-			monochromeImage: "./src/assets/images/android-icon-monochrome.png"
+			backgroundColor: "#FFFFFF",
+			foregroundImage: "./src/assets/images/adaptive-foreground.png",
+			monochromeImage: "./src/assets/images/adaptive-monochrome.png"
 		},
 		predictiveBackGestureEnabled: false,
-		// adaptiveIcon: {
-		// 	foregroundImage: "./assets/images/adaptive-icon.png",
-		// 	backgroundColor: "#ffffff"
-		// },
 		package: IDENTIFIER,
 		permissions: [
 			"INTERNET",
@@ -177,11 +171,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		[
 			"expo-splash-screen",
 			{
-				image: "./src/assets/images/splash-icon.png",
+				image: "./src/assets/images/icon-light.png",
 				imageWidth: 200,
 				resizeMode: "contain",
-				backgroundColor: "#ffffff",
+				backgroundColor: "#FFFFFF",
 				dark: {
+					image: "./src/assets/images/icon-dark.png",
 					backgroundColor: "#000000"
 				}
 			}
