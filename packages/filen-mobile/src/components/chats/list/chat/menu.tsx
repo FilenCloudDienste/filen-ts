@@ -21,13 +21,16 @@ export function createMenuButtons({
 	chat,
 	userId,
 	origin,
-	isSelected,
+	isSelected = false,
 	unreadCount
 }: {
 	chat: TChat
 	userId: bigint
 	origin: ChatMenuOrigin
-	isSelected: boolean
+	// Optional: detail-route callers (origin === "chat") don't have a meaningful
+	// selection state — the select/deselect entry is hidden for them anyway, so
+	// they can omit it. List-row callers still pass it.
+	isSelected?: boolean
 	unreadCount: number
 }): MenuButton[] {
 	const isOwner = chat.ownerId === userId
@@ -169,7 +172,6 @@ export function createMenuButtons({
 						id: "markAsRead",
 						title: "tbd_mark_as_read",
 						icon: "envelopeOpen",
-						checked: isSelected,
 						requiresOnline: true,
 						onPress: async () => {
 							const result = await runWithLoading(async () => {

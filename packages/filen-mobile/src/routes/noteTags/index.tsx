@@ -23,10 +23,50 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useNotesTagsQuery from "@/queries/useNotesTags.query"
 import DismissStack from "@/components/dismissStack"
 
-const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
+// Tri-state of a tag against the working set of notes:
+//   "all"  — every note already carries this tag (tap → remove from all)
+//   "some" — some but not all carry it (tap → add to the rest, promoting to "all")
+//   "none" — no note carries it yet (tap → add to all)
+type TagState = "all" | "some" | "none"
+
+function computeTagState(targetNotes: readonly Note[], tag: NoteTag): TagState {
+	let tagged = 0
+
+	for (let i = 0; i < targetNotes.length; i++) {
+		const note = targetNotes[i]
+
+		if (note && note.tags.some(t => t.uuid === tag.uuid)) {
+			tagged++
+		}
+	}
+
+	if (tagged === 0) {
+		return "none"
+	}
+
+	if (tagged === targetNotes.length) {
+		return "all"
+	}
+
+	return "some"
+}
+
+const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 
-	const isTagged = note.tags.some(t => t.uuid === tag.uuid)
+	const state = computeTagState(targetNotes, tag)
+	const isSingle = targetNotes.length === 1
+
+	const toggleTitle =
+		state === "all"
+			? isSingle
+				? "tbd_remove_tag"
+				: "tbd_remove_tag_from_selected"
+			: state === "some"
+				? "tbd_add_tag_to_remaining"
+				: isSingle
+					? "tbd_add_tag"
+					: "tbd_add_tag_to_selected"
 
 	return (
 		<Menu
@@ -34,23 +74,39 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 			buttons={[
 				{
 					id: "tagged",
-					title: "tbd_tagged",
+					title: toggleTitle,
 					icon: "tag",
-					checked: isTagged,
+					checked: state === "all",
 					requiresOnline: true,
 					onPress: async () => {
 						const result = await runWithLoading(async () => {
-							if (isTagged) {
-								await notes.removeTag({
-									note,
-									tag
-								})
-							} else {
-								await notes.addTag({
-									note,
-									tag
-								})
+							if (state === "all") {
+								// Remove the tag from every selected note.
+								await Promise.all(
+									targetNotes.map(note =>
+										notes.removeTag({
+											note,
+											tag
+										})
+									)
+								)
+
+								return
 							}
+
+							// "none" or "some": promote to "all" — add to every note that
+							// doesn't already carry the tag (addTag is idempotent, but
+							// filtering avoids the redundant SDK call).
+							const needsAdd = targetNotes.filter(note => !note.tags.some(t => t.uuid === tag.uuid))
+
+							await Promise.all(
+								needsAdd.map(note =>
+									notes.addTag({
+										note,
+										tag
+									})
+								)
+							)
 						})
 
 						if (!result.success) {
@@ -153,10 +209,18 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 			]}
 		>
 			<PressableScale className="bg-background-tertiary p-2 px-3 flex-row items-center justify-center rounded-full gap-2">
-				{note.tags.some(t => t.uuid === tag.uuid) && (
+				{state === "all" && (
 					<Ionicons
 						className="shrink-0"
 						name="checkmark"
+						size={15}
+						color={textForeground.color}
+					/>
+				)}
+				{state === "some" && (
+					<Ionicons
+						className="shrink-0"
+						name="remove"
 						size={15}
 						color={textForeground.color}
 					/>
@@ -174,48 +238,61 @@ const Tag = memo(({ tag, note }: { tag: NoteTag; note: Note }) => {
 })
 
 const NoteTags = memo(() => {
-	const { note: noteSerialized } = useLocalSearchParams<{
-		note?: string
+	const { notes: notesSerialized } = useLocalSearchParams<{
+		notes?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 
-	const noteParsed = (() => {
-		if (!noteSerialized) {
+	// Deserialize the navigation payload. Single-note callers (per-item context
+	// menu) and bulk callers (notes-list bulk action) both serialize a Note[] —
+	// even a single note is wrapped as a one-element array so the route stays
+	// uniform.
+	const notesParsed = (() => {
+		if (!notesSerialized) {
 			return null
 		}
 
 		try {
-			return deserialize(noteSerialized) as Note
+			return deserialize(notesSerialized) as Note[]
 		} catch {
 			return null
 		}
 	})()
 
+	// Re-anchor the navigated notes against the live query result. Selection /
+	// route params are snapshots; a tag change after this screen opens (or a
+	// note moved into trash via another client) must reflect in the tri-state
+	// without requiring a re-navigation.
 	const notesWithContentQuery = useNotesWithContentQuery({
 		enabled: false
 	})
 
-	const note =
-		noteParsed && notesWithContentQuery.status === "success"
-			? (notesWithContentQuery.data.find(n => n.uuid === noteParsed.uuid) ?? null)
-			: null
+	const liveNotes = (() => {
+		if (!notesParsed || notesParsed.length === 0 || notesWithContentQuery.status !== "success") {
+			return []
+		}
+
+		const wantedUuids = new Set(notesParsed.map(n => n.uuid))
+
+		return notesWithContentQuery.data.filter(n => wantedUuids.has(n.uuid))
+	})()
 
 	const notesTagsQuery = useNotesTagsQuery()
 
 	const tags =
 		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b))) : []
 
-	if (!note) {
+	if (liveNotes.length === 0) {
 		return <DismissStack />
 	}
 
 	return (
 		<Fragment>
 			<Header
-				title="tbd_note_tags"
+				title={liveNotes.length === 1 ? "tbd_note_tags" : "tbd_note_tags_selected"}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -326,7 +403,7 @@ const NoteTags = memo(() => {
 								<Tag
 									key={tag.uuid}
 									tag={tag}
-									note={note}
+									targetNotes={liveNotes}
 								/>
 							)
 						})}
