@@ -53,6 +53,24 @@ const CameraUpload = memo(() => {
 					ios: undefined,
 					default: bgBackgroundSecondary.backgroundColor as string
 				})}
+				leftItems={Platform.select({
+					ios: [
+						{
+							type: "button",
+							icon: {
+								name: "close",
+								color: textForeground.color,
+								size: 20
+							},
+							props: {
+								onPress: () => {
+									router.back()
+								}
+							}
+						}
+					],
+					default: undefined
+				})}
 			/>
 			<SafeAreaView
 				className="flex-1 bg-background-secondary"
