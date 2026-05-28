@@ -696,6 +696,110 @@ describe("AudioCache", () => {
 
 			expect(fs.has(metaPath)).toBe(false)
 		})
+
+		it("sweeps an orphan picture file whose sidecar does not exist", async () => {
+			const cache = await createAudioCache()
+			const orphanJpg = `${AUDIO_BASE_DIR}/orphan-uuid.jpg`
+
+			fs.set(orphanJpg, new Uint8Array([1, 2, 3]))
+
+			await cache.gc()
+
+			expect(fs.has(orphanJpg)).toBe(false)
+		})
+
+		it("keeps a picture whose fresh sidecar exists", async () => {
+			const cache = await createAudioCache()
+			const uuid = "kept-uuid"
+			const picturePath = `${AUDIO_BASE_DIR}/${uuid}.jpg`
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+			const freshMeta: Metadata = {
+				artist: "Fresh",
+				title: "Fresh",
+				album: null,
+				date: null,
+				duration: 1,
+				pictureUri: picturePath,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			fs.set(picturePath, new Uint8Array([1, 2, 3]))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(freshMeta))))
+
+			await cache.gc()
+
+			expect(fs.has(picturePath)).toBe(true)
+			expect(fs.has(metaPath)).toBe(true)
+		})
+
+		it("skips deletion when the sidecar becomes fresh between Pass 1's read and the mutex re-check", async () => {
+			const cache = await createAudioCache()
+			const uuid = "race-uuid"
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+			const expiredTime = Date.now() - 86400 * 1000 - 1
+			const staleMeta: Metadata = {
+				artist: "Old",
+				title: "Old",
+				album: null,
+				date: null,
+				duration: 1,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: expiredTime
+			}
+			const freshMeta: Metadata = {
+				artist: "New",
+				title: "New",
+				album: null,
+				date: null,
+				duration: 1,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+			const freshBytes = new Uint8Array(new TextEncoder().encode(serialize(freshMeta)))
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(staleMeta))))
+
+			// Simulate a concurrent get() that finishes writing a fresh sidecar
+			// between Pass 1's unprotected read and Pass 2's mutex-guarded re-read.
+			// The first .text() on the target sidecar returns the stale bytes
+			// (because we capture them before swapping), then the fs entry is
+			// swapped to fresh for any subsequent read.
+			let metaReads = 0
+			const spy = vi.spyOn(File.prototype, "text").mockImplementation(async function (this: File): Promise<string> {
+				const bytes = fs.get(this.uri)
+
+				if (!(bytes instanceof Uint8Array)) {
+					throw new Error(`File not found: ${this.uri}`)
+				}
+
+				const result = new TextDecoder().decode(bytes)
+
+				if (this.uri === metaPath) {
+					metaReads++
+
+					if (metaReads === 1) {
+						fs.set(metaPath, freshBytes)
+					}
+				}
+
+				return result
+			})
+
+			try {
+				await cache.gc()
+			} finally {
+				spy.mockRestore()
+			}
+
+			// The mutex re-check must have fired (at least two reads) and the
+			// sidecar must survive — the entry was fresh by the time the
+			// deletion phase committed.
+			expect(metaReads).toBeGreaterThanOrEqual(2)
+			expect(fs.has(metaPath)).toBe(true)
+		})
 	})
 
 	describe("clear", () => {
