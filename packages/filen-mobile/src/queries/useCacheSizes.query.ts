@@ -20,14 +20,38 @@ export type CacheSizes = {
 	}
 }
 
+// Each size() below walks its cache directory synchronously on the JS thread —
+// expo-file-system's File/Directory APIs have no async variant, and offline.size()
+// is also a sync walk under an async wrapper. On a cold open of /advanced this
+// blocks the modal slide-in for hundreds of ms when caches hold many files.
+// Yield up front so React commits the modal mount before the first walk starts,
+// and yield again between walks so pending touches/renders get a slot.
+function yieldToUI(): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, 0))
+}
+
 export async function fetchData(): Promise<CacheSizes> {
+	await yieldToUI()
+
 	const offlineSize = await offline.size()
+	await yieldToUI()
+
+	const thumbnailsSize = thumbnails.size()
+	await yieldToUI()
+
+	const fileCacheSize = fileCache.size()
+	await yieldToUI()
+
+	const audioCacheSize = audioCache.size()
+	await yieldToUI()
+
+	const sandboxSize = sandboxCache.size()
 
 	return {
-		thumbnails: thumbnails.size(),
-		fileCache: fileCache.size(),
-		audioCache: audioCache.size(),
-		sandbox: sandboxCache.size(),
+		thumbnails: thumbnailsSize,
+		fileCache: fileCacheSize,
+		audioCache: audioCacheSize,
+		sandbox: sandboxSize,
 		offline: offlineSize
 	}
 }
