@@ -42,3 +42,4 @@ playwright/.cache/
 
 .env
 codedb.snapshot
+.claude/scheduled_tasks.lock
