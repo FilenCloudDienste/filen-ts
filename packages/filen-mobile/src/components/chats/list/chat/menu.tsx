@@ -66,7 +66,8 @@ export function createMenuButtons({
 								title: "tbd_delete_chat",
 								message: "tbd_delete_chat_confirmation",
 								cancelText: "tbd_cancel",
-								okText: "tbd_delete"
+								okText: "tbd_delete",
+								destructive: true
 							})
 						})
 
@@ -116,7 +117,8 @@ export function createMenuButtons({
 							title: "tbd_leave_chat",
 							message: "tbd_leave_chat_confirmation",
 							cancelText: "tbd_cancel",
-							okText: "tbd_leave"
+							okText: "tbd_leave",
+							destructive: true
 						})
 					})
 
@@ -291,7 +293,8 @@ export function createMenuButtons({
 									title: "tbd_delete_chat",
 									message: "tbd_delete_chat_confirmation",
 									cancelText: "tbd_cancel",
-									okText: "tbd_delete"
+									okText: "tbd_delete",
+									destructive: true
 								})
 							})
 
@@ -338,7 +341,8 @@ export function createMenuButtons({
 									title: "tbd_leave_chat",
 									message: "tbd_leave_chat_confirmation",
 									cancelText: "tbd_cancel",
-									okText: "tbd_leave"
+									okText: "tbd_leave",
+									destructive: true
 								})
 							})
 

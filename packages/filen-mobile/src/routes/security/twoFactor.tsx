@@ -165,9 +165,8 @@ const TwoFactor = memo(() => {
 													title: "tbd_enter_two_factor_code",
 													message: "tbd_enter_two_factor_code_description",
 													cancelText: "tbd_cancel",
-													okText: "tbd_disable",
-													inputType: "secure-text",
-													destructive: true
+													okText: "tbd_enable",
+													inputType: "secure-text"
 												})
 											})
 

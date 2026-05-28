@@ -84,7 +84,8 @@ const FileProviderSettings = memo(() => {
 								title: "tbd_file_provider_disables_biometric_title",
 								message: "tbd_file_provider_disables_biometric_message",
 								okText: "tbd_continue",
-								cancelText: "tbd_cancel"
+								cancelText: "tbd_cancel",
+								destructive: true
 							})
 						})
 

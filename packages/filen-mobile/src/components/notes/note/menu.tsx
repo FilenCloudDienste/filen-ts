@@ -73,7 +73,8 @@ export function createMenuButtons({
 							title: "tbd_delete_note",
 							message: "tbd_are_you_sure_delete_note",
 							cancelText: "tbd_cancel",
-							okText: "tbd_delete"
+							okText: "tbd_delete",
+							destructive: true
 						})
 					})
 
@@ -119,7 +120,8 @@ export function createMenuButtons({
 							title: "tbd_trash_note",
 							message: "tbd_are_you_sure_trash_note",
 							cancelText: "tbd_cancel",
-							okText: "tbd_dtrash"
+							okText: "tbd_dtrash",
+							destructive: true
 						})
 					})
 
@@ -165,7 +167,8 @@ export function createMenuButtons({
 							title: "tbd_leave_note",
 							message: "tbd_are_you_sure_leave_note",
 							cancelText: "tbd_cancel",
-							okText: "tbd_leave"
+							okText: "tbd_leave",
+							destructive: true
 						})
 					})
 
@@ -564,7 +567,8 @@ export function createMenuButtons({
 							title: "tbd_trash_note",
 							message: "tbd_are_you_sure_trash_note",
 							cancelText: "tbd_cancel",
-							okText: "tbd_dtrash"
+							okText: "tbd_dtrash",
+							destructive: true
 						})
 					})
 
@@ -612,7 +616,8 @@ export function createMenuButtons({
 							title: "tbd_delete_note",
 							message: "tbd_are_you_sure_delete_note",
 							cancelText: "tbd_cancel",
-							okText: "tbd_delete"
+							okText: "tbd_delete",
+							destructive: true
 						})
 					})
 

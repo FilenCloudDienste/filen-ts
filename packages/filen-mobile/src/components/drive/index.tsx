@@ -1282,7 +1282,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							title: "tbd_empty_trash",
 							message: "tbd_are_you_sure_empty_trash",
 							cancelText: "tbd_cancel",
-							okText: "tbd_empty"
+							okText: "tbd_empty",
+							destructive: true
 						})
 					})
 

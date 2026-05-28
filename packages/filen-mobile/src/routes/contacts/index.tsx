@@ -509,7 +509,8 @@ const Contact = memo(
 							title: "tbd_deny_request_contact",
 							message: "tbd_deny_request_contact_confirmation",
 							cancelText: "tbd_cancel",
-							okText: "tbd_deny_request"
+							okText: "tbd_deny_request",
+							destructive: true
 						})
 					}
 
@@ -518,7 +519,8 @@ const Contact = memo(
 							title: "tbd_cancel_request_contact",
 							message: "tbd_cancel_request_contact_confirmation",
 							cancelText: "tbd_cancel",
-							okText: "tbd_cancel_request"
+							okText: "tbd_cancel_request",
+							destructive: true
 						})
 					}
 
@@ -622,7 +624,8 @@ const Contact = memo(
 								title: "tbd_remove_contact",
 								message: "tbd_remove_contact_confirmation",
 								cancelText: "tbd_cancel",
-								okText: "tbd_remove"
+								okText: "tbd_remove",
+								destructive: true
 							})
 						})
 
@@ -668,7 +671,8 @@ const Contact = memo(
 								title: "tbd_block_contact",
 								message: "tbd_block_contact_confirmation",
 								cancelText: "tbd_cancel",
-								okText: "tbd_block"
+								okText: "tbd_block",
+								destructive: true
 							})
 						})
 
@@ -789,7 +793,8 @@ const Contact = memo(
 								title: "tbd_deny_contact",
 								message: "tbd_deny_contact_confirmation",
 								cancelText: "tbd_cancel",
-								okText: "tbd_deny"
+								okText: "tbd_deny",
+								destructive: true
 							})
 						})
 
@@ -837,7 +842,8 @@ const Contact = memo(
 								title: "tbd_cancel_contact",
 								message: "tbd_cancel_contact_confirmation",
 								cancelText: "tbd_cancel",
-								okText: "tbd_cancel"
+								okText: "tbd_cancel",
+								destructive: true
 							})
 						})
 

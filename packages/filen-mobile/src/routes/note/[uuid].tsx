@@ -101,7 +101,8 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 											title: "tbd_restore_note",
 											message: "tbd_are_you_sure_restore_note",
 											cancelText: "tbd_cancel",
-											okText: "tbd_drestore"
+											okText: "tbd_drestore",
+											destructive: true
 										})
 									})
 

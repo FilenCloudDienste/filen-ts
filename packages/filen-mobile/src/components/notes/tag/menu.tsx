@@ -108,7 +108,8 @@ const Menu = memo(
 								title: "tbd_delete_tag",
 								message: "tbd_are_you_sure_delete_tag",
 								cancelText: "tbd_cancel",
-								okText: "tbd_delete"
+								okText: "tbd_delete",
+								destructive: true
 							})
 						})
 
@@ -287,7 +288,8 @@ const Menu = memo(
 							title: "tbd_delete_tag",
 							message: "tbd_are_you_sure_delete_tag",
 							cancelText: "tbd_cancel",
-							okText: "tbd_delete"
+							okText: "tbd_delete",
+							destructive: true
 						})
 					})
 
