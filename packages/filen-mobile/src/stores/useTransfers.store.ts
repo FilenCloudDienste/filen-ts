@@ -68,10 +68,12 @@ export type Transfer = {
 )
 
 // Speed smoothing. The Rust SDK only emits byte-transferred events when the
-// network delivers a chunk — on slow or jittery connections that produces
-// irregular bursts. A 3-second rolling window over cumulative bytes turns
-// "burst, gap, burst" into a stable bytes/sec figure.
-const SPEED_WINDOW_MS = 3000
+// network delivers a chunk — on slow or jittery mobile connections that
+// produces irregular bursts and brief 1-2 second blips between cell towers.
+// A 5-second rolling window over cumulative bytes turns "burst, gap, burst"
+// into a stable bytes/sec figure and absorbs typical cellular hiccups
+// without flashing through zero.
+const SPEED_WINDOW_MS = 5000
 const STATS_UPDATE_THROTTLE_MS = 100
 
 type Sample = {

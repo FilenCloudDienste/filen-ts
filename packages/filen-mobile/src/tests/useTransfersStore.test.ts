@@ -120,7 +120,7 @@ describe("useTransfersStore", () => {
 			expect(useTransfersStore.getState().stats.speed).toBeGreaterThan(0)
 		})
 
-		it("decays toward 0 once a burst rolls fully out of the 3-second window", () => {
+		it("decays toward 0 once a burst rolls fully out of the rolling window", () => {
 			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("a", 1000000, 0)])
 
 			// Burst at t=100ms
@@ -128,8 +128,9 @@ describe("useTransfersStore", () => {
 			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("a", 1000000, 100000)])
 
 			// Wait long enough for the burst sample to age fully out of the window.
-			// The backstop interval pushes zero-delta samples that crowd the burst out.
-			vi.advanceTimersByTime(4000)
+			// The backstop interval pushes zero-delta samples that crowd the burst
+			// out. Window is 5s; advance well past it.
+			vi.advanceTimersByTime(6000)
 
 			expect(useTransfersStore.getState().stats.speed).toBe(0)
 		})
