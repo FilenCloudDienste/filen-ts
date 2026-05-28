@@ -157,7 +157,6 @@ export const TextEditor = memo(
 					case "ready": {
 						onReady?.()
 
-						useRichtextStore.getState().setFormats({})
 						useTextEditorStore.getState().setReady(true)
 
 						break
@@ -190,6 +189,17 @@ export const TextEditor = memo(
 
 		useEffect(() => {
 			useTextEditorStore.getState().setReady(false)
+
+			// Clear stale format state from any previous richtext editor instance
+			// (the Zustand store is global so it survives mount/unmount). The new
+			// editor's first selection-change event will repopulate with its own
+			// current formats. Belt-and-suspenders cleanup on unmount so a stacked
+			// editor behind this one can't read this editor's last format state.
+			useRichtextStore.getState().setFormats({})
+
+			return () => {
+				useRichtextStore.getState().setFormats({})
+			}
 		}, [])
 
 		// Expose a STABLE dispatch wrapper to the route's header so it can render
