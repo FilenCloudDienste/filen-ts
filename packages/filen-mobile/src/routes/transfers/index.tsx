@@ -19,6 +19,9 @@ import { DirectoryIcon, FileIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import transfersLib from "@/lib/transfers"
 import { driveItemDisplayName } from "@/lib/decryption"
+import { run } from "@filen/utils"
+import prompts from "@/lib/prompts"
+import alerts from "@/lib/alerts"
 
 const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderItemInfo<TTransfer> }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -108,7 +111,28 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 								title: "tbd_cancel",
 								icon: "cancel",
 								destructive: true,
-								onPress: () => {
+								onPress: async () => {
+									const promptResult = await run(async () => {
+										return await prompts.alert({
+											title: "tbd_cancel_transfer",
+											message: "tbd_confirm_cancel_transfer",
+											cancelText: "tbd_cancel",
+											okText: "tbd_cancel_transfer",
+											destructive: true
+										})
+									})
+
+									if (!promptResult.success) {
+										console.error(promptResult.error)
+										alerts.error(promptResult.error)
+
+										return
+									}
+
+									if (promptResult.data.cancelled) {
+										return
+									}
+
 									transfer.abort()
 								}
 							}
@@ -218,7 +242,28 @@ const Transfers = memo(() => {
 												title: "tbd_cancel_all",
 												icon: "cancel",
 												destructive: true,
-												onPress: () => {
+												onPress: async () => {
+													const promptResult = await run(async () => {
+														return await prompts.alert({
+															title: "tbd_cancel_all_transfers",
+															message: "tbd_confirm_cancel_all_transfers",
+															cancelText: "tbd_cancel",
+															okText: "tbd_cancel_all",
+															destructive: true
+														})
+													})
+
+													if (!promptResult.success) {
+														console.error(promptResult.error)
+														alerts.error(promptResult.error)
+
+														return
+													}
+
+													if (promptResult.data.cancelled) {
+														return
+													}
+
 													transfersLib.cancelAll()
 												}
 											}
