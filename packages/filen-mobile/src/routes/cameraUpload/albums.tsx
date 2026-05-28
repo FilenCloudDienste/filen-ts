@@ -7,6 +7,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
 import { Platform, ActivityIndicator, AppState } from "react-native"
+import { router } from "expo-router"
 import useCameraUploadAlbumsQuery from "@/queries/useCameraUploadAlbums.query"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
@@ -45,6 +46,24 @@ const Albums = memo(() => {
 				backgroundColor={Platform.select({
 					ios: undefined,
 					default: bgBackgroundSecondary.color as string | undefined
+				})}
+				leftItems={Platform.select({
+					ios: [
+						{
+							type: "button",
+							icon: {
+								name: "chevron-back-outline",
+								color: textForeground.color,
+								size: 20
+							},
+							props: {
+								onPress: () => {
+									router.back()
+								}
+							}
+						}
+					],
+					default: undefined
 				})}
 			/>
 			<SafeAreaView

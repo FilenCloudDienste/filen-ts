@@ -413,7 +413,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			{
 				type: "button",
 				icon: {
-					name: "chevron-back-outline",
+					name: "close",
 					color: textForeground.color,
 					size: 20
 				},

@@ -128,7 +128,7 @@ const Appearance = memo(() => {
 						{
 							type: "button",
 							icon: {
-								name: "close-outline",
+								name: "close",
 								color: textForeground.color,
 								size: 20
 							},
