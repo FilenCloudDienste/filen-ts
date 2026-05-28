@@ -1,6 +1,6 @@
 import { Fragment, memo } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import StackHeader, { type HeaderItem } from "@/components/ui/header"
+import StackHeader from "@/components/ui/header"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
 import useNotesWithContentQuery from "@/queries/useNotesWithContent.query"
 import { type Note as TNote, type NoteHistory } from "@/types"
@@ -29,7 +29,6 @@ import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
 const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const textForeground = useResolveClassNames("text-foreground")
-	const textPrimary = useResolveClassNames("text-primary")
 	const stringifiedClient = useStringifiedClient()
 	const navigation = useNavigation()
 	const keyboardState = useKeyboardState()
@@ -87,38 +86,8 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 				default: undefined
 			})}
 			rightItems={() => {
-				// Done checkmark for keyboard dismissal — surfaced while editing
-				// alongside (not replacing) the regular right-side items. On
-				// Android, swapping the rightItems wholesale unmounts the
-				// MenuView wrapper for the ellipsis menu and re-mounts it under
-				// the user's finger when the keyboard hides, which makes the
-				// in-flight touch land on the new MenuView and pop the menu.
-				// Keeping the menu always mounted and just prepending Done
-				// avoids the swap entirely.
-				const doneItem: HeaderItem[] = (showToolbar && dispatch)
-					? [
-							{
-								type: "button",
-								icon: {
-									name: "checkmark",
-									color: textPrimary.color,
-									size: 22
-								},
-								props: {
-									hitSlop: 20,
-									onPress: () => {
-										dispatch({
-											type: "dismissKeyboard"
-										})
-									}
-								}
-							}
-						]
-					: []
-
 				if (history) {
 					return [
-						...doneItem,
 						{
 							type: "button",
 							props: {
@@ -178,7 +147,6 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 
 				if (!isInflight) {
 					return [
-						...doneItem,
 						{
 							type: "menu",
 							props: {
@@ -204,7 +172,6 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 				}
 
 				return [
-					...doneItem,
 					{
 						type: "loader",
 						props: {
