@@ -1,8 +1,13 @@
 import * as FileSystem from "expo-file-system"
 import { Platform } from "react-native"
+import { Semaphore } from "@filen/utils"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
+
+// Safety floor for cache budgets. Below this the extension would thrash —
+// thumbnails alone need ~32 MiB to be useful.
+const MIN_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
 
 // secureStore key mirroring auth.json's `providerEnabled` field for fast,
 // reactive UI reads via useSecureStore. enable() / disable() keep it in sync;
@@ -46,6 +51,12 @@ export type AuthFileSchema = {
 }
 
 class FileProvider {
+	// Serializes auth.json writes. enable(), disable(), and setCacheBudget()
+	// all touch the same file via this.write() — without the mutex, a slow
+	// enable() racing setCacheBudget() can leave the JSON half-written or
+	// drop fields.
+	private writeMutex = new Semaphore(1)
+
 	private async read(): Promise<AuthFileSchema | null> {
 		if (!AUTH_FILE.exists) {
 			return null
@@ -76,6 +87,30 @@ class FileProvider {
 		}
 
 		return Math.floor(data.maxCacheFilesBudget + data.maxThumbnailFilesBudget)
+	}
+
+	public async setCacheBudget(totalBytes: number): Promise<void> {
+		if (!Number.isFinite(totalBytes) || totalBytes < MIN_CACHE_BUDGET_BYTES) {
+			throw new Error(`Invalid cache budget: ${totalBytes}`)
+		}
+
+		const current = await this.read()
+
+		if (!current) {
+			throw new Error("setCacheBudget called before enable()")
+		}
+
+		// 25% thumbnails, 75% file cache — preserves the Rust default ratio
+		// (256 MiB : 768 MiB). floor + subtraction guarantees thumb + cache === total
+		// exactly, no rounding overshoot.
+		const thumbnailBudget = Math.floor(totalBytes / 4)
+		const cacheFileBudget = totalBytes - thumbnailBudget
+
+		await this.write({
+			...current,
+			maxThumbnailFilesBudget: thumbnailBudget,
+			maxCacheFilesBudget: cacheFileBudget
+		} satisfies AuthFileSchema)
 	}
 
 	public async disable(): Promise<void> {
@@ -118,13 +153,19 @@ class FileProvider {
 	}
 
 	private async write(data: AuthFileSchema): Promise<void> {
-		if (AUTH_FILE.exists) {
-			AUTH_FILE.delete()
+		await this.writeMutex.acquire()
+
+		try {
+			if (AUTH_FILE.exists) {
+				AUTH_FILE.delete()
+			}
+
+			AUTH_FILE.create()
+
+			AUTH_FILE.write(JSON.stringify(data, null, 4))
+		} finally {
+			this.writeMutex.release()
 		}
-
-		AUTH_FILE.create()
-
-		AUTH_FILE.write(JSON.stringify(data, null, 4))
 	}
 }
 
