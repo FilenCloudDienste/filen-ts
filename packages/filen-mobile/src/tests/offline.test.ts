@@ -60,6 +60,10 @@ vi.mock("@/queries/useDriveItemStoredOffline.query", () => ({
 	driveItemStoredOfflineQueryUpdate: vi.fn()
 }))
 
+vi.mock("@/queries/useDriveItems.query", () => ({
+	driveItemsQueryUpdate: vi.fn()
+}))
+
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (p: string) =>
 		p
@@ -263,6 +267,7 @@ import type { DriveItem } from "@/types"
 import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
 import transfers from "@/lib/transfers"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
+import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import useOfflineStore from "@/stores/useOffline.store"
@@ -1810,6 +1815,211 @@ describe("Offline", () => {
 			expect(invalidatedUuids).toContain(nestedFileUuid)
 			expect(invalidatedUuids).toContain(nestedSubdirUuid)
 			expect(invalidatedUuids).toContain(dirUuid)
+		})
+
+		it("optimistically prunes the /offline virtual-root listing when removing a stored file", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "tracked.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+			const survivorUuid = "33333333-3333-3333-3333-333333333333"
+			const survivorItem = makeFileItem(survivorUuid, "survivor.txt")
+
+			writeFileData(uuid, "tracked.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			vi.mocked(driveItemsQueryUpdate).mockClear()
+
+			await offline.removeItem(fileItem)
+
+			// The optimistic update targets the offline virtual-root path.
+			const offlineRootCalls = vi
+				.mocked(driveItemsQueryUpdate)
+				.mock.calls.filter(([arg]) => arg.params.path.type === "offline" && arg.params.path.uuid === null)
+
+			expect(offlineRootCalls).toHaveLength(1)
+
+			// The updater must remove only the targeted uuid, leaving everything else intact,
+			// and pass through non-array prev untouched (e.g., uninitialized cache).
+			const [{ updater }] = offlineRootCalls[0]!
+
+			if (typeof updater !== "function") {
+				throw new Error("Expected updater to be a function")
+			}
+
+			const seeded: DriveItem[] = [fileItem, survivorItem]
+			const pruned = updater(seeded) as DriveItem[]
+
+			expect(pruned).toEqual([survivorItem])
+			expect(updater(undefined as unknown as DriveItem[])).toBeUndefined()
+		})
+
+		it("optimistically prunes the /offline virtual-root listing when removing a stored directory", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const dirItem = makeDirItem(dirUuid, "my-dir")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+			const survivorUuid = "33333333-3333-3333-3333-333333333333"
+			const survivorItem = makeFileItem(survivorUuid, "survivor.txt")
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			vi.mocked(driveItemsQueryUpdate).mockClear()
+
+			await offline.removeItem(dirItem)
+
+			const offlineRootCalls = vi
+				.mocked(driveItemsQueryUpdate)
+				.mock.calls.filter(([arg]) => arg.params.path.type === "offline" && arg.params.path.uuid === null)
+
+			expect(offlineRootCalls).toHaveLength(1)
+
+			const [{ updater }] = offlineRootCalls[0]!
+
+			if (typeof updater !== "function") {
+				throw new Error("Expected updater to be a function")
+			}
+
+			const seeded: DriveItem[] = [dirItem, survivorItem]
+
+			expect(updater(seeded) as DriveItem[]).toEqual([survivorItem])
+		})
+	})
+
+	describe("isItemTopLevelStoredSync after updateIndex", () => {
+		it("returns true for a top-level standalone file", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "standalone.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeFileData(uuid, "standalone.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// After updateIndex, both indexCache and uuidToTopLevelCache must be warm.
+			// Before the fix, uuidToTopLevelCache was lazy-built and this returned undefined.
+			expect(offline.isItemTopLevelStoredSync(fileItem)).toBe(true)
+		})
+
+		it("returns true for a top-level stored directory", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const dirItem = makeDirItem(dirUuid, "my-dir")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(offline.isItemTopLevelStoredSync(dirItem)).toBe(true)
+		})
+
+		it("returns false for a nested file inside a stored directory (cannot be individually removed)", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const nestedFileUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "my-dir")
+			const nestedFile = makeFileItem(nestedFileUuid, "nested.txt")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/nested.txt": { item: nestedFile }
+				}
+			})
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data/nested.txt`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Nested children are flattened into index.files by updateIndex,
+			// but isItemTopLevelStoredSync correctly distinguishes them via
+			// uuidToTopLevelCache. The "Remove offline" menu entry must stay hidden
+			// for nested items in /drive, /favorites etc.
+			expect(offline.isItemTopLevelStoredSync(nestedFile)).toBe(false)
+			// The owning top-level directory still reports true.
+			expect(offline.isItemTopLevelStoredSync(dirItem)).toBe(true)
+		})
+
+		it("returns false for a nested directory inside a stored directory", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const nestedSubdirUuid = "22222222-2222-2222-2222-222222222222"
+			const dirItem = makeDirItem(dirUuid, "my-dir")
+			const nestedSubdir = makeDirItem(nestedSubdirUuid, "sub-dir")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/sub-dir": { item: nestedSubdir }
+				}
+			})
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}/data`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(offline.isItemTopLevelStoredSync(nestedSubdir)).toBe(false)
+		})
+
+		it("returns false for an item that is not stored at all", async () => {
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			const unstoredFile = makeFileItem("99999999-9999-9999-9999-999999999999", "nope.txt")
+
+			expect(offline.isItemTopLevelStoredSync(unstoredFile)).toBe(false)
+		})
+
+		it("returns the correct value after isItemStored() warms the caches (no updateIndex needed)", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "standalone.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeFileData(uuid, "standalone.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			// Pre-seed an index on disk so isItemStored has something to read.
+			writeIndex({
+				files: {
+					[uuid]: { item: fileItem, parent }
+				},
+				directories: {}
+			})
+
+			const offline = await createOffline()
+
+			// Defensive warming: isItemStored() now also primes uuidToTopLevelCache.
+			// Without that warm path, the sync top-level check would return undefined
+			// until something else (e.g. updateIndex) ran.
+			await offline.isItemStored(fileItem)
+
+			expect(offline.isItemTopLevelStoredSync(fileItem)).toBe(true)
 		})
 	})
 

@@ -42,6 +42,7 @@ import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/stores/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
+import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import {
 	OFFLINE_VERSION,
 	OFFLINE_DIRECTORY,
@@ -360,6 +361,14 @@ export class Offline {
 				this.atomicWrite(INDEX_FILE, serialize(index satisfies Index))
 
 				this.indexCache = index
+
+				// Eagerly warm uuidToTopLevelCache so the sync isItemTopLevelStoredSync
+				// used by drive item menus returns a defined answer immediately after
+				// boot, not after the per-row isStoredOffline query lazily triggers it.
+				// We just walked every top-level directory above; this re-reads their
+				// meta but is the price for a clean cache invariant: "indexCache set
+				// ⇒ uuidToTopLevelCache set".
+				await this.buildUuidToTopLevelIndex()
 			},
 			{
 				throw: true
@@ -488,6 +497,11 @@ export class Offline {
 		this.ensureDirectories()
 
 		const index = await this.readIndex()
+
+		// Warm uuidToTopLevelCache too — the sync isItemTopLevelStoredSync check
+		// used by drive item menus depends on BOTH this cache AND indexCache.
+		// Idempotent: short-circuits once populated.
+		await this.buildUuidToTopLevelIndex()
 
 		switch (item.type) {
 			case "directory":
@@ -2284,6 +2298,28 @@ export class Offline {
 
 			if (didDelete) {
 				await this.updateIndex()
+
+				// Optimistically prune the /offline virtual-root listing so the row
+				// disappears without waiting for the next mount-driven refetch.
+				// removeItem only operates on top-level entries, so the root list is
+				// the only place where the removed item is directly visible; nested
+				// children already had their per-item driveItemStoredOfflineQuery
+				// invalidated above.
+				driveItemsQueryUpdate({
+					params: {
+						path: {
+							type: "offline",
+							uuid: null
+						}
+					},
+					updater: prev => {
+						if (!Array.isArray(prev)) {
+							return prev
+						}
+
+						return prev.filter(driveItem => driveItem.data.uuid !== item.data.uuid)
+					}
+				})
 			}
 
 			driveItemStoredOfflineQueryUpdate({
