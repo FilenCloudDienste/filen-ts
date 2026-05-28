@@ -67,7 +67,37 @@ export type Transfer = {
 	  }
 )
 
+// Speed smoothing. The Rust SDK only emits byte-transferred events when the
+// network delivers a chunk — on slow or jittery connections that produces
+// irregular bursts. A 3-second rolling window over cumulative bytes turns
+// "burst, gap, burst" into a stable bytes/sec figure.
+const SPEED_WINDOW_MS = 3000
+const STATS_UPDATE_THROTTLE_MS = 100
+
+type Sample = {
+	time: number
+	cumulativeBytes: number
+}
+
+// Module-level speed state, isolated from the React store. None of this is
+// consumed by UI; it just produces the smoothed `speed` value.
 let interval: ReturnType<typeof setInterval> | undefined
+let nextUpdateAt = 0
+let lastTotalBytes = 0
+let cumulativeBytes = 0
+let samples: Sample[] = []
+
+function resetSpeedState(): void {
+	if (interval) {
+		clearInterval(interval)
+		interval = undefined
+	}
+
+	nextUpdateAt = 0
+	lastTotalBytes = 0
+	cumulativeBytes = 0
+	samples = []
+}
 
 function updateTransfers({
 	transfers,
@@ -83,59 +113,131 @@ function updateTransfers({
 } {
 	const now = Date.now()
 
-	if (transfers.length === 0 && interval) {
-		clearInterval(interval)
+	// Tear down when the batch finishes.
+	if (transfers.length === 0) {
+		resetSpeedState()
 
-		interval = undefined
+		if (state.stats.count === 0 && state.stats.progress === 0 && state.stats.speed === 0) {
+			return {
+				transfers,
+				stats: state.stats
+			}
+		}
+
+		return {
+			transfers,
+			stats: {
+				progress: 0,
+				speed: 0,
+				count: 0
+			}
+		}
 	}
 
-	if (!interval && transfers.length > 0) {
+	// Spin up the back-stop interval when a new batch starts. Without it, a
+	// long pause between SDK events would freeze the displayed stats; the
+	// interval keeps advancing the speed window so speed decays naturally
+	// toward 0 on a stalled connection.
+	if (!interval) {
 		interval = setInterval(() => {
-			useTransfersStore.setState(state =>
+			useTransfersStore.setState(s =>
 				updateTransfers({
-					transfers: state.transfers,
-					state,
+					transfers: s.transfers,
+					state: s,
 					addToNextUpdateAt: false
 				})
 			)
-		}, 100)
+		}, STATS_UPDATE_THROTTLE_MS)
+
+		// Establish a baseline anchor so the first measured interval produces
+		// a meaningful (non-spike) speed.
+		nextUpdateAt = 0
+		lastTotalBytes = 0
+		cumulativeBytes = 0
+		samples = [
+			{
+				time: now,
+				cumulativeBytes: 0
+			}
+		]
 	}
 
-	if (now < state.stats.nextUpdateAt) {
+	// Throttle stats updates to a fixed cadence. SDK-driven calls advance the
+	// throttle so a flood of byte events doesn't recompute N times per second;
+	// interval-driven calls don't, so an SDK event can squeeze in if it
+	// arrives shortly after the interval has already fired.
+	if (now < nextUpdateAt) {
 		return {
 			transfers,
 			stats: state.stats
 		}
 	}
 
-	let activeTransfersTotalBytesTransferred = 0
-	let activeTransfersTotalSize = 0
-	let pausedTransfersCount = 0
+	let totalBytesTransferred = 0
+	let totalSize = 0
+	let pausedCount = 0
 
 	for (const transfer of transfers) {
-		activeTransfersTotalBytesTransferred += transfer.bytesTransferred
-		activeTransfersTotalSize += transfer.size
+		totalBytesTransferred += transfer.bytesTransferred
+		totalSize += transfer.size
 
 		if (transfer.paused) {
-			pausedTransfersCount++
+			pausedCount++
 		}
 	}
 
-	const bytesDelta = activeTransfersTotalBytesTransferred - state.stats.lastBytesTransferred
-	const timeDelta = now - (state.stats.lastUpdateTime === 0 ? now - 1000 : state.stats.lastUpdateTime)
+	// Append a cumulative-bytes sample. Clamping at 0 handles the brief moment
+	// when a completed transfer is removed from the array before a new one's
+	// bytes catch up — cumulativeBytes never decreases, so window deltas are
+	// always a meaningful "bytes transferred since N seconds ago".
+	const delta = Math.max(0, totalBytesTransferred - lastTotalBytes)
+
+	cumulativeBytes += delta
+	lastTotalBytes = totalBytesTransferred
+
+	samples.push({
+		time: now,
+		cumulativeBytes
+	})
+
+	// Trim samples older than the window. Keep at least one sample so the
+	// window always has an anchor to compute a delta against.
+	const cutoff = now - SPEED_WINDOW_MS
+	let dropCount = 0
+
+	while (dropCount < samples.length - 1 && (samples[dropCount] as Sample).time < cutoff) {
+		dropCount++
+	}
+
+	if (dropCount > 0) {
+		samples = samples.slice(dropCount)
+	}
+
+	let speed = 0
+
+	if (pausedCount < transfers.length && samples.length >= 2) {
+		const oldest = samples[0] as Sample
+		const newest = samples[samples.length - 1] as Sample
+		const timeDelta = newest.time - oldest.time
+
+		if (timeDelta > 0) {
+			// (bytes_in_window * 1000) / window_span_ms = bytes/sec
+			speed = ((newest.cumulativeBytes - oldest.cumulativeBytes) * 1000) / timeDelta
+		}
+	}
+
+	const progress = totalSize > 0 ? Math.min(1, Math.max(0, totalBytesTransferred / totalSize)) : 0
+
+	if (addToNextUpdateAt) {
+		nextUpdateAt = now + STATS_UPDATE_THROTTLE_MS
+	}
 
 	return {
 		transfers,
 		stats: {
-			speed: pausedTransfersCount === transfers.length ? 0 : timeDelta > 0 ? Math.max(0, bytesDelta / timeDelta) : 0,
-			lastBytesTransferred: activeTransfersTotalBytesTransferred,
-			lastUpdateTime: now,
-			progress:
-				activeTransfersTotalSize > 0
-					? Math.min(1, Math.max(0, activeTransfersTotalBytesTransferred / activeTransfersTotalSize))
-					: 0,
-			count: transfers.length,
-			nextUpdateAt: addToNextUpdateAt ? now + 100 : state.stats.nextUpdateAt
+			progress,
+			speed,
+			count: transfers.length
 		}
 	}
 }
@@ -145,10 +247,7 @@ export type TransfersStore = {
 	stats: {
 		progress: number
 		speed: number
-		lastBytesTransferred: number
-		lastUpdateTime: number
 		count: number
-		nextUpdateAt: number
 	}
 	setTransfers: (fn: Transfer[] | ((prev: Transfer[]) => Transfer[])) => void
 }
@@ -158,10 +257,7 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 	stats: {
 		progress: 0,
 		speed: 0,
-		lastBytesTransferred: 0,
-		lastUpdateTime: 0,
-		count: 0,
-		nextUpdateAt: 0
+		count: 0
 	} satisfies TransfersStore["stats"],
 	setTransfers(fn) {
 		set(state => {
