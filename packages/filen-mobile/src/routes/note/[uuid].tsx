@@ -44,7 +44,14 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 					{
 						type: "button",
 						icon: {
-							name: "close",
+							// /note/[uuid] is reached two ways:
+							//   - from /tabs/notes — push onto the tab's stack. Tapping the left
+							//     button should pop back to the list (chevron-back-outline).
+							//   - from /noteHistory (a modal) — when the user taps a history
+							//     entry, the same route renders with the `history` param set,
+							//     stacking on top of the history modal. Tapping the left button
+							//     dismisses back to history (close).
+							name: history ? "close" : "chevron-back-outline",
 							color: textForeground.color,
 							size: 20
 						},
