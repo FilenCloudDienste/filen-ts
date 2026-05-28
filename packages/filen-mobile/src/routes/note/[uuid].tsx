@@ -21,12 +21,19 @@ import { deserialize } from "@/lib/serializer"
 import { createMenuButtons } from "@/components/notes/note/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import DismissStack from "@/components/dismissStack"
+import { useKeyboardState } from "react-native-keyboard-controller"
+import { NoteType } from "@filen/sdk-rs"
+import useTextEditorStore from "@/stores/useTextEditor.store"
+import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
 
 const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const textForeground = useResolveClassNames("text-foreground")
+	const textPrimary = useResolveClassNames("text-primary")
 	const stringifiedClient = useStringifiedClient()
 	const navigation = useNavigation()
+	const keyboardState = useKeyboardState()
+	const dispatch = useTextEditorStore(state => state.dispatch)
 
 	const writeAccess =
 		note.ownerId === stringifiedClient?.userId ||
@@ -34,9 +41,24 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 
 	const isOwner = note.ownerId === stringifiedClient?.userId
 
+	// Swap the header title for the rich-text toolbar while the user is
+	// typing. Gated on:
+	//   - keyboard visible (so we don't steal title space when not editing)
+	//   - !history (history is read-only — no edits possible)
+	//   - noteType is Rich (text/markdown/code/checklist use other UI)
+	//   - dispatch is non-null (TextEditor is mounted and reachable)
+	const showToolbar =
+		keyboardState.isVisible && !history && note.noteType === NoteType.Rich && dispatch !== null
+
 	return (
 		<StackHeader
-			title={history ? simpleDate(Number(history.editedTimestamp)) : noteDisplayTitle(note)}
+			title={
+				showToolbar && dispatch
+					? () => <RichTextHeaderToolbar dispatch={dispatch} />
+					: history
+						? simpleDate(Number(history.editedTimestamp))
+						: noteDisplayTitle(note)
+			}
 			backVisible={true}
 			transparent={Platform.OS === "ios"}
 			leftItems={Platform.select({
@@ -65,6 +87,31 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 				default: undefined
 			})}
 			rightItems={() => {
+				// While the toolbar is in the title slot, surface a Done checkmark
+				// so the user can dismiss the keyboard without losing their place.
+				// Replaces the note's menu / loader for the duration of editing —
+				// they come back the moment the keyboard closes.
+				if (showToolbar && dispatch) {
+					return [
+						{
+							type: "button",
+							icon: {
+								name: "checkmark",
+								color: textPrimary.color,
+								size: 22
+							},
+							props: {
+								hitSlop: 20,
+								onPress: () => {
+									dispatch({
+										type: "dismissKeyboard"
+									})
+								}
+							}
+						}
+					]
+				}
+
 				if (history) {
 					return [
 						{

@@ -6,7 +6,6 @@ import { useNativeDomEvents, type DOMRef } from "@/hooks/useDomEvents/useNativeD
 import { Platform } from "react-native"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import useRichtextStore from "@/stores/useRichtext.store"
-import RichTextEditorToolbar from "@/components/textEditor/richText/toolbar"
 import MarkdownPreviewButton from "@/components/textEditor/markdownPreviewButton"
 import { useSecureStore } from "@/lib/secureStore"
 import * as ExpoLinking from "expo-linking"
@@ -112,7 +111,6 @@ export const TextEditor = memo(
 		initialValue,
 		onValueChange,
 		placeholder,
-		disableRichtextToolbar,
 		type,
 		readOnly,
 		onReady,
@@ -125,7 +123,6 @@ export const TextEditor = memo(
 		initialValue?: string
 		onValueChange?: (value: string) => void
 		placeholder?: string
-		disableRichtextToolbar?: boolean
 		type: TextEditorType
 		readOnly?: boolean
 		onReady?: () => void
@@ -194,6 +191,33 @@ export const TextEditor = memo(
 		useEffect(() => {
 			useTextEditorStore.getState().setReady(false)
 		}, [])
+
+		// Expose a STABLE dispatch wrapper to the route's header so it can render
+		// the rich-text toolbar inside the navigation bar. postMessage itself is
+		// re-created every render (onMessage is an inline closure), so we keep
+		// the latest in a ref and publish a single stable wrapper to the store.
+		// Cleared on unmount to prevent stale-closure invocations.
+		const postMessageRef = useRef(postMessage)
+
+		useEffect(() => {
+			postMessageRef.current = postMessage
+		}, [postMessage])
+
+		useEffect(() => {
+			if (type !== "richtext" || readOnly) {
+				return
+			}
+
+			const stableDispatch = (event: TextEditorEvents) => {
+				postMessageRef.current(event)
+			}
+
+			useTextEditorStore.getState().setDispatch(stableDispatch)
+
+			return () => {
+				useTextEditorStore.getState().setDispatch(null)
+			}
+		}, [type, readOnly])
 
 		return (
 			<Fragment>
@@ -280,7 +304,6 @@ export const TextEditor = memo(
 						</View>
 					)}
 				</KeyboardAvoidingView>
-				{!disableRichtextToolbar && type === "richtext" && !readOnly && <RichTextEditorToolbar postMessage={postMessage} />}
 				{!disableMarkdownPreview && type === "markdown" && <MarkdownPreviewButton id={id ?? "textEditor"} />}
 			</Fragment>
 		)

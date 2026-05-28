@@ -1,9 +1,7 @@
 import { Fragment, memo } from "react"
-import View, { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
+import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { useKeyboardState } from "react-native-keyboard-controller"
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import useRichtextStore from "@/stores/useRichtext.store"
@@ -13,22 +11,27 @@ import type { QuillFormats } from "@/components/textEditor/richText/dom"
 import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
 import * as Linking from "expo-linking"
-import useTextEditorStore from "@/stores/useTextEditor.store"
 
-const ICON_SIZE = 18
+// Compact sizing tuned for the native stack header bar (~44pt iOS / ~56dp
+// Android). Slightly smaller than the old floating toolbar so all 9 buttons
+// fit inside the title slot's horizontal budget on common phone widths; a
+// ScrollView absorbs the rest on narrow devices.
+const ICON_SIZE = 16
+const BUTTON_CLASS = "flex-row items-center justify-center shrink-0 size-8"
 
 const Button = memo(
-	({ type, postMessage }: { type: keyof QuillFormats | "keyboard"; postMessage: (message: TextEditorEvents) => void }) => {
+	({
+		type,
+		dispatch
+	}: {
+		type: keyof QuillFormats
+		dispatch: (event: TextEditorEvents) => void
+	}) => {
 		const formats = useRichtextStore(useShallow(state => state.formats))
 		const textForeground = useResolveClassNames("text-foreground")
 		const textPrimary = useResolveClassNames("text-primary")
-		const keyboardState = useKeyboardState()
 
 		const menuButtons = ((): MenuButton[] => {
-			if (!keyboardState.isVisible) {
-				return []
-			}
-
 			switch (type) {
 				case "header": {
 					return [
@@ -37,7 +40,7 @@ const Button = memo(
 							title: "1",
 							icon: "headerH" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleHeader",
 									data: 1
 								})
@@ -48,7 +51,7 @@ const Button = memo(
 							title: "2",
 							icon: "headerH" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleHeader",
 									data: 2
 								})
@@ -59,7 +62,7 @@ const Button = memo(
 							title: "3",
 							icon: "headerH" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleHeader",
 									data: 3
 								})
@@ -70,7 +73,7 @@ const Button = memo(
 							title: "4",
 							icon: "headerH" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleHeader",
 									data: 4
 								})
@@ -81,7 +84,7 @@ const Button = memo(
 							title: "5",
 							icon: "headerH" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleHeader",
 									data: 5
 								})
@@ -92,7 +95,7 @@ const Button = memo(
 							title: "6",
 							icon: "headerH" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleHeader",
 									data: 6
 								})
@@ -103,7 +106,7 @@ const Button = memo(
 							title: "normal",
 							icon: "text" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillRemoveHeader"
 								})
 							}
@@ -152,7 +155,7 @@ const Button = memo(
 											return
 										}
 
-										postMessage({
+										dispatch({
 											type: "quillAddLink",
 											data: response.value.trim().toLowerCase()
 										})
@@ -168,7 +171,7 @@ const Button = memo(
 									return
 								}
 
-								postMessage({
+								dispatch({
 									type: "quillRemoveLink"
 								})
 							}
@@ -183,7 +186,7 @@ const Button = memo(
 							title: "tbd_ordered",
 							icon: "listOrdered" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleList",
 									data: "ordered"
 								})
@@ -194,7 +197,7 @@ const Button = memo(
 							title: "tbd_bullet",
 							icon: "listBullet" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleList",
 									data: "bullet"
 								})
@@ -205,7 +208,7 @@ const Button = memo(
 							title: "tbd_checklist",
 							icon: "checklist" as const,
 							onPress: () => {
-								postMessage({
+								dispatch({
 									type: "quillToggleList",
 									data: "checklist"
 								})
@@ -218,7 +221,7 @@ const Button = memo(
 										title: "tbd_remove",
 										icon: "minus" as const,
 										onPress: () => {
-											postMessage({
+											dispatch({
 												type: "quillRemoveList"
 											})
 										}
@@ -237,7 +240,7 @@ const Button = memo(
 		const onPress = () => {
 			switch (type) {
 				case "bold": {
-					postMessage({
+					dispatch({
 						type: "quillToggleBold"
 					})
 
@@ -245,7 +248,7 @@ const Button = memo(
 				}
 
 				case "italic": {
-					postMessage({
+					dispatch({
 						type: "quillToggleItalic"
 					})
 
@@ -253,16 +256,8 @@ const Button = memo(
 				}
 
 				case "underline": {
-					postMessage({
+					dispatch({
 						type: "quillToggleUnderline"
-					})
-
-					break
-				}
-
-				case "keyboard": {
-					postMessage({
-						type: "dismissKeyboard"
 					})
 
 					break
@@ -286,7 +281,7 @@ const Button = memo(
 								return
 							}
 
-							postMessage({
+							dispatch({
 								type: "quillAddLink",
 								data: response.value.trim().toLowerCase()
 							})
@@ -296,7 +291,7 @@ const Button = memo(
 				}
 
 				case "code-block": {
-					postMessage({
+					dispatch({
 						type: "quillToggleCodeBlock"
 					})
 
@@ -304,7 +299,7 @@ const Button = memo(
 				}
 
 				case "blockquote": {
-					postMessage({
+					dispatch({
 						type: "quillToggleBlockquote"
 					})
 
@@ -321,18 +316,12 @@ const Button = memo(
 			>
 				<PressableOpacity
 					rippleColor="transparent"
-					className="flex-row items-center justify-center shrink-0 size-9"
+					className={BUTTON_CLASS}
 					enabled={menuButtons.length === 0}
 					onPress={onPress}
 					hitSlop={5}
 				>
-					{type === "keyboard" ? (
-						<FontAwesome6
-							name="check"
-							size={ICON_SIZE}
-							color={textPrimary.color}
-						/>
-					) : type === "header" ? (
+					{type === "header" ? (
 						<Fragment>
 							<FontAwesome6
 								name="heading"
@@ -340,7 +329,7 @@ const Button = memo(
 								color={formats[type] ? (textPrimary.color as string) : (textForeground.color as string)}
 							/>
 							{formats[type] && (
-								<View className="flex-row items-center justify-center absolute rounded-full size-4 -mt-5 -mr-5 overflow-hidden bg-background-secondary border border-border">
+								<View className="flex-row items-center justify-center absolute rounded-full size-4 -mt-4 -mr-4 overflow-hidden bg-background-secondary border border-border">
 									<Text className="text-foreground text-xs">{formats[type]}</Text>
 								</View>
 							)}
@@ -386,69 +375,51 @@ const Button = memo(
 	}
 )
 
-const Toolbar = memo(({ postMessage }: { postMessage: (message: TextEditorEvents) => void }) => {
-	const insets = useSafeAreaInsets()
-	const keyboardState = useKeyboardState()
-	const textEditorReady = useTextEditorStore(useShallow(state => state.ready))
-
-	if (!textEditorReady) {
-		return null
-	}
-
+// Compact horizontal strip rendered inside the navigation header's title slot
+// while the user is typing in a rich-text note. Scrolls horizontally as a
+// safety net on narrow phones — the natural width (~250pt) fits inside the
+// iOS title slot (~300pt usable) on every modern iPhone without scrolling.
+export const RichTextHeaderToolbar = memo(({ dispatch }: { dispatch: (event: TextEditorEvents) => void }) => {
 	return (
-		<KeyboardStickyView
-			className="bg-transparent absolute left-0 right-0 bottom-0"
-			offset={{
-				opened: 0,
-				closed: -(insets.bottom + 8)
-			}}
+		<GestureHandlerScrollView
+			horizontal={true}
+			showsHorizontalScrollIndicator={false}
+			contentContainerClassName="flex-row items-center"
 		>
-			{keyboardState.isVisible && (
-				<View className="px-4 py-2 bg-transparent flex-row items-center justify-between gap-4">
-					<CrossGlassContainerView className="shrink-0 flex-row items-center p-2 h-9">
-						<Button
-							type="header"
-							postMessage={postMessage}
-						/>
-						<Button
-							type="bold"
-							postMessage={postMessage}
-						/>
-						<Button
-							type="italic"
-							postMessage={postMessage}
-						/>
-						<Button
-							type="underline"
-							postMessage={postMessage}
-						/>
-						<Button
-							type="code-block"
-							postMessage={postMessage}
-						/>
-						<Button
-							type="link"
-							postMessage={postMessage}
-						/>
-						<Button
-							type="blockquote"
-							postMessage={postMessage}
-						/>
-						<Button
-							type="list"
-							postMessage={postMessage}
-						/>
-					</CrossGlassContainerView>
-					<CrossGlassContainerView className="shrink-0 size-9 flex-row items-center justify-center">
-						<Button
-							type="keyboard"
-							postMessage={postMessage}
-						/>
-					</CrossGlassContainerView>
-				</View>
-			)}
-		</KeyboardStickyView>
+			<Button
+				type="header"
+				dispatch={dispatch}
+			/>
+			<Button
+				type="bold"
+				dispatch={dispatch}
+			/>
+			<Button
+				type="italic"
+				dispatch={dispatch}
+			/>
+			<Button
+				type="underline"
+				dispatch={dispatch}
+			/>
+			<Button
+				type="code-block"
+				dispatch={dispatch}
+			/>
+			<Button
+				type="link"
+				dispatch={dispatch}
+			/>
+			<Button
+				type="blockquote"
+				dispatch={dispatch}
+			/>
+			<Button
+				type="list"
+				dispatch={dispatch}
+			/>
+		</GestureHandlerScrollView>
 	)
 })
 
-export default Toolbar
+export default RichTextHeaderToolbar
