@@ -47,7 +47,7 @@ const AudioSlot = memo(() => {
 
 	return (
 		<PressableScale
-			className="flex-1 flex-row items-center px-3 py-2 gap-2 min-h-9"
+			className="flex-1 flex-row items-center px-3 py-2 gap-2 min-h-11"
 			rippleColor="transparent"
 			onPress={onBodyPress}
 		>

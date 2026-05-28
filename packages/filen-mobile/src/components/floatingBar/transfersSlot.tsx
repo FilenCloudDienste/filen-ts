@@ -24,15 +24,13 @@ const TransfersSlot = memo(() => {
 		return null
 	}
 
-	const onPress = () => {
-		router.push("/transfers")
-	}
-
 	return (
 		<PressableScale
-			className="flex-1 flex-col overflow-hidden min-h-9"
+			className="flex-1 flex-col overflow-hidden min-h-11"
 			rippleColor="transparent"
-			onPress={onPress}
+			onPress={() => {
+				router.push("/transfers")
+			}}
 		>
 			<View className="flex-row items-center justify-between bg-transparent px-3 py-2 gap-3 flex-1">
 				<Text
