@@ -1,4 +1,4 @@
-import { Fragment, memo } from "react"
+import { Fragment, memo, useEffect, useState } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
@@ -47,8 +47,33 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 	//   - !history (history is read-only — no edits possible)
 	//   - noteType is Rich (text/markdown/code/checklist use other UI)
 	//   - dispatch is non-null (TextEditor is mounted and reachable)
-	const showToolbar =
+	const shouldShowToolbar =
 		keyboardState.isVisible && !history && note.noteType === NoteType.Rich && dispatch !== null
+
+	// Show transitions are immediate; hide transitions debounce by ~300ms.
+	// react-native-keyboard-controller flips isVisible at the START of the
+	// keyboard dismiss animation, before the user's touch-up on the ✓ Done
+	// button has even registered. Swapping rightItems back to the ellipsis
+	// menu in that window lets the touch-up land on the menu and open it.
+	// Holding the toolbar for 300ms outlasts both the keyboard animation
+	// and any tap-up race.
+	const [showToolbar, setShowToolbar] = useState(false)
+
+	useEffect(() => {
+		if (shouldShowToolbar) {
+			setShowToolbar(true)
+
+			return
+		}
+
+		const timer = setTimeout(() => {
+			setShowToolbar(false)
+		}, 300)
+
+		return () => {
+			clearTimeout(timer)
+		}
+	}, [shouldShowToolbar])
 
 	return (
 		<StackHeader
