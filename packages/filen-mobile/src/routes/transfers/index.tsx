@@ -1,4 +1,4 @@
-import { memo, Fragment, useState } from "react"
+import { memo, Fragment } from "react"
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -73,7 +73,11 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 							color={textForeground.color}
 						/>
 					) : (
-						<Text>{Math.min(100, Math.max(0, (transfer.bytesTransferred / transfer.size) * 100)).toFixed(0)}%</Text>
+						<Text>
+							{transfer.size > 0
+								? `${Math.min(100, Math.max(0, (transfer.bytesTransferred / transfer.size) * 100)).toFixed(0)}%`
+								: "0%"}
+						</Text>
 					)}
 					<Menu
 						type="dropdown"
@@ -103,6 +107,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 								id: "cancel",
 								title: "tbd_cancel",
 								icon: "cancel",
+								destructive: true,
 								onPress: () => {
 									transfer.abort()
 								}
@@ -130,7 +135,11 @@ const Transfers = memo(() => {
 	const insets = useSafeAreaInsets()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const [allPaused, setAllPaused] = useState<boolean>(false)
+
+	// Derive the pause-all state from the live transfers array so that closing
+	// and reopening the modal reflects truth — local component state would be
+	// reset to false on remount even if every transfer is actually paused.
+	const allPaused = transfers.length > 0 && transfers.every(t => t.paused)
 
 	return (
 		<Fragment>
@@ -177,9 +186,14 @@ const Transfers = memo(() => {
 															title: "tbd_resume_all",
 															icon: "play" as const,
 															onPress: () => {
-																transfersLib.resumeAll()
-
-																setAllPaused(false)
+																// Iterate per-transfer instead of resuming the
+																// global signal: the store's `paused` flag is
+																// driven by the per-transfer signal, so a global
+																// resume would leave individually-paused transfers
+																// stuck (store says resumed, SDK still paused).
+																for (const transfer of transfers) {
+																	transfer.resume()
+																}
 															}
 														}
 													]
@@ -189,9 +203,13 @@ const Transfers = memo(() => {
 															title: "tbd_pause_all",
 															icon: "pause" as const,
 															onPress: () => {
-																transfersLib.pauseAll()
-
-																setAllPaused(true)
+																// Same reason — iterate per-transfer so the
+																// per-transfer signal stays in sync with the store
+																// and so the global pause signal doesn't stay
+																// sticky and silently pause future uploads.
+																for (const transfer of transfers) {
+																	transfer.pause()
+																}
 															}
 														}
 													]),
@@ -199,6 +217,7 @@ const Transfers = memo(() => {
 												id: "abortAll",
 												title: "tbd_cancel_all",
 												icon: "cancel",
+												destructive: true,
 												onPress: () => {
 													transfersLib.cancelAll()
 												}
