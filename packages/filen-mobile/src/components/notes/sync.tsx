@@ -192,7 +192,22 @@ export class Sync {
 	}
 
 	public executeNow(): void {
-		this.syncTimeout?.execute()
+		// Fall through to a direct sync() when no debounce is queued. This
+		// catches the cold-start + offline + reconnect case: restoreFromDisk
+		// runs sync() at boot, which bails because we're offline, but does NOT
+		// schedule a debounce — so when the reconnect listener later calls
+		// executeNow() there's nothing for the timeout's execute() to fire.
+		// Without this fallthrough, inflight from the previous session would
+		// sit on disk forever until the user typed (which retriggers
+		// syncDebounced) or backgrounded/foregrounded the app at the right
+		// moment.
+		if (this.syncTimeout) {
+			this.syncTimeout.execute()
+
+			return
+		}
+
+		this.sync().catch(console.error)
 	}
 }
 
