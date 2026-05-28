@@ -1,8 +1,6 @@
 import { Fragment, memo } from "react"
 import { useShallow } from "zustand/shallow"
-import { FadeInDown, FadeOutDown, LinearTransition } from "react-native-reanimated"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { AnimatedView } from "@/components/ui/animated"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useAudio } from "@/lib/audio"
 import useTransfersStore from "@/stores/useTransfers.store"
@@ -10,8 +8,6 @@ import useFloatingBarOffset from "@/hooks/useFloatingBarOffset"
 import AudioSlot from "@/components/floatingBar/audioSlot"
 import TransfersSlot from "@/components/floatingBar/transfersSlot"
 import Separator from "@/components/floatingBar/separator"
-
-const SLOT_LAYOUT = LinearTransition.duration(240)
 
 const FloatingBar = memo(() => {
 	const insets = useSafeAreaInsets()
@@ -35,29 +31,19 @@ const FloatingBar = memo(() => {
 				paddingRight: insets.right > 0 ? insets.right : 16
 			}}
 		>
-			<CrossGlassContainerView className="overflow-hidden flex-row items-stretch min-h-9">
+			<CrossGlassContainerView className="overflow-hidden flex-row items-stretch min-h-11">
 				{audioActive ? (
-					<AnimatedView
-						className="flex-1"
-						layout={SLOT_LAYOUT}
-						entering={FadeInDown.duration(220)}
-						exiting={FadeOutDown.duration(160)}
-					>
+					<View className="flex-1 bg-transparent">
 						<AudioSlot />
-					</AnimatedView>
+					</View>
 				) : (
 					<Fragment />
 				)}
 				{audioActive && transfersActive ? <Separator /> : <Fragment />}
 				{transfersActive ? (
-					<AnimatedView
-						className="flex-1"
-						layout={SLOT_LAYOUT}
-						entering={FadeInDown.duration(220)}
-						exiting={FadeOutDown.duration(160)}
-					>
+					<View className="flex-1 bg-transparent">
 						<TransfersSlot />
-					</AnimatedView>
+					</View>
 				) : (
 					<Fragment />
 				)}
