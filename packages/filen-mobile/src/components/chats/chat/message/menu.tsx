@@ -47,7 +47,8 @@ export const Menu = memo(
 						title: "tbd_delete_message",
 						message: "tbd_delete_message_confirmation",
 						cancelText: "tbd_cancel",
-						okText: "tbd_delete"
+						okText: "tbd_delete",
+						destructive: true
 					})
 				})
 

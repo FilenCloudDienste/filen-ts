@@ -80,7 +80,8 @@ export function createMenuButtons({
 								title: "tbd_delete_permanently_item",
 								message: "tbd_confirm_delete_permanently",
 								cancelText: "tbd_cancel",
-								okText: "tbd_delete_permanently"
+								okText: "tbd_delete_permanently",
+								destructive: true
 							})
 						})
 
@@ -133,7 +134,8 @@ export function createMenuButtons({
 							title: "tbd_trash_item",
 							message: "tbd_confirm_trash",
 							cancelText: "tbd_cancel",
-							okText: "tbd_trash"
+							okText: "tbd_trash",
+							destructive: true
 						})
 					})
 
@@ -1009,7 +1011,8 @@ export function createMenuButtons({
 						title: "tbd_remove_offline_item",
 						message: "tbd_confirm_remove_offline",
 						cancelText: "tbd_cancel",
-						okText: "tbd_remove_offline"
+						okText: "tbd_remove_offline",
+						destructive: true
 					})
 				})
 
@@ -1051,7 +1054,8 @@ export function createMenuButtons({
 						title: "tbd_remove_share_item",
 						message: "tbd_confirm_remove_share",
 						cancelText: "tbd_cancel",
-						okText: "tbd_remove_share"
+						okText: "tbd_remove_share",
+						destructive: true
 					})
 				})
 
@@ -1098,7 +1102,8 @@ export function createMenuButtons({
 						title: "tbd_stop_sharing_item",
 						message: "tbd_confirm_stop_sharing",
 						cancelText: "tbd_cancel",
-						okText: "tbd_stop_sharing"
+						okText: "tbd_stop_sharing",
+						destructive: true
 					})
 				})
 
@@ -1265,7 +1270,8 @@ export function createMenuButtons({
 						title: "tbd_delete_permanently_item",
 						message: "tbd_confirm_delete_permanently",
 						cancelText: "tbd_cancel",
-						okText: "tbd_delete_permanently"
+						okText: "tbd_delete_permanently",
+						destructive: true
 					})
 				})
 

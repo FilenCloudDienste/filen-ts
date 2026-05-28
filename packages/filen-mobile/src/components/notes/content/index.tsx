@@ -125,7 +125,8 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 					title: "tbd_note_edited",
 					message: "tbd_note_edited_message",
 					cancelText: "tbd_cancel",
-					okText: "tbd_reload"
+					okText: "tbd_reload",
+					destructive: true
 				})
 			})
 
