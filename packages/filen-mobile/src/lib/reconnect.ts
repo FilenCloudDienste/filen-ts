@@ -22,12 +22,11 @@ let lastOnline = onlineManager.isOnline()
  *   server state (renames, deletes, modifications). The library-level
  *   gate inside sync() means cold-start in airplane mode no-ops; this
  *   listener catches reconnect mid-session.
- * - notesSync.forceSync(): flushes any inflight note content that was
- *   accumulated offline. The existing executeNow() only fires whatever
- *   debounce happens to be queued — once a debounce has been consumed by
- *   the offline-gate early-return, executeNow is a no-op. forceSync()
- *   awaits sync() directly so the inflight store is processed.
- * - chatsSync.forceSync(): same for inflight chat messages.
+ * - notesSync.executeNow(): flushes any inflight note content that was
+ *   accumulated offline. executeNow() now falls through to sync() when no
+ *   debounce is queued, so the cold-start case (boot offline with inflight
+ *   on disk, no typing yet, then reconnect) also drains.
+ * - chatsSync.syncNow(): same for inflight chat messages.
  */
 export function startReconnectListener(): void {
 	if (started) {

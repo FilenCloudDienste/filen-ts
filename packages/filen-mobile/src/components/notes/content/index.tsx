@@ -19,6 +19,7 @@ import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { sync } from "@/components/notes/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const Loading = memo(({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -47,13 +48,38 @@ const Loading = memo(({ children, loading, noteType }: { children: React.ReactNo
 const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | null }) => {
 	const stringifiedClient = useStringifiedClient()
 	const insets = useSafeAreaInsets()
+	const isOnline = useIsOnline()
+	const hasInflightContent = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 
+	// Gate the query on three conditions to make editing race-free:
+	//
+	// 1. !history          — history view is read-only, no need to refetch
+	// 2. isOnline          — when offline, refetchOnMount:"always" would fire one
+	//                        doomed network call per mount (offlineFirst pauses
+	//                        after the first failed attempt) and on reconnect
+	//                        would race against any local typing
+	// 3. !hasInflightContent — the editor's `key` prop is this query's
+	//                        dataUpdatedAt, so a successful refetch *remounts*
+	//                        the WebView (the underlying expo-dom component
+	//                        doesn't propagate initialValue changes any other
+	//                        way) and would wipe any unsynced local edits the
+	//                        user has in flight. Once sync.tsx drains inflight,
+	//                        this re-enables.
+	//
+	// staleTime: Infinity keeps the query from auto-refetching on the
+	// re-enable that follows a sync. Without it, every 3s typing pause would
+	// trigger a fetch → loader → editor remount cycle that resets the user's
+	// cursor. Initial mount still refetches because refetchOnMount:"always"
+	// bypasses the stale check; refetchOnReconnect:"always" bypasses it too
+	// when no inflight is in the way. Catch-up for remote edits arrives via
+	// the socket → onContentEditedRemotely reload prompt below.
 	const noteContentQuery = useNoteContentQuery(
 		{
 			uuid: note.uuid
 		},
 		{
-			enabled: !history
+			enabled: !history && isOnline && !hasInflightContent,
+			staleTime: Infinity
 		}
 	)
 
@@ -61,13 +87,9 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 
 	const loading = history
 		? false
-		: noteContentQuery.isRefetching ||
-			noteContentQuery.isLoading ||
-			noteContentQuery.isFetching ||
+		: noteContentQuery.isFetching ||
 			noteContentQuery.isPending ||
 			noteContentQuery.isError ||
-			noteContentQuery.isRefetchError ||
-			noteContentQuery.isLoadingError ||
 			typeof initialValue !== "string"
 
 	const hasWriteAccess = (() => {
