@@ -13,7 +13,7 @@ import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
-import { router, useFocusEffect } from "expo-router"
+import { router, useFocusEffect, useNavigation, useSegments } from "expo-router"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/lib/drive"
@@ -118,6 +118,19 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
 	const offlineSyncing = useOfflineStore(state => state.syncing)
+	// Drive is rendered from /tabs/drive (a tab), every modal that delegates to it
+	// (trash, recents, favorites, links, sharedIn, sharedOut, offline, driveSelect,
+	// linkedDir), AND nested screens within those. The header's left-side button has
+	// to differ by context:
+	//   - tab root  : no back (swipe between tabs)
+	//   - modal root: "close" (X) — dismiss the whole modal
+	//   - modal sub : "chevron-back-outline" — pop one level in the modal stack
+	// `useSegments()[0]` discriminates tab vs modal context; `useNavigation()`'s
+	// stack index discriminates root vs nested within the modal's own stack.
+	const navigation = useNavigation()
+	const segments = useSegments()
+	const inTabContext = segments[0] === "tabs"
+	const isAtStackRoot = (navigation.getState()?.index ?? 0) === 0
 	const { sort: currentSort, setSort, sortable } = useDriveSortPreference(drivePath)
 
 	const driveItemsQuery = useDriveItemsQuery(
@@ -1318,26 +1331,8 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	})()
 
 	const leftItems = ((): HeaderItem[] => {
-		if (drivePath.selectOptions) {
-			return [
-				{
-					type: "button",
-					icon: {
-						name: "chevron-back-outline",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							if (router.canGoBack()) {
-								router.back()
-							}
-						}
-					}
-				}
-			] satisfies HeaderItem[]
-		}
-
+		// Selection mode "X" clears the bulk selection — different semantic from
+		// modal-close. Always wins regardless of context.
 		if (selectedDriveItems.length > 0) {
 			return [
 				{
@@ -1356,40 +1351,34 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			] satisfies HeaderItem[]
 		}
 
-		if (
-			(drivePath.type === "drive" ||
-				drivePath.type === "offline" ||
-				drivePath.type === "sharedIn" ||
-				drivePath.type === "sharedOut" ||
-				drivePath.type === "favorites") &&
-			drivePath.uuid
-		) {
+		// Tab context (`/tabs/drive[...]`): no explicit back button. iOS uses the
+		// swipe-back gesture inside the tab's stack; tab root has nothing to go
+		// back to.
+		if (inTabContext) {
 			return []
 		}
 
-		if (Platform.OS === "ios") {
-			if (drivePath.type === "drive" && !drivePath.uuid) {
-				return []
-			}
-
-			return [
-				{
-					type: "button",
-					icon: {
-						name: "chevron-back-outline",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							router.back()
-						}
-					}
-				}
-			] satisfies HeaderItem[]
+		// Modal context. Android shows the OS back affordance; iOS gets the
+		// explicit close-vs-chevron based on stack position.
+		if (Platform.OS !== "ios") {
+			return []
 		}
 
-		return []
+		return [
+			{
+				type: "button",
+				icon: {
+					name: isAtStackRoot ? "close" : "chevron-back-outline",
+					color: textForeground.color,
+					size: 20
+				},
+				props: {
+					onPress: () => {
+						router.back()
+					}
+				}
+			}
+		] satisfies HeaderItem[]
 	})()
 
 	const headerTitle = (() => {
