@@ -320,7 +320,20 @@ const RichTextEditorDom = memo(
 			}
 		}, [initialValue, autoFocus])
 
+		const readyEmittedRef = useRef(false)
+
 		useEffect(() => {
+			// Emit "ready" exactly once per WebView mount. useDomDomEvents returns
+			// a new `postMessage` identity on every render (no useCallback), so a
+			// naive [postMessage] dep would re-fire on every parent re-render,
+			// repeatedly invoking onReady and (previously) wiping the toolbar's
+			// active format state.
+			if (readyEmittedRef.current) {
+				return
+			}
+
+			readyEmittedRef.current = true
+
 			postMessage({
 				type: "ready"
 			})
