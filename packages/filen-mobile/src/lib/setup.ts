@@ -10,6 +10,8 @@ import foregroundService from "@/lib/foregroundService"
 import { sweepTmpDir } from "@/lib/tmp"
 import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
 import { startReconnectListener } from "@/lib/reconnect"
+import fileCache from "@/lib/fileCache"
+import audioCache from "@/lib/audioCache"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -57,6 +59,13 @@ class Setup {
 					console.error(err)
 					alerts.error(err)
 				})
+
+				// Reclaim disk space from caches that grow unbounded today.
+				// Idempotent; running on an empty cache directory is a no-op.
+				// Log-only on failure — gc hygiene isn't user-actionable, so we
+				// don't fire a toast (would be noise on every cold start).
+				fileCache.gc().catch(console.error)
+				audioCache.gc().catch(console.error)
 			}
 
 			const duration = performance.now() - now
