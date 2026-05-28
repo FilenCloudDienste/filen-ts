@@ -377,9 +377,28 @@ export class FileCache {
 
 					const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(PARENT_DIRECTORY.uri, uuid))
 
-					if (parentDirectory.exists) {
-						parentDirectory.delete()
+					if (!parentDirectory.exists) {
+						return
 					}
+
+					// Re-check the staleness predicate inside the mutex. A concurrent get()
+					// may have written a fresh entry for this uuid while we were queued
+					// behind it on the mutex — Phase 1 ran without the mutex held.
+					const metadataFile = new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, `${uuid}.filenmeta`))
+
+					if (metadataFile.exists) {
+						const recheck = await run(async () => {
+							const metadata = deserialize(await metadataFile.text()) as Metadata | null
+
+							return !metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? 86400 * 1000)
+						})
+
+						if (recheck.success && !recheck.data) {
+							return
+						}
+					}
+
+					parentDirectory.delete()
 				})
 			})
 		)

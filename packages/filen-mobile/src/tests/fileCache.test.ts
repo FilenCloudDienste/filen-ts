@@ -579,6 +579,62 @@ describe("FileCache", () => {
 
 			expect(fs.has(dir)).toBe(false)
 		})
+
+		it("skips deletion when the metadata becomes fresh between Phase 1 and the mutex re-check", async () => {
+			const cache = await createFileCache()
+			const uuid = "race-uuid"
+			const item = wrapDrive(makeFileItem(uuid, "race.txt"))
+			const dir = `${BASE_DIR}/${uuid}`
+			const filePath = `${dir}/${uuid}.txt`
+			const metaPath = `${dir}/${uuid}.filenmeta`
+			const expiredTime = Date.now() - 86400 * 1000 - 1
+			const staleBytes = new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: expiredTime })))
+			const freshBytes = new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: Date.now() })))
+
+			fs.set(dir, "dir")
+			fs.set(filePath, new Uint8Array([1, 2, 3]))
+			fs.set(metaPath, staleBytes)
+
+			// Simulate a concurrent get() that finishes writing a fresh sidecar
+			// between Phase 1's unprotected read and Phase 2's mutex-guarded re-read.
+			// The first .text() on the target sidecar returns the stale bytes
+			// (captured before the swap), then the fs entry is swapped to fresh
+			// for any subsequent read.
+			let metaReads = 0
+			const spy = vi.spyOn(File.prototype, "text").mockImplementation(async function (this: File): Promise<string> {
+				const bytes = fs.get(this.uri)
+
+				if (!(bytes instanceof Uint8Array)) {
+					throw new Error(`File not found: ${this.uri}`)
+				}
+
+				const result = new TextDecoder().decode(bytes)
+
+				if (this.uri === metaPath) {
+					metaReads++
+
+					if (metaReads === 1) {
+						fs.set(metaPath, freshBytes)
+					}
+				}
+
+				return result
+			})
+
+			try {
+				await cache.gc()
+			} finally {
+				spy.mockRestore()
+			}
+
+			// The mutex re-check must have fired (at least two reads) and the
+			// directory must survive — the entry was fresh by the time the
+			// deletion phase committed.
+			expect(metaReads).toBeGreaterThanOrEqual(2)
+			expect(fs.has(dir)).toBe(true)
+			expect(fs.has(metaPath)).toBe(true)
+			expect(fs.has(filePath)).toBe(true)
+		})
 	})
 
 	describe("clear", () => {

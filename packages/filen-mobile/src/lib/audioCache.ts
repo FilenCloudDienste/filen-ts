@@ -328,6 +328,7 @@ export class AudioCache {
 		const now = Date.now()
 		const entries = PARENT_DIRECTORY.list()
 
+		// Pass 1: gc expired or corrupt sidecars and their owning picture files.
 		await Promise.all(
 			entries.map(async entry => {
 				await run(async defer => {
@@ -335,9 +336,6 @@ export class AudioCache {
 						return
 					}
 
-					// Picture files (e.g. *.jpg, *.png) are not metadata sidecars — leave them
-					// alone here. They get cleaned up when their owning .filenmeta is deleted,
-					// or via clear() on full cache wipe.
 					if (!entry.name.endsWith(".filenmeta")) {
 						return
 					}
@@ -372,12 +370,82 @@ export class AudioCache {
 						mutex.release()
 					})
 
+					// Re-check inside the mutex. A concurrent get() may have just finished
+					// writing a fresh sidecar for this key — Pass 1's initial parse ran
+					// without the mutex held. Refresh pictureUri at the same time so we
+					// never delete a picture that belongs to fresh metadata.
+					if (!entry.exists) {
+						return
+					}
+
+					const recheck = await run(async () => {
+						const metadata = deserialize(await entry.text()) as Metadata
+
+						pictureUri = metadata?.pictureUri ?? null
+
+						return Object.keys(metadata ?? {}).length === 0 || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
+					})
+
+					if (recheck.success && !recheck.data) {
+						return
+					}
+
 					if (pictureUri) {
 						const pictureFile = new FileSystem.File(pictureUri)
 
 						if (pictureFile.exists) {
 							pictureFile.delete()
 						}
+					}
+
+					if (entry.exists) {
+						entry.delete()
+					}
+				})
+			})
+		)
+
+		// Pass 2: sweep orphaned picture files — pictures whose sidecar no longer
+		// exists. get() writes the picture before the sidecar, so an aborted or
+		// crashed run can leave the picture stranded; pass 1's sidecar deletes can
+		// also leave behind a picture if the sidecar's pictureUri was missing.
+		await Promise.all(
+			entries.map(async entry => {
+				await run(async defer => {
+					if (!(entry instanceof FileSystem.File)) {
+						return
+					}
+
+					if (entry.name.endsWith(".filenmeta")) {
+						return
+					}
+
+					const dotIndex = entry.name.lastIndexOf(".")
+					const cacheId = dotIndex === -1 ? entry.name : entry.name.substring(0, dotIndex)
+
+					if (!cacheId) {
+						return
+					}
+
+					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, `${cacheId}.filenmeta`))
+
+					if (sidecar.exists) {
+						return
+					}
+
+					// Block against a concurrent get() racing to write a fresh sidecar
+					// for this key. After the mutex is held, re-check the sidecar so a
+					// just-finished get() isn't undone.
+					const mutex = this.getMutexForKey(cacheId)
+
+					await mutex.acquire()
+
+					defer(() => {
+						mutex.release()
+					})
+
+					if (sidecar.exists) {
+						return
 					}
 
 					if (entry.exists) {
