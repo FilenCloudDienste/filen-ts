@@ -159,7 +159,6 @@ const PreviewTextInner = memo(({ previewType, text, item }: { previewType: "text
 				readOnly={readOnly}
 				placeholder="tbd_placeholder"
 				type={previewType === "code" ? "code" : "text"}
-				disableRichtextToolbar={true}
 				paddingTop={headerHeight ? headerHeight + 8 : undefined}
 				paddingBottom={insets.bottom}
 			/>
