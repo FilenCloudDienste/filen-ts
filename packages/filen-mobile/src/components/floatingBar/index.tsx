@@ -8,16 +8,28 @@ import useFloatingBarOffset from "@/hooks/useFloatingBarOffset"
 import AudioSlot from "@/components/floatingBar/audioSlot"
 import TransfersSlot from "@/components/floatingBar/transfersSlot"
 import Separator from "@/components/floatingBar/separator"
+import useAppStore from "@/stores/useApp.store"
 
 const FloatingBar = memo(() => {
 	const insets = useSafeAreaInsets()
 	const offset = useFloatingBarOffset()
 	const { queueItem } = useAudio()
 	const transfersActive = useTransfersStore(useShallow(state => state.transfers.length > 0))
+	// FloatingBar is mounted at the root _layout as a sibling of <Stack/>, not
+	// inside any specific route. The "pathname tracks focused URL not mount
+	// point" gotcha that bit us with drive header's left button does NOT apply
+	// here — we WANT the focused URL, because the bar is a global overlay and
+	// its visibility is supposed to track wherever the user currently is.
+	//
+	// On iOS, modal screens are pageSheet and the OS chrome naturally covers
+	// the bar. On Android modals use the same plane as the bar, and on both
+	// platforms non-tab stack pushes (/chat/[uuid], /note/[uuid]) never cover
+	// it. Gate on the focused route so the bar only ever shows inside /tabs.
+	const isOnTabs = useAppStore(state => state.pathname.startsWith("/tabs"))
 
 	const audioActive = queueItem !== null
 
-	if (!audioActive && !transfersActive) {
+	if (!isOnTabs || (!audioActive && !transfersActive)) {
 		return null
 	}
 
