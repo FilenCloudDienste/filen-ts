@@ -13,7 +13,7 @@ import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
-import { router, useFocusEffect, useNavigation, useSegments } from "expo-router"
+import { router, useFocusEffect, useNavigation } from "expo-router"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/lib/drive"
@@ -125,11 +125,20 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	//   - tab root  : no back (swipe between tabs)
 	//   - modal root: "close" (X) — dismiss the whole modal
 	//   - modal sub : "chevron-back-outline" — pop one level in the modal stack
-	// `useSegments()[0]` discriminates tab vs modal context; `useNavigation()`'s
-	// stack index discriminates root vs nested within the modal's own stack.
+	//
+	// `drivePath.type` is the stable tab-vs-modal discriminator: it's derived from
+	// the route Drive is mounted under, NOT the currently focused URL. Crucially
+	// `useSegments()` would flip when ANY other modal opens on top (e.g. opening
+	// changeDirectoryColor from /tabs/drive briefly painted "close" onto the drive
+	// tab header during the open animation). drivePath does not flip.
+	//
+	// Every Drive-rendered modal folder (trash, recents, favorites, links,
+	// sharedIn, sharedOut, offline, driveSelect, linkedDir) has its own
+	// `_layout.tsx` so `useNavigation().getState()` is the modal's INTERNAL stack —
+	// index 0 reliably means "first screen of this modal", any other value means
+	// "the user navigated deeper inside the same modal."
 	const navigation = useNavigation()
-	const segments = useSegments()
-	const inTabContext = segments[0] === "tabs"
+	const inTabContext = drivePath.type === "drive" && !drivePath.selectOptions
 	const isAtStackRoot = (navigation.getState()?.index ?? 0) === 0
 	const { sort: currentSort, setSort, sortable } = useDriveSortPreference(drivePath)
 
