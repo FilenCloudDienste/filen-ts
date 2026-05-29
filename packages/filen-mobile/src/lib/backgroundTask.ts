@@ -1,6 +1,7 @@
 import * as TaskManager from "expo-task-manager"
 import * as BackgroundTask from "expo-background-task"
 import { BackgroundTaskResult, BackgroundTaskStatus } from "expo-background-task"
+import { Platform } from "react-native"
 import { run } from "@filen/utils"
 import setup from "@/lib/setup"
 import cameraUpload from "@/lib/cameraUpload"
@@ -9,13 +10,15 @@ const TASK_NAME = "filen-camera-upload-sync"
 
 TaskManager.defineTask(TASK_NAME, async () => {
 	await run(async defer => {
-		const expirationListener = BackgroundTask.addExpirationListener(() => {
-			cameraUpload.cancel()
-		})
+		if (Platform.OS === "ios") {
+			const expirationListener = BackgroundTask.addExpirationListener(() => {
+				cameraUpload.cancel()
+			})
 
-		defer(() => {
-			expirationListener.remove()
-		})
+			defer(() => {
+				expirationListener.remove()
+			})
+		}
 
 		const { isAuthed } = await setup.setup({
 			background: true

@@ -82,7 +82,7 @@ class FileProvider {
 	public async cacheBudget(): Promise<number> {
 		const data = await this.read()
 
-		if (!data || !data.maxCacheFilesBudget || !data.maxThumbnailFilesBudget) {
+		if (!data || data.maxCacheFilesBudget == null || data.maxThumbnailFilesBudget == null) {
 			return 1024 * 1024 * 1024
 		}
 
@@ -114,8 +114,14 @@ class FileProvider {
 	}
 
 	public async disable(): Promise<void> {
-		if (AUTH_FILE.exists) {
-			AUTH_FILE.delete()
+		await this.writeMutex.acquire()
+
+		try {
+			if (AUTH_FILE.exists) {
+				AUTH_FILE.delete()
+			}
+		} finally {
+			this.writeMutex.release()
 		}
 
 		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)

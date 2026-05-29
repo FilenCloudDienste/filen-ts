@@ -1,4 +1,4 @@
-import { open, type DB, type PreparedStatement } from "@op-engineering/op-sqlite"
+import { open, type DB } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/utils"
 import { AppState } from "react-native"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -38,11 +38,6 @@ class Sqlite {
 	private initDone: boolean = false
 
 	private initMutex: Semaphore = new Semaphore(1)
-
-	private stmtGet: PreparedStatement | null = null
-	private stmtSet: PreparedStatement | null = null
-	private stmtRemove: PreparedStatement | null = null
-	private stmtContains: PreparedStatement | null = null
 
 	public constructor() {
 		// Maintenance on app background: checkpoint WAL, reclaim free pages, run optimize with query history
@@ -101,11 +96,6 @@ class Sqlite {
 
 			await this.db.execute(INIT_QUERIES.join("; "))
 
-			this.stmtGet = this.db.prepareStatement("SELECT value FROM kv WHERE key = ?")
-			this.stmtSet = this.db.prepareStatement("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)")
-			this.stmtRemove = this.db.prepareStatement("DELETE FROM kv WHERE key = ?")
-			this.stmtContains = this.db.prepareStatement("SELECT EXISTS(SELECT 1 FROM kv WHERE key = ?) AS found")
-
 			this.initDone = true
 		})
 
@@ -131,12 +121,9 @@ class Sqlite {
 
 	public kvAsync = {
 		get: async <T>(key: string): Promise<T | null> => {
-			await this.openDb()
-
-			await this.stmtGet!.bind([key])
-
-			const result = await this.stmtGet!.execute()
-			const row = result.rows[0]
+			const db = await this.openDb()
+			const result = await db.executeRaw("SELECT value FROM kv WHERE key = ?", [key])
+			const row = result[0]
 
 			if (!row) {
 				return null
@@ -145,7 +132,7 @@ class Sqlite {
 			return await new Promise<T>((resolve, reject) => {
 				queueMicrotask(() => {
 					try {
-						resolve(deserialize(row["value"] as string) as T)
+						resolve(deserialize(row[0] as string) as T)
 					} catch (err) {
 						reject(err)
 					}
@@ -157,21 +144,18 @@ class Sqlite {
 				return null
 			}
 
-			await this.openDb()
-
-			await new Promise<void>((resolve, reject) => {
+			const serialized = await new Promise<string>((resolve, reject) => {
 				queueMicrotask(() => {
 					try {
-						this.stmtSet!.bind([key, serialize(value)])
-							.then(resolve)
-							.catch(reject)
+						resolve(serialize(value))
 					} catch (err) {
 						reject(err)
 					}
 				})
 			})
 
-			const result = await this.stmtSet!.execute()
+			const db = await this.openDb()
+			const result = await db.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [key, serialized])
 
 			return result.insertId ?? null
 		},
@@ -187,19 +171,15 @@ class Sqlite {
 			await db.execute("DELETE FROM kv")
 		},
 		contains: async (key: string): Promise<boolean> => {
-			await this.openDb()
+			const db = await this.openDb()
+			const result = await db.executeRaw("SELECT EXISTS(SELECT 1 FROM kv WHERE key = ?)", [key])
 
-			await this.stmtContains!.bind([key])
-
-			const result = await this.stmtContains!.execute()
-
-			return (result.rows[0]?.["found"] as number) === 1
+			return (result[0]?.[0] as number) === 1
 		},
 		remove: async (key: string): Promise<void> => {
-			await this.openDb()
+			const db = await this.openDb()
 
-			await this.stmtRemove!.bind([key])
-			await this.stmtRemove!.execute()
+			await db.execute("DELETE FROM kv WHERE key = ?", [key])
 		},
 		removeByPrefix: async (prefix: string): Promise<void> => {
 			const db = await this.openDb()
