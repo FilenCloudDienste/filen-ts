@@ -22,7 +22,13 @@ class Contacts {
 			})
 		})
 
-		const contacts = await authedSdkClient.getContacts()
+		const contacts = await authedSdkClient.getContacts(
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
 
 		contactsQueryUpdate({
 			updater: prev => ({
@@ -74,7 +80,13 @@ class Contacts {
 
 	public async block({ email, signal }: { email: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
-		const contacts = await authedSdkClient.getContacts()
+		const contacts = await authedSdkClient.getContacts(
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
 		const contactToBlock = contacts.find(c => c.email === email)
 
 		if (!contactToBlock) {
@@ -141,7 +153,13 @@ class Contacts {
 				: undefined
 		)
 
-		const contacts = await authedSdkClient.getContacts()
+		const contacts = await authedSdkClient.getContacts(
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
 
 		contactsQueryUpdate({
 			updater: prev => ({
@@ -164,7 +182,13 @@ class Contacts {
 				: undefined
 		)
 
-		const outgoing = await authedSdkClient.listOutgoingContactRequests()
+		const outgoing = await authedSdkClient.listOutgoingContactRequests(
+			signal
+				? {
+						signal
+					}
+				: undefined
+		)
 
 		contactRequestsQueryUpdate({
 			updater: prev => ({

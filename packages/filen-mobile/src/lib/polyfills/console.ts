@@ -17,7 +17,11 @@ global.console = {
 			}
 		}
 
-		originalConsoleError(...args)
+		const nonSdkArgs = args.filter(arg => unwrapSdkError(arg) === null)
+
+		if (nonSdkArgs.length > 0) {
+			originalConsoleError(...nonSdkArgs)
+		}
 	}
 }
 

@@ -233,7 +233,7 @@ function isExifMarker(bytes: Uint8Array, offset: number): boolean {
 function parseJpegOrientation(bytes: Uint8Array): number {
 	let offset = 2
 
-	while (offset + 4 < bytes.length) {
+	while (offset + 4 <= bytes.length) {
 		if (bytes[offset] !== 0xff) {
 			return 0
 		}
@@ -268,7 +268,7 @@ function parseJpegOrientation(bytes: Uint8Array): number {
  */
 function scanForExifOrientation(bytes: Uint8Array): number {
 	// Scan for "Exif\0\0" marker — the TIFF header follows immediately after
-	for (let i = 0; i + 14 < bytes.length; i++) {
+	for (let i = 0; i + 14 <= bytes.length; i++) {
 		if (isExifMarker(bytes, i)) {
 			return parseTiffOrientation(bytes, i + 6)
 		}
