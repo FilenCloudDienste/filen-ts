@@ -506,7 +506,7 @@ class Drive {
 				updater: prev => [
 					...prev.filter(
 						i =>
-							i.data.uuid === item.data.uuid &&
+							i.data.uuid !== item.data.uuid &&
 							i.data.decryptedMeta?.name.toLowerCase().trim() !== item.data.decryptedMeta?.name.toLowerCase().trim()
 					),
 					item

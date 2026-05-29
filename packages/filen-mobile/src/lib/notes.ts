@@ -586,7 +586,7 @@ class Notes {
 
 	public async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
-		const note = wrapSdkNote(
+		let note = wrapSdkNote(
 			await authedSdkClient.createNote(
 				title,
 				signal
@@ -597,14 +597,14 @@ class Notes {
 			)
 		)
 
-		await this.setType({
+		note = await this.setType({
 			note,
 			type,
 			signal,
 			knownContent: content
 		})
 
-		await this.setContent({
+		note = await this.setContent({
 			note,
 			content,
 			signal,
@@ -836,7 +836,7 @@ class Notes {
 		permissionsWrite: boolean
 	}) {
 		if (participant.permissionsWrite === permissionsWrite) {
-			return
+			return note
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()

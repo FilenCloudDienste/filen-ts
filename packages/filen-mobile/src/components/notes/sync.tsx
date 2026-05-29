@@ -57,7 +57,7 @@ export class Sync {
 			for (const noteUuid of Object.keys(fromDisk)) {
 				const editedTimestamp = fromCloudEditedTimestamp[noteUuid]
 
-				if (!editedTimestamp) {
+				if (editedTimestamp === undefined) {
 					delete fromDisk[noteUuid]
 
 					continue
