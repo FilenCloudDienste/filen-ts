@@ -115,13 +115,17 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 								const result = await runWithLoading(async () => {
 									const index = playlist.files.findIndex(f => f.uuid === track.uuid)
 
-									await audio.replaceQueue({
+									const { droppedUndecryptable } = await audio.replaceQueue({
 										items: playlist.files.map(file => ({
 											item: file.item,
 											playlistUuid: playlist.uuid
 										})),
 										startingPosition: index >= 0 ? index : 0
 									})
+
+									if (droppedUndecryptable) {
+										alerts.normal("tbd_cannot_decrypt_toast")
+									}
 
 									await audio.play()
 								})
@@ -140,12 +144,16 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 								const result = await runWithLoading(async () => {
 									const queueLengthBefore = audio.getQueue().length
 
-									await audio.addToQueue({
+									const added = await audio.addToQueue({
 										item: {
 											playlistUuid: playlist.uuid,
 											item: track.item
 										}
 									})
+
+									if (!added) {
+										alerts.normal("tbd_cannot_decrypt_toast")
+									}
 
 									if (queueLengthBefore === 0) {
 										await audio.play()
@@ -371,18 +379,28 @@ const Playlist = memo(() => {
 			onPress: async () => {
 				const playlistUuid = playlist.uuid
 
+				let droppedUndecryptable = false
+
 				await runBulk({
 					items: selectedTracks,
 					clearSelection: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
 					op: async track => {
-						await audio.addToQueue({
+						const added = await audio.addToQueue({
 							item: {
 								playlistUuid,
 								item: track.item
 							}
 						})
+
+						if (!added) {
+							droppedUndecryptable = true
+						}
 					}
 				})
+
+				if (droppedUndecryptable) {
+					alerts.normal("tbd_cannot_decrypt_toast")
+				}
 			}
 		})
 
@@ -581,13 +599,17 @@ const Playlist = memo(() => {
 													const result = await runWithLoading(async () => {
 														await audio.clearQueue()
 
-														await audio.replaceQueue({
+														const { droppedUndecryptable } = await audio.replaceQueue({
 															items: playlist.files.map(file => ({
 																item: file.item,
 																playlistUuid: playlist.uuid
 															})),
 															startingPosition: 0
 														})
+
+														if (droppedUndecryptable) {
+															alerts.normal("tbd_cannot_decrypt_toast")
+														}
 
 														await audio.play()
 													})
@@ -608,9 +630,9 @@ const Playlist = memo(() => {
 													const result = await runWithLoading(async () => {
 														const queueLengthBefore = audio.getQueue().length
 
-														await Promise.all(
+														const addedResults = await Promise.all(
 															playlist.files.map(async file => {
-																await audio.addToQueue({
+																return await audio.addToQueue({
 																	item: {
 																		playlistUuid: playlist.uuid,
 																		item: file.item
@@ -618,6 +640,10 @@ const Playlist = memo(() => {
 																})
 															})
 														)
+
+														if (addedResults.some(added => !added)) {
+															alerts.normal("tbd_cannot_decrypt_toast")
+														}
 
 														if (queueLengthBefore === 0) {
 															await audio.play()
