@@ -326,7 +326,7 @@ describe("time", () => {
 			// 0 < 4102444800, so treated as seconds → new Date(0)
 			// epoch 0 = Jan 1, 1970 00:00:00 UTC, formatted in local time
 			expect(result).toContain("1970")
-			expect(result).toMatch(/\d{2}\/\d{2}\/1970, \d{2}:\d{2}:\d{2}/)
+			expect(result).toMatch(/\d{2}\/\d{2}\/1970, \d{2}:\d{2}:\d{2} (AM|PM)/)
 		})
 
 		it("timestamp at boundary (4102444800) is treated as milliseconds", () => {
@@ -350,6 +350,8 @@ describe("time", () => {
 
 	describe("ja-JP locale (24-hour, YMD, dash separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
 
 		beforeEach(async () => {
 			vi.resetModules()
@@ -361,6 +363,8 @@ describe("time", () => {
 			const mod = await import("@/lib/time")
 
 			simpleDate = mod.simpleDate
+			simpleDateNoTime = mod.simpleDateNoTime
+			simpleDateNoDate = mod.simpleDateNoDate
 		})
 
 		it("formats as YMD with dash separator", () => {
@@ -370,6 +374,20 @@ describe("time", () => {
 			const year = fixedDate.getFullYear()
 
 			expect(result).toContain(`${year}-${month}-${day}`)
+		})
+
+		it("simpleDateNoTime returns YMD date only", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+
+		it("24-hour format in time-only output", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoDate(d)
+
+			expect(result).toBe("14:30:45")
 		})
 	})
 })

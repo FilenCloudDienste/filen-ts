@@ -65,6 +65,14 @@ describe("aggregateNoteSelectionFlags", () => {
 		expect(aggregateNoteSelectionFlags([note(), note({ trash: true })], ME).includesTrashed).toBe(true)
 	})
 
+	it("includesArchived true when any note is archived", () => {
+		expect(aggregateNoteSelectionFlags([note(), note({ archive: true })], ME).includesArchived).toBe(true)
+	})
+
+	it("includesArchived false when no note is archived", () => {
+		expect(aggregateNoteSelectionFlags([note(), note()], ME).includesArchived).toBe(false)
+	})
+
 	it("includesUndecryptable true when any note is undecryptable", () => {
 		expect(aggregateNoteSelectionFlags([note(), note({ undecryptable: true })], ME).includesUndecryptable).toBe(true)
 	})
@@ -86,6 +94,17 @@ describe("aggregateNoteSelectionFlags", () => {
 	it("everyTrashed true only when every note is trashed", () => {
 		expect(aggregateNoteSelectionFlags([note({ trash: true }), note({ trash: true })], ME).everyTrashed).toBe(true)
 		expect(aggregateNoteSelectionFlags([note({ trash: true }), note()], ME).everyTrashed).toBe(false)
+	})
+
+	it("everyArchivedOrTrashed true when every note is archived or trashed", () => {
+		expect(aggregateNoteSelectionFlags([note({ archive: true }), note({ archive: true })], ME).everyArchivedOrTrashed).toBe(true)
+		expect(aggregateNoteSelectionFlags([note({ trash: true }), note({ trash: true })], ME).everyArchivedOrTrashed).toBe(true)
+		expect(aggregateNoteSelectionFlags([note({ archive: true }), note({ trash: true })], ME).everyArchivedOrTrashed).toBe(true)
+	})
+
+	it("everyArchivedOrTrashed false when any note is active", () => {
+		expect(aggregateNoteSelectionFlags([note({ archive: true }), note()], ME).everyArchivedOrTrashed).toBe(false)
+		expect(aggregateNoteSelectionFlags([note({ trash: true }), note()], ME).everyArchivedOrTrashed).toBe(false)
 	})
 
 	it("hasWriteAccessToAll: owner of all has write", () => {
@@ -115,6 +134,15 @@ describe("aggregateNoteSelectionFlags", () => {
 		const readOnly = note({ ownerId: SOMEONE_ELSE, participants: [participant(ME, false)] })
 
 		expect(aggregateNoteSelectionFlags([writeable, readOnly], ME).hasWriteAccessToAll).toBe(false)
+	})
+
+	it("hasWriteAccessToAll: false when user is not a participant and not the owner", () => {
+		const stranger = note({
+			ownerId: SOMEONE_ELSE,
+			participants: [participant(SOMEONE_ELSE + 1n, true)]
+		})
+
+		expect(aggregateNoteSelectionFlags([stranger], ME).hasWriteAccessToAll).toBe(false)
 	})
 
 	it("participantOfEveryAndNotOwner: true only if user is participant + not owner of ALL", () => {

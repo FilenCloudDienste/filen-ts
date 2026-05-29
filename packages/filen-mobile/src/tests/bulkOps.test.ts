@@ -69,6 +69,29 @@ describe("runBulk", () => {
 		expect(mockRunWithLoading).not.toHaveBeenCalled()
 	})
 
+	it("returns false and toasts when prompts.alert throws", async () => {
+		const promptError = new Error("dialog crashed")
+
+		mockPromptsAlert.mockRejectedValueOnce(promptError)
+
+		const op = vi.fn()
+		const clearSelection = vi.fn()
+
+		const result = await runBulk({
+			items: [item1],
+			op,
+			clearSelection,
+			confirm: { title: "T", message: "M", okText: "OK" }
+		})
+
+		expect(result).toBe(false)
+		expect(op).not.toHaveBeenCalled()
+		expect(clearSelection).not.toHaveBeenCalled()
+		expect(mockRunWithLoading).not.toHaveBeenCalled()
+		expect(mockAlertsError).toHaveBeenCalledTimes(1)
+		expect(mockAlertsError).toHaveBeenCalledWith(promptError)
+	})
+
 	it("returns true, calls op per item, clears selection on full success (with confirm)", async () => {
 		mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
 		mockRunWithLoading.mockImplementationOnce(async (fn: () => Promise<unknown>) => {
@@ -136,22 +159,38 @@ describe("runBulk", () => {
 			return { success: true, data: undefined }
 		})
 
-		const startTimestamps: number[] = []
-		const op = vi.fn(async (item: Item) => {
-			startTimestamps.push(Date.now())
+		// Track when each op was called (before any await) and when it resolved
+		const callOrder: string[] = []
+		const resolvers: Array<() => void> = []
 
-			await new Promise(resolve => setTimeout(resolve, 10))
+		const op = vi.fn(async (item: Item) => {
+			callOrder.push(`called:${item.id}`)
+
+			await new Promise<void>(resolve => {
+				resolvers.push(resolve)
+			})
+
+			callOrder.push(`resolved:${item.id}`)
 
 			return item.id
 		})
 		const clearSelection = vi.fn()
 
-		await runBulk({ items: [item1, item2], op, clearSelection })
+		const bulkPromise = runBulk({ items: [item1, item2], op, clearSelection })
 
+		// Flush the microtask queue so both ops are called before either resolves
+		await Promise.resolve()
+		await Promise.resolve()
+
+		// Both ops must have been called before either settled — proof of concurrency
+		expect(callOrder).toEqual(["called:1", "called:2"])
 		expect(op).toHaveBeenCalledTimes(2)
-		// Both fired in the same tick (concurrent), not sequential
-		const gap = Math.abs((startTimestamps[1] ?? 0) - (startTimestamps[0] ?? 0))
 
-		expect(gap).toBeLessThan(5)
+		// Resolve both manually; order does not matter
+		resolvers.forEach(r => r())
+
+		await bulkPromise
+
+		expect(callOrder).toEqual(["called:1", "called:2", "resolved:1", "resolved:2"])
 	})
 })

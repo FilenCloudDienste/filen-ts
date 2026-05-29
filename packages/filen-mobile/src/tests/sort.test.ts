@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { itemSorter, notesSorter } from "@/lib/sort"
-import { type DriveItem, type Note } from "@/types"
+import { type DriveItem, type Note, type NoteTag } from "@/types"
 
 function makeItem(
 	type: string,
@@ -193,16 +193,18 @@ describe("itemSorter", () => {
 			expect(result).toHaveLength(2)
 		})
 
-		it("produces consistent ordering for items with identical names", () => {
+		it("sorts identical-name items in stable (input-preserving) order", () => {
 			const a = makeItem("file", "same.txt", { uuid: "aaa-111" })
 			const b = makeItem("file", "same.txt", { uuid: "bbb-222" })
 			const c = makeItem("file", "same.txt", { uuid: "ccc-333" })
 
-			const result1 = itemSorter.sortItems([a, b, c], "nameAsc")
-			const result2 = itemSorter.sortItems([a, b, c], "nameAsc")
+			// compareName returns 0 for identical names; stable sort must preserve input order
+			const result = itemSorter.sortItems([a, b, c], "nameAsc")
 
-			expect(result1.map(i => i.data.uuid)).toEqual(result2.map(i => i.data.uuid))
-			expect(result1).toHaveLength(3)
+			expect(result[0]).toBe(a)
+			expect(result[1]).toBe(b)
+			expect(result[2]).toBe(c)
+			expect(result).toHaveLength(3)
 		})
 
 		it("does not mutate input array with shared types", () => {
@@ -354,6 +356,79 @@ describe("notesSorter", () => {
 			expect(descNames).toHaveLength(2)
 			expect(ascNames[0]).toBe(descNames[1])
 			expect(ascNames[1]).toBe(descNames[0])
+		})
+	})
+
+	describe("group", () => {
+		function makeTag(uuid: string, name: string): NoteTag {
+			return {
+				uuid,
+				name,
+				favorite: false,
+				editedTimestamp: 1000n,
+				createdTimestamp: 1000n,
+				undecryptable: false
+			}
+		}
+
+		it("returns empty array for empty input", () => {
+			expect(notesSorter.group({ notes: [] })).toEqual([])
+		})
+
+		it("groups pinned notes under a pinned header when groupPinned is true", () => {
+			const pinned = makeNote({ uuid: "pinned-1", editedTimestamp: BigInt(Date.now()), pinned: true })
+			const normal = makeNote({ uuid: "normal-1", editedTimestamp: BigInt(Date.now()) })
+
+			const result = notesSorter.group({ notes: [normal, pinned], groupPinned: true })
+			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-pinned")
+
+			expect(headerIdx).toBeGreaterThanOrEqual(0)
+			expect(result[headerIdx + 1]?.type).toBe("note")
+			expect((result[headerIdx + 1] as { uuid?: string }).uuid).toBe("pinned-1")
+		})
+
+		it("groups archived notes under archived header when groupArchived is true", () => {
+			const archived = makeNote({ uuid: "arch-1", editedTimestamp: BigInt(Date.now()), archive: true })
+
+			const result = notesSorter.group({ notes: [archived], groupArchived: true })
+			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-archived")
+
+			expect(headerIdx).toBeGreaterThanOrEqual(0)
+			expect(result[headerIdx + 1]?.type).toBe("note")
+		})
+
+		it("groups trashed notes under trashed header when groupTrashed is true", () => {
+			const trashed = makeNote({ uuid: "trash-1", editedTimestamp: BigInt(Date.now()), trash: true })
+
+			const result = notesSorter.group({ notes: [trashed], groupTrashed: true })
+			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-trashed")
+
+			expect(headerIdx).toBeGreaterThanOrEqual(0)
+			expect(result[headerIdx + 1]?.type).toBe("note")
+		})
+
+		it("filters notes by tag uuid when tag is provided", () => {
+			const matchingTag = makeTag("tag-abc", "work")
+			const otherTag = makeTag("tag-xyz", "other")
+			const withTag = makeNote({ uuid: "tagged-1", editedTimestamp: BigInt(Date.now()), tags: [matchingTag] })
+			const withOther = makeNote({ uuid: "tagged-2", editedTimestamp: BigInt(Date.now()), tags: [otherTag] })
+			const noTags = makeNote({ uuid: "no-tags", editedTimestamp: BigInt(Date.now()) })
+
+			const result = notesSorter.group({ notes: [withTag, withOther, noTags], tag: matchingTag })
+			const noteItems = result.filter(item => item.type === "note")
+
+			expect(noteItems).toHaveLength(1)
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("tagged-1")
+		})
+
+		it("places a recent note into the today bucket", () => {
+			const now = BigInt(Date.now())
+			const recent = makeNote({ uuid: "recent-1", editedTimestamp: now })
+
+			const result = notesSorter.group({ notes: [recent] })
+			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
+
+			expect(todayHeader).toBeDefined()
 		})
 	})
 })

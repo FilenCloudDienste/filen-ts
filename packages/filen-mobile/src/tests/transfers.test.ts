@@ -14,7 +14,9 @@ const {
 	mockCreateCompositeAbortSignal,
 	mockUnwrapDirMeta,
 	mockUnwrapFileMeta,
-	mockUnwrapParentUuid
+	mockUnwrapParentUuid,
+	mockFileCacheHas,
+	mockFileCacheGet
 } = vi.hoisted(() => {
 	const mockUploadFile = vi.fn().mockResolvedValue({
 		uuid: "uploaded-file-uuid",
@@ -79,6 +81,10 @@ const {
 
 			return { remove: () => set.delete(fn) }
 		}
+
+		removeEventListener(event: string, fn: () => void) {
+			this._listeners.get(event)?.delete(fn)
+		}
 	}
 
 	const mockCreateCompositePauseSignal = vi.fn((..._signals: unknown[]) => Object.assign(new MockPauseSignal(), { dispose: vi.fn() }))
@@ -102,6 +108,8 @@ const {
 	const mockUnwrapDirMeta = vi.fn()
 	const mockUnwrapFileMeta = vi.fn()
 	const mockUnwrapParentUuid = vi.fn()
+	const mockFileCacheHas = vi.fn().mockResolvedValue(false)
+	const mockFileCacheGet = vi.fn()
 
 	return {
 		MockPauseSignal,
@@ -117,7 +125,9 @@ const {
 		mockCreateCompositeAbortSignal,
 		mockUnwrapDirMeta,
 		mockUnwrapFileMeta,
-		mockUnwrapParentUuid
+		mockUnwrapParentUuid,
+		mockFileCacheHas,
+		mockFileCacheGet
 	}
 })
 
@@ -237,7 +247,8 @@ vi.mock("@/lib/cache", () => ({
 
 vi.mock("@/lib/fileCache", () => ({
 	default: {
-		get: vi.fn(),
+		has: mockFileCacheHas,
+		get: mockFileCacheGet,
 		set: vi.fn(),
 		remove: vi.fn()
 	}
@@ -357,6 +368,9 @@ describe("Transfers", () => {
 		})
 
 		mockUnwrapParentUuid.mockReturnValue("parent-uuid")
+
+		mockFileCacheHas.mockResolvedValue(false)
+		mockFileCacheGet.mockResolvedValue(undefined)
 	})
 
 	describe("upload", () => {
@@ -738,6 +752,27 @@ describe("Transfers", () => {
 				expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
 				expect(result!.files).toHaveLength(1)
 				expect(result!.directories).toHaveLength(0)
+			})
+
+			it("serves file from cache when fileCache has a cached copy", async () => {
+				const cachedFile = new FsFile("file:///document/cached.txt")
+				fs.set(cachedFile.uri, new Uint8Array([9, 8, 7]))
+
+				const dest = new FsFile("file:///document/dest-cached.txt")
+				const item = makeFileItem("file-uuid")
+
+				mockFileCacheHas.mockResolvedValue(true)
+				mockFileCacheGet.mockResolvedValue(cachedFile)
+
+				const result = await transfers.download({
+					item,
+					destination: dest,
+					hideProgress: true
+				})
+
+				expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+				expect(result).not.toBeNull()
+				expect(result!.files).toHaveLength(1)
 			})
 
 			it("does not update store when hideProgress is true", async () => {

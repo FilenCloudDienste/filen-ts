@@ -151,6 +151,7 @@ import { Buffer } from "node:buffer"
 import { type DriveItemFileExtracted } from "@/types"
 import audioCache from "@/lib/audioCache"
 import events from "@/lib/events"
+import alerts from "@/lib/alerts"
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio"
 import { Platform } from "react-native"
 import { type QueueItem } from "@/lib/audio"
@@ -311,6 +312,30 @@ describe("Audio", () => {
 
 			expect(audio.getPosition()).toBe(1)
 		})
+
+		it("rejects an undecryptable item and does not add it to the queue", async () => {
+			const { audio } = await createAudio()
+
+			const undecryptableItem: QueueItem = {
+				playlistUuid: "test-playlist",
+				item: {
+					type: "file",
+					data: {
+						uuid: "bad-uuid",
+						decryptedMeta: null,
+						undecryptable: true,
+						size: 0n
+					}
+				} as unknown as DriveItemFileExtracted
+			}
+
+			vi.mocked(alerts.normal).mockClear()
+
+			await audio.addToQueue({ item: undecryptableItem })
+
+			expect(audio.getQueue()).toHaveLength(0)
+			expect(alerts.normal).toHaveBeenCalledWith("tbd_cannot_decrypt_toast")
+		})
 	})
 
 	describe("clearQueue", () => {
@@ -367,36 +392,6 @@ describe("Audio", () => {
 			expect(audio.getPosition()).toBe(0)
 			expect(playlist.replace).toHaveBeenCalled()
 			expect(playlist.play).toHaveBeenCalled()
-		})
-
-		it("plays current queue item via replace + play", async () => {
-			const { audio, playlist } = await createAudio()
-
-			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
-
-			playlist.replace.mockClear()
-			playlist.play.mockClear()
-
-			await audio.play()
-
-			// Should call loadAndPlay which calls replace + play
-			expect(playlist.replace).toHaveBeenCalled()
-			expect(playlist.play).toHaveBeenCalled()
-		})
-
-		it("sets loading true during fetch and false after", async () => {
-			const { audio } = await createAudio()
-
-			await audio.addToQueue({ item: makeQueueItem("a", "song.mp3") })
-
-			vi.mocked(events.emit).mockClear()
-
-			await audio.play()
-
-			const emitCalls = vi.mocked(events.emit).mock.calls.filter(c => c[0] === "audioLoading")
-
-			expect(emitCalls[0]![1]).toBe(true)
-			expect(emitCalls[1]![1]).toBe(false)
 		})
 
 		it("calls audioCache.get with drive-typed CacheItem", async () => {

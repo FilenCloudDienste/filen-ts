@@ -96,6 +96,48 @@ describe("ClearBarrier", () => {
 		barrier.leave()
 	})
 
+	it("all enters queued during a runExclusive resume after the exclusive completes", async () => {
+		const barrier = new ClearBarrier()
+		const release = deferred()
+
+		const exclusivePromise = barrier.runExclusive(() => release.promise)
+
+		let entered1 = false
+		let entered2 = false
+		let entered3 = false
+
+		const enter1 = barrier.enter().then(() => {
+			entered1 = true
+		})
+
+		const enter2 = barrier.enter().then(() => {
+			entered2 = true
+		})
+
+		const enter3 = barrier.enter().then(() => {
+			entered3 = true
+		})
+
+		await flushMicrotasks()
+
+		expect(entered1).toBe(false)
+		expect(entered2).toBe(false)
+		expect(entered3).toBe(false)
+
+		release.resolve()
+
+		await exclusivePromise
+		await Promise.all([enter1, enter2, enter3])
+
+		expect(entered1).toBe(true)
+		expect(entered2).toBe(true)
+		expect(entered3).toBe(true)
+
+		barrier.leave()
+		barrier.leave()
+		barrier.leave()
+	})
+
 	it("queues multiple runExclusive callers in order", async () => {
 		const barrier = new ClearBarrier()
 		const order: number[] = []

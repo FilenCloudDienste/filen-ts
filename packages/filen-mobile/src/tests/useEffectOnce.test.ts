@@ -25,6 +25,19 @@ describe("useEffectOnce", () => {
 		expect(effect).toHaveBeenCalledOnce()
 	})
 
+	it("does not re-run even when the effect callback identity changes on rerender", () => {
+		let callCount = 0
+
+		const { rerender } = renderHook(({ cb }) => useEffectOnce(cb), {
+			initialProps: { cb: () => { callCount++ } }
+		})
+
+		rerender({ cb: () => { callCount += 100 } })
+		rerender({ cb: () => { callCount += 1000 } })
+
+		expect(callCount).toBe(1)
+	})
+
 	it("calls the cleanup function on unmount", () => {
 		const cleanup = vi.fn()
 		const effect = vi.fn(() => cleanup)

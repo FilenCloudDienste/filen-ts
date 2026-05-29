@@ -388,7 +388,6 @@ describe("AudioCache", () => {
 			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
 
 			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
-			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
 
 			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
 			const existingMeta: Metadata = {

@@ -532,6 +532,51 @@ describe("QueryPersisterKv", () => {
 		})
 	})
 
+	describe("flushNow()", () => {
+		it("persists dirty entries immediately without waiting for debounce", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("key-1", "value-1")
+			kv.setItem("key-2", "value-2")
+
+			kv.flushNow()
+
+			// persistNow() fires sqlite.openDb().then(db => db.executeBatch(...))
+			// drain both levels of the Promise chain before asserting
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+			expect(readKvStore<string>("key-1")).toBe("value-1")
+			expect(readKvStore<string>("key-2")).toBe("value-2")
+		})
+
+		it("cancels pending debounce so no second executeBatch fires after flushNow", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("key-1", "value-1")
+			kv.flushNow()
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			mockDb.executeBatch.mockClear()
+
+			// The debounce was cancelled, no additional flush should fire
+			await flushDebounce()
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+
+		it("is a no-op when no dirty entries exist", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.flushNow()
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("round-trip", () => {
 		it("setItem → flush → new instance restore → getItem returns same value", async () => {
 			const kv1 = new QueryPersisterKv()

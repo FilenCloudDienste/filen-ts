@@ -5578,6 +5578,34 @@ describe("Offline", () => {
 			expect(fs.get(FILES_DIR_URI)).toBe("dir")
 			expect(fs.get(DIRECTORIES_DIR_URI)).toBe("dir")
 		})
+
+		it("calls driveItemStoredOfflineQueryUpdate(false) for every stored item after clearAll", async () => {
+			const fileUuid = "ff111111-ffff-1111-ffff-111111111111"
+			const dirUuid = "dd222222-dddd-2222-dddd-222222222222"
+			const fileItem = makeFileItem(fileUuid, "doc.txt")
+			const dirItem = makeDirItem(dirUuid, "Folder")
+			const parent = makeParent("00000000-0000-0000-0000-000000000000")
+
+			writeFileMeta(fileUuid, { item: fileItem, parent })
+			writeFileData(fileUuid, "doc.txt")
+			writeDirectoryMeta(dirUuid, { item: dirItem, parent, entries: {} })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+
+			await offline.clearAll()
+
+			const calls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls
+			const falseCalls = calls.filter(([arg]) => arg.updater === false)
+			const invalidatedUuids = falseCalls.map(([arg]) => arg.params.uuid)
+
+			// Both items must be broadcast as no-longer-offline
+			expect(invalidatedUuids).toContain(fileUuid)
+			expect(invalidatedUuids).toContain(dirUuid)
+		})
 	})
 
 	describe("size", () => {

@@ -83,6 +83,21 @@ describe("SandboxCache", () => {
 			expect(fs.has(`${CACHE_DIR}/locked`)).toBe(true)
 			expect(fs.has(`${CACHE_DIR}/normal`)).toBe(false)
 		})
+
+		it("preserves the filen-tmp directory and its contents during clear", async () => {
+			const sandbox = await createSandboxCache()
+
+			fs.set(CACHE_DIR, "dir")
+			fs.set(`${CACHE_DIR}/filen-tmp`, "dir")
+			fs.set(`${CACHE_DIR}/filen-tmp/staging.bin`, new Uint8Array([7, 8, 9]))
+			fs.set(`${CACHE_DIR}/stray.bin`, new Uint8Array([1]))
+
+			await sandbox.clear()
+
+			expect(fs.get(`${CACHE_DIR}/filen-tmp`)).toBe("dir")
+			expect(fs.has(`${CACHE_DIR}/filen-tmp/staging.bin`)).toBe(true)
+			expect(fs.has(`${CACHE_DIR}/stray.bin`)).toBe(false)
+		})
 	})
 
 	describe("size", () => {
@@ -111,6 +126,17 @@ describe("SandboxCache", () => {
 			fs.set(`${CACHE_DIR}/nested/deeper/c.bin`, new Uint8Array(new Array(16).fill(0)))
 
 			expect(sandbox.size()).toBe(4 + 8 + 16)
+		})
+
+		it("excludes files inside filen-tmp from the byte total", async () => {
+			const sandbox = await createSandboxCache()
+
+			fs.set(CACHE_DIR, "dir")
+			fs.set(`${CACHE_DIR}/a.bin`, new Uint8Array(new Array(10).fill(0)))
+			fs.set(`${CACHE_DIR}/filen-tmp`, "dir")
+			fs.set(`${CACHE_DIR}/filen-tmp/staging.bin`, new Uint8Array(new Array(999).fill(0)))
+
+			expect(sandbox.size()).toBe(10)
 		})
 	})
 })

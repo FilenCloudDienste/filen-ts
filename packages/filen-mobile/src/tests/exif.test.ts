@@ -125,6 +125,15 @@ describe("parseExifDate", () => {
 
 			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45Z"))
 		})
+
+		it("applies OffsetTime when DateTime is the only date field", () => {
+			const exif = {
+				DateTime: BASE_DATE,
+				OffsetTime: "+03:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45+03:00"))
+		})
 	})
 
 	describe("SubSecTimeDigitized with DateTimeDigitized", () => {
@@ -132,6 +141,17 @@ describe("parseExifDate", () => {
 			const exif = {
 				DateTimeDigitized: BASE_DATE,
 				SubSecTimeDigitized: "456"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.456Z"))
+		})
+	})
+
+	describe("SubSecTime with DateTime fallback", () => {
+		it("adds millisecond precision when DateTime is the only date field", () => {
+			const exif = {
+				DateTime: BASE_DATE,
+				SubSecTime: "456"
 			}
 
 			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.456Z"))
@@ -183,6 +203,17 @@ describe("parseExifDate", () => {
 			}
 
 			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.789Z"))
+		})
+
+		it("reads OffsetTimeOriginal from nested {Exif} group", () => {
+			const exif = {
+				"{Exif}": {
+					DateTimeOriginal: BASE_DATE,
+					OffsetTimeOriginal: "+05:30"
+				}
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45+05:30"))
 		})
 	})
 

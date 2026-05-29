@@ -276,4 +276,30 @@ describe("chatDisplayName", () => {
 			)
 		).toBe("Ann")
 	})
+
+	it("multi-party fallback sorts display names regardless of participant order", () => {
+		expect(
+			chatDisplayName(
+				chat("c1", false, {
+					participants: [
+						participant(ME, "me@x.com"),
+						participant(OTHER_B, "b@x.com"),
+						participant(OTHER_A, "a@x.com", "Ann")
+					]
+				}),
+				ME
+			)
+		).toBe("Ann, b@x.com")
+	})
+
+	it("returns empty string when there are no other participants", () => {
+		expect(
+			chatDisplayName(
+				chat("c1", false, {
+					participants: [participant(ME, "me@x.com")]
+				}),
+				ME
+			)
+		).toBe("")
+	})
 })

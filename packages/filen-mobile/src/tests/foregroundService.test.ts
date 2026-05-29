@@ -152,6 +152,26 @@ describe("foregroundService", () => {
 		expect(await fgs.getStatus()).toBe("notDetermined")
 	})
 
+	it("getStatus with PROVISIONAL authorization returns 'authorized'", async () => {
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 3 })
+
+		expect(await fgs.getStatus()).toBe("authorized")
+	})
+
+	it("start with PROVISIONAL from requestPermission displays notification", async () => {
+		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 0 })
+		mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 3 })
+
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0, speed: 0 })
+
+		expect(mockNotifee.requestPermission).toHaveBeenCalledTimes(1)
+		expect(mockNotifee.displayNotification).toHaveBeenCalled()
+	})
+
 	it("openSettings opens Android notification settings", async () => {
 		const { default: fgs } = await import("@/lib/foregroundService")
 

@@ -380,7 +380,7 @@ describe("PersistentMap", () => {
 		])
 	})
 
-	it("calls onMutate on every set, even overwrites", () => {
+	it("calls onMutate for each set with a new value, skips for same-reference value", () => {
 		const onMutate = vi.fn()
 		const map = createReadyMap<string>(onMutate)
 
@@ -389,6 +389,17 @@ describe("PersistentMap", () => {
 
 		expect(onMutate).toHaveBeenCalledTimes(2)
 		expect(map.get("key")).toBe("second")
+	})
+
+	it("skips onMutate when setting the same value reference again (identity dedup)", () => {
+		const onMutate = vi.fn()
+		const map = createReadyMap<string>(onMutate)
+
+		map.set("key", "value")
+		map.set("key", "value")
+
+		expect(onMutate).toHaveBeenCalledTimes(1)
+		expect(map.get("key")).toBe("value")
 	})
 
 	it("delete returns true for existing key and false for missing key", () => {
@@ -801,6 +812,76 @@ describe("Cache", () => {
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(kvStore.has(`${GLOBAL_PREFIX}:_testField`)).toBe(false)
+		})
+	})
+
+	describe("flushNow", () => {
+		it("synchronously persists dirty entries without waiting for the debounce timer", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("flush-key", "flush-value")
+
+			mockDb.executeBatch.mockClear()
+
+			// Call flushNow before the 1-second debounce would fire
+			cache.flushNow()
+
+			// Resolve the async openDb().then(db => db.executeBatch(...)) chain
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+			const stored = kvStore.get(kvKey(name, "flush-key"))
+
+			expect(typeof stored).toBe("string")
+			expect(deserialize(stored as string)).toBe("flush-value")
+		})
+
+		it("cancels the pending debounce so the batch is not written twice", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const { map } = getFirstMap(cache)
+
+			map.set("k", "v")
+
+			mockDb.executeBatch.mockClear()
+
+			cache.flushNow()
+
+			// Resolve the fire-and-forget promise
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			// Now advance past the original debounce window — should NOT trigger a second batch
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+		})
+
+		it("does nothing when there are no dirty entries", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			mockDb.executeBatch.mockClear()
+
+			cache.flushNow()
+
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 		})
 	})
 })

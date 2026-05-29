@@ -259,6 +259,21 @@ describe("Sqlite", () => {
 
 			expect(result.get("cache:v1:map:a")).toBe("value")
 		})
+
+		it("silently omits entries with corrupt serialized data and returns partial map", async () => {
+			mockDb.executeRaw.mockResolvedValue([
+				["ok_key", serialize({ v: 42 })],
+				["bad_key", "}{not valid json"]
+			])
+
+			const sqlite = await createSqlite()
+
+			const result = await sqlite.kvAsync.getByPrefix("") as Map<string, unknown>
+
+			expect(result.size).toBe(1)
+			expect(result.get("ok_key")).toEqual({ v: 42 })
+			expect(result.has("bad_key")).toBe(false)
+		})
 	})
 
 	describe("clearAsync", () => {
@@ -268,6 +283,37 @@ describe("Sqlite", () => {
 			await sqlite.clearAsync()
 
 			expect(mockDb.execute).toHaveBeenCalledWith("DELETE FROM kv")
+		})
+	})
+
+	describe("shrinkMemory", () => {
+		it("executes PRAGMA shrink_memory after db is open", async () => {
+			const sqlite = await createSqlite()
+
+			await sqlite.openDb()
+			await sqlite.shrinkMemory()
+
+			expect(mockDb.execute).toHaveBeenCalledWith("PRAGMA shrink_memory")
+		})
+
+		it("does nothing when db is not yet initialized", async () => {
+			const sqlite = await createSqlite()
+
+			await sqlite.shrinkMemory()
+
+			expect(mockDb.execute).not.toHaveBeenCalledWith("PRAGMA shrink_memory")
+		})
+	})
+
+	describe("init error propagation", () => {
+		it("propagates error from open() through init()", async () => {
+			open.mockImplementationOnce(() => {
+				throw new Error("disk full")
+			})
+
+			const sqlite = await createSqlite()
+
+			await expect(sqlite.init()).rejects.toThrow("disk full")
 		})
 	})
 

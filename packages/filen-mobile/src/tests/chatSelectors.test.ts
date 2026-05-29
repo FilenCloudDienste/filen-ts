@@ -147,6 +147,15 @@ describe("chatHasUnread", () => {
 		expect(chatHasUnread(c, ME)).toBe(false)
 	})
 
+	it("false when lastMessage sentTimestamp equals lastFocus (exact boundary)", () => {
+		const c = chat({
+			lastFocus: 200n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(false)
+	})
+
 	it("true when other user sent a newer message after lastFocus", () => {
 		const c = chat({
 			lastFocus: 100n as unknown as Chat["lastFocus"],
@@ -172,6 +181,16 @@ describe("aggregateChatSelectionFlags includesUnread", () => {
 		})
 
 		expect(aggregateChatSelectionFlags([read, unread], ME).includesUnread).toBe(true)
+	})
+
+	it("false when the only chat with a newer message is muted", () => {
+		const muted = chat({
+			muted: true,
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(aggregateChatSelectionFlags([muted], ME).includesUnread).toBe(false)
 	})
 })
 
