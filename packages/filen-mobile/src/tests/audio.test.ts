@@ -313,7 +313,7 @@ describe("Audio", () => {
 			expect(audio.getPosition()).toBe(1)
 		})
 
-		it("rejects an undecryptable item and does not add it to the queue", async () => {
+		it("returns false for an undecryptable item and does not add it to the queue", async () => {
 			const { audio } = await createAudio()
 
 			const undecryptableItem: QueueItem = {
@@ -331,10 +331,12 @@ describe("Audio", () => {
 
 			vi.mocked(alerts.normal).mockClear()
 
-			await audio.addToQueue({ item: undecryptableItem })
+			const added = await audio.addToQueue({ item: undecryptableItem })
 
+			expect(added).toBe(false)
 			expect(audio.getQueue()).toHaveLength(0)
-			expect(alerts.normal).toHaveBeenCalledWith("tbd_cannot_decrypt_toast")
+			// The toast now lives in the UI layer — the lib must stay silent.
+			expect(alerts.normal).not.toHaveBeenCalled()
 		})
 	})
 

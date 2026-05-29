@@ -196,13 +196,17 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 											const result = await runWithLoading(async () => {
 												await audio.clearQueue()
 
-												await audio.replaceQueue({
+												const { droppedUndecryptable } = await audio.replaceQueue({
 													items: playlist.files.map(file => ({
 														item: file.item,
 														playlistUuid: playlist.uuid
 													})),
 													startingPosition: 0
 												})
+
+												if (droppedUndecryptable) {
+													alerts.normal("tbd_cannot_decrypt_toast")
+												}
 
 												await audio.play()
 											})
@@ -221,9 +225,9 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 											const result = await runWithLoading(async () => {
 												const queueLengthBefore = audio.getQueue().length
 
-												await Promise.all(
+												const addedResults = await Promise.all(
 													playlist.files.map(async file => {
-														await audio.addToQueue({
+														return await audio.addToQueue({
 															item: {
 																playlistUuid: playlist.uuid,
 																item: file.item
@@ -231,6 +235,10 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 														})
 													})
 												)
+
+												if (addedResults.some(added => !added)) {
+													alerts.normal("tbd_cannot_decrypt_toast")
+												}
 
 												if (queueLengthBefore === 0) {
 													await audio.play()

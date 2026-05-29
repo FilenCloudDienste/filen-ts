@@ -14,7 +14,6 @@ import { wrapAbortSignalForSdk } from "@/lib/utils"
 import { playlistsQueryUpdate } from "@/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
-import alerts from "@/lib/alerts"
 
 export type LoopMode = "none" | "track" | "queue"
 
@@ -57,10 +56,6 @@ type State = {
 	queue: QueueItem[]
 	position: number
 	loading: boolean
-}
-
-function surfaceCannotDecryptToast(): void {
-	alerts.normal("tbd_cannot_decrypt_toast")
 }
 
 // When the native didJustFinish end-of-track signal is missed (observed on short
@@ -539,11 +534,9 @@ export class Audio {
 		return this.placeholderArtworkUri ?? undefined
 	}
 
-	public async addToQueue({ item, position = "end" }: { item: QueueItem; position?: "start" | "end" }): Promise<void> {
+	public async addToQueue({ item, position = "end" }: { item: QueueItem; position?: "start" | "end" }): Promise<boolean> {
 		if (item.item.data.undecryptable) {
-			surfaceCannotDecryptToast()
-
-			return
+			return false
 		}
 
 		const shuffle = await this.isShuffleEnabled()
@@ -583,17 +576,22 @@ export class Audio {
 				}
 			}
 		}
+
+		return true
 	}
 
-	public async replaceQueue({ items, startingPosition = 0 }: { items: QueueItem[]; startingPosition?: number }): Promise<void> {
+	public async replaceQueue({
+		items,
+		startingPosition = 0
+	}: {
+		items: QueueItem[]
+		startingPosition?: number
+	}): Promise<{ droppedUndecryptable: boolean }> {
 		const droppedBeforePosition = items.slice(0, startingPosition).filter(i => i.item.data.undecryptable).length
 		const filteredItems = items.filter(i => !i.item.data.undecryptable)
 		const adjustedPosition =
 			filteredItems.length === 0 ? 0 : Math.max(0, Math.min(filteredItems.length - 1, startingPosition - droppedBeforePosition))
-
-		if (items.length > filteredItems.length) {
-			surfaceCannotDecryptToast()
-		}
+		const droppedUndecryptable = items.length > filteredItems.length
 
 		this.state.queue = filteredItems
 		this.state.position = adjustedPosition
@@ -606,6 +604,10 @@ export class Audio {
 		} else {
 			this.shuffleOrder = []
 			this.shufflePosition = 0
+		}
+
+		return {
+			droppedUndecryptable
 		}
 	}
 
