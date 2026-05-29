@@ -131,13 +131,57 @@ index 93b6901..8be3801 100644
  export declare class AudioRecorder extends SharedObject<RecordingEvents> {
      /**
 diff --git a/node_modules/expo-audio/ios/MediaController.swift b/node_modules/expo-audio/ios/MediaController.swift
-index b13872f..82312e4 100644
+index b13872f..286da1a 100644
 --- a/node_modules/expo-audio/ios/MediaController.swift
 +++ b/node_modules/expo-audio/ios/MediaController.swift
-@@ -201,12 +201,30 @@ class MediaController {
+@@ -11,6 +11,7 @@ class MediaController {
+ 
+   private var currentArtworkUrl: URL?
+   private var cachedArtwork: MPMediaItemArtwork?
++  private var remoteCommandsRegistered = false
+ 
+   func setActivePlayer(_ player: AudioPlayer?, options: LockScreenOptions? = nil) {
+     if let previous = activePlayer, previous.id != player?.id {
+@@ -130,6 +131,29 @@ class MediaController {
+   }
+ 
+   private func enableRemoteCommands(options: LockScreenOptions?) {
++    registerRemoteCommandHandlers()
++
++    remoteCommandCenter.playCommand.isEnabled = true
++    remoteCommandCenter.pauseCommand.isEnabled = true
++    remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
++    remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
++    remoteCommandCenter.skipForwardCommand.isEnabled = options?.showSeekForward ?? false
++    remoteCommandCenter.skipBackwardCommand.isEnabled = options?.showSeekBackward ?? false
++    remoteCommandCenter.nextTrackCommand.isEnabled = true
++    remoteCommandCenter.previousTrackCommand.isEnabled = true
++  }
++
++  // Register the remote command handlers exactly once. setActivePlayer (and therefore
++  // enableRemoteCommands) runs on every track change; re-adding block-based targets each
++  // time stacks handlers — removeTarget(self) does not remove closure-based targets — so a
++  // single button press would fire N times after N tracks. The handlers read activePlayer
++  // dynamically, so a one-time registration stays correct across track changes.
++  private func registerRemoteCommandHandlers() {
++    if remoteCommandsRegistered {
++      return
++    }
++    remoteCommandsRegistered = true
++
+     remoteCommandCenter.playCommand.addTarget { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+@@ -201,12 +225,21 @@ class MediaController {
        return .success
      }
  
+-    remoteCommandCenter.playCommand.isEnabled = true
+-    remoteCommandCenter.pauseCommand.isEnabled = true
+-    remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
+-    remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
+-    remoteCommandCenter.skipForwardCommand.isEnabled = options?.showSeekForward ?? false
+-    remoteCommandCenter.skipBackwardCommand.isEnabled = options?.showSeekBackward ?? false
 +    remoteCommandCenter.nextTrackCommand.addTarget { [weak self] _ in
 +      guard let player = self?.activePlayer else {
 +        return .commandFailed
@@ -153,19 +197,10 @@ index b13872f..82312e4 100644
 +      player.emit(event: "remotePreviousTrack", arguments: [:])
 +      return .success
 +    }
-+
-     remoteCommandCenter.playCommand.isEnabled = true
-     remoteCommandCenter.pauseCommand.isEnabled = true
-     remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
-     remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
-     remoteCommandCenter.skipForwardCommand.isEnabled = options?.showSeekForward ?? false
-     remoteCommandCenter.skipBackwardCommand.isEnabled = options?.showSeekBackward ?? false
-+    remoteCommandCenter.nextTrackCommand.isEnabled = true
-+    remoteCommandCenter.previousTrackCommand.isEnabled = true
    }
  
    private func disableRemoteCommands() {
-@@ -216,6 +234,8 @@ class MediaController {
+@@ -216,6 +249,8 @@ class MediaController {
      remoteCommandCenter.changePlaybackPositionCommand.isEnabled = false
      remoteCommandCenter.skipForwardCommand.isEnabled = false
      remoteCommandCenter.skipBackwardCommand.isEnabled = false
@@ -174,7 +209,7 @@ index b13872f..82312e4 100644
  
      // Remove event targets
      remoteCommandCenter.playCommand.removeTarget(self)
-@@ -224,5 +244,7 @@ class MediaController {
+@@ -224,5 +259,7 @@ class MediaController {
      remoteCommandCenter.changePlaybackPositionCommand.removeTarget(self)
      remoteCommandCenter.skipForwardCommand.removeTarget(self)
      remoteCommandCenter.skipBackwardCommand.removeTarget(self)

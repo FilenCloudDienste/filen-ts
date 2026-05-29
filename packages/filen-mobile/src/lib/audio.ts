@@ -1,4 +1,6 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-audio"
+import { Platform } from "react-native"
+import { Asset } from "expo-asset"
 import audioCache, { type Metadata } from "@/lib/audioCache"
 import type { DriveItemFileExtracted } from "@/types"
 import { useEffect, useState } from "react"
@@ -61,6 +63,17 @@ function surfaceCannotDecryptToast(): void {
 	alerts.normal("tbd_cannot_decrypt_toast")
 }
 
+// When the native didJustFinish end-of-track signal is missed (observed on short
+// 1-5s tracks where iOS can drop AVPlayerItemDidPlayToEndTime), this watchdog
+// advances the queue anyway. It arms from the duration reported once a track is
+// loaded and fires `buffer` ms after the expected end; a normal didJustFinish
+// clears it first, so it only ever acts as a fallback.
+const TRACK_END_WATCHDOG_BUFFER_MS = 2000
+
+// How close to the reported duration counts as "ended" when the watchdog fires —
+// guards against skipping a track that merely stalled mid-buffer.
+const TRACK_END_WATCHDOG_EPSILON_S = 0.5
+
 export class Audio {
 	private readonly player = createAudioPlayer(undefined, {
 		updateInterval: 1000,
@@ -74,6 +87,19 @@ export class Audio {
 
 	// Generation counter for loadAndPlay; bumped on each call so older in-flight loads can detect they've been superseded.
 	private loadGeneration: number = 0
+
+	// Fallback timer for the missed-didJustFinish watchdog (see TRACK_END_WATCHDOG_* above).
+	private trackEndWatchdog: ReturnType<typeof setTimeout> | null = null
+
+	// loadGeneration whose track-end has already been handled, so the watchdog and a
+	// late didJustFinish can't both advance the same track.
+	private trackEndHandledGeneration: number = -1
+
+	// Whether we currently intend to be playing; gates the watchdog so it doesn't poll while paused/stopped.
+	private intendPlaying: boolean = false
+
+	// Lazily-resolved file:// URI for the lock-screen artwork placeholder shown when a track has no embedded cover art.
+	private placeholderArtworkUri: string | null = null
 
 	// Tracks playlist UUIDs whose missing-file cleanup has already been initiated this session, to avoid rewriting on every read.
 	private playlistCleanupDone: Set<string> = new Set()
@@ -123,8 +149,13 @@ export class Audio {
 			events.emit("audioStatus", status)
 
 			if (status.didJustFinish) {
+				this.clearTrackEndWatchdog()
 				this.handleTrackEnd().catch(console.error)
+
+				return
 			}
+
+			this.maybeArmTrackEndWatchdog(status)
 		})
 
 		this.player.addListener("remoteNextTrack", () => {
@@ -289,6 +320,17 @@ export class Audio {
 	}
 
 	private async handleTrackEnd(): Promise<void> {
+		// Both the native didJustFinish event and the watchdog funnel through here.
+		// Dedupe per loaded track so a late didJustFinish can't double-advance after
+		// the watchdog already recovered (or vice-versa).
+		if (this.trackEndHandledGeneration === this.loadGeneration) {
+			return
+		}
+
+		this.trackEndHandledGeneration = this.loadGeneration
+
+		this.clearTrackEndWatchdog()
+
 		const loopMode = await this.getLoopMode()
 
 		if (loopMode === "track") {
@@ -309,6 +351,8 @@ export class Audio {
 
 			return
 		}
+
+		this.intendPlaying = false
 
 		this.player.pause()
 	}
@@ -343,23 +387,28 @@ export class Audio {
 					return
 				}
 
+				// Clear any pending watchdog from the outgoing track before swapping sources;
+				// the incoming track re-arms it from its own status updates.
+				this.clearTrackEndWatchdog()
+
 				this.player.replace({
 					uri: audio.uri,
 					name: metadata?.title ?? entry.item.data.decryptedMeta?.name ?? entry.item.data.uuid
 				})
 
-				await this.player.seekTo(0)
-
-				if (generation !== this.loadGeneration) {
-					return
-				}
+				// No seekTo(0) here on purpose: a freshly-replaced AVPlayerItem is already at
+				// time 0, and the previous `await seekTo(0)` opened a gap between replace() and
+				// play() that could lose the end-of-track observer on very short tracks. Keeping
+				// replace()/play() in one synchronous tick avoids that race.
+				this.intendPlaying = true
 
 				this.player.play()
 
 				this.updateLockScreen({
 					item: entry,
-					metadata
-				})
+					metadata,
+					generation
+				}).catch(console.error)
 			},
 			{
 				throw: true
@@ -367,20 +416,127 @@ export class Audio {
 		)
 	}
 
-	private updateLockScreen({ item, metadata }: { item: QueueItem; metadata: Metadata }): void {
+	private async updateLockScreen({
+		item,
+		metadata,
+		generation
+	}: {
+		item: QueueItem
+		metadata: Metadata
+		generation: number
+	}): Promise<void> {
+		// Fall back to a bundled placeholder when the track has no embedded cover art,
+		// otherwise iOS keeps showing the previous track's artwork (it never clears a
+		// now-playing key that isn't overwritten).
+		const artworkUrl = metadata?.pictureUri ?? (await this.getPlaceholderArtworkUri())
+
+		// Resolving the placeholder is async on first use; bail if a newer load has
+		// since superseded this one so we don't overwrite the current track's info.
+		if (generation !== this.loadGeneration) {
+			return
+		}
+
 		this.player.setActiveForLockScreen(
 			true,
 			{
 				title: metadata?.title ?? item.item.data.decryptedMeta?.name ?? item.item.data.uuid,
 				artist: metadata?.artist ?? undefined,
 				albumTitle: metadata?.album ?? undefined,
-				artworkUrl: metadata?.pictureUri ?? undefined
+				artworkUrl: artworkUrl ?? undefined
 			},
 			{
-				showSeekBackward: true,
-				showSeekForward: true
+				// iOS gives the two Now Playing side-button slots to the 10s skip-interval
+				// commands when they're enabled, hiding previous/next track. Disable them on
+				// iOS so prev/next show; keep them on Android where they coexist in the
+				// notification with prev/next.
+				showSeekBackward: Platform.OS !== "ios",
+				showSeekForward: Platform.OS !== "ios"
 			}
 		)
+	}
+
+	private clearTrackEndWatchdog(): void {
+		if (this.trackEndWatchdog !== null) {
+			clearTimeout(this.trackEndWatchdog)
+
+			this.trackEndWatchdog = null
+		}
+	}
+
+	private scheduleTrackEndWatchdog(generation: number, delayMs: number): void {
+		this.clearTrackEndWatchdog()
+
+		this.trackEndWatchdog = setTimeout(() => {
+			this.onTrackEndWatchdogFired(generation)
+		}, delayMs)
+	}
+
+	private maybeArmTrackEndWatchdog(status: AudioStatus): void {
+		if (!this.intendPlaying || !status.isLoaded || !Number.isFinite(status.duration) || status.duration <= 0) {
+			return
+		}
+
+		const remainingMs = Math.max(0, (status.duration - status.currentTime) * 1000)
+
+		this.scheduleTrackEndWatchdog(this.loadGeneration, remainingMs + TRACK_END_WATCHDOG_BUFFER_MS)
+	}
+
+	private onTrackEndWatchdogFired(generation: number): void {
+		this.trackEndWatchdog = null
+
+		if (generation !== this.loadGeneration) {
+			return
+		}
+
+		const duration = this.player.duration
+		const currentTime = this.player.currentTime
+
+		if (!Number.isFinite(duration) || duration <= 0) {
+			return
+		}
+
+		// Still short of the end — the track stalled (buffering) rather than finished.
+		// Keep waiting instead of skipping, but only while we still intend to play.
+		if (currentTime < duration - TRACK_END_WATCHDOG_EPSILON_S) {
+			if (!this.intendPlaying) {
+				return
+			}
+
+			const remainingMs = Math.max(0, (duration - currentTime) * 1000)
+
+			this.scheduleTrackEndWatchdog(generation, remainingMs + TRACK_END_WATCHDOG_BUFFER_MS)
+
+			return
+		}
+
+		// Reached the end but didJustFinish never arrived — advance the queue.
+		this.handleTrackEnd().catch(console.error)
+	}
+
+	private async getPlaceholderArtworkUri(): Promise<string | undefined> {
+		if (this.placeholderArtworkUri !== null) {
+			return this.placeholderArtworkUri
+		}
+
+		const result = await run(async () => {
+			const asset = Asset.fromModule(require("@/assets/images/icon-light.png"))
+
+			if (!asset.localUri) {
+				await asset.downloadAsync()
+			}
+
+			return asset.localUri
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+
+			return undefined
+		}
+
+		this.placeholderArtworkUri = result.data ?? null
+
+		return this.placeholderArtworkUri ?? undefined
 	}
 
 	public async addToQueue({ item, position = "end" }: { item: QueueItem; position?: "start" | "end" }): Promise<void> {
@@ -469,11 +625,17 @@ export class Audio {
 	}
 
 	public pause(): void {
+		this.intendPlaying = false
+
+		this.clearTrackEndWatchdog()
+
 		this.player.pause()
 	}
 
 	public resume(): void {
 		if (this.state.queue.length > 0) {
+			this.intendPlaying = true
+
 			this.player.play()
 		}
 	}
@@ -525,6 +687,10 @@ export class Audio {
 	}
 
 	public async stop(): Promise<void> {
+		this.intendPlaying = false
+
+		this.clearTrackEndWatchdog()
+
 		this.player.pause()
 
 		await this.player.seekTo(0)

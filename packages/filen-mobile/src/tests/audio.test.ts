@@ -36,6 +36,15 @@ vi.mock("expo-audio", () => ({
 	setAudioModeAsync: vi.fn().mockResolvedValue(undefined)
 }))
 
+vi.mock("expo-asset", () => ({
+	Asset: {
+		fromModule: vi.fn(() => ({
+			localUri: "file:///mock/placeholder-artwork.png",
+			downloadAsync: vi.fn().mockResolvedValue(undefined)
+		}))
+	}
+}))
+
 vi.mock("@/lib/audioCache", () => ({
 	default: {
 		get: vi.fn().mockResolvedValue({
@@ -143,6 +152,7 @@ import { type DriveItemFileExtracted } from "@/types"
 import audioCache from "@/lib/audioCache"
 import events from "@/lib/events"
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio"
+import { Platform } from "react-native"
 import { type QueueItem } from "@/lib/audio"
 
 // ──────────────────────────────────────────────
@@ -1677,6 +1687,217 @@ describe("Audio", () => {
 
 			expect(result).toHaveLength(1)
 			expect(result[0]!.uuid).toBe("p-uuid")
+		})
+	})
+
+	describe("track-end watchdog (short-track fallback)", () => {
+		it("advances to the next track when didJustFinish never fires", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				const statusListener = getPlaylistStatusListener(playlist)
+
+				expect(statusListener).toBeDefined()
+
+				playlist.replace.mockClear()
+
+				// A 2s track starts playing — arms the watchdog.
+				playlist.duration = 2
+				playlist.currentTime = 0
+				statusListener!({ playing: true, isLoaded: true, duration: 2, currentTime: 0, didJustFinish: false })
+
+				// Track reaches its end, but didJustFinish never arrives.
+				playlist.currentTime = 2
+
+				// Watchdog fires TRACK_END_WATCHDOG_BUFFER_MS (2000) after the expected end.
+				await vi.advanceTimersByTimeAsync(2 * 1000 + 2000 + 100)
+
+				expect(audio.getPosition()).toBe(1)
+				expect(playlist.replace).toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not double-advance: a normal didJustFinish cancels the watchdog", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("c", "c.mp3") })
+				await audio.play()
+
+				const statusListener = getPlaylistStatusListener(playlist)
+
+				// Arm the watchdog for a 2s track.
+				playlist.duration = 2
+				playlist.currentTime = 0
+				statusListener!({ playing: true, isLoaded: true, duration: 2, currentTime: 0, didJustFinish: false })
+
+				// didJustFinish arrives normally → advances to track 1 and cancels the watchdog.
+				statusListener!({ didJustFinish: true })
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(audio.getPosition()).toBe(1)
+
+				// Long past the (cancelled) watchdog deadline — must NOT advance again.
+				await vi.advanceTimersByTimeAsync(10000)
+
+				expect(audio.getPosition()).toBe(1)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not skip a track that merely stalled mid-playback", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				const statusListener = getPlaylistStatusListener(playlist)
+
+				playlist.replace.mockClear()
+
+				// 10s track arms the watchdog.
+				playlist.duration = 10
+				playlist.currentTime = 0
+				statusListener!({ playing: true, isLoaded: true, duration: 10, currentTime: 0, didJustFinish: false })
+
+				// Playback stalls at 3s (buffering) — well short of the end.
+				playlist.currentTime = 3
+
+				// Past the original watchdog deadline (10s + 2s buffer).
+				await vi.advanceTimersByTimeAsync(10 * 1000 + 2000 + 100)
+
+				// Still on the same track — the watchdog re-armed instead of skipping.
+				expect(audio.getPosition()).toBe(0)
+				expect(playlist.replace).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not advance after pause(), even past the watchdog deadline", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				const statusListener = getPlaylistStatusListener(playlist)
+
+				playlist.replace.mockClear()
+
+				playlist.duration = 2
+				playlist.currentTime = 0
+				statusListener!({ playing: true, isLoaded: true, duration: 2, currentTime: 0, didJustFinish: false })
+
+				audio.pause()
+
+				await vi.advanceTimersByTimeAsync(2 * 1000 + 2000 + 100)
+
+				expect(audio.getPosition()).toBe(0)
+				expect(playlist.replace).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+	})
+
+	describe("lock screen artwork + controls", () => {
+		// When a track has no embedded art, the code substitutes a bundled placeholder
+		// resolved via Metro's asset require(). That require() can't resolve in the vitest
+		// node env (no Metro transform), so the placeholder URI itself is verified on-device;
+		// here we assert the no-artwork path still pushes a lock-screen update with the track's
+		// metadata rather than crashing or skipping.
+		it("still updates the lock screen for a track without embedded artwork", async () => {
+			vi.mocked(audioCache.get).mockResolvedValue({
+				audio: { uri: "file:///cache/audio.mp3" },
+				metadata: { title: "No Art Song", artist: "Artist", album: "Album", pictureUri: null, cachedAt: Date.now() }
+			} as never)
+
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.play()
+			await flushMicrotasks()
+
+			const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
+
+			expect(lastCall).toBeDefined()
+			expect(lastCall![1].title).toBe("No Art Song")
+		})
+
+		it("uses the track's own artwork when present", async () => {
+			vi.mocked(audioCache.get).mockResolvedValue({
+				audio: { uri: "file:///cache/audio.mp3" },
+				metadata: {
+					title: "Song",
+					artist: "Artist",
+					album: "Album",
+					pictureUri: "file:///cache/cover.jpg",
+					cachedAt: Date.now()
+				}
+			} as never)
+
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.play()
+			await flushMicrotasks()
+
+			const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
+
+			expect(lastCall![1].artworkUrl).toBe("file:///cache/cover.jpg")
+		})
+
+		it("disables the 10s seek controls on iOS so prev/next are shown", async () => {
+			Platform.OS = "ios"
+
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.play()
+			await flushMicrotasks()
+
+			const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
+
+			expect(lastCall![2]).toEqual({ showSeekBackward: false, showSeekForward: false })
+		})
+
+		it("keeps the 10s seek controls on Android", async () => {
+			Platform.OS = "android"
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.play()
+				await flushMicrotasks()
+
+				const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
+
+				expect(lastCall![2]).toEqual({ showSeekBackward: true, showSeekForward: true })
+			} finally {
+				Platform.OS = "ios"
+			}
 		})
 	})
 })
