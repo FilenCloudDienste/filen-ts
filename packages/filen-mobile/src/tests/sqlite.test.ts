@@ -1,56 +1,94 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const store = new Map<string, string>()
-
+// In-memory store backing the op-sqlite mock. The real sqlite lib uses one-shot
+// db.execute / db.executeRaw (no shared prepared statements), so the mock parses
+// the handful of SQL patterns the kv layer issues and operates on this Map.
 const { mockDb, open } = vi.hoisted(() => {
-	const stmtStore = new Map<string, string>()
+	const store = new Map<string, string>()
 
-	function createStmt(query: string) {
-		let params: unknown[] = []
+	const stripWildcard = (param: unknown): string => (param as string).replace(/%$/, "")
 
-		return {
-			bind: vi.fn(async (p: unknown[]) => {
-				params = p
-			}),
-			bindSync: vi.fn((p: unknown[]) => {
-				params = p
-			}),
-			execute: vi.fn(async () => {
-				if (query.startsWith("SELECT value")) {
-					const value = stmtStore.get(params[0] as string)
+	const executeImpl = async (query: string, params?: unknown[]) => {
+		if (query.startsWith("INSERT")) {
+			store.set(params![0] as string, params![1] as string)
 
-					return { rows: value !== undefined ? [{ value }] : [], insertId: undefined, rowsAffected: 0 }
-				}
-
-				if (query.startsWith("INSERT")) {
-					stmtStore.set(params[0] as string, params[1] as string)
-
-					return { rows: [], insertId: 1, rowsAffected: 1 }
-				}
-
-				if (query.startsWith("DELETE")) {
-					stmtStore.delete(params[0] as string)
-
-					return { rows: [], insertId: undefined, rowsAffected: 1 }
-				}
-
-				if (query.startsWith("SELECT EXISTS")) {
-					return { rows: [{ found: stmtStore.has(params[0] as string) ? 1 : 0 }], insertId: undefined, rowsAffected: 0 }
-				}
-
-				return { rows: [], insertId: undefined, rowsAffected: 0 }
-			}),
-			_getStore: () => stmtStore
+			return { rows: [], insertId: 1, rowsAffected: 1 }
 		}
+
+		if (query.startsWith("DELETE FROM kv WHERE key LIKE")) {
+			const prefix = stripWildcard(params![0])
+			let rowsAffected = 0
+
+			for (const key of [...store.keys()]) {
+				if (key.startsWith(prefix)) {
+					store.delete(key)
+					rowsAffected++
+				}
+			}
+
+			return { rows: [], insertId: undefined, rowsAffected }
+		}
+
+		if (query.startsWith("DELETE FROM kv WHERE key =")) {
+			const existed = store.delete(params![0] as string)
+
+			return { rows: [], insertId: undefined, rowsAffected: existed ? 1 : 0 }
+		}
+
+		if (query.startsWith("DELETE FROM kv")) {
+			const rowsAffected = store.size
+
+			store.clear()
+
+			return { rows: [], insertId: undefined, rowsAffected }
+		}
+
+		return { rows: [], insertId: undefined, rowsAffected: 0 }
+	}
+
+	const executeRawImpl = async (query: string, params?: unknown[]) => {
+		if (query.startsWith("SELECT value")) {
+			const value = store.get(params![0] as string)
+
+			return value !== undefined ? [[value]] : []
+		}
+
+		if (query.startsWith("SELECT EXISTS")) {
+			return [[store.has(params![0] as string) ? 1 : 0]]
+		}
+
+		if (query.startsWith("SELECT key, value")) {
+			const prefix = stripWildcard(params![0])
+
+			return [...store.entries()].filter(([key]) => key.startsWith(prefix))
+		}
+
+		if (query.startsWith("SELECT key FROM kv WHERE key LIKE")) {
+			const prefix = stripWildcard(params![0])
+
+			return [...store.keys()].filter(key => key.startsWith(prefix)).map(key => [key])
+		}
+
+		if (query.startsWith("SELECT key FROM kv")) {
+			return [...store.keys()].map(key => [key])
+		}
+
+		return []
 	}
 
 	const mockDb = {
-		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
+		execute: vi.fn(executeImpl),
 		executeSync: vi.fn().mockReturnValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
-		executeRaw: vi.fn().mockResolvedValue([]),
+		executeRaw: vi.fn(executeRawImpl),
 		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
-		prepareStatement: vi.fn((query: string) => createStmt(query)),
-		close: vi.fn()
+		prepareStatement: vi.fn(),
+		close: vi.fn(),
+		_store: store,
+		_reset: () => {
+			store.clear()
+			mockDb.execute.mockImplementation(executeImpl)
+			mockDb.executeRaw.mockImplementation(executeRawImpl)
+		}
 	}
 
 	return { mockDb, open: vi.fn(() => mockDb) }
@@ -72,8 +110,6 @@ vi.mock("@/lib/utils", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-import { serialize } from "@/lib/serializer"
-
 type Sqlite = any
 
 async function createSqlite(): Promise<Sqlite> {
@@ -86,15 +122,12 @@ describe("Sqlite", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.resetModules()
-		store.clear()
+		mockDb._reset()
 		open.mockReturnValue(mockDb)
-		mockDb.execute.mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 })
-		mockDb.executeRaw.mockResolvedValue([])
-		mockDb.executeBatch.mockResolvedValue({ rowsAffected: 0 })
 	})
 
 	describe("init", () => {
-		it("calls open, runs INIT_QUERIES, and prepares statements", async () => {
+		it("calls open, runs INIT_QUERIES, and creates the kv table", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.init()
@@ -111,8 +144,6 @@ describe("Sqlite", () => {
 			expect(execArg).toContain("CREATE TABLE IF NOT EXISTS kv")
 			expect(execArg).toContain("PRAGMA optimize")
 			expect(execArg).not.toContain("foreign_keys")
-
-			expect(mockDb.prepareStatement).toHaveBeenCalledTimes(4)
 		})
 
 		it("is idempotent — calling init twice only opens db once", async () => {
@@ -144,7 +175,7 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.set", () => {
-		it("uses prepared statement and returns insertId", async () => {
+		it("returns the insertId from execute", async () => {
 			const sqlite = await createSqlite()
 			const result = await sqlite.kvAsync.set("test-key", "test-value")
 
@@ -177,12 +208,15 @@ describe("Sqlite", () => {
 
 	describe("kvAsync.keys", () => {
 		it("uses executeRaw and returns array of keys", async () => {
-			mockDb.executeRaw.mockResolvedValue([["alpha"], ["beta"], ["gamma"]])
-
 			const sqlite = await createSqlite()
+
+			await sqlite.kvAsync.set("alpha", "1")
+			await sqlite.kvAsync.set("beta", "2")
+			await sqlite.kvAsync.set("gamma", "3")
+
 			const keys = await sqlite.kvAsync.keys()
 
-			expect(keys).toEqual(["alpha", "beta", "gamma"])
+			expect([...keys].sort()).toEqual(["alpha", "beta", "gamma"])
 			expect(mockDb.executeRaw).toHaveBeenCalledWith("SELECT key FROM kv")
 		})
 
@@ -214,7 +248,7 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.remove", () => {
-		it("uses prepared statement for removal", async () => {
+		it("removes the key", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.kvAsync.set("doomed-key", "value")
@@ -237,38 +271,52 @@ describe("Sqlite", () => {
 	})
 
 	describe("kvAsync.keysByPrefix", () => {
-		it("uses executeRaw with LIKE query", async () => {
-			mockDb.executeRaw.mockResolvedValue([["cache:v1:map:a"], ["cache:v1:map:b"]])
-
+		it("uses executeRaw with LIKE query and returns matching keys", async () => {
 			const sqlite = await createSqlite()
+
+			await sqlite.kvAsync.set("cache:v1:map:a", "1")
+			await sqlite.kvAsync.set("cache:v1:map:b", "2")
+			await sqlite.kvAsync.set("other:c", "3")
+
 			const keys = await sqlite.kvAsync.keysByPrefix("cache:v1:map:")
 
-			expect(keys).toEqual(["cache:v1:map:a", "cache:v1:map:b"])
+			expect([...keys].sort()).toEqual(["cache:v1:map:a", "cache:v1:map:b"])
 			expect(mockDb.executeRaw).toHaveBeenCalledWith("SELECT key FROM kv WHERE key LIKE ?", ["cache:v1:map:%"])
 		})
 	})
 
 	describe("kvAsync.getByPrefix", () => {
-		it("uses executeRaw and returns map of entries", async () => {
-			const serialized = serialize("value")
-
-			mockDb.executeRaw.mockResolvedValue([["cache:v1:map:a", serialized]])
-
+		it("returns matching entries as a Map", async () => {
 			const sqlite = await createSqlite()
-			const result = await sqlite.kvAsync.getByPrefix("cache:v1:map:")
 
-			expect(result.get("cache:v1:map:a")).toBe("value")
+			await sqlite.kvAsync.set("data_x", { value: 1 })
+			await sqlite.kvAsync.set("data_y", { value: 2 })
+			await sqlite.kvAsync.set("other_z", { value: 3 })
+
+			const result = (await sqlite.kvAsync.getByPrefix("data_")) as Map<string, { value: number }>
+
+			expect(result.size).toBe(2)
+			expect(result.get("data_x")).toEqual({ value: 1 })
+			expect(result.get("data_y")).toEqual({ value: 2 })
+		})
+
+		it("returns empty Map when no rows match", async () => {
+			const sqlite = await createSqlite()
+
+			const result = await sqlite.kvAsync.getByPrefix("nonexistent_")
+
+			expect(result).toBeInstanceOf(Map)
+			expect(result.size).toBe(0)
 		})
 
 		it("silently omits entries with corrupt serialized data and returns partial map", async () => {
-			mockDb.executeRaw.mockResolvedValue([
-				["ok_key", serialize({ v: 42 })],
-				["bad_key", "}{not valid json"]
-			])
-
 			const sqlite = await createSqlite()
 
-			const result = await sqlite.kvAsync.getByPrefix("") as Map<string, unknown>
+			await sqlite.kvAsync.set("ok_key", { v: 42 })
+			// Inject a corrupt raw value directly into the backing store
+			mockDb._store.set("bad_key", "}{not valid json")
+
+			const result = (await sqlite.kvAsync.getByPrefix("")) as Map<string, unknown>
 
 			expect(result.size).toBe(1)
 			expect(result.get("ok_key")).toEqual({ v: 42 })
@@ -317,7 +365,7 @@ describe("Sqlite", () => {
 		})
 	})
 
-	describe("round-trip via prepared statements", () => {
+	describe("round-trip via execute/executeRaw", () => {
 		it("set then get preserves the value through serializer", async () => {
 			const sqlite = await createSqlite()
 
@@ -338,23 +386,7 @@ describe("Sqlite", () => {
 	})
 
 	describe("removeByPrefix", () => {
-		it("removes all entries matching prefix", async () => {
-			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, string>
-
-			mockDb.execute.mockImplementation(async (query: string, params?: unknown[]) => {
-				if (query.includes("LIKE") && params?.[0]) {
-					const prefix = (params[0] as string).replace(/%$/, "")
-
-					for (const key of [...stmtStoreRef.keys()]) {
-						if (key.startsWith(prefix)) {
-							stmtStoreRef.delete(key)
-						}
-					}
-				}
-
-				return { rows: [], insertId: undefined, rowsAffected: 1 }
-			})
-
+		it("removes all entries matching prefix and leaves others", async () => {
 			const sqlite = await createSqlite()
 
 			await sqlite.kvAsync.set("prefix_a", "one")
@@ -366,52 +398,6 @@ describe("Sqlite", () => {
 			expect(await sqlite.kvAsync.get("prefix_a")).toBeNull()
 			expect(await sqlite.kvAsync.get("prefix_b")).toBeNull()
 			expect(await sqlite.kvAsync.get("other_c")).toBe("three")
-		})
-	})
-
-	describe("getByPrefix", () => {
-		it("returns empty Map when no rows match", async () => {
-			mockDb.executeRaw.mockResolvedValue([])
-
-			const sqlite = await createSqlite()
-
-			const result = await sqlite.kvAsync.getByPrefix("nonexistent_")
-
-			expect(result).toBeInstanceOf(Map)
-			expect(result.size).toBe(0)
-		})
-
-		it("returns matching entries as a Map", async () => {
-			const stmtStoreRef = mockDb.prepareStatement("SELECT value")._getStore() as Map<string, string>
-
-			mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
-				if (query.includes("LIKE") && params?.[0]) {
-					const prefix = (params[0] as string).replace(/%$/, "")
-					const results: [string, string][] = []
-
-					for (const [key, value] of stmtStoreRef.entries()) {
-						if (key.startsWith(prefix)) {
-							results.push([key, value])
-						}
-					}
-
-					return results
-				}
-
-				return []
-			})
-
-			const sqlite = await createSqlite()
-
-			await sqlite.kvAsync.set("data_x", { value: 1 })
-			await sqlite.kvAsync.set("data_y", { value: 2 })
-			await sqlite.kvAsync.set("other_z", { value: 3 })
-
-			const result = await sqlite.kvAsync.getByPrefix("data_") as Map<string, { value: number }>
-
-			expect(result.size).toBe(2)
-			expect(result.get("data_x")).toEqual({ value: 1 })
-			expect(result.get("data_y")).toEqual({ value: 2 })
 		})
 	})
 })

@@ -211,6 +211,10 @@ class SecureStore {
 				this.rwMutex.release()
 			})
 
+			if (this.readCache) {
+				return this.readCache
+			}
+
 			this.ensureDirectories()
 
 			if (!this.secureStoreFile.exists || this.secureStoreFile.size === 0) {
@@ -451,18 +455,14 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 
 	const set = useCallback(
 		(fn: T | ((prev: T) => T)): void => {
+			isLocalUpdateRef.current = true
+
 			;(async () => {
 				const result = await run(async defer => {
 					await flushMutexRef.current.acquire()
 
 					defer(() => {
 						flushMutexRef.current.release()
-					})
-
-					isLocalUpdateRef.current = true
-
-					defer(() => {
-						isLocalUpdateRef.current = false
 					})
 
 					const now = typeof fn === "function" ? (fn as (prev: T) => T)(lastValueRef.current) : fn
@@ -472,10 +472,10 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 					await secureStore.set(key, now)
 				})
 
+				isLocalUpdateRef.current = false
+
 				if (!result.success) {
 					console.error("Error setting value in secureStore:", result.error)
-
-					return
 				}
 			})()
 		},

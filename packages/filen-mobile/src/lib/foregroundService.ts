@@ -38,7 +38,11 @@ class ForegroundService {
 				name: CHANNEL_NAME,
 				importance: AndroidImportance.LOW
 			})
-		})()
+		})().catch(err => {
+			this.initPromise = null
+
+			throw err
+		})
 
 		return this.initPromise
 	}
@@ -106,9 +110,9 @@ class ForegroundService {
 			return
 		}
 
-		this.running = false
-
 		await notifee.stopForegroundService()
+
+		this.running = false
 	}
 
 	private async ensurePermission(): Promise<boolean> {

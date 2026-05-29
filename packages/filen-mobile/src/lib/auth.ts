@@ -196,7 +196,11 @@ class Auth {
 			console.error(e)
 		}
 
-		await Promise.all([secureStore.clear(), sqlite.clearAsync()])
+		try {
+			await Promise.all([secureStore.clear(), sqlite.clearAsync()])
+		} catch (e) {
+			console.error(e)
+		}
 
 		// Wait a bit for everyting to settle before reloading, to avoid potential race conditions
 		await new Promise(resolve => setTimeout(resolve, 3000))

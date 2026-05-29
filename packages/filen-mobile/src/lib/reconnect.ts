@@ -5,7 +5,6 @@ import { sync as chatsSync } from "@/components/chats/sync"
 import cameraUpload from "@/lib/cameraUpload"
 
 let started = false
-let lastOnline = onlineManager.isOnline()
 
 /**
  * Subscribes to onlineManager once at startup and replays the sync routines
@@ -34,6 +33,8 @@ export function startReconnectListener(): void {
 	}
 
 	started = true
+
+	let lastOnline = onlineManager.isOnline()
 
 	onlineManager.subscribe(isOnline => {
 		// Guard against duplicate events from NetInfo edge cases (initial
