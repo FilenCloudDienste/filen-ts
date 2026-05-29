@@ -341,6 +341,47 @@ describe("Thumbnails", () => {
 			expect(mockManipulate).not.toHaveBeenCalled()
 		})
 
+		it("uses offline-stored file when available, skipping download", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/lib/offline")
+
+			const offlineFileUri = "file:///offline/photo.jpg"
+			const offlineFile = new File(offlineFileUri)
+
+			fs.set(offlineFileUri, new Uint8Array([1, 2, 3]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(
+				offlineFile as unknown as Awaited<ReturnType<typeof offlineMod.default.getLocalFile>>
+			)
+
+			const item = makeFileItem("offline-hit-uuid", "photo.jpg")
+			const result = await thumbnails.generate({ item })
+
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockManipulate).toHaveBeenCalledWith(offlineFileUri)
+			expect(result).toBe(`${THUMBNAILS_DIR}/offline-hit-uuid.webp`)
+		})
+
+		it("uses fileCache hit when offline file not available, skipping download", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const fileCacheMod = await import("@/lib/fileCache")
+
+			const cachedFileUri = "file:///fileCache/photo.jpg"
+			const cachedFile = new File(cachedFileUri)
+
+			fs.set(cachedFileUri, new Uint8Array([1, 2, 3]))
+			vi.mocked(fileCacheMod.default.has).mockResolvedValueOnce(true)
+			vi.mocked(fileCacheMod.default.get).mockResolvedValueOnce(
+				cachedFile as unknown as Awaited<ReturnType<typeof fileCacheMod.default.get>>
+			)
+
+			const item = makeFileItem("filecache-hit-uuid", "photo.jpg")
+			const result = await thumbnails.generate({ item })
+
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(mockManipulate).toHaveBeenCalledWith(cachedFileUri)
+			expect(result).toBe(`${THUMBNAILS_DIR}/filecache-hit-uuid.webp`)
+		})
+
 		it("throws for unsupported extensions", async () => {
 			const item = makeFileItem("pdf-uuid", "document.pdf")
 
@@ -572,7 +613,6 @@ describe("Thumbnails", () => {
 			await expect(thumbnails.generate({ item })).rejects.toThrow("No thumbnail generated")
 			expect(mockRelease).toHaveBeenCalledTimes(1)
 		})
-
 	})
 
 	describe("generate — shared files", () => {

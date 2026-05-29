@@ -79,6 +79,13 @@ describe("useTransfersStore", () => {
 
 			expect(useTransfersStore.getState().stats.progress).toBe(1)
 		})
+
+		it("progress is 0 when all transfers have size 0", () => {
+			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("z", 0, 0)])
+
+			expect(useTransfersStore.getState().stats.progress).toBe(0)
+			expect(useTransfersStore.getState().stats.count).toBe(1)
+		})
 	})
 
 	describe("speed smoothing", () => {
@@ -177,9 +184,11 @@ describe("useTransfersStore", () => {
 
 			const speedAfterCompletion = useTransfersStore.getState().stats.speed
 
-			// Never negative, never a wild spike. With clamped delta it should be
-			// close to (and not less than) the pre-completion speed.
+			// Never negative, never a wild spike. With clamped delta the speed after
+			// a completed transfer is removed should not be negative and should not
+			// spike far above the pre-completion rate.
 			expect(speedAfterCompletion).toBeGreaterThanOrEqual(0)
+			expect(speedAfterCompletion).toBeLessThanOrEqual(speedBefore * 2)
 		})
 	})
 

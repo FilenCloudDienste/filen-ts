@@ -68,6 +68,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
+import { onlineManager } from "@tanstack/react-query"
 import { Sync } from "@/components/chats/sync"
 import sqlite from "@/lib/sqlite"
 import type { InflightChatMessages } from "@/stores/useChats.store"
@@ -366,6 +367,29 @@ describe("Sync (Chats)", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(mockSendMessage).not.toHaveBeenCalled()
+		})
+
+		it("skips sync when offline", async () => {
+			const sync = await createSync()
+
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-1", "hello", 1000)]
+				}
+			}
+
+			onlineManager.setOnline(false)
+
+			try {
+				sync.syncNow()
+
+				await new Promise(resolve => setTimeout(resolve, 0))
+
+				expect(mockSendMessage).not.toHaveBeenCalled()
+			} finally {
+				onlineManager.setOnline(true)
+			}
 		})
 
 		it("clears error on successful send", async () => {

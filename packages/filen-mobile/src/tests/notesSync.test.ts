@@ -368,6 +368,34 @@ describe("Sync (Notes)", () => {
 			expect(mockNotesSetContent).not.toHaveBeenCalled()
 		})
 
+		it("skips uploading when device is offline", async () => {
+			const { onlineManager } = await import("@tanstack/react-query")
+			const spy = vi.spyOn(onlineManager, "isOnline").mockReturnValue(false)
+
+			try {
+				const sync = await createSync()
+
+				notesState.inflightContent = {
+					"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
+				}
+
+				mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+					id: null,
+					execute: vi.fn(() => cb()),
+					cancel: vi.fn()
+				}))
+
+				sync.syncDebounced()
+				sync.executeNow()
+
+				await new Promise(resolve => setTimeout(resolve, 0))
+
+				expect(mockNotesSetContent).not.toHaveBeenCalled()
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
 		it("syncs multiple notes in parallel", async () => {
 			const sync = await createSync()
 			const uploadedNotes: string[] = []
@@ -467,6 +495,35 @@ describe("Sync (Notes)", () => {
 
 			// Should not throw
 			sync.executeNow()
+		})
+
+		it("cancel() aborts the signal that is already threaded into setContent", async () => {
+			const sync = await createSync()
+			let observedSignal: AbortSignal | undefined
+
+			mockNotesSetContent.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
+				observedSignal = signal
+				sync.cancel()
+				return { editedTimestamp: BigInt(2000) }
+			})
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
+			}
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(observedSignal).toBeDefined()
+			expect(observedSignal?.aborted).toBe(true)
 		})
 	})
 })

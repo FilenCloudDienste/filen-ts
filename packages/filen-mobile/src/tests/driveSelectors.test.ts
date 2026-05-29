@@ -143,4 +143,24 @@ describe("aggregateDriveSelectionFlags", () => {
 	it("includesUndecryptable false on empty selection (EMPTY_DRIVE_FLAGS)", () => {
 		expect(aggregateDriveSelectionFlags([]).includesUndecryptable).toBe(false)
 	})
+
+	it("includesFavorited false for sharedRootFile item with no favorited field in data", () => {
+		// sharedRootFile/sharedRootDirectory do not carry favorited — the source code guards
+		// with `"favorited" in it.data`. Verify the guard fires correctly when the field is absent.
+		const item: DriveItem = {
+			type: "sharedRootFile",
+			data: { uuid: "x", undecryptable: false, decryptedMeta: null } as DriveItem["data"]
+		} as DriveItem
+
+		expect(aggregateDriveSelectionFlags([item]).includesFavorited).toBe(false)
+	})
+
+	it("includesFavorited false for sharedRootDirectory item with no favorited field in data", () => {
+		const item: DriveItem = {
+			type: "sharedRootDirectory",
+			data: { uuid: "x", undecryptable: false, decryptedMeta: null } as DriveItem["data"]
+		} as DriveItem
+
+		expect(aggregateDriveSelectionFlags([item]).includesFavorited).toBe(false)
+	})
 })

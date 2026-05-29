@@ -267,4 +267,24 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("sqlite.clearAsync")
 		expect(callLog).toContain("reloadAppAsync")
 	})
+
+	it("continues even when fileProvider.disable throws", async () => {
+		const fp = await import("@/lib/fileProvider")
+		vi.mocked(fp.default.disable).mockRejectedValueOnce(new Error("provider unavailable"))
+
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+
+		await expect(promise).resolves.toBeUndefined()
+		expect(callLog).toContain("unregisterBackgroundSync")
+		expect(callLog).toContain("audio.stop")
+		expect(callLog).toContain("transfers.cancelAll")
+		expect(callLog).toContain("chatsSync.cancel")
+		expect(callLog).toContain("notesSync.cancel")
+		expect(callLog).toContain("offline.cancel")
+		expect(callLog).toContain("secureStore.clear")
+		expect(callLog).toContain("sqlite.clearAsync")
+		expect(callLog).toContain("reloadAppAsync")
+	})
 })

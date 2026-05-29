@@ -18,7 +18,7 @@ const { OFFLINE_FILES, OFFLINE_DIRS, FILE_CACHE, AUDIO_CACHE, THUMBNAILS, DOWNLO
 		OFFLINE_FILES: `${BASE}/offline/v1/files`,
 		OFFLINE_DIRS: `${BASE}/offline/v1/directories`,
 		FILE_CACHE: `${BASE}/fileCache/v1`,
-		AUDIO_CACHE: `${BASE}/audioCache/v1`,
+		AUDIO_CACHE: `${BASE}/audioCache/v2`,
 		THUMBNAILS: `${BASE}/thumbnails/v2`,
 		DOWNLOADS: `${BASE}/Downloads`
 	}
@@ -71,7 +71,7 @@ describe("sweepStrayDownloadFiles", () => {
 		expect(fs.has(`${OFFLINE_DIRS}/uuid-a/sub/child.bin.filendl`)).toBe(false)
 	})
 
-	it("deletes .filendl in fileCache/v1, audioCache/v1, thumbnails/v2, and Downloads", () => {
+	it("deletes .filendl in fileCache/v1, audioCache/v2, thumbnails/v2, and Downloads", () => {
 		fs.set(FILE_CACHE, "dir")
 		fs.set(`${FILE_CACHE}/uuid-1`, "dir")
 		fs.set(`${FILE_CACHE}/uuid-1/file.bin.filendl`, new Uint8Array([1]))

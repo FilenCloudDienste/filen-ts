@@ -126,6 +126,15 @@ describe("createSelectionSlice", () => {
 		expect(store.getState().selected).toEqual([items[1], items[2]])
 	})
 
+	it("selectAll with empty array clears the selection", () => {
+		const store = makeStore()
+
+		store.getState().selectAll(items)
+		store.getState().selectAll([])
+
+		expect(store.getState().selected).toEqual([])
+	})
+
 	it("each store instance is independent", () => {
 		const a = makeStore()
 		const b = makeStore()

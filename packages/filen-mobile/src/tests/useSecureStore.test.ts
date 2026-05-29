@@ -262,7 +262,7 @@ describe("useSecureStore", () => {
 			mockEventEmitter.emit("secureStoreChange", { key: "testKey", value: "afterUnmount" })
 		})
 
-		it("suppresses external events during local set", async () => {
+		it("local set value wins over a concurrent external event fired before mutex acquisition", async () => {
 			const { result } = renderHook(() => useSecureStore("testKey", "initial"))
 
 			await act(async () => {

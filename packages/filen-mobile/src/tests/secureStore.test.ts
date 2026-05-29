@@ -205,6 +205,27 @@ describe("SecureStore", () => {
 		})
 	})
 
+	describe("auto-init via waitForInit", () => {
+		it("set() without explicit init() still persists the value", async () => {
+			const store = createSecureStore()
+
+			// Deliberately skip store.init()
+			await store.set("autoKey", "autoValue")
+
+			const result = await store.get("autoKey")
+
+			expect(result).toBe("autoValue")
+		})
+
+		it("get() without explicit init() returns null for missing key", async () => {
+			const store = createSecureStore()
+
+			const result = await store.get("missing")
+
+			expect(result).toBeNull()
+		})
+	})
+
 	describe("set", () => {
 		it("writes value and emits secureStoreChange", async () => {
 			const store = createSecureStore()
@@ -448,6 +469,30 @@ describe("SecureStore", () => {
 			await store.remove("key")
 
 			expect(mockSecureStoreMap.has("key")).toBe(false)
+		})
+
+		it("removing a non-existent key does not throw and emits secureStoreRemove", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			mockEvents.emit.mockClear()
+
+			await expect(store.remove("never-set")).resolves.not.toThrow()
+
+			expect(mockEvents.emit).toHaveBeenCalledWith("secureStoreRemove", {
+				key: "never-set"
+			})
+		})
+
+		it("removing a non-existent key does not affect existing keys", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			await store.set("existing", "data")
+
+			await store.remove("never-set")
+
+			expect(await store.get("existing")).toBe("data")
 		})
 	})
 

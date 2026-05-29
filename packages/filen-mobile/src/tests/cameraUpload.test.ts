@@ -562,6 +562,22 @@ describe("sync pre-flight checks", () => {
 
 		expect(mockSetSyncing).toHaveBeenCalledWith(true)
 	})
+
+	it("skips background sync when config.background is false", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, background: false })
+
+		await cameraUpload.sync({ background: true })
+
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+	})
+
+	it("proceeds with background sync when config.background is true", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, background: true })
+
+		await cameraUpload.sync({ background: true })
+
+		expect(mockSetSyncing).toHaveBeenCalledWith(true)
+	})
 })
 
 // ─── Sync cleanup ────────────────────────────────────────────────────────────
@@ -649,6 +665,22 @@ describe("constructor events", () => {
 		eventHandlers["secureStoreClear"]!()
 
 		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
+	})
+
+	it("secureStoreRemove with matching key triggers cancel", () => {
+		const controllerBefore = (cameraUpload as any).globalAbortController
+
+		eventHandlers["secureStoreRemove"]!({ key: "cameraUploadConfig:v1" })
+
+		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
+	})
+
+	it("secureStoreRemove with unrelated key does not trigger cancel", () => {
+		const controllerBefore = (cameraUpload as any).globalAbortController
+
+		eventHandlers["secureStoreRemove"]!({ key: "someOtherKey" })
+
+		expect((cameraUpload as any).globalAbortController).toBe(controllerBefore)
 	})
 })
 
@@ -909,6 +941,19 @@ describe("listLocal filtering", () => {
 		])
 
 		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("background sync excludes videos even when config.includeVideos is true", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, includeVideos: true, background: true })
+
+		setupAlbumWithAssets([
+			{ id: "img", filename: "photo.jpg", mediaType: MediaType.IMAGE },
+			{ id: "vid", filename: "video.mp4", mediaType: MediaType.VIDEO }
+		])
+
+		await cameraUpload.sync({ background: true })
 
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 	})
