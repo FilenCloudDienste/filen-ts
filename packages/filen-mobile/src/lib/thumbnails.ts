@@ -53,6 +53,14 @@ function abortError(signal?: AbortSignal): Error {
 	return new Error("Aborted")
 }
 
+class OfflineAbortError extends Error {
+	public constructor() {
+		super("Offline")
+
+		this.name = "OfflineAbortError"
+	}
+}
+
 class Thumbnails {
 	private readonly pending = new Map<string, Promise<string>>()
 	private readonly failures = new Map<string, number>()
@@ -221,7 +229,7 @@ class Thumbnails {
 					// otherwise the 3-strike `failures` map would permanently skip the
 					// item even after we come back online.
 					if (!onlineManager.isOnline()) {
-						throw abortError(params.signal)
+						throw new OfflineAbortError()
 					}
 
 					const { authedSdkClient } = await auth.getSdkClients()
@@ -375,7 +383,7 @@ class Thumbnails {
 					// would stall. Throw abort-flavoured so the failures map isn't
 					// poisoned (see generateImage for the same reasoning).
 					if (!onlineManager.isOnline()) {
-						throw abortError(params.signal)
+						throw new OfflineAbortError()
 					}
 
 					const getFileUrl = await this.waitForHttpProvider(params.signal)
@@ -686,7 +694,7 @@ class Thumbnails {
 			})
 
 			if (!result.success) {
-				if (!params.signal?.aborted) {
+				if (!params.signal?.aborted && !(result.error instanceof OfflineAbortError)) {
 					console.error(
 						"[Thumbnails] generation failed",
 						{
@@ -821,7 +829,7 @@ class Thumbnails {
 
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
-				if (!params.signal?.aborted) {
+				if (!params.signal?.aborted && !(error instanceof OfflineAbortError)) {
 					console.error(
 						"[Thumbnails] generateFromLocalFile failed",
 						{

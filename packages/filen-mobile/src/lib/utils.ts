@@ -948,20 +948,7 @@ export function extractPathInsideUuidDirectory(absolutePath: string, dirUuid: st
 }
 
 export function normalizeFilePathForBlobUtil(filePath: string): string {
-	let normalizedPath = normalizeFilePathForSdk(filePath)
-		.split("/")
-		.map(segment => (segment.length > 0 ? decodeURIComponent(segment) : segment))
-		.join("/")
-
-	if (!normalizedPath.startsWith("/")) {
-		normalizedPath = "/" + normalizedPath
-	}
-
-	if (normalizedPath.endsWith("/") && normalizedPath !== "/") {
-		normalizedPath = normalizedPath.slice(0, -1)
-	}
-
-	return `file://${normalizedPath}`
+	return `file://${normalizeFilePathForSdk(filePath)}`
 }
 
 export type PreviewType = "image" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"

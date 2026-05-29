@@ -25,7 +25,7 @@ class ItemSorter {
 	private getUuidNumber(uuid: string): number {
 		let cached = this.uuidCache.get(uuid)
 
-		if (!cached) {
+		if (cached === undefined) {
 			cached = parseNumbersFromString(uuid)
 
 			this.uuidCache.set(uuid, cached)
@@ -41,7 +41,7 @@ class ItemSorter {
 	private getLowerName(name: string): string {
 		let cached = this.lowerCache.get(name)
 
-		if (!cached) {
+		if (cached === undefined) {
 			cached = name.toLowerCase()
 
 			this.lowerCache.set(name, cached)
@@ -353,7 +353,7 @@ class NotesSorter {
 	private parseUuid(uuid: string): number {
 		const cached = this.uuidCache.get(uuid)
 
-		if (cached) {
+		if (cached !== undefined) {
 			return cached
 		}
 
@@ -382,16 +382,12 @@ class NotesSorter {
 				return b.pinned ? 1 : -1
 			}
 
-			if (a.trash !== b.trash && a.archive === false) {
-				return a.trash ? 1 : -1
-			}
+			const tier = (note: { trash: boolean; archive: boolean }): number => (note.trash ? 2 : note.archive ? 1 : 0)
+			const aTier = tier(a)
+			const bTier = tier(b)
 
-			if (a.archive !== b.archive) {
-				return a.archive ? 1 : -1
-			}
-
-			if (a.trash !== b.trash) {
-				return a.trash ? 1 : -1
+			if (aTier !== bTier) {
+				return aTier - bTier
 			}
 
 			if (b.editedTimestamp === a.editedTimestamp) {
