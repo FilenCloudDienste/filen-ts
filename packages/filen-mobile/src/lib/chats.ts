@@ -10,7 +10,7 @@ import {
 	DirMeta_Tags
 } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
-import { chatsQueryUpdate, chatsQueryGet, fetchData as chatsQueryFetch } from "@/queries/useChats.query"
+import { chatsQueryUpdate, fetchData as chatsQueryFetch } from "@/queries/useChats.query"
 import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/queries/useChatMessages.query"
 import { Semaphore, run } from "@filen/utils"
 
@@ -249,12 +249,6 @@ class Chats {
 					: undefined
 			)
 		)
-
-		const chat = chatsQueryGet()?.find(c => c.uuid === message.chat)
-
-		if (!chat) {
-			throw new Error("Chat not found for message")
-		}
 
 		chatMessagesQueryUpdate({
 			params: {

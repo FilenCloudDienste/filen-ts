@@ -222,6 +222,7 @@ class Cache {
 	}
 
 	private persisting = false
+	private clearGeneration = 0
 
 	/**
 	 * Synchronous persist — used by flushNow() when the app backgrounds.
@@ -262,6 +263,8 @@ class Cache {
 		}
 
 		this.persisting = true
+
+		const generation = this.clearGeneration
 
 		try {
 			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
@@ -326,6 +329,10 @@ class Cache {
 			console.log(`[Cache] Persisting ${commands.length} changes`)
 
 			const db = await sqlite.openDb()
+
+			if (generation !== this.clearGeneration) {
+				return
+			}
 
 			await db.executeBatch(commands)
 
@@ -436,10 +443,7 @@ class Cache {
 
 	public flushNow(): void {
 		this.persistDirty.cancel()
-
-		if (!this.persisting) {
-			this.persistNow()
-		}
+		this.persistNow()
 	}
 
 	/**
@@ -507,6 +511,9 @@ class Cache {
 	}
 
 	public clear(): void {
+		this.persistDirty.cancel()
+		this.clearGeneration++
+
 		this.secureStore.clear()
 
 		for (const { map } of this.registry) {
