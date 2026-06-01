@@ -26,17 +26,21 @@ import { selectContacts } from "@/routes/contacts"
 import cache from "@/lib/cache"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
 import useDriveStore from "@/stores/useDrive.store"
+import { useTranslation } from "react-i18next"
+import { type TFunction } from "i18next"
 
 export function createMenuButtons({
 	item,
 	drivePath,
 	isStoredOffline,
-	showSelectToggle
+	showSelectToggle,
+	t
 }: {
 	item: DriveItem
 	drivePath: DrivePath
 	isStoredOffline: boolean
 	showSelectToggle?: boolean
+	t: TFunction
 }): MenuButton[] {
 	// Undecryptable items only support destructive disposition — every other
 	// action (rename/move/share/download/info/etc.) requires decrypted meta.
@@ -50,7 +54,7 @@ export function createMenuButtons({
 				undecryptableButtons.push({
 					id: "restore",
 					requiresOnline: true,
-					title: "tbd_restore",
+					title: t("restore"),
 					icon: "restore",
 					onPress: async () => {
 						const result = await runWithLoading(async () => {
@@ -71,16 +75,16 @@ export function createMenuButtons({
 				undecryptableButtons.push({
 					id: "deletePermanently",
 					requiresOnline: true,
-					title: "tbd_delete_permanently",
+					title: t("delete_permanently"),
 					icon: "delete",
 					destructive: true,
 					onPress: async () => {
 						const promptResult = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_delete_permanently_item",
-								message: "tbd_confirm_delete_permanently",
-								cancelText: "tbd_cancel",
-								okText: "tbd_delete_permanently",
+								title: t("delete_permanently_item"),
+								message: t("confirm_delete_permanently"),
+								cancelText: t("cancel"),
+								okText: t("delete_permanently"),
 								destructive: true
 							})
 						})
@@ -125,16 +129,16 @@ export function createMenuButtons({
 			undecryptableButtons.push({
 				id: "trash",
 				requiresOnline: true,
-				title: "tbd_trash",
+				title: t("trash"),
 				icon: "trash",
 				destructive: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_trash_item",
-							message: "tbd_confirm_trash",
-							cancelText: "tbd_cancel",
-							okText: "tbd_trash",
+							title: t("trash_item"),
+							message: t("confirm_trash"),
+							cancelText: t("cancel"),
+							okText: t("trash"),
 							destructive: true
 						})
 					})
@@ -192,7 +196,7 @@ export function createMenuButtons({
 
 		menuButtons.push({
 			id: isSelected ? "deselect" : "select",
-			title: isSelected ? "tbd_deselect" : "tbd_select",
+			title: isSelected ? t("deselect") : t("select"),
 			icon: "select",
 			checked: isSelected,
 			onPress: () => {
@@ -213,7 +217,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "open",
-			title: "tbd_open",
+			title: t("open"),
 			icon: "folder",
 			onPress: () => {
 				router.push({
@@ -255,7 +259,7 @@ export function createMenuButtons({
 	) {
 		downloadSubButtons.push({
 			id: "downloadToDevice",
-			title: "tbd_download_to_device",
+			title: t("download_to_device"),
 			icon: "download",
 			requiresOnline: true,
 			onPress: async () => {
@@ -374,7 +378,7 @@ export function createMenuButtons({
 		downloadSubButtons.push({
 			id: "makeAvailableOffline",
 			requiresOnline: true,
-			title: "tbd_make_available_offline",
+			title: t("make_available_offline"),
 			icon: "archive",
 			onPress: async () => {
 				if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
@@ -418,7 +422,7 @@ export function createMenuButtons({
 		downloadSubButtons.push({
 			id: "saveToPhotos",
 			requiresOnline: true,
-			title: "tbd_save_to_photos",
+			title: t("save_to_photos"),
 			icon: "image",
 			onPress: async () => {
 				const permissionsResult = await run(async () => {
@@ -435,7 +439,7 @@ export function createMenuButtons({
 				}
 
 				if (!permissionsResult.data) {
-					alerts.error("tbd_no_permissions_enable_manually")
+					alerts.error(t("no_permissions_enable_manually"))
 
 					return
 				}
@@ -490,7 +494,7 @@ export function createMenuButtons({
 		downloadSubButtons.push({
 			id: "export",
 			requiresOnline: true,
-			title: "tbd_export",
+			title: t("export"),
 			icon: "export",
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
@@ -582,7 +586,7 @@ export function createMenuButtons({
 		downloadSubButtons.push({
 			id: "import",
 			requiresOnline: true,
-			title: "tbd_import",
+			title: t("import"),
 			icon: "import",
 			onPress: async () => {
 				const selectResult = await run(async () => {
@@ -717,7 +721,7 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "favorite",
 			requiresOnline: true,
-			title: item.data.favorited ? "tbd_unfavorite" : "tbd_favorite",
+			title: item.data.favorited ? t("unfavorite") : t("favorite"),
 			icon: "heart",
 			checked: item.data.favorited,
 			onPress: async () => {
@@ -749,7 +753,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "info",
-			title: "tbd_info",
+			title: t("info"),
 			icon: "info",
 			onPress: () => {
 				router.push({
@@ -764,7 +768,7 @@ export function createMenuButtons({
 		if (item.type === "file" && drivePath.type !== "offline") {
 			menuButtons.push({
 				id: "versions",
-				title: "tbd_versions",
+				title: t("versions"),
 				icon: "versions",
 				onPress: () => {
 					router.push({
@@ -788,7 +792,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "color",
-			title: "tbd_color",
+			title: t("color"),
 			icon: "color",
 			onPress: () => {
 				router.push({
@@ -813,16 +817,16 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "rename",
 			requiresOnline: true,
-			title: "tbd_rename",
+			title: t("rename"),
 			icon: "edit",
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
-						title: "tbd_rename_item",
-						message: "tbd_enter_new_name",
+						title: t("rename_item"),
+						message: t("enter_new_name"),
 						defaultValue: item.data.decryptedMeta?.name ?? "",
-						cancelText: "tbd_cancel",
-						okText: "tbd_rename"
+						cancelText: t("cancel"),
+						okText: t("rename")
 					})
 				})
 
@@ -863,7 +867,7 @@ export function createMenuButtons({
 			menuButtons.push({
 				id: "move",
 				requiresOnline: true,
-				title: "tbd_move",
+				title: t("move"),
 				icon: "move",
 				onPress: async () => {
 					const driveRootUuidResult = await run(async () => {
@@ -907,7 +911,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "download",
-			title: "tbd_download",
+			title: t("download"),
 			icon: "download",
 			subButtons: downloadSubButtons
 		})
@@ -924,13 +928,13 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "share",
-			title: "tbd_share",
+			title: t("share"),
 			icon: "share",
 			subButtons: [
 				{
 					id: "sharePublicLink",
 					requiresOnline: true,
-					title: "tbd_share_public_link",
+					title: t("share_public_link"),
 					icon: "link",
 					onPress: () => {
 						router.push({
@@ -944,7 +948,7 @@ export function createMenuButtons({
 				{
 					id: "shareFilenUser",
 					requiresOnline: true,
-					title: "tbd_share_filen_user",
+					title: t("share_filen_user"),
 					icon: "users",
 					onPress: async () => {
 						const pickResult = await run(async () => {
@@ -1002,16 +1006,16 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "removeOffline",
-			title: "tbd_remove_offline",
+			title: t("remove_offline"),
 			icon: "trash",
 			destructive: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_remove_offline_item",
-						message: "tbd_confirm_remove_offline",
-						cancelText: "tbd_cancel",
-						okText: "tbd_remove_offline",
+						title: t("remove_offline_item"),
+						message: t("confirm_remove_offline"),
+						cancelText: t("cancel"),
+						okText: t("remove_offline"),
 						destructive: true
 					})
 				})
@@ -1045,16 +1049,16 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "removeShare",
 			requiresOnline: true,
-			title: "tbd_remove_share",
+			title: t("remove_share"),
 			icon: "delete",
 			destructive: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_remove_share_item",
-						message: "tbd_confirm_remove_share",
-						cancelText: "tbd_cancel",
-						okText: "tbd_remove_share",
+						title: t("remove_share_item"),
+						message: t("confirm_remove_share"),
+						cancelText: t("cancel"),
+						okText: t("remove_share"),
 						destructive: true
 					})
 				})
@@ -1093,16 +1097,16 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "stopSharing",
 			requiresOnline: true,
-			title: "tbd_stop_sharing",
+			title: t("stop_sharing"),
 			icon: "delete",
 			destructive: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_stop_sharing_item",
-						message: "tbd_confirm_stop_sharing",
-						cancelText: "tbd_cancel",
-						okText: "tbd_stop_sharing",
+						title: t("stop_sharing_item"),
+						message: t("confirm_stop_sharing"),
+						cancelText: t("cancel"),
+						okText: t("stop_sharing"),
 						destructive: true
 					})
 				})
@@ -1140,16 +1144,16 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "disablePublicLink",
 			requiresOnline: true,
-			title: "tbd_disable_public_link",
+			title: t("disable_public_link"),
 			icon: "delete",
 			destructive: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_disable_public_link",
-						message: "tbd_confirm_disable_public_link",
-						cancelText: "tbd_cancel",
-						okText: "tbd_disable",
+						title: t("disable_public_link"),
+						message: t("confirm_disable_public_link"),
+						cancelText: t("cancel"),
+						okText: t("disable"),
 						destructive: true
 					})
 				})
@@ -1192,16 +1196,16 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "trash",
 			requiresOnline: true,
-			title: "tbd_trash",
+			title: t("trash"),
 			icon: "trash",
 			destructive: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_trash_item",
-						message: "tbd_confirm_trash",
-						cancelText: "tbd_cancel",
-						okText: "tbd_trash"
+						title: t("trash_item"),
+						message: t("confirm_trash"),
+						cancelText: t("cancel"),
+						okText: t("trash")
 					})
 				})
 
@@ -1238,7 +1242,7 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "restore",
 			requiresOnline: true,
-			title: "tbd_restore",
+			title: t("restore"),
 			icon: "restore",
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
@@ -1261,16 +1265,16 @@ export function createMenuButtons({
 		menuButtons.push({
 			id: "deletePermanently",
 			requiresOnline: true,
-			title: "tbd_delete_permanently",
+			title: t("delete_permanently"),
 			icon: "delete",
 			destructive: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_delete_permanently_item",
-						message: "tbd_confirm_delete_permanently",
-						cancelText: "tbd_cancel",
-						okText: "tbd_delete_permanently",
+						title: t("delete_permanently_item"),
+						message: t("confirm_delete_permanently"),
+						cancelText: t("cancel"),
+						okText: t("delete_permanently"),
 						destructive: true
 					})
 				})
@@ -1337,13 +1341,15 @@ const Menu = memo(
 		style?: StyleProp<ViewStyle>
 		showSelectToggle?: boolean
 	}) => {
+		const { t } = useTranslation()
 		const menuButtons = disabled
 			? []
 			: createMenuButtons({
 					item,
 					drivePath,
 					isStoredOffline,
-					showSelectToggle
+					showSelectToggle,
+					t
 				})
 
 		return (

@@ -11,8 +11,10 @@ import { chatDisplayName } from "@/lib/decryption"
 import { memo } from "react"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 
 const List = memo(({ searchQuery }: { searchQuery: string }) => {
+	const { t } = useTranslation()
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
 
@@ -97,7 +99,7 @@ const List = memo(({ searchQuery }: { searchQuery: string }) => {
 	const emptyComponent = () => (
 		<ListEmpty
 			icon="chatbubbles-outline"
-			title={searchQuery && searchQuery.length > 0 ? "tbd_no_chats_search" : "tbd_no_chats"}
+			title={searchQuery && searchQuery.length > 0 ? t("no_chats_search") : t("no_chats")}
 		/>
 	)
 

@@ -7,6 +7,7 @@ import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
+import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
 import Thumbnail from "@/components/drive/item/thumbnail"
@@ -19,6 +20,7 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 
 const LinkedFile = memo(() => {
+	const { t } = useTranslation()
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
@@ -99,7 +101,8 @@ const LinkedFile = memo(() => {
 											type: "linked",
 											uuid: null
 										},
-										isStoredOffline: false
+										isStoredOffline: false,
+										t
 									})
 								: []
 						},
@@ -140,7 +143,7 @@ const LinkedFile = memo(() => {
 						>
 							{driveItemDisplayName(item)}
 						</Text>
-						<Text className="text-muted-foreground">tbd_file</Text>
+						<Text className="text-muted-foreground">{t("file")}</Text>
 					</View>
 					<View className="bg-transparent mt-10">
 						<Information

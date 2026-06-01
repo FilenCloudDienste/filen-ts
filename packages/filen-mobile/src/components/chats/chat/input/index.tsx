@@ -1,4 +1,5 @@
 import { type ChatParticipant, ChatTypingType, AnyNormalDir } from "@filen/sdk-rs"
+import { useTranslation } from "react-i18next"
 import { type Chat } from "@/types"
 import { messageDisplayBody } from "@/lib/decryption"
 import { useRef, useEffect, Fragment, memo, useCallback } from "react"
@@ -536,6 +537,7 @@ const ReplyTo = memo(({ chat }: { chat: Chat }) => {
 })
 
 const Input = memo(({ chat }: { chat: Chat }) => {
+	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const inputViewRef = useRef<TView>(null)
 	const { onLayout: inputViewOnLayout, layout: inputViewLayout } = useViewLayout(inputViewRef)
@@ -801,7 +803,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 					buttons={[
 						{
 							id: "addMedia",
-							title: "tbd_add_photos_or_videos_from_gallery",
+							title: t("add_photos_or_videos_from_gallery"),
 							icon: "image",
 							onPress: async () => {
 								const permissionsResult = await run(async () => {
@@ -818,7 +820,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 								}
 
 								if (!permissionsResult.data) {
-									alerts.error("tbd_no_permissions_enable_manually")
+									alerts.error(t("no_permissions_enable_manually"))
 
 									return
 								}
@@ -891,7 +893,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						},
 						{
 							id: "takeMedia",
-							title: "tbd_take_photo_or_video",
+							title: t("take_photo_or_video"),
 							icon: "camera",
 							onPress: async () => {
 								const permissionsResult = await run(async () => {
@@ -908,7 +910,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 								}
 
 								if (!permissionsResult.data) {
-									alerts.error("tbd_no_permissions_enable_manually")
+									alerts.error(t("no_permissions_enable_manually"))
 
 									return
 								}
@@ -981,7 +983,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						},
 						{
 							id: "addFiles",
-							title: "tbd_add_files",
+							title: t("add_files"),
 							icon: "upload",
 							onPress: async () => {
 								const documentPickerResult = await run(async () => {
@@ -1040,7 +1042,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 						},
 						{
 							id: "addDriveItems",
-							title: "tbd_add_drive_items",
+							title: t("add_drive_items"),
 							icon: "folder",
 							onPress: async () => {
 								const selectDriveItemsResult = await run(async () => {
@@ -1137,7 +1139,7 @@ const Input = memo(({ chat }: { chat: Chat }) => {
 							onChangeText={onChangeText}
 							className="ios:py-3 text-foreground min-h-11 flex-1 rounded-3xl py-2 pl-3 pr-12 leading-5"
 							placeholderTextColorClassName="text-muted-foreground"
-							placeholder="tbd_type_a_message"
+							placeholder={t("type_a_message")}
 							multiline={true}
 							scrollEnabled={true}
 							autoFocus={false}

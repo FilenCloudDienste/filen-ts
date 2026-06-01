@@ -20,6 +20,7 @@ import { Information } from "@/routes/driveItemInfo"
 import DismissStack from "@/components/dismissStack"
 import useIsOnline from "@/hooks/useIsOnline"
 import { driveItemDisplayName } from "@/lib/decryption"
+import { useTranslation } from "react-i18next"
 
 const ChangeDirectoryColor = memo(() => {
 	const { item: itemSerialized } = useLocalSearchParams<{
@@ -31,6 +32,7 @@ const ChangeDirectoryColor = memo(() => {
 	const navigation = useNavigation()
 	const [selectedColor, setSelectedColor] = useState<string | null>(null)
 	const isOnline = useIsOnline()
+	const { t } = useTranslation()
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -59,7 +61,7 @@ const ChangeDirectoryColor = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_change_directory_color"
+				title={t("change_directory_color")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -147,7 +149,7 @@ const ChangeDirectoryColor = memo(() => {
 						>
 							{driveItemDisplayName(item)}
 						</Text>
-						<Text className="text-muted-foreground">tbd_directory</Text>
+						<Text className="text-muted-foreground">{t("directory")}</Text>
 					</View>
 					<View className="bg-background-tertiary rounded-3xl p-4 mt-10 items-center justify-center flex-row">
 						<ColorPicker

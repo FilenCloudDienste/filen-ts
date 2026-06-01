@@ -28,6 +28,7 @@ import usePlaylistsStore from "@/stores/usePlaylists.store"
 import { useShallow } from "zustand/shallow"
 import { Checkbox } from "@/components/ui/checkbox"
 import { runBulk } from "@/lib/bulkOps"
+import { useTranslation } from "react-i18next"
 import type { MenuButton } from "@/components/ui/menu"
 
 export type SelectOptions = {
@@ -80,6 +81,7 @@ export async function selectPlaylists(options: Omit<SelectOptions, "id">): Promi
 }
 
 const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItems; selectOptions?: SelectOptions }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const { queueItem } = useAudioQueue()
 	const isSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.some(p => p.uuid === playlist.uuid)))
@@ -134,21 +136,21 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 				actionSheet.show({
 					buttons: [
 						{
-							title: "tbd_select",
+							title: t("select"),
 							onPress: () => {
 								usePlaylistsStore.getState().toggleSelectedPlaylist(playlist)
 							}
 						},
 						{
-							title: "tbd_rename",
+							title: t("rename"),
 							onPress: async () => {
 								const promptResult = await run(async () => {
 									return await prompts.input({
-										title: "tbd_rename_playlist",
-										message: "tbd_enter_playlist_name",
-										placeholder: "tbd_playlist_name_placeholder",
-										cancelText: "tbd_cancel",
-										okText: "tbd_rename",
+										title: t("rename_playlist"),
+										message: t("enter_playlist_name"),
+										placeholder: t("playlist_name_placeholder"),
+										cancelText: t("cancel"),
+										okText: t("rename"),
 										defaultValue: playlist.name
 									})
 								})
@@ -191,7 +193,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 						...(playlist.files.length > 0
 							? [
 									{
-										title: "tbd_play",
+										title: t("play"),
 										onPress: async () => {
 											const result = await runWithLoading(async () => {
 												await audio.clearQueue()
@@ -205,7 +207,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 												})
 
 												if (droppedUndecryptable) {
-													alerts.normal("tbd_cannot_decrypt_toast")
+													alerts.normal(t("cannot_decrypt_toast"))
 												}
 
 												await audio.play()
@@ -220,7 +222,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 										}
 									},
 									{
-										title: "tbd_add_to_queue",
+										title: t("add_to_queue"),
 										onPress: async () => {
 											const result = await runWithLoading(async () => {
 												const queueLengthBefore = audio.getQueue().length
@@ -237,7 +239,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 												)
 
 												if (addedResults.some(added => !added)) {
-													alerts.normal("tbd_cannot_decrypt_toast")
+													alerts.normal(t("cannot_decrypt_toast"))
 												}
 
 												if (queueLengthBefore === 0) {
@@ -256,7 +258,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 								]
 							: []),
 						{
-							title: "tbd_add_tracks",
+							title: t("add_tracks"),
 							onPress: async () => {
 								const selectDriveItemsResult = await run(async () => {
 									return await selectDriveItems({
@@ -336,15 +338,15 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 							}
 						},
 						{
-							title: "tbd_delete",
+							title: t("delete"),
 							destructive: true,
 							onPress: async () => {
 								const promptResult = await run(async () => {
 									return await prompts.alert({
-										title: "tbd_delete_playlist",
-										message: "tbd_delete_playlist_confirm",
-										cancelText: "tbd_cancel",
-										okText: "tbd_delete",
+										title: t("delete_playlist"),
+										message: t("delete_playlist_confirm"),
+										cancelText: t("cancel"),
+										okText: t("delete"),
 										destructive: true
 									})
 								})
@@ -375,7 +377,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 							}
 						},
 						{
-							title: "tbd_close",
+							title: t("close"),
 							cancel: true
 						}
 					]
@@ -417,8 +419,10 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 					ellipsizeMode="middle"
 					className="shrink-0 text-xs text-muted-foreground"
 				>
-					{playlist.files.length} {playlist.files.length === 1 ? "tbd_track" : "tbd_tracks"}, tbd_updated{" "}
-					{simpleDateNoTime(playlist.updated)}
+					{t("tracks_updated", {
+							count: playlist.files.length,
+							date: simpleDateNoTime(playlist.updated)
+						})}
 				</Text>
 			</View>
 		</PressableScale>
@@ -426,6 +430,7 @@ const Playlist = memo(({ playlist, selectOptions }: { playlist: PlaylistWithItem
 })
 
 const Playlists = memo(() => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const selectedPlaylists = usePlaylistsStore(useShallow(state => state.selectedPlaylists))
@@ -522,7 +527,7 @@ const Playlists = memo(() => {
 		if (selectedPlaylists.length > 0 && !selectOptions) {
 			menuButtons.push({
 				id: "selectAll",
-				title: selectedPlaylists.length === allPlaylists.length ? "tbd_deselect_all" : "tbd_select_all",
+				title: selectedPlaylists.length === allPlaylists.length ? t("deselect_all") : t("select_all"),
 				icon: "select",
 				onPress: () => {
 					if (selectedPlaylists.length === allPlaylists.length) {
@@ -537,7 +542,7 @@ const Playlists = memo(() => {
 
 			menuButtons.push({
 				id: "bulkDelete",
-				title: "tbd_delete_selected",
+				title: t("delete_selected"),
 				icon: "delete",
 				destructive: true,
 				requiresOnline: true,
@@ -546,10 +551,10 @@ const Playlists = memo(() => {
 						items: selectedPlaylists,
 						clearSelection: () => usePlaylistsStore.getState().clearSelectedPlaylists(),
 						confirm: {
-							title: "tbd_delete_selected",
-							message: "tbd_delete_selected_playlists_confirm",
-							okText: "tbd_delete",
-							cancelText: "tbd_cancel",
+							title: t("delete_selected"),
+							message: t("delete_selected_playlists_confirm"),
+							okText: t("delete"),
+							cancelText: t("cancel"),
 							destructive: true
 						},
 						op: playlist => audio.deletePlaylist({ playlist })
@@ -560,16 +565,16 @@ const Playlists = memo(() => {
 			menuButtons.push({
 				id: "create",
 				icon: "plus",
-				title: "tbd_create_playlist",
+				title: t("create_playlist"),
 				requiresOnline: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.input({
-							title: "tbd_new_playlist",
-							message: "tbd_enter_playlist_name",
-							placeholder: "tbd_playlist_name_placeholder",
-							cancelText: "tbd_cancel",
-							okText: "tbd_create"
+							title: t("new_playlist"),
+							message: t("enter_playlist_name"),
+							placeholder: t("playlist_name_placeholder"),
+							cancelText: t("cancel"),
+							okText: t("create")
 						})
 					})
 
@@ -632,7 +637,9 @@ const Playlists = memo(() => {
 		]
 	})()
 
-	const title = selectedPlaylists.length > 0 && !selectOptions ? `${selectedPlaylists.length} tbd_selected` : "tbd_playlists"
+	const title = selectedPlaylists.length > 0 && !selectOptions
+		? t("selected", { count: selectedPlaylists.length })
+		: t("playlists")
 
 	return (
 		<Fragment>
@@ -677,7 +684,7 @@ const Playlists = memo(() => {
 					emptyComponent={() => (
 						<ListEmpty
 							icon="musical-note-outline"
-							title="tbd_no_playlists"
+							title={t("no_playlists")}
 						/>
 					)}
 					renderItem={({ item: playlist }) => {

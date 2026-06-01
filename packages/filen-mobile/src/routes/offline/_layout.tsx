@@ -7,11 +7,13 @@ import { useShallow } from "zustand/shallow"
 import { Platform, ActivityIndicator } from "react-native"
 import Text from "@/components/ui/text"
 import { useResolveClassNames } from "uniwind"
+import { useTranslation } from "react-i18next"
 
 const Indicator = memo(() => {
 	const insets = useSafeAreaInsets()
 	const syncing = useOfflineStore(useShallow(state => state.syncing))
 	const textForeground = useResolveClassNames("text-foreground")
+	const { t } = useTranslation()
 
 	if (!syncing) {
 		return null
@@ -34,7 +36,7 @@ const Indicator = memo(() => {
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						tbd_syncing
+						{t("syncing")}
 					</Text>
 					<ActivityIndicator
 						className="shrink-0"

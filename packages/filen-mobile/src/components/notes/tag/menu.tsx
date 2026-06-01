@@ -12,6 +12,7 @@ import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { useRouter } from "expo-router"
 import { Paths } from "expo-file-system"
+import { useTranslation } from "react-i18next"
 
 export type TagMenuOrigin = "tags"
 
@@ -26,6 +27,7 @@ const Menu = memo(
 		tag: NoteTag
 		origin: TagMenuOrigin
 	} & React.ComponentPropsWithoutRef<typeof MenuComponent>) => {
+		const { t } = useTranslation()
 		const isSelected = useNotesStore(useShallow(state => state.selectedTags.some(selectedTag => selectedTag.uuid === tag.uuid)))
 		const router = useRouter()
 
@@ -40,10 +42,10 @@ const Menu = memo(
 		const createNote = async (type: NoteType) => {
 			const result = await run(async () => {
 				return await prompts.input({
-					title: "tbd_create_note",
-					message: "tbd_enter_note_name",
-					cancelText: "tbd_cancel",
-					okText: "tbd_create"
+					title: t("create_note"),
+					message: t("enter_note_name"),
+					cancelText: t("cancel"),
+					okText: t("create")
 				})
 			})
 
@@ -99,16 +101,16 @@ const Menu = memo(
 			if (tag.undecryptable) {
 				buttons.push({
 					id: "delete",
-					title: "tbd_delete",
+					title: t("delete"),
 					icon: "delete",
 					destructive: true,
 					onPress: async () => {
 						const promptResult = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_delete_tag",
-								message: "tbd_are_you_sure_delete_tag",
-								cancelText: "tbd_cancel",
-								okText: "tbd_delete",
+								title: t("delete_tag"),
+								message: t("are_you_sure_delete_tag"),
+								cancelText: t("cancel"),
+								okText: t("delete"),
 								destructive: true
 							})
 						})
@@ -145,15 +147,15 @@ const Menu = memo(
 			if (origin === "tags") {
 				buttons.push({
 					id: isSelected ? "deselect" : "select",
-					title: isSelected ? "tbd_deselect" : "tbd_select",
+					title: isSelected ? t("deselect") : t("select"),
 					icon: "select",
 					checked: isSelected,
 					onPress: () => {
 						useNotesStore.getState().setSelectedTags(prev => {
 							if (isSelected) {
-								return prev.filter(t => t.uuid !== tag.uuid)
+								return prev.filter(selectedTag => selectedTag.uuid !== tag.uuid)
 							} else {
-								return [...prev.filter(t => t.uuid !== tag.uuid), tag]
+								return [...prev.filter(selectedTag => selectedTag.uuid !== tag.uuid), tag]
 							}
 						})
 					}
@@ -162,11 +164,11 @@ const Menu = memo(
 
 			buttons.push({
 				id: "create",
-				title: "tbd_create_note",
+				title: t("create_note"),
 				icon: "plus",
 				subButtons: [
 					{
-						title: "tbd_text",
+						title: t("note_type_text"),
 						id: "text",
 						icon: "text",
 						onPress: async () => {
@@ -174,7 +176,7 @@ const Menu = memo(
 						}
 					},
 					{
-						title: "tbd_checklist",
+						title: t("note_type_checklist"),
 						id: "checklist",
 						icon: "checklist",
 						onPress: async () => {
@@ -182,7 +184,7 @@ const Menu = memo(
 						}
 					},
 					{
-						title: "tbd_markdown",
+						title: t("note_type_markdown"),
 						id: "markdown",
 						icon: "markdown",
 						onPress: async () => {
@@ -190,7 +192,7 @@ const Menu = memo(
 						}
 					},
 					{
-						title: "tbd_code",
+						title: t("note_type_code"),
 						id: "code",
 						icon: "code",
 						onPress: async () => {
@@ -198,7 +200,7 @@ const Menu = memo(
 						}
 					},
 					{
-						title: "tbd_richtext",
+						title: t("note_type_richtext"),
 						id: "richtext",
 						icon: "richtext",
 						onPress: async () => {
@@ -210,7 +212,7 @@ const Menu = memo(
 
 			buttons.push({
 				id: tag.favorite ? "unfavorite" : "favorite",
-				title: tag.favorite ? "tbd_unfavorite" : "tbd_favorite",
+				title: tag.favorite ? t("unfavorite") : t("favorite"),
 				icon: "heart",
 				onPress: async () => {
 					const result = await runWithLoading(async () => {
@@ -231,16 +233,16 @@ const Menu = memo(
 
 			buttons.push({
 				id: "rename",
-				title: "tbd_rename",
+				title: t("rename"),
 				icon: "edit",
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.input({
-							title: "tbd_rename_note",
-							message: "tbd_enter_new_name",
+							title: t("rename_tag"),
+							message: t("enter_new_name"),
 							defaultValue: tag.name,
-							cancelText: "tbd_cancel",
-							okText: "tbd_rename"
+							cancelText: t("cancel"),
+							okText: t("rename")
 						})
 					})
 
@@ -279,16 +281,16 @@ const Menu = memo(
 
 			buttons.push({
 				id: "delete",
-				title: "tbd_delete",
+				title: t("delete"),
 				icon: "delete",
 				destructive: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_delete_tag",
-							message: "tbd_are_you_sure_delete_tag",
-							cancelText: "tbd_cancel",
-							okText: "tbd_delete",
+							title: t("delete_tag"),
+							message: t("are_you_sure_delete_tag"),
+							cancelText: t("cancel"),
+							okText: t("delete"),
 							destructive: true
 						})
 					})

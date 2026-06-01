@@ -7,6 +7,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useViewLayout from "@/hooks/useViewLayout"
 import { useRef, useEffect, memo, Fragment } from "react"
+import { useTranslation } from "react-i18next"
 import { type View as TView, Platform } from "react-native"
 import DriveItemMenu from "@/components/drive/item/menu"
 import useDriveItemStoredOfflineQuery from "@/queries/useDriveItemStoredOffline.query"
@@ -32,6 +33,7 @@ const GalleryHeader = memo(
 		}
 		goBack: () => void
 	}) => {
+		const { t } = useTranslation()
 		const insets = useSafeAreaInsets()
 		const viewRef = useRef<TView>(null)
 		const { onLayout, layout } = useViewLayout(viewRef)
@@ -157,7 +159,7 @@ const GalleryHeader = memo(
 										buttons={[
 											{
 												id: "openLink",
-												title: "tbd_open_link",
+												title: t("open_link"),
 												icon: "openExternal",
 												onPress: async () => {
 													const parsedDomain = (() => {
@@ -186,7 +188,7 @@ const GalleryHeader = memo(
 													}
 
 													if (!canOpenResult.data) {
-														alerts.error("tbd_cannot_open_link")
+														alerts.error(t("cannot_open_link"))
 
 														return
 													}
@@ -194,10 +196,12 @@ const GalleryHeader = memo(
 													if (!openLinkTrustedDomains[parsedDomain]) {
 														const promptResponse = await run(async () => {
 															return await prompts.alert({
-																title: "tbd_open_external_link",
-																message: `tbd_open_external_link_message_${parsedDomain}`,
-																cancelText: "tbd_cancel",
-																okText: "tbd_open_trust"
+																title: t("open_external_link"),
+																message: t("open_external_link_message", {
+																	domain: parsedDomain
+																}),
+																cancelText: t("cancel"),
+																okText: t("open_trust")
 															})
 														})
 

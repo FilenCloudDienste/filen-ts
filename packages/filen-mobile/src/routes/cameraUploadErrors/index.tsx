@@ -13,11 +13,14 @@ import useCameraUploadStore, { type CameraUploadError } from "@/stores/useCamera
 import { useShallow } from "zustand/shallow"
 import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/utils"
 import cameraUpload from "@/lib/cameraUpload"
+import { useTranslation } from "react-i18next"
 
 const Err = memo(({ error }: { error: CameraUploadError }) => {
+	const { t } = useTranslation()
+
 	const errorMessage = (() => {
 		if (!error.error) {
-			return "tbd_unknown_error"
+			return t("unknown_error")
 		}
 
 		const unwrappedError = unwrapSdkError(error.error)
@@ -34,7 +37,7 @@ const Err = memo(({ error }: { error: CameraUploadError }) => {
 			return error.error
 		}
 
-		return "tbd_unknown_error"
+		return t("unknown_error")
 	})()
 
 	return (
@@ -47,6 +50,7 @@ const Err = memo(({ error }: { error: CameraUploadError }) => {
 })
 
 const CameraUploadErrors = memo(() => {
+	const { t } = useTranslation()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -55,7 +59,7 @@ const CameraUploadErrors = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_camera_upload_errors"
+				title={t("camera_upload_errors")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -91,7 +95,7 @@ const CameraUploadErrors = memo(() => {
 								{
 									id: "clear",
 									icon: "edit",
-									title: "tbd_clear_errors",
+									title: t("clear_errors"),
 									onPress: () => {
 										useCameraUploadStore.getState().setErrors([])
 
@@ -101,7 +105,7 @@ const CameraUploadErrors = memo(() => {
 								{
 									id: "settings",
 									icon: "edit",
-									title: "tbd_settings",
+									title: t("settings"),
 									onPress: () => {
 										router.push("/cameraUpload")
 									}
@@ -132,7 +136,7 @@ const CameraUploadErrors = memo(() => {
 					emptyComponent={() => (
 						<ListEmpty
 							icon="checkmark-outline"
-							title="tbd_no_camera_upload_errors"
+							title={t("no_camera_upload_errors")}
 						/>
 					)}
 					renderItem={({ item: error }) => {

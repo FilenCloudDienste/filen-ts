@@ -1,4 +1,6 @@
 import { Fragment, useState, useEffect, memo, useCallback } from "react"
+import { useTranslation } from "react-i18next"
+import { type TFunction } from "i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useDrivePath, { type SelectOptions } from "@/hooks/useDrivePath"
@@ -48,7 +50,11 @@ import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/routes/contacts"
 import { driveItemDisplayName } from "@/lib/decryption"
 
-function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void): MenuButton {
+function buildSortMenuButton(
+	current: SortByType,
+	setSort: (next: SortByType) => void,
+	t: TFunction
+): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
 		id,
 		title,
@@ -58,52 +64,52 @@ function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) =>
 
 	return {
 		id: "sort",
-		title: "tbd_sort_by",
+		title: t("sort_by"),
 		icon: "list",
 		subButtons: [
 			{
 				id: "sort.name",
-				title: "tbd_sort_name",
+				title: t("sort_name"),
 				icon: "text",
-				subButtons: [leaf("sort.nameAsc", "tbd_sort_name_asc", "nameAsc"), leaf("sort.nameDesc", "tbd_sort_name_desc", "nameDesc")]
+				subButtons: [leaf("sort.nameAsc", t("sort_name_asc"), "nameAsc"), leaf("sort.nameDesc", t("sort_name_desc"), "nameDesc")]
 			},
 			{
 				id: "sort.size",
-				title: "tbd_sort_size",
+				title: t("sort_size"),
 				icon: "size",
-				subButtons: [leaf("sort.sizeAsc", "tbd_sort_size_asc", "sizeAsc"), leaf("sort.sizeDesc", "tbd_sort_size_desc", "sizeDesc")]
+				subButtons: [leaf("sort.sizeAsc", t("sort_size_asc"), "sizeAsc"), leaf("sort.sizeDesc", t("sort_size_desc"), "sizeDesc")]
 			},
 			{
 				id: "sort.type",
-				title: "tbd_sort_type",
+				title: t("sort_type"),
 				icon: "doc",
-				subButtons: [leaf("sort.mimeAsc", "tbd_sort_type_asc", "mimeAsc"), leaf("sort.mimeDesc", "tbd_sort_type_desc", "mimeDesc")]
+				subButtons: [leaf("sort.mimeAsc", t("sort_type_asc"), "mimeAsc"), leaf("sort.mimeDesc", t("sort_type_desc"), "mimeDesc")]
 			},
 			{
 				id: "sort.modified",
-				title: "tbd_sort_modified",
+				title: t("sort_modified"),
 				icon: "clock",
 				subButtons: [
-					leaf("sort.lastModifiedAsc", "tbd_sort_modified_asc", "lastModifiedAsc"),
-					leaf("sort.lastModifiedDesc", "tbd_sort_modified_desc", "lastModifiedDesc")
+					leaf("sort.lastModifiedAsc", t("sort_modified_asc"), "lastModifiedAsc"),
+					leaf("sort.lastModifiedDesc", t("sort_modified_desc"), "lastModifiedDesc")
 				]
 			},
 			{
 				id: "sort.uploaded",
-				title: "tbd_sort_uploaded",
+				title: t("sort_uploaded"),
 				icon: "upload",
 				subButtons: [
-					leaf("sort.uploadDateAsc", "tbd_sort_uploaded_asc", "uploadDateAsc"),
-					leaf("sort.uploadDateDesc", "tbd_sort_uploaded_desc", "uploadDateDesc")
+					leaf("sort.uploadDateAsc", t("sort_uploaded_asc"), "uploadDateAsc"),
+					leaf("sort.uploadDateDesc", t("sort_uploaded_desc"), "uploadDateDesc")
 				]
 			},
 			{
 				id: "sort.created",
-				title: "tbd_sort_created",
+				title: t("sort_created"),
 				icon: "calendar",
 				subButtons: [
-					leaf("sort.creationAsc", "tbd_sort_created_asc", "creationAsc"),
-					leaf("sort.creationDesc", "tbd_sort_created_desc", "creationDesc")
+					leaf("sort.creationAsc", t("sort_created_asc"), "creationAsc"),
+					leaf("sort.creationDesc", t("sort_created_desc"), "creationDesc")
 				]
 			}
 		]
@@ -118,6 +124,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
 	const offlineSyncing = useOfflineStore(state => state.syncing)
+	const { t } = useTranslation()
 	// Drive is rendered from /tabs/drive (a tab), every modal that delegates to it
 	// (trash, recents, favorites, links, sharedIn, sharedOut, offline, driveSelect,
 	// linkedDir), AND nested screens within those. The header's left-side button has
@@ -178,14 +185,14 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		const menuButtons: MenuButton[] = []
 
 		if (sortable && !selectionMode) {
-			menuButtons.push(buildSortMenuButton(currentSort, setSort))
+			menuButtons.push(buildSortMenuButton(currentSort, setSort, t))
 		}
 
 		if (driveItems.length > 0) {
 			if (selectedDriveItems.length === driveItems.length) {
 				menuButtons.push({
 					id: "deselectAll",
-					title: "tbd_deselect_all",
+					title: t("deselect_all"),
 					icon: "select",
 					onPress: () => {
 						useDriveStore.getState().clearSelectedItems()
@@ -194,7 +201,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			} else {
 				menuButtons.push({
 					id: "selectAll",
-					title: "tbd_select_all",
+					title: t("select_all"),
 					icon: "select",
 					onPress: () => {
 						useDriveStore.getState().selectAllItems(driveItems)
@@ -214,17 +221,17 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		) {
 			menuButtons.push({
 				id: "createFolder",
-				title: "tbd_create_folder",
+				title: t("create_folder"),
 				icon: "plus",
 				requiresOnline: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.input({
-							title: "tbd_create_folder",
-							message: "tbd_enter_folder_name",
-							cancelText: "tbd_cancel",
-							okText: "tbd_create",
-							placeholder: "tbd_folder_name"
+							title: t("create_folder"),
+							message: t("enter_folder_name"),
+							cancelText: t("cancel"),
+							okText: t("create"),
+							placeholder: t("folder_name")
 						})
 					})
 
@@ -261,12 +268,12 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 			menuButtons.push({
 				id: "upload",
-				title: "tbd_upload",
+				title: t("upload"),
 				icon: "upload",
 				subButtons: [
 					{
 						id: "uploadFiles",
-						title: "tbd_upload_files",
+						title: t("upload_files"),
 						icon: "upload",
 						requiresOnline: true,
 						onPress: async () => {
@@ -348,7 +355,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					{
 						id: "uploadPhotosOrVideos",
 						requiresOnline: true,
-						title: "tbd_upload_photos_or_videos",
+						title: t("upload_photos_or_videos"),
 						icon: "image",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
@@ -365,7 +372,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 
 							if (!permissionsResult.data) {
-								alerts.error("tbd_no_permissions_enable_manually")
+								alerts.error(t("no_permissions_enable_manually"))
 
 								return
 							}
@@ -452,7 +459,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					},
 					{
 						id: "takePhotoOrVideo",
-						title: "tbd_take_photo_or_video",
+						title: t("take_photo_or_video"),
 						icon: "camera",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
@@ -469,7 +476,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 
 							if (!permissionsResult.data) {
-								alerts.error("tbd_no_permissions_enable_manually")
+								alerts.error(t("no_permissions_enable_manually"))
 
 								return
 							}
@@ -559,7 +566,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					{
 						id: "scanDocument",
 						requiresOnline: true,
-						title: "tbd_scan_document",
+						title: t("scan_document"),
 						icon: "scan",
 						onPress: async () => {
 							const permissionsResult = await run(async () => {
@@ -576,7 +583,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 
 							if (!permissionsResult.data) {
-								alerts.error("tbd_no_permissions_enable_manually")
+								alerts.error(t("no_permissions_enable_manually"))
 
 								return
 							}
@@ -624,7 +631,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 													parent,
 													modified: Date.now(),
 													created: Date.now(),
-													name: `tbd_scanned_document_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`,
+													name: `${t("scanned_document_name")}_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`,
 													mime: "image/jpeg"
 												})
 											},
@@ -658,16 +665,16 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					},
 					{
 						id: "createTextFile",
-						title: "tbd_create_text_file",
+						title: t("create_text_file"),
 						icon: "text",
 						onPress: async () => {
 							const promptResult = await run(async () => {
 								return await prompts.input({
-									title: "tbd_create_text_file",
-									message: "tbd_enter_text_file_name",
-									cancelText: "tbd_cancel",
-									okText: "tbd_create",
-									placeholder: "tbd_text_file_name"
+									title: t("create_text_file"),
+									message: t("enter_text_file_name"),
+									cancelText: t("cancel"),
+									okText: t("create"),
+									placeholder: t("text_file_name")
 								})
 							})
 
@@ -776,7 +783,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		if (!selectionMode) {
 			menuButtons.push({
 				id: "transfers",
-				title: "tbd_transfers",
+				title: t("transfers"),
 				icon: "list",
 				onPress: () => {
 					router.push("/transfers")
@@ -789,7 +796,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (drivePath.type === "offline") {
 				menuButtons.push({
 					id: "syncNow",
-					title: offlineSyncing ? "tbd_syncing" : "tbd_sync_now",
+					title: offlineSyncing ? t("syncing") : t("sync_now"),
 					icon: "restore",
 					disabled: offlineSyncing,
 					onPress: () => {
@@ -812,7 +819,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (drivePath.type === "trash") {
 				menuButtons.push({
 					id: "restoreSelected",
-					title: "tbd_restore_selected",
+					title: t("restore_selected"),
 					icon: "restore",
 					requiresOnline: true,
 					onPress: async () => {
@@ -820,10 +827,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedDriveItems,
 							clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 							confirm: {
-								title: "tbd_restore_selected",
-								message: "tbd_are_you_sure_restore_selected",
-								okText: "tbd_restore",
-								cancelText: "tbd_cancel"
+								title: t("restore_selected"),
+								message: t("are_you_sure_restore_selected"),
+								okText: t("restore"),
+								cancelText: t("cancel")
 							},
 							op: item => drive.restore({ item, signal: undefined })
 						})
@@ -832,7 +839,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 				menuButtons.push({
 					id: "deleteSelectedPermanently",
-					title: "tbd_delete_selected_permanently",
+					title: t("delete_selected_permanently"),
 					destructive: true,
 					icon: "delete",
 					requiresOnline: true,
@@ -841,10 +848,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedDriveItems,
 							clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 							confirm: {
-								title: "tbd_delete_selected_permanently",
-								message: "tbd_are_you_sure_delete_selected_permanently",
-								okText: "tbd_delete",
-								cancelText: "tbd_cancel",
+								title: t("delete_selected_permanently"),
+								message: t("are_you_sure_delete_selected_permanently"),
+								okText: t("delete"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: item => drive.deletePermanently({ item, signal: undefined })
@@ -862,7 +869,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				) {
 					menuButtons.push({
 						id: "bulkFavorite",
-						title: driveFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+						title: driveFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
 						icon: "heart",
 						requiresOnline: true,
 						onPress: async () => {
@@ -894,7 +901,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				) {
 					menuButtons.push({
 						id: "bulkMove",
-						title: "tbd_move_selected",
+						title: t("move_selected"),
 						icon: "move",
 						requiresOnline: true,
 						onPress: async () => {
@@ -940,7 +947,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				) {
 					menuButtons.push({
 						id: "bulkDownload",
-						title: "tbd_download_selected",
+						title: t("download_selected"),
 						icon: "download",
 						requiresOnline: true,
 						onPress: async () => {
@@ -969,7 +976,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				) {
 					menuButtons.push({
 						id: "bulkSaveToPhotos",
-						title: "tbd_save_to_photos_selected",
+						title: t("save_to_photos_selected"),
 						icon: "image",
 						requiresOnline: true,
 						onPress: async () => {
@@ -985,7 +992,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 
 							if (!permissionsResult.data) {
-								alerts.error("tbd_no_permissions_enable_manually")
+								alerts.error(t("no_permissions_enable_manually"))
 
 								return
 							}
@@ -1046,7 +1053,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				) {
 					menuButtons.push({
 						id: "bulkShareFilenUser",
-						title: "tbd_share_filen_user_selected",
+						title: t("share_filen_user_selected"),
 						icon: "users",
 						requiresOnline: true,
 						onPress: async () => {
@@ -1098,7 +1105,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				if ((drivePath.type === "drive" || drivePath.type === "favorites") && !everySelectedKnownStoredOffline) {
 					menuButtons.push({
 						id: "bulkMakeOffline",
-						title: "tbd_make_available_offline_selected",
+						title: t("make_available_offline_selected"),
 						icon: "archive",
 						requiresOnline: true,
 						onPress: async () => {
@@ -1142,7 +1149,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				) {
 					menuButtons.push({
 						id: "bulkRemoveOffline",
-						title: "tbd_remove_offline_selected",
+						title: t("remove_offline_selected"),
 						icon: "trash",
 						destructive: true,
 						onPress: async () => {
@@ -1150,10 +1157,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								items: selectedDriveItems,
 								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 								confirm: {
-									title: "tbd_remove_offline_selected",
-									message: "tbd_confirm_remove_offline_selected",
-									okText: "tbd_remove_offline",
-									cancelText: "tbd_cancel",
+									title: t("remove_offline_selected"),
+									message: t("confirm_remove_offline_selected"),
+									okText: t("remove_offline"),
+									cancelText: t("cancel"),
 									destructive: true
 								},
 								op: item => offline.removeItem(item)
@@ -1172,7 +1179,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				) {
 					menuButtons.push({
 						id: "bulkTrash",
-						title: "tbd_trash_selected",
+						title: t("trash_selected"),
 						icon: "trash",
 						destructive: true,
 						requiresOnline: true,
@@ -1181,10 +1188,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								items: selectedDriveItems,
 								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 								confirm: {
-									title: "tbd_trash_selected",
-									message: "tbd_are_you_sure_trash_selected",
-									okText: "tbd_trash",
-									cancelText: "tbd_cancel",
+									title: t("trash_selected"),
+									message: t("are_you_sure_trash_selected"),
+									okText: t("trash"),
+									cancelText: t("cancel"),
 									destructive: true
 								},
 								op: item => drive.trash({ item, signal: undefined })
@@ -1197,7 +1204,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				if (drivePath.type === "sharedOut" && isAtRoot) {
 					menuButtons.push({
 						id: "bulkStopSharing",
-						title: "tbd_stop_sharing_selected",
+						title: t("stop_sharing_selected"),
 						icon: "delete",
 						destructive: true,
 						requiresOnline: true,
@@ -1206,10 +1213,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								items: selectedDriveItems,
 								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 								confirm: {
-									title: "tbd_stop_sharing_selected",
-									message: "tbd_are_you_sure_stop_sharing_selected",
-									okText: "tbd_stop_sharing",
-									cancelText: "tbd_cancel",
+									title: t("stop_sharing_selected"),
+									message: t("are_you_sure_stop_sharing_selected"),
+									okText: t("stop_sharing"),
+									cancelText: t("cancel"),
 									destructive: true
 								},
 								op: item => drive.removeShare({ item, signal: undefined })
@@ -1222,7 +1229,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				if (drivePath.type === "sharedIn" && isAtRoot) {
 					menuButtons.push({
 						id: "bulkRemoveShare",
-						title: "tbd_remove_share_selected",
+						title: t("remove_share_selected"),
 						icon: "delete",
 						destructive: true,
 						requiresOnline: true,
@@ -1231,10 +1238,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								items: selectedDriveItems,
 								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 								confirm: {
-									title: "tbd_remove_share_selected",
-									message: "tbd_are_you_sure_remove_share_selected",
-									okText: "tbd_remove",
-									cancelText: "tbd_cancel",
+									title: t("remove_share_selected"),
+									message: t("are_you_sure_remove_share_selected"),
+									okText: t("remove"),
+									cancelText: t("cancel"),
 									destructive: true
 								},
 								op: item => drive.removeShare({ item, signal: undefined })
@@ -1247,7 +1254,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				if (drivePath.type === "links" && isAtRoot) {
 					menuButtons.push({
 						id: "bulkDisablePublicLink",
-						title: "tbd_disable_public_link_selected",
+						title: t("disable_public_link_selected"),
 						icon: "delete",
 						destructive: true,
 						requiresOnline: true,
@@ -1256,10 +1263,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								items: selectedDriveItems,
 								clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 								confirm: {
-									title: "tbd_disable_public_link_selected",
-									message: "tbd_are_you_sure_disable_public_link_selected",
-									okText: "tbd_disable",
-									cancelText: "tbd_cancel",
+									title: t("disable_public_link_selected"),
+									message: t("are_you_sure_disable_public_link_selected"),
+									okText: t("disable"),
+									cancelText: t("cancel"),
 									destructive: true
 								},
 								op: item => drive.disablePublicLink({ item, signal: undefined })
@@ -1273,16 +1280,16 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		if (drivePath.type === "trash" && !selectionMode) {
 			menuButtons.push({
 				id: "empty",
-				title: "tbd_empty_trash",
+				title: t("empty_trash"),
 				destructive: true,
 				icon: "delete",
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_empty_trash",
-							message: "tbd_are_you_sure_empty_trash",
-							cancelText: "tbd_cancel",
-							okText: "tbd_empty",
+							title: t("empty_trash"),
+							message: t("are_you_sure_empty_trash"),
+							cancelText: t("cancel"),
+							okText: t("empty"),
 							destructive: true
 						})
 					})
@@ -1396,27 +1403,27 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		// matches Notes / Tracks / Contacts / Participants / Versions.
 		// Picker mode (drivePath.selectOptions) keeps its own destination title.
 		if (selectedDriveItems.length > 0 && !drivePath.selectOptions) {
-			return `${selectedDriveItems.length} tbd_selected`
+			return t("selected", { count: selectedDriveItems.length })
 		}
 
 		if (drivePath.selectOptions) {
 			switch (drivePath.selectOptions.intention) {
 				case "move": {
-					return "tbd_select_destination"
+					return t("select_destination")
 				}
 
 				case "select": {
 					return drivePath.selectOptions.directories && drivePath.selectOptions.files
 						? drivePath.selectOptions.type === "single"
-							? "tbd_select_item"
-							: "tbd_select_items"
+							? t("select_item")
+							: t("select_items")
 						: drivePath.selectOptions.directories
 							? drivePath.selectOptions.type === "single"
-								? "tbd_select_directory"
-								: "tbd_select_directories"
+								? t("select_directory")
+								: t("select_directories")
 							: drivePath.selectOptions.type === "single"
-								? "tbd_select_file"
-								: "tbd_select_files"
+								? t("select_file")
+								: t("select_files")
 				}
 			}
 		}
@@ -1445,30 +1452,30 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		switch (drivePath.type) {
 			case "drive": {
 				if (stringifiedClient && (drivePath.uuid ?? "") === stringifiedClient.rootUuid) {
-					return "tbd_drive"
+					return t("drive")
 				}
 
-				return resolveBreadcrumb("tbd_drive")
+				return resolveBreadcrumb(t("drive"))
 			}
 
 			case "offline": {
-				return resolveBreadcrumb("tbd_offline")
+				return resolveBreadcrumb(t("offline"))
 			}
 
 			case "sharedIn": {
-				return resolveBreadcrumb("tbd_shared_with_me")
+				return resolveBreadcrumb(t("shared_with_me"))
 			}
 
 			case "sharedOut": {
-				return resolveBreadcrumb("tbd_shared_with_others")
+				return resolveBreadcrumb(t("shared_with_others"))
 			}
 
 			case "links": {
-				return resolveBreadcrumb("tbd_links")
+				return resolveBreadcrumb(t("links"))
 			}
 
 			case "favorites": {
-				return resolveBreadcrumb("tbd_favorites")
+				return resolveBreadcrumb(t("favorites"))
 			}
 
 			case "linked": {
@@ -1476,15 +1483,15 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					return drivePath.linked.rootName
 				}
 
-				return resolveBreadcrumb("tbd_linked")
+				return resolveBreadcrumb(t("linked"))
 			}
 
 			case "trash": {
-				return "tbd_trash"
+				return t("trash")
 			}
 
 			case "recents": {
-				return "tbd_recents"
+				return t("recents")
 			}
 
 			default: {
@@ -1511,7 +1518,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			rightItems={rightItems}
 			searchBarOptions={{
 				placement: "integratedButton",
-				placeholder: "tbd_search_drive",
+				placeholder: t("search_drive"),
 				onChangeText: e => setSearchQuery(e.nativeEvent.text),
 				onCancelButtonPress: () => setSearchQuery(""),
 				onClose: () => setSearchQuery(""),
@@ -1533,6 +1540,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 const Drive = memo(() => {
 	const drivePath = useDrivePath()
+	const { t } = useTranslation()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const [globalSearchResult, setGlobalSearchResult] = useState<DriveItem[]>([])
 	const [queryingGlobalSearch, setQueryingGlobalSearch] = useState<boolean>(false)
@@ -1719,20 +1727,20 @@ const Drive = memo(() => {
 							}
 							title={
 								drivePath.type === "trash"
-									? "tbd_trash_is_empty"
+									? t("trash_is_empty")
 									: drivePath.type === "favorites"
-										? "tbd_no_favorites"
+										? t("no_favorites")
 										: drivePath.type === "recents"
-											? "tbd_no_recents"
+											? t("no_recents")
 											: drivePath.type === "sharedIn"
-												? "tbd_no_shared_in_items"
+												? t("no_shared_in_items")
 												: drivePath.type === "sharedOut"
-													? "tbd_no_shared_out_items"
+													? t("no_shared_out_items")
 													: drivePath.type === "links"
-														? "tbd_no_links"
+														? t("no_links")
 														: drivePath.type === "offline"
-															? "tbd_no_offline_items"
-															: "tbd_folder_is_empty"
+															? t("no_offline_items")
+															: t("folder_is_empty")
 							}
 						/>
 					)}

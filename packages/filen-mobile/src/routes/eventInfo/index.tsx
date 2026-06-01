@@ -11,13 +11,15 @@ import { simpleDate } from "@/lib/time"
 import { type UserEvent, type FileMeta, type DirMeta, FileMeta_Tags, DirMeta_Tags, UserEventKind_Tags } from "@filen/sdk-rs"
 import { eventKindToReadable } from "@/routes/events"
 import DismissStack from "@/components/dismissStack"
+import i18n from "@/lib/i18n"
+import { useTranslation } from "react-i18next"
 
 function extractFileMetaName(meta: FileMeta): string {
 	if (meta.tag === FileMeta_Tags.Decoded) {
 		return meta.inner[0].name
 	}
 
-	return "tbd_encrypted"
+	return i18n.t("encrypted")
 }
 
 function extractDirMetaName(meta: DirMeta): string {
@@ -25,7 +27,7 @@ function extractDirMetaName(meta: DirMeta): string {
 		return meta.inner[0].name
 	}
 
-	return "tbd_encrypted"
+	return i18n.t("encrypted")
 }
 
 function buildEventDetails(event: UserEvent): {
@@ -37,19 +39,19 @@ function buildEventDetails(event: UserEvent): {
 		value: string
 	}[] = [
 		{
-			title: "tbd_event_type",
+			title: i18n.t("event_type"),
 			value: eventKindToReadable(event.kind)
 		},
 		{
-			title: "tbd_timestamp",
+			title: i18n.t("timestamp"),
 			value: simpleDate(Number(event.timestamp))
 		},
 		{
-			title: "tbd_ip",
+			title: i18n.t("ip"),
 			value: event.kind.inner[0].ip
 		},
 		{
-			title: "tbd_user_agent",
+			title: i18n.t("user_agent"),
 			value: event.kind.inner[0].userAgent
 		}
 	]
@@ -65,7 +67,7 @@ function buildEventDetails(event: UserEvent): {
 		case UserEventKind_Tags.FileLinkEdited:
 		case UserEventKind_Tags.DeleteFilePermanently: {
 			rows.push({
-				title: "tbd_name",
+				title: i18n.t("name"),
 				value: extractFileMetaName(event.kind.inner[0].metadata)
 			})
 
@@ -75,12 +77,12 @@ function buildEventDetails(event: UserEvent): {
 		case UserEventKind_Tags.FileRenamed:
 		case UserEventKind_Tags.FileMetadataChanged: {
 			rows.push({
-				title: "tbd_name",
+				title: i18n.t("name"),
 				value: extractFileMetaName(event.kind.inner[0].metadata)
 			})
 
 			rows.push({
-				title: "tbd_old_name",
+				title: i18n.t("old_name"),
 				value: extractFileMetaName(event.kind.inner[0].oldMetadata)
 			})
 
@@ -89,12 +91,12 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.FileShared: {
 			rows.push({
-				title: "tbd_name",
+				title: i18n.t("name"),
 				value: extractFileMetaName(event.kind.inner[0].metadata)
 			})
 
 			rows.push({
-				title: "tbd_receiver_email",
+				title: i18n.t("receiver_email"),
 				value: event.kind.inner[0].receiverEmail
 			})
 
@@ -109,7 +111,7 @@ function buildEventDetails(event: UserEvent): {
 		case UserEventKind_Tags.FolderColorChanged:
 		case UserEventKind_Tags.DeleteFolderPermanently: {
 			rows.push({
-				title: "tbd_name",
+				title: i18n.t("name"),
 				value: extractDirMetaName(event.kind.inner[0].name)
 			})
 
@@ -119,12 +121,12 @@ function buildEventDetails(event: UserEvent): {
 		case UserEventKind_Tags.FolderRenamed:
 		case UserEventKind_Tags.FolderMetadataChanged: {
 			rows.push({
-				title: "tbd_name",
+				title: i18n.t("name"),
 				value: extractDirMetaName(event.kind.inner[0].name)
 			})
 
 			rows.push({
-				title: "tbd_old_name",
+				title: i18n.t("old_name"),
 				value: extractDirMetaName(event.kind.inner[0].oldName)
 			})
 
@@ -133,12 +135,12 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.FolderShared: {
 			rows.push({
-				title: "tbd_name",
+				title: i18n.t("name"),
 				value: extractDirMetaName(event.kind.inner[0].name)
 			})
 
 			rows.push({
-				title: "tbd_receiver_email",
+				title: i18n.t("receiver_email"),
 				value: event.kind.inner[0].receiverEmail
 			})
 
@@ -147,7 +149,7 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.FolderLinkEdited: {
 			rows.push({
-				title: "tbd_link_uuid",
+				title: i18n.t("link_uuid"),
 				value: event.kind.inner[0].linkUuid
 			})
 
@@ -156,7 +158,7 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.CodeRedeemed: {
 			rows.push({
-				title: "tbd_code",
+				title: i18n.t("code"),
 				value: event.kind.inner[0].code
 			})
 
@@ -165,7 +167,7 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.EmailChanged: {
 			rows.push({
-				title: "tbd_email",
+				title: i18n.t("email"),
 				value: event.kind.inner[0].email
 			})
 
@@ -174,17 +176,17 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.EmailChangeAttempt: {
 			rows.push({
-				title: "tbd_email",
+				title: i18n.t("email"),
 				value: event.kind.inner[0].email
 			})
 
 			rows.push({
-				title: "tbd_old_email",
+				title: i18n.t("old_email"),
 				value: event.kind.inner[0].oldEmail
 			})
 
 			rows.push({
-				title: "tbd_new_email",
+				title: i18n.t("new_email"),
 				value: event.kind.inner[0].newEmail
 			})
 
@@ -193,13 +195,13 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.ItemFavorite: {
 			rows.push({
-				title: "tbd_name",
+				title: i18n.t("name"),
 				value: extractFileMetaName(event.kind.inner[0].metadata)
 			})
 
 			rows.push({
-				title: "tbd_favorited",
-				value: event.kind.inner[0].value ? "tbd_yes" : "tbd_no"
+				title: i18n.t("favorited"),
+				value: event.kind.inner[0].value ? i18n.t("yes") : i18n.t("no")
 			})
 
 			break
@@ -207,12 +209,12 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.RemovedSharedInItems: {
 			rows.push({
-				title: "tbd_count",
+				title: i18n.t("count"),
 				value: event.kind.inner[0].count.toString()
 			})
 
 			rows.push({
-				title: "tbd_sharer_email",
+				title: i18n.t("sharer_email"),
 				value: event.kind.inner[0].sharerEmail
 			})
 
@@ -221,12 +223,12 @@ function buildEventDetails(event: UserEvent): {
 
 		case UserEventKind_Tags.RemovedSharedOutItems: {
 			rows.push({
-				title: "tbd_count",
+				title: i18n.t("count"),
 				value: event.kind.inner[0].count.toString()
 			})
 
 			rows.push({
-				title: "tbd_receiver_email",
+				title: i18n.t("receiver_email"),
 				value: event.kind.inner[0].receiverEmail
 			})
 
@@ -256,6 +258,7 @@ const EventInfo = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
+	const { t } = useTranslation()
 
 	const event = (() => {
 		if (!eventSerialized) {
@@ -278,7 +281,7 @@ const EventInfo = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_event_info"
+				title={t("event_info")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}

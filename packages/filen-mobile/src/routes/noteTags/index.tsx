@@ -22,6 +22,7 @@ import notes from "@/lib/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useNotesTagsQuery from "@/queries/useNotesTags.query"
 import DismissStack from "@/components/dismissStack"
+import { useTranslation } from "react-i18next"
 
 // Tri-state of a tag against the working set of notes:
 //   "all"  — every note already carries this tag (tap → remove from all)
@@ -52,6 +53,7 @@ function computeTagState(targetNotes: readonly Note[], tag: NoteTag): TagState {
 }
 
 const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
 	const state = computeTagState(targetNotes, tag)
@@ -60,13 +62,13 @@ const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly No
 	const toggleTitle =
 		state === "all"
 			? isSingle
-				? "tbd_remove_tag"
-				: "tbd_remove_tag_from_selected"
+				? t("remove_tag")
+				: t("remove_tag_from_selected")
 			: state === "some"
-				? "tbd_add_tag_to_remaining"
+				? t("add_tag_to_remaining")
 				: isSingle
-					? "tbd_add_tag"
-					: "tbd_add_tag_to_selected"
+					? t("add_tag")
+					: t("add_tag_to_selected")
 
 	return (
 		<Menu
@@ -97,7 +99,7 @@ const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly No
 							// "none" or "some": promote to "all" — add to every note that
 							// doesn't already carry the tag (addTag is idempotent, but
 							// filtering avoids the redundant SDK call).
-							const needsAdd = targetNotes.filter(note => !note.tags.some(t => t.uuid === tag.uuid))
+							const needsAdd = targetNotes.filter(note => !note.tags.some(noteTag => noteTag.uuid === tag.uuid))
 
 							await Promise.all(
 								needsAdd.map(note =>
@@ -119,16 +121,16 @@ const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly No
 				},
 				{
 					id: "rename",
-					title: "tbd_rename",
+					title: t("rename"),
 					icon: "edit",
 					requiresOnline: true,
 					onPress: async () => {
 						const promptResult = await run(async () => {
 							return await prompts.input({
-								title: "tbd_new_tag_name",
-								message: "tbd_enter_tag_name",
-								cancelText: "tbd_cancel",
-								okText: "tbd_save"
+								title: t("new_tag_name"),
+								message: t("enter_tag_name"),
+								cancelText: t("cancel"),
+								okText: t("save")
 							})
 						})
 
@@ -166,17 +168,17 @@ const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly No
 				},
 				{
 					id: "delete",
-					title: "tbd_delete",
+					title: t("delete"),
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_delete_tag",
-								message: "tbd_delete_tag_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_delete",
+								title: t("delete_tag"),
+								message: t("are_you_sure_delete_tag"),
+								cancelText: t("cancel"),
+								okText: t("delete"),
 								destructive: true
 							})
 						})
@@ -238,6 +240,7 @@ const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly No
 })
 
 const NoteTags = memo(() => {
+	const { t } = useTranslation()
 	const { notes: notesSerialized } = useLocalSearchParams<{
 		notes?: string
 	}>()
@@ -292,7 +295,7 @@ const NoteTags = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title={liveNotes.length === 1 ? "tbd_note_tags" : "tbd_note_tags_selected"}
+				title={liveNotes.length === 1 ? t("note_tags") : t("note_tags_selected")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -331,10 +334,10 @@ const NoteTags = memo(() => {
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_new_tag_name",
-											message: "tbd_enter_tag_name",
-											cancelText: "tbd_cancel",
-											okText: "tbd_add"
+											title: t("new_tag_name"),
+											message: t("enter_tag_name"),
+											cancelText: t("cancel"),
+											okText: t("add")
 										})
 									})
 
@@ -387,7 +390,7 @@ const NoteTags = memo(() => {
 				) : tags.length === 0 ? (
 					<ListEmpty
 						icon="pricetag-outline"
-						title="tbd_no_tags"
+						title={t("no_tags")}
 					/>
 				) : (
 					<GestureHandlerScrollView

@@ -13,6 +13,7 @@ import chats from "@/lib/chats"
 import prompts from "@/lib/prompts"
 import { simpleDate } from "@/lib/time"
 import events from "@/lib/events"
+import { useTranslation } from "react-i18next"
 
 export const Menu = memo(
 	({
@@ -28,6 +29,7 @@ export const Menu = memo(
 		className?: string
 		isAnchoredToRight?: boolean
 	}) => {
+		const { t } = useTranslation()
 		const [, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
 		const [, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
 		const stringifiedClient = useStringifiedClient()
@@ -37,17 +39,17 @@ export const Menu = memo(
 
 		const deleteButton = {
 			id: "delete",
-			title: "tbd_delete",
+			title: t("delete"),
 			icon: "delete" as const,
 			destructive: true,
 			requiresOnline: true,
 			onPress: async () => {
 				const promptResponse = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_delete_message",
-						message: "tbd_delete_message_confirmation",
-						cancelText: "tbd_cancel",
-						okText: "tbd_delete",
+						title: t("delete_message"),
+						message: t("delete_message_confirmation"),
+						cancelText: t("cancel"),
+						okText: t("delete"),
 						destructive: true
 					})
 				})
@@ -84,7 +86,7 @@ export const Menu = memo(
 			: ([
 					{
 						id: "reply",
-						title: "tbd_reply",
+						title: t("reply"),
 						icon: "reply" as const,
 						onPress: () => {
 							setChatReplyTo(info.item)
@@ -96,7 +98,7 @@ export const Menu = memo(
 					},
 					{
 						id: "copy",
-						title: "tbd_copy",
+						title: t("copy"),
 						icon: "copy" as const,
 						onPress: async () => {
 							const result = await run(async () => {
@@ -114,14 +116,14 @@ export const Menu = memo(
 								return
 							}
 
-							alerts.normal("tbd_copied_to_clipboard")
+							alerts.normal(t("copied_to_clipboard"))
 						}
 					},
 					...(isOwner
 						? [
 								{
 									id: "edit",
-									title: "tbd_edit",
+									title: t("edit"),
 									icon: "edit" as const,
 									requiresOnline: true,
 									onPress: () => {

@@ -18,8 +18,10 @@ import * as Sharing from "expo-sharing"
 import QRCode from "react-qr-code"
 import Button from "@/components/ui/button"
 import * as Clipboard from "expo-clipboard"
+import { useTranslation } from "react-i18next"
 
 const TwoFactor = memo(() => {
+	const { t } = useTranslation()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -31,7 +33,7 @@ const TwoFactor = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_two_factor_authentication"
+				title={t("two_factor_authentication")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -89,8 +91,8 @@ const TwoFactor = memo(() => {
 							buttons={[
 								{
 									icon: "time-outline",
-									title: "tbd_two_factor_authentication",
-									subTitle: "tbd_two_factor_authentication_description",
+									title: t("two_factor_authentication"),
+									subTitle: t("two_factor_authentication_description"),
 									rightItem: {
 										type: "switch",
 										value: accountQuery.data.twoFactorEnabled,
@@ -98,10 +100,10 @@ const TwoFactor = memo(() => {
 											if (accountQuery.data.twoFactorEnabled) {
 												const promptResult = await run(async () => {
 													return await prompts.alert({
-														title: "tbd_disable_two_factor_authentication",
-														message: "tbd_disable_two_factor_authentication_description",
-														okText: "tbd_continue",
-														cancelText: "tbd_cancel",
+														title: t("disable_two_factor_authentication"),
+														message: t("disable_two_factor_authentication_description"),
+														okText: t("continue"),
+														cancelText: t("cancel"),
 														destructive: true
 													})
 												})
@@ -119,10 +121,10 @@ const TwoFactor = memo(() => {
 
 												const twoFactorPromptResult = await run(async () => {
 													return await prompts.input({
-														title: "tbd_enter_two_factor_code",
-														message: "tbd_enter_two_factor_code_description",
-														cancelText: "tbd_cancel",
-														okText: "tbd_disable",
+														title: t("enter_two_factor_code"),
+														message: t("enter_two_factor_code_description"),
+														cancelText: t("cancel"),
+														okText: t("disable"),
 														inputType: "secure-text",
 														destructive: true
 													})
@@ -162,10 +164,10 @@ const TwoFactor = memo(() => {
 
 											const twoFactorPromptResult = await run(async () => {
 												return await prompts.input({
-													title: "tbd_enter_two_factor_code",
-													message: "tbd_enter_two_factor_code_description",
-													cancelText: "tbd_cancel",
-													okText: "tbd_enable",
+													title: t("enter_two_factor_code"),
+													message: t("enter_two_factor_code_description"),
+													cancelText: t("cancel"),
+													okText: t("enable"),
 													inputType: "secure-text"
 												})
 											})
@@ -208,10 +210,10 @@ const TwoFactor = memo(() => {
 
 											const promptResult = await run(async () => {
 												return await prompts.alert({
-													title: "tbd_two_factor_recovery_key",
-													message: "tbd_two_factor_recovery_key_description_save_it_somewhere_safe",
-													okText: "tbd_continue",
-													cancelText: "tbd_continue"
+													title: t("two_factor_recovery_key"),
+													message: t("two_factor_recovery_key_description"),
+													okText: t("continue"),
+													cancelText: t("close")
 												})
 											})
 
@@ -305,10 +307,10 @@ const TwoFactor = memo(() => {
 												return
 											}
 
-											alerts.normal("tbd_secret_copied_to_clipboard")
+											alerts.normal(t("secret_copied_to_clipboard"))
 										}}
 									>
-										tbd_copy_secret
+										{t("copy_secret")}
 									</Button>
 								</View>
 							)}

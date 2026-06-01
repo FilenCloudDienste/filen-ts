@@ -10,8 +10,10 @@ import usePlaylistsStore from "@/stores/usePlaylists.store"
 import Text from "@/components/ui/text"
 import { cn } from "@filen/utils"
 import events from "@/lib/events"
+import { useTranslation } from "react-i18next"
 
 function Toolbar() {
+	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const { selectOptions: selectOptionsSerialized } = useLocalSearchParams<{
 		selectOptions?: string
@@ -71,7 +73,7 @@ function Toolbar() {
 			<CrossGlassContainerView
 				className={cn("min-h-12 min-w-12 px-4 flex-row items-center justify-center", !canSubmit && "opacity-50")}
 			>
-				<Text className="font-bold text-blue-500">tbd_select_playlists {selectedPlaylists.length}</Text>
+				<Text className="font-bold text-blue-500">{t("select_n_playlists", { count: selectedPlaylists.length })}</Text>
 			</CrossGlassContainerView>
 		</PressableScale>
 	)

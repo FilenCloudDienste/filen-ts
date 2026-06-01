@@ -30,8 +30,10 @@ import { runBulk } from "@/lib/bulkOps"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
+import { useTranslation } from "react-i18next"
 
 const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][number]; playlist: PlaylistWithItems }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const drag = useReorderableDrag()
 	const { queueItem } = useAudioQueue()
@@ -65,13 +67,13 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 					actionSheet.show({
 						buttons: [
 							{
-								title: "tbd_select",
+								title: t("select"),
 								onPress: () => {
 									usePlaylistTracksStore.getState().toggleSelectedTrack(track)
 								}
 							},
 							{
-								title: "tbd_remove_from_playlist",
+								title: t("remove_from_playlist"),
 								destructive: true,
 								onPress: async () => {
 									const result = await runWithLoading(async () => {
@@ -92,7 +94,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 								}
 							},
 							{
-								title: "tbd_close",
+								title: t("close"),
 								cancel: true
 							}
 						]
@@ -104,13 +106,13 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 				actionSheet.show({
 					buttons: [
 						{
-							title: "tbd_select",
+							title: t("select"),
 							onPress: () => {
 								usePlaylistTracksStore.getState().toggleSelectedTrack(track)
 							}
 						},
 						{
-							title: "tbd_play",
+							title: t("play"),
 							onPress: async () => {
 								const result = await runWithLoading(async () => {
 									const index = playlist.files.findIndex(f => f.uuid === track.uuid)
@@ -124,7 +126,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 									})
 
 									if (droppedUndecryptable) {
-										alerts.normal("tbd_cannot_decrypt_toast")
+										alerts.normal(t("cannot_decrypt_toast"))
 									}
 
 									await audio.play()
@@ -139,7 +141,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 							}
 						},
 						{
-							title: "tbd_add_to_queue",
+							title: t("add_to_queue"),
 							onPress: async () => {
 								const result = await runWithLoading(async () => {
 									const queueLengthBefore = audio.getQueue().length
@@ -152,7 +154,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 									})
 
 									if (!added) {
-										alerts.normal("tbd_cannot_decrypt_toast")
+										alerts.normal(t("cannot_decrypt_toast"))
 									}
 
 									if (queueLengthBefore === 0) {
@@ -169,7 +171,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 							}
 						},
 						{
-							title: "tbd_add_to_playlist",
+							title: t("add_to_playlist"),
 							onPress: async () => {
 								const selectResult = await run(async () => {
 									return await selectPlaylists({
@@ -234,7 +236,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 							}
 						},
 						{
-							title: "tbd_remove_from_playlist",
+							title: t("remove_from_playlist"),
 							destructive: true,
 							onPress: async () => {
 								const result = await runWithLoading(async () => {
@@ -255,7 +257,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 							}
 						},
 						{
-							title: "tbd_close",
+							title: t("close"),
 							cancel: true
 						}
 					]
@@ -325,6 +327,7 @@ const Track = memo(({ track, playlist }: { track: PlaylistWithItems["files"][num
 })
 
 const Playlist = memo(() => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const selectedTracks = usePlaylistTracksStore(useShallow(state => state.selectedTracks))
@@ -359,7 +362,7 @@ const Playlist = memo(() => {
 	if (tracksInSelectionMode) {
 		baseRightMenuButtons.push({
 			id: "selectAllTracks",
-			title: selectedTracks.length === playlist.files.length ? "tbd_deselect_all" : "tbd_select_all",
+			title: selectedTracks.length === playlist.files.length ? t("deselect_all") : t("select_all"),
 			icon: "select",
 			onPress: () => {
 				if (selectedTracks.length === playlist.files.length) {
@@ -374,7 +377,7 @@ const Playlist = memo(() => {
 
 		baseRightMenuButtons.push({
 			id: "bulkAddToQueue",
-			title: "tbd_add_to_queue",
+			title: t("add_to_queue"),
 			icon: "plus",
 			onPress: async () => {
 				const playlistUuid = playlist.uuid
@@ -399,7 +402,7 @@ const Playlist = memo(() => {
 				})
 
 				if (droppedUndecryptable) {
-					alerts.normal("tbd_cannot_decrypt_toast")
+					alerts.normal(t("cannot_decrypt_toast"))
 				}
 			}
 		})
@@ -410,7 +413,7 @@ const Playlist = memo(() => {
 		// "item" is the target playlist, not the source track.
 		baseRightMenuButtons.push({
 			id: "bulkAddToPlaylist",
-			title: "tbd_add_to_playlist",
+			title: t("add_to_playlist"),
 			icon: "plus",
 			requiresOnline: true,
 			onPress: async () => {
@@ -477,7 +480,7 @@ const Playlist = memo(() => {
 
 		baseRightMenuButtons.push({
 			id: "bulkRemoveTracks",
-			title: "tbd_remove_from_playlist",
+			title: t("remove_from_playlist"),
 			icon: "delete",
 			destructive: true,
 			requiresOnline: true,
@@ -488,10 +491,10 @@ const Playlist = memo(() => {
 					items: [currentPlaylist],
 					clearSelection: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
 					confirm: {
-						title: "tbd_remove_from_playlist",
-						message: "tbd_are_you_sure_remove_selected_from_playlist",
-						okText: "tbd_remove",
-						cancelText: "tbd_cancel",
+						title: t("remove_from_playlist"),
+						message: t("are_you_sure_remove_selected_from_playlist"),
+						okText: t("remove"),
+						cancelText: t("cancel"),
 						destructive: true
 					},
 					op: async p => {
@@ -518,7 +521,7 @@ const Playlist = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title={tracksInSelectionMode ? `${selectedTracks.length} tbd_selected` : playlist.name}
+				title={tracksInSelectionMode ? t("selected", { count: selectedTracks.length }) : playlist.name}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -593,7 +596,7 @@ const Playlist = memo(() => {
 									? ([
 											{
 												id: "play",
-												title: "tbd_play",
+												title: t("play"),
 												icon: "play",
 												onPress: async () => {
 													const result = await runWithLoading(async () => {
@@ -608,7 +611,7 @@ const Playlist = memo(() => {
 														})
 
 														if (droppedUndecryptable) {
-															alerts.normal("tbd_cannot_decrypt_toast")
+															alerts.normal(t("cannot_decrypt_toast"))
 														}
 
 														await audio.play()
@@ -624,7 +627,7 @@ const Playlist = memo(() => {
 											},
 											{
 												id: "addToQueue",
-												title: "tbd_add_to_queue",
+												title: t("add_to_queue"),
 												icon: "queue",
 												onPress: async () => {
 													const result = await runWithLoading(async () => {
@@ -642,7 +645,7 @@ const Playlist = memo(() => {
 														)
 
 														if (addedResults.some(added => !added)) {
-															alerts.normal("tbd_cannot_decrypt_toast")
+															alerts.normal(t("cannot_decrypt_toast"))
 														}
 
 														if (queueLengthBefore === 0) {
@@ -663,15 +666,15 @@ const Playlist = memo(() => {
 								{
 									id: "rename",
 									icon: "edit",
-									title: "tbd_rename_playlist",
+									title: t("rename_playlist"),
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_rename_playlist",
-												message: "tbd_enter_playlist_name",
-												placeholder: "tbd_playlist_name_placeholder",
-												cancelText: "tbd_cancel",
-												okText: "tbd_rename",
+												title: t("rename_playlist"),
+												message: t("enter_playlist_name"),
+												placeholder: t("playlist_name_placeholder"),
+												cancelText: t("cancel"),
+												okText: t("rename"),
 												defaultValue: playlist.name
 											})
 										})
@@ -714,7 +717,7 @@ const Playlist = memo(() => {
 								{
 									id: "add",
 									icon: "plus",
-									title: "tbd_add_tracks",
+									title: t("add_tracks"),
 									onPress: async () => {
 										const selectDriveItemsResult = await run(async () => {
 											return await selectDriveItems({
@@ -800,15 +803,15 @@ const Playlist = memo(() => {
 								{
 									id: "delete",
 									icon: "delete",
-									title: "tbd_delete_playlist",
+									title: t("delete_playlist"),
 									destructive: true,
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.alert({
-												title: "tbd_delete_playlist",
-												message: "tbd_delete_playlist_confirm",
-												cancelText: "tbd_cancel",
-												okText: "tbd_delete",
+												title: t("delete_playlist"),
+												message: t("delete_playlist_confirm"),
+												cancelText: t("cancel"),
+												okText: t("delete"),
 												destructive: true
 											})
 										})
@@ -887,7 +890,7 @@ const Playlist = memo(() => {
 					ListEmptyComponent={() => (
 						<ListEmpty
 							icon="musical-note-outline"
-							title="tbd_no_tracks"
+							title={t("no_tracks")}
 						/>
 					)}
 					renderItem={({ item: track }) => {

@@ -14,6 +14,7 @@ import useChatsStore from "@/stores/useChats.store"
 import { useShallow } from "zustand/shallow"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
 import { serialize } from "@/lib/serializer"
+import { t } from "@/lib/i18n"
 
 export type ChatMenuOrigin = "chats" | "search" | "chat"
 
@@ -41,7 +42,7 @@ export function createMenuButtons({
 				? [
 						{
 							id: isSelected ? "deselect" : "select",
-							title: isSelected ? "tbd_deselect" : "tbd_select",
+							title: isSelected ? t("deselect") : t("select"),
 							icon: "select",
 							checked: isSelected,
 							onPress: () => {
@@ -57,16 +58,16 @@ export function createMenuButtons({
 				{
 					id: "delete",
 					requiresOnline: true,
-					title: "tbd_delete",
+					title: t("delete"),
 					destructive: true,
 					icon: "delete",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_delete_chat",
-								message: "tbd_delete_chat_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_delete",
+								title: t("delete_chat"),
+								message: t("delete_chat_confirmation"),
+								cancelText: t("cancel"),
+								okText: t("delete"),
 								destructive: true
 							})
 						})
@@ -108,16 +109,16 @@ export function createMenuButtons({
 			{
 				id: "leave",
 				requiresOnline: true,
-				title: "tbd_leave",
+				title: t("leave"),
 				destructive: true,
 				icon: "exit",
 				onPress: async () => {
 					const promptResponse = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_leave_chat",
-							message: "tbd_leave_chat_confirmation",
-							cancelText: "tbd_cancel",
-							okText: "tbd_leave",
+							title: t("leave_chat"),
+							message: t("leave_chat_confirmation"),
+							cancelText: t("cancel"),
+							okText: t("leave"),
 							destructive: true
 						})
 					})
@@ -159,7 +160,7 @@ export function createMenuButtons({
 			? [
 					{
 						id: isSelected ? "deselect" : "select",
-						title: isSelected ? "tbd_deselect" : "tbd_select",
+						title: isSelected ? t("deselect") : t("select"),
 						icon: "select",
 						checked: isSelected,
 						onPress: () => {
@@ -172,7 +173,7 @@ export function createMenuButtons({
 			? [
 					{
 						id: "markAsRead",
-						title: "tbd_mark_as_read",
+						title: t("mark_as_read"),
 						icon: "envelopeOpen",
 						requiresOnline: true,
 						onPress: async () => {
@@ -200,7 +201,7 @@ export function createMenuButtons({
 		{
 			id: "muted",
 			requiresOnline: true,
-			title: "tbd_muted",
+			title: t("muted"),
 			icon: "mute",
 			checked: chat.muted,
 			onPress: async () => {
@@ -221,7 +222,7 @@ export function createMenuButtons({
 		},
 		{
 			id: "participants",
-			title: "tbd_participants",
+			title: t("participants"),
 			icon: "users",
 			onPress: () => {
 				router.push({
@@ -237,15 +238,15 @@ export function createMenuButtons({
 					{
 						id: "editName",
 						requiresOnline: true,
-						title: "tbd_edit_name",
+						title: t("edit_name"),
 						icon: "edit",
 						onPress: async () => {
 							const promptResult = await run(async () => {
 								return await prompts.input({
-									title: "tbd_edit_chat_name",
-									message: "tbd_enter_chat_name",
-									cancelText: "tbd_cancel",
-									okText: "tbd_save"
+									title: t("edit_chat_name"),
+									message: t("enter_chat_name"),
+									cancelText: t("cancel"),
+									okText: t("save")
 								})
 							})
 
@@ -284,16 +285,16 @@ export function createMenuButtons({
 					{
 						id: "delete",
 						requiresOnline: true,
-						title: "tbd_delete",
+						title: t("delete"),
 						destructive: true,
 						icon: "delete",
 						onPress: async () => {
 							const promptResponse = await run(async () => {
 								return await prompts.alert({
-									title: "tbd_delete_chat",
-									message: "tbd_delete_chat_confirmation",
-									cancelText: "tbd_cancel",
-									okText: "tbd_delete",
+									title: t("delete_chat"),
+									message: t("delete_chat_confirmation"),
+									cancelText: t("cancel"),
+									okText: t("delete"),
 									destructive: true
 								})
 							})
@@ -332,16 +333,16 @@ export function createMenuButtons({
 					{
 						id: "leave",
 						requiresOnline: true,
-						title: "tbd_leave",
+						title: t("leave"),
 						destructive: true,
 						icon: "exit",
 						onPress: async () => {
 							const promptResponse = await run(async () => {
 								return await prompts.alert({
-									title: "tbd_leave_chat",
-									message: "tbd_leave_chat_confirmation",
-									cancelText: "tbd_cancel",
-									okText: "tbd_leave",
+									title: t("leave_chat"),
+									message: t("leave_chat_confirmation"),
+									cancelText: t("cancel"),
+									okText: t("leave"),
 									destructive: true
 								})
 							})

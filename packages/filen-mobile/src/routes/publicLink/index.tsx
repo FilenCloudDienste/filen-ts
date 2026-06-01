@@ -5,6 +5,8 @@ import { deserialize } from "@/lib/serializer"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Fragment, memo, useState } from "react"
+import { useTranslation } from "react-i18next"
+import { type TFunction } from "i18next"
 import { useResolveClassNames } from "uniwind"
 import type { DriveItem } from "@/types"
 import DismissStack from "@/components/dismissStack"
@@ -32,47 +34,48 @@ import useAccountQuery from "@/queries/useAccount.query"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 
-function expirationToText(expiration: PublicLinkExpiration) {
+function expirationToText(expiration: PublicLinkExpiration, t: TFunction) {
 	switch (expiration) {
 		case PublicLinkExpiration.Never: {
-			return "tbd_never"
+			return t("never")
 		}
 
 		case PublicLinkExpiration.OneHour: {
-			return "tbd_one_hour"
+			return t("one_hour")
 		}
 
 		case PublicLinkExpiration.SixHours: {
-			return "tbd_six_hours"
+			return t("six_hours")
 		}
 
 		case PublicLinkExpiration.OneDay: {
-			return "tbd_one_day"
+			return t("one_day")
 		}
 
 		case PublicLinkExpiration.ThreeDays: {
-			return "tbd_three_days"
+			return t("three_days")
 		}
 
 		case PublicLinkExpiration.OneWeek: {
-			return "tbd_one_week"
+			return t("one_week")
 		}
 
 		case PublicLinkExpiration.TwoWeeks: {
-			return "tbd_two_weeks"
+			return t("two_weeks")
 		}
 
 		case PublicLinkExpiration.ThirtyDays: {
-			return "tbd_thirty_days"
+			return t("thirty_days")
 		}
 
 		default: {
-			return "tbd_unknown"
+			return t("unknown")
 		}
 	}
 }
 
 const PublicLink = memo(() => {
+	const { t } = useTranslation()
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
@@ -134,7 +137,7 @@ const PublicLink = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_public_link"
+				title={t("public_link")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -325,7 +328,7 @@ const PublicLink = memo(() => {
 												{driveItemDisplayName(itemParsed)}
 											</Text>
 											<Text className="text-muted-foreground">
-												{itemParsed.type === "directory" ? "tbd_directory" : "tbd_file"}
+												{itemParsed.type === "directory" ? t("directory") : t("file")}
 											</Text>
 										</View>
 										<Group
@@ -333,7 +336,7 @@ const PublicLink = memo(() => {
 											buttons={[
 												{
 													icon: "time-outline",
-													title: "tbd_enabled",
+													title: t("enabled"),
 													rightItem: {
 														type: "switch",
 														value: true,
@@ -362,7 +365,7 @@ const PublicLink = memo(() => {
 											buttons={[
 												{
 													icon: "time-outline",
-													title: "tbd_password",
+													title: t("password"),
 													rightItem: {
 														type: "custom",
 														value: (
@@ -378,11 +381,11 @@ const PublicLink = memo(() => {
 																	onPress={async () => {
 																		const promptResult = await run(async () => {
 																			return await prompts.input({
-																				title: "tbd_password",
-																				message: "tbd_enter_password",
-																				cancelText: "tbd_cancel",
-																				okText: "tbd_save",
-																				placeholder: "tbd_password",
+																				title: t("password"),
+																				message: t("enter_the_password"),
+																				cancelText: t("cancel"),
+																				okText: t("save"),
+																				placeholder: t("password"),
 																				inputType: "secure-text"
 																			})
 																		})
@@ -413,7 +416,7 @@ const PublicLink = memo(() => {
 																		}))
 																	}}
 																>
-																	<Text className="text-blue-500 text-base">tbd_edit</Text>
+																	<Text className="text-blue-500 text-base">{t("edit")}</Text>
 																</PressableOpacity>
 															</View>
 														)
@@ -421,7 +424,7 @@ const PublicLink = memo(() => {
 												},
 												{
 													icon: "time-outline",
-													title: "tbd_expiration",
+													title: t("expiration"),
 													rightItem: {
 														type: "custom",
 														value: (
@@ -430,35 +433,35 @@ const PublicLink = memo(() => {
 																	type="dropdown"
 																	buttons={[
 																		{
-																			title: "tbd_never",
+																			title: t("never"),
 																			enum: PublicLinkExpiration.Never
 																		},
 																		{
-																			title: "tbd_one_hour",
+																			title: t("one_hour"),
 																			enum: PublicLinkExpiration.OneHour
 																		},
 																		{
-																			title: "tbd_six_hours",
+																			title: t("six_hours"),
 																			enum: PublicLinkExpiration.SixHours
 																		},
 																		{
-																			title: "tbd_one_day",
+																			title: t("one_day"),
 																			enum: PublicLinkExpiration.OneDay
 																		},
 																		{
-																			title: "tbd_three_days",
+																			title: t("three_days"),
 																			enum: PublicLinkExpiration.ThreeDays
 																		},
 																		{
-																			title: "tbd_one_week",
+																			title: t("one_week"),
 																			enum: PublicLinkExpiration.OneWeek
 																		},
 																		{
-																			title: "tbd_two_weeks",
+																			title: t("two_weeks"),
 																			enum: PublicLinkExpiration.TwoWeeks
 																		},
 																		{
-																			title: "tbd_thirty_days",
+																			title: t("thirty_days"),
 																			enum: PublicLinkExpiration.ThirtyDays
 																		}
 																	].map(expiration => ({
@@ -483,7 +486,8 @@ const PublicLink = memo(() => {
 																			{expirationToText(
 																				edited && edited.expiration
 																					? edited.expiration
-																					: publicLinkStatusQuery.data.status.expiration
+																					: publicLinkStatusQuery.data.status.expiration,
+																				t
 																			)}
 																		</Text>
 																	</CrossGlassContainerView>
@@ -494,7 +498,7 @@ const PublicLink = memo(() => {
 												},
 												{
 													icon: "time-outline",
-													title: "tbd_downloadable",
+													title: t("downloadable"),
 													rightItem: {
 														type: "switch",
 														value:
@@ -528,8 +532,8 @@ const PublicLink = memo(() => {
 											size={64}
 											color={textMutedForeground.color}
 										/>
-										<Text className="mt-2">tbd_public_link_disabled</Text>
-										<Text className="text-xs text-muted-foreground mt-0.5">tbd_public_link_description</Text>
+										<Text className="mt-2">{t("public_link_disabled")}</Text>
+										<Text className="text-xs text-muted-foreground mt-0.5">{t("public_link_description")}</Text>
 										<View className="mt-4 bg-transparent">
 											<Button
 												onPress={async () => {
@@ -545,7 +549,7 @@ const PublicLink = memo(() => {
 													}
 												}}
 											>
-												tbd_enable_public_link
+												{t("enable_public_link")}
 											</Button>
 										</View>
 									</View>
@@ -558,9 +562,9 @@ const PublicLink = memo(() => {
 									size={64}
 									color={textMutedForeground.color}
 								/>
-								<Text className="mt-2">tbd_feature_requires_subscription</Text>
+								<Text className="mt-2">{t("feature_requires_subscription")}</Text>
 								<Text className="text-xs text-muted-foreground mt-0.5">
-									tbd_feature_requires_subscription_public_links_description
+									{t("feature_requires_subscription_public_links_description")}
 								</Text>
 							</View>
 						)}

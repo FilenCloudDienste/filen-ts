@@ -27,6 +27,7 @@ import * as ImageManipulator from "expo-image-manipulator"
 import { serialize } from "@/lib/serializer"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import useIsOnline from "@/hooks/useIsOnline"
+import { useTranslation } from "react-i18next"
 
 type BigIntToNumber<T> = T extends bigint
 	? number
@@ -79,13 +80,14 @@ const Account = memo(() => {
 	const navigation = useNavigation()
 	const textRed500 = useResolveClassNames("text-red-500")
 	const isOnline = useIsOnline()
+	const { t } = useTranslation()
 
 	const accountQuery = useAccountQuery()
 
 	return (
 		<Fragment>
 			<Header
-				title="tbd_account"
+				title={t("account")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -161,7 +163,7 @@ const Account = memo(() => {
 								}
 
 								if (!permissionsResult.data) {
-									alerts.error("tbd_no_permissions_enable_manually")
+									alerts.error(t("no_permissions_enable_manually"))
 
 									return
 								}
@@ -280,7 +282,7 @@ const Account = memo(() => {
 								ellipsizeMode="middle"
 								className="text-sm flex-1"
 							>
-								tbd_change_avatar
+								{t("change_avatar")}
 							</Text>
 							<Ionicons
 								name="chevron-forward-outline"
@@ -293,16 +295,16 @@ const Account = memo(() => {
 							buttons={[
 								{
 									icon: "time-outline",
-									title: "tbd_change_email_address",
+									title: t("change_email_address"),
 									subTitle: accountQuery.data.email,
 									disabled: !isOnline,
 									onPress: async () => {
 										const newEmailPromptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_change_email_address",
-												message: "tbd_enter_new_email_address",
-												cancelText: "tbd_cancel",
-												okText: "tbd_next"
+												title: t("change_email_address"),
+												message: t("enter_new_email_address"),
+												cancelText: t("cancel"),
+												okText: t("next")
 											})
 										})
 
@@ -325,10 +327,10 @@ const Account = memo(() => {
 
 										const confirmNewEmailPromptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_change_email_address",
-												message: "tbd_confirm_new_email_address",
-												cancelText: "tbd_cancel",
-												okText: "tbd_next"
+												title: t("change_email_address"),
+												message: t("confirm_new_email_address"),
+												cancelText: t("cancel"),
+												okText: t("next")
 											})
 										})
 
@@ -353,17 +355,17 @@ const Account = memo(() => {
 										}
 
 										if (newEmail !== confirmNewEmail) {
-											alerts.error("tbd_email_addresses_do_not_match")
+											alerts.error(t("email_addresses_do_not_match"))
 
 											return
 										}
 
 										const passwordPromptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_change_email_address",
-												message: "tbd_enter_password",
-												cancelText: "tbd_cancel",
-												okText: "tbd_save",
+												title: t("change_email_address"),
+												message: t("enter_password"),
+												cancelText: t("cancel"),
+												okText: t("save"),
 												inputType: "secure-text"
 											})
 										})
@@ -402,16 +404,16 @@ const Account = memo(() => {
 								},
 								{
 									icon: "time-outline",
-									title: "tbd_change_nickname",
+									title: t("change_nickname"),
 									subTitle: accountQuery.data.nickName,
 									disabled: !isOnline,
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_change_nickname",
-												message: "tbd_enter_nickname",
-												cancelText: "tbd_cancel",
-												okText: "tbd_save",
+												title: t("change_nickname"),
+												message: t("enter_nickname"),
+												cancelText: t("cancel"),
+												okText: t("save"),
 												placeholder: accountQuery.data.nickName
 											})
 										})
@@ -450,8 +452,8 @@ const Account = memo(() => {
 								},
 								{
 									icon: "time-outline",
-									title: "tbd_personal_information",
-									subTitle: "tbd_personal_information_description",
+									title: t("personal_information"),
+									subTitle: t("personal_information_description"),
 									onPress: () => {
 										router.push({
 											pathname: "/account/personal",
@@ -463,8 +465,8 @@ const Account = memo(() => {
 								},
 								{
 									icon: "time-outline",
-									title: "tbd_gdpr_information",
-									subTitle: "tbd_gdpr_information_description",
+									title: t("gdpr_information"),
+									subTitle: t("gdpr_information_description"),
 									disabled: !isOnline,
 									onPress: async () => {
 										const result = await runWithLoading(async () => {
@@ -510,14 +512,14 @@ const Account = memo(() => {
 								},
 								{
 									icon: "time-outline",
-									title: "tbd_more_account_settings",
+									title: t("more_account_settings"),
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.alert({
-												title: "tbd_open_web_app",
-												message: "tbd_open_web_app_to_change_more_settings_do_you_want_to_open_it",
-												okText: "tbd_open",
-												cancelText: "tbd_cancel"
+												title: t("open_web_app"),
+												message: t("open_web_app_to_change_more_settings_do_you_want_to_open_it"),
+												okText: t("open"),
+												cancelText: t("cancel")
 											})
 										})
 
@@ -544,7 +546,7 @@ const Account = memo(() => {
 										}
 
 										if (!canOpenResult.data) {
-											alerts.error("tbd_cannot_open_link")
+											alerts.error(t("cannot_open_link"))
 
 											return
 										}
@@ -568,8 +570,8 @@ const Account = memo(() => {
 							buttons={[
 								{
 									icon: "time-outline",
-									title: "tbd_file_versioning",
-									subTitle: "tbd_file_versioning_description",
+									title: t("file_versioning"),
+									subTitle: t("file_versioning_description"),
 									disabled: !isOnline,
 									rightItem: {
 										type: "switch",
@@ -593,8 +595,8 @@ const Account = memo(() => {
 								},
 								{
 									icon: "time-outline",
-									title: "tbd_login_alerts",
-									subTitle: "tbd_login_alerts_description",
+									title: t("login_alerts"),
+									subTitle: t("login_alerts_description"),
 									disabled: !isOnline,
 									rightItem: {
 										type: "switch",
@@ -623,14 +625,14 @@ const Account = memo(() => {
 							buttons={[
 								{
 									icon: "log-out-outline",
-									title: "tbd_logout",
+									title: t("logout"),
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.alert({
-												title: "tbd_logout",
-												message: "tbd_logout_confirm_wipes_local_data",
-												okText: "tbd_logout",
-												cancelText: "tbd_cancel",
+												title: t("logout"),
+												message: t("logout_confirm_wipes_local_data"),
+												okText: t("logout"),
+												cancelText: t("cancel"),
 												destructive: true
 											})
 										})
@@ -662,7 +664,7 @@ const Account = memo(() => {
 						/>
 						<View className="bg-transparent gap-2">
 							<View className="bg-transparent flex-row items-center gap-2 px-2">
-								<Text className="text-xs font-semibold uppercase tracking-wider text-red-500">tbd_danger_zone</Text>
+								<Text className="text-xs font-semibold uppercase tracking-wider text-red-500">{t("danger_zone")}</Text>
 							</View>
 							<Group
 								className="bg-background-tertiary"
@@ -670,7 +672,7 @@ const Account = memo(() => {
 									{
 										icon: "time-outline",
 										iconColor: textRed500.color as string,
-										title: "tbd_delete_versioned_files",
+										title: t("delete_versioned_files"),
 										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.versionedStorage)),
 										disabled: !isOnline,
@@ -681,10 +683,10 @@ const Account = memo(() => {
 
 											const promptResult = await run(async () => {
 												return await prompts.alert({
-													title: "tbd_delete_versioned_files",
-													message: "tbd_delete_versioned_files_description_non_reversible",
-													okText: "tbd_delete",
-													cancelText: "tbd_cancel",
+													title: t("delete_versioned_files"),
+													message: t("delete_versioned_files_description_non_reversible"),
+													okText: t("delete"),
+													cancelText: t("cancel"),
 													destructive: true
 												})
 											})
@@ -702,10 +704,10 @@ const Account = memo(() => {
 
 											const confirmPromptResult = await run(async () => {
 												return await prompts.alert({
-													title: "tbd_are_you_sure",
-													message: "tbd_delete_versioned_files_description_are_you_sure",
-													okText: "tbd_delete",
-													cancelText: "tbd_cancel",
+													title: t("are_you_sure"),
+													message: t("delete_versioned_files_description_are_you_sure"),
+													okText: t("delete"),
+													cancelText: t("cancel"),
 													destructive: true
 												})
 											})
@@ -739,7 +741,7 @@ const Account = memo(() => {
 									{
 										icon: "time-outline",
 										iconColor: textRed500.color as string,
-										title: "tbd_delete_all_files_and_directories",
+										title: t("delete_all_files_and_directories"),
 										titleClassName: "text-red-500",
 										subTitle: formatBytes(Number(accountQuery.data.storageUsed)),
 										disabled: !isOnline,
@@ -750,10 +752,10 @@ const Account = memo(() => {
 
 											const promptResult = await run(async () => {
 												return await prompts.alert({
-													title: "tbd_delete_all_files_and_directories",
-													message: "tbd_delete_all_files_and_directories_description_non_reversible",
-													okText: "tbd_delete",
-													cancelText: "tbd_cancel",
+													title: t("delete_all_files_and_directories"),
+													message: t("delete_all_files_and_directories_description_non_reversible"),
+													okText: t("delete"),
+													cancelText: t("cancel"),
 													destructive: true
 												})
 											})
@@ -771,10 +773,10 @@ const Account = memo(() => {
 
 											const confirmPromptResult = await run(async () => {
 												return await prompts.alert({
-													title: "tbd_are_you_sure",
-													message: "tbd_delete_all_files_and_directories_description_are_you_sure",
-													okText: "tbd_delete",
-													cancelText: "tbd_cancel",
+													title: t("are_you_sure"),
+													message: t("delete_all_files_and_directories_description_are_you_sure"),
+													okText: t("delete"),
+													cancelText: t("cancel"),
 													destructive: true
 												})
 											})
@@ -808,18 +810,17 @@ const Account = memo(() => {
 									{
 										icon: "time-outline",
 										iconColor: textRed500.color as string,
-										title: "tbd_request_account_deletion",
+										title: t("request_account_deletion"),
 										titleClassName: "text-red-500",
-										subTitle: "tbd_request_account_deletion_description",
+										subTitle: t("request_account_deletion_description"),
 										disabled: !isOnline,
 										onPress: async () => {
 											const promptResult = await run(async () => {
 												return await prompts.alert({
-													title: "tbd_request_account_deletion",
-													message:
-														"tbd_request_account_deletion_description_non_reversible_will_send_email_first_to_confirm",
-													okText: "tbd_request",
-													cancelText: "tbd_cancel",
+													title: t("request_account_deletion"),
+													message: t("request_account_deletion_description_non_reversible_will_send_email_first_to_confirm"),
+													okText: t("request"),
+													cancelText: t("cancel"),
 													destructive: true
 												})
 											})
@@ -837,11 +838,12 @@ const Account = memo(() => {
 
 											const confirmPromptResult = await run(async () => {
 												return await prompts.alert({
-													title: "tbd_are_you_sure",
-													message:
-														"tbd_request_account_deletion_description_non_reversible_will_send_email_first_to_confirm_are_you_sure",
-													okText: "tbd_request",
-													cancelText: "tbd_cancel",
+													title: t("are_you_sure"),
+													message: t(
+														"request_account_deletion_description_non_reversible_will_send_email_first_to_confirm_are_you_sure"
+													),
+													okText: t("request"),
+													cancelText: t("cancel"),
 													destructive: true
 												})
 											})
@@ -862,10 +864,10 @@ const Account = memo(() => {
 											if (accountQuery.data.twoFactorEnabled) {
 												const twoFactorPromptResult = await run(async () => {
 													return await prompts.input({
-														title: "tbd_enter_two_factor_code",
-														message: "tbd_enter_two_factor_code_description",
-														cancelText: "tbd_cancel",
-														okText: "tbd_request",
+														title: t("enter_two_factor_code"),
+														message: t("enter_two_factor_code_description_confirm"),
+														cancelText: t("cancel"),
+														okText: t("request"),
 														inputType: "secure-text",
 														destructive: true
 													})
@@ -905,7 +907,7 @@ const Account = memo(() => {
 												return
 											}
 
-											alerts.normal("tbd_account_deletion_requested_follow_instructions_sent_to_email")
+											alerts.normal(t("account_deletion_requested_follow_instructions_sent_to_email"))
 										}
 									}
 								]}

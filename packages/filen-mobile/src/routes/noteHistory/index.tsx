@@ -25,8 +25,10 @@ import notes from "@/lib/notes"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Icon from "@/components/notes/note/icon"
 import DismissStack from "@/components/dismissStack"
+import { useTranslation } from "react-i18next"
 
 const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
@@ -56,7 +58,7 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 						numberOfLines={1}
 						ellipsizeMode="tail"
 					>
-						{history.preview ?? "tbd_no_preview"}
+						{history.preview ?? t("no_preview_history")}
 					</Text>
 				</View>
 				<View className="flex-row items-center gap-2 bg-transparent">
@@ -65,7 +67,7 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 						buttons={[
 							{
 								id: "view",
-								title: "tbd_view",
+								title: t("view"),
 								icon: "eye",
 								onPress: () => {
 									router.push({
@@ -79,16 +81,16 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 							},
 							{
 								id: "restore",
-								title: "tbd_restore",
+								title: t("restore"),
 								icon: "restore",
 								requiresOnline: true,
 								onPress: async () => {
 									const promptResponse = await run(async () => {
 										return await prompts.alert({
-											title: "tbd_restore_history",
-											message: "tbd_restore_history_confirmation",
-											cancelText: "tbd_cancel",
-											okText: "tbd_restore",
+											title: t("restore_history"),
+											message: t("restore_history_confirmation"),
+											cancelText: t("cancel"),
+											okText: t("restore"),
 											destructive: true
 										})
 									})
@@ -138,6 +140,7 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 })
 
 const NoteHistory = memo(() => {
+	const { t } = useTranslation()
 	const { note: noteSerialized } = useLocalSearchParams<{
 		note?: string
 	}>()
@@ -185,7 +188,7 @@ const NoteHistory = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_note_history"
+				title={t("note_history")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -240,7 +243,7 @@ const NoteHistory = memo(() => {
 					emptyComponent={() => (
 						<ListEmpty
 							icon="time-outline"
-							title="tbd_no_note_history"
+							title={t("no_note_history")}
 						/>
 					)}
 					renderItem={({ item: history }) => {

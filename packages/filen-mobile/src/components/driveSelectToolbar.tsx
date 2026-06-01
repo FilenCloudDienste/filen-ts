@@ -19,6 +19,7 @@ import useDriveSelectStore from "@/stores/useDriveSelect.store"
 import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
 import { useNavigation } from "expo-router"
+import { useTranslation } from "react-i18next"
 
 const DriveSelectToolbar = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -27,6 +28,7 @@ const DriveSelectToolbar = memo(() => {
 	const { authedSdkClient } = useSdkClients()
 	const selectedItems = useDriveSelectStore(useShallow(state => state.selectedItems))
 	const navigation = useNavigation()
+	const { t } = useTranslation()
 
 	const parentDir = (() => {
 		if (!authedSdkClient) {
@@ -81,10 +83,10 @@ const DriveSelectToolbar = memo(() => {
 
 		const promptResult = await run(async () => {
 			return await prompts.input({
-				title: "tbd_create_directory",
-				message: "tbd_enter_directory_name",
-				cancelText: "tbd_cancel",
-				okText: "tbd_create"
+				title: t("create_directory"),
+				message: t("enter_directory_name"),
+				cancelText: t("cancel"),
+				okText: t("create")
 			})
 		})
 
@@ -229,7 +231,7 @@ const DriveSelectToolbar = memo(() => {
 							isSameParentAsSelectedItems && "opacity-50"
 						)}
 					>
-						<Text className="font-bold text-blue-500">tbd_move_here</Text>
+						<Text className="font-bold text-blue-500">{t("move_here")}</Text>
 					</CrossGlassContainerView>
 				</PressableScale>
 			)}
@@ -247,8 +249,8 @@ const DriveSelectToolbar = memo(() => {
 					>
 						<Text className="font-bold text-blue-500">
 							{selectedItems.length === 0 && parentDir && drivePath.selectOptions.directories
-								? "tbd_select_root"
-								: `tbd_select_items ${selectedItems.length}`}
+								? t("select_root")
+								: t("select_n_items", { count: selectedItems.length })}
 						</Text>
 					</CrossGlassContainerView>
 				</PressableScale>

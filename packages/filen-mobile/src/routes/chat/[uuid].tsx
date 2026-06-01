@@ -30,6 +30,7 @@ import alerts from "@/lib/alerts"
 import { simpleDateNoTime } from "@/lib/time"
 import useChatUnreadCount from "@/hooks/useChatUnreadCount"
 import DismissStack from "@/components/dismissStack"
+import { useTranslation } from "react-i18next"
 
 const HeaderTitle = memo(({ chat }: { chat: TChat }) => {
 	const stringifiedClient = useStringifiedClient()
@@ -140,6 +141,7 @@ const Header = memo(({ chat }: { chat: TChat }) => {
 })
 
 const Unread = memo(({ chat }: { chat: TChat }) => {
+	const { t } = useTranslation()
 	const unreadCount = useChatUnreadCount(chat)
 
 	const markAsRead = async () => {
@@ -180,7 +182,7 @@ const Unread = memo(({ chat }: { chat: TChat }) => {
 				numberOfLines={1}
 				ellipsizeMode="middle"
 			>
-				{unreadCount} tbd_new_messages_since {simpleDateNoTime(Number(chat.lastFocus))}
+				{t("new_messages_since", { count: unreadCount, date: simpleDateNoTime(Number(chat.lastFocus)) })}
 			</Text>
 			<Ionicons
 				className="shrink-0"
@@ -193,6 +195,7 @@ const Unread = memo(({ chat }: { chat: TChat }) => {
 })
 
 const Chat = memo(() => {
+	const { t } = useTranslation()
 	const { uuid } = useLocalSearchParams<{
 		uuid: string
 	}>()
@@ -260,7 +263,7 @@ const Chat = memo(() => {
 								numberOfLines={1}
 								ellipsizeMode="middle"
 							>
-								{socketState === "disconnected" ? "tbd_disconnected" : "tbd_reconnecting"}
+								{socketState === "disconnected" ? t("disconnected") : t("reconnecting")}
 							</Text>
 						</View>
 					)}

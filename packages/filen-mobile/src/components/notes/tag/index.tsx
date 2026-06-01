@@ -17,14 +17,16 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
+import { useTranslation } from "react-i18next"
 
 const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
+	const { t } = useTranslation()
 	const router = useRouter()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textPrimary = useResolveClassNames("text-primary")
 	const isActive = useNotesStore(useShallow(state => state.activeTag?.uuid === info.item.uuid))
-	const isSelected = useNotesStore(useShallow(state => state.selectedTags.some(t => t.uuid === info.item.uuid)))
+	const isSelected = useNotesStore(useShallow(state => state.selectedTags.some(selectedTag => selectedTag.uuid === info.item.uuid)))
 	const areTagsSelected = useNotesStore(useShallow(state => state.selectedTags.length > 0))
 	const isInflight = useNotesStore(
 		useShallow(state => {
@@ -35,13 +37,13 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 	const onPress = () => {
 		if (useNotesStore.getState().selectedTags.length > 0) {
 			useNotesStore.getState().setSelectedTags(prev => {
-				const prevSelected = prev.some(t => t.uuid === info.item.uuid)
+				const prevSelected = prev.some(selectedTag => selectedTag.uuid === info.item.uuid)
 
 				if (prevSelected) {
-					return prev.filter(t => t.uuid !== info.item.uuid)
+					return prev.filter(selectedTag => selectedTag.uuid !== info.item.uuid)
 				}
 
-				return [...prev.filter(t => t.uuid !== info.item.uuid), info.item]
+				return [...prev.filter(selectedTag => selectedTag.uuid !== info.item.uuid), info.item]
 			})
 
 			return
@@ -153,7 +155,10 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 									ellipsizeMode="tail"
 									className="text-muted-foreground text-xs"
 								>
-									{notesForTag.length} tbd_notes, {simpleDate(Number(info.item.editedTimestamp))}
+									{t("tag_notes_count_and_date", {
+										noteCount: String(notesForTag.length),
+										date: simpleDate(Number(info.item.editedTimestamp))
+									})}
 								</Text>
 							</View>
 						</View>

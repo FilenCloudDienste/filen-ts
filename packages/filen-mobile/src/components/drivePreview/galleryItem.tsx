@@ -1,4 +1,5 @@
 import { memo } from "react"
+import { useTranslation } from "react-i18next"
 import { getPreviewType } from "@/lib/utils"
 import { useWindowDimensions, ActivityIndicator } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
@@ -31,6 +32,7 @@ const GalleryItem = memo(
 		onZoomChange?: (zoom: number) => void
 		onSingleTap?: () => void
 	}) => {
+		const { t } = useTranslation()
 		const dimensions = useWindowDimensions()
 		const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
@@ -78,7 +80,7 @@ const GalleryItem = memo(
 							color="#9ca3af"
 						/>
 						<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
-							tbd_unavailable_offline
+							{t("unavailable_offline")}
 						</Text>
 					</View>
 				</View>

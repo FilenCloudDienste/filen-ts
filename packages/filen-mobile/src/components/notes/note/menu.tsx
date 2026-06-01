@@ -17,8 +17,48 @@ import { Platform } from "react-native"
 import useAppStore from "@/stores/useApp.store"
 import * as Sharing from "expo-sharing"
 import { serialize } from "@/lib/serializer"
+import { t } from "@/lib/i18n"
 
 export type NoteMenuOrigin = "notes" | "search" | "content"
+
+export type NoteTypeString = "text" | "checklist" | "code" | "rich" | "md"
+
+type NoteTypeLabelKey = "note_type_text" | "note_type_checklist" | "note_type_code" | "note_type_richtext" | "note_type_markdown"
+
+// Note-type → canonical label key. The static submenu and the dynamic `typeString`
+// path both resolve through this map so a type renders one identical label everywhere.
+export const NOTE_TYPE_LABEL_KEY: Record<NoteTypeString, NoteTypeLabelKey> = {
+	text: "note_type_text",
+	checklist: "note_type_checklist",
+	code: "note_type_code",
+	rich: "note_type_richtext",
+	md: "note_type_markdown"
+}
+
+// The five note types in display order, typed so `typeString` is the narrow union
+// (a plain array literal would widen it to `string` and break the label-key lookup).
+export const NOTE_TYPE_OPTIONS: { type: NoteType; typeString: NoteTypeString }[] = [
+	{
+		type: NoteType.Text,
+		typeString: "text"
+	},
+	{
+		type: NoteType.Checklist,
+		typeString: "checklist"
+	},
+	{
+		type: NoteType.Code,
+		typeString: "code"
+	},
+	{
+		type: NoteType.Rich,
+		typeString: "rich"
+	},
+	{
+		type: NoteType.Md,
+		typeString: "md"
+	}
+]
 
 export function createMenuButtons({
 	note,
@@ -43,7 +83,7 @@ export function createMenuButtons({
 			buttons.push({
 				id: "restore",
 				requiresOnline: true,
-				title: "tbd_restore",
+				title: t("restore"),
 				icon: "restore",
 				onPress: async () => {
 					const result = await runWithLoading(async () => {
@@ -64,16 +104,16 @@ export function createMenuButtons({
 			buttons.push({
 				id: "delete",
 				requiresOnline: true,
-				title: "tbd_delete",
+				title: t("delete"),
 				icon: "delete",
 				destructive: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_delete_note",
-							message: "tbd_are_you_sure_delete_note",
-							cancelText: "tbd_cancel",
-							okText: "tbd_delete",
+							title: t("delete_note"),
+							message: t("are_you_sure_delete_note"),
+							cancelText: t("cancel"),
+							okText: t("delete"),
 							destructive: true
 						})
 					})
@@ -111,16 +151,16 @@ export function createMenuButtons({
 			buttons.push({
 				id: "trash",
 				requiresOnline: true,
-				title: "tbd_trash",
+				title: t("trash"),
 				icon: "trash",
 				destructive: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_trash_note",
-							message: "tbd_are_you_sure_trash_note",
-							cancelText: "tbd_cancel",
-							okText: "tbd_dtrash",
+							title: t("trash_note"),
+							message: t("are_you_sure_trash_note"),
+							cancelText: t("cancel"),
+							okText: t("trash"),
 							destructive: true
 						})
 					})
@@ -158,16 +198,16 @@ export function createMenuButtons({
 			buttons.push({
 				id: "leave",
 				requiresOnline: true,
-				title: "tbd_leave",
+				title: t("leave"),
 				icon: "exit",
 				destructive: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_leave_note",
-							message: "tbd_are_you_sure_leave_note",
-							cancelText: "tbd_cancel",
-							okText: "tbd_leave",
+							title: t("leave_note"),
+							message: t("are_you_sure_leave_note"),
+							cancelText: t("cancel"),
+							okText: t("leave"),
 							destructive: true
 						})
 					})
@@ -209,7 +249,7 @@ export function createMenuButtons({
 	if (origin === "notes" || origin === "search") {
 		buttons.push({
 			id: isSelected ? "deselect" : "select",
-			title: isSelected ? "tbd_deselect" : "tbd_select",
+			title: isSelected ? t("deselect") : t("select"),
 			icon: "select",
 			checked: isSelected,
 			onPress: () => {
@@ -222,7 +262,7 @@ export function createMenuButtons({
 	// actions in the menu.
 	buttons.push({
 		id: note.pinned ? "unpin" : "pin",
-		title: note.pinned ? "tbd_unpin" : "tbd_pin",
+		title: note.pinned ? t("unpin") : t("pin"),
 		icon: "pin",
 		requiresOnline: true,
 		onPress: async () => {
@@ -244,7 +284,7 @@ export function createMenuButtons({
 
 	buttons.push({
 		id: note.favorite ? "unfavorite" : "favorite",
-		title: note.favorite ? "tbd_unfavorite" : "tbd_favorite",
+		title: note.favorite ? t("unfavorite") : t("favorite"),
 		icon: "heart",
 		requiresOnline: true,
 		onPress: async () => {
@@ -267,7 +307,7 @@ export function createMenuButtons({
 	if (writeAccess) {
 		buttons.push({
 			id: "type",
-			title: "tbd_type",
+			title: t("type"),
 			icon:
 				note.noteType === NoteType.Text
 					? "text"
@@ -280,32 +320,11 @@ export function createMenuButtons({
 								: note.noteType === NoteType.Md
 									? "markdown"
 									: undefined,
-			subButtons: [
-				{
-					type: NoteType.Text,
-					typeString: "text"
-				},
-				{
-					type: NoteType.Checklist,
-					typeString: "checklist"
-				},
-				{
-					type: NoteType.Code,
-					typeString: "code"
-				},
-				{
-					type: NoteType.Rich,
-					typeString: "rich"
-				},
-				{
-					type: NoteType.Md,
-					typeString: "md"
-				}
-			].map(
+			subButtons: NOTE_TYPE_OPTIONS.map(
 				({ type, typeString }) =>
 					({
 						id: `type_${typeString}`,
-						title: `tbd_${typeString}`,
+						title: t(NOTE_TYPE_LABEL_KEY[typeString]),
 						checked: note.noteType === type,
 						disabled: note.noteType === type,
 						requiresOnline: true,
@@ -349,7 +368,7 @@ export function createMenuButtons({
 
 	buttons.push({
 		id: "tags",
-		title: "tbd_tags",
+		title: t("tags"),
 		icon: "tag",
 		onPress: () => {
 			router.push({
@@ -368,16 +387,16 @@ export function createMenuButtons({
 		buttons.push({
 			id: "rename",
 			requiresOnline: true,
-			title: "tbd_rename",
+			title: t("rename"),
 			icon: "edit",
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
-						title: "tbd_rename_note",
-						message: "tbd_enter_new_name",
+						title: t("rename_note"),
+						message: t("enter_new_name"),
 						defaultValue: noteDisplayTitle(note),
-						cancelText: "tbd_cancel",
-						okText: "tbd_rename"
+						cancelText: t("cancel"),
+						okText: t("rename")
 					})
 				})
 
@@ -418,7 +437,7 @@ export function createMenuButtons({
 	buttons.push({
 		id: "duplicate",
 		requiresOnline: true,
-		title: "tbd_duplicate",
+		title: t("duplicate"),
 		icon: "duplicate",
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
@@ -438,7 +457,7 @@ export function createMenuButtons({
 
 	buttons.push({
 		id: "participants",
-		title: "tbd_participants",
+		title: t("participants"),
 		icon: "users",
 		onPress: () => {
 			router.push({
@@ -453,7 +472,7 @@ export function createMenuButtons({
 	if (writeAccess) {
 		buttons.push({
 			id: "history",
-			title: "tbd_history",
+			title: t("history"),
 			icon: "clock",
 			onPress: () => {
 				router.push({
@@ -468,7 +487,7 @@ export function createMenuButtons({
 
 	buttons.push({
 		id: "export",
-		title: "tbd_export",
+		title: t("export"),
 		icon: "export",
 		onPress: async () => {
 			const exportResult = await runWithLoading(async () => {
@@ -512,7 +531,7 @@ export function createMenuButtons({
 			buttons.push({
 				id: "archive",
 				requiresOnline: true,
-				title: "tbd_archive",
+				title: t("archive"),
 				icon: "archive",
 				onPress: async () => {
 					const result = await runWithLoading(async () => {
@@ -535,7 +554,7 @@ export function createMenuButtons({
 			buttons.push({
 				id: "restore",
 				requiresOnline: true,
-				title: "tbd_restore",
+				title: t("restore"),
 				icon: "restore",
 				onPress: async () => {
 					const result = await runWithLoading(async () => {
@@ -558,16 +577,16 @@ export function createMenuButtons({
 			buttons.push({
 				id: "trash",
 				requiresOnline: true,
-				title: "tbd_trash",
+				title: t("trash"),
 				icon: "trash",
 				destructive: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_trash_note",
-							message: "tbd_are_you_sure_trash_note",
-							cancelText: "tbd_cancel",
-							okText: "tbd_dtrash",
+							title: t("trash_note"),
+							message: t("are_you_sure_trash_note"),
+							cancelText: t("cancel"),
+							okText: t("trash"),
 							destructive: true
 						})
 					})
@@ -607,16 +626,16 @@ export function createMenuButtons({
 			buttons.push({
 				id: "delete",
 				requiresOnline: true,
-				title: "tbd_delete",
+				title: t("delete"),
 				icon: "delete",
 				destructive: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
-							title: "tbd_delete_note",
-							message: "tbd_are_you_sure_delete_note",
-							cancelText: "tbd_cancel",
-							okText: "tbd_delete",
+							title: t("delete_note"),
+							message: t("are_you_sure_delete_note"),
+							cancelText: t("cancel"),
+							okText: t("delete"),
 							destructive: true
 						})
 					})
@@ -655,16 +674,16 @@ export function createMenuButtons({
 		buttons.push({
 			id: "leave",
 			requiresOnline: true,
-			title: "tbd_leave",
+			title: t("leave"),
 			icon: "exit",
 			destructive: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_leave_note",
-						message: "tbd_are_you_sure_leave_note",
-						cancelText: "tbd_cancel",
-						okText: "tbd_leave"
+						title: t("leave_note"),
+						message: t("are_you_sure_leave_note"),
+						cancelText: t("cancel"),
+						okText: t("leave")
 					})
 				})
 

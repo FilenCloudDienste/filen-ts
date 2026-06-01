@@ -16,7 +16,10 @@ import auth from "@/lib/auth"
 import { deserialize } from "@/lib/serializer"
 import DismissStack from "@/components/dismissStack"
 import { actionSheet } from "@/providers/actionSheet.provider"
+import { useTranslation } from "react-i18next"
 
+// The account API stores the country as a plain English name string (no ISO 3166 region code),
+// so these cannot be localized via Intl.DisplayNames — they stay a non-translated constant array.
 const countries: string[] = [
 	"Afghanistan",
 	"Albania",
@@ -221,6 +224,7 @@ const Personal = memo(() => {
 	const { personal: personalSerialized } = useLocalSearchParams<{
 		personal?: string
 	}>()
+	const { t } = useTranslation()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
@@ -249,7 +253,7 @@ const Personal = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_personal_information"
+				title={t("personal_information")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -330,15 +334,15 @@ const Personal = memo(() => {
 						className="bg-background-tertiary"
 						buttons={[
 							{
-								title: "tbd_first_name",
-								subTitle: personal.firstName ?? "tbd_not_set",
+								title: t("first_name"),
+								subTitle: personal.firstName ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_first_name",
-											message: "tbd_enter_new_first_name",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("first_name"),
+											message: t("enter_new_first_name"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.firstName ?? undefined
 										})
 									})
@@ -374,15 +378,15 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_last_name",
-								subTitle: personal.lastName ?? "tbd_not_set",
+								title: t("last_name"),
+								subTitle: personal.lastName ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_last_name",
-											message: "tbd_enter_new_last_name",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("last_name"),
+											message: t("enter_new_last_name"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.lastName ?? undefined
 										})
 									})
@@ -418,15 +422,15 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_company_name",
-								subTitle: personal.companyName ?? "tbd_not_set",
+								title: t("company_name"),
+								subTitle: personal.companyName ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_company_name",
-											message: "tbd_enter_new_company_name",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("company_name"),
+											message: t("enter_new_company_name"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.companyName ?? undefined
 										})
 									})
@@ -462,15 +466,15 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_vat_id",
-								subTitle: personal.vatId ?? "tbd_not_set",
+								title: t("vat_id"),
+								subTitle: personal.vatId ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_vat_id",
-											message: "tbd_enter_new_vat_id",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("vat_id"),
+											message: t("enter_new_vat_id"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.vatId ?? undefined
 										})
 									})
@@ -506,15 +510,15 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_street",
-								subTitle: personal.street ?? "tbd_not_set",
+								title: t("street"),
+								subTitle: personal.street ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_street",
-											message: "tbd_enter_new_street",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("street"),
+											message: t("enter_new_street"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.street ?? undefined
 										})
 									})
@@ -550,15 +554,15 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_street_number",
-								subTitle: personal.streetNumber ?? "tbd_not_set",
+								title: t("street_number"),
+								subTitle: personal.streetNumber ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_street_number",
-											message: "tbd_enter_new_street_number",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("street_number"),
+											message: t("enter_new_street_number"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.streetNumber ?? undefined
 										})
 									})
@@ -594,15 +598,15 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_city",
-								subTitle: personal.city ?? "tbd_not_set",
+								title: t("city"),
+								subTitle: personal.city ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_city",
-											message: "tbd_enter_new_city",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("city"),
+											message: t("enter_new_city"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.city ?? undefined
 										})
 									})
@@ -638,15 +642,15 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_postal_code",
-								subTitle: personal.postalCode ?? "tbd_not_set",
+								title: t("postal_code"),
+								subTitle: personal.postalCode ?? t("not_set"),
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.input({
-											title: "tbd_postal_code",
-											message: "tbd_enter_new_postal_code",
-											cancelText: "tbd_cancel",
-											okText: "tbd_save",
+											title: t("postal_code"),
+											message: t("enter_new_postal_code"),
+											cancelText: t("cancel"),
+											okText: t("save"),
 											defaultValue: personal.postalCode ?? undefined
 										})
 									})
@@ -682,8 +686,8 @@ const Personal = memo(() => {
 								}
 							},
 							{
-								title: "tbd_country",
-								subTitle: personal.country ?? "tbd_not_set",
+								title: t("country"),
+								subTitle: personal.country ?? t("not_set"),
 								onPress: () => {
 									actionSheet.show({
 										buttons: [
@@ -704,7 +708,7 @@ const Personal = memo(() => {
 												}
 											})),
 											{
-												title: "tbd_close",
+												title: t("close"),
 												cancel: true
 											}
 										]

@@ -1,4 +1,5 @@
 import { Fragment, memo } from "react"
+import { useTranslation } from "react-i18next"
 import View, { GestureHandlerScrollView, CrossGlassContainerView } from "@/components/ui/view"
 import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
@@ -22,6 +23,7 @@ const ICON_SIZE = 16
 const BUTTON_CLASS = "flex-row items-center justify-center shrink-0 size-8"
 
 const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event: TextEditorEvents) => void }) => {
+	const { t } = useTranslation()
 	const formats = useRichtextStore(useShallow(state => state.formats))
 	const textForeground = useResolveClassNames("text-foreground")
 	const textPrimary = useResolveClassNames("text-primary")
@@ -98,7 +100,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 					},
 					{
 						id: "header-normal",
-						title: "normal",
+						title: t("normal"),
 						icon: "text" as const,
 						onPress: () => {
 							dispatch({
@@ -117,7 +119,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 				return [
 					{
 						id: "open",
-						title: "tbd_open",
+						title: t("open"),
 						icon: "openExternal" as const,
 						onPress: () => {
 							if (type !== "link" || !formats.link) {
@@ -129,7 +131,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 					},
 					{
 						id: "edit",
-						title: "tbd_edit",
+						title: t("edit"),
 						icon: "edit" as const,
 						onPress: () => {
 							if (type !== "link" || !formats.link) {
@@ -138,12 +140,12 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 
 							prompts
 								.input({
-									title: "tbd",
-									message: "tbd",
-									placeholder: "tbd",
+									title: t("edit_link"),
+									message: t("enter_url"),
+									placeholder: t("url_placeholder"),
 									defaultValue: formats.link,
-									okText: "tbd",
-									cancelText: "tbd"
+									okText: t("save"),
+									cancelText: t("cancel")
 								})
 								.then(response => {
 									if (response.cancelled || response.type !== "string" || !response.value.trim()) {
@@ -159,7 +161,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 					},
 					{
 						id: "remove",
-						title: "tbd_remove",
+						title: t("remove"),
 						icon: "minus" as const,
 						onPress: () => {
 							if (type !== "link" || !formats.link) {
@@ -178,7 +180,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 				return [
 					{
 						id: "ordered",
-						title: "tbd_ordered",
+						title: t("ordered_list"),
 						icon: "listOrdered" as const,
 						onPress: () => {
 							dispatch({
@@ -189,7 +191,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 					},
 					{
 						id: "bullet",
-						title: "tbd_bullet",
+						title: t("bullet_list"),
 						icon: "listBullet" as const,
 						onPress: () => {
 							dispatch({
@@ -200,7 +202,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 					},
 					{
 						id: "checklist",
-						title: "tbd_checklist",
+						title: t("checklist"),
 						icon: "checklist" as const,
 						onPress: () => {
 							dispatch({
@@ -213,7 +215,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 						? [
 								{
 									id: "remove",
-									title: "tbd_remove",
+									title: t("remove"),
 									icon: "minus" as const,
 									onPress: () => {
 										dispatch({
@@ -265,11 +267,11 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 
 				prompts
 					.input({
-						title: "tbd",
-						message: "tbd",
-						placeholder: "tbd",
-						okText: "tbd",
-						cancelText: "tbd"
+						title: t("insert_link"),
+						message: t("enter_url"),
+						placeholder: t("url_placeholder"),
+						okText: t("insert"),
+						cancelText: t("cancel")
 					})
 					.then(response => {
 						if (response.cancelled || response.type !== "string" || !response.value.trim()) {

@@ -13,8 +13,10 @@ import { cn } from "@filen/utils"
 import { AudioSlider, FONT_TABULAR_NUMS, formatAudioTime } from "@/components/drivePreview/previewAudio"
 import alerts from "@/lib/alerts"
 import useAudioMetadataQuery from "@/queries/useAudioMetadata.query"
+import { useTranslation } from "react-i18next"
 
 const Toolbar = memo(() => {
+	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
@@ -74,8 +76,8 @@ const Toolbar = memo(() => {
 								ellipsizeMode="middle"
 							>
 								{queueItem && audioMetadataQuery.status === "success"
-									? (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? "tbd_unknown_title")
-									: "tbd_not_playing"}
+									? (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? t("unknown_title"))
+									: t("not_playing")}
 							</Text>
 							<Text
 								className="text-xs text-muted-foreground"
@@ -83,8 +85,8 @@ const Toolbar = memo(() => {
 								ellipsizeMode="middle"
 							>
 								{queueItem && audioMetadataQuery.status === "success"
-									? (audioMetadataQuery.data?.artist ?? "tbd_unknown_artist")
-									: "tbd_not_playing"}
+									? (audioMetadataQuery.data?.artist ?? t("unknown_artist"))
+									: t("not_playing")}
 							</Text>
 						</View>
 					</View>

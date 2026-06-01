@@ -17,6 +17,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { URL_REGEX } from "@/constants"
+import { useTranslation } from "react-i18next"
 
 export const MENTION_REGEX: RegExp = /(@[\w.-]+@[\w.-]+\.\w+|@everyone)/g
 export const LINE_BREAK_REGEX: RegExp = /\n/gi
@@ -85,6 +86,7 @@ const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean 
 })
 
 export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
+	const { t } = useTranslation()
 	const [openLinkTrustedDomains, setOpenLinkTrustedDomains] = useSecureStore<Record<string, boolean>>("openLinkTrustedDomains", {})
 
 	const parsedDomain = (() => {
@@ -114,7 +116,7 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 		}
 
 		if (!canOpenResult.data) {
-			alerts.error("tbd_cannot_open_link")
+			alerts.error(t("cannot_open_link"))
 
 			return
 		}
@@ -122,10 +124,10 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 		if (!openLinkTrustedDomains[parsedDomain]) {
 			const promptResponse = await run(async () => {
 				return await prompts.alert({
-					title: "tbd_open_external_link",
-					message: `tbd_open_external_link_message_${parsedDomain}`,
-					cancelText: "tbd_cancel",
-					okText: "tbd_open_trust"
+					title: t("open_external_link"),
+					message: t("open_external_link_message", { domain: parsedDomain }),
+					cancelText: t("cancel"),
+					okText: t("open_trust")
 				})
 			})
 
@@ -176,6 +178,7 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 })
 
 const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMessageWithInflightId; fromSelf: boolean }) => {
+	const { t } = useTranslation()
 	const isInflight = useChatsStore(
 		useShallow(state => state.inflightMessages[chat.uuid]?.messages.some(m => m.inflightId === message.inflightId))
 	)
@@ -203,17 +206,17 @@ const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMe
 					const email = match.slice(1).trim()
 
 					if (email === "everyone") {
-						return <Mention name="tbd_everyone" />
+						return <Mention name={t("everyone")} />
 					}
 
 					if (!email.includes("@")) {
-						return <Mention name="tbd_unknown" />
+						return <Mention name={t("unknown")} />
 					}
 
 					const foundParticipant = chat.participants.find(p => p.email === email)
 
 					if (!foundParticipant) {
-						return <Mention name="tbd_unknown" />
+						return <Mention name={t("unknown")} />
 					}
 
 					return (
