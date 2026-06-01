@@ -1,5 +1,6 @@
 import { Fragment, memo, useState } from "react"
 import { Platform, TextInput, Image } from "react-native"
+import { Trans, useTranslation } from "react-i18next"
 import { router } from "expo-router"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { cn, run } from "@filen/utils"
@@ -41,6 +42,7 @@ function isTwoFactorRequiredError(error: unknown): boolean {
 }
 
 const Login = memo(() => {
+	const { t } = useTranslation()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const isOnline = useIsOnline()
 	const [email, setEmail] = useState<string>("")
@@ -65,12 +67,12 @@ const Login = memo(() => {
 	const promptForTwoFactor = async (): Promise<string | null> => {
 		const promptResult = await run(async () => {
 			return await prompts.input({
-				title: "tbd_two_factor_authentication",
-				message: "tbd_enter_two_factor_code_or_recovery_key",
+				title: t("two_factor_authentication"),
+				message: t("enter_two_factor_code_or_recovery_key"),
 				inputType: "plain-text",
-				placeholder: "tbd_code_or_recovery_key",
-				cancelText: "tbd_cancel",
-				okText: "tbd_sign_in"
+				placeholder: t("code_or_recovery_key"),
+				cancelText: t("cancel"),
+				okText: t("sign_in")
 			})
 		})
 
@@ -152,11 +154,11 @@ const Login = memo(() => {
 
 		const promptResult = await run(async () => {
 			return await prompts.input({
-				title: "tbd_reset_password",
-				message: "tbd_enter_account_email",
-				placeholder: "tbd_email_placeholder_hint",
-				cancelText: "tbd_cancel",
-				okText: "tbd_send",
+				title: t("reset_password"),
+				message: t("enter_account_email"),
+				placeholder: t("email_placeholder_hint"),
+				cancelText: t("cancel"),
+				okText: t("send"),
 				defaultValue: email.trim()
 			})
 		})
@@ -175,7 +177,7 @@ const Login = memo(() => {
 		const targetEmail = promptResult.data.value.trim()
 
 		if (!isValidEmail(targetEmail)) {
-			alerts.error("tbd_please_enter_valid_email")
+			alerts.error(t("please_enter_valid_email"))
 
 			return
 		}
@@ -191,7 +193,7 @@ const Login = memo(() => {
 			return
 		}
 
-		alerts.normal("tbd_password_reset_email_sent")
+		alerts.normal(t("password_reset_email_sent"))
 	}
 
 	const openRegister = (): void => {
@@ -221,8 +223,8 @@ const Login = memo(() => {
 							source={theme === "dark" ? require("@/assets/images/icon-dark.png") : require("@/assets/images/icon-light.png")}
 							className="size-20 rounded-2xl"
 						/>
-						<Text className="text-foreground text-3xl font-bold">tbd_welcome_back</Text>
-						<Text className="text-muted-foreground text-sm text-center">tbd_sign_in_to_your_account</Text>
+						<Text className="text-foreground text-3xl font-bold">{t("welcome_back")}</Text>
+						<Text className="text-muted-foreground text-sm text-center">{t("sign_in_to_your_account")}</Text>
 					</View>
 					<View className="bg-background-secondary rounded-2xl overflow-hidden">
 						<View className="flex-row items-center px-4">
@@ -234,7 +236,7 @@ const Login = memo(() => {
 							<TextInput
 								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
 								placeholderTextColor={textMutedForeground.color as string}
-								placeholder="tbd_email"
+								placeholder={t("email")}
 								keyboardType="email-address"
 								autoCapitalize="none"
 								autoComplete="email"
@@ -255,7 +257,7 @@ const Login = memo(() => {
 							<TextInput
 								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
 								placeholderTextColor={textMutedForeground.color as string}
-								placeholder="tbd_password"
+								placeholder={t("password")}
 								secureTextEntry
 								autoCapitalize="none"
 								autoComplete="current-password"
@@ -274,19 +276,29 @@ const Login = memo(() => {
 							enabled={canSubmit}
 							className={cn("bg-primary rounded-2xl py-3 items-center justify-center", !canSubmit && "opacity-50")}
 						>
-							<Text className="text-primary-foreground text-base font-semibold">tbd_sign_in</Text>
+							<Text className="text-primary-foreground text-base font-semibold">{t("sign_in")}</Text>
 						</PressableOpacity>
 						<PressableOpacity
 							onPress={handleForgotPassword}
 							enabled={isOnline}
 							className={cn(!isOnline && "opacity-50 pointer-events-none")}
 						>
-							<Text className="text-primary text-sm text-center">tbd_forgot_password</Text>
+							<Text className="text-primary text-sm text-center">{t("forgot_password")}</Text>
 						</PressableOpacity>
 					</View>
 					<PressableOpacity onPress={openRegister}>
 						<Text className="text-muted-foreground text-sm text-center">
-							tbd_dont_have_an_account <Text className="text-primary">tbd_create_one</Text>
+							<Trans
+								i18nKey="dont_have_an_account"
+								components={{
+									link: (
+										<Text
+											className="text-primary"
+											onPress={openRegister}
+										/>
+									)
+								}}
+							/>
 						</Text>
 					</PressableOpacity>
 				</KeyboardAwareScrollView>

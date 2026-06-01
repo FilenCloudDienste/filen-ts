@@ -1,5 +1,6 @@
 import { Fragment, memo, useState } from "react"
 import { Platform, TextInput } from "react-native"
+import { Trans, useTranslation } from "react-i18next"
 import { useNavigation } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { cn, ratePasswordStrength, run } from "@filen/utils"
@@ -21,14 +22,22 @@ function isValidEmail(email: string): boolean {
 	return EMAIL_REGEX.test(email.trim())
 }
 
-const STRENGTH_LABEL: Record<ReturnType<typeof ratePasswordStrength>["strength"], string> = {
-	weak: "tbd_password_strength_weak",
-	normal: "tbd_password_strength_normal",
-	strong: "tbd_password_strength_strong",
-	best: "tbd_password_strength_best"
+type PasswordStrength = ReturnType<typeof ratePasswordStrength>["strength"]
+
+// Strength → catalog key. Resolved with `t()` at the call site (inside the component, where the
+// hook `t` is in scope), so the labels stay reactive to language switches. The values are catalog
+// key literals — not template-literal keys — to keep full key-type-safety.
+const STRENGTH_LABEL_KEY: Record<
+	PasswordStrength,
+	"password_strength_weak" | "password_strength_normal" | "password_strength_strong" | "password_strength_best"
+> = {
+	weak: "password_strength_weak",
+	normal: "password_strength_normal",
+	strong: "password_strength_strong",
+	best: "password_strength_best"
 }
 
-const STRENGTH_TW: Record<ReturnType<typeof ratePasswordStrength>["strength"], string> = {
+const STRENGTH_TW: Record<PasswordStrength, string> = {
 	weak: "text-red-500",
 	normal: "text-yellow-500",
 	strong: "text-blue-500",
@@ -36,6 +45,7 @@ const STRENGTH_TW: Record<ReturnType<typeof ratePasswordStrength>["strength"], s
 }
 
 const Register = memo(() => {
+	const { t } = useTranslation()
 	const navigation = useNavigation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -78,7 +88,7 @@ const Register = memo(() => {
 
 		dismiss()
 
-		alerts.normal("tbd_account_created")
+		alerts.normal(t("account_created"))
 	}
 
 	const handleResendConfirmation = async (): Promise<void> => {
@@ -88,11 +98,11 @@ const Register = memo(() => {
 
 		const promptResult = await run(async () => {
 			return await prompts.input({
-				title: "tbd_resend_confirmation_email",
-				message: "tbd_enter_registered_email",
-				placeholder: "tbd_email_placeholder_hint",
-				cancelText: "tbd_cancel",
-				okText: "tbd_resend",
+				title: t("resend_confirmation_email"),
+				message: t("enter_registered_email"),
+				placeholder: t("email_placeholder_hint"),
+				cancelText: t("cancel"),
+				okText: t("resend"),
 				defaultValue: email.trim()
 			})
 		})
@@ -111,7 +121,7 @@ const Register = memo(() => {
 		const targetEmail = promptResult.data.value.trim()
 
 		if (!isValidEmail(targetEmail)) {
-			alerts.error("tbd_please_enter_valid_email")
+			alerts.error(t("please_enter_valid_email"))
 
 			return
 		}
@@ -127,13 +137,13 @@ const Register = memo(() => {
 			return
 		}
 
-		alerts.normal("tbd_resend_confirmation_email_sent")
+		alerts.normal(t("resend_confirmation_email_sent"))
 	}
 
 	return (
 		<Fragment>
 			<Header
-				title="tbd_register"
+				title={t("register")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -188,8 +198,8 @@ const Register = memo(() => {
 					contentInsetAdjustmentBehavior="automatic"
 				>
 					<View className="gap-1 pt-2 bg-transparent">
-						<Text className="text-foreground text-2xl font-bold">tbd_create_account_welcome</Text>
-						<Text className="text-muted-foreground text-sm">tbd_register_subtitle</Text>
+						<Text className="text-foreground text-2xl font-bold">{t("create_account_welcome")}</Text>
+						<Text className="text-muted-foreground text-sm">{t("register_subtitle")}</Text>
 					</View>
 					<View className="bg-transparent rounded-2xl overflow-hidden">
 						<View className="flex-row items-center px-4 bg-transparent">
@@ -201,7 +211,7 @@ const Register = memo(() => {
 							<TextInput
 								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
 								placeholderTextColor={textMutedForeground.color as string}
-								placeholder="tbd_email"
+								placeholder={t("email")}
 								keyboardType="email-address"
 								autoCapitalize="none"
 								autoComplete="email"
@@ -222,7 +232,7 @@ const Register = memo(() => {
 							<TextInput
 								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
 								placeholderTextColor={textMutedForeground.color as string}
-								placeholder="tbd_password"
+								placeholder={t("password")}
 								secureTextEntry
 								autoCapitalize="none"
 								autoComplete="new-password"
@@ -243,7 +253,7 @@ const Register = memo(() => {
 							<TextInput
 								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
 								placeholderTextColor={textMutedForeground.color as string}
-								placeholder="tbd_confirm_password"
+								placeholder={t("confirm_password")}
 								secureTextEntry
 								autoCapitalize="none"
 								autoComplete="new-password"
@@ -258,14 +268,14 @@ const Register = memo(() => {
 					</View>
 					{passwordStrength !== null && (
 						<View className="flex-row items-center justify-between px-1 bg-transparent">
-							<Text className="text-muted-foreground text-xs">tbd_password_strength</Text>
+							<Text className="text-muted-foreground text-xs">{t("password_strength")}</Text>
 							<Text className={cn("text-xs font-medium", STRENGTH_TW[passwordStrength.strength])}>
-								{STRENGTH_LABEL[passwordStrength.strength]}
+								{t(STRENGTH_LABEL_KEY[passwordStrength.strength])}
 							</Text>
 						</View>
 					)}
 					{password.length > 0 && confirmPassword.length > 0 && !passwordsMatch && (
-						<Text className="text-red-500 text-xs px-1">tbd_passwords_do_not_match</Text>
+						<Text className="text-red-500 text-xs px-1">{t("passwords_do_not_match")}</Text>
 					)}
 					<View className="px-4 pb-2 pt-2 gap-3 bg-transparent">
 						<PressableOpacity
@@ -273,19 +283,29 @@ const Register = memo(() => {
 							enabled={canSubmit}
 							className={cn("bg-primary rounded-2xl py-3 items-center justify-center", !canSubmit && "opacity-50")}
 						>
-							<Text className="text-primary-foreground text-base font-semibold">tbd_create_account</Text>
+							<Text className="text-primary-foreground text-base font-semibold">{t("create_account")}</Text>
 						</PressableOpacity>
 						<PressableOpacity
 							onPress={handleResendConfirmation}
 							enabled={isOnline}
 							className={cn(!isOnline && "opacity-50 pointer-events-none")}
 						>
-							<Text className="text-primary text-sm text-center">tbd_resend_confirmation_email</Text>
+							<Text className="text-primary text-sm text-center">{t("resend_confirmation_email")}</Text>
 						</PressableOpacity>
 					</View>
 					<PressableOpacity onPress={dismiss}>
 						<Text className="text-muted-foreground text-sm text-center">
-							tbd_already_have_an_account <Text className="text-primary">tbd_sign_in</Text>
+							<Trans
+								i18nKey="already_have_an_account"
+								components={{
+									link: (
+										<Text
+											className="text-primary"
+											onPress={dismiss}
+										/>
+									)
+								}}
+							/>
 						</Text>
 					</PressableOpacity>
 				</KeyboardAwareScrollView>
