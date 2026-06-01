@@ -44,8 +44,11 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_DIR = join(SCRIPT_DIR, "..")
 const EN_SOURCE_DIR = join(PACKAGE_DIR, "src", "locales", "en")
 const LOCALES_DIR = join(PACKAGE_DIR, "src", "locales")
-// Git pathspec is relative to the repo root; this package lives at packages/filen-mobile.
-const EN_SOURCE_GIT_PATHSPEC = "packages/filen-mobile/src/locales/en"
+// Git pathspecs resolve relative to the process cwd, not the repo root. `gitShow` runs git with
+// `cwd: PACKAGE_DIR`, so this pathspec must be relative to the package — NOT prefixed with
+// `packages/filen-mobile/` (that would resolve to a non-existent doubled path and silently match
+// nothing, so the delta would always be empty).
+const EN_SOURCE_GIT_PATHSPEC = "src/locales/en"
 
 // "en" is the source language; never a translation target.
 type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
@@ -341,21 +344,86 @@ function buildOutputSchema(): Record<string, unknown> {
 	}
 }
 
-async function translateWithApi(args: {
+// Max keys per Anthropic request. The full catalog (~764 keys) in a single response can exceed
+// max_tokens for verbose languages (German/Russian/Japanese/Chinese) → a truncated JSON body that
+// fails to parse and aborts that language. Batching keeps every response well under max_tokens; the
+// cached system prefix (English source + glossary) is identical across all batches and languages,
+// so each extra batch is a cheap cache READ, not a re-send of the big prefix.
+const BATCH_SIZE = 100
+
+function chunkEntries(subset: Record<string, string>, size: number): Record<string, string>[] {
+	const entries = Object.entries(subset)
+	const chunks: Record<string, string>[] = []
+
+	for (let start = 0; start < entries.length; start += size) {
+		const chunk: Record<string, string> = {}
+
+		for (const [key, value] of entries.slice(start, start + size)) {
+			chunk[key] = value
+		}
+
+		chunks.push(chunk)
+	}
+
+	return chunks
+}
+
+// Translate one language's full subset by splitting it into BATCH_SIZE chunks, translating each, and
+// merging. Throws if the model omits any requested key (a truncated/partial batch surfaces as an
+// error rather than silently writing an incomplete catalog).
+async function translateSubset(args: {
 	client: Anthropic
 	lang: TargetLanguage
 	subset: Record<string, string>
 	systemPrompt: string
 }): Promise<Record<string, string>> {
 	const { client, lang, subset, systemPrompt } = args
+	const batches = chunkEntries(subset, BATCH_SIZE)
+	const result: Record<string, string> = {}
+
+	for (let index = 0; index < batches.length; index++) {
+		const batch = batches[index]
+
+		if (batch === undefined) {
+			continue
+		}
+
+		console.log(`[translate-i18n] ${lang}: batch ${index + 1}/${batches.length} (${Object.keys(batch).length} keys)`)
+
+		const translated = await translateBatch({
+			client,
+			lang,
+			batch,
+			systemPrompt
+		})
+
+		Object.assign(result, translated)
+	}
+
+	for (const key of Object.keys(subset)) {
+		if (!(key in result)) {
+			throw new Error(`${lang}: model did not return a translation for key "${key}"`)
+		}
+	}
+
+	return result
+}
+
+async function translateBatch(args: {
+	client: Anthropic
+	lang: TargetLanguage
+	batch: Record<string, string>
+	systemPrompt: string
+}): Promise<Record<string, string>> {
+	const { client, lang, batch, systemPrompt } = args
 	const languageName = LANGUAGE_NAMES[lang]
 
-	// Stable, cached system prefix (instructions + full English source) is reused across all eight
-	// languages — the first call writes the cache, the rest read it. The varying part (the delta
-	// subset + the target language name) lives in the per-language user message.
+	// Stable, cached system prefix (instructions + full English source) is reused across every batch
+	// and all eight languages — the first call writes the cache, the rest read it. The varying part
+	// (the batch subset + the target language name) lives in the per-language user message.
 	const response = await client.messages.create({
 		model: MODEL,
-		max_tokens: 16000,
+		max_tokens: 8192,
 		system: [
 			{
 				type: "text",
@@ -381,7 +449,7 @@ async function translateWithApi(args: {
 							`Translate these English UI strings to ${languageName}.`,
 							"Return ONLY the JSON map of the same keys to their translated values.",
 							"",
-							JSON.stringify(subset, null, 2)
+							JSON.stringify(batch, null, 2)
 						].join("\n")
 					}
 				]
@@ -474,7 +542,7 @@ async function main(): Promise<void> {
 
 			const translated = DRY_RUN
 				? translateDryRun(lang, subset)
-				: await translateWithApi({
+				: await translateSubset({
 						client: client as Anthropic,
 						lang,
 						subset,
