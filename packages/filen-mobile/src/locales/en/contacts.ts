@@ -110,7 +110,7 @@ export const contacts = {
 
 	// ── Incoming Share screen ─────────────────────────────────────────────────
 	/** Incoming Share screen — header title */
-	saved_shares: "Incoming share",
+	saved_shares: "Incoming shares",
 	/** Empty-state label shown when the share extension returned an error while resolving shared files */
 	error_resolving_shares: "Could not resolve the shared files",
 	/** Empty-state label shown while waiting for the OS to finish resolving shared files */

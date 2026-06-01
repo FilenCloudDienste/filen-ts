@@ -90,7 +90,7 @@ export const notes = {
 	unpin_selected: "Unpin selected",
 	// favorite_selected and unfavorite_selected live in common.ts.
 	/** Bulk action: change the type of every selected note */
-	type_change_selected: "Change type of selected",
+	type_change_selected: "Change type of selection",
 	/** Bulk action: add or remove tags across every selected note */
 	bulk_tag_selected: "Tag selected",
 	/** Bulk action: duplicate every selected note */
@@ -123,19 +123,21 @@ export const notes = {
 	/** Confirmation dialog message before deleting a single tag */
 	are_you_sure_delete_tag: "Are you sure you want to delete this tag? It will be removed from all notes.",
 	/** Bulk action confirm button: delete every selected tag */
-	delete_all_tags: "Delete all",
+	delete_all_tags: "Delete",
 	/** Confirmation dialog title before deleting every selected tag */
 	delete_all_tags_title: "Delete tags",
 	/** Confirmation dialog message before deleting every selected tag */
 	delete_all_tags_confirmation: "Are you sure you want to delete the selected tags? They will be removed from all notes.",
-	/** Tag row subtitle: note count and last-edited date. {{noteCount}} is the note count, {{date}} the edited date */
-	tag_notes_count_and_date: "{{noteCount}} notes, {{date}}",
+	/** Tag row subtitle (exactly one note): {{count}} is the note count, {{date}} the last-edited date */
+	tag_notes_count_and_date_one: "{{count}} note, {{date}}",
+	/** Tag row subtitle (plural): {{count}} is the note count, {{date}} the last-edited date */
+	tag_notes_count_and_date_other: "{{count}} notes, {{date}}",
 
 	// ── Note tags screen (add/remove tags to one or many notes) ───────────────
 	/** Tags screen — header title when tagging a single note */
 	note_tags: "Tags",
 	/** Tags screen — header title when tagging multiple selected notes */
-	note_tags_selected: "Tag selected",
+	note_tags_selected: "Tag selected notes",
 	/** Tag toggle: remove this tag from the single open note */
 	remove_tag: "Remove tag",
 	/** Tag toggle: remove this tag from every selected note */

@@ -156,9 +156,9 @@ export const drive = {
 	/** Bulk action: stop sharing all selected outgoing-share items */
 	stop_sharing_selected: "Stop sharing selected",
 	/** Bulk action: remove all selected incoming-share items */
-	remove_share_selected: "Remove share selected",
+	remove_share_selected: "Remove from shared with me",
 	/** Bulk action: disable public link for all selected items */
-	disable_public_link_selected: "Disable public link selected",
+	disable_public_link_selected: "Disable public link for selected",
 
 	// ── Bulk confirmation dialogs ─────────────────────────────────────────────
 	/** Confirmation body for bulk restore */
@@ -170,7 +170,7 @@ export const drive = {
 	/** Confirmation body for bulk stop-sharing */
 	are_you_sure_stop_sharing_selected: "Are you sure you want to stop sharing the selected items?",
 	/** Confirmation body for bulk remove-share */
-	are_you_sure_remove_share_selected: "Are you sure you want to remove the selected items from shared with you?",
+	are_you_sure_remove_share_selected: "Are you sure you want to remove the selected items from Shared with me?",
 	/** Confirmation body for bulk disable-public-link */
 	are_you_sure_disable_public_link_selected: "Are you sure you want to disable the public link for the selected items?",
 	/** Confirmation body for bulk remove-offline */

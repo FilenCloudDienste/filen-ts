@@ -338,5 +338,5 @@ export const settings = {
 	/** Event kind: items you shared with others were removed */
 	removed_shared_out_items: "Removed shared-out items",
 	/** Event kind: an item was favorited or unfavorited */
-	item_favorite: "Item favorited"
+	item_favorite: "Favorite status changed"
 } as const
