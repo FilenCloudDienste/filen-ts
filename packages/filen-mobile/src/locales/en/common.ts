@@ -26,5 +26,15 @@ export const common = {
 	/** Generic dialog cancel button */
 	cancel: "Cancel",
 	/** Generic action-sheet dismiss button */
-	close: "Close"
+	close: "Close",
+	/** Generic email field label / placeholder (login + registration forms, reset prompts) */
+	email: "Email",
+	/** Generic password field label / placeholder */
+	password: "Password",
+	/** Generic sign-in action: login submit button, 2FA confirm, "already have an account" link */
+	sign_in: "Sign in",
+	/** Generic placeholder hint for an email input, shown as faded example text */
+	email_placeholder_hint: "you@example.com",
+	/** Generic validation error shown when an entered email address is not valid */
+	please_enter_valid_email: "Please enter a valid email address."
 } as const

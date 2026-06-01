@@ -11,9 +11,11 @@
 import { common } from "@/locales/en/common"
 import { appearance } from "@/locales/en/appearance"
 import { transfers } from "@/locales/en/transfers"
+import { auth } from "@/locales/en/auth"
 
 export const en = {
 	...common,
 	...appearance,
-	...transfers
+	...transfers,
+	...auth
 } as const
