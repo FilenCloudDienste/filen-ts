@@ -4,6 +4,7 @@
 import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
 import withOPSQLiteAppGroup from "./plugins/withOpSqliteAppGroup"
+import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
 
 const VERSION: string = "4.0.1"
 
@@ -79,7 +80,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			LSApplicationCategoryType: "public.app-category.productivity",
 			UIRequiredDeviceCapabilities: ["arm64"],
 			CFBundleAllowMixedLocalizations: true,
-			CFBundleLocalizations: ["en"],
+			CFBundleLocalizations: [...SUPPORTED_LANGUAGES],
 			CFBundleDevelopmentRegion: "en",
 			UIPrefersShowingLanguageSettings: true
 		},
@@ -271,6 +272,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		"./plugins/withAndroidLargeHeapAndHardwareAcceleration",
 		"./plugins/withGradleMemory",
 		"./plugins/withNotifeeForegroundServiceType",
+		[
+			"./plugins/withAndroidLocaleConfig",
+			{
+				locales: [...SUPPORTED_LANGUAGES]
+			}
+		],
 		[
 			"./plugins/withAndroidArchitectures",
 			{

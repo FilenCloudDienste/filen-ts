@@ -11,6 +11,15 @@ try {
 	console.error(e)
 }
 
+// Keeps date/time formatting aligned with a runtime language switch. Resets the cached
+// locale info so the next format call re-derives MDY/DMY/YMD + 12h/24h from the new language.
+// Known limitation (Risk 5): already-mounted date displays won't re-render until their next
+// render — they'll keep the old format until then.
+export function setIntlLanguage(lang: string): void {
+	intlLanguage = lang
+	cachedLocaleInfo = null
+}
+
 /**
  * Fast date formatting functions optimized for Hermes JS engine
  * Replaces slow Intl.DateTimeFormat calls with manual implementations
