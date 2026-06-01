@@ -28,9 +28,9 @@ describe("auth catalog", () => {
 
 	it("carries every password-strength label", () => {
 		expect(auth.password_strength_weak).toBe("Weak")
-		expect(auth.password_strength_normal).toBe("Normal")
+		expect(auth.password_strength_normal).toBe("Fair")
 		expect(auth.password_strength_strong).toBe("Strong")
-		expect(auth.password_strength_best).toBe("Best")
+		expect(auth.password_strength_best).toBe("Very strong")
 	})
 
 	it("merges auth + common keys into the flat catalog without collisions", () => {

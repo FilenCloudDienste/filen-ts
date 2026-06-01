@@ -41,11 +41,11 @@ export const auth = {
 	/** Password-strength rating: weakest tier */
 	password_strength_weak: "Weak",
 	/** Password-strength rating: medium tier */
-	password_strength_normal: "Normal",
+	password_strength_normal: "Fair",
 	/** Password-strength rating: strong tier */
 	password_strength_strong: "Strong",
 	/** Password-strength rating: strongest tier */
-	password_strength_best: "Best",
+	password_strength_best: "Very strong",
 	// passwords_do_not_match lives in common.ts.
 	/** Registration screen — primary submit button that creates the account */
 	create_account: "Create account",

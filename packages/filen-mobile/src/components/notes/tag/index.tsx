@@ -156,7 +156,7 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 									className="text-muted-foreground text-xs"
 								>
 									{t("tag_notes_count_and_date", {
-										noteCount: String(notesForTag.length),
+										count: notesForTag.length,
 										date: simpleDate(Number(info.item.editedTimestamp))
 									})}
 								</Text>

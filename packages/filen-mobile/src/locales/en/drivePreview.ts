@@ -22,7 +22,7 @@ export const drivePreview = {
 	// ── PDF preview (previewPdf.tsx) ───────────────────────────────────────────
 	// password_required lives in common.ts.
 	/** Password prompt message asking the user to type the password of a protected PDF or public link */
-	enter_the_password: "Enter the password",
+	enter_the_password: "Enter password",
 	/** Error toast shown when a PDF file is corrupt or not a valid document */
 	invalid_pdf: "This PDF could not be opened",
 	/** Error toast shown when a PDF file could not be loaded from disk */
