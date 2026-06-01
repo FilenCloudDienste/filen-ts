@@ -12,6 +12,7 @@ import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
 import { startReconnectListener } from "@/lib/reconnect"
 import fileCache from "@/lib/fileCache"
 import audioCache from "@/lib/audioCache"
+import { initI18n } from "@/lib/i18n"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -45,6 +46,12 @@ class Setup {
 			}
 
 			await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
+
+			// Initialize i18next after secureStore.init() resolves (needs the persisted-language
+			// read) and before setup returns — RootLayout renders null until setup is done, so
+			// i18n is ready before first paint (no flash of raw keys). Serial-awaited, not folded
+			// into the Promise.all above (would race the secureStore read).
+			await initI18n()
 
 			// Wire the reconnect-replay listener after the query cache is hydrated
 			// but before the fire-and-forget offline.sync below. Idempotent —
