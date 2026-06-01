@@ -1,4 +1,18 @@
-import { describe, it, expect } from "vitest"
+import { vi, describe, it, expect } from "vitest"
+
+// sort.ts now resolves the fixed group-header labels via the module i18n and derives month
+// names from Intl using `intlLanguage`. Mock both so the pure sorter tests don't drag in
+// expo-localization / react-i18next (which crash in the node test env on `__DEV__`).
+vi.mock("@/lib/i18n", () => ({
+	default: {
+		t: (key: string) => key
+	}
+}))
+
+vi.mock("@/lib/time", () => ({
+	intlLanguage: "en-US"
+}))
+
 import { itemSorter, notesSorter } from "@/lib/sort"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 
@@ -429,6 +443,45 @@ describe("notesSorter", () => {
 			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
 
 			expect(todayHeader).toBeDefined()
+		})
+
+		it("resolves the fixed bucket header titles through the module i18n (translated, not tbd_)", () => {
+			const now = BigInt(Date.now())
+			const recent = makeNote({ uuid: "recent-1", editedTimestamp: now })
+			const pinned = makeNote({ uuid: "pinned-1", editedTimestamp: now, pinned: true })
+			const trashed = makeNote({ uuid: "trash-1", editedTimestamp: now, trash: true })
+
+			const result = notesSorter.group({ notes: [recent, pinned, trashed], groupPinned: true, groupTrashed: true })
+			const headerTitle = (id: string) =>
+				result.find(item => item.type === "header" && "id" in item && item.id === id) as { title?: string } | undefined
+
+			// Mock t returns the key verbatim; the point is the real catalog key (not a tbd_ token) is used.
+			expect(headerTitle("header-today")?.title).toBe("today")
+			expect(headerTitle("header-pinned")?.title).toBe("pinned")
+			expect(headerTitle("header-trashed")?.title).toBe("trashed")
+		})
+
+		it("renders month-bucket headers with a real Intl month name (not a tbd_month_ key)", () => {
+			const now = new Date()
+			// ~45 days ago lands in the previousMonth1 bucket (between 30 days and two months ago).
+			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "old-1", editedTimestamp: fortyFiveDaysAgo })
+
+			const result = notesSorter.group({ notes: [note] })
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1") as
+				| { title?: string }
+				| undefined
+
+			expect(monthHeader).toBeDefined()
+			expect(monthHeader?.title).not.toContain("tbd_")
+			expect(monthHeader?.title).not.toContain("month_")
+
+			// The title must equal a locale-formatted long month name.
+			const expectedMonth = new Intl.DateTimeFormat("en-US", {
+				month: "long"
+			}).format(new Date(new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()).getTime()))
+
+			expect(monthHeader?.title).toBe(expectedMonth)
 		})
 	})
 })

@@ -25,6 +25,8 @@ export const common = {
 	reset: "Reset",
 	/** Generic dialog cancel button */
 	cancel: "Cancel",
+	/** Generic dialog submit / confirm button */
+	submit: "Submit",
 	/** Generic action-sheet dismiss button */
 	close: "Close",
 	/** Generic email field label / placeholder (login + registration forms, reset prompts) */

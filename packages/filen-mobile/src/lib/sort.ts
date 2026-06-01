@@ -1,6 +1,8 @@
 import { parseNumbersFromString } from "@filen/utils"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 import type { ListItem as NoteListItem, Item as NoteItem } from "@/components/notes/note"
+import i18n from "@/lib/i18n"
+import { intlLanguage } from "@/lib/time"
 
 export type SortByType =
 	| "nameAsc"
@@ -515,7 +517,7 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-pinned",
-				title: "tbd_pinned",
+				title: i18n.t("pinned"),
 				icon: "pin-outline"
 			})
 
@@ -539,7 +541,7 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-favorited",
-				title: "tbd_favorited",
+				title: i18n.t("favorited"),
 				icon: "heart-outline"
 			})
 
@@ -563,7 +565,7 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-today",
-				title: "tbd_today",
+				title: i18n.t("today"),
 				icon: "today-outline"
 			})
 
@@ -587,7 +589,7 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-7days",
-				title: "tbd_prev_7_days",
+				title: i18n.t("previous_7_days"),
 				icon: "calendar-outline"
 			})
 
@@ -611,7 +613,7 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-30days",
-				title: "tbd_prev_30_days",
+				title: i18n.t("previous_30_days"),
 				icon: "calendar-outline"
 			})
 
@@ -637,7 +639,9 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-month1",
-				title: `tbd_month_${date.getMonth().toString()}`,
+				title: new Intl.DateTimeFormat(intlLanguage, {
+					month: "long"
+				}).format(date),
 				icon: "calendar-outline"
 			})
 
@@ -663,7 +667,9 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-month2",
-				title: `tbd_month_${date.getMonth().toString()}`,
+				title: new Intl.DateTimeFormat(intlLanguage, {
+					month: "long"
+				}).format(date),
 				icon: "calendar-outline"
 			})
 
@@ -727,7 +733,7 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-archived",
-				title: "tbd_archived",
+				title: i18n.t("archived"),
 				icon: "archive-outline"
 			})
 
@@ -751,7 +757,7 @@ class NotesSorter {
 			result.push({
 				type: "header",
 				id: "header-trashed",
-				title: "tbd_trashed",
+				title: i18n.t("trashed"),
 				icon: "trash-outline"
 			})
 
