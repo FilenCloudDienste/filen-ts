@@ -16,8 +16,10 @@ import type { MenuButton } from "@/components/ui/menu"
 import { selectContacts } from "@/routes/contacts"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateChatSelectionFlags, chatHasUnread } from "@/lib/chatSelectors"
+import { useTranslation } from "react-i18next"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
+	const { t } = useTranslation()
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
 	const textForeground = useResolveClassNames("text-foreground")
@@ -68,7 +70,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 		menuButtons.push({
 			id: "selectAll",
-			title: selectedChats.length === chats.length ? "tbd_deselect_all" : "tbd_select_all",
+			title: selectedChats.length === chats.length ? t("deselect_all") : t("select_all"),
 			icon: "select",
 			onPress: () => {
 				if (selectedChats.length === chats.length) {
@@ -84,7 +86,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		if (selectedChats.length === 0) {
 			menuButtons.push({
 				id: "createChat",
-				title: "tbd_create_chat",
+				title: t("create_chat"),
 				icon: "plus",
 				requiresOnline: true,
 				onPress: async () => {
@@ -122,7 +124,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				menuButtons.push({
 					id: "bulkMarkAsRead",
 					requiresOnline: true,
-					title: "tbd_mark_as_read",
+					title: t("mark_as_read"),
 					icon: "envelopeOpen",
 					onPress: async () => {
 						// Mirror the single-item path in chats/list/chat/menu.tsx — call
@@ -142,7 +144,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			menuButtons.push({
 				id: "bulkMute",
 				requiresOnline: true,
-				title: chatFlags.includesMuted ? "tbd_unmute_all" : "tbd_mute_all",
+				title: chatFlags.includesMuted ? t("unmute_all") : t("mute_all"),
 				icon: "mute",
 				onPress: async () => {
 					await runBulk({
@@ -157,7 +159,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				menuButtons.push({
 					id: "bulkDelete",
 					requiresOnline: true,
-					title: "tbd_delete_chats",
+					title: t("delete_chats"),
 					icon: "delete",
 					destructive: true,
 					onPress: async () => {
@@ -165,10 +167,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedChats,
 							clearSelection: () => useChatsStore.getState().clearSelectedChats(),
 							confirm: {
-								title: "tbd_delete_all_chats",
-								message: "tbd_delete_all_chats_confirmation",
-								okText: "tbd_delete_all",
-								cancelText: "tbd_cancel",
+								title: t("delete_all_chats"),
+								message: t("delete_all_chats_confirmation"),
+								okText: t("delete_all"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: chat => chatsLib.delete({ chat })
@@ -181,7 +183,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				menuButtons.push({
 					id: "bulkLeave",
 					requiresOnline: true,
-					title: "tbd_leave_chats",
+					title: t("leave_chats"),
 					icon: "exit",
 					destructive: true,
 					onPress: async () => {
@@ -189,10 +191,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedChats,
 							clearSelection: () => useChatsStore.getState().clearSelectedChats(),
 							confirm: {
-								title: "tbd_leave_all_chats",
-								message: "tbd_leave_all_chats_confirmation",
-								okText: "tbd_leave_all",
-								cancelText: "tbd_cancel",
+								title: t("leave_all_chats"),
+								message: t("leave_all_chats_confirmation"),
+								okText: t("leave_all"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: chat => chatsLib.leave({ chat })
@@ -226,13 +228,13 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 	return (
 		<StackHeader
-			title={selectedChats.length > 0 ? `${selectedChats.length} tbd_selected` : "tbd_chats"}
+			title={selectedChats.length > 0 ? t("selected", { count: selectedChats.length }) : t("chats")}
 			transparent={Platform.OS === "ios"}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
 			searchBarOptions={{
 				placement: "integratedButton",
-				placeholder: "tbd_search_chats",
+				placeholder: t("search_chats"),
 				onChangeText: e => setSearchQuery(e.nativeEvent.text),
 				onCancelButtonPress: () => setSearchQuery(""),
 				onClose: () => setSearchQuery(""),

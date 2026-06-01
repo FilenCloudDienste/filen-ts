@@ -15,8 +15,7 @@ export const auth = {
 	forgot_password: "Forgot password?",
 	/** Login screen — split sentence inviting sign-up; <link> wraps the tappable "Create one" that opens registration */
 	dont_have_an_account: "Don't have an account? <link>Create one</link>",
-	/** Two-factor prompt — dialog title shown after a password requires a 2FA code */
-	two_factor_authentication: "Two-factor authentication",
+	// two_factor_authentication lives in security.ts.
 	/** Two-factor prompt — dialog message asking for the 2FA code or a recovery key */
 	enter_two_factor_code_or_recovery_key: "Enter your two-factor code or recovery key",
 	/** Two-factor prompt — input placeholder for the 2FA code or recovery key field */
@@ -47,8 +46,7 @@ export const auth = {
 	password_strength_strong: "Strong",
 	/** Password-strength rating: strongest tier */
 	password_strength_best: "Best",
-	/** Registration form — inline error shown when the two password fields differ */
-	passwords_do_not_match: "Passwords do not match",
+	// passwords_do_not_match lives in common.ts.
 	/** Registration screen — primary submit button that creates the account */
 	create_account: "Create account",
 	/** Toast shown after an account has been created successfully */

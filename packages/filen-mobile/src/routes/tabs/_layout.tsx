@@ -6,6 +6,7 @@ import { useIsAuthed } from "@/lib/auth"
 import { memo } from "react"
 import useChatsUnreadCount from "@/hooks/useChatsUnreadCount"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
+import { useTranslation } from "react-i18next"
 
 const TabsLayout = memo(() => {
 	const bgBackground = useResolveClassNames("bg-background")
@@ -16,6 +17,7 @@ const TabsLayout = memo(() => {
 	const chatsUnreadCount = useChatsUnreadCount()
 	const contactRequestsQuery = useContactRequestsQuery()
 	const { theme } = useUniwind()
+	const { t } = useTranslation()
 
 	if (!isAuthed) {
 		return null
@@ -46,7 +48,7 @@ const TabsLayout = memo(() => {
 			})}
 		>
 			<NativeTabs.Trigger name="drive">
-				<NativeTabs.Trigger.Label>tbd_drive</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Label>{t("tab_drive")}</NativeTabs.Trigger.Label>
 				{Platform.select({
 					ios: <NativeTabs.Trigger.Icon sf="folder.fill" />,
 					default: (
@@ -62,7 +64,7 @@ const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="photos">
-				<NativeTabs.Trigger.Label>tbd_photos</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Label>{t("tab_photos")}</NativeTabs.Trigger.Label>
 				{Platform.select({
 					ios: <NativeTabs.Trigger.Icon sf="photo.fill" />,
 					default: (
@@ -78,7 +80,7 @@ const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="notes">
-				<NativeTabs.Trigger.Label>tbd_notes</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Label>{t("tab_notes")}</NativeTabs.Trigger.Label>
 				{Platform.select({
 					ios: <NativeTabs.Trigger.Icon sf="note.text" />,
 					default: (
@@ -94,7 +96,7 @@ const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="chats">
-				<NativeTabs.Trigger.Label>tbd_chats</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Label>{t("tab_chats")}</NativeTabs.Trigger.Label>
 				{chatsUnreadCount > 0 && <NativeTabs.Trigger.Badge>{chatsUnreadCount.toString()}</NativeTabs.Trigger.Badge>}
 				{Platform.select({
 					ios: <NativeTabs.Trigger.Icon sf="message.fill" />,
@@ -111,7 +113,7 @@ const TabsLayout = memo(() => {
 				})}
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="more">
-				<NativeTabs.Trigger.Label>tbd_more</NativeTabs.Trigger.Label>
+				<NativeTabs.Trigger.Label>{t("tab_more")}</NativeTabs.Trigger.Label>
 				{contactRequestsQuery.status === "success" && contactRequestsQuery.data.incoming.length > 0 && (
 					<NativeTabs.Trigger.Badge>{contactRequestsQuery.data.incoming.length.toString()}</NativeTabs.Trigger.Badge>
 				)}

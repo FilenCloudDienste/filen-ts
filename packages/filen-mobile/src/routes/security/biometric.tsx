@@ -15,6 +15,7 @@ import useLocalAuthenticationQuery from "@/queries/useLocalAuthentication.query"
 import Text from "@/components/ui/text"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import fileProvider, { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/lib/fileProvider"
+import { useTranslation } from "react-i18next"
 
 export type Biometric =
 	| {
@@ -30,6 +31,7 @@ export type Biometric =
 	  }
 
 const BiometricComponent = memo(() => {
+	const { t } = useTranslation()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -45,7 +47,7 @@ const BiometricComponent = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_biometric_authentication"
+				title={t("biometric_authentication")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -97,8 +99,8 @@ const BiometricComponent = memo(() => {
 								buttons={[
 									{
 										icon: "time-outline",
-										title: "tbd_biometric_authentication",
-										subTitle: "tbd_biometric_authentication_description",
+										title: t("biometric_authentication"),
+										subTitle: t("biometric_authentication_description"),
 										rightItem: {
 											type: "switch",
 											value: biometric.enabled,
@@ -119,10 +121,10 @@ const BiometricComponent = memo(() => {
 												if (fileProviderEnabled) {
 													const confirmProviderDisableResult = await run(async () => {
 														return await prompts.alert({
-															title: "tbd_biometric_disables_file_provider_title",
-															message: "tbd_biometric_disables_file_provider_message",
-															okText: "tbd_continue",
-															cancelText: "tbd_cancel"
+															title: t("biometric_disables_file_provider_title"),
+															message: t("biometric_disables_file_provider_message"),
+															okText: t("continue"),
+															cancelText: t("cancel")
 														})
 													})
 
@@ -153,10 +155,10 @@ const BiometricComponent = memo(() => {
 
 												const fallbackPromptResult = await run(async () => {
 													return await prompts.input({
-														title: "tbd_fallback_password",
-														message: "tbd_enter_fallback_password",
-														cancelText: "tbd_cancel",
-														okText: "tbd_continue",
+														title: t("fallback_password"),
+														message: t("enter_fallback_password"),
+														cancelText: t("cancel"),
+														okText: t("continue"),
 														inputType: "secure-text"
 													})
 												})
@@ -180,10 +182,10 @@ const BiometricComponent = memo(() => {
 
 												const confirmFallbackPasswordPromptResult = await run(async () => {
 													return await prompts.input({
-														title: "tbd_fallback_password",
-														message: "tbd_enter_confirm_fallback_password",
-														cancelText: "tbd_cancel",
-														okText: "tbd_save",
+														title: t("fallback_password"),
+														message: t("enter_confirm_fallback_password"),
+														cancelText: t("cancel"),
+														okText: t("save"),
 														inputType: "secure-text"
 													})
 												})
@@ -209,7 +211,7 @@ const BiometricComponent = memo(() => {
 												}
 
 												if (fallbackPassword !== confirmFallbackPassword) {
-													alerts.error("tbd_fallback_passwords_do_not_match")
+													alerts.error(t("fallback_passwords_do_not_match"))
 
 													return
 												}
@@ -233,8 +235,8 @@ const BiometricComponent = memo(() => {
 									buttons={[
 										{
 											icon: "time-outline",
-											title: "tbd_pin_only",
-											subTitle: "tbd_pin_only_description",
+											title: t("pin_only"),
+											subTitle: t("pin_only_description"),
 											rightItem: {
 												type: "switch",
 												value: biometric.pinOnly,
@@ -254,47 +256,47 @@ const BiometricComponent = memo(() => {
 										},
 										{
 											icon: "time-outline",
-											title: "tbd_lock_app_after",
+											title: t("lock_app_after"),
 											subTitle:
 												biometric.lockAfter === 0
-													? "tbd_immediately"
+													? t("immediately")
 													: biometric.lockAfter === 60
-														? "tbd_one_minute"
+														? t("one_minute")
 														: biometric.lockAfter === 60 * 5
-															? "tbd_five_minutes"
+															? t("five_minutes")
 															: biometric.lockAfter === 60 * 15
-																? "tbd_fifteen_minutes"
+																? t("fifteen_minutes")
 																: biometric.lockAfter === 60 * 30
-																	? "tbd_thirty_minutes"
+																	? t("thirty_minutes")
 																	: biometric.lockAfter === 60 * 60
-																		? "tbd_one_hour"
-																		: "tbd_lock_app_after_description",
+																		? t("one_hour")
+																		: t("lock_app_after_description"),
 											onPress: () => {
 												actionSheet.show({
 													buttons: [
 														...[
 															{
-																title: "tbd_immediately",
+																title: t("immediately"),
 																seconds: 0
 															},
 															{
-																title: "tbd_one_minute",
+																title: t("one_minute"),
 																seconds: 60
 															},
 															{
-																title: "tbd_five_minutes",
+																title: t("five_minutes"),
 																seconds: 60 * 5
 															},
 															{
-																title: "tbd_fifteen_minutes",
+																title: t("fifteen_minutes"),
 																seconds: 60 * 15
 															},
 															{
-																title: "tbd_thirty_minutes",
+																title: t("thirty_minutes"),
 																seconds: 60 * 30
 															},
 															{
-																title: "tbd_one_hour",
+																title: t("one_hour"),
 																seconds: 60 * 60
 															}
 														].map(option => ({
@@ -313,7 +315,7 @@ const BiometricComponent = memo(() => {
 															}
 														})),
 														{
-															title: "tbd_close",
+															title: t("close"),
 															cancel: true
 														}
 													]
@@ -326,7 +328,7 @@ const BiometricComponent = memo(() => {
 						</GestureHandlerScrollView>
 					) : (
 						<View className="flex-1 bg-transparent items-center justify-center px-10">
-							<Text className="text-center">tbd_biometric_auth_not_supported_on_device_no_hardware_or_not_enrolled</Text>
+							<Text className="text-center">{t("biometric_not_supported")}</Text>
 						</View>
 					)
 				) : (

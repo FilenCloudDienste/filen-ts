@@ -12,8 +12,10 @@ import useCameraUploadAlbumsQuery from "@/queries/useCameraUploadAlbums.query"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
+import { useTranslation } from "react-i18next"
 
 const Albums = memo(() => {
+	const { t } = useTranslation()
 	const { config, setConfig } = useCameraUpload()
 	const insets = useSafeAreaInsets()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -41,7 +43,7 @@ const Albums = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_albums"
+				title={t("albums")}
 				transparent={Platform.OS === "ios"}
 				backgroundColor={Platform.select({
 					ios: undefined,
@@ -140,7 +142,7 @@ const Albums = memo(() => {
 								size={64}
 								color={textMutedForeground.color}
 							/>
-							<Text>tbd_no_albums</Text>
+							<Text>{t("no_albums")}</Text>
 						</View>
 					)
 				) : (
@@ -150,7 +152,7 @@ const Albums = memo(() => {
 							size={64}
 							color={textMutedForeground.color}
 						/>
-						<Text>tbd_no_permissions_enable_manually</Text>
+						<Text>{t("no_permissions_enable_manually")}</Text>
 					</View>
 				)}
 			</SafeAreaView>

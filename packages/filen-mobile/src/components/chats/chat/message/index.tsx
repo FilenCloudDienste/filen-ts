@@ -1,4 +1,5 @@
 import { AnyFile, DirColor, MaybeEncryptedUniffi_Tags, DirMeta_Tags } from "@filen/sdk-rs"
+import { useTranslation } from "react-i18next"
 import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
@@ -27,8 +28,10 @@ import alerts from "@/lib/alerts"
 import drive from "@/lib/drive"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { cannotDecryptPlaceholder, messageDisplayBody } from "@/lib/decryption"
+import { t as i18nT } from "@/lib/i18n"
 
 const Typing = memo(({ chat }: { chat: TChat }) => {
+	const { t } = useTranslation()
 	const typing = useChatsStore(useShallow(state => state.typing[chat.uuid] ?? []))
 
 	const users = typing
@@ -47,7 +50,7 @@ const Typing = memo(({ chat }: { chat: TChat }) => {
 			className="w-full h-auto pb-2 px-4 items-start"
 		>
 			<View className="p-3 rounded-3xl max-w-3/4 bg-background-secondary">
-				<Text className="text-xs">{users.length > 1 ? `${users.join(", ")} tbd_typing...` : "..."}</Text>
+				<Text className="text-xs">{users.length > 1 ? t("typing_with_names", { names: users.join(", ") }) : t("typing")}</Text>
 			</View>
 		</AnimatedView>
 	)
@@ -105,7 +108,7 @@ const VideoAttachment = memo(
 						}
 
 						if (driveItem.data.decryptedMeta === null) {
-							alerts.normal("tbd_cannot_decrypt_toast")
+							alerts.normal(i18nT("cannot_decrypt_toast"))
 
 							return
 						}
@@ -223,7 +226,7 @@ const ImageAttachment = memo(
 						}
 
 						if (driveItem.data.decryptedMeta === null) {
-							alerts.normal("tbd_cannot_decrypt_toast")
+							alerts.normal(i18nT("cannot_decrypt_toast"))
 
 							return
 						}
@@ -328,7 +331,7 @@ const InternalAttachment = memo(
 				onPress={async () => {
 					if (data.type === "directory") {
 						if (data.info.root.inner.meta.tag !== DirMeta_Tags.Decoded) {
-							alerts.normal("tbd_cannot_decrypt_toast")
+							alerts.normal(i18nT("cannot_decrypt_toast"))
 
 							return
 						}
@@ -352,7 +355,7 @@ const InternalAttachment = memo(
 					}
 
 					if (data.file.name.tag !== MaybeEncryptedUniffi_Tags.Decrypted) {
-						alerts.normal("tbd_cannot_decrypt_toast")
+						alerts.normal(i18nT("cannot_decrypt_toast"))
 
 						return
 					}
@@ -382,7 +385,7 @@ const InternalAttachment = memo(
 					}
 
 					if (driveItem.data.decryptedMeta === null) {
-						alerts.normal("tbd_cannot_decrypt_toast")
+						alerts.normal(i18nT("cannot_decrypt_toast"))
 
 						return
 					}
@@ -736,6 +739,7 @@ const Message = memo(
 			height: number
 		}
 	}) => {
+		const { t } = useTranslation()
 		const stringifiedClient = useStringifiedClient()
 		const isInflightError = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""]))
 
@@ -788,7 +792,7 @@ const Message = memo(
 									numberOfLines={1}
 									ellipsizeMode="middle"
 								>
-									tbd_new
+									{t("new")}
 								</Text>
 							</View>
 							<View className="flex-1 bg-red-500 h-[0.5px]" />

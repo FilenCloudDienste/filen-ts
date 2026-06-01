@@ -31,8 +31,11 @@ import * as DocumentPicker from "expo-document-picker"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/lib/notesSelectors"
 import { serialize } from "@/lib/serializer"
+import { useTranslation } from "react-i18next"
+import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS } from "@/components/notes/note/menu"
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
+	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -61,7 +64,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			return null
 		}
 
-		return notesTagsQuery.data.find(t => t.uuid === tagUuid) ?? null
+		return notesTagsQuery.data.find(noteTag => noteTag.uuid === tagUuid) ?? null
 	})()
 
 	const viewMode = tag ? "notes" : notesViewMode
@@ -86,10 +89,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const createNote = async (type: NoteType) => {
 		const result = await run(async () => {
 			return await prompts.input({
-				title: "tbd_create_note",
-				message: "tbd_enter_note_name",
-				cancelText: "tbd_cancel",
-				okText: "tbd_create"
+				title: t("create_note"),
+				message: t("enter_note_name"),
+				cancelText: t("cancel"),
+				okText: t("create")
 			})
 		})
 
@@ -145,7 +148,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (onlyNotes.length > 0) {
 				menuButtons.push({
 					id: "selectAll",
-					title: selectedNotes.length === onlyNotes.length ? "tbd_deselect_all" : "tbd_select_all",
+					title: selectedNotes.length === onlyNotes.length ? t("deselect_all") : t("select_all"),
 					icon: "select",
 					onPress: () => {
 						if (selectedNotes.length === onlyNotes.length) {
@@ -162,11 +165,11 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedNotes.length === 0) {
 				menuButtons.push({
 					id: "create",
-					title: "tbd_create_note",
+					title: t("create_note"),
 					icon: "plus",
 					subButtons: [
 						{
-							title: "tbd_text",
+							title: t("note_type_text"),
 							id: "text",
 							icon: "text",
 							onPress: async () => {
@@ -174,7 +177,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 						},
 						{
-							title: "tbd_checklist",
+							title: t("note_type_checklist"),
 							id: "checklist",
 							icon: "checklist",
 							onPress: async () => {
@@ -182,7 +185,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 						},
 						{
-							title: "tbd_markdown",
+							title: t("note_type_markdown"),
 							id: "markdown",
 							icon: "markdown",
 							onPress: async () => {
@@ -190,7 +193,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 						},
 						{
-							title: "tbd_code",
+							title: t("note_type_code"),
 							id: "code",
 							icon: "code",
 							onPress: async () => {
@@ -198,7 +201,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							}
 						},
 						{
-							title: "tbd_richtext",
+							title: t("note_type_richtext"),
 							id: "richtext",
 							icon: "richtext",
 							onPress: async () => {
@@ -210,34 +213,13 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 				menuButtons.push({
 					id: "import",
-					title: "tbd_import_note",
+					title: t("import_note"),
 					icon: "export",
-					subButtons: [
-						{
-							type: NoteType.Text,
-							typeString: "text"
-						},
-						{
-							type: NoteType.Checklist,
-							typeString: "checklist"
-						},
-						{
-							type: NoteType.Code,
-							typeString: "code"
-						},
-						{
-							type: NoteType.Rich,
-							typeString: "rich"
-						},
-						{
-							type: NoteType.Md,
-							typeString: "md"
-						}
-					].map(
+					subButtons: NOTE_TYPE_OPTIONS.map(
 						({ type, typeString }) =>
 							({
 								id: `type_${typeString}`,
-								title: `tbd_${typeString}`,
+								title: t(NOTE_TYPE_LABEL_KEY[typeString]),
 								icon:
 									type === NoteType.Text
 										? "text"
@@ -276,7 +258,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 										const asset = documentPickerResult.data.assets[0]
 
 										if (!asset) {
-											alerts.error("tbd_file_not_found")
+											alerts.error(t("import_file_not_found"))
 
 											return
 										}
@@ -284,7 +266,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 										const assetFile = new FileSystem.File(asset.uri)
 
 										if (!assetFile.exists || assetFile.size === 0) {
-											alerts.error("tbd_file_not_found_or_empty")
+											alerts.error(t("import_file_not_found_or_empty"))
 
 											return
 										}
@@ -297,10 +279,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 										const promptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_import_note",
-												message: "tbd_enter_note_name",
-												cancelText: "tbd_cancel",
-												okText: "tbd_import"
+												title: t("import_note"),
+												message: t("enter_note_name"),
+												cancelText: t("cancel"),
+												okText: t("import")
 											})
 										})
 
@@ -353,7 +335,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					// Toggles (pin / favorite) sit first — one-tap, most-tapped.
 					menuButtons.push({
 						id: "bulkPin",
-						title: noteFlags.includesPinned ? "tbd_unpin_selected" : "tbd_pin_selected",
+						title: noteFlags.includesPinned ? t("unpin_selected") : t("pin_selected"),
 						icon: "pin",
 						requiresOnline: true,
 						onPress: async () => {
@@ -367,7 +349,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 					menuButtons.push({
 						id: "bulkFavorite",
-						title: noteFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+						title: noteFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
 						icon: "heart",
 						requiresOnline: true,
 						onPress: async () => {
@@ -382,35 +364,14 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					if (noteFlags.hasWriteAccessToAll) {
 						menuButtons.push({
 							id: "type",
-							title: "tbd_type_change_selected",
+							title: t("type_change_selected"),
 							icon: "text",
 							requiresOnline: true,
-							subButtons: [
-								{
-									type: NoteType.Text,
-									typeString: "text"
-								},
-								{
-									type: NoteType.Checklist,
-									typeString: "checklist"
-								},
-								{
-									type: NoteType.Code,
-									typeString: "code"
-								},
-								{
-									type: NoteType.Rich,
-									typeString: "rich"
-								},
-								{
-									type: NoteType.Md,
-									typeString: "md"
-								}
-							].map(
+							subButtons: NOTE_TYPE_OPTIONS.map(
 								({ type, typeString }) =>
 									({
 										id: `type_${typeString}`,
-										title: `tbd_${typeString}`,
+										title: t(NOTE_TYPE_LABEL_KEY[typeString]),
 										icon:
 											type === NoteType.Text
 												? "text"
@@ -448,7 +409,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					// from the per-note flow and lacked a removal path.
 					menuButtons.push({
 						id: "bulkTag",
-						title: "tbd_bulk_tag_selected",
+						title: t("bulk_tag_selected"),
 						icon: "tag",
 						requiresOnline: true,
 						onPress: () => {
@@ -463,7 +424,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 					menuButtons.push({
 						id: "bulkDuplicate",
-						title: "tbd_duplicate_selected",
+						title: t("duplicate_selected"),
 						icon: "duplicate",
 						requiresOnline: true,
 						onPress: async () => {
@@ -477,7 +438,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 					menuButtons.push({
 						id: "bulkExport",
-						title: "tbd_export_selected",
+						title: t("export_selected"),
 						icon: "export",
 						requiresOnline: true,
 						onPress: async () => {
@@ -543,7 +504,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					if (!noteFlags.includesArchived && !noteFlags.includesTrashed && !noteFlags.includesUndecryptable) {
 						menuButtons.push({
 							id: "bulkArchive",
-							title: "tbd_archive_selected",
+							title: t("archive_selected"),
 							icon: "archive",
 							requiresOnline: true,
 							onPress: async () => {
@@ -563,7 +524,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					if (noteFlags.everyArchivedOrTrashed && (!noteFlags.includesUndecryptable || noteFlags.everyTrashed)) {
 						menuButtons.push({
 							id: "bulkRestore",
-							title: "tbd_restore_selected",
+							title: t("restore_selected"),
 							icon: "restore",
 							requiresOnline: true,
 							onPress: async () => {
@@ -580,7 +541,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					if (!noteFlags.includesTrashed) {
 						menuButtons.push({
 							id: "bulkTrash",
-							title: "tbd_trash_selected",
+							title: t("trash_selected"),
 							icon: "trash",
 							destructive: true,
 							requiresOnline: true,
@@ -589,10 +550,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 									items: selectedNotes,
 									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 									confirm: {
-										title: "tbd_trash_selected",
-										message: "tbd_are_you_sure_trash_selected_notes",
-										okText: "tbd_trash",
-										cancelText: "tbd_cancel",
+										title: t("trash_selected"),
+										message: t("are_you_sure_trash_selected_notes"),
+										okText: t("trash"),
+										cancelText: t("cancel"),
 										destructive: true
 									},
 									op: n => notesLib.trash({ note: n })
@@ -605,7 +566,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 					if (noteFlags.everyTrashed) {
 						menuButtons.push({
 							id: "bulkDelete",
-							title: "tbd_delete_selected",
+							title: t("delete_selected"),
 							icon: "delete",
 							destructive: true,
 							requiresOnline: true,
@@ -614,10 +575,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 									items: selectedNotes,
 									clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 									confirm: {
-										title: "tbd_delete_selected",
-										message: "tbd_are_you_sure_delete_selected_notes",
-										okText: "tbd_delete",
-										cancelText: "tbd_cancel",
+										title: t("delete_selected"),
+										message: t("are_you_sure_delete_selected_notes"),
+										okText: t("delete"),
+										cancelText: t("cancel"),
 										destructive: true
 									},
 									op: n => notesLib.delete({ note: n })
@@ -630,7 +591,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 				if (noteFlags.participantOfEveryAndNotOwner) {
 					menuButtons.push({
 						id: "bulkLeave",
-						title: "tbd_leave_selected",
+						title: t("leave_selected"),
 						icon: "exit",
 						destructive: true,
 						requiresOnline: true,
@@ -639,10 +600,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 								items: selectedNotes,
 								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 								confirm: {
-									title: "tbd_leave_selected",
-									message: "tbd_are_you_sure_leave_selected_notes",
-									okText: "tbd_leave",
-									cancelText: "tbd_cancel",
+									title: t("leave_selected"),
+									message: t("are_you_sure_leave_selected_notes"),
+									okText: t("leave"),
+									cancelText: t("cancel"),
 									destructive: true
 								},
 								op: n => notesLib.leave({ note: n })
@@ -655,7 +616,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (notesTags.length > 0) {
 				menuButtons.push({
 					id: "selectAll",
-					title: selectedTags.length === notesTags.length ? "tbd_deselect_all" : "tbd_select_all",
+					title: selectedTags.length === notesTags.length ? t("deselect_all") : t("select_all"),
 					icon: "select",
 					onPress: () => {
 						if (selectedTags.length === notesTags.length) {
@@ -672,21 +633,21 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedTags.length > 0) {
 				menuButtons.push({
 					id: "bulkFavorite",
-					title: tagFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+					title: tagFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
 					icon: "heart",
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({
 							items: selectedTags,
 							clearSelection: () => useNotesStore.getState().clearSelectedTags(),
-							op: t => notesLib.favoriteTag({ tag: t, favorite: !tagFlags.includesFavorited })
+							op: selectedTag => notesLib.favoriteTag({ tag: selectedTag, favorite: !tagFlags.includesFavorited })
 						})
 					}
 				})
 
 				menuButtons.push({
 					id: "bulkDelete",
-					title: "tbd_delete_selected",
+					title: t("delete_selected"),
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
@@ -695,13 +656,13 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedTags,
 							clearSelection: () => useNotesStore.getState().clearSelectedTags(),
 							confirm: {
-								title: "tbd_delete_all_tags",
-								message: "tbd_delete_all_tags_confirmation",
-								okText: "tbd_delete_all",
-								cancelText: "tbd_cancel",
+								title: t("delete_all_tags_title"),
+								message: t("delete_all_tags_confirmation"),
+								okText: t("delete_all_tags"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
-							op: t => notesLib.deleteTag({ tag: t })
+							op: selectedTag => notesLib.deleteTag({ tag: selectedTag })
 						})
 					}
 				})
@@ -711,15 +672,15 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		if (selectedNotes.length === 0 && selectedTags.length === 0) {
 			menuButtons.push({
 				id: "createTag",
-				title: "tbd_create_tag",
+				title: t("create_tag"),
 				icon: "tag",
 				onPress: async () => {
 					const result = await run(async () => {
 						return await prompts.input({
-							title: "tbd_create_tag",
-							message: "tbd_enter_tag_name",
-							cancelText: "tbd_cancel",
-							okText: "tbd_create"
+							title: t("create_tag"),
+							message: t("enter_tag_name"),
+							cancelText: t("cancel"),
+							okText: t("create")
 						})
 					})
 
@@ -759,11 +720,11 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		if (!tag && selectedNotes.length === 0 && selectedTags.length === 0) {
 			menuButtons.push({
 				id: "viewMode",
-				title: "tbd_viewMode",
+				title: t("view_mode"),
 				icon: notesViewMode === "notes" ? "list" : "tag",
 				subButtons: [
 					{
-						title: "tbd_notes_view",
+						title: t("notes_view"),
 						id: "notesView",
 						icon: "list",
 						checked: notesViewMode === "notes",
@@ -775,7 +736,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 						}
 					},
 					{
-						title: "tbd_tags_view",
+						title: t("tags_view"),
 						id: "tagsView",
 						icon: "tag",
 						checked: notesViewMode === "tags",
@@ -838,16 +799,16 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const title = (() => {
 		if (viewMode === "notes") {
 			if (selectedNotes.length > 0) {
-				return `${selectedNotes.length} tbd_selected`
+				return t("selected", { count: selectedNotes.length })
 			}
 
-			return "tbd_notes"
+			return t("notes")
 		} else {
 			if (selectedTags.length > 0) {
-				return `${selectedTags.length} tbd_selected`
+				return t("selected", { count: selectedTags.length })
 			}
 
-			return "tbd_tags"
+			return t("tags")
 		}
 	})()
 
@@ -859,7 +820,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			rightItems={headerRightItems}
 			searchBarOptions={{
 				placement: "integratedButton",
-				placeholder: viewMode === "notes" ? "tbd_search_notes" : "tbd_search_tags",
+				placeholder: viewMode === "notes" ? t("search_notes") : t("search_tags"),
 				onChangeText: e => setSearchQuery(e.nativeEvent.text),
 				onCancelButtonPress: () => setSearchQuery(""),
 				onClose: () => setSearchQuery(""),
@@ -880,6 +841,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 })
 
 const Notes = memo(() => {
+	const { t } = useTranslation()
 	const notesQuery = useNotesWithContentQuery()
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
 	const { tagUuid } = useLocalSearchParams<{
@@ -893,7 +855,7 @@ const Notes = memo(() => {
 			return null
 		}
 
-		return notesTagsQuery.data.find(t => t.uuid === tagUuid) ?? null
+		return notesTagsQuery.data.find(noteTag => noteTag.uuid === tagUuid) ?? null
 	})()
 
 	const notes = ((): NoteListItem[] => {
@@ -1038,14 +1000,14 @@ const Notes = memo(() => {
 	const notesEmptyComponent = () => (
 		<ListEmpty
 			icon="document-text-outline"
-			title="tbd_no_notes"
+			title={t("no_notes")}
 		/>
 	)
 
 	const tagsEmptyComponent = () => (
 		<ListEmpty
 			icon="pricetag-outline"
-			title="tbd_no_tags"
+			title={t("no_tags")}
 		/>
 	)
 

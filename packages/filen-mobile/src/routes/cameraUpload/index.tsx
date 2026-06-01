@@ -18,8 +18,10 @@ import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { AnyNormalDir_Tags } from "@filen/sdk-rs"
 import useIsOnline from "@/hooks/useIsOnline"
+import { useTranslation } from "react-i18next"
 
 const CameraUpload = memo(() => {
+	const { t } = useTranslation()
 	const { config, setConfig } = useCameraUpload()
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -45,7 +47,7 @@ const CameraUpload = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_camera_upload"
+				title={t("camera_upload")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -98,7 +100,7 @@ const CameraUpload = memo(() => {
 							buttons={[
 								{
 									icon: "time-outline",
-									title: "tbd_enabled",
+									title: t("enabled"),
 									rightItem: {
 										type: "switch",
 										value: config.enabled,
@@ -126,8 +128,8 @@ const CameraUpload = memo(() => {
 									buttons={[
 										{
 											icon: "time-outline",
-											title: "tbd_albums",
-											subTitle: "tbd_albums_description",
+											title: t("albums"),
+											subTitle: t("albums_description"),
 											onPress: () => {
 												router.push("/cameraUpload/albums")
 											},
@@ -138,13 +140,13 @@ const CameraUpload = memo(() => {
 										},
 										{
 											icon: "time-outline",
-											title: "tbd_cloud_directory",
+											title: t("cloud_directory"),
 											disabled: !isOnline,
 											subTitle: config.remoteDir
 												? config.remoteDir.tag === AnyNormalDir_Tags.Root
-													? "tbd_cloud_directory_root_description"
-													: (unwrapDirMeta(config.remoteDir).meta?.name ?? "tbd_cloud_directory_description")
-												: "tbd_cloud_directory_description",
+													? t("cloud_directory_root_description")
+													: (unwrapDirMeta(config.remoteDir).meta?.name ?? t("cloud_directory_description"))
+												: t("cloud_directory_description"),
 											rightItem: {
 												type: "badge",
 												value: (
@@ -221,8 +223,8 @@ const CameraUpload = memo(() => {
 									buttons={[
 										{
 											icon: "time-outline",
-											title: "tbd_videos",
-											subTitle: "tbd_videos_description",
+											title: t("videos"),
+											subTitle: t("videos_description"),
 											rightItem: {
 												type: "switch",
 												value: config.includeVideos,
@@ -243,8 +245,8 @@ const CameraUpload = memo(() => {
 										},
 										{
 											icon: "time-outline",
-											title: "tbd_cellular",
-											subTitle: "tbd_cellular_description",
+											title: t("cellular"),
+											subTitle: t("cellular_description"),
 											rightItem: {
 												type: "switch",
 												value: config.cellular,
@@ -265,8 +267,8 @@ const CameraUpload = memo(() => {
 										},
 										{
 											icon: "time-outline",
-											title: "tbd_background",
-											subTitle: "tbd_background_description",
+											title: t("background"),
+											subTitle: t("background_description"),
 											rightItem: {
 												type: "switch",
 												value: config.background,
@@ -287,8 +289,8 @@ const CameraUpload = memo(() => {
 										},
 										{
 											icon: "time-outline",
-											title: "tbd_low_battery",
-											subTitle: "tbd_low_battery_description",
+											title: t("low_battery"),
+											subTitle: t("low_battery_description"),
 											rightItem: {
 												type: "switch",
 												value: config.lowBattery,
@@ -309,8 +311,8 @@ const CameraUpload = memo(() => {
 										},
 										{
 											icon: "time-outline",
-											title: "tbd_compress",
-											subTitle: "tbd_compress_description",
+											title: t("compress"),
+											subTitle: t("compress_description"),
 											rightItem: {
 												type: "switch",
 												value: config.compress,
@@ -331,8 +333,8 @@ const CameraUpload = memo(() => {
 										},
 										{
 											icon: "time-outline",
-											title: "tbd_after_activation",
-											subTitle: "tbd_after_activation_description",
+											title: t("after_activation"),
+											subTitle: t("after_activation_description"),
 											rightItem: {
 												type: "switch",
 												value: config.afterActivation,
@@ -363,7 +365,7 @@ const CameraUpload = memo(() => {
 							size={64}
 							color={textMutedForeground.color}
 						/>
-						<Text>tbd_no_permissions_enable_manually</Text>
+						<Text>{t("no_permissions_enable_manually")}</Text>
 					</View>
 				)}
 			</SafeAreaView>

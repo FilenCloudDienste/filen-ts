@@ -25,8 +25,10 @@ import { useKeyboardState } from "react-native-keyboard-controller"
 import { NoteType } from "@filen/sdk-rs"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
+import { useTranslation } from "react-i18next"
 
 const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
+	const { t } = useTranslation()
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
@@ -98,10 +100,10 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 
 									const result = await run(async () => {
 										return await prompts.alert({
-											title: "tbd_restore_note",
-											message: "tbd_are_you_sure_restore_note",
-											cancelText: "tbd_cancel",
-											okText: "tbd_drestore",
+											title: t("restore_note"),
+											message: t("are_you_sure_restore_note"),
+											cancelText: t("cancel"),
+											okText: t("restore"),
 											destructive: true
 										})
 									})

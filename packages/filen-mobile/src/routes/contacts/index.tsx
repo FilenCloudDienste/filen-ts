@@ -4,6 +4,7 @@ import { onlineManager } from "@tanstack/react-query"
 import { fastLocaleCompare, run, cn } from "@filen/utils"
 import { Fragment, useState, memo, useCallback } from "react"
 import { Platform } from "react-native"
+import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
@@ -116,6 +117,7 @@ function useSelectOptions() {
 }
 
 const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -168,7 +170,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		if (inBulkMode) {
 			menuButtons.push({
 				id: "selectAll",
-				title: "tbd_deselect_all",
+				title: t("deselect_all"),
 				icon: "select",
 				onPress: () => {
 					useContactsStore.getState().clearSelectedContacts()
@@ -182,7 +184,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedByType.blocked.length > 0) {
 				menuButtons.push({
 					id: "bulkUnblock",
-					title: `tbd_unblock (${selectedByType.blocked.length})`,
+					title: t("bulk_unblock", { count: selectedByType.blocked.length }),
 					icon: "select",
 					requiresOnline: true,
 					onPress: async () => {
@@ -190,10 +192,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedByType.blocked,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
 							confirm: {
-								title: "tbd_unblock",
-								message: "tbd_unblock_selected_confirmation",
-								okText: "tbd_unblock",
-								cancelText: "tbd_cancel"
+								title: t("unblock"),
+								message: t("unblock_selected_confirmation"),
+								okText: t("unblock"),
+								cancelText: t("cancel")
 							},
 							op: c => contacts.unblock({ uuid: c.data.uuid })
 						})
@@ -204,7 +206,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedByType.incoming.length > 0) {
 				menuButtons.push({
 					id: "bulkAcceptIncoming",
-					title: `tbd_accept (${selectedByType.incoming.length})`,
+					title: t("bulk_accept", { count: selectedByType.incoming.length }),
 					icon: "checkmark",
 					requiresOnline: true,
 					onPress: async () => {
@@ -229,7 +231,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedByType.contacts.length > 0) {
 				menuButtons.push({
 					id: "bulkRemoveContacts",
-					title: `tbd_remove (${selectedByType.contacts.length})`,
+					title: t("bulk_remove", { count: selectedByType.contacts.length }),
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
@@ -238,10 +240,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedByType.contacts,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
 							confirm: {
-								title: "tbd_remove",
-								message: "tbd_remove_selected_contacts_confirmation",
-								okText: "tbd_remove",
-								cancelText: "tbd_cancel",
+								title: t("remove"),
+								message: t("remove_selected_contacts_confirmation"),
+								okText: t("remove"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: c => contacts.delete({ uuid: c.data.uuid })
@@ -251,7 +253,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 				menuButtons.push({
 					id: "bulkBlockContacts",
-					title: `tbd_block (${selectedByType.contacts.length})`,
+					title: t("bulk_block", { count: selectedByType.contacts.length }),
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
@@ -260,10 +262,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedByType.contacts,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
 							confirm: {
-								title: "tbd_block",
-								message: "tbd_block_selected_contacts_confirmation",
-								okText: "tbd_block",
-								cancelText: "tbd_cancel",
+								title: t("block"),
+								message: t("block_selected_contacts_confirmation"),
+								okText: t("block"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: c => contacts.block({ email: (c.data as TContact).email })
@@ -275,7 +277,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedByType.incoming.length > 0) {
 				menuButtons.push({
 					id: "bulkDenyIncoming",
-					title: `tbd_deny (${selectedByType.incoming.length})`,
+					title: t("bulk_deny", { count: selectedByType.incoming.length }),
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
@@ -284,10 +286,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedByType.incoming,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
 							confirm: {
-								title: "tbd_deny",
-								message: "tbd_deny_selected_requests_confirmation",
-								okText: "tbd_deny",
-								cancelText: "tbd_cancel",
+								title: t("deny"),
+								message: t("deny_selected_requests_confirmation"),
+								okText: t("deny"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: c => contacts.denyRequest({ uuid: c.data.uuid })
@@ -299,7 +301,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			if (selectedByType.outgoing.length > 0) {
 				menuButtons.push({
 					id: "bulkCancelOutgoing",
-					title: `tbd_cancel_request (${selectedByType.outgoing.length})`,
+					title: t("bulk_cancel_request", { count: selectedByType.outgoing.length }),
 					icon: "cancel",
 					destructive: true,
 					requiresOnline: true,
@@ -308,10 +310,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 							items: selectedByType.outgoing,
 							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
 							confirm: {
-								title: "tbd_cancel_request",
-								message: "tbd_cancel_selected_outgoing_confirmation",
-								okText: "tbd_cancel_request",
-								cancelText: "tbd_cancel",
+								title: t("cancel_request"),
+								message: t("cancel_selected_outgoing_confirmation"),
+								okText: t("cancel_request"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: c => contacts.cancelRequest({ uuid: c.data.uuid })
@@ -322,16 +324,16 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		} else {
 			menuButtons.push({
 				id: "add",
-				title: "tbd_add_contact",
+				title: t("add_contact"),
 				icon: "plus",
 				requiresOnline: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.input({
-							title: "tbd_add_contact",
-							message: "tbd_enter_contact_filen_email",
-							cancelText: "tbd_cancel",
-							okText: "tbd_add"
+							title: t("add_contact"),
+							message: t("enter_contact_filen_email"),
+							cancelText: t("cancel"),
+							okText: t("add")
 						})
 					})
 
@@ -430,7 +432,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 		] satisfies HeaderItem[]
 	})()
 
-	const title = inBulkMode ? `${selectedAll.length} tbd_selected` : "tbd_contacts"
+	const title = inBulkMode ? t("selected", { count: selectedAll.length }) : t("contacts")
 
 	return (
 		<StackHeader
@@ -444,7 +446,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			rightItems={headerRightItems}
 			searchBarOptions={{
 				placement: "integratedButton",
-				placeholder: "tbd_search_contacts",
+				placeholder: t("search_contacts"),
 				onChangeText: e => setSearchQuery(e.nativeEvent.text),
 				onCancelButtonPress: () => setSearchQuery(""),
 				onClose: () => setSearchQuery(""),
@@ -474,6 +476,7 @@ const Contact = memo(
 		nextItem?: ContactListItemWithHeader
 		prevItem?: ContactListItemWithHeader
 	}) => {
+		const { t } = useTranslation()
 		const selectOptions = useSelectOptions()
 		const isSelected = useContactsStore(
 			useShallow(state => state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid))
@@ -506,30 +509,30 @@ const Contact = memo(
 				switch (info.item.type) {
 					case "incomingRequest": {
 						return await prompts.alert({
-							title: "tbd_deny_request_contact",
-							message: "tbd_deny_request_contact_confirmation",
-							cancelText: "tbd_cancel",
-							okText: "tbd_deny_request",
+							title: t("deny_request_contact"),
+							message: t("deny_request_contact_confirmation"),
+							cancelText: t("cancel"),
+							okText: t("deny_request"),
 							destructive: true
 						})
 					}
 
 					case "outgoingRequest": {
 						return await prompts.alert({
-							title: "tbd_cancel_request_contact",
-							message: "tbd_cancel_request_contact_confirmation",
-							cancelText: "tbd_cancel",
-							okText: "tbd_cancel_request",
+							title: t("cancel_request_contact"),
+							message: t("cancel_request_contact_confirmation"),
+							cancelText: t("cancel"),
+							okText: t("cancel_request"),
 							destructive: true
 						})
 					}
 
 					case "blocked": {
 						return await prompts.alert({
-							title: "tbd_unblock_contact",
-							message: "tbd_unblock_contact_confirmation",
-							cancelText: "tbd_cancel",
-							okText: "tbd_unblock"
+							title: t("unblock_contact"),
+							message: t("unblock_contact_confirmation"),
+							cancelText: t("cancel"),
+							okText: t("unblock")
 						})
 					}
 
@@ -599,7 +602,7 @@ const Contact = memo(
 				const target = info.item
 				buttons.push({
 					id: isSelected ? "deselect" : "select",
-					title: isSelected ? "tbd_deselect" : "tbd_select",
+					title: isSelected ? t("deselect") : t("select"),
 					icon: "select",
 					checked: isSelected,
 					onPress: () => {
@@ -615,16 +618,16 @@ const Contact = memo(
 				buttons.push({
 					id: "remove",
 					requiresOnline: true,
-					title: "tbd_remove",
+					title: t("remove"),
 					destructive: true,
 					icon: "delete",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_remove_contact",
-								message: "tbd_remove_contact_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_remove",
+								title: t("remove_contact"),
+								message: t("remove_contact_confirmation"),
+								cancelText: t("cancel"),
+								okText: t("remove"),
 								destructive: true
 							})
 						})
@@ -662,16 +665,16 @@ const Contact = memo(
 				buttons.push({
 					id: "block",
 					requiresOnline: true,
-					title: "tbd_block",
+					title: t("block"),
 					destructive: true,
 					icon: "delete",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_block_contact",
-								message: "tbd_block_contact_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_block",
+								title: t("block_contact"),
+								message: t("block_contact_confirmation"),
+								cancelText: t("cancel"),
+								okText: t("block"),
 								destructive: true
 							})
 						})
@@ -712,15 +715,15 @@ const Contact = memo(
 				buttons.push({
 					id: "unblock",
 					requiresOnline: true,
-					title: "tbd_unblock",
+					title: t("unblock"),
 					icon: "select",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_unblock_contact",
-								message: "tbd_unblock_contact_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_unblock"
+								title: t("unblock_contact"),
+								message: t("unblock_contact_confirmation"),
+								cancelText: t("cancel"),
+								okText: t("unblock")
 							})
 						})
 
@@ -759,7 +762,7 @@ const Contact = memo(
 				buttons.push({
 					id: "accept",
 					requiresOnline: true,
-					title: "tbd_accept",
+					title: t("accept"),
 					icon: "checkmark",
 					onPress: async () => {
 						const result = await runWithLoading(async () => {
@@ -784,16 +787,16 @@ const Contact = memo(
 				buttons.push({
 					id: "deny",
 				requiresOnline: true,
-					title: "tbd_deny",
+					title: t("deny"),
 					destructive: true,
 					icon: "delete",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_deny_contact",
-								message: "tbd_deny_contact_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_deny",
+								title: t("deny_contact"),
+								message: t("deny_contact_confirmation"),
+								cancelText: t("cancel"),
+								okText: t("deny"),
 								destructive: true
 							})
 						})
@@ -833,16 +836,16 @@ const Contact = memo(
 				buttons.push({
 					id: "cancel",
 					requiresOnline: true,
-					title: "tbd_cancel",
+					title: t("cancel"),
 					destructive: true,
 					icon: "cancel",
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_cancel_contact",
-								message: "tbd_cancel_contact_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_cancel",
+								title: t("cancel_contact"),
+								message: t("cancel_contact_confirmation"),
+								cancelText: t("cancel"),
+								okText: t("cancel"),
 								destructive: true
 							})
 						})
@@ -1034,6 +1037,7 @@ const Contact = memo(
 )
 
 const Contacts = memo(() => {
+	const { t } = useTranslation()
 	const contactsQuery = useContactsQuery()
 	const contactRequestsQuery = useContactRequestsQuery()
 	const [searchQuery, setSearchQuery] = useState<string>("")
@@ -1051,7 +1055,7 @@ const Contacts = memo(() => {
 							type: "header",
 							data: {
 								id: "requests",
-								title: "tbd_contacts_requests"
+								title: t("contacts_requests")
 							}
 						} satisfies ContactListItemWithHeader
 					]
@@ -1068,7 +1072,7 @@ const Contacts = memo(() => {
 							type: "header",
 							data: {
 								id: "pending",
-								title: "tbd_contacts_pending"
+								title: t("contacts_pending")
 							}
 						} satisfies ContactListItemWithHeader
 					]
@@ -1085,7 +1089,7 @@ const Contacts = memo(() => {
 							type: "header",
 							data: {
 								id: "contacts",
-								title: "tbd_contact_contacts"
+								title: t("contact_contacts")
 							}
 						} satisfies ContactListItemWithHeader
 					]
@@ -1102,7 +1106,7 @@ const Contacts = memo(() => {
 							type: "header",
 							data: {
 								id: "blocked",
-								title: "tbd_contact_blocked"
+								title: t("contact_blocked")
 							}
 						} satisfies ContactListItemWithHeader
 					]
@@ -1193,7 +1197,7 @@ const Contacts = memo(() => {
 	const emptyComponent = () => (
 		<ListEmpty
 			icon="people-outline"
-			title="tbd_no_contacts"
+			title={t("no_contacts")}
 		/>
 	)
 

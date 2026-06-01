@@ -9,6 +9,7 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, memo, useCallback } from "react"
+import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { run, formatBytes, cn } from "@filen/utils"
 import useDriveItemVersionsQuery from "@/queries/useDriveItemVersions.query"
@@ -32,6 +33,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 
 const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const isSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.some(v => v.uuid === version.uuid)))
 	const areVersionsSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.length > 0))
@@ -79,7 +81,7 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 						buttons={[
 							{
 								id: "select",
-								title: isSelected ? "tbd_deselect" : "tbd_select",
+								title: isSelected ? t("deselect") : t("select"),
 								icon: "select",
 								checked: isSelected,
 								onPress: () => {
@@ -88,16 +90,16 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 							},
 							{
 								id: "restore",
-								title: "tbd_restore",
+								title: t("restore"),
 								icon: "restore",
 								requiresOnline: true,
 								onPress: async () => {
 									const promptResponse = await run(async () => {
 										return await prompts.alert({
-											title: "tbd_restore_version",
-											message: "tbd_restore_version_confirmation",
-											cancelText: "tbd_cancel",
-											okText: "tbd_restore",
+											title: t("restore_version"),
+											message: t("restore_version_confirmation"),
+											cancelText: t("cancel"),
+											okText: t("restore"),
 											destructive: true
 										})
 									})
@@ -130,17 +132,17 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 							},
 							{
 								id: "delete",
-								title: "tbd_delete",
+								title: t("delete"),
 								icon: "delete",
 								destructive: true,
 								requiresOnline: true,
 								onPress: async () => {
 									const promptResponse = await run(async () => {
 										return await prompts.alert({
-											title: "tbd_delete_version",
-											message: "tbd_delete_version_confirmation",
-											cancelText: "tbd_cancel",
-											okText: "tbd_delete",
+											title: t("delete_version"),
+											message: t("delete_version_confirmation"),
+											cancelText: t("cancel"),
+											okText: t("delete"),
 											destructive: true
 										})
 									})
@@ -190,6 +192,7 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 })
 
 const FileVersions = memo(() => {
+	const { t } = useTranslation()
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
@@ -246,7 +249,7 @@ const FileVersions = memo(() => {
 			const menuButtons: MenuButton[] = [
 				{
 					id: "selectAll",
-					title: selectedVersions.length === versions.length ? "tbd_deselect_all" : "tbd_select_all",
+					title: selectedVersions.length === versions.length ? t("deselect_all") : t("select_all"),
 					icon: "select",
 					onPress: () => {
 						if (selectedVersions.length === versions.length) {
@@ -260,7 +263,7 @@ const FileVersions = memo(() => {
 				},
 				{
 					id: "bulkDelete",
-					title: "tbd_delete_selected",
+					title: t("delete_selected"),
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
@@ -269,10 +272,10 @@ const FileVersions = memo(() => {
 							items: selectedVersions,
 							clearSelection: () => useFileVersionsStore.getState().clearSelectedVersions(),
 							confirm: {
-								title: "tbd_delete_selected",
-								message: "tbd_delete_selected_versions_confirmation",
-								okText: "tbd_delete",
-								cancelText: "tbd_cancel",
+								title: t("delete_selected"),
+								message: t("delete_selected_versions_confirmation"),
+								okText: t("delete"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: version => drive.deleteVersion({ item, version })
@@ -317,10 +320,10 @@ const FileVersions = memo(() => {
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_delete__all_cversion",
-								message: "tbd_delete_version_c_all_confirmation",
-								cancelText: "tbd_cancel",
-								okText: "tbd_delete_all_c",
+								title: t("delete_all_versions"),
+								message: t("delete_all_versions_confirmation"),
+								cancelText: t("cancel"),
+								okText: t("delete_all"),
 								destructive: true
 							})
 						})
@@ -402,7 +405,7 @@ const FileVersions = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title={inSelectionMode ? `${selectedVersions.length} tbd_selected` : "tbd_file_versions"}
+				title={inSelectionMode ? t("selected", { count: selectedVersions.length }) : t("file_versions")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -441,7 +444,7 @@ const FileVersions = memo(() => {
 					emptyComponent={() => (
 						<ListEmpty
 							icon="time-outline"
-							title="tbd_no_file_versions"
+							title={t("no_file_versions")}
 						/>
 					)}
 					renderItem={({ item: version }) => {

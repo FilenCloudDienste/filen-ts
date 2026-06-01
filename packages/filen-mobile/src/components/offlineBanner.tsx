@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from "react"
 import { View } from "react-native"
+import { useTranslation } from "react-i18next"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -12,6 +13,7 @@ import { useIsAuthed } from "@/lib/auth"
 type Status = "online" | "offline" | "back-online"
 
 const Banner = memo(({ status }: { status: Exclude<Status, "online"> }) => {
+	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const isOffline = status === "offline"
 
@@ -28,7 +30,7 @@ const Banner = memo(({ status }: { status: Exclude<Status, "online"> }) => {
 					size={16}
 					color="white"
 				/>
-				<Text className="ml-2 text-sm leading-5 text-white">{isOffline ? "tbd_offline" : "tbd_back_online"}</Text>
+				<Text className="ml-2 text-sm leading-5 text-white">{isOffline ? t("youre_offline") : t("back_online")}</Text>
 			</View>
 		</Animated.View>
 	)

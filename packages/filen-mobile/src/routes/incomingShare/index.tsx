@@ -1,5 +1,6 @@
 import { useIncomingShare, type ResolvedSharePayload } from "expo-sharing"
 import { Platform } from "react-native"
+import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -76,6 +77,7 @@ const Payload = memo(({ payload }: { payload: ResolvedSharePayload }) => {
 })
 
 const IncomingShare = memo(() => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const insets = useSafeAreaInsets()
@@ -136,7 +138,7 @@ const IncomingShare = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_saved_shares"
+				title={t("saved_shares")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -315,12 +317,12 @@ const IncomingShare = memo(() => {
 						error ? (
 							<ListEmpty
 								icon="warning-outline"
-								title="tbd_error_resolving_shares"
+								title={t("error_resolving_shares")}
 							/>
 						) : (
 							<ListEmpty
 								icon="time-outline"
-								title="tbd_no_resolved_shares"
+								title={t("no_resolved_shares")}
 							/>
 						)
 					}

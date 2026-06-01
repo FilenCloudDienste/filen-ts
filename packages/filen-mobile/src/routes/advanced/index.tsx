@@ -18,6 +18,8 @@ import audioCache from "@/lib/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
 import offline from "@/lib/offline"
 import useCacheSizesQuery, { invalidateCacheSizesQuery } from "@/queries/useCacheSizes.query"
+import { useTranslation } from "react-i18next"
+import i18n from "@/lib/i18n"
 
 const SIZE_LOADING_PLACEHOLDER = "…"
 
@@ -56,8 +58,8 @@ async function confirmAndRun(options: {
 		return await prompts.alert({
 			title: options.title,
 			message: options.message,
-			okText: "tbd_clear",
-			cancelText: "tbd_cancel",
+			okText: i18n.t("clear"),
+			cancelText: i18n.t("cancel"),
 			destructive: true
 		})
 	})
@@ -94,6 +96,7 @@ const Advanced = memo(() => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
+	const { t } = useTranslation()
 
 	const cacheSizesQuery = useCacheSizesQuery()
 	const sizes = cacheSizesQuery.data
@@ -103,13 +106,17 @@ const Advanced = memo(() => {
 			return SIZE_LOADING_PLACEHOLDER
 		}
 
-		return `${formatBytes(sizes.offline.size)} · ${sizes.offline.files} tbd_files, ${sizes.offline.dirs} tbd_dirs`
+		return `${formatBytes(sizes.offline.size)} · ${t("offline_files_count", {
+			count: sizes.offline.files
+		})}, ${t("offline_dirs_count", {
+			count: sizes.offline.dirs
+		})}`
 	})()
 
 	return (
 		<Fragment>
 			<Header
-				title="tbd_advanced"
+				title={t("advanced")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -157,76 +164,76 @@ const Advanced = memo(() => {
 						buttons={[
 							{
 								icon: "image-outline",
-								title: "tbd_clear_image_thumbnails",
+								title: t("clear_image_thumbnails"),
 								subTitle: formatSize(sizes?.thumbnails),
 								onPress: () => {
 									confirmAndRun({
-										title: "tbd_clear_image_thumbnails",
-										message: "tbd_clear_image_thumbnails_description",
+										title: t("clear_image_thumbnails"),
+										message: t("clear_image_thumbnails_description"),
 										action: async () => {
 											await thumbnails.clear()
 
 											await clearExpoImageCache()
 										},
-										successMessage: "tbd_image_thumbnails_cleared"
+										successMessage: t("image_thumbnails_cleared")
 									})
 								}
 							},
 							{
 								icon: "film-outline",
-								title: "tbd_clear_preview_cache",
+								title: t("clear_preview_cache"),
 								subTitle: formatSize(sizes?.fileCache),
 								onPress: () => {
 									confirmAndRun({
-										title: "tbd_clear_preview_cache",
-										message: "tbd_clear_preview_cache_description",
+										title: t("clear_preview_cache"),
+										message: t("clear_preview_cache_description"),
 										action: async () => {
 											await fileCache.clear()
 
 											await clearExpoImageCache()
 										},
-										successMessage: "tbd_preview_cache_cleared"
+										successMessage: t("preview_cache_cleared")
 									})
 								}
 							},
 							{
 								icon: "musical-notes-outline",
-								title: "tbd_clear_music_metadata",
+								title: t("clear_music_metadata"),
 								subTitle: formatSize(sizes?.audioCache),
 								onPress: () => {
 									confirmAndRun({
-										title: "tbd_clear_music_metadata",
-										message: "tbd_clear_music_metadata_description",
+										title: t("clear_music_metadata"),
+										message: t("clear_music_metadata_description"),
 										action: () => audioCache.clear(),
-										successMessage: "tbd_music_metadata_cleared"
+										successMessage: t("music_metadata_cleared")
 									})
 								}
 							},
 							{
 								icon: "folder-open-outline",
-								title: "tbd_clear_sandbox_cache",
+								title: t("clear_sandbox_cache"),
 								subTitle: formatSize(sizes?.sandbox),
 								onPress: () => {
 									confirmAndRun({
-										title: "tbd_clear_sandbox_cache",
-										message: "tbd_clear_sandbox_cache_description",
+										title: t("clear_sandbox_cache"),
+										message: t("clear_sandbox_cache_description"),
 										action: async () => {
 											sandboxCache.clear()
 
 											await clearExpoImageCache()
 										},
-										successMessage: "tbd_sandbox_cache_cleared"
+										successMessage: t("sandbox_cache_cleared")
 									})
 								}
 							},
 							{
 								icon: "trash-outline",
-								title: "tbd_clear_all_disk_caches",
-								subTitle: "tbd_clear_all_disk_caches_description",
+								title: t("clear_all_disk_caches"),
+								subTitle: t("clear_all_disk_caches_description"),
 								onPress: () => {
 									confirmAndRun({
-										title: "tbd_clear_all_disk_caches",
-										message: "tbd_clear_all_disk_caches_confirmation",
+										title: t("clear_all_disk_caches"),
+										message: t("clear_all_disk_caches_confirmation"),
 										action: async () => {
 											// Independent disk operations — run in parallel and surface a
 											// partial failure only after each gets a chance to complete.
@@ -245,7 +252,7 @@ const Advanced = memo(() => {
 												throw firstFailure.reason
 											}
 										},
-										successMessage: "tbd_all_disk_caches_cleared"
+										successMessage: t("all_disk_caches_cleared")
 									})
 								}
 							}
@@ -257,18 +264,18 @@ const Advanced = memo(() => {
 							{
 								icon: "cloud-offline-outline",
 								iconColor: "#ef4444",
-								title: "tbd_clear_offline_files",
+								title: t("clear_offline_files"),
 								subTitle: offlineSubtitle,
 								onPress: () => {
 									confirmAndRun({
-										title: "tbd_clear_offline_files",
-										message: "tbd_clear_offline_files_confirmation",
+										title: t("clear_offline_files"),
+										message: t("clear_offline_files_confirmation"),
 										action: async () => {
 											await offline.clearAll()
 
 											await clearExpoImageCache()
 										},
-										successMessage: "tbd_offline_files_cleared"
+										successMessage: t("offline_files_cleared")
 									})
 								}
 							}

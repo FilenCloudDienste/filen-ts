@@ -10,18 +10,34 @@
 // config, and the plural/context separator rule (Risk 1).
 import { common } from "@/locales/en/common"
 import { appearance } from "@/locales/en/appearance"
-import { transfers } from "@/locales/en/transfers"
 import { auth } from "@/locales/en/auth"
-import { errors } from "@/locales/en/errors"
-import { sort } from "@/locales/en/sort"
+import { chats } from "@/locales/en/chats"
+import { contacts } from "@/locales/en/contacts"
 import { drive } from "@/locales/en/drive"
+import { drivePreview } from "@/locales/en/drivePreview"
+import { errors } from "@/locales/en/errors"
+import { media } from "@/locales/en/media"
+import { misc } from "@/locales/en/misc"
+import { notes } from "@/locales/en/notes"
+import { security } from "@/locales/en/security"
+import { settings } from "@/locales/en/settings"
+import { sort } from "@/locales/en/sort"
+import { transfers } from "@/locales/en/transfers"
 
 export const en = {
 	...common,
 	...appearance,
-	...transfers,
 	...auth,
+	...chats,
+	...contacts,
+	...drive,
+	...drivePreview,
 	...errors,
+	...media,
+	...misc,
+	...notes,
+	...security,
+	...settings,
 	...sort,
-	...drive
+	...transfers
 } as const

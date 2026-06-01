@@ -16,8 +16,10 @@ import auth from "@/lib/auth"
 import { newTmpFile } from "@/lib/tmp"
 import * as Sharing from "expo-sharing"
 import useIsOnline from "@/hooks/useIsOnline"
+import { useTranslation } from "react-i18next"
 
 const Security = memo(() => {
+	const { t } = useTranslation()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -30,7 +32,7 @@ const Security = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_security"
+				title={t("security")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -86,16 +88,16 @@ const Security = memo(() => {
 							buttons={[
 								{
 									icon: "time-outline",
-									title: "tbd_change_password",
-									subTitle: "tbd_change_password_description",
+									title: t("change_password"),
+									subTitle: t("change_password_description"),
 									disabled: !isOnline,
 									onPress: async () => {
 										const newPasswordPromptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_change_password",
-												message: "tbd_enter_new_password",
-												cancelText: "tbd_cancel",
-												okText: "tbd_continue",
+												title: t("change_password"),
+												message: t("enter_new_password"),
+												cancelText: t("cancel"),
+												okText: t("continue"),
 												inputType: "secure-text"
 											})
 										})
@@ -119,10 +121,10 @@ const Security = memo(() => {
 
 										const confirmNewPasswordPromptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_change_password",
-												message: "tbd_enter_confirm_new_password",
-												cancelText: "tbd_cancel",
-												okText: "tbd_continue",
+												title: t("change_password"),
+												message: t("enter_confirm_new_password"),
+												cancelText: t("cancel"),
+												okText: t("continue"),
 												inputType: "secure-text"
 											})
 										})
@@ -148,17 +150,17 @@ const Security = memo(() => {
 										}
 
 										if (newPassword !== confirmNewPassword) {
-											alerts.error("tbd_passwords_do_not_match")
+											alerts.error(t("passwords_do_not_match"))
 
 											return
 										}
 
 										const currentPasswordPromptResult = await run(async () => {
 											return await prompts.input({
-												title: "tbd_change_password",
-												message: "tbd_enter_current_password",
-												cancelText: "tbd_cancel",
-												okText: "tbd_change",
+												title: t("change_password"),
+												message: t("enter_current_password"),
+												cancelText: t("cancel"),
+												okText: t("change"),
 												inputType: "secure-text"
 											})
 										})
@@ -203,21 +205,21 @@ const Security = memo(() => {
 											return
 										}
 
-										alerts.normal("tbd_password_changed_successfully")
+										alerts.normal(t("password_changed_successfully"))
 									}
 								},
 								{
 									icon: "time-outline",
-									title: "tbd_two_factor_authentication",
-									subTitle: "tbd_two_factor_authentication_description",
+									title: t("two_factor_authentication"),
+									subTitle: t("two_factor_authentication_description"),
 									onPress: () => {
 										router.push("/security/twoFactor")
 									}
 								},
 								{
 									icon: "time-outline",
-									title: "tbd_biometric_authentication",
-									subTitle: "tbd_biometric_authentication_description",
+									title: t("biometric_authentication"),
+									subTitle: t("biometric_authentication_description"),
 									onPress: () => {
 										router.push("/security/biometric")
 									}
@@ -225,20 +227,19 @@ const Security = memo(() => {
 								{
 									icon: "time-outline",
 									iconColor: accountQuery.data.didExportMasterKeys ? undefined : (textRed500.color as string),
-									title: "tbd_export_master_keys",
+									title: t("export_master_keys"),
 									titleClassName: accountQuery.data.didExportMasterKeys ? undefined : "text-red-500",
-									subTitle: "tbd_export_master_keys_description",
+									subTitle: t("export_master_keys_description"),
 									subTitleClassName: accountQuery.data.didExportMasterKeys ? undefined : "text-red-500",
 									badge: accountQuery.data.didExportMasterKeys ? undefined : "!",
 									badgeColor: accountQuery.data.didExportMasterKeys ? undefined : (textRed500.color as string),
 									onPress: async () => {
 										const promptResult = await run(async () => {
 											return await prompts.alert({
-												title: "tbd_export_master_keys",
-												message:
-													"tbd_export_master_keys_description_needed_for_password_reset_and_account_recovery",
-												okText: "tbd_continue",
-												cancelText: "tbd_cancel"
+												title: t("export_master_keys"),
+												message: t("export_master_keys_needed_for_recovery"),
+												okText: t("continue"),
+												cancelText: t("cancel")
 											})
 										})
 

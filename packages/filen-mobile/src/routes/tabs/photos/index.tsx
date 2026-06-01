@@ -44,6 +44,7 @@ import transfers from "@/lib/transfers"
 import { newTmpDir } from "@/lib/tmp"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import * as MediaLibrary from "expo-media-library"
+import { useTranslation } from "react-i18next"
 import type { MenuButton } from "@/components/ui/menu"
 
 const Photo = memo(
@@ -175,6 +176,7 @@ const Photo = memo(
 )
 
 const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; drivePath: DrivePath }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const syncing = useCameraUploadStore(useShallow(state => state.syncing))
 	const hasErrors = useCameraUploadStore(useShallow(state => state.errors.length > 0))
@@ -242,7 +244,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 
 			bulkButtons.push({
 				id: "selectAll",
-				title: selectedItems.length === items.length ? "tbd_deselect_all" : "tbd_select_all",
+				title: selectedItems.length === items.length ? t("deselect_all") : t("select_all"),
 				icon: "select",
 				onPress: () => {
 					if (selectedItems.length === items.length) {
@@ -257,7 +259,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 
 			bulkButtons.push({
 				id: "bulkFavorite",
-				title: driveFlags.includesFavorited ? "tbd_unfavorite_selected" : "tbd_favorite_selected",
+				title: driveFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
 				icon: "heart",
 				requiresOnline: true,
 				onPress: async () => {
@@ -277,7 +279,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 			if (driveFlags.everyImageOrVideoFile) {
 				bulkButtons.push({
 					id: "bulkSaveToPhotos",
-					title: "tbd_save_to_photos_selected",
+					title: t("save_to_device_photos_selected"),
 					icon: "archive",
 					requiresOnline: true,
 					onPress: async () => {
@@ -293,7 +295,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 						}
 
 						if (!permissionsResult.data) {
-							alerts.error("tbd_no_permissions_enable_manually")
+							alerts.error(t("no_permissions_enable_manually"))
 
 							return
 						}
@@ -341,7 +343,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 
 			bulkButtons.push({
 				id: "bulkDownload",
-				title: "tbd_download_selected",
+				title: t("download_selected"),
 				icon: "archive",
 				requiresOnline: true,
 				onPress: async () => {
@@ -361,7 +363,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 
 			bulkButtons.push({
 				id: "bulkMakeOffline",
-				title: "tbd_make_available_offline_selected",
+				title: t("make_available_offline_selected"),
 				icon: "archive",
 				requiresOnline: true,
 				onPress: async () => {
@@ -385,7 +387,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 
 			bulkButtons.push({
 				id: "bulkTrash",
-				title: "tbd_trash_selected",
+				title: t("trash_selected"),
 				icon: "trash",
 				destructive: true,
 				requiresOnline: true,
@@ -394,10 +396,10 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 						items: selectedItems,
 						clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 						confirm: {
-							title: "tbd_trash_selected",
-							message: "tbd_are_you_sure_trash_selected",
-							okText: "tbd_trash",
-							cancelText: "tbd_cancel",
+							title: t("trash_selected"),
+							message: t("are_you_sure_trash_selected_photos"),
+							okText: t("trash"),
+							cancelText: t("cancel"),
 							destructive: true
 						},
 						op: item => drive.trash({ item, signal: undefined })
@@ -434,13 +436,13 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 					buttons: [
 						{
 							id: "settings",
-							title: "tbd_settings",
+							title: t("settings"),
 							onPress: () => router.push("/cameraUpload"),
 							icon: "gear"
 						},
 						{
 							id: "gridTiles",
-							title: `${photosGridTiles} ${photosGridTiles === 1 ? "tbd_photo_per_row" : "tbd_photos_per_row"}`,
+							title: t("photos_per_row", { count: photosGridTiles }),
 							icon: "grid",
 							subButtons: [
 								{
@@ -496,7 +498,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 
 	return (
 		<StackHeader
-			title={inSelectionMode ? `${selectedItems.length} tbd_selected` : "tbd_photos"}
+			title={inSelectionMode ? t("selected", { count: selectedItems.length }) : t("photos")}
 			transparent={Platform.OS === "ios"}
 			leftItems={leftItems}
 			rightItems={rightItems}
@@ -540,6 +542,7 @@ const DateRange = memo(() => {
 })
 
 const Photos = memo(() => {
+	const { t } = useTranslation()
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
 	const { config } = useCameraUpload()
@@ -667,7 +670,7 @@ const Photos = memo(() => {
 							emptyComponent={() => (
 								<ListEmpty
 									icon="images-outline"
-									title="tbd_no_photos"
+									title={t("no_photos")}
 								/>
 							)}
 						/>
@@ -678,10 +681,10 @@ const Photos = memo(() => {
 								size={64}
 								color="gray"
 							/>
-							<Text className="mt-2">tbd_camera_upload_disabled</Text>
-							<Text className="text-xs text-muted-foreground mt-0.5">tbd_camera_upload_disabled_description</Text>
+							<Text className="mt-2">{t("camera_upload_disabled")}</Text>
+							<Text className="text-xs text-muted-foreground mt-0.5">{t("camera_upload_disabled_description")}</Text>
 							<View className="mt-4">
-								<Button onPress={() => router.push("/cameraUpload")}>tbd_enable_camera_upload</Button>
+								<Button onPress={() => router.push("/cameraUpload")}>{t("enable_camera_upload")}</Button>
 							</View>
 						</View>
 					)}

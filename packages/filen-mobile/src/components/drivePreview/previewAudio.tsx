@@ -1,4 +1,5 @@
 import { Fragment, memo, useState } from "react"
+import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import Text from "@/components/ui/text"
@@ -276,6 +277,7 @@ export const AudioSlider = memo(
 )
 
 const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItemTagged; metadata: Metadata; fileUrl: string }) => {
+	const { t } = useTranslation()
 	const player = useAudioPlayer(fileUrl, {
 		updateInterval: 1000,
 		crossOrigin: "anonymous"
@@ -321,7 +323,7 @@ const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItem
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							tbd_unkwn_artist
+							{t("unknown_artist")}
 						</Text>
 						<Text
 							className="text-white"

@@ -19,8 +19,10 @@ import { useResolveClassNames } from "uniwind"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
+import { useTranslation } from "react-i18next"
 
 const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
+	const { t } = useTranslation()
 	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
 	const unreadCount = useChatUnreadCount(info.item)
@@ -129,7 +131,7 @@ const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 									ellipsizeMode="tail"
 									className="text-xs text-muted-foreground italic"
 								>
-									{typingUsers.length > 1 ? `${typingUsers.join(", ")} tbd_typing...` : "tbd_typing..."}
+									{typingUsers.length > 1 ? t("typing_with_names", { names: typingUsers.join(", ") }) : t("typing")}
 								</Text>
 							) : info.item.lastMessage && info.item.lastMessage.inner.message ? (
 								<Text
@@ -137,7 +139,7 @@ const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 									ellipsizeMode="tail"
 									className={cn("text-xs", unreadCount > 0 ? "text-foreground font-bold" : "text-muted-foreground")}
 								>
-									{info.item.lastMessage?.inner.message ?? "tbd_no_messages_yet"}
+									{info.item.lastMessage?.inner.message ?? t("no_messages_yet")}
 								</Text>
 							) : (
 								<Text
@@ -145,7 +147,7 @@ const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 									ellipsizeMode="tail"
 									className="text-xs text-muted-foreground italic"
 								>
-									tbd_no_messages_yet
+									{t("no_messages_yet")}
 								</Text>
 							)}
 						</View>

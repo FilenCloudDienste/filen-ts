@@ -31,8 +31,10 @@ import { runBulk } from "@/lib/bulkOps"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
+import { useTranslation } from "react-i18next"
 
 const Participant = memo(({ participant, note, isOwner }: { participant: NoteParticipant; note: Note; isOwner: boolean }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const isSelected = useNoteParticipantsStore(
@@ -108,7 +110,7 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 							buttons={[
 								{
 									id: "select",
-									title: isSelected ? "tbd_deselect" : "tbd_select",
+									title: isSelected ? t("deselect") : t("select"),
 									icon: "select",
 									checked: isSelected,
 									onPress: () => {
@@ -117,12 +119,12 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 								},
 								{
 									id: "permissions",
-									title: "tbd_permissions",
+									title: t("permissions"),
 									icon: participant.permissionsWrite ? "edit" : "eye",
 									subButtons: [
 										{
 											id: "read",
-											title: "tbd_read",
+											title: t("permission_read"),
 											icon: "eye",
 											checked: !participant.permissionsWrite,
 											requiresOnline: true,
@@ -145,7 +147,7 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 										},
 										{
 											id: "write",
-											title: "tbd_write",
+											title: t("permission_write"),
 											icon: "edit",
 											checked: participant.permissionsWrite,
 											requiresOnline: true,
@@ -170,17 +172,17 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 								},
 								{
 									id: "remove",
-									title: "tbd_remove",
+									title: t("remove"),
 									destructive: true,
 									icon: "delete",
 									requiresOnline: true,
 									onPress: async () => {
 										const promptResponse = await run(async () => {
 											return await prompts.alert({
-												title: "tbd_remove_participant",
-												message: "tbd_remove_participant_confirmation",
-												cancelText: "tbd_cancel",
-												okText: "tbd_remove",
+												title: t("remove_participant"),
+												message: t("remove_participant_confirmation_note"),
+												cancelText: t("cancel"),
+												okText: t("remove"),
 												destructive: true
 											})
 										})
@@ -231,6 +233,7 @@ const Participant = memo(({ participant, note, isOwner }: { participant: NotePar
 })
 
 const NoteParticipants = memo(() => {
+	const { t } = useTranslation()
 	const { note: noteSerialized } = useLocalSearchParams<{
 		note?: string
 	}>()
@@ -325,7 +328,7 @@ const NoteParticipants = memo(() => {
 			const menuButtons: MenuButton[] = [
 				{
 					id: "selectAll",
-					title: selectedNoteParticipants.length === participants.length ? "tbd_deselect_all" : "tbd_select_all",
+					title: selectedNoteParticipants.length === participants.length ? t("deselect_all") : t("select_all"),
 					icon: "select",
 					onPress: () => {
 						if (selectedNoteParticipants.length === participants.length) {
@@ -339,13 +342,13 @@ const NoteParticipants = memo(() => {
 				},
 				{
 					id: "bulkPermissions",
-					title: "tbd_permissions",
+					title: t("permissions"),
 					icon: "edit",
 					requiresOnline: true,
 					subButtons: [
 						{
 							id: "bulkPermissionRead",
-							title: "tbd_read",
+							title: t("permission_read"),
 							icon: "eye",
 							requiresOnline: true,
 							onPress: async () => {
@@ -363,7 +366,7 @@ const NoteParticipants = memo(() => {
 						},
 						{
 							id: "bulkPermissionWrite",
-							title: "tbd_write",
+							title: t("permission_write"),
 							icon: "edit",
 							requiresOnline: true,
 							onPress: async () => {
@@ -383,7 +386,7 @@ const NoteParticipants = memo(() => {
 				},
 				{
 					id: "bulkRemove",
-					title: "tbd_remove_selected",
+					title: t("remove_selected"),
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
@@ -392,10 +395,10 @@ const NoteParticipants = memo(() => {
 							items: selectedNoteParticipants,
 							clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
 							confirm: {
-								title: "tbd_remove_selected",
-								message: "tbd_remove_selected_participants_confirmation",
-								okText: "tbd_remove",
-								cancelText: "tbd_cancel",
+								title: t("remove_selected"),
+								message: t("remove_selected_participants_confirmation_note"),
+								okText: t("remove"),
+								cancelText: t("cancel"),
 								destructive: true
 							},
 							op: participant =>
@@ -478,7 +481,7 @@ const NoteParticipants = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title={inSelectionMode ? `${selectedNoteParticipants.length} tbd_selected` : "tbd_note_participants"}
+				title={inSelectionMode ? t("selected", { count: selectedNoteParticipants.length }) : t("note_participants")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -502,7 +505,7 @@ const NoteParticipants = memo(() => {
 					emptyComponent={() => (
 						<ListEmpty
 							icon="people-outline"
-							title="tbd_no_note_participants"
+							title={t("no_note_participants")}
 						/>
 					)}
 					renderItem={({ item: participant }) => {

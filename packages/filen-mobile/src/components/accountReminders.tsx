@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react"
 import { AppState, type AppStateStatus } from "react-native"
+import { useTranslation } from "react-i18next"
 import { router, usePathname } from "expo-router"
 import { run, runEffect } from "@filen/utils"
 import useAccountQuery from "@/queries/useAccount.query"
@@ -8,6 +9,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 
 const AccountReminders = memo(() => {
+	const { t } = useTranslation()
 	const accountQuery = useAccountQuery()
 	const pathname = usePathname()
 	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
@@ -58,10 +60,10 @@ const AccountReminders = memo(() => {
 		const showReminders = async (): Promise<void> => {
 			if (!data.didExportMasterKeys) {
 				const masterKeysResult = await prompts.alert({
-					title: "tbd_master_keys_reminder_title",
-					message: "tbd_master_keys_reminder_message",
-					okText: "tbd_export_now",
-					cancelText: "tbd_later"
+					title: t("master_keys_reminder_title"),
+					message: t("master_keys_reminder_message"),
+					okText: t("export_now"),
+					cancelText: t("later")
 				})
 
 				if (!masterKeysResult.cancelled) {
@@ -73,9 +75,9 @@ const AccountReminders = memo(() => {
 
 			if (data.storageUsed > data.maxStorage) {
 				await prompts.info({
-					title: "tbd_storage_exceeded_title",
-					message: "tbd_storage_exceeded_message",
-					okText: "tbd_ok"
+					title: t("storage_exceeded_title"),
+					message: t("storage_exceeded_message"),
+					okText: t("ok")
 				})
 			}
 		}
@@ -86,7 +88,7 @@ const AccountReminders = memo(() => {
 				alerts.error(result.error)
 			}
 		})
-	}, [pathname, biometricUnlocked, appState, accountQuery.status, accountQuery.isFetching, accountQuery.data])
+	}, [pathname, biometricUnlocked, appState, accountQuery.status, accountQuery.isFetching, accountQuery.data, t])
 
 	return null
 })

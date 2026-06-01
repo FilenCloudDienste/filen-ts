@@ -1,4 +1,6 @@
 import secureStore, { useSecureStore } from "@/lib/secureStore"
+import i18n from "@/lib/i18n"
+import { useTranslation } from "react-i18next"
 import useAppStore from "@/stores/useApp.store"
 import { fetchData } from "@/queries/useLocalAuthentication.query"
 import { type Biometric as TBiometric } from "@/routes/security/biometric"
@@ -73,21 +75,21 @@ async function promptBiometric(): Promise<LocalAuthentication.LocalAuthenticatio
 	}
 
 	return await LocalAuthentication.authenticateAsync({
-		cancelLabel: "tbd_cancel",
-		promptMessage: "tbd_authenticate",
-		promptDescription: "tbd_authenticate_to_access_app",
+		cancelLabel: i18n.t("cancel"),
+		promptMessage: i18n.t("authenticate"),
+		promptDescription: i18n.t("authenticate_to_access_app"),
 		promptSubtitle: "",
 		disableDeviceFallback: true,
-		fallbackLabel: "tbd_use_pin"
+		fallbackLabel: i18n.t("use_pin")
 	})
 }
 
 async function promptPin(biometric: EnabledBiometric): Promise<PinResult> {
 	const pinPromptResult = await prompts.input({
-		title: "tbd_pin",
-		message: "tbd_enter_pin",
-		cancelText: "tbd_cancel",
-		okText: "tbd_authenticate",
+		title: i18n.t("pin_code"),
+		message: i18n.t("enter_pin"),
+		cancelText: i18n.t("cancel"),
+		okText: i18n.t("authenticate"),
 		inputType: "secure-text"
 	})
 
@@ -125,7 +127,7 @@ async function applyAuthFailure(biometric: EnabledBiometric): Promise<void> {
 		...nextLockState(biometric)
 	} satisfies TBiometric)
 
-	alerts.error("tbd_invalid_pin")
+	alerts.error(i18n.t("invalid_pin"))
 }
 
 async function applyAuthSuccess(biometric: EnabledBiometric, onSuccess: () => void): Promise<void> {
@@ -264,6 +266,7 @@ function PrimaryButton({ onPress, children }: { onPress: () => void; children: s
 }
 
 function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch<React.SetStateAction<boolean>> }) {
+	const { t } = useTranslation()
 	const isPromptingRef = useRef<boolean>(false)
 
 	const tryAuth = async (preferBiometric: boolean): Promise<void> => {
@@ -328,15 +331,15 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 	return (
 		<AuthShell
 			icon={<AuthIconBlock />}
-			heading="tbd_authenticate"
-			subtitle="tbd_unlock_to_continue"
+			heading={t("authenticate")}
+			subtitle={t("unlock_to_continue")}
 			action={
 				<PrimaryButton
 					onPress={async () => {
 						await tryAuth(false).catch(console.error)
 					}}
 				>
-					tbd_use_pin
+					{t("use_pin")}
 				</PrimaryButton>
 			}
 		/>
@@ -344,6 +347,7 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 }
 
 function Locked({ lockedUntil, lockSeconds }: { lockedUntil: number; lockSeconds: number }) {
+	const { t } = useTranslation()
 	const [msLeft, setMsLeft] = useState<number>(() => Math.max(0, lockedUntil - new Date().getTime()))
 	const [, setBiometric] = useSecureStore<TBiometric>("biometric", {
 		enabled: false
@@ -393,8 +397,8 @@ function Locked({ lockedUntil, lockSeconds }: { lockedUntil: number; lockSeconds
 					totalMs={totalMs}
 				/>
 			}
-			heading="tbd_app_locked"
-			subtitle="tbd_too_many_failed_attempts"
+			heading={t("app_locked")}
+			subtitle={t("too_many_failed_attempts")}
 		/>
 	)
 }

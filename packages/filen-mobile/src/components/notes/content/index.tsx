@@ -20,6 +20,7 @@ import prompts from "@/lib/prompts"
 import { sync } from "@/components/notes/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useIsOnline from "@/hooks/useIsOnline"
+import { useTranslation } from "react-i18next"
 
 const Loading = memo(({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -46,6 +47,7 @@ const Loading = memo(({ children, loading, noteType }: { children: React.ReactNo
 })
 
 const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | null }) => {
+	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
 	const insets = useSafeAreaInsets()
 	const isOnline = useIsOnline()
@@ -144,10 +146,10 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 
 			const promptResponse = await run(async () => {
 				return await prompts.alert({
-					title: "tbd_note_edited",
-					message: "tbd_note_edited_message",
-					cancelText: "tbd_cancel",
-					okText: "tbd_reload",
+					title: t("note_edited"),
+					message: t("note_edited_message"),
+					cancelText: t("cancel"),
+					okText: t("reload"),
 					destructive: true
 				})
 			})
@@ -174,7 +176,7 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 				return
 			}
 		},
-		[note.uuid, stringifiedClient, noteContentQuery]
+		[note.uuid, stringifiedClient, noteContentQuery, t]
 	)
 
 	useEffect(() => {
@@ -209,7 +211,7 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 					initialValue={initialValue ?? ""}
 					onValueChange={onValueChange}
 					readOnly={!hasWriteAccess}
-					placeholder="tbd_placeholder"
+					placeholder={t("note_editor_placeholder")}
 					type={
 						note.noteType === NoteType.Text
 							? "text"

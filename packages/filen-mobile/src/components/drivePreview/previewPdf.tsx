@@ -1,4 +1,5 @@
 import { memo, useRef } from "react"
+import { useTranslation } from "react-i18next"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
 import useFileUriQuery from "@/queries/useFileUri.query"
@@ -14,6 +15,7 @@ import Button from "@/components/ui/button"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 
 const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
+	const { t } = useTranslation()
 	const [password, setPassword] = useRecyclingState<string | null>(null, [item.type === "drive" ? item.data.data.uuid : item.data.url])
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
@@ -42,10 +44,10 @@ const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
 	const promptPassword = async () => {
 		const result = await run(async () => {
 			return await prompts.input({
-				title: "tbd_password_required",
-				message: "tbd_enter_password",
-				cancelText: "tbd_cancel",
-				okText: "tbd_ok",
+				title: t("password_required"),
+				message: t("enter_the_password"),
+				cancelText: t("cancel"),
+				okText: t("ok"),
 				inputType: "secure-text"
 			})
 		})
@@ -90,13 +92,13 @@ const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
 
 			switch (e.code) {
 				case "invalid_document": {
-					alerts.error("tbd_invalid_pdf")
+					alerts.error(t("invalid_pdf"))
 
 					return
 				}
 
 				case "invalid_uri": {
-					alerts.error("tbd_unable_to_load_pdf")
+					alerts.error(t("unable_to_load_pdf"))
 
 					return
 				}
@@ -126,7 +128,7 @@ const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
 		<View className="bg-background flex-1">
 			{didCancelPasswordPrompt ? (
 				<View className="flex-1 bg-transparent items-center justify-center">
-					<Button onPress={() => promptPassword()}>tbd_enter_pdf_password</Button>
+					<Button onPress={() => promptPassword()}>{t("enter_pdf_password")}</Button>
 				</View>
 			) : (
 				<PdfView

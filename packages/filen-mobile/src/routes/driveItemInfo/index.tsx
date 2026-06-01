@@ -20,10 +20,12 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import DismissStack from "@/components/dismissStack"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
+import { useTranslation } from "react-i18next"
 
 export const Information = memo(({ item, linked }: { item: DriveItem; linked?: boolean }) => {
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textGreen500 = useResolveClassNames("text-green-500")
+	const { t } = useTranslation()
 
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
@@ -56,56 +58,56 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 		[
 			{
 				type: "type",
-				title: "tbd_type",
+				title: t("type"),
 				value:
 					item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-						? "tbd_directory"
-						: "tbd_file"
+						? t("directory")
+						: t("file")
 			},
 			...(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
 				? [
 						{
 							type: "mime",
-							title: "tbd_mime",
+							title: t("mime"),
 							value: item.data.decryptedMeta?.mime ?? "application/octet-stream"
 						},
 						{
 							type: "previewType",
-							title: "tbd_preview_type",
+							title: t("preview_type"),
 							value: (() => {
 								const previewType = getPreviewType(driveItemDisplayName(item))
 
 								switch (previewType) {
 									case "audio": {
-										return "tbd_preview_type_audio"
+										return t("preview_type_audio")
 									}
 
 									case "code": {
-										return "tbd_preview_type_code"
+										return t("preview_type_code")
 									}
 
 									case "docx": {
-										return "tbd_preview_type_docx"
+										return t("preview_type_docx")
 									}
 
 									case "pdf": {
-										return "tbd_preview_type_pdf"
+										return t("preview_type_pdf")
 									}
 
 									case "image": {
-										return "tbd_preview_type_image"
+										return t("preview_type_image")
 									}
 
 									case "text": {
-										return "tbd_preview_type_text"
+										return t("preview_type_text")
 									}
 
 									case "video": {
-										return "tbd_preview_type_video"
+										return t("preview_type_video")
 									}
 
 									case "unknown": {
-										return "tbd_preview_type_unknown"
+										return t("preview_type_unknown")
 									}
 								}
 							})()
@@ -114,7 +116,7 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 				: []),
 			{
 				type: "size",
-				title: "tbd_size",
+				title: t("size"),
 				value: (() => {
 					switch (item.type) {
 						case "file":
@@ -139,19 +141,19 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 				? [
 						{
 							type: "files",
-							title: "tbd_files",
+							title: t("files"),
 							value: directorySizeQuery.status === "success" ? directorySizeQuery.data.files.toString() : "..."
 						},
 						{
 							type: "directories",
-							title: "tbd_directories",
+							title: t("directories"),
 							value: directorySizeQuery.status === "success" ? directorySizeQuery.data.dirs.toString() : "..."
 						}
 					]
 				: []),
 			{
 				type: "created",
-				title: "tbd_created",
+				title: t("created"),
 				value: (() => {
 					if (!item.data.decryptedMeta) {
 						return null
@@ -203,7 +205,7 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 			},
 			{
 				type: "modified",
-				title: "tbd_modified",
+				title: t("modified"),
 				value: (() => {
 					if (!item.data.decryptedMeta) {
 						return null
@@ -255,7 +257,7 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 			},
 			{
 				type: "uploaded",
-				title: "tbd_uploaded",
+				title: t("uploaded"),
 				value: (() => {
 					if (!item.data.decryptedMeta) {
 						return null
@@ -283,7 +285,7 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 				? [
 						{
 							type: "offline",
-							title: "tbd_offline",
+							title: t("offline_status"),
 							value: (
 								<Ionicons
 									name="cloud-download-outline"
@@ -304,7 +306,7 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 	return (
 		<View className="bg-transparent flex-col gap-2">
 			<View className="bg-transparent border-b border-border pb-2 flex-row items-center justify-between gap-4">
-				<Text className="text-lg text-muted-foreground font-bold">tbd_information</Text>
+				<Text className="text-lg text-muted-foreground font-bold">{t("information")}</Text>
 			</View>
 			{info.map(({ type, value, title }) => (
 				<View
@@ -343,6 +345,7 @@ const DriveItemInfo = memo(() => {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
+	const { t } = useTranslation()
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -375,7 +378,7 @@ const DriveItemInfo = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_info"
+				title={t("item_info")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -438,8 +441,8 @@ const DriveItemInfo = memo(() => {
 						</Text>
 						<Text className="text-muted-foreground">
 							{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-								? "tbd_directory"
-								: "tbd_file"}
+								? t("directory")
+								: t("file")}
 						</Text>
 					</View>
 					<View className="bg-transparent mt-10">

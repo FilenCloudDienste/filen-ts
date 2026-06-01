@@ -17,167 +17,60 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useEventsQuery, { fetchData, eventsQueryUpdate } from "@/queries/useEvents.query"
 import { serialize } from "@/lib/serializer"
 import { onlineManager } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
+import i18n from "@/lib/i18n"
+import { type en } from "@/locales/en"
 
 const ON_END_REACHED_THRESHOLD = 0.5
 
+// Maps each SDK event kind to a translation key. `satisfies` checks completeness + key validity
+// while preserving each value's literal type, so indexing the map yields a narrow key that i18n.t
+// accepts. Resolved with the module-level i18n.t because eventKindToReadable() is a plain
+// (non-React) function shared with eventInfo and cannot use the useTranslation() hook.
+const EVENT_KIND_KEY = {
+	[UserEventKind_Tags.FileUploaded]: "file_uploaded",
+	[UserEventKind_Tags.FileVersioned]: "file_versioned",
+	[UserEventKind_Tags.FileRestored]: "file_restored",
+	[UserEventKind_Tags.VersionedFileRestored]: "versioned_file_restored",
+	[UserEventKind_Tags.FileMoved]: "file_moved",
+	[UserEventKind_Tags.FileRenamed]: "file_renamed",
+	[UserEventKind_Tags.FileMetadataChanged]: "file_metadata_changed",
+	[UserEventKind_Tags.FileTrash]: "file_trash",
+	[UserEventKind_Tags.FileRm]: "file_rm",
+	[UserEventKind_Tags.FileShared]: "file_shared",
+	[UserEventKind_Tags.FileLinkEdited]: "file_link_edited",
+	[UserEventKind_Tags.DeleteFilePermanently]: "delete_file_permanently",
+	[UserEventKind_Tags.FolderTrash]: "directory_trash",
+	[UserEventKind_Tags.FolderShared]: "directory_shared",
+	[UserEventKind_Tags.FolderMoved]: "directory_moved",
+	[UserEventKind_Tags.FolderRenamed]: "directory_renamed",
+	[UserEventKind_Tags.FolderMetadataChanged]: "directory_metadata_changed",
+	[UserEventKind_Tags.SubFolderCreated]: "sub_directory_created",
+	[UserEventKind_Tags.BaseFolderCreated]: "base_directory_created",
+	[UserEventKind_Tags.FolderRestored]: "directory_restored",
+	[UserEventKind_Tags.FolderColorChanged]: "directory_color_changed",
+	[UserEventKind_Tags.DeleteFolderPermanently]: "delete_directory_permanently",
+	[UserEventKind_Tags.FolderLinkEdited]: "directory_link_edited",
+	[UserEventKind_Tags.Login]: "login",
+	[UserEventKind_Tags.FailedLogin]: "failed_login",
+	[UserEventKind_Tags.PasswordChanged]: "password_changed",
+	[UserEventKind_Tags.TwoFaEnabled]: "two_fa_enabled",
+	[UserEventKind_Tags.TwoFaDisabled]: "two_fa_disabled",
+	[UserEventKind_Tags.RequestAccountDeletion]: "request_account_deletion",
+	[UserEventKind_Tags.TrashEmptied]: "trash_emptied",
+	[UserEventKind_Tags.DeleteAll]: "all_files_deleted",
+	[UserEventKind_Tags.DeleteVersioned]: "delete_versioned",
+	[UserEventKind_Tags.DeleteUnfinished]: "delete_unfinished",
+	[UserEventKind_Tags.CodeRedeemed]: "code_redeemed",
+	[UserEventKind_Tags.EmailChanged]: "email_changed",
+	[UserEventKind_Tags.EmailChangeAttempt]: "email_change_attempt",
+	[UserEventKind_Tags.RemovedSharedInItems]: "removed_shared_in_items",
+	[UserEventKind_Tags.RemovedSharedOutItems]: "removed_shared_out_items",
+	[UserEventKind_Tags.ItemFavorite]: "item_favorite"
+} satisfies Record<UserEventKind_Tags, keyof typeof en>
+
 export function eventKindToReadable(kind: UserEventKind): string {
-	switch (kind.tag) {
-		case UserEventKind_Tags.FileUploaded: {
-			return "tbd_file_uploaded"
-		}
-
-		case UserEventKind_Tags.FileVersioned: {
-			return "tbd_file_versioned"
-		}
-
-		case UserEventKind_Tags.FileRestored: {
-			return "tbd_file_restored"
-		}
-
-		case UserEventKind_Tags.VersionedFileRestored: {
-			return "tbd_versioned_file_restored"
-		}
-
-		case UserEventKind_Tags.FileMoved: {
-			return "tbd_file_moved"
-		}
-
-		case UserEventKind_Tags.FileRenamed: {
-			return "tbd_file_renamed"
-		}
-
-		case UserEventKind_Tags.FileMetadataChanged: {
-			return "tbd_file_metadata_changed"
-		}
-
-		case UserEventKind_Tags.FileTrash: {
-			return "tbd_file_trash"
-		}
-
-		case UserEventKind_Tags.FileRm: {
-			return "tbd_file_rm"
-		}
-
-		case UserEventKind_Tags.FileShared: {
-			return "tbd_file_shared"
-		}
-
-		case UserEventKind_Tags.FileLinkEdited: {
-			return "tbd_file_link_edited"
-		}
-
-		case UserEventKind_Tags.DeleteFilePermanently: {
-			return "tbd_delete_file_permanently"
-		}
-
-		case UserEventKind_Tags.FolderTrash: {
-			return "tbd_directory_trash"
-		}
-
-		case UserEventKind_Tags.FolderShared: {
-			return "tbd_directory_shared"
-		}
-
-		case UserEventKind_Tags.FolderMoved: {
-			return "tbd_directory_moved"
-		}
-
-		case UserEventKind_Tags.FolderRenamed: {
-			return "tbd_directory_renamed"
-		}
-
-		case UserEventKind_Tags.FolderMetadataChanged: {
-			return "tbd_directory_metadata_changed"
-		}
-
-		case UserEventKind_Tags.SubFolderCreated: {
-			return "tbd_sub_directory_created"
-		}
-
-		case UserEventKind_Tags.BaseFolderCreated: {
-			return "tbd_base_directory_created"
-		}
-
-		case UserEventKind_Tags.FolderRestored: {
-			return "tbd_directory_restored"
-		}
-
-		case UserEventKind_Tags.FolderColorChanged: {
-			return "tbd_directory_color_changed"
-		}
-
-		case UserEventKind_Tags.DeleteFolderPermanently: {
-			return "tbd_delete_directory_permanently"
-		}
-
-		case UserEventKind_Tags.FolderLinkEdited: {
-			return "tbd_directory_link_edited"
-		}
-
-		case UserEventKind_Tags.Login: {
-			return "tbd_login"
-		}
-
-		case UserEventKind_Tags.FailedLogin: {
-			return "tbd_failed_login"
-		}
-
-		case UserEventKind_Tags.PasswordChanged: {
-			return "tbd_password_changed"
-		}
-
-		case UserEventKind_Tags.TwoFaEnabled: {
-			return "tbd_two_fa_enabled"
-		}
-
-		case UserEventKind_Tags.TwoFaDisabled: {
-			return "tbd_two_fa_disabled"
-		}
-
-		case UserEventKind_Tags.RequestAccountDeletion: {
-			return "tbd_request_account_deletion"
-		}
-
-		case UserEventKind_Tags.TrashEmptied: {
-			return "tbd_trash_emptied"
-		}
-
-		case UserEventKind_Tags.DeleteAll: {
-			return "tbd_delete_all"
-		}
-
-		case UserEventKind_Tags.DeleteVersioned: {
-			return "tbd_delete_versioned"
-		}
-
-		case UserEventKind_Tags.DeleteUnfinished: {
-			return "tbd_delete_unfinished"
-		}
-
-		case UserEventKind_Tags.CodeRedeemed: {
-			return "tbd_code_redeemed"
-		}
-
-		case UserEventKind_Tags.EmailChanged: {
-			return "tbd_email_changed"
-		}
-
-		case UserEventKind_Tags.EmailChangeAttempt: {
-			return "tbd_email_change_attempt"
-		}
-
-		case UserEventKind_Tags.RemovedSharedInItems: {
-			return "tbd_removed_shared_in_items"
-		}
-
-		case UserEventKind_Tags.RemovedSharedOutItems: {
-			return "tbd_removed_shared_out_items"
-		}
-
-		case UserEventKind_Tags.ItemFavorite: {
-			return "tbd_item_favorite"
-		}
-	}
+	return i18n.t(EVENT_KIND_KEY[kind.tag])
 }
 
 const Event = memo(({ event }: { event: UserEvent }) => {
@@ -226,6 +119,7 @@ const Events = memo(() => {
 	const [hasMore, setHasMore] = useState<boolean>(true)
 	const inflightRef = useRef<boolean>(false)
 	const navigation = useNavigation()
+	const { t } = useTranslation()
 
 	const events =
 		eventsQuery.status === "success"
@@ -237,7 +131,7 @@ const Events = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_events"
+				title={t("events")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -370,7 +264,7 @@ const Events = memo(() => {
 					emptyComponent={() => (
 						<ListEmpty
 							icon="list-outline"
-							title="tbd_no_events"
+							title={t("no_events")}
 						/>
 					)}
 					footerComponent={() => {

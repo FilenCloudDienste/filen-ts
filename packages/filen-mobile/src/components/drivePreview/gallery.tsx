@@ -1,4 +1,5 @@
 import { useState, useEffect, memo } from "react"
+import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { router } from "expo-router"
@@ -174,6 +175,7 @@ function changeZoom(zoomScale: SharedValue<number>, newZoom: number) {
 }
 
 const Gallery = memo(() => {
+	const { t } = useTranslation()
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
 	const [isDismissGestureActive, setIsDismissGestureActive] = useState<boolean>(false)
@@ -392,7 +394,7 @@ const Gallery = memo(() => {
 							>
 								<ListEmpty
 									icon="eye-off-outline"
-									title="tbd_no_preview"
+									title={t("no_preview")}
 								/>
 							</View>
 						)}

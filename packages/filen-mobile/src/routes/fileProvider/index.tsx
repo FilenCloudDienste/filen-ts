@@ -17,9 +17,7 @@ import Text from "@/components/ui/text"
 import useDeviceDiskSpace from "@/hooks/useDeviceDiskSpace"
 import useFileProviderCacheBudgetQuery, { invalidateFileProviderCacheBudgetQuery } from "@/queries/useFileProviderCacheBudget.query"
 import { actionSheet } from "@/providers/actionSheet.provider"
-
-const FILE_PROVIDER_FEATURE_LABEL = Platform.OS === "ios" ? "tbd_file_provider" : "tbd_documents_provider"
-const FILE_PROVIDER_FEATURE_DESCRIPTION = Platform.OS === "ios" ? "tbd_file_provider_description" : "tbd_documents_provider_description"
+import { useTranslation } from "react-i18next"
 
 const CACHE_SIZE_PRESETS_BYTES: readonly number[] = [
 	256 * 1024 * 1024,
@@ -40,6 +38,9 @@ const FileProviderSettings = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
+	const { t } = useTranslation()
+	const featureLabel = Platform.OS === "ios" ? t("file_provider") : t("documents_provider")
+	const featureDescription = Platform.OS === "ios" ? t("file_provider_description") : t("documents_provider_description")
 	const [enabled, setEnabled] = useSecureStore<boolean>(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)
 	const [biometric, setBiometric] = useSecureStore<Biometric>("biometric", {
 		enabled: false
@@ -51,7 +52,7 @@ const FileProviderSettings = memo(() => {
 	const groupButtons: Button[] = [
 		{
 			icon: "folder-open-outline",
-			title: FILE_PROVIDER_FEATURE_LABEL,
+			title: featureLabel,
 			rightItem: {
 				type: "switch",
 				value: enabled,
@@ -81,10 +82,10 @@ const FileProviderSettings = memo(() => {
 					if (biometric.enabled) {
 						const confirmResult = await run(async () => {
 							return await prompts.alert({
-								title: "tbd_file_provider_disables_biometric_title",
-								message: "tbd_file_provider_disables_biometric_message",
-								okText: "tbd_continue",
-								cancelText: "tbd_cancel",
+								title: t("file_provider_disables_biometric_title"),
+								message: t("file_provider_disables_biometric_message"),
+								okText: t("continue"),
+								cancelText: t("cancel"),
 								destructive: true
 							})
 						})
@@ -125,8 +126,8 @@ const FileProviderSettings = memo(() => {
 	if (enabled) {
 		groupButtons.push({
 			icon: "server-outline",
-			title: "tbd_cache_size",
-			subTitle: "tbd_cache_size_description",
+			title: t("cache_size"),
+			subTitle: t("cache_size_description"),
 			rightItem: {
 				type: "text",
 				value: typeof currentCacheBudgetBytes === "number" ? formatBytes(currentCacheBudgetBytes) : "…"
@@ -151,7 +152,7 @@ const FileProviderSettings = memo(() => {
 				actionSheet.show({
 					buttons: [
 						...sorted.map(bytes => {
-							const title = bytes === currentCacheBudgetBytes ? `${formatBytes(bytes)} (tbd_current)` : formatBytes(bytes)
+							const title = bytes === currentCacheBudgetBytes ? `${formatBytes(bytes)} (${t("current")})` : formatBytes(bytes)
 
 							return {
 								title,
@@ -173,7 +174,7 @@ const FileProviderSettings = memo(() => {
 							}
 						}),
 						{
-							title: "tbd_close",
+							title: t("close"),
 							cancel: true
 						}
 					]
@@ -185,7 +186,7 @@ const FileProviderSettings = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title={FILE_PROVIDER_FEATURE_LABEL}
+				title={featureLabel}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -234,7 +235,7 @@ const FileProviderSettings = memo(() => {
 						className="bg-background-tertiary"
 						buttons={groupButtons}
 					/>
-					<Text className="text-sm text-muted-foreground px-4 leading-5">{FILE_PROVIDER_FEATURE_DESCRIPTION}</Text>
+					<Text className="text-sm text-muted-foreground px-4 leading-5">{featureDescription}</Text>
 				</GestureHandlerScrollView>
 			</SafeAreaView>
 		</Fragment>

@@ -18,8 +18,10 @@ import chats from "@/lib/chats"
 import useViewLayout from "@/hooks/useViewLayout"
 import alerts from "@/lib/alerts"
 import { onlineManager } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 
 const Messages = memo(({ chat }: { chat: TChat }) => {
+	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const keyboardAnimation = useReanimatedKeyboardAnimation()
 	const inputViewLayout = useChatsStore(useShallow(state => state.inputViewLayout))
@@ -190,7 +192,7 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 					>
 						<ListEmpty
 							icon="chatbubble-outline"
-							title="tbd_no_messages"
+							title={t("no_messages")}
 						/>
 					</View>
 				)}

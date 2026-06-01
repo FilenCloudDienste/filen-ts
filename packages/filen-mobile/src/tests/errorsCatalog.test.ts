@@ -69,7 +69,9 @@ describe("sort catalog", () => {
 
 describe("drive catalog", () => {
 	it("exposes the public-link password prompt copy", () => {
-		expect(drive.password_required).toBe("Password required")
+		// password_required is a shared key — it lives in common.ts (used by drive + drivePreview)
+		expect(common.password_required).toBe("Password required")
+		expect(drive).not.toHaveProperty("password_required")
 		expect(drive.enter_public_link_directory_password).toBeTypeOf("string")
 		expect(drive.enter_public_link_file_password).toBeTypeOf("string")
 	})

@@ -1,4 +1,5 @@
 import { memo } from "react"
+import { useTranslation } from "react-i18next"
 import { router } from "expo-router"
 import { ActivityIndicator } from "react-native"
 import audio, { useAudio } from "@/lib/audio"
@@ -12,6 +13,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { driveItemDisplayName } from "@/lib/decryption"
 
 const AudioSlot = memo(() => {
+	const { t } = useTranslation()
 	const { status, loading, queueItem } = useAudio()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -80,8 +82,8 @@ const AudioSlot = memo(() => {
 						{queueItem && audioMetadataQuery.status === "success"
 							? queueItem.item.data.undecryptable
 								? driveItemDisplayName(queueItem.item)
-								: (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? "tbd_unknown_title")
-							: "tbd_not_playing"}
+								: (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? t("unknown_title"))
+							: t("not_playing")}
 					</Text>
 					<Text
 						className="text-xs text-muted-foreground"
@@ -89,8 +91,8 @@ const AudioSlot = memo(() => {
 						ellipsizeMode="middle"
 					>
 						{queueItem && audioMetadataQuery.status === "success"
-							? (audioMetadataQuery.data?.artist ?? "tbd_unknown_artist")
-							: "tbd_not_playing"}
+							? (audioMetadataQuery.data?.artist ?? t("unknown_artist"))
+							: t("not_playing")}
 					</Text>
 				</View>
 			</View>

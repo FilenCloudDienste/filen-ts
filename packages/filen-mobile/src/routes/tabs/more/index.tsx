@@ -13,6 +13,7 @@ import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 import useAccountQuery from "@/queries/useAccount.query"
+import { useTranslation } from "react-i18next"
 
 export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]
@@ -234,6 +235,7 @@ export const Group = memo(({ buttons, className }: { buttons: Button[]; classNam
 const More = memo(() => {
 	const stringifiedClient = useStringifiedClient()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const { t } = useTranslation()
 
 	const contactRequestsQuery = useContactRequestsQuery({
 		enabled: false
@@ -246,7 +248,7 @@ const More = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_more"
+				title={t("more")}
 				transparent={Platform.OS === "ios"}
 			/>
 			<SafeAreaView edges={["left", "right"]}>
@@ -281,8 +283,10 @@ const More = memo(() => {
 									ellipsizeMode="middle"
 									className="text-muted-foreground text-sm"
 								>
-									{formatBytes(Number(accountQuery.data.storageUsed))} tbd_used_of{" "}
-									{formatBytes(Number(accountQuery.data.maxStorage))}
+									{t("used_of", {
+										used: formatBytes(Number(accountQuery.data.storageUsed)),
+										max: formatBytes(Number(accountQuery.data.maxStorage))
+									})}
 								</Text>
 							) : (
 								<ActivityIndicator
@@ -301,14 +305,14 @@ const More = memo(() => {
 						buttons={[
 							{
 								icon: "time-outline",
-								title: "tbd_recents",
+								title: t("recents"),
 								onPress: () => {
 									router.push("/recents")
 								}
 							},
 							{
 								icon: "heart-outline",
-								title: "tbd_favorites",
+								title: t("favorites"),
 								onPress: () => {
 									router.push({
 										pathname: "/favorites/[uuid]",
@@ -320,7 +324,7 @@ const More = memo(() => {
 							},
 							{
 								icon: "cloud-download-outline",
-								title: "tbd_saved_offline",
+								title: t("saved_offline"),
 								onPress: () => {
 									router.push({
 										pathname: "/offline/[uuid]",
@@ -332,7 +336,7 @@ const More = memo(() => {
 							},
 							{
 								icon: "trash-outline",
-								title: "tbd_trash",
+								title: t("trash"),
 								onPress: () => {
 									router.push("/trash")
 								}
@@ -345,7 +349,7 @@ const More = memo(() => {
 								? [
 										{
 											icon: "link-outline",
-											title: "tbd_public_links",
+											title: t("public_links"),
 											onPress: () => {
 												router.push({
 													pathname: "/links/[uuid]",
@@ -359,7 +363,7 @@ const More = memo(() => {
 								: []),
 							{
 								icon: "share-outline",
-								title: "tbd_shared_with_me",
+								title: t("shared_with_me"),
 								onPress: () => {
 									router.push({
 										pathname: "/sharedIn/[uuid]",
@@ -371,7 +375,7 @@ const More = memo(() => {
 							},
 							{
 								icon: "share-outline",
-								title: "tbd_shared_with_others",
+								title: t("shared_with_others"),
 								onPress: () => {
 									router.push({
 										pathname: "/sharedOut/[uuid]",
@@ -387,7 +391,7 @@ const More = memo(() => {
 						buttons={[
 							{
 								icon: "person-outline",
-								title: "tbd_contacts",
+								title: t("contacts"),
 								badge:
 									contactRequestsQuery.status === "success" && contactRequestsQuery.data.incoming.length > 0
 										? contactRequestsQuery.data.incoming.length.toString()
@@ -398,7 +402,7 @@ const More = memo(() => {
 							},
 							{
 								icon: "musical-note-outline",
-								title: "tbd_playlists",
+								title: t("playlists"),
 								onPress: () => {
 									router.push("/playlists")
 								}
@@ -409,35 +413,35 @@ const More = memo(() => {
 						buttons={[
 							{
 								icon: "lock-closed-outline",
-								title: "tbd_security",
+								title: t("security"),
 								onPress: () => {
 									router.push("/security")
 								}
 							},
 							{
 								icon: "folder-open-outline",
-								title: Platform.OS === "ios" ? "tbd_file_provider" : "tbd_documents_provider",
+								title: Platform.OS === "ios" ? t("file_provider") : t("documents_provider"),
 								onPress: () => {
 									router.push("/fileProvider")
 								}
 							},
 							{
 								icon: "color-palette-outline",
-								title: "tbd_appearance",
+								title: t("appearance"),
 								onPress: () => {
 									router.push("/appearance")
 								}
 							},
 							{
 								icon: "list-outline",
-								title: "tbd_events",
+								title: t("events"),
 								onPress: () => {
 									router.push("/events")
 								}
 							},
 							{
 								icon: "build-outline",
-								title: "tbd_advanced",
+								title: t("advanced"),
 								onPress: () => {
 									router.push("/advanced")
 								}
