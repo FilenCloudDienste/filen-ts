@@ -29,6 +29,7 @@
     "clean": "tsx ./clean.ts",
     "superclean": "tsx ./superclean.ts",
     "test": "vitest run",
+    "translate-i18n": "tsx scripts/translate-i18n.ts",
     "verify": "npm run lint && npm run typecheck && npm run test"
   },
   "expo": {
@@ -180,6 +181,7 @@
     "hermes-compiler": "250829098.0.4"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@tanstack/eslint-plugin-query": "^5.100.10",
     "@testing-library/react": "^16.3.2",
     "@types/mime-types": "^3.0.1",
@@ -202,6 +204,7 @@
     "tsx": "^4.22.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.58.2",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.6",
+    "zod": "^3.25.76"
   }
 }

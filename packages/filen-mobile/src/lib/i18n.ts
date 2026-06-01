@@ -10,9 +10,46 @@ import { DEFAULT_LANGUAGE, LANGUAGE_SECURE_STORE_KEY, type Language } from "@/li
 
 import { en } from "@/locales/en"
 
+// Target-language catalogs are plain JSON value maps, filled by the CI translation pipeline
+// (scripts/translate-i18n.ts). They start out as empty `{}` stubs and i18next falls back to
+// `en` for any missing key. Only `en` is type-checked (via the `typeof en` augmentation in
+// src/i18next.d.ts); the others are untyped value maps keyed off the English key set.
+import deJson from "@/locales/de.json"
+import esJson from "@/locales/es.json"
+import frJson from "@/locales/fr.json"
+import itJson from "@/locales/it.json"
+import ptJson from "@/locales/pt.json"
+import ruJson from "@/locales/ru.json"
+import jaJson from "@/locales/ja.json"
+import zhJson from "@/locales/zh.json"
+
 const resources = {
 	en: {
 		translation: en
+	},
+	de: {
+		translation: deJson
+	},
+	es: {
+		translation: esJson
+	},
+	fr: {
+		translation: frJson
+	},
+	it: {
+		translation: itJson
+	},
+	pt: {
+		translation: ptJson
+	},
+	ru: {
+		translation: ruJson
+	},
+	ja: {
+		translation: jaJson
+	},
+	zh: {
+		translation: zhJson
 	}
 }
 
@@ -66,6 +103,21 @@ export async function changeAppLanguage(lang: Language): Promise<void> {
 	await i18n.changeLanguage(lang)
 
 	setIntlLanguage(lang)
+}
+
+// Whether a language actually ships any translations yet. `en` is always true (it's the
+// source). A target language is true only once its `<lang>.json` catalog has ≥1 key — until
+// the CI pipeline fills the empty stubs, the picker must not offer a fake option that would
+// just fall back to English. Reads the imported value maps directly (not i18n.getResourceBundle,
+// which only works after init); the resource objects are the same ones registered above.
+export function hasTranslations(lang: Language): boolean {
+	if (lang === "en") {
+		return true
+	}
+
+	const bundle = resources[lang]?.translation as Record<string, unknown> | undefined
+
+	return bundle !== undefined && Object.keys(bundle).length > 0
 }
 
 export const t = i18n.t.bind(i18n)

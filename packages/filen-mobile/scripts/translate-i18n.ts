@@ -1,0 +1,501 @@
+// i18n translation pipeline — fills the target-language catalogs (src/locales/<lang>.json)
+// from the English source catalog (src/locales/en/*.ts) via the Anthropic Messages API.
+//
+// Run with: npm run translate-i18n            (DELTA mode — only changed English keys)
+//           npm run translate-i18n -- --full  (FULL mode — every key for every language)
+//           npm run translate-i18n -- de,fr   (restrict to specific languages)
+//
+// Modes:
+//   DELTA (default) — diff src/locales/en between HEAD~1 and HEAD to find added/modified/removed
+//                     keys, then translate only the added/modified ones and delete the removed
+//                     ones from every target catalog. Plus a safety net: any key present in `en`
+//                     but missing from a target catalog is treated as added (covers a brand-new
+//                     empty stub or a previously-failed run).
+//   FULL (--full)   — translate every English key for every target language (ignores git).
+//
+// DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>"
+//             (e.g. "de:Cancel"). Lets the catalog-read / delta / file-write logic be exercised
+//             with zero token spend. The stub is OBVIOUS in code (see translateDryRun below).
+//
+// Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
+
+import Anthropic from "@anthropic-ai/sdk"
+import { z } from "zod"
+import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { dirname, join } from "node:path"
+import { execFileSync } from "node:child_process"
+
+import { en } from "@/locales/en"
+import { SUPPORTED_LANGUAGES } from "@/locales/languages"
+
+// NOTE: do NOT import from `@/lib/language` here — it transitively pulls in React Native
+// (via secureStore), which a Node/tsx run cannot evaluate. `@/locales/languages` is import-free
+// by contract (its own comment), so it's the only locale module safe to import in this script.
+// The target-language display names below are local to the script for the same reason; the
+// single source of truth for WHICH languages exist is still SUPPORTED_LANGUAGES.
+
+// ---------------------------------------------------------------------------
+// Paths & constants
+// ---------------------------------------------------------------------------
+
+const MODEL = "claude-opus-4-8"
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
+const PACKAGE_DIR = join(SCRIPT_DIR, "..")
+const EN_SOURCE_DIR = join(PACKAGE_DIR, "src", "locales", "en")
+const LOCALES_DIR = join(PACKAGE_DIR, "src", "locales")
+// Git pathspec is relative to the repo root; this package lives at packages/filen-mobile.
+const EN_SOURCE_GIT_PATHSPEC = "packages/filen-mobile/src/locales/en"
+
+// "en" is the source language; never a translation target.
+type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
+type TargetLanguage = Exclude<SupportedLanguage, "en">
+
+const TARGET_LANGUAGES: readonly TargetLanguage[] = SUPPORTED_LANGUAGES.filter(
+	(lang): lang is TargetLanguage => lang !== "en"
+)
+
+// English names of the target languages, used only to tell the model what to translate into.
+// Typed Record<TargetLanguage, string> so adding a SUPPORTED_LANGUAGES entry forces a name here
+// (compile error otherwise). Keep in step with LANGUAGE_LABELS in src/lib/language.ts.
+const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
+	de: "German",
+	es: "Spanish",
+	fr: "French",
+	it: "Italian",
+	pt: "Portuguese",
+	ru: "Russian",
+	ja: "Japanese",
+	zh: "Chinese (Simplified)"
+}
+
+// English catalog as a flat key→value map. The barrel merges the area files into one `as const`
+// object; every value is a string (plural keys are separate `_one`/`_other` entries).
+const EN_CATALOG: Record<string, string> = en
+
+const DRY_RUN = process.env["DRY_RUN"] === "1"
+
+// ---------------------------------------------------------------------------
+// CLI args
+// ---------------------------------------------------------------------------
+
+type Args = {
+	full: boolean
+	languages: readonly TargetLanguage[]
+}
+
+function parseArgs(argv: readonly string[]): Args {
+	let full = false
+	const requested: TargetLanguage[] = []
+
+	for (const arg of argv) {
+		if (arg === "--full") {
+			full = true
+
+			continue
+		}
+
+		// Accept a bare or comma-separated language list, e.g. `de` or `de,fr,ja`.
+		for (const candidate of arg.split(",")) {
+			const trimmed = candidate.trim()
+
+			if (trimmed.length === 0) {
+				continue
+			}
+
+			if ((TARGET_LANGUAGES as readonly string[]).includes(trimmed)) {
+				requested.push(trimmed as TargetLanguage)
+			} else {
+				throw new Error(`Unknown target language "${trimmed}". Valid: ${TARGET_LANGUAGES.join(", ")}`)
+			}
+		}
+	}
+
+	return {
+		full,
+		languages: requested.length > 0 ? requested : TARGET_LANGUAGES
+	}
+}
+
+// ---------------------------------------------------------------------------
+// English source files as translator context (JSDoc-rich)
+// ---------------------------------------------------------------------------
+
+// Concatenate the raw `src/locales/en/*.ts` files as text. Their JSDoc comments describe what
+// each key means and where it's used — invaluable context for the translator, and a stable
+// prefix that prompt caching reuses across all eight languages.
+function readEnglishSourceFiles(): string {
+	const files = readdirSync(EN_SOURCE_DIR)
+		.filter(name => name.endsWith(".ts"))
+		.sort()
+
+	const parts: string[] = []
+
+	for (const name of files) {
+		const contents = readFileSync(join(EN_SOURCE_DIR, name), "utf8")
+
+		parts.push(`// ===== src/locales/en/${name} =====\n${contents}`)
+	}
+
+	return parts.join("\n\n")
+}
+
+// ---------------------------------------------------------------------------
+// Delta computation (git diff of the English source)
+// ---------------------------------------------------------------------------
+
+type Delta = {
+	// Keys whose English value was added or changed → (re)translate for every target.
+	upsert: Record<string, string>
+	// Keys removed from English → delete from every target catalog.
+	removed: readonly string[]
+}
+
+// Extract the flat key set from a committed revision of src/locales/en by importing nothing —
+// we can't `import` an arbitrary git blob, so instead we reuse the current barrel for the value
+// map and rely on git only to tell us WHICH keys changed. We compute changed keys by diffing the
+// raw source text of the previous vs current revision for `key:` definitions.
+//
+// Simplest correct approach per the design: `git diff HEAD~1 -- <en dir>` to get added/modified/
+// removed key lines. We parse `+`/`-` lines for top-level `key: "..."` definitions.
+function gitShow(revision: string): string | null {
+	try {
+		// `git diff` between the two revisions, restricted to the English source dir.
+		return execFileSync("git", ["diff", "--unified=0", revision, "--", EN_SOURCE_GIT_PATHSPEC], {
+			cwd: PACKAGE_DIR,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"]
+		})
+	} catch {
+		return null
+	}
+}
+
+// Match a flat catalog key definition line, e.g. `\tappearance: "Appearance",` or
+// `\tselected_one: "{{count}} selected"`. Captures the key name only.
+const KEY_LINE = /^[+-]\s*([a-zA-Z0-9_]+)\s*:\s*["'`]/
+
+function computeDelta(): Delta {
+	const diff = gitShow("HEAD~1")
+
+	const addedOrChanged = new Set<string>()
+	const deletedCandidates = new Set<string>()
+
+	if (diff !== null) {
+		for (const line of diff.split("\n")) {
+			// Ignore diff headers (+++/---).
+			if (line.startsWith("+++") || line.startsWith("---")) {
+				continue
+			}
+
+			const match = KEY_LINE.exec(line)
+
+			if (match === null) {
+				continue
+			}
+
+			const key = match[1]
+
+			if (key === undefined) {
+				continue
+			}
+
+			if (line.startsWith("+")) {
+				addedOrChanged.add(key)
+			} else if (line.startsWith("-")) {
+				deletedCandidates.add(key)
+			}
+		}
+	}
+
+	// A key that appears on both a `+` and `-` line is a modification (re-translate); a key only
+	// on `-` lines and no longer in the current English catalog is a genuine removal.
+	const upsert: Record<string, string> = {}
+	const removed: string[] = []
+
+	for (const key of addedOrChanged) {
+		const value = EN_CATALOG[key]
+
+		if (value !== undefined) {
+			upsert[key] = value
+		}
+	}
+
+	for (const key of deletedCandidates) {
+		if (!(key in EN_CATALOG)) {
+			removed.push(key)
+		}
+	}
+
+	return {
+		upsert,
+		removed
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-language merge planning
+// ---------------------------------------------------------------------------
+
+function readTargetCatalog(lang: TargetLanguage): Record<string, string> {
+	const path = join(LOCALES_DIR, `${lang}.json`)
+
+	if (!existsSync(path)) {
+		return {}
+	}
+
+	const raw = readFileSync(path, "utf8").trim()
+
+	if (raw.length === 0) {
+		return {}
+	}
+
+	const parsed: unknown = JSON.parse(raw)
+
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(`Catalog ${lang}.json is not a JSON object`)
+	}
+
+	return parsed as Record<string, string>
+}
+
+// The subset of English keys that this language needs translated, given the mode and the
+// language's existing catalog. In FULL mode this is the entire English catalog. In DELTA mode
+// it's the upserts PLUS any English key missing from the target (new stub / failed prior run).
+function keysToTranslate(args: Args, delta: Delta, existing: Record<string, string>): Record<string, string> {
+	if (args.full) {
+		return {
+			...EN_CATALOG
+		}
+	}
+
+	const result: Record<string, string> = {
+		...delta.upsert
+	}
+
+	for (const [key, value] of Object.entries(EN_CATALOG)) {
+		if (!(key in existing)) {
+			result[key] = value
+		}
+	}
+
+	return result
+}
+
+// ---------------------------------------------------------------------------
+// Translation — Anthropic Messages API (with prompt caching) or DRY_RUN stub
+// ---------------------------------------------------------------------------
+
+function buildSystemPrompt(englishSource: string): string {
+	return [
+		"You are a professional software localizer translating the user-interface strings of Filen,",
+		"an end-to-end-encrypted cloud storage mobile app. You translate from English into the target",
+		"language named in each user message. Return only natural, idiomatic translations suitable for",
+		"a native speaker using the app.",
+		"",
+		"STRICT RULES — follow every one:",
+		"1. Do NOT translate the brand names \"Filen\" and \"Filen.io\" — keep them verbatim.",
+		"2. Preserve every interpolation placeholder EXACTLY as written, including the double braces:",
+		"   `{{count}}`, `{{name}}`, `{{date}}`, `{{domain}}`, etc. Never translate, reorder the braces,",
+		"   add spaces inside them, or localize the placeholder name. You MAY move a placeholder within",
+		"   the sentence if the target grammar requires it, but the token itself stays byte-identical.",
+		"3. Preserve react-i18next markup tags EXACTLY: `<link>…</link>` and any other `<tag>…</tag>`.",
+		"   Translate the text BETWEEN the tags, never the tag names, and keep them balanced.",
+		"4. Plural keys come as separate entries ending in `_one` / `_other` (and occasionally `_zero`,",
+		"   `_few`, `_many`). Translate each as its own entry — do not merge or drop any. Use the correct",
+		"   plural form for the target language even when English repeats the same wording.",
+		"5. Keep technical tokens, file extensions, units, and format specifiers intact",
+		"   (e.g. \"PDF\", \"MB/s\", \"2FA\", \"URL\").",
+		"6. Match the source register and length where possible — these are compact mobile UI labels.",
+		"   Do not add explanations, quotes, or trailing punctuation that the source lacks.",
+		"7. Return ONLY a JSON object mapping each input key to its translated string. No commentary.",
+		"",
+		"The full English source catalog follows, WITH its JSDoc comments, so you can see exactly where",
+		"and how each key is used. Use it as context; only translate the keys requested in each message.",
+		"",
+		"===== BEGIN ENGLISH SOURCE CATALOG =====",
+		englishSource,
+		"===== END ENGLISH SOURCE CATALOG ====="
+	].join("\n")
+}
+
+// DRY_RUN stub: prefix every English value with the lang code. Obvious, deterministic, free.
+function translateDryRun(lang: TargetLanguage, subset: Record<string, string>): Record<string, string> {
+	const result: Record<string, string> = {}
+
+	for (const [key, value] of Object.entries(subset)) {
+		result[key] = `${lang}:${value}`
+	}
+
+	return result
+}
+
+// JSON schema forcing a flat { key: translatedString } object. additionalProperties is a string
+// schema so any key is allowed but every value must be a string.
+function buildOutputSchema(): Record<string, unknown> {
+	return {
+		type: "object",
+		additionalProperties: {
+			type: "string"
+		}
+	}
+}
+
+async function translateWithApi(args: {
+	client: Anthropic
+	lang: TargetLanguage
+	subset: Record<string, string>
+	systemPrompt: string
+}): Promise<Record<string, string>> {
+	const { client, lang, subset, systemPrompt } = args
+	const languageName = LANGUAGE_NAMES[lang]
+
+	// Stable, cached system prefix (instructions + full English source) is reused across all eight
+	// languages — the first call writes the cache, the rest read it. The varying part (the delta
+	// subset + the target language name) lives in the per-language user message.
+	const response = await client.messages.create({
+		model: MODEL,
+		max_tokens: 16000,
+		system: [
+			{
+				type: "text",
+				text: systemPrompt,
+				cache_control: {
+					type: "ephemeral"
+				}
+			}
+		],
+		output_config: {
+			format: {
+				type: "json_schema",
+				schema: buildOutputSchema()
+			}
+		},
+		messages: [
+			{
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: [
+							`Translate these English UI strings to ${languageName}.`,
+							"Return ONLY the JSON map of the same keys to their translated values.",
+							"",
+							JSON.stringify(subset, null, 2)
+						].join("\n")
+					}
+				]
+			}
+		]
+	})
+
+	const block = response.content.find(part => part.type === "text")
+
+	if (block === undefined || block.type !== "text") {
+		throw new Error(`No text content returned for ${lang}`)
+	}
+
+	const parsed: unknown = JSON.parse(block.text)
+	const validated = z.record(z.string(), z.string()).parse(parsed)
+
+	return validated
+}
+
+// ---------------------------------------------------------------------------
+// Catalog write (sorted keys + trailing newline for stable diffs)
+// ---------------------------------------------------------------------------
+
+function writeCatalog(lang: TargetLanguage, catalog: Record<string, string>): void {
+	const sorted: Record<string, string> = {}
+
+	for (const key of Object.keys(catalog).sort()) {
+		const value = catalog[key]
+
+		if (value !== undefined) {
+			sorted[key] = value
+		}
+	}
+
+	const json = `${JSON.stringify(sorted, null, "\t")}\n`
+
+	writeFileSync(join(LOCALES_DIR, `${lang}.json`), json, "utf8")
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+	const args = parseArgs(process.argv.slice(2))
+	const delta = args.full ? { upsert: {}, removed: [] } : computeDelta()
+	const englishSource = readEnglishSourceFiles()
+	const systemPrompt = buildSystemPrompt(englishSource)
+
+	console.log(`[translate-i18n] mode=${args.full ? "FULL" : "DELTA"} dryRun=${DRY_RUN}`)
+	console.log(`[translate-i18n] english catalog: ${Object.keys(EN_CATALOG).length} keys`)
+	console.log(`[translate-i18n] target languages: ${args.languages.join(", ")}`)
+
+	if (!args.full) {
+		console.log(
+			`[translate-i18n] delta: ${Object.keys(delta.upsert).length} added/changed, ${delta.removed.length} removed`
+		)
+	}
+
+	let client: Anthropic | null = null
+
+	if (!DRY_RUN) {
+		const apiKey = process.env["ANTHROPIC_API_KEY"]
+
+		if (apiKey === undefined || apiKey.length === 0) {
+			throw new Error("ANTHROPIC_API_KEY is not set (and DRY_RUN is not enabled)")
+		}
+
+		// The SDK reads ANTHROPIC_API_KEY from the environment itself; constructing without
+		// passing the value keeps it out of any logged constructor args.
+		client = new Anthropic()
+	}
+
+	for (const lang of args.languages) {
+		const existing = readTargetCatalog(lang)
+		const subset = keysToTranslate(args, delta, existing)
+		const merged: Record<string, string> = {
+			...existing
+		}
+
+		// Apply removals first so a key removed AND re-added in the same delta nets to the new value.
+		for (const key of delta.removed) {
+			delete merged[key]
+		}
+
+		const subsetKeyCount = Object.keys(subset).length
+
+		if (subsetKeyCount > 0) {
+			console.log(`[translate-i18n] ${lang}: translating ${subsetKeyCount} keys`)
+
+			const translated = DRY_RUN
+				? translateDryRun(lang, subset)
+				: await translateWithApi({
+						client: client as Anthropic,
+						lang,
+						subset,
+						systemPrompt
+					})
+
+			Object.assign(merged, translated)
+		} else {
+			console.log(`[translate-i18n] ${lang}: nothing to translate`)
+		}
+
+		writeCatalog(lang, merged)
+
+		console.log(`[translate-i18n] ${lang}: wrote ${Object.keys(merged).length} keys`)
+	}
+
+	console.log("[translate-i18n] done")
+}
+
+main().catch(error => {
+	// Surface a clean message; never echo the API key.
+	console.error("[translate-i18n] failed:", error instanceof Error ? error.message : String(error))
+	process.exit(1)
+})

@@ -16,7 +16,7 @@ import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
 import { useLanguage, LANGUAGE_LABELS } from "@/lib/language"
 import { SUPPORTED_LANGUAGES } from "@/locales/languages"
-import { changeAppLanguage } from "@/lib/i18n"
+import { changeAppLanguage, hasTranslations } from "@/lib/i18n"
 
 const Appearance = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -71,9 +71,15 @@ const Appearance = memo(() => {
 				value: LANGUAGE_LABELS[language]
 			},
 			onPress: () => {
+				// Only offer languages that actually ship translations (English always; another
+				// language only once its catalog has ≥1 key). The empty stub catalogs must not
+				// surface a fake option that would just fall back to English. Keep the current
+				// selection visible even in the unlikely case its catalog became empty.
+				const offeredLanguages = SUPPORTED_LANGUAGES.filter(option => hasTranslations(option) || option === language)
+
 				actionSheet.show({
 					buttons: [
-						...SUPPORTED_LANGUAGES.map(option => ({
+						...offeredLanguages.map(option => ({
 							title: LANGUAGE_LABELS[option],
 							onPress: () => {
 								setLanguage(option)

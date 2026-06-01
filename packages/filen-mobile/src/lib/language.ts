@@ -11,7 +11,15 @@ export const DEFAULT_LANGUAGE: Language = "en"
 // Native names — NEVER translated, never t() keys. Typed by Language so a new
 // language forces a label (compile error if missing).
 export const LANGUAGE_LABELS: Record<Language, string> = {
-	en: "English"
+	en: "English",
+	de: "Deutsch",
+	es: "Español",
+	fr: "Français",
+	it: "Italiano",
+	pt: "Português",
+	ru: "Русский",
+	ja: "日本語",
+	zh: "中文"
 }
 
 export function useLanguage(): [Language, (next: Language | ((prev: Language) => Language)) => void] {
