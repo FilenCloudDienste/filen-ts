@@ -3,8 +3,7 @@
 		"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "128000",
 		"SLASH_COMMAND_TOOL_CHAR_BUDGET": "128000",
 		"ENABLE_LSP_TOOL": "1",
-		"CLAUDE_CODE_NO_FLICKER": "1",
-		"CLAUDE_CODE_EFFORT_LEVEL": "max"
+		"CLAUDE_CODE_NO_FLICKER": "1"
 	},
 	"permissions": {
 		"deny": [
@@ -21,7 +20,7 @@
 	"enabledPlugins": {
 		"typescript-lsp@claude-plugins-official": true
 	},
-	"model": "claude-opus-4-7[1m]",
+	"model": "claude-opus-4-8",
 	"includeCoAuthoredBy": false,
 	"hooks": {
 		"UserPromptSubmit": [
