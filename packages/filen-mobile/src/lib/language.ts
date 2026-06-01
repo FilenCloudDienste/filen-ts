@@ -19,7 +19,24 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 	pt: "Português",
 	ru: "Русский",
 	ja: "日本語",
-	zh: "中文"
+	zh: "中文",
+	bn: "বাংলা",
+	cs: "Čeština",
+	da: "Dansk",
+	fi: "Suomi",
+	hi: "हिन्दी",
+	hu: "Magyar",
+	id: "Bahasa Indonesia",
+	ko: "한국어",
+	nl: "Nederlands",
+	no: "Norsk",
+	pl: "Polski",
+	ro: "Română",
+	sv: "Svenska",
+	th: "ไทย",
+	tr: "Türkçe",
+	uk: "Українська",
+	vi: "Tiếng Việt"
 }
 
 export function useLanguage(): [Language, (next: Language | ((prev: Language) => Language)) => void] {
