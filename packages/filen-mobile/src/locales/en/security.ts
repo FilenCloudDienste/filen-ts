@@ -71,7 +71,7 @@ export const security = {
 	/** Fallback-password dialog — title shown when setting the PIN/password fallback for biometrics */
 	fallback_password: "Fallback password",
 	/** Fallback-password dialog — message asking the user to set a fallback password */
-	enter_fallback_password: "Enter a fallback password used when biometrics are unavailable",
+	enter_fallback_password: "Enter a fallback password to use when biometrics are unavailable",
 	/** Fallback-password confirm dialog — message asking the user to re-enter the fallback password */
 	enter_confirm_fallback_password: "Confirm your fallback password",
 	/** Inline error shown when the two fallback-password fields do not match */

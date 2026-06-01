@@ -92,7 +92,7 @@ export const notes = {
 	/** Bulk action: change the type of every selected note */
 	type_change_selected: "Change type of selection",
 	/** Bulk action: add or remove tags across every selected note */
-	bulk_tag_selected: "Tag selected",
+	bulk_tag_selected: "Tag selection",
 	/** Bulk action: duplicate every selected note */
 	duplicate_selected: "Duplicate selected",
 	/** Bulk action: export every selected note */
