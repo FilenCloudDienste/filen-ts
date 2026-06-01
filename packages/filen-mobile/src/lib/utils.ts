@@ -50,6 +50,7 @@ import pathModule from "path"
 import type { DriveItem, Prettify } from "@/types"
 import cache from "@/lib/cache"
 import type { DrivePath } from "@/hooks/useDrivePath"
+import i18n from "@/lib/i18n"
 
 export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
 	const abortController = new ManagedAbortController()
@@ -252,108 +253,113 @@ export function isNetworkClassError(error: unknown): boolean {
 	return kind === ErrorKind.Reqwest || kind === ErrorKind.RetryFailed || kind === ErrorKind.Response
 }
 
+// Maps the SDK's finite error KIND to a translated, user-readable string and appends the raw
+// `message()` as an untranslated diagnostic suffix. Per Google AIP-193 only the enumerable kind
+// is localized; `message()` is an open-ended English/developer string and must stay raw. Module
+// level (not a hook) → uses the imported module `i18n`.
 export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
-	const kind = (() => {
+	const errorKey = (() => {
 		switch (unwrapped.kind()) {
 			case ErrorKind.BadRecoveryKey: {
-				return "tbd_bad_recovery_key"
+				return "bad_recovery_key" as const
 			}
 
 			case ErrorKind.FolderNotFound: {
-				return "tbd_directory_not_found"
+				return "directory_not_found" as const
 			}
 
 			case ErrorKind.WrongPassword: {
-				return "tbd_wrong_password"
+				return "wrong_password" as const
 			}
 
 			case ErrorKind.Cancelled: {
-				return "tbd_operation_cancelled"
+				return "operation_cancelled" as const
 			}
 
 			case ErrorKind.ChunkTooLarge: {
-				return "tbd_chunk_too_large"
+				return "chunk_too_large" as const
 			}
 
 			case ErrorKind.Conversion: {
-				return "tbd_conversion_error"
+				return "conversion_error" as const
 			}
 
 			case ErrorKind.FileChangedDuringSync: {
-				return "tbd_file_changed_during_sync"
+				return "file_changed_during_sync" as const
 			}
 
 			case ErrorKind.HeifError: {
-				return "tbd_heif_error"
+				return "heif_error" as const
 			}
 
 			case ErrorKind.ImageError: {
-				return "tbd_image_error"
+				return "image_error" as const
 			}
 
 			case ErrorKind.InsufficientMemory: {
-				return "tbd_insufficient_memory"
+				return "insufficient_memory" as const
 			}
 
 			case ErrorKind.Internal: {
-				return "tbd_internal_error"
+				return "internal_error" as const
 			}
 
 			case ErrorKind.InvalidName: {
-				return "tbd_invalid_name"
+				return "invalid_name" as const
 			}
 
 			case ErrorKind.InvalidState: {
-				return "tbd_invalid_state"
+				return "invalid_state" as const
 			}
 
 			case ErrorKind.InvalidType: {
-				return "tbd_invalid_type"
+				return "invalid_type" as const
 			}
 
 			case ErrorKind.Io: {
-				return "tbd_fs_io_error"
+				return "fs_io_error" as const
 			}
 
 			case ErrorKind.MaxStorageReached: {
-				return "tbd_max_remote_storage_reached"
+				return "max_remote_storage_reached" as const
 			}
 
 			case ErrorKind.MetadataWasNotDecrypted: {
-				return "tbd_metadata_was_not_decrypted"
+				return "metadata_was_not_decrypted" as const
 			}
 
 			case ErrorKind.Reqwest: {
-				return "tbd_network_error"
+				return "network_error" as const
 			}
 
 			case ErrorKind.Response: {
-				return "tbd_network_error"
+				return "network_error" as const
 			}
 
 			case ErrorKind.RetryFailed: {
-				return "tbd_network_retry_failed"
+				return "network_retry_failed" as const
 			}
 
 			case ErrorKind.Server: {
-				return "tbd_server_error"
+				return "server_error" as const
 			}
 
 			case ErrorKind.Unauthenticated: {
-				return "tbd_unauthenticated"
+				return "unauthenticated" as const
 			}
 
 			case ErrorKind.Walk: {
-				return "tbd_fs_directory_walk_error"
+				return "fs_directory_walk_error" as const
 			}
 
 			default: {
-				return "tbd_unknown_error"
+				return "error_generic" as const
 			}
 		}
 	})()
 
-	return `${kind}: (${unwrapped.message()})`
+	// Translated kind + UNTRANSLATED raw message() diagnostic (AIP-193).
+	return `${i18n.t(errorKey)}: (${unwrapped.message()})`
 }
 
 export function unwrapAnyDirUuid(dir: AnyDirWithContext): string | null {

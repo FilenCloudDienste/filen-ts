@@ -46,6 +46,7 @@ import alerts from "@/lib/alerts"
 import { router } from "expo-router"
 import { serialize } from "@/lib/serializer"
 import type { Linked } from "@/hooks/useDrivePath"
+import i18n from "@/lib/i18n"
 
 class Drive {
 	public async favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
@@ -1302,10 +1303,10 @@ class Drive {
 				if (!password) {
 					const promptResult = await run(async () => {
 						return await prompts.input({
-							title: "tbd_password_required",
-							message: "tbd_enter_public_link_directory_password",
-							cancelText: "tbd_cancel",
-							okText: "tbd_submit",
+							title: i18n.t("password_required"),
+							message: i18n.t("enter_public_link_directory_password"),
+							cancelText: i18n.t("cancel"),
+							okText: i18n.t("submit"),
 							inputType: "secure-text"
 						})
 					})
@@ -1334,7 +1335,7 @@ class Drive {
 					return
 				}
 
-				alerts.error("tbd_wrong_password")
+				alerts.error(i18n.t("wrong_password"))
 
 				return
 			}
@@ -1391,10 +1392,10 @@ class Drive {
 				if (!password) {
 					const promptResult = await run(async () => {
 						return await prompts.input({
-							title: "tbd_password_required",
-							message: "tbd_enter_public_link_file_password",
-							cancelText: "tbd_cancel",
-							okText: "tbd_submit",
+							title: i18n.t("password_required"),
+							message: i18n.t("enter_public_link_file_password"),
+							cancelText: i18n.t("cancel"),
+							okText: i18n.t("submit"),
 							inputType: "secure-text"
 						})
 					})
@@ -1422,7 +1423,7 @@ class Drive {
 					return
 				}
 
-				alerts.error("tbd_wrong_password")
+				alerts.error(i18n.t("wrong_password"))
 
 				return
 			}

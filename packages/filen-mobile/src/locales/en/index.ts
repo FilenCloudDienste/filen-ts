@@ -12,10 +12,16 @@ import { common } from "@/locales/en/common"
 import { appearance } from "@/locales/en/appearance"
 import { transfers } from "@/locales/en/transfers"
 import { auth } from "@/locales/en/auth"
+import { errors } from "@/locales/en/errors"
+import { sort } from "@/locales/en/sort"
+import { drive } from "@/locales/en/drive"
 
 export const en = {
 	...common,
 	...appearance,
 	...transfers,
-	...auth
+	...auth,
+	...errors,
+	...sort,
+	...drive
 } as const
