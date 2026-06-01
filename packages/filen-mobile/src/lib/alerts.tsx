@@ -4,6 +4,7 @@ import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { memo } from "react"
 import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/utils"
+import i18n from "@/lib/i18n"
 
 const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }) => {
 	const insets = useSafeAreaInsets()
@@ -30,7 +31,7 @@ export class Alerts {
 				: String(message)
 
 		Notifier.showNotification({
-			title: "Error",
+			title: i18n.t("error"),
 			description,
 			duration: 3000,
 			Component: NotifierComponents.Alert,

@@ -78,6 +78,10 @@ export const media = {
 	no_camera_upload_errors: "No errors",
 	/** Camera upload error row / generic error fallback when no message is available */
 	unknown_error: "Unknown error",
+	/** Camera upload error: the photo or video could no longer be found on the device */
+	camera_upload_file_missing: "This item could no longer be found on your device.",
+	/** Camera upload error: the photo or video could not be prepared for upload */
+	camera_upload_processing_failed: "This item could not be prepared for upload.",
 
 	// ── Playlists list ────────────────────────────────────────────────────────
 	/** Playlists screen — header title */

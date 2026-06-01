@@ -11,6 +11,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import * as ExpoLinking from "expo-linking"
 import alerts from "@/lib/alerts"
 import useTextEditorStore from "@/stores/useTextEditor.store"
+import i18n from "@/lib/i18n"
 
 export type TextEditorType = "richtext" | "text" | "markdown" | "code"
 
@@ -166,7 +167,7 @@ export const TextEditor = memo(
 						ExpoLinking.canOpenURL(message.data)
 							.then(supported => {
 								if (!supported) {
-									alerts.error(`No app found to open ${message.data}`)
+									alerts.error(i18n.t("cannot_open_link"))
 
 									return
 								}

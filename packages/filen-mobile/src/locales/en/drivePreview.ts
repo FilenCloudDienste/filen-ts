@@ -69,6 +69,10 @@ export const drivePreview = {
 	two_weeks: "2 weeks",
 	/** Public-link expiration option: 30 days from now */
 	thirty_days: "30 days",
+	/** Error shown when the public link could not be built for sharing */
+	public_link_generate_failed: "Could not create the public link. Please try again.",
+	/** Error shown when the device does not support the system share sheet */
+	sharing_not_available: "Sharing is not available on this device.",
 
 	// ── File versions route (fileVersions/index.tsx) ───────────────────────────
 	/** File-versions screen header title (the history of past versions of a file) */

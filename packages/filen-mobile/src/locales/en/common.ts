@@ -36,18 +36,16 @@ export const common = {
 	yes: "Yes",
 	/** Generic negative answer button (yes/no prompts) */
 	no: "No",
-	/** Generic "this action is finished" / dismiss button */
-	done: "Done",
 	/** Generic button advancing a multi-step flow to the next step */
 	next: "Next",
 	/** Generic button to proceed past a confirmation or informational prompt */
 	continue: "Continue",
 	/** Generic button to postpone / defer an action (e.g. a reminder) */
 	later: "Later",
-	/** Generic button to retry a failed action */
-	retry: "Retry",
 	/** Generic button to clear / dismiss an error or input */
 	clear: "Clear",
+	/** Generic title for an error banner / error dialog */
+	error: "Error",
 
 	// ── Generic credentials / form fields ─────────────────────────────────────
 	/** Generic email field label / placeholder (login + registration forms, reset prompts) */
@@ -110,8 +108,6 @@ export const common = {
 	info: "Info",
 	/** Generic action: open settings */
 	settings: "Settings",
-	/** Generic action: search within a list */
-	search: "Search",
 	/** Generic action: leave a shared item (chat, note, share) */
 	leave: "Leave",
 
@@ -124,10 +120,6 @@ export const common = {
 	pin: "Pin",
 	/** Generic action: unpin a pinned item */
 	unpin: "Unpin",
-	/** Generic action: mute notifications for an item */
-	mute: "Mute",
-	/** Generic action: unmute a muted item */
-	unmute: "Unmute",
 	/** Generic action: mark an item / conversation as read */
 	mark_as_read: "Mark as read",
 	/** Generic action: enable a feature / setting */

@@ -28,6 +28,7 @@ import { serialize } from "@/lib/serializer"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
+import i18n from "@/lib/i18n"
 
 type BigIntToNumber<T> = T extends bigint
 	? number
@@ -208,7 +209,7 @@ const Account = memo(() => {
 									})
 
 									if (!originalFile.exists) {
-										throw new Error("Asset file does not exist")
+										throw new Error(i18n.t("avatar_upload_failed"))
 									}
 
 									if (
@@ -217,7 +218,7 @@ const Account = memo(() => {
 										!asset.fileSize ||
 										!asset.fileName
 									) {
-										throw new Error("Selected file is not an image")
+										throw new Error(i18n.t("avatar_not_an_image"))
 									}
 
 									const mimeType = asset.mimeType?.toLowerCase()
@@ -229,7 +230,7 @@ const Account = memo(() => {
 												FileSystem.Paths.extname(asset.fileName).toLowerCase()
 											)
 										) {
-											throw new Error("Selected image format is not supported")
+											throw new Error(i18n.t("avatar_unsupported_format"))
 										}
 
 										// Hold the Context in a local binding across the await. expo-image-manipulator's
@@ -253,7 +254,7 @@ const Account = memo(() => {
 										})
 
 										if (!convertedFile.exists) {
-											throw new Error("Converted file does not exist")
+											throw new Error(i18n.t("avatar_upload_failed"))
 										}
 
 										fileToUpload = convertedFile

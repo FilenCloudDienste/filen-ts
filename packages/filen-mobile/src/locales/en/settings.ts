@@ -55,6 +55,12 @@ export const settings = {
 	account: "Account",
 	/** Account screen — row to pick and upload a new profile avatar image */
 	change_avatar: "Change avatar",
+	/** Error shown when the picked avatar file is not an image */
+	avatar_not_an_image: "Please choose an image file.",
+	/** Error shown when the picked avatar image is in a format that cannot be used */
+	avatar_unsupported_format: "This image format is not supported. Please choose a different image.",
+	/** Generic error shown when uploading the chosen avatar image fails */
+	avatar_upload_failed: "Could not update your avatar. Please try again.",
 	/** Account screen — row title to change the account email address */
 	change_email_address: "Change email address",
 	/** Account screen — input prompt for the new email address */
