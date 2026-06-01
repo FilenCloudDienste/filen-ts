@@ -176,7 +176,7 @@ export const drive = {
 	/** Confirmation body for bulk remove-offline */
 	confirm_remove_offline_selected: "Are you sure you want to remove the selected items from offline storage?",
 	/** Confirm button label for bulk remove-offline dialog */
-	remove_offline: "Remove offline",
+	remove_offline: "Remove from offline",
 
 	// ── Empty trash actions / confirmation ────────────────────────────────────
 	/** Menu button and dialog title: permanently delete every item in the trash */
@@ -291,7 +291,7 @@ export const drive = {
 	/** Info-sheet row label: upload date */
 	uploaded: "Uploaded",
 	/** Info-sheet row label: whether the item is cached for offline use */
-	offline_status: "Offline",
+	offline_status: "Available offline",
 	/** Header title of the item-info sheet */
 	item_info: "Info",
 

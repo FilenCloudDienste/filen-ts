@@ -163,7 +163,7 @@ export const settings = {
 	/** Personal info — street field label */
 	street: "Street",
 	/** Personal info — input prompt for the street */
-	enter_new_street: "Enter your street",
+	enter_new_street: "Enter your street name",
 	/** Personal info — street number field label */
 	street_number: "Street number",
 	/** Personal info — input prompt for the street number */
@@ -207,7 +207,7 @@ export const settings = {
 	/** Toast after music metadata was cleared */
 	music_metadata_cleared: "Music metadata cleared",
 	/** Advanced — row title: clear the OS sandbox cache */
-	clear_sandbox_cache: "Clear sandbox cache",
+	clear_sandbox_cache: "Clear temporary cache",
 	/** Advanced — confirm message before clearing the sandbox cache */
 	clear_sandbox_cache_description: "This clears temporary files stored in the app cache.",
 	/** Toast after the sandbox cache was cleared */
@@ -215,7 +215,7 @@ export const settings = {
 	/** Advanced — row title: clear every disk cache at once */
 	clear_all_disk_caches: "Clear all disk caches",
 	/** Advanced — subtitle for the clear-all-disk-caches row */
-	clear_all_disk_caches_description: "Clears thumbnails, previews, music metadata and the sandbox cache",
+	clear_all_disk_caches_description: "Clears thumbnails, previews, music metadata, and the temporary cache",
 	/** Advanced — confirm message before clearing all disk caches */
 	clear_all_disk_caches_confirmation:
 		"This clears all disk caches. Cached data will be regenerated or re-downloaded as needed.",
