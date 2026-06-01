@@ -13,14 +13,10 @@ import alerts from "@/lib/alerts"
 import { useDriveSortPreferences, DEFAULT_SORT_PREFERENCES } from "@/lib/driveSortPreference"
 import { useStartScreen, START_SCREENS, type StartScreen } from "@/lib/startScreen"
 import { actionSheet } from "@/providers/actionSheet.provider"
-
-const START_SCREEN_LABELS: Record<StartScreen, string> = {
-	drive: "tbd_drive",
-	photos: "tbd_photos",
-	notes: "tbd_notes",
-	chats: "tbd_chats",
-	more: "tbd_more"
-}
+import { useTranslation } from "react-i18next"
+import { useLanguage, LANGUAGE_LABELS } from "@/lib/language"
+import { SUPPORTED_LANGUAGES } from "@/locales/languages"
+import { changeAppLanguage } from "@/lib/i18n"
 
 const Appearance = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -29,27 +25,63 @@ const Appearance = memo(() => {
 	const navigation = useNavigation()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
 	const [startScreen, setStartScreen] = useStartScreen()
+	const { t } = useTranslation()
+	const [language, setLanguage] = useLanguage()
+
+	const startScreenLabels: Record<StartScreen, string> = {
+		drive: t("start_screen_drive"),
+		photos: t("start_screen_photos"),
+		notes: t("start_screen_notes"),
+		chats: t("start_screen_chats"),
+		more: t("start_screen_more")
+	}
 
 	const generalButtons: Button[] = [
 		{
 			icon: "rocket-outline",
-			title: "tbd_start_screen",
-			subTitle: "tbd_start_screen_description",
+			title: t("start_screen"),
+			subTitle: t("start_screen_description"),
 			rightItem: {
 				type: "text",
-				value: START_SCREEN_LABELS[startScreen]
+				value: startScreenLabels[startScreen]
 			},
 			onPress: () => {
 				actionSheet.show({
 					buttons: [
 						...START_SCREENS.map(option => ({
-							title: START_SCREEN_LABELS[option],
+							title: startScreenLabels[option],
 							onPress: () => {
 								setStartScreen(option)
 							}
 						})),
 						{
-							title: "tbd_close",
+							title: t("close"),
+							cancel: true
+						}
+					]
+				})
+			}
+		},
+		{
+			icon: "language-outline",
+			title: t("language"),
+			subTitle: t("language_description"),
+			rightItem: {
+				type: "text",
+				value: LANGUAGE_LABELS[language]
+			},
+			onPress: () => {
+				actionSheet.show({
+					buttons: [
+						...SUPPORTED_LANGUAGES.map(option => ({
+							title: LANGUAGE_LABELS[option],
+							onPress: () => {
+								setLanguage(option)
+								changeAppLanguage(option)
+							}
+						})),
+						{
+							title: t("close"),
 							cancel: true
 						}
 					]
@@ -61,8 +93,8 @@ const Appearance = memo(() => {
 	const sortButtons: Button[] = [
 		{
 			icon: "swap-vertical-outline",
-			title: "tbd_remember_sort_per_directory",
-			subTitle: "tbd_remember_sort_per_directory_description",
+			title: t("remember_sort_per_directory"),
+			subTitle: t("remember_sort_per_directory_description"),
 			rightItem: {
 				type: "switch",
 				value: sortPrefs.mode === "perDirectory",
@@ -75,15 +107,15 @@ const Appearance = memo(() => {
 		},
 		{
 			icon: "refresh-outline",
-			title: "tbd_reset_sort",
-			subTitle: "tbd_reset_sort_description",
+			title: t("reset_sort"),
+			subTitle: t("reset_sort_description"),
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
-						title: "tbd_reset_sort",
-						message: "tbd_reset_sort_confirm",
-						okText: "tbd_reset",
-						cancelText: "tbd_cancel",
+						title: t("reset_sort"),
+						message: t("reset_sort_confirm"),
+						okText: t("reset"),
+						cancelText: t("cancel"),
 						destructive: true
 					})
 				})
@@ -111,7 +143,7 @@ const Appearance = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_appearance"
+				title={t("appearance")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
