@@ -3,6 +3,7 @@ import { useShallow } from "zustand/shallow"
 import { router } from "expo-router"
 import { ActivityIndicator } from "react-native"
 import { bpsToReadable } from "@filen/utils"
+import { useTranslation } from "react-i18next"
 import useTransfersStore from "@/stores/useTransfers.store"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
@@ -11,6 +12,7 @@ import { useResolveClassNames } from "uniwind"
 import AnimatedProgressBar from "@/components/floatingBar/animatedProgressBar"
 
 const TransfersSlot = memo(() => {
+	const { t } = useTranslation()
 	const transfersActive = useTransfersStore(useShallow(state => state.transfers.length > 0))
 	const { count, speed } = useTransfersStore(
 		useShallow(state => ({
@@ -38,7 +40,7 @@ const TransfersSlot = memo(() => {
 					numberOfLines={1}
 					ellipsizeMode="middle"
 				>
-					{count} tbd_active tbd_transfer{count !== 1 ? "s" : ""}
+					{t("transfers_active", { count })}
 				</Text>
 				{speed === 0 ? (
 					<ActivityIndicator

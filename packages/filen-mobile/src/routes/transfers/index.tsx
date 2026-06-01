@@ -12,6 +12,7 @@ import Header, { type HeaderItem } from "@/components/ui/header"
 import { useResolveClassNames } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { router } from "expo-router"
+import { useTranslation } from "react-i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Menu from "@/components/ui/menu"
 import Thumbnail from "@/components/drive/item/thumbnail"
@@ -24,6 +25,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 
 const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderItemInfo<TTransfer> }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
@@ -89,7 +91,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 								? [
 										{
 											id: "resume",
-											title: "tbd_resume",
+											title: t("resume"),
 											icon: "play" as const,
 											onPress: () => {
 												transfer.resume()
@@ -99,7 +101,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 								: [
 										{
 											id: "pause",
-											title: "tbd_pause",
+											title: t("pause"),
 											icon: "pause" as const,
 											onPress: () => {
 												transfer.pause()
@@ -108,16 +110,16 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 									]),
 							{
 								id: "cancel",
-								title: "tbd_cancel",
+								title: t("cancel"),
 								icon: "cancel",
 								destructive: true,
 								onPress: async () => {
 									const promptResult = await run(async () => {
 										return await prompts.alert({
-											title: "tbd_cancel_transfer",
-											message: "tbd_confirm_cancel_transfer",
-											cancelText: "tbd_cancel",
-											okText: "tbd_cancel_transfer",
+											title: t("cancel_transfer"),
+											message: t("confirm_cancel_transfer"),
+											cancelText: t("cancel"),
+											okText: t("cancel_transfer"),
 											destructive: true
 										})
 									})
@@ -155,6 +157,7 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 })
 
 const Transfers = memo(() => {
+	const { t } = useTranslation()
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 	const insets = useSafeAreaInsets()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -168,7 +171,7 @@ const Transfers = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title="tbd_transfers"
+				title={t("transfers")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -207,7 +210,7 @@ const Transfers = memo(() => {
 												? [
 														{
 															id: "resumeAll",
-															title: "tbd_resume_all",
+															title: t("resume_all"),
 															icon: "play" as const,
 															onPress: () => {
 																// Iterate per-transfer instead of resuming the
@@ -224,7 +227,7 @@ const Transfers = memo(() => {
 												: [
 														{
 															id: "pauseAll",
-															title: "tbd_pause_all",
+															title: t("pause_all"),
 															icon: "pause" as const,
 															onPress: () => {
 																// Same reason — iterate per-transfer so the
@@ -239,16 +242,16 @@ const Transfers = memo(() => {
 													]),
 											{
 												id: "abortAll",
-												title: "tbd_cancel_all",
+												title: t("cancel_all"),
 												icon: "cancel",
 												destructive: true,
 												onPress: async () => {
 													const promptResult = await run(async () => {
 														return await prompts.alert({
-															title: "tbd_cancel_all_transfers",
-															message: "tbd_confirm_cancel_all_transfers",
-															cancelText: "tbd_cancel",
-															okText: "tbd_cancel_all",
+															title: t("cancel_all_transfers"),
+															message: t("confirm_cancel_all_transfers"),
+															cancelText: t("cancel"),
+															okText: t("cancel_all"),
 															destructive: true
 														})
 													})
@@ -295,7 +298,7 @@ const Transfers = memo(() => {
 					emptyComponent={() => (
 						<ListEmpty
 							icon="sync-outline"
-							title="tbd_no_transfers"
+							title={t("no_transfers")}
 						/>
 					)}
 					contentContainerStyle={{
