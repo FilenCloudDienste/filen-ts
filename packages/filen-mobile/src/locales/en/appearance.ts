@@ -1,21 +1,6 @@
-// English translation catalog — the source language for every other locale.
-//
-// Format: a flat (no nesting) `as const` object of snake_case keys → English copy, with one
-// `/** JSDoc */` per key giving translator context. Comments strip at build; the `as const`
-// gives full key-type-safety (see src/i18next.d.ts). i18next runs with `keySeparator:false`
-// and `nsSeparator:false`, so keys are treated as opaque flat literals (dots/colons in a key
-// are literal characters, not path separators).
-//
-// PLURAL/CONTEXT SEPARATOR RULE (Risk 1): `keySeparator:false` does NOT disable i18next's
-// `pluralSeparator`/`contextSeparator`, both of which default to `_`. Because these keys are
-// snake_case, the first pluralized/context key (i18next appends `_one`/`_other`/`_male`/…)
-// would collide with snake_case. Inert in Phase 1 (no plurals/contexts here). When the first
-// plural lands, override `pluralSeparator`/`contextSeparator` to a snake-safe value
-// (e.g. `"__"`), and ensure no base key ends in a token that could collide.
-//
-// Native language names (English, Deutsch, …) do NOT live here — they are non-translated
-// constants in src/lib/language.ts.
-export const en = {
+// Appearance settings screen vocabulary (src/routes/appearance/index.tsx). Shared keys
+// (cancel, reset, close) live in common.ts and must not be redefined here.
+export const appearance = {
 	/** Appearance settings screen — header title */
 	appearance: "Appearance",
 	/** Settings row label: choose which tab opens on launch */
@@ -45,11 +30,5 @@ export const en = {
 	/** Settings row subtitle explaining the reset-sort action */
 	reset_sort_description: "Clear all saved sort orders and return to the defaults",
 	/** Confirmation dialog message shown before resetting sort orders */
-	reset_sort_confirm: "Are you sure you want to reset all saved sort orders?",
-	/** Generic confirm/destructive action button: reset */
-	reset: "Reset",
-	/** Generic dialog cancel button */
-	cancel: "Cancel",
-	/** Generic action-sheet dismiss button */
-	close: "Close"
+	reset_sort_confirm: "Are you sure you want to reset all saved sort orders?"
 } as const
