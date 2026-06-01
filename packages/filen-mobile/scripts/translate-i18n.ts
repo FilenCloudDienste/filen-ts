@@ -69,7 +69,24 @@ const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
 	pt: "Portuguese",
 	ru: "Russian",
 	ja: "Japanese",
-	zh: "Chinese (Simplified)"
+	zh: "Chinese (Simplified)",
+	bn: "Bengali",
+	cs: "Czech",
+	da: "Danish",
+	fi: "Finnish",
+	hi: "Hindi",
+	hu: "Hungarian",
+	id: "Indonesian",
+	ko: "Korean",
+	nl: "Dutch",
+	no: "Norwegian",
+	pl: "Polish",
+	ro: "Romanian",
+	sv: "Swedish",
+	th: "Thai",
+	tr: "Turkish",
+	uk: "Ukrainian",
+	vi: "Vietnamese"
 }
 
 // English catalog as a flat key→value map. The barrel merges the area files into one `as const`

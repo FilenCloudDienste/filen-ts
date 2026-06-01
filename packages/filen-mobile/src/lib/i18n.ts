@@ -22,6 +22,23 @@ import ptJson from "@/locales/pt.json"
 import ruJson from "@/locales/ru.json"
 import jaJson from "@/locales/ja.json"
 import zhJson from "@/locales/zh.json"
+import bnJson from "@/locales/bn.json"
+import csJson from "@/locales/cs.json"
+import daJson from "@/locales/da.json"
+import fiJson from "@/locales/fi.json"
+import hiJson from "@/locales/hi.json"
+import huJson from "@/locales/hu.json"
+import idJson from "@/locales/id.json"
+import koJson from "@/locales/ko.json"
+import nlJson from "@/locales/nl.json"
+import noJson from "@/locales/no.json"
+import plJson from "@/locales/pl.json"
+import roJson from "@/locales/ro.json"
+import svJson from "@/locales/sv.json"
+import thJson from "@/locales/th.json"
+import trJson from "@/locales/tr.json"
+import ukJson from "@/locales/uk.json"
+import viJson from "@/locales/vi.json"
 
 const resources = {
 	en: {
@@ -50,6 +67,57 @@ const resources = {
 	},
 	zh: {
 		translation: zhJson
+	},
+	bn: {
+		translation: bnJson
+	},
+	cs: {
+		translation: csJson
+	},
+	da: {
+		translation: daJson
+	},
+	fi: {
+		translation: fiJson
+	},
+	hi: {
+		translation: hiJson
+	},
+	hu: {
+		translation: huJson
+	},
+	id: {
+		translation: idJson
+	},
+	ko: {
+		translation: koJson
+	},
+	nl: {
+		translation: nlJson
+	},
+	no: {
+		translation: noJson
+	},
+	pl: {
+		translation: plJson
+	},
+	ro: {
+		translation: roJson
+	},
+	sv: {
+		translation: svJson
+	},
+	th: {
+		translation: thJson
+	},
+	tr: {
+		translation: trJson
+	},
+	uk: {
+		translation: ukJson
+	},
+	vi: {
+		translation: viJson
 	}
 }
 
