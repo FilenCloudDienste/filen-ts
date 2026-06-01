@@ -27,5 +27,11 @@ export const transfers = {
 	/** Floating-bar label: number of active transfers (singular). {{count}} is the count */
 	transfers_active_one: "{{count}} active transfer",
 	/** Floating-bar label: number of active transfers (plural). {{count}} is the count */
-	transfers_active_other: "{{count}} active transfers"
+	transfers_active_other: "{{count}} active transfers",
+	/** Android foreground-service notification name for the persistent transfers channel (shown in system notification settings) */
+	transfers_channel_name: "Transfers",
+	/** Android foreground-service notification body while transfers run (singular). {{count}} is the transfer count, {{percent}} the overall progress, {{speed}} the human-readable speed */
+	transfers_progress_one: "{{count}} transfer · {{percent}}% · {{speed}}",
+	/** Android foreground-service notification body while transfers run (plural). {{count}} is the transfer count, {{percent}} the overall progress, {{speed}} the human-readable speed */
+	transfers_progress_other: "{{count}} transfers · {{percent}}% · {{speed}}"
 } as const

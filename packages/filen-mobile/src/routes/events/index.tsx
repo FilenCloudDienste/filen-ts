@@ -19,14 +19,16 @@ import { serialize } from "@/lib/serializer"
 import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import i18n from "@/lib/i18n"
+import { type TFunction } from "i18next"
 import { type en } from "@/locales/en"
 
 const ON_END_REACHED_THRESHOLD = 0.5
 
 // Maps each SDK event kind to a translation key. `satisfies` checks completeness + key validity
-// while preserving each value's literal type, so indexing the map yields a narrow key that i18n.t
-// accepts. Resolved with the module-level i18n.t because eventKindToReadable() is a plain
-// (non-React) function shared with eventInfo and cannot use the useTranslation() hook.
+// while preserving each value's literal type, so indexing the map yields a narrow key that the
+// translator accepts. Callers may pass their own `t` (e.g. the useTranslation() hook in eventInfo)
+// so the resolved label stays reactive to an in-app language change; otherwise the module-level
+// i18n.t is used for non-React callers.
 const EVENT_KIND_KEY = {
 	[UserEventKind_Tags.FileUploaded]: "file_uploaded",
 	[UserEventKind_Tags.FileVersioned]: "file_versioned",
@@ -69,8 +71,8 @@ const EVENT_KIND_KEY = {
 	[UserEventKind_Tags.ItemFavorite]: "item_favorite"
 } satisfies Record<UserEventKind_Tags, keyof typeof en>
 
-export function eventKindToReadable(kind: UserEventKind): string {
-	return i18n.t(EVENT_KIND_KEY[kind.tag])
+export function eventKindToReadable(kind: UserEventKind, t: TFunction = i18n.t): string {
+	return t(EVENT_KIND_KEY[kind.tag])
 }
 
 const Event = memo(({ event }: { event: UserEvent }) => {

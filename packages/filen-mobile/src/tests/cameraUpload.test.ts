@@ -99,6 +99,12 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
+vi.mock("@/lib/i18n", () => ({
+	default: {
+		t: (key: string) => key
+	}
+}))
+
 
 vi.mock("@/lib/utils", () => ({
 	PauseSignal: class {

@@ -33,6 +33,7 @@ import cache from "@/lib/cache"
 import useAccountQuery from "@/queries/useAccount.query"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
+import i18n from "@/lib/i18n"
 
 function expirationToText(expiration: PublicLinkExpiration, t: TFunction) {
 	switch (expiration) {
@@ -180,11 +181,11 @@ const PublicLink = memo(() => {
 											onPress: async () => {
 												const result = await runWithLoading(async () => {
 													if (!publicLinkStatusQuery.data) {
-														throw new Error("Public link status not found")
+														throw new Error(i18n.t("error_generic"))
 													}
 
 													if (itemParsed.type !== publicLinkStatusQuery.data.type) {
-														throw new Error("Mismatching item type and public link status type")
+														throw new Error(i18n.t("error_generic"))
 													}
 
 													return await drive.updatePublicLink({
@@ -248,7 +249,7 @@ const PublicLink = memo(() => {
 											onPress: async () => {
 												const result = await run(async () => {
 													if (!publicLinkStatusQuery.data) {
-														throw new Error("Public link status not found")
+														throw new Error(i18n.t("error_generic"))
 													}
 
 													const url = makeDriveItemPublicLink({
@@ -261,11 +262,11 @@ const PublicLink = memo(() => {
 													})
 
 													if (!url) {
-														throw new Error("Failed to generate public link URL from parameters")
+														throw new Error(i18n.t("public_link_generate_failed"))
 													}
 
 													if (!(await Sharing.isAvailableAsync())) {
-														throw new Error("Sharing is not available on this platform")
+														throw new Error(i18n.t("sharing_not_available"))
 													}
 
 													return await Sharing.shareAsync(url)

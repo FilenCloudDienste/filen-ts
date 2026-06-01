@@ -25,6 +25,7 @@ import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import cache from "@/lib/cache"
+import i18n from "@/lib/i18n"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -237,7 +238,7 @@ class CameraUpload {
 		const manipulatedFile = new FileSystem.File(result.uri)
 
 		if (!manipulatedFile.exists) {
-			throw new Error(`Generated file at ${manipulatedFile.uri} does not exist.`)
+			throw new Error(i18n.t("camera_upload_processing_failed"))
 		}
 
 		if (!manipulatedFile.size || !file.size || manipulatedFile.size >= file.size) {
@@ -636,7 +637,7 @@ class CameraUpload {
 		}
 
 		if (slashCount !== 2) {
-			throw new Error(`Unexpected path structure: ${originalPath}`)
+			throw new Error(i18n.t("error_generic"))
 		}
 
 		const parentDirName = FileSystem.Paths.dirname(originalPath).replace(/\//g, "")
@@ -650,7 +651,7 @@ class CameraUpload {
 		this.ensureParentDirectoryExistsCache.delete(cacheKey)
 
 		if (parentDirName.length === 0 || parentDirName === ".") {
-			throw new Error(`Invalid parent directory path: ${parentDirName}`)
+			throw new Error(i18n.t("error_generic"))
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
@@ -767,19 +768,19 @@ class CameraUpload {
 								const uri = await delta.file.asset.getUri()
 
 								if (!uri) {
-									throw new Error(`Failed to get URI for asset with id: ${delta.file.info.id}`)
+									throw new Error(i18n.t("camera_upload_file_missing"))
 								}
 
 								const assetFile = new FileSystem.File(uri)
 
 								if (!assetFile.exists) {
-									throw new Error(`File does not exist at path: ${uri}`)
+									throw new Error(i18n.t("camera_upload_file_missing"))
 								}
 
 								const md5 = assetFile.md5
 
 								if (!md5) {
-									throw new Error(`Failed to calculate MD5 for file at path: ${uri}`)
+									throw new Error(i18n.t("camera_upload_processing_failed"))
 								}
 
 								if (md5 === cache.cameraUploadHashes.get(delta.file.path)) {
@@ -833,7 +834,7 @@ class CameraUpload {
 							}
 
 							default: {
-								throw new Error(`Unknown delta type: ${delta.type}`)
+								throw new Error(i18n.t("error_generic"))
 							}
 						}
 					})

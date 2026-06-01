@@ -51,8 +51,6 @@ export const chats = {
 	// ── Chat list row / context menu ─────────────────────────────────────────
 	/** Chat context-menu item: toggle the muted state (shows current state with a checkmark) */
 	muted: "Mute notifications",
-	/** Chat context-menu item: open the chat participants management screen */
-	view_participants: "Participants",
 	/** Chat context-menu item: rename the chat (owner only) */
 	edit_name: "Edit name",
 	/** Confirmation dialog title for renaming a chat */

@@ -21,6 +21,12 @@ vi.mock("react-native-notify-kit", () => ({
 	AuthorizationStatus: { NOT_DETERMINED: 0, DENIED: 1, AUTHORIZED: 2, PROVISIONAL: 3 }
 }))
 
+vi.mock("@/lib/i18n", () => ({
+	default: {
+		t: (key: string) => key
+	}
+}))
+
 beforeEach(() => {
 	vi.clearAllMocks()
 	vi.resetModules()

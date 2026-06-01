@@ -205,8 +205,6 @@ export const drive = {
 	folder_is_empty: "This directory is empty",
 
 	// ── Per-item context menu actions (drive/item/menu.tsx) ───────────────────
-	/** Per-item context menu: open a directory */
-	open_directory: "Open",
 	/** Per-item context menu: download item to the device filesystem */
 	download_to_device: "Download to device",
 	/** Per-item context menu: make the item available when offline */

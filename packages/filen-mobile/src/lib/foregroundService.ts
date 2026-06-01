@@ -1,9 +1,9 @@
 import { Platform } from "react-native"
 import notifee, { AndroidImportance, AndroidForegroundServiceType, AuthorizationStatus } from "react-native-notify-kit"
 import { bpsToReadable } from "@filen/utils"
+import i18n from "@/lib/i18n"
 
 const CHANNEL_ID = "transfers"
-const CHANNEL_NAME = "Transfers"
 const NOTIFICATION_ID = "filen-transfers-fgs"
 
 export type PermissionStatus = "authorized" | "denied" | "notDetermined" | "notAndroid"
@@ -35,7 +35,7 @@ class ForegroundService {
 
 			await notifee.createChannel({
 				id: CHANNEL_ID,
-				name: CHANNEL_NAME,
+				name: i18n.t("transfers_channel_name"),
 				importance: AndroidImportance.LOW
 			})
 		})().catch(err => {
@@ -142,8 +142,14 @@ class ForegroundService {
 		const { count, progress: ratio, speed } = progress
 		const percent = Math.round(ratio * 100)
 		const speedText = speed > 0 ? bpsToReadable(speed) : "—"
-		const body =
-			count === 1 ? `1 transfer · ${percent}% · ${speedText}` : `${count} transfers · ${percent}% · ${speedText}`
+		// `count` stays a number so i18next selects the right plural form; `percent` is passed as a
+		// string because i18next's TS types collapse the interpolation overload once a key has 3+
+		// variables and one is numeric — stringifying it keeps the call fully typed.
+		const body = i18n.t("transfers_progress", {
+			count,
+			percent: percent.toString(),
+			speed: speedText
+		})
 
 		await notifee.displayNotification({
 			id: NOTIFICATION_ID,
