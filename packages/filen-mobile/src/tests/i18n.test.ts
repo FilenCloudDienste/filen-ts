@@ -43,7 +43,9 @@ describe("getInitialLanguage", () => {
 	})
 
 	it("ignores an unsupported persisted language and falls back to the device locale", async () => {
-		mockSecureStoreGet.mockResolvedValue("fr")
+		// "ko" (Korean) is intentionally NOT in SUPPORTED_LANGUAGES — a stand-in for any
+		// unsupported code, so this exercises the persisted-rejection path, not a real locale.
+		mockSecureStoreGet.mockResolvedValue("ko")
 		mockGetLocales.mockReturnValue([{ languageCode: "en" }])
 
 		const result = await getInitialLanguage()
@@ -62,7 +64,9 @@ describe("getInitialLanguage", () => {
 
 	it("falls back to 'en' when the device locale is unsupported", async () => {
 		mockSecureStoreGet.mockResolvedValue(null)
-		mockGetLocales.mockReturnValue([{ languageCode: "de" }])
+		// "ko" (Korean) is intentionally NOT in SUPPORTED_LANGUAGES — exercises the
+		// device-locale-rejection path that falls through to DEFAULT_LANGUAGE.
+		mockGetLocales.mockReturnValue([{ languageCode: "ko" }])
 
 		const result = await getInitialLanguage()
 

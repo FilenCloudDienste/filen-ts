@@ -7,5 +7,7 @@
 // MUST stay import-free: `app.config.ts` loads this in a plain Node context (no `@/` alias,
 // no React Native, no Expo). Adding any import here breaks the config build.
 //
-// Phase 1 value is `["en"]`. Adding a language is a one-line edit here plus a new catalog file.
-export const SUPPORTED_LANGUAGES = ["en"] as const
+// `en` is the source language; the other eight are filled by the CI translation pipeline
+// (scripts/translate-i18n.ts). Adding a language is a one-line edit here plus a new
+// `<lang>.json` stub catalog, a `LANGUAGE_LABELS` entry, and a `resources` import in i18n.ts.
+export const SUPPORTED_LANGUAGES = ["en", "de", "es", "fr", "it", "pt", "ru", "ja", "zh"] as const

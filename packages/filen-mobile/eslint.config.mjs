@@ -37,6 +37,7 @@ export default [
 			"eslint.config.mjs",
 			"metro.config.js",
 			"plugins/**/*",
+			"scripts/**/*",
 			"src/uniwind-types.d.ts",
 			"src/global.css",
 			"src/tests/**/*"
