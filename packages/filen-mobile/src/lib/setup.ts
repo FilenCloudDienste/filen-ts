@@ -13,6 +13,7 @@ import { startReconnectListener } from "@/lib/reconnect"
 import fileCache from "@/lib/fileCache"
 import audioCache from "@/lib/audioCache"
 import { initI18n } from "@/lib/i18n"
+import { initTheme } from "@/lib/theme"
 
 class Setup {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -52,6 +53,11 @@ class Setup {
 			// i18n is ready before first paint (no flash of raw keys). Serial-awaited, not folded
 			// into the Promise.all above (would race the secureStore read).
 			await initI18n()
+
+			// Apply the persisted theme override (light/dark) before first paint, same reasoning as
+			// initI18n — RootLayout renders null until setup is done, so there's no flash of the wrong
+			// theme. No-op when the user follows the system (uniwind already defaults to it on import).
+			await initTheme()
 
 			// Wire the reconnect-replay listener after the query cache is hydrated
 			// but before the fire-and-forget offline.sync below. Idempotent —

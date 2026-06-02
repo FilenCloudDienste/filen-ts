@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next"
 import { useLanguage, LANGUAGE_LABELS } from "@/lib/language"
 import { SUPPORTED_LANGUAGES } from "@/locales/languages"
 import { changeAppLanguage, hasTranslations } from "@/lib/i18n"
+import { useThemeSetting, THEME_SETTINGS, changeAppTheme, type ThemeSetting } from "@/lib/theme"
 
 const Appearance = memo(() => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -27,6 +28,7 @@ const Appearance = memo(() => {
 	const [startScreen, setStartScreen] = useStartScreen()
 	const { t } = useTranslation()
 	const [language, setLanguage] = useLanguage()
+	const [themeSetting, setThemeSetting] = useThemeSetting()
 
 	const startScreenLabels: Record<StartScreen, string> = {
 		drive: t("start_screen_drive"),
@@ -36,7 +38,39 @@ const Appearance = memo(() => {
 		more: t("start_screen_more")
 	}
 
+	const themeLabels: Record<ThemeSetting, string> = {
+		system: t("theme_system"),
+		light: t("theme_light"),
+		dark: t("theme_dark")
+	}
+
 	const generalButtons: Button[] = [
+		{
+			icon: "contrast-outline",
+			title: t("theme"),
+			subTitle: t("theme_description"),
+			rightItem: {
+				type: "text",
+				value: themeLabels[themeSetting]
+			},
+			onPress: () => {
+				actionSheet.show({
+					buttons: [
+						...THEME_SETTINGS.map(option => ({
+							title: themeLabels[option],
+							onPress: () => {
+								setThemeSetting(option)
+								changeAppTheme(option)
+							}
+						})),
+						{
+							title: t("close"),
+							cancel: true
+						}
+					]
+				})
+			}
+		},
 		{
 			icon: "rocket-outline",
 			title: t("start_screen"),

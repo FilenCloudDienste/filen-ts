@@ -21,6 +21,16 @@ export const appearance = {
 	language: "Language",
 	/** Settings row subtitle for the language option */
 	language_description: "Choose the language used throughout the app",
+	/** Settings row label: choose the light/dark appearance */
+	theme: "Theme",
+	/** Settings row subtitle for the theme option */
+	theme_description: "Choose a light or dark appearance, or follow the system",
+	/** Theme option: follow the device's system appearance */
+	theme_system: "System",
+	/** Theme option: always use the light appearance */
+	theme_light: "Light",
+	/** Theme option: always use the dark appearance */
+	theme_dark: "Dark",
 	/** Settings row label: remember the sort order separately for each directory */
 	remember_sort_per_directory: "Remember sort per directory",
 	/** Settings row subtitle explaining per-directory sort memory */

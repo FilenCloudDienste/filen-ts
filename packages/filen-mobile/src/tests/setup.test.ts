@@ -14,7 +14,8 @@ const {
 	mockAlerts,
 	mockFileCache,
 	mockAudioCache,
-	mockInitI18n
+	mockInitI18n,
+	mockInitTheme
 } = vi.hoisted(() => {
 	const mockAuth = {
 		isAuthed: vi.fn(),
@@ -40,7 +41,8 @@ const {
 		mockAlerts: { error: vi.fn() },
 		mockFileCache: { gc: vi.fn() },
 		mockAudioCache: { gc: vi.fn() },
-		mockInitI18n: vi.fn()
+		mockInitI18n: vi.fn(),
+		mockInitTheme: vi.fn()
 	}
 })
 
@@ -59,6 +61,7 @@ vi.mock("@/lib/reconnect", () => ({ startReconnectListener: mockStartReconnectLi
 vi.mock("@/lib/fileCache", () => ({ default: mockFileCache }))
 vi.mock("@/lib/audioCache", () => ({ default: mockAudioCache }))
 vi.mock("@/lib/i18n", () => ({ initI18n: mockInitI18n }))
+vi.mock("@/lib/theme", () => ({ initTheme: mockInitTheme }))
 
 import setup from "@/lib/setup"
 
@@ -79,6 +82,7 @@ beforeEach(() => {
 	mockFileCache.gc.mockResolvedValue(undefined)
 	mockAudioCache.gc.mockResolvedValue(undefined)
 	mockInitI18n.mockResolvedValue(undefined)
+	mockInitTheme.mockResolvedValue(undefined)
 })
 
 describe("setup.setup", () => {
