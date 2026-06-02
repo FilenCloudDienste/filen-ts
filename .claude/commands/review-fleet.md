@@ -43,9 +43,8 @@ The plan below is the orchestration. Adapt agent **counts** to the actual file c
 
 ## Workers — use these subagent definitions; do not improvise new ones
 
-- **Phase 1 audit** → the `code-auditor` subagent (read-only: bugs, throw sites, races, security, behavior-changing perf, UI/UX, DX)
-- **Phase 1 dead-code** → the `dead-code-auditor` subagent (read-only: unused files/exports/deps/types/CSS/i18n/flags)
-- **Phase 3 refactor** → the `react-ts-refactor` subagent (edit-capable: behavior-preserving fixes only)
+- **Phase 1 audit** → the `code-auditor`, `react-ts-refactor` and `dead-code-auditor` subagents
+- **Phase 2 verification + consolidation** → subagents that fact and do adversarial reviews of the phase 1 results
 
 Each subagent's own `tools` allowlist still applies inside the workflow, so the two auditors physically cannot edit files even though workflow agents run in `acceptEdits` mode. Rely on that — do not grant them edit access.
 
@@ -53,19 +52,16 @@ Each subagent's own `tools` allowlist still applies inside the workflow, so the 
 
 Default every agent to **Opus 4.8 at high effort**, then **downgrade per stage**:
 
-- **`dead-code-auditor` agents → Haiku.** The work is mechanical (run `knip`/`ts-prune`/`depcheck` if present, else grep); it does not need Opus reasoning.
+- **`dead-code-auditor` agents → Sonnet.** The work is mechanical (run `knip`/`ts-prune`/`depcheck` if present, else grep); it does not need Opus reasoning.
 - **`code-auditor` sweep agents → Sonnet.** Breadth across many files; cheap per file.
+- **`react-ts-refactor` sweep agents → Sonnet.** Breadth across many files; cheap per file.
 - **Phase 2 verification + consolidation → Opus.** This is the only stage where Opus earns its cost; keep the agent count small.
-- **Phase 3 `react-ts-refactor` agents → Opus, high effort.** Correctness-critical. Do **not** raise effort to xhigh/max — it multiplies the Opus burn for no benefit on this work.
 
 ## Cost & concurrency guardrails (non-negotiable)
 
-- Honor the runtime's 16-concurrent-agent cap, and additionally **cap concurrent Opus agents at 4** to smooth the burn against the weekly Opus bucket. Let the Haiku/Sonnet agents use the rest of the concurrency.
-- **Partition by module/area: one agent per file-group.** Keep each agent's input well under ~200K tokens (large inputs bill at 2×, and per-agent cost stays predictable). Never hand one agent the whole repo.
-- Size the total agent count to the file count. If the scope implies more than ~150 agents, **stop and ask me to narrow it** rather than fanning out — do not approach the 1,000-agent ceiling.
-- Reserve Opus strictly for Phase 2 and Phase 3.
+- Honor the runtime's 16-concurrent-agent cap, and additionally **cap concurrent Opus agents at 8** to smooth the burn against the weekly Opus bucket. Let the Haiku/Sonnet agents use the rest of the concurrency.
 
-## Phase 1 — parallel read-only sweep (Sonnet + Haiku)
+## Phase 1 — parallel read-only sweep (Sonnet)
 
 Partition the in-scope files into independent groups by module/feature. For each group, spawn in parallel:
 
@@ -73,16 +69,12 @@ Partition the in-scope files into independent groups by module/feature. For each
 2. a `dead-code-auditor` agent (Haiku) that returns deletion candidates: `{ path|symbol, artifactType, detectionMethod, confidence, checklistStatus }`.
    Keep every group's raw output in the workflow script's variables, not in the final context.
 
-## Phase 2 — Opus cross-check and plan (Opus, small fleet)
+## Phase 2 — Opus cross-check and plan (Opus)
 
 1. **Adversarial verification.** For each high-severity bug and every security finding, spawn an independent Opus verifier agent whose job is to _try to refute the finding_ — locate an existing guard, sanitizer, server-side control, or surrounding code that already handles it. **Drop findings that don't survive**; keep the rest with the refuter's notes attached. This is what makes the report trustworthy rather than a single pass.
 2. **Consolidate**: dedupe across groups, merge overlapping findings, and rank by severity then confidence.
 3. **Emit a refactor plan**: from the surviving findings, list only the items the `react-ts-refactor` agent could fix _while preserving behavior_ (its safe catalog — not bugs, security, behavior-changing perf, or deletions). Partition that plan into **independent units that touch disjoint files**, so Phase 3 can parallelize without two agents editing the same file.
 4. If `apply` was not requested, **stop here** and produce the report below.
-
-## Phase 3 — gated behavior-preserving refactor (Opus; only when `apply` is present)
-
-For each independent unit from the Phase 2 plan, spawn a `react-ts-refactor` agent (Opus, high effort) **restricted to that unit's files**. Each agent must follow its own workflow, including its **behavioral safety-net gate**: establish passing characterization tests for the unit first, refactor, then re-run them green. It must touch **only** the behavior-preserving items in its assigned plan — never a flagged bug, security item, behavior-changing perf change, or deletion. Run typecheck/lint/tests after each unit. Two agents must never share a file.
 
 ## Output
 
