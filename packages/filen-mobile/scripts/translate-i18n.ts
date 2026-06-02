@@ -6,12 +6,15 @@
 //           npm run translate-i18n -- de,fr   (restrict to specific languages)
 //
 // Modes:
-//   DELTA (default) — diff src/locales/en between HEAD~1 and HEAD to find added/modified/removed
-//                     keys, then translate only the added/modified ones and delete the removed
-//                     ones from every target catalog. Plus a safety net: any key present in `en`
-//                     but missing from a target catalog is treated as added (covers a brand-new
-//                     empty stub or a previously-failed run).
-//   FULL (--full)   — translate every English key for every target language (ignores git).
+//   DELTA (default) — compare the English catalog against the committed snapshot
+//                     (src/locales/.en-snapshot.json) to find added/modified/removed keys, then
+//                     translate only the added/modified ones and delete the removed ones from every
+//                     target catalog. Content-based, so a changed value is caught regardless of git
+//                     history (no dependence on commit topology, force-pushes, or squash merges).
+//                     Plus a safety net: any key present in `en` but missing from a target catalog is
+//                     treated as added (covers a brand-new empty stub or a previously-failed run).
+//                     After a successful run the snapshot is rewritten to the current English catalog.
+//   FULL (--full)   — translate every English key for every target language (ignores the snapshot).
 //
 // DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>"
 //             (e.g. "de:Cancel"). Lets the catalog-read / delta / file-write logic be exercised
@@ -24,7 +27,6 @@ import { z } from "zod"
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
-import { execFileSync } from "node:child_process"
 
 import { en } from "@/locales/en"
 import { SUPPORTED_LANGUAGES } from "@/locales/languages"
@@ -44,11 +46,9 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_DIR = join(SCRIPT_DIR, "..")
 const EN_SOURCE_DIR = join(PACKAGE_DIR, "src", "locales", "en")
 const LOCALES_DIR = join(PACKAGE_DIR, "src", "locales")
-// Git pathspecs resolve relative to the process cwd, not the repo root. `gitShow` runs git with
-// `cwd: PACKAGE_DIR`, so this pathspec must be relative to the package — NOT prefixed with
-// `packages/filen-mobile/` (that would resolve to a non-existent doubled path and silently match
-// nothing, so the delta would always be empty).
-const EN_SOURCE_GIT_PATHSPEC = "src/locales/en"
+// Baseline for the DELTA diff: the English catalog as of the last translation (key -> value). Lives
+// alongside the language catalogs but is never loaded as one (not a TARGET_LANGUAGE; a dotfile).
+const EN_SNAPSHOT_PATH = join(LOCALES_DIR, ".en-snapshot.json")
 
 // "en" is the source language; never a translation target.
 type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
@@ -161,7 +161,7 @@ function readEnglishSourceFiles(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Delta computation (git diff of the English source)
+// Delta computation (English catalog vs. committed snapshot)
 // ---------------------------------------------------------------------------
 
 type Delta = {
@@ -171,77 +171,54 @@ type Delta = {
 	removed: readonly string[]
 }
 
-// Extract the flat key set from a committed revision of src/locales/en by importing nothing —
-// we can't `import` an arbitrary git blob, so instead we reuse the current barrel for the value
-// map and rely on git only to tell us WHICH keys changed. We compute changed keys by diffing the
-// raw source text of the previous vs current revision for `key:` definitions.
-//
-// Simplest correct approach per the design: `git diff HEAD~1 -- <en dir>` to get added/modified/
-// removed key lines. We parse `+`/`-` lines for top-level `key: "..."` definitions.
-function gitShow(revision: string): string | null {
-	try {
-		// `git diff` between the two revisions, restricted to the English source dir.
-		return execFileSync("git", ["diff", "--unified=0", revision, "--", EN_SOURCE_GIT_PATHSPEC], {
-			cwd: PACKAGE_DIR,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"]
-		})
-	} catch {
+// Read the English snapshot (the DELTA baseline) — the catalog as of the last translation. Returns
+// null when absent (first run / not yet seeded) so the caller re-baselines instead of retranslating
+// everything; throws on a malformed file so a corrupt baseline fails loudly rather than silently
+// re-translating the whole catalog.
+function readSnapshot(): Record<string, string> | null {
+	if (!existsSync(EN_SNAPSHOT_PATH)) {
 		return null
 	}
-}
 
-// Match a flat catalog key definition line, e.g. `\tappearance: "Appearance",` or
-// `\tselected_one: "{{count}} selected"`. Captures the key name only.
-const KEY_LINE = /^[+-]\s*([a-zA-Z0-9_]+)\s*:\s*["'`]/
+	const raw = readFileSync(EN_SNAPSHOT_PATH, "utf8").trim()
 
-function computeDelta(): Delta {
-	const diff = gitShow("HEAD~1")
-
-	const addedOrChanged = new Set<string>()
-	const deletedCandidates = new Set<string>()
-
-	if (diff !== null) {
-		for (const line of diff.split("\n")) {
-			// Ignore diff headers (+++/---).
-			if (line.startsWith("+++") || line.startsWith("---")) {
-				continue
-			}
-
-			const match = KEY_LINE.exec(line)
-
-			if (match === null) {
-				continue
-			}
-
-			const key = match[1]
-
-			if (key === undefined) {
-				continue
-			}
-
-			if (line.startsWith("+")) {
-				addedOrChanged.add(key)
-			} else if (line.startsWith("-")) {
-				deletedCandidates.add(key)
-			}
-		}
+	if (raw.length === 0) {
+		return null
 	}
 
-	// A key that appears on both a `+` and `-` line is a modification (re-translate); a key only
-	// on `-` lines and no longer in the current English catalog is a genuine removal.
+	const parsed: unknown = JSON.parse(raw)
+
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(".en-snapshot.json is not a JSON object")
+	}
+
+	return parsed as Record<string, string>
+}
+
+// DELTA = the current English catalog diffed against the snapshot baseline. A key whose value changed
+// (or a brand-new key absent from the snapshot) is an upsert; a key in the snapshot but no longer in
+// English is a removal. Purely content-based — a modified value is caught no matter which commit it
+// landed in. With no snapshot yet, assume the catalogs are in sync (empty delta); the per-language
+// missing-key fallback in keysToTranslate still fills any genuinely-absent key.
+function computeDelta(): Delta {
+	const snapshot = readSnapshot()
 	const upsert: Record<string, string> = {}
 	const removed: string[] = []
 
-	for (const key of addedOrChanged) {
-		const value = EN_CATALOG[key]
+	if (snapshot === null) {
+		return {
+			upsert,
+			removed
+		}
+	}
 
-		if (value !== undefined) {
+	for (const [key, value] of Object.entries(EN_CATALOG)) {
+		if (snapshot[key] !== value) {
 			upsert[key] = value
 		}
 	}
 
-	for (const key of deletedCandidates) {
+	for (const key of Object.keys(snapshot)) {
 		if (!(key in EN_CATALOG)) {
 			removed.push(key)
 		}
@@ -724,6 +701,25 @@ function writeCatalog(lang: TargetLanguage, catalog: Record<string, string>): vo
 	writeFileSync(join(LOCALES_DIR, `${lang}.json`), json, "utf8")
 }
 
+// Rewrite the snapshot to the current English catalog (sorted + trailing newline, like the catalogs)
+// so the next DELTA diffs against this state. Written into the same PR as the translations, so the
+// baseline only advances once that PR is merged — an unmerged run keeps re-detecting the same delta.
+function writeSnapshot(): void {
+	const sorted: Record<string, string> = {}
+
+	for (const key of Object.keys(EN_CATALOG).sort()) {
+		const value = EN_CATALOG[key]
+
+		if (value !== undefined) {
+			sorted[key] = value
+		}
+	}
+
+	const json = `${JSON.stringify(sorted, null, "\t")}\n`
+
+	writeFileSync(EN_SNAPSHOT_PATH, json, "utf8")
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -803,6 +799,10 @@ async function main(): Promise<void> {
 
 		console.log(`[translate-i18n] ${lang}: wrote ${Object.keys(merged).length} keys`)
 	}
+
+	// Advance the baseline only after every language succeeded — a mid-run throw leaves the old
+	// snapshot in place, so a re-run re-detects the same delta and retries.
+	writeSnapshot()
 
 	console.log("[translate-i18n] done")
 }
