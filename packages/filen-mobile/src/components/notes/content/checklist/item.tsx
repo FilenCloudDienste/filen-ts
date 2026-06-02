@@ -62,6 +62,13 @@ const Item = memo(
 
 			const content = normalizeItemContent(text)
 
+			// onChangeText only fires for genuine user input (programmatic hydration writes the
+			// store directly and seeds `value` via the useState initializer, never through here).
+			// On Android soft keyboards onKeyPress does not fire for ordinary character keys, so this
+			// is the only reliable signal that the user has actually typed — without it, didType stays
+			// false and edits are never propagated to the parent / synced.
+			onDidType()
+
 			setValue(content)
 			onContentChange({
 				item,
@@ -92,23 +99,25 @@ const Item = memo(
 			}
 
 			const id = randomUUID()
+			const index = parsed.findIndex(i => i.id === after.id)
+			const newList = [...parsed]
 
-			useChecklistStore.getState().setParsed(prev => {
-				const newList = [...prev]
-				const index = prev.findIndex(i => i.id === after.id)
-
-				newList.splice(index + 1, 0, {
-					id,
-					checked: false,
-					content: ""
-				})
-
-				useChecklistStore.getState().setIds(newList.map(i => i.id))
-
-				return newList
+			newList.splice(index + 1, 0, {
+				id,
+				checked: false,
+				content: ""
 			})
 
-			focusItem(id)
+			useChecklistStore.getState().setParsed(newList)
+			useChecklistStore.getState().setIds(newList.map(i => i.id))
+
+			// Defer focus: the new <Item> for `id` has not mounted yet, so its ref-registration
+			// useEffect has not run and inputRefs[id] is still undefined. A macrotask runs after React
+			// has committed the render and flushed the passive effect, so the ref is registered by then
+			// (matches the focus-after-mount deferral used by the chat input).
+			setTimeout(() => {
+				focusItem(id)
+			}, 0)
 		}
 
 		const removeItem = (item: ChecklistItem) => {
@@ -137,14 +146,10 @@ const Item = memo(
 			}
 
 			const prevItem = parsed[index - 1]
+			const newList = parsed.filter(i => i.id !== item.id)
 
-			useChecklistStore.getState().setParsed(prev => {
-				const newList = prev.filter(i => i.id !== item.id)
-
-				useChecklistStore.getState().setIds(newList.map(i => i.id))
-
-				return newList
-			})
+			useChecklistStore.getState().setParsed(newList)
+			useChecklistStore.getState().setIds(newList.map(i => i.id))
 
 			if (prevItem) {
 				focusItem(prevItem.id)

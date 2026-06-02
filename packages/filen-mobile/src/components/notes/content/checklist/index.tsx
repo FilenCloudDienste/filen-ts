@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment, memo } from "react"
+import { useRef, useEffect, Fragment, memo } from "react"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
 import { checklistParser, type ChecklistItem } from "@filen/utils"
 import Item from "@/components/notes/content/checklist/item"
@@ -19,7 +19,11 @@ const Checklist = memo(
 		readOnly?: boolean
 		autoFocus?: boolean
 	}) => {
-		const [didType, setDidType] = useState<boolean>(false)
+		// didType gates onChange so programmatic hydration (the initialValue useEffect below, which
+		// writes the store directly) never propagates a spurious onChange. It is a ref, not state,
+		// so it reads the up-to-date value synchronously within the same event that flips it —
+		// otherwise the first keystroke would be dropped while a state update is still pending.
+		const didTypeRef = useRef<boolean>(false)
 		const ids = useChecklistStore(useShallow(state => state.ids))
 
 		const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
@@ -34,7 +38,7 @@ const Checklist = memo(
 				)
 			)
 
-			if (didType && onChange) {
+			if (didTypeRef.current && onChange) {
 				const parsed = useChecklistStore.getState().parsed
 
 				onChange(checklistParser.stringify(parsed))
@@ -61,7 +65,7 @@ const Checklist = memo(
 		}
 
 		const onTyped = () => {
-			setDidType(true)
+			didTypeRef.current = true
 		}
 
 		useEffect(() => {

@@ -857,9 +857,12 @@ class Notes {
 				prev.map(n =>
 					n.uuid === note.uuid
 						? {
-								...note,
-								content: n.content,
-								participants: note.participants.map(p => (p.userId === participant.userId ? participant : p))
+								// Patch onto the LIVE cache entry `n`, not the closure-captured render-time
+								// `note`: under bulk concurrency (Promise.all) every call would otherwise
+								// rebuild participants from the same stale base array and the last write
+								// would revert all the others until the next refetch.
+								...n,
+								participants: n.participants.map(p => (p.userId === participant.userId ? participant : p))
 							}
 						: n
 				)

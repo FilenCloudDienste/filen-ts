@@ -128,32 +128,44 @@ class FileProvider {
 	}
 
 	public async enable(): Promise<void> {
-		const current = await this.read()
-		const { authedSdkClient } = await auth.getSdkClients()
-		const sdkConfig = authedSdkClient.toSdkConfig()
+		// Hold writeMutex across the entire read -> getSdkClients -> write
+		// transaction. getSdkClients() is a real suspension point (slow on cold
+		// start); without the lock a concurrent disable() or setCacheBudget()
+		// could complete inside that await window and then be clobbered when
+		// enable() resumes its write — re-creating auth.json after disable()
+		// deleted it (provider silently re-enabled) or dropping a fresh budget.
+		await this.writeMutex.acquire()
 
-		await this.write({
-			...(current ? current : {}),
-			providerEnabled: true,
-			sdkConfig: {
-				email: sdkConfig.email,
-				// The extension never re-authenticates from password/2FA — it only uses apiKey + masterKeys.
-				// Forwarding the SDK's password to disk would be an unnecessary credential leak, so we hardcode
-				// a placeholder. The Rust SDK accepts this once apiKey + masterKeys are present.
-				password: "redacted",
-				twoFactorCode: "redacted",
-				masterKeys: sdkConfig.masterKeys,
-				apiKey: sdkConfig.apiKey,
-				publicKey: sdkConfig.publicKey,
-				privateKey: sdkConfig.privateKey,
-				authVersion: Number(sdkConfig.authVersion),
-				baseFolderUUID: sdkConfig.baseFolderUuid,
-				userId: Number(sdkConfig.userId),
-				metadataCache: sdkConfig.metadataCache,
-				tmpPath: sdkConfig.tmpPath,
-				connectToSocket: sdkConfig.connectToSocket
-			}
-		} satisfies AuthFileSchema)
+		try {
+			const current = await this.read()
+			const { authedSdkClient } = await auth.getSdkClients()
+			const sdkConfig = authedSdkClient.toSdkConfig()
+
+			this.writeUnlocked({
+				...(current ? current : {}),
+				providerEnabled: true,
+				sdkConfig: {
+					email: sdkConfig.email,
+					// The extension never re-authenticates from password/2FA — it only uses apiKey + masterKeys.
+					// Forwarding the SDK's password to disk would be an unnecessary credential leak, so we hardcode
+					// a placeholder. The Rust SDK accepts this once apiKey + masterKeys are present.
+					password: "redacted",
+					twoFactorCode: "redacted",
+					masterKeys: sdkConfig.masterKeys,
+					apiKey: sdkConfig.apiKey,
+					publicKey: sdkConfig.publicKey,
+					privateKey: sdkConfig.privateKey,
+					authVersion: Number(sdkConfig.authVersion),
+					baseFolderUUID: sdkConfig.baseFolderUuid,
+					userId: Number(sdkConfig.userId),
+					metadataCache: sdkConfig.metadataCache,
+					tmpPath: sdkConfig.tmpPath,
+					connectToSocket: sdkConfig.connectToSocket
+				}
+			} satisfies AuthFileSchema)
+		} finally {
+			this.writeMutex.release()
+		}
 
 		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, true)
 	}
@@ -162,16 +174,23 @@ class FileProvider {
 		await this.writeMutex.acquire()
 
 		try {
-			if (AUTH_FILE.exists) {
-				AUTH_FILE.delete()
-			}
-
-			AUTH_FILE.create()
-
-			AUTH_FILE.write(JSON.stringify(data, null, 4))
+			this.writeUnlocked(data)
 		} finally {
 			this.writeMutex.release()
 		}
+	}
+
+	// Performs the actual auth.json replace. Callers MUST already hold writeMutex —
+	// this never acquires it, so it can be reused inside a longer locked transaction
+	// (e.g. enable()) without deadlocking the single-permit Semaphore.
+	private writeUnlocked(data: AuthFileSchema): void {
+		if (AUTH_FILE.exists) {
+			AUTH_FILE.delete()
+		}
+
+		AUTH_FILE.create()
+
+		AUTH_FILE.write(JSON.stringify(data, null, 4))
 	}
 }
 

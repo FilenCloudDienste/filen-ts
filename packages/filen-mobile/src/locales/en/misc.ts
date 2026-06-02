@@ -72,5 +72,13 @@ export const misc = {
 	/** List-style menu item: bulleted list */
 	bullet_list: "Bulleted list",
 	/** List-style menu item: checklist (tappable checkboxes) */
-	checklist: "Checklist"
+	checklist: "Checklist",
+
+	// ── Root-layout setup-failure screen (routes/_layout.tsx) ─────────────────
+	/** Title shown when app initialization fails on launch */
+	setup_failed_title: "Couldn't start the app",
+	/** Body explaining the setup failure and inviting a retry */
+	setup_failed_description: "Something went wrong while starting the app. Please try again.",
+	/** Button label that retries app setup after a failure */
+	try_again: "Try again"
 } as const

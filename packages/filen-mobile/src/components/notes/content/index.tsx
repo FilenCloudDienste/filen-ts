@@ -165,7 +165,25 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 				return
 			}
 
+			// The user accepted loading the remote edit. Drop any unsynced local
+			// content for this note first — otherwise sync.tsx would later push the
+			// stale inflight content back to the server, overwriting the remote edit
+			// the user just chose to load. Clearing inflight also re-enables the
+			// query (enabled gate at line 83) so refetch() can remount the editor
+			// with the fresh server content.
 			const result = await run(async () => {
+				useNotesStore.getState().setInflightContent(prev => {
+					const updated = {
+						...prev
+					}
+
+					delete updated[note.uuid]
+
+					return updated
+				})
+
+				await sync.flushToDisk(useNotesStore.getState().inflightContent)
+
 				return await noteContentQuery.refetch()
 			})
 

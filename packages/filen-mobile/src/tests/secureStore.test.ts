@@ -49,7 +49,7 @@ vi.mock("@/lib/utils", () => ({
 }))
 
 import secureStore from "@/lib/secureStore"
-import { fs } from "@/tests/mocks/expoFileSystem"
+import { fs, File } from "@/tests/mocks/expoFileSystem"
 import { isAvailableAsync, getItemAsync, setItemAsync } from "@/tests/mocks/expoSecureStore"
 import { mockMmkv } from "@/tests/mocks/reactNativeMMKV"
 
@@ -714,6 +714,65 @@ describe("SecureStore", () => {
 			const oldVal = await store.get("existing")
 
 			expect(oldVal).toBeNull()
+		})
+	})
+
+	describe("atomic write — no zero-copy window", () => {
+		const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
+
+		it("does not delete the existing store before the new payload is staged", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			await store.set("key", "v1")
+
+			expect(fs.has(fileUri)).toBe(true)
+
+			// Fail the promotion of the staged tmp file into the destination. The move-aside
+			// of the existing store (source securestore.bin) and any restore (source .bak.)
+			// must still succeed — only the tmp -> destination promotion fails.
+			const originalMove = File.prototype.move
+			const moveSpy = vi.spyOn(File.prototype, "move").mockImplementation(function (this: File, dest) {
+				if (this.uri.includes(".securestore.tmp.")) {
+					throw new Error("simulated I/O error during move")
+				}
+
+				originalMove.call(this, dest)
+			})
+
+			try {
+				await expect(store.set("key", "v2")).rejects.toThrow("simulated I/O error during move")
+			} finally {
+				moveSpy.mockRestore()
+			}
+
+			// The destination must still exist after the failed write — credentials are never wiped.
+			expect(fs.has(fileUri)).toBe(true)
+
+			// And it must still hold the previously-committed value, recoverable by a fresh instance.
+			const setCall = setItemAsync.mock.calls[0] as [string, string]
+			const encryptionKey = setCall[1]
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			await store2.init()
+
+			expect(await store2.get("key")).toBe("v1")
+		})
+
+		it("leaves no temp or backup orphans on the happy path", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			await store.set("key", "first")
+			await store.set("key", "second")
+
+			const orphans = [...fs.keys()].filter(k => k.includes(".securestore.tmp.") || k.includes(".securestore.bak."))
+
+			expect(orphans).toHaveLength(0)
+			expect(await store.get("key")).toBe("second")
 		})
 	})
 })

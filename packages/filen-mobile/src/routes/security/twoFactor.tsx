@@ -28,8 +28,6 @@ const TwoFactor = memo(() => {
 
 	const accountQuery = useAccountQuery()
 
-	console.log(accountQuery.data)
-
 	return (
 		<Fragment>
 			<Header

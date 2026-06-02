@@ -218,7 +218,7 @@ const Advanced = memo(() => {
 										title: t("clear_sandbox_cache"),
 										message: t("clear_sandbox_cache_description"),
 										action: async () => {
-											sandboxCache.clear()
+											await sandboxCache.clear()
 
 											await clearExpoImageCache()
 										},

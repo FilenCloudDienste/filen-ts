@@ -5,7 +5,7 @@ import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import ListEmpty from "@/components/ui/listEmpty"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
-import usePlaylistsQuery from "@/queries/usePlaylists.query"
+import usePlaylistsQuery, { playlistsQueryGet } from "@/queries/usePlaylists.query"
 import { run, formatBytes, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -866,10 +866,15 @@ const Playlist = memo(() => {
 					}}
 					onReorder={async ({ from, to }) => {
 						const result = await runWithLoading(async () => {
+							// Read the freshest playlist from the query cache so rapid sequential reorders
+							// compose on each other instead of overwriting the cloud copy with a stale order
+							// captured in this handler's render snapshot.
+							const latestPlaylist = playlistsQueryGet()?.find(p => p.uuid === playlist.uuid) ?? playlist
+
 							await audio.savePlaylist({
 								playlist: {
-									...playlist,
-									files: reorderItems(playlist.files, from, to)
+									...latestPlaylist,
+									files: reorderItems(latestPlaylist.files, from, to)
 								}
 							})
 						})

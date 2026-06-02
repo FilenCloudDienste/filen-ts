@@ -12,6 +12,7 @@ const {
 	mockTransfersState,
 	mockCreateCompositePauseSignal,
 	mockCreateCompositeAbortSignal,
+	mockWrapAbortSignalForSdk,
 	mockUnwrapDirMeta,
 	mockUnwrapFileMeta,
 	mockUnwrapParentUuid,
@@ -85,6 +86,14 @@ const {
 		removeEventListener(event: string, fn: () => void) {
 			this._listeners.get(event)?.delete(fn)
 		}
+
+		removeAllListeners() {
+			this._listeners.clear()
+		}
+
+		dispose = vi.fn(() => {
+			this._listeners.clear()
+		})
 	}
 
 	const mockCreateCompositePauseSignal = vi.fn((..._signals: unknown[]) => Object.assign(new MockPauseSignal(), { dispose: vi.fn() }))
@@ -105,6 +114,10 @@ const {
 		return Object.assign(controller.signal, { dispose: vi.fn() })
 	})
 
+	// Returns a fresh wrapped ManagedAbortSignal stand-in per call, each carrying its own uniffiDestroy
+	// spy so tests can assert the SDK handle is released (matching the real uniffi binding's reclaim path).
+	const mockWrapAbortSignalForSdk = vi.fn(() => ({ uniffiDestroy: vi.fn() }))
+
 	const mockUnwrapDirMeta = vi.fn()
 	const mockUnwrapFileMeta = vi.fn()
 	const mockUnwrapParentUuid = vi.fn()
@@ -123,6 +136,7 @@ const {
 		mockTransfersState: state,
 		mockCreateCompositePauseSignal,
 		mockCreateCompositeAbortSignal,
+		mockWrapAbortSignalForSdk,
 		mockUnwrapDirMeta,
 		mockUnwrapFileMeta,
 		mockUnwrapParentUuid,
@@ -277,7 +291,7 @@ vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForExpo: vi.fn((path: string) => path),
 	unwrapDirMeta: mockUnwrapDirMeta,
 	unwrapFileMeta: mockUnwrapFileMeta,
-	wrapAbortSignalForSdk: vi.fn(() => ({})),
+	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,
 	PauseSignal: MockPauseSignal,
 	createCompositePauseSignal: mockCreateCompositePauseSignal,
 	createCompositeAbortSignal: mockCreateCompositeAbortSignal,
@@ -469,6 +483,54 @@ describe("Transfers", () => {
 
 				expect(compositePause.value.dispose).toHaveBeenCalledTimes(1)
 				expect(compositeAbort.value.dispose).toHaveBeenCalledTimes(1)
+			})
+
+			it("destroys the wrapped SDK abort signal on completion (no uniffi handle leak)", async () => {
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					hideProgress: true
+				})
+
+				const wrapped = mockWrapAbortSignalForSdk.mock.results[0] as { value: { uniffiDestroy: ReturnType<typeof vi.fn> } }
+
+				expect(mockWrapAbortSignalForSdk).toHaveBeenCalledTimes(1)
+				expect(wrapped.value.uniffiDestroy).toHaveBeenCalledTimes(1)
+			})
+
+			it("disposes the self-created pause signal but not a caller-supplied one", async () => {
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				// No pauseSignal passed: transfers owns the one it allocates and must dispose it.
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					hideProgress: true
+				})
+
+				const owned = mockCreateCompositePauseSignal.mock.calls[0]?.[1] as { dispose: ReturnType<typeof vi.fn> }
+
+				expect(owned.dispose).toHaveBeenCalledTimes(1)
+
+				mockCreateCompositePauseSignal.mockClear()
+
+				// Caller-supplied pauseSignal: transfers must NOT dispose it (the caller owns its lifecycle).
+				const callerPauseSignal = new MockPauseSignal()
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					hideProgress: true,
+					pauseSignal: callerPauseSignal as unknown as Parameters<typeof transfers.upload>[0]["pauseSignal"]
+				})
+
+				expect(callerPauseSignal.dispose).not.toHaveBeenCalled()
 			})
 
 			it("throws when local file does not exist", async () => {

@@ -84,7 +84,9 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 	const onlyNotes = notes.filter(n => n.type === "note")
 
 	const notesTags =
-		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b))) : []
+		notesTagsQuery.status === "success"
+			? [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
+			: []
 
 	const createNote = async (type: NoteType) => {
 		const result = await run(async () => {
@@ -900,7 +902,7 @@ const Notes = memo(() => {
 			return []
 		}
 
-		let notesTags = notesTagsQuery.data.sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
+		let notesTags = [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
 
 		if (searchQuery.length > 0) {
 			const searchQueryNormalized = searchQuery.trim().toLowerCase()

@@ -363,6 +363,33 @@ describe("Sqlite", () => {
 
 			await expect(sqlite.init()).rejects.toThrow("disk full")
 		})
+
+		it("openDb() rejects (does not busy-loop) when init persistently fails", async () => {
+			vi.useFakeTimers()
+
+			try {
+				// open() always throws, so init() can never set initDone — openDb()
+				// must give up after bounded retries instead of spinning forever.
+				open.mockImplementation(() => {
+					throw new Error("disk full")
+				})
+
+				const sqlite = await createSqlite()
+				const openPromise = sqlite.openDb()
+
+				// Surface the eventual rejection; drain backoff timers so the bounded
+				// retry loop runs to exhaustion rather than hanging the test.
+				const assertion = expect(openPromise).rejects.toThrow("disk full")
+
+				await vi.runAllTimersAsync()
+				await assertion
+
+				// open() was attempted multiple times (bounded retry), not once and not unbounded.
+				expect(open.mock.calls.length).toBeGreaterThan(1)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
 	})
 
 	describe("round-trip via execute/executeRaw", () => {

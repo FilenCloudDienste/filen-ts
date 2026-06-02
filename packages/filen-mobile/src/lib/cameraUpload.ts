@@ -193,7 +193,9 @@ class CameraUpload {
 		this.globalAbortController = new AbortController()
 		// Replace the pause signal so the next sync starts unpaused. The aborted
 		// controller above will already stop any in-flight transfers before they
-		// can block on the old (possibly paused) signal.
+		// can block on the old (possibly paused) signal. Free the old signal's SDK
+		// handle first — uniffi handles are not GC'd.
+		this.globalPauseSignal.dispose()
 		this.globalPauseSignal = new PauseSignal()
 		this.syncing = false
 		this.uploadFailures.clear()

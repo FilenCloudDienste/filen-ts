@@ -115,6 +115,11 @@ export class Offline {
 	private readonly syncMutex = new Semaphore(1)
 	// storeMutex(3): allows up to 3 concurrent file/directory downloads while still bounding I/O.
 	private readonly storeMutex = new Semaphore(3)
+	// storeItemMutexes: per-UUID Semaphore(1) lock serializing storeFile/storeDirectory for the same item.
+	// Without this, two concurrent store calls for the same UUID both pass the isItemStored guard (cold cache)
+	// and race the destructive parent-directory delete/recreate, so call B wipes call A's in-flight download
+	// target mid-transfer. Keyed by UUID so distinct items still download concurrently up to storeMutex(3).
+	private readonly storeItemMutexes = new Map<string, Semaphore>()
 	// clearBarrier: serializes clearAll against in-flight storeFile/storeDirectory/removeItem.
 	private readonly clearBarrier = new ClearBarrier()
 	private readonly listDirectoriesCache = new Map<string, Awaited<ReturnType<Offline["listDirectories"]>>>()
@@ -197,6 +202,42 @@ export class Offline {
 			}
 
 			throw e
+		}
+	}
+
+	/**
+	 * Acquire the per-UUID store lock, serializing storeFile/storeDirectory for the same item so the
+	 * check-then-act (isItemStored guard → destructive parent delete/recreate → download → index update)
+	 * runs atomically per UUID. Distinct UUIDs are unaffected and still bounded only by storeMutex(3).
+	 * Returns a release function that frees the slot and prunes the map entry once no one else holds or
+	 * waits on it, keeping the map bounded.
+	 */
+	private async acquireStoreItemLock(uuid: string): Promise<() => void> {
+		const existing = this.storeItemMutexes.get(uuid)
+		const mutex = existing ?? new Semaphore(1)
+
+		if (!existing) {
+			this.storeItemMutexes.set(uuid, mutex)
+		}
+
+		await mutex.acquire()
+
+		let released = false
+
+		return () => {
+			if (released) {
+				return
+			}
+
+			released = true
+
+			mutex.release()
+
+			// Prune the entry only when fully idle (no holder, no waiters) so a concurrent waiter
+			// keeps using the same Semaphore instance instead of racing on a fresh one.
+			if (mutex.count() === 0 && this.storeItemMutexes.get(uuid) === mutex) {
+				this.storeItemMutexes.delete(uuid)
+			}
 		}
 	}
 
@@ -1332,6 +1373,14 @@ export class Offline {
 				this.clearBarrier.leave()
 			})
 
+			// Per-UUID lock (outermost of the store locks): serializes the whole guard→delete→download→index
+			// section against another store call for the same file, so neither wipes the other's in-flight target.
+			const releaseStoreItemLock = await this.acquireStoreItemLock(file.data.uuid)
+
+			defer(() => {
+				releaseStoreItemLock()
+			})
+
 			await this.storeMutex.acquire()
 
 			defer(() => {
@@ -1439,6 +1488,14 @@ export class Offline {
 
 			defer(() => {
 				this.clearBarrier.leave()
+			})
+
+			// Per-UUID lock (outermost of the store locks): serializes the whole guard→delete→download→index
+			// section against another store call for the same directory, so neither wipes the other's in-flight target.
+			const releaseStoreItemLock = await this.acquireStoreItemLock(directory.data.uuid)
+
+			defer(() => {
+				releaseStoreItemLock()
 			})
 
 			await this.storeMutex.acquire()

@@ -98,13 +98,23 @@ export async function runWithLoading<TResult, E = unknown>(
 	return await run<TResult, E>(async defer => {
 		events.emit("showFullScreenLoadingModal")
 
-		defer(() => {
+		let hidden = false
+
+		const hide = () => {
+			if (hidden) {
+				return
+			}
+
+			hidden = true
+
 			events.emit("hideFullScreenLoadingModal")
+		}
+
+		defer(() => {
+			hide()
 		})
 
-		return await fn(defer, () => {
-			events.emit("hideFullScreenLoadingModal")
-		})
+		return await fn(defer, hide)
 	}, options)
 }
 

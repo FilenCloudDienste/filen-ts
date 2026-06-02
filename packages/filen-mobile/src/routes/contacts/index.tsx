@@ -2,7 +2,7 @@ import useContactsQuery from "@/queries/useContacts.query"
 import useContactRequestsQuery from "@/queries/useContactRequests.query"
 import { onlineManager } from "@tanstack/react-query"
 import { fastLocaleCompare, run, cn } from "@filen/utils"
-import { Fragment, useState, memo, useCallback } from "react"
+import { Fragment, useState, memo, useCallback, useEffect } from "react"
 import { Platform } from "react-native"
 import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
@@ -1042,6 +1042,24 @@ const Contacts = memo(() => {
 	const contactRequestsQuery = useContactRequestsQuery()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const selectOptions = useSelectOptions()
+
+	useEffect(() => {
+		// When in picker mode, emit a cancellation on unmount so selectContacts()
+		// resolves and removes its contactsSelect listener. Without this, dismissing
+		// the modal via OS back gesture / header close (which emit no event) leaves
+		// the awaiting promise pending forever and leaks the listener. A confirmed
+		// selection emits its own event + removes the listener before this fires.
+		return () => {
+			if (!selectOptions) {
+				return
+			}
+
+			events.emit("contactsSelect", {
+				id: selectOptions.id,
+				cancelled: true
+			})
+		}
+	}, [selectOptions])
 
 	const itemsSorted = (() => {
 		if (contactsQuery.status !== "success" || contactRequestsQuery.status !== "success") {

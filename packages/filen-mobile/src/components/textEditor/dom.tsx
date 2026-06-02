@@ -166,6 +166,10 @@ const TextEditorDOM = memo(
 		})()
 
 		const { onNativeMessage, postMessage } = useDomDomEvents<TextEditorEvents>()
+		const postMessageRef = useRef(postMessage)
+		const readyEmittedRef = useRef(false)
+
+		postMessageRef.current = postMessage
 
 		useDOMImperativeHandle(
 			ref,
@@ -176,9 +180,18 @@ const TextEditorDOM = memo(
 		)
 
 		useEffect(() => {
-			postMessage({
-				type: "ready"
-			})
+			// Emit "ready" exactly once per WebView mount, and register the window
+			// listeners once. useDomDomEvents returns a new `postMessage` identity on
+			// every render (no useCallback), so a naive [postMessage] dep would re-fire
+			// "ready" and re-register the listeners on every parent re-render. The click
+			// listener reads the latest `postMessage` through postMessageRef instead.
+			if (!readyEmittedRef.current) {
+				readyEmittedRef.current = true
+
+				postMessageRef.current({
+					type: "ready"
+				})
+			}
 
 			const keydownListener = () => {
 				didTypeRef.current = true
@@ -201,7 +214,7 @@ const TextEditorDOM = memo(
 					return
 				}
 
-				postMessage({
+				postMessageRef.current({
 					type: "externalLinkClicked",
 					data: url
 				})
@@ -214,7 +227,7 @@ const TextEditorDOM = memo(
 				window.removeEventListener("keydown", keydownListener)
 				window.removeEventListener("click", onClickListener)
 			}
-		}, [postMessage])
+		}, [])
 
 		if (markdownPreviewActive && type === "markdown") {
 			return (
@@ -260,7 +273,7 @@ const TextEditorDOM = memo(
 		return (
 			<CodeMirror
 				ref={codeMirrorRef}
-				value={initialValue}
+				value={value}
 				width="100dvw"
 				onChange={onChange}
 				extensions={extensions}

@@ -1,4 +1,4 @@
-import { memo, Fragment, useEffect, useCallback } from "react"
+import { memo, Fragment, useEffect, useCallback, useRef } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
@@ -458,16 +458,26 @@ const Playlists = memo(() => {
 
 	const playlistsQuery = usePlaylistsQuery()
 
+	// Hold the latest selectOptions in a ref so the cancel effect below can run on
+	// unmount only. Depending on selectOptions directly would re-run the cleanup on
+	// every re-render (e.g. the clearSelectedPlaylists store update on focus),
+	// emitting a spurious `cancelled: true` that silently aborts the selection flow.
+	const selectOptionsRef = useRef(selectOptions)
+
+	selectOptionsRef.current = selectOptions
+
 	useEffect(() => {
 		return () => {
-			if (selectOptions) {
+			const currentSelectOptions = selectOptionsRef.current
+
+			if (currentSelectOptions) {
 				events.emit("playlistsSelect", {
-					id: selectOptions.id,
+					id: currentSelectOptions.id,
 					cancelled: true
 				})
 			}
 		}
-	}, [selectOptions])
+	}, [])
 
 	useFocusEffect(
 		useCallback(() => {
@@ -480,7 +490,7 @@ const Playlists = memo(() => {
 	)
 
 	const allPlaylists =
-		playlistsQuery.status === "success" ? playlistsQuery.data.sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
+		playlistsQuery.status === "success" ? [...playlistsQuery.data].sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
 
 	const headerLeftItems = ((): HeaderItem[] | undefined => {
 		if (selectedPlaylists.length > 0 && !selectOptions) {

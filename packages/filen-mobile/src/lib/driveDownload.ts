@@ -63,7 +63,7 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 			if (isFile && destination instanceof FileSystem.File) {
 				await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
 					{
-						name: decodeURIComponent(item.data.decryptedMeta.name),
+						name: item.data.decryptedMeta.name,
 						parentFolder: "Filen",
 						mimeType: item.data.decryptedMeta.mime
 					},
@@ -86,20 +86,37 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 						const normalizedEntryPath = normalizeFilePathForBlobUtil(entry.uri)
 						const destinationUriNormalized = normalizeFilePathForBlobUtil(destination.uri)
 
+						// `entry.name` (already decoded by expo's Paths.basename) and the decrypted
+						// plaintext name are passed raw — decoding them again threw URIError on names
+						// with a bare "%" (e.g. "50% off.jpg"). The parentFolder segments are
+						// different: FileSystem.Paths.join re-encodes them (" " -> "%20", "%" -> "%25"),
+						// so they must be decoded back, otherwise files land in literally mis-named
+						// directories ("Sub%20Folder"). The per-segment decode is guarded so a malformed
+						// sequence falls back to the raw segment instead of throwing.
 						const parentFolder = FileSystem.Paths.join(
 							"Filen",
 							item.data.decryptedMeta?.name ?? item.data.uuid,
 							FileSystem.Paths.dirname(normalizedEntryPath.slice(destinationUriNormalized.length))
 						)
 							.split("/")
-							.map(segment => (segment.length > 0 ? decodeURIComponent(segment) : segment))
+							.map(segment => {
+								if (segment.length === 0) {
+									return segment
+								}
+
+								try {
+									return decodeURIComponent(segment)
+								} catch {
+									return segment
+								}
+							})
 							.join("/")
 
 						await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
 							{
-								name: decodeURIComponent(entry.name),
+								name: entry.name,
 								parentFolder: parentFolder.startsWith("/") ? parentFolder.slice(1) : parentFolder,
-								mimeType: mimeTypes.lookup(decodeURIComponent(entry.name)) || "application/octet-stream"
+								mimeType: mimeTypes.lookup(entry.name) || "application/octet-stream"
 							},
 							"Download",
 							normalizedEntryPath

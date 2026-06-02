@@ -6,6 +6,9 @@ import { useState, Fragment, memo } from "react"
 import { Stack } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import View from "@/components/ui/view"
+import Text from "@/components/ui/text"
+import Button from "@/components/ui/button"
+import { t } from "@/lib/i18n"
 import setup from "@/lib/setup"
 import { run } from "@filen/utils"
 import { useIsAuthed } from "@/lib/auth"
@@ -46,6 +49,7 @@ const RootLayout = memo(() => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const [isSetupDone, setIsSetupDone] = useState<boolean>(false)
+	const [setupFailed, setSetupFailed] = useState<boolean>(false)
 	const isAuthed = useIsAuthed()
 
 	const modalOptions = {
@@ -59,6 +63,7 @@ const RootLayout = memo(() => {
 	const runSetup = async () => {
 		const result = await run(async () => {
 			setIsSetupDone(false)
+			setSetupFailed(false)
 
 			await setup.setup()
 		})
@@ -67,10 +72,17 @@ const RootLayout = memo(() => {
 			console.error(result.error)
 
 			setIsSetupDone(false)
+			// Surface the failure with a retry path instead of rendering null forever.
+			// The native splash MUST be hidden here too — otherwise it stays frozen on top
+			// of the error UI, leaving the app permanently stuck behind the splash.
+			setSetupFailed(true)
+
+			SplashScreen.hideAsync().catch(console.error)
 
 			return
 		}
 
+		setSetupFailed(false)
 		setIsSetupDone(true)
 
 		setTimeout(() => {
@@ -81,6 +93,21 @@ const RootLayout = memo(() => {
 	useEffectOnce(() => {
 		runSetup()
 	})
+
+	if (setupFailed) {
+		return (
+			<View
+				className="flex-1 items-center justify-center gap-4 bg-background p-8"
+				style={{
+					backgroundColor: bgBackground.backgroundColor
+				}}
+			>
+				<Text className="text-center text-lg font-semibold leading-6">{t("setup_failed_title")}</Text>
+				<Text className="text-center text-base text-muted-foreground leading-5">{t("setup_failed_description")}</Text>
+				<Button onPress={runSetup}>{t("try_again")}</Button>
+			</View>
+		)
+	}
 
 	if (!isSetupDone) {
 		return null
