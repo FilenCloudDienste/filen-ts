@@ -231,8 +231,8 @@ Eternal variant: staleTime/gcTime: Infinity, no refetch (for unchanging data).
 | `useMediaPermissionsQuery` | — | media library permission status |
 | `usePlaylistsQuery` | — | audio playlist list + metadata |
 
-`client.ts` exports: `QueryUpdater` class (get/set cache), `queryUpdater` singleton, `useDefaultQueryParams`,
-`useFocusNotifyOnChangeProps`, `useQueryFocusAware`, `useRefreshOnFocus`. `onlineStatus.ts` adapts NetInfo → TanStack `onlineManager`.
+`client.ts` exports: `QueryUpdater` class (get/set cache), `queryUpdater` singleton, and `useDefaultQueryParams`.
+`onlineStatus.ts` adapts NetInfo → TanStack `onlineManager`.
 Uncached queries: `["drivePreviewTextContent"]`.
 
 ## Types (src/types.ts)
