@@ -1,5 +1,5 @@
 ---
-description: Fan out the review subagents across a codebase as a dynamic workflow — parallel read-only audit, an Opus cross-check, and a gated behavior-preserving refactor.
+description: Fan out the review subagents across a codebase as a dynamic workflow — parallel read-only audit and an Opus cross-check adversarial review
 argument-hint: [paths/globs — defaults to files changed vs main]
 model: opus
 ---
