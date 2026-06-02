@@ -36,7 +36,7 @@ export function playlistsQueryUpdate({
 	})
 }
 
-export function notesWithContentQueryGet() {
+export function playlistsQueryGet() {
 	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
 }
 
