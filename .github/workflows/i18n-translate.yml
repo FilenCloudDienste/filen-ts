@@ -33,7 +33,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # fetch-depth 2 so the DELTA mode can `git diff HEAD~1` against the previous commit.
+          # The DELTA baseline is the committed src/locales/.en-snapshot.json, not git history, so a
+          # shallow checkout is fine. Kept at 2 (harmless) rather than 1 to avoid disturbing the PR step.
           fetch-depth: 2
 
       - name: Set up Node
