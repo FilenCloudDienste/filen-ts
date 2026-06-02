@@ -350,14 +350,23 @@ function translateDryRun(lang: TargetLanguage, subset: Record<string, string>): 
 	return result
 }
 
-// JSON schema forcing a flat { key: translatedString } object. additionalProperties is a string
-// schema so any key is allowed but every value must be a string.
-function buildOutputSchema(): Record<string, unknown> {
-	return {
-		type: "object",
-		additionalProperties: {
+// Closed JSON schema with one string-valued property per requested key. Anthropic structured output
+// (output_config.format) requires `additionalProperties: false` — an open `{ type: "string" }` map
+// is rejected with a 400 — so the exact keys are declared explicitly and all are required.
+function buildOutputSchema(keys: readonly string[]): Record<string, unknown> {
+	const properties: Record<string, unknown> = {}
+
+	for (const key of keys) {
+		properties[key] = {
 			type: "string"
 		}
+	}
+
+	return {
+		type: "object",
+		additionalProperties: false,
+		properties,
+		required: [...keys]
 	}
 }
 
@@ -453,7 +462,7 @@ async function translateBatch(args: {
 		output_config: {
 			format: {
 				type: "json_schema",
-				schema: buildOutputSchema()
+				schema: buildOutputSchema(Object.keys(batch))
 			}
 		},
 		messages: [
