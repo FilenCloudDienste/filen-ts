@@ -279,23 +279,176 @@ function readTargetCatalog(lang: TargetLanguage): Record<string, string> {
 	return parsed as Record<string, string>
 }
 
-// The subset of English keys that this language needs translated, given the mode and the
-// language's existing catalog. In FULL mode this is the entire English catalog. In DELTA mode
-// it's the upserts PLUS any English key missing from the target (new stub / failed prior run).
-function keysToTranslate(args: Args, delta: Delta, existing: Record<string, string>): Record<string, string> {
-	if (args.full) {
-		return {
-			...EN_CATALOG
+// --- CLDR plural expansion -------------------------------------------------
+//
+// English defines only `_one` / `_other` for count keys, but many languages need more CLDR
+// categories: Slavic (ru/uk/pl/cs) add `_few` and `_many`, Romanian adds `_few`, and the Romance
+// languages (es/fr/it/pt) add `_many`. The app's i18next resolves the form via `Intl.PluralRules`,
+// so a category missing from a target catalog falls back to the ENGLISH string for that count range.
+// We therefore request the FULL set of categories each language requires, using `Intl.PluralRules` as
+// the single source of truth (no hand-maintained per-language table).
+
+const PLURAL_SUFFIXES = ["zero", "one", "two", "few", "many", "other"] as const
+
+const cldrCategoriesCache = new Map<string, readonly string[]>()
+
+function cldrCategories(lang: string): readonly string[] {
+	const cached = cldrCategoriesCache.get(lang)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	const categories = new Intl.PluralRules(lang, { type: "cardinal" }).resolvedOptions().pluralCategories
+
+	cldrCategoriesCache.set(lang, categories)
+
+	return categories
+}
+
+function splitPluralKey(key: string): { base: string; category: string } | null {
+	for (const suffix of PLURAL_SUFFIXES) {
+		const tail = `_${suffix}`
+
+		if (key.endsWith(tail) && key.length > tail.length) {
+			return { base: key.slice(0, -tail.length), category: suffix }
 		}
 	}
 
-	const result: Record<string, string> = {
-		...delta.upsert
+	return null
+}
+
+// Bases that form a real i18next plural group in the English catalog (have BOTH `_one` and `_other`),
+// mapped to the CLDR categories English provides. Guards against false positives like a lone key that
+// merely ends in `_one`.
+const ENGLISH_PLURAL_BASES: ReadonlyMap<string, ReadonlySet<string>> = (() => {
+	const bases = new Map<string, Set<string>>()
+
+	for (const key of Object.keys(EN_CATALOG)) {
+		const split = splitPluralKey(key)
+
+		if (split === null) {
+			continue
+		}
+
+		const categories = bases.get(split.base) ?? new Set<string>()
+
+		categories.add(split.category)
+		bases.set(split.base, categories)
 	}
 
+	for (const [base, categories] of bases) {
+		if (!(categories.has("one") && categories.has("other"))) {
+			bases.delete(base)
+		}
+	}
+
+	return bases
+})()
+
+function pluralBaseOf(key: string): string | null {
+	const split = splitPluralKey(key)
+
+	if (split === null) {
+		return null
+	}
+
+	return ENGLISH_PLURAL_BASES.has(split.base) ? split.base : null
+}
+
+// Every (key -> English source text) entry a target language needs for one plural base: the union of
+// the categories English defines and the categories the language requires. Categories English lacks
+// (`_few` / `_many`) use the English `_other` text as the translation template.
+function pluralGroupSources(base: string, lang: TargetLanguage): Record<string, string> {
+	const englishCategories = ENGLISH_PLURAL_BASES.get(base) ?? new Set<string>()
+	const categories = new Set<string>([...englishCategories, ...cldrCategories(lang)])
+	const template = EN_CATALOG[`${base}_other`] ?? EN_CATALOG[`${base}_one`]
+	const out: Record<string, string> = {}
+
+	for (const category of categories) {
+		const source = EN_CATALOG[`${base}_${category}`] ?? template
+
+		if (source !== undefined) {
+			out[`${base}_${category}`] = source
+		}
+	}
+
+	return out
+}
+
+// The subset of English keys (key -> source text) this language needs translated, given the mode and
+// its existing catalog. FULL = the whole catalog with plural groups expanded to the language's full
+// CLDR set. DELTA = changed English keys + non-plural keys missing from the target + the CLDR plural
+// categories missing from the target. A *changed* English plural retranslates its whole group (the
+// wording shifted); a merely *incomplete* group only fills the missing categories, so human-reviewed
+// `_one` / `_other` forms are never clobbered.
+function keysToTranslate(
+	args: Args,
+	delta: Delta,
+	existing: Record<string, string>,
+	lang: TargetLanguage
+): Record<string, string> {
+	const result: Record<string, string> = {}
+
+	if (args.full) {
+		const fullGroups = new Set<string>()
+
+		for (const [key, value] of Object.entries(EN_CATALOG)) {
+			const base = pluralBaseOf(key)
+
+			if (base === null) {
+				result[key] = value
+			} else {
+				fullGroups.add(base)
+			}
+		}
+
+		for (const base of fullGroups) {
+			Object.assign(result, pluralGroupSources(base, lang))
+		}
+
+		return result
+	}
+
+	// English-source changes: a changed plural variant flags its whole group for retranslation.
+	const changedGroups = new Set<string>()
+
+	for (const [key, value] of Object.entries(delta.upsert)) {
+		const base = pluralBaseOf(key)
+
+		if (base === null) {
+			result[key] = value
+		} else {
+			changedGroups.add(base)
+		}
+	}
+
+	// Non-plural English keys missing from the target (new stub / failed prior run).
 	for (const [key, value] of Object.entries(EN_CATALOG)) {
+		if (pluralBaseOf(key) !== null) {
+			continue
+		}
+
 		if (!(key in existing)) {
 			result[key] = value
+		}
+	}
+
+	// Plural groups: retranslate the whole group if its English wording changed, otherwise fill only
+	// the CLDR categories the target is missing (this is what supplies `_few` / `_many`).
+	for (const base of ENGLISH_PLURAL_BASES.keys()) {
+		const sources = pluralGroupSources(base, lang)
+
+		if (changedGroups.has(base)) {
+			Object.assign(result, sources)
+
+			continue
+		}
+
+		for (const [key, value] of Object.entries(sources)) {
+			if (!(key in existing)) {
+				result[key] = value
+			}
 		}
 	}
 
@@ -363,6 +516,12 @@ function buildSystemPrompt(englishSource: string): string {
 		"14. Rating-scale tiers (e.g. password strength Weak / Fair / Strong / Very strong) map to the same",
 		"    relative rank in the target language. Do not use generic superlatives (\"best\", \"excellent\")",
 		"    that collapse the top tiers.",
+		"15. You may be asked for plural entries ending in `_few` or `_many` that have NO matching English",
+		"    key — CLDR categories your language needs but English lacks. The English text shown is the",
+		"    `_other` template; produce the correct form for that category's count range (`_few` ≈ small",
+		"    counts, e.g. 2–4 in Slavic, 2–19 in Romanian; `_many` ≈ large/other counts), inflecting the noun",
+		"    and agreeing adjectives into the right case (Slavic: `_few` → genitive singular, `_many` →",
+		"    genitive plural). Keep every `{{placeholder}}` byte-identical.",
 		"",
 		"The full English source catalog follows, WITH its JSDoc comments, so you can see exactly where",
 		"and how each key is used. Use it as context; only translate the keys requested in each message.",
@@ -585,14 +744,24 @@ async function main(): Promise<void> {
 
 	for (const lang of args.languages) {
 		const existing = readTargetCatalog(lang)
-		const subset = keysToTranslate(args, delta, existing)
+		const subset = keysToTranslate(args, delta, existing, lang)
 		const merged: Record<string, string> = {
 			...existing
 		}
 
 		// Apply removals first so a key removed AND re-added in the same delta nets to the new value.
+		// A removed plural variant drops every CLDR-category sibling — including target-only `_few` /
+		// `_many` that never appear in the English diff.
 		for (const key of delta.removed) {
 			delete merged[key]
+
+			const split = splitPluralKey(key)
+
+			if (split !== null) {
+				for (const suffix of PLURAL_SUFFIXES) {
+					delete merged[`${split.base}_${suffix}`]
+				}
+			}
 		}
 
 		const subsetKeyCount = Object.keys(subset).length
