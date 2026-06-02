@@ -281,17 +281,23 @@ function readTargetCatalog(lang: TargetLanguage): Record<string, string> {
 
 // --- CLDR plural expansion -------------------------------------------------
 //
-// English defines only `_one` / `_other` for count keys, but many languages need more CLDR
-// categories: Slavic (ru/uk/pl/cs) add `_few` and `_many`, Romanian adds `_few`, and the Romance
-// languages (es/fr/it/pt) add `_many`. The app's i18next resolves the form via `Intl.PluralRules`,
-// so a category missing from a target catalog falls back to the ENGLISH string for that count range.
-// We therefore request the FULL set of categories each language requires, using `Intl.PluralRules` as
-// the single source of truth (no hand-maintained per-language table).
+// English defines only `_one` / `_other` for count keys, but several languages need more CLDR
+// categories for INTEGER counts: Slavic ru/uk/pl add `_few` and `_many`, while Czech and Romanian add
+// `_few`. The app's i18next picks the form via `Intl.PluralRules.select(count)`, so a category an
+// integer count can select but the catalog lacks falls back to the ENGLISH string. We emit exactly the
+// integer-reachable categories — Intl is the single source of truth, no hand-maintained table — which
+// is why categories that only fire for decimals (Czech `many`) or exact millions (Romance `many`) are
+// intentionally NOT generated: they would be dead keys the model fills inconsistently and that diverge
+// from the hand-reviewed catalogs.
 
 const PLURAL_SUFFIXES = ["zero", "one", "two", "few", "many", "other"] as const
 
 const cldrCategoriesCache = new Map<string, readonly string[]>()
 
+// The plural categories an INTEGER count can actually select for this language. Sampling 0..200 covers
+// every modulo-10 / modulo-100 CLDR rule (Slavic few/many cycles, Romanian few = 0 or n%100 in 1..19)
+// while excluding decimal-only and millions-only categories. `_one` / `_other` are kept regardless,
+// because pluralGroupSources unions this with the categories English itself defines.
 function cldrCategories(lang: string): readonly string[] {
 	const cached = cldrCategoriesCache.get(lang)
 
@@ -299,7 +305,14 @@ function cldrCategories(lang: string): readonly string[] {
 		return cached
 	}
 
-	const categories = new Intl.PluralRules(lang, { type: "cardinal" }).resolvedOptions().pluralCategories
+	const rules = new Intl.PluralRules(lang, { type: "cardinal" })
+	const reachable = new Set<string>()
+
+	for (let n = 0; n <= 200; n++) {
+		reachable.add(rules.select(n))
+	}
+
+	const categories = [...reachable]
 
 	cldrCategoriesCache.set(lang, categories)
 
@@ -502,7 +515,10 @@ function buildSystemPrompt(englishSource: string): string {
 		"   English is a verb used as a label (\"Empty\", \"Trash\", \"Favorite\", \"Duplicate\"), the translation",
 		"   must be a verb/action phrase, never an adjective or bare noun (the French empty-trash button is",
 		"   \"Vider\", not the adjective \"Vide\"). A status badge keeps its full meaning (\"Available offline\",",
-		"   not bare \"Offline\"). A screen or section title naming a collection is a plural noun phrase.",
+		"   not bare \"Offline\"). A screen or section title naming a collection is a plural noun phrase. A",
+		"   standalone picker/option label (e.g. Light / Dark / System) must be a noun or nominal form that",
+		"   can stand alone — never an adverb or bare verb stem (Korean \"Light\" is the noun 밝음, not the",
+		"   adverb 밝게).",
 		"10. Translate the ACTION, not a description of state. A header for tagging selected notes is \"Tag",
 		"    selected notes\" (what the user is DOING), not \"Tags of selected notes\" (what they are viewing).",
 		"    Name both the verb and the object type the action operates on.",
