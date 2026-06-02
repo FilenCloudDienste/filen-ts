@@ -309,6 +309,32 @@ describe("QueryPersisterKv", () => {
 
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 		})
+
+		it("skips a corrupt row and still restores the remaining rows", async () => {
+			seedKvStore("query-good-1", { queryKey: ["a"], state: { data: "hello" } })
+			// Inject a corrupt raw value directly so deserialize() throws on this row
+			kvStore.set(kvKey("query-bad"), "}{not valid json")
+			seedKvStore("query-good-2", { queryKey: ["b"], state: { data: "world" } })
+
+			const kv = new QueryPersisterKv()
+			await kv.restore()
+
+			expect(kv.getItem("query-good-1")).toEqual({ queryKey: ["a"], state: { data: "hello" } })
+			expect(kv.getItem("query-good-2")).toEqual({ queryKey: ["b"], state: { data: "world" } })
+			expect(kv.getItem("query-bad")).toBeNull()
+		})
+
+		it("does not throw when a row contains a corrupt BigInt envelope", async () => {
+			seedKvStore("query-good", { queryKey: ["a"], state: { data: "ok" } })
+			// A __bi envelope whose value is not a valid integer string
+			kvStore.set(kvKey("query-bad-bi"), JSON.stringify({ n: { __bi: 1, v: "not-a-bigint" } }))
+
+			const kv = new QueryPersisterKv()
+
+			await expect(kv.restore()).resolves.toBeUndefined()
+
+			expect(kv.getItem("query-good")).toEqual({ queryKey: ["a"], state: { data: "ok" } })
+		})
 	})
 
 	describe("setItem()", () => {
@@ -574,6 +600,59 @@ describe("QueryPersisterKv", () => {
 			await vi.advanceTimersByTimeAsync(0)
 
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+
+		it("does not drop dirty entries added while a persist run is in flight", async () => {
+			// Hold the first executeBatch open so the debounced persistAsync() run
+			// stays in flight while we add a late entry and call flushNow().
+			let releaseFirstBatch: () => void = () => {}
+
+			const firstBatchGate = new Promise<void>(resolve => {
+				releaseFirstBatch = resolve
+			})
+
+			let batchCall = 0
+
+			mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
+				batchCall++
+
+				if (batchCall === 1) {
+					await firstBatchGate
+				}
+
+				for (const [query, params] of commands) {
+					if (query.startsWith("INSERT OR REPLACE")) {
+						kvStore.set(params[0] as string, params[1] as string)
+					}
+				}
+
+				return { rowsAffected: commands.length }
+			})
+
+			const kv = new QueryPersisterKv()
+
+			// Kick off a debounced persist and let it enter persistAsync() (now in flight).
+			// PERSIST_DEBOUNCE is 1000ms; advance past it, then drain microtasks so
+			// persistAsync() reaches the gated executeBatch without finishing the run.
+			kv.setItem("early-key", "early-value")
+			await vi.advanceTimersByTimeAsync(1000)
+
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+			// Late entry arrives after the in-flight run snapshotted its dirty sets.
+			kv.setItem("late-key", "late-value")
+
+			// Background event fires flushNow() while persisting === true.
+			kv.flushNow()
+
+			// Release the in-flight run; the chained flush must then persist the late entry.
+			releaseFirstBatch()
+
+			await vi.advanceTimersByTimeAsync(0)
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(kv.getItem("late-key")).toBe("late-value")
+			expect(readKvStore<string>("late-key")).toBe("late-value")
 		})
 	})
 

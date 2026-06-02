@@ -347,6 +347,43 @@ describe("FileCache", () => {
 			await expect(cache.get({ item })).rejects.toThrow("Item must be a file or shared file")
 		})
 
+		it("recovers from a corrupt fast-path metadata sidecar instead of throwing", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("corrupt-fast-uuid", "song.txt"))
+			const dir = `${BASE_DIR}/corrupt-fast-uuid`
+
+			// File + non-empty metadata sidecar both exist (passes the fast-path guard),
+			// but the sidecar contains invalid JSON so deserialize() throws.
+			fs.set(dir, "dir")
+			fs.set(`${dir}/corrupt-fast-uuid.txt`, new Uint8Array([1, 2, 3]))
+			fs.set(`${dir}/corrupt-fast-uuid.filenmeta`, new Uint8Array(new TextEncoder().encode("{this is not valid json}")))
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						const uri = "file://" + path
+
+						fs.set(uri, new Uint8Array([4, 5, 6]))
+					})
+				}
+			} as never)
+
+			const file = await cache.get({ item })
+
+			expect(file).toBeInstanceOf(File)
+			expect(file.uri).toBe(`${BASE_DIR}/corrupt-fast-uuid/corrupt-fast-uuid.txt`)
+
+			// The corrupt sidecar was replaced with valid metadata during recovery.
+			const metaFile = new File(`${BASE_DIR}/corrupt-fast-uuid/corrupt-fast-uuid.filenmeta`)
+
+			expect(metaFile.exists).toBe(true)
+
+			const meta = deserialize(new TextDecoder().decode(await metaFile.bytes())) as Metadata
+
+			expect(meta.type).toBe("drive")
+			expect(meta.cachedAt).toBeTypeOf("number")
+		})
+
 		it("cleans up on download failure", async () => {
 			const cache = await createFileCache()
 			const item = wrapDrive(makeFileItem("fail-uuid", "fail.bin"))

@@ -796,7 +796,7 @@ const Account = memo(() => {
 											const result = await runWithLoading(async () => {
 												const { authedSdkClient } = await auth.getSdkClients()
 
-												await authedSdkClient.deleteAllVersions()
+												await authedSdkClient.deleteAllItems()
 												await accountQuery.refetch()
 											})
 

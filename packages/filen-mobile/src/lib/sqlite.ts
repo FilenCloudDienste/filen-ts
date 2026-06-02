@@ -10,6 +10,10 @@ export const VERSION = SQLITE_VERSION
 export const DB_FILE_NAME = SQLITE_DB_FILE_NAME
 export const DB_FILE_DIRECTORY = SQLITE_DB_FILE_DIRECTORY
 
+const OPEN_DB_MAX_ATTEMPTS = 10
+const OPEN_DB_BASE_BACKOFF_MS = 100
+const OPEN_DB_MAX_BACKOFF_MS = 5000
+
 // Order matters: page_size before journal_mode, locking_mode before first WAL access.
 // page_size only takes effect on a fresh database or after VACUUM outside WAL mode.
 const INIT_QUERIES: string[] = [
@@ -57,8 +61,25 @@ class Sqlite {
 	}
 
 	public async openDb(): Promise<DB> {
+		let attempt = 0
+
+		// Bounded retry with backoff. A persistent init() failure (corrupt DB file,
+		// filesystem permission error, out-of-disk during PRAGMA) must not busy-loop
+		// re-entering init() — it surfaces as a rejection after exhausting attempts.
 		while (!this.initDone) {
-			await this.init()
+			const result = await run(() => this.init())
+
+			if (!result.success) {
+				attempt++
+
+				if (attempt >= OPEN_DB_MAX_ATTEMPTS) {
+					throw result.error
+				}
+
+				await new Promise<void>(resolve => {
+					setTimeout(resolve, Math.min(OPEN_DB_BASE_BACKOFF_MS * 2 ** (attempt - 1), OPEN_DB_MAX_BACKOFF_MS))
+				})
+			}
 		}
 
 		if (!this.db) {

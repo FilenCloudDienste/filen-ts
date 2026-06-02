@@ -286,7 +286,7 @@ const NoteTags = memo(() => {
 	const notesTagsQuery = useNotesTagsQuery()
 
 	const tags =
-		notesTagsQuery.status === "success" ? notesTagsQuery.data.sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b))) : []
+		notesTagsQuery.status === "success" ? [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b))) : []
 
 	if (liveNotes.length === 0) {
 		return <DismissStack />

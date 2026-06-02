@@ -8,7 +8,6 @@ import { run, Semaphore, runEffect } from "@filen/utils"
 import { useRef, useEffect, useCallback, useState } from "react"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
-import { newTmpFile } from "@/lib/tmp"
 import { Buffer } from "react-native-quick-crypto"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import isEqual from "react-fast-compare"
@@ -262,21 +261,82 @@ class SecureStore {
 			const final = cipher.final()
 			const authTag = cipher.getAuthTag()
 
-			const tmpFile = newTmpFile(`.securestore.tmp.${crypto.randomUUID()}`)
+			// Stage the new payload in the SAME directory as the destination so the final
+			// move is an atomic intra-volume rename (not a cross-volume copy, which would
+			// widen the crash window). expo-file-system's File.move() has no overwrite
+			// option, so the destination must be absent before the move — but we never let
+			// it reach a state with zero copies: the old file is moved ASIDE to a backup
+			// first, and on any failure during the swap the backup is restored.
+			const parentDirectory = this.secureStoreFile.parentDirectory
+			const destinationUri = this.secureStoreFile.uri
+			const tmpFile = new FileSystem.File(parentDirectory, `.securestore.tmp.${crypto.randomUUID()}`)
+			const backupUri = FileSystem.Paths.join(parentDirectory.uri, `.securestore.bak.${crypto.randomUUID()}`)
+
+			let backedUp = false
+			let promoted = false
 
 			try {
 				tmpFile.write(new Uint8Array(Buffer.concat([iv, encrypted, final, authTag])))
 
+				// Move the existing store aside to the backup before clearing the destination.
+				// Use a fresh handle so the shared this.secureStoreFile.uri is never mutated by move().
 				if (this.secureStoreFile.exists) {
-					this.secureStoreFile.delete()
+					new FileSystem.File(destinationUri).move(new FileSystem.File(backupUri))
+
+					backedUp = true
 				}
 
-				tmpFile.move(this.secureStoreFile)
+				// Promote the staged payload into place. Use a fresh destination handle so the
+				// shared this.secureStoreFile instance keeps its identity.
+				tmpFile.move(new FileSystem.File(destinationUri))
 
+				// The new payload is now the live store. move() has mutated tmpFile.uri to the
+				// destination, so from here the catch block must NOT delete tmpFile.
+				promoted = true
 				this.readCache = data
+
+				// Best-effort: discard the backup now that the new payload is live. A failure
+				// here only orphans the backup (harmless) and must never surface as a write
+				// failure or reach the catch — the store is already safely committed on disk.
+				if (backedUp) {
+					try {
+						const backupFile = new FileSystem.File(backupUri)
+
+						if (backupFile.exists) {
+							backupFile.delete()
+						}
+					} catch {
+						// Orphaned backup; harmless.
+					}
+				}
 			} catch (e) {
-				if (tmpFile.exists) {
+				// If the swap failed BEFORE promotion (destination cleared but new payload not
+				// yet in place), restore the backup so the destination is never left empty —
+				// credentials must survive a failed write.
+				if (!promoted && backedUp && !this.secureStoreFile.exists) {
+					const backupFile = new FileSystem.File(backupUri)
+
+					if (backupFile.exists) {
+						try {
+							backupFile.move(new FileSystem.File(destinationUri))
+						} catch {
+							// Best-effort restore; the backup is preserved below for manual recovery.
+						}
+					}
+				}
+
+				// Only delete the staged tmp when it was NOT promoted — after a successful move
+				// tmpFile.uri points at the live store, so deleting it would wipe credentials.
+				if (!promoted && tmpFile.exists) {
 					tmpFile.delete()
+				}
+
+				// Discard the backup only once the destination is safely back in place — never
+				// when the destination is still missing, or the only surviving copy would be lost.
+				const backupFile = new FileSystem.File(backupUri)
+
+				if (this.secureStoreFile.exists && backupFile.exists) {
+					backupFile.delete()
 				}
 
 				throw e

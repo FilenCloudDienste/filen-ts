@@ -294,6 +294,35 @@ describe("AudioCache", () => {
 			expect(fileCache.get).not.toHaveBeenCalled()
 		})
 
+		it("recovers from a corrupt fast-path metadata sidecar instead of throwing", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-corrupt-fast"
+			const name = "song.mp3"
+			const item = wrapDrive(makeFileItem(uuid, name))
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			// Audio + non-empty metadata sidecar both exist (passes the fast-path guard),
+			// but the sidecar contains invalid JSON so deserialize() throws.
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode("{this is not valid json}")))
+
+			const mockAudioFile = new File(audioPath)
+
+			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
+
+			const result = await cache.get({ item })
+
+			// Falls through to fileCache.get() + re-parse rather than propagating the parse error.
+			expect(fileCache.get).toHaveBeenCalledWith({ item, signal: undefined })
+			expect(parseWebStream).toHaveBeenCalled()
+			expect(result.audio.uri).toBe(audioPath)
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.artist).toBe("Test Artist")
+			expect(fs.has(metaPath)).toBe(true)
+		})
+
 		it("downloads via fileCache and parses metadata for supported extension (cache miss)", async () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-8"

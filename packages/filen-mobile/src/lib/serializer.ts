@@ -146,7 +146,14 @@ function reviver(_key: string, value: unknown): unknown {
 		}
 
 		if (obj["__bi"] === 1) {
-			return BigInt(obj["v"] as string)
+			// BigInt() throws SyntaxError on a non-integer string (truncated/corrupt DB
+			// value, NaN, empty string). Degrade to null instead of aborting the whole
+			// JSON.parse so a single bad envelope can't crash deserialization.
+			try {
+				return BigInt(obj["v"] as string)
+			} catch {
+				return null
+			}
 		}
 
 		if (obj["__bin"] === 1) {

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, memo, useCallback } from "react"
+import { Fragment, useState, useEffect, useRef, memo, useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
@@ -1005,7 +1005,7 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 										return
 									}
 
-									await run(async defer => {
+									const result = await run(async defer => {
 										const destination = new FileSystem.File(
 											FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta!.name)
 										)
@@ -1035,6 +1035,10 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 
 										await MediaLibrary.saveToLibraryAsync(destination.uri)
 									})
+
+									if (!result.success) {
+										throw result.error
+									}
 								}
 							})
 						}
@@ -1544,6 +1548,7 @@ const Drive = memo(() => {
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const [globalSearchResult, setGlobalSearchResult] = useState<DriveItem[]>([])
 	const [queryingGlobalSearch, setQueryingGlobalSearch] = useState<boolean>(false)
+	const globalSearchAbortControllerRef = useRef<AbortController | null>(null)
 	const { sort } = useDriveSortPreference(drivePath)
 
 	const driveItemsQuery = useDriveItemsQuery(
@@ -1584,6 +1589,12 @@ const Drive = memo(() => {
 
 	const debouncedSearch = (() => {
 		return debounce(async (value: string) => {
+			// Cancel any in-flight global search before starting (or skipping) a new
+			// one so a stale SDK result for a previous query/directory cannot land
+			// after navigation and pollute this screen's item list.
+			globalSearchAbortControllerRef.current?.abort()
+			globalSearchAbortControllerRef.current = null
+
 			if (drivePath.type !== "drive" || drivePath.selectOptions) {
 				setGlobalSearchResult([])
 				setQueryingGlobalSearch(false)
@@ -1611,6 +1622,10 @@ const Drive = memo(() => {
 				return
 			}
 
+			const abortController = new AbortController()
+
+			globalSearchAbortControllerRef.current = abortController
+
 			setQueryingGlobalSearch(true)
 			setGlobalSearchResult([])
 
@@ -1620,9 +1635,18 @@ const Drive = memo(() => {
 				})
 
 				return await drive.findItemMatchesForName({
-					name: normalized
+					name: normalized,
+					signal: abortController.signal
 				})
 			})
+
+			// A newer search (or a navigation/unmount) aborted this request — drop
+			// its result so it cannot overwrite the current view's state.
+			if (abortController.signal.aborted) {
+				return
+			}
+
+			globalSearchAbortControllerRef.current = null
 
 			setQueryingGlobalSearch(false)
 
@@ -1652,6 +1676,15 @@ const Drive = memo(() => {
 			debouncedSearch.cancel()
 		}
 	}, [debouncedSearch])
+
+	// Abort any in-flight global search when the directory changes or the screen
+	// unmounts so a stale SDK result cannot land on a different view.
+	useEffect(() => {
+		return () => {
+			globalSearchAbortControllerRef.current?.abort()
+			globalSearchAbortControllerRef.current = null
+		}
+	}, [drivePath.uuid])
 
 	useFocusEffect(
 		useCallback(() => {

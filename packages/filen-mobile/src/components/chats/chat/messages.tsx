@@ -48,7 +48,22 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 			return []
 		}
 
-		return [...chatMessagesQuery.data, ...fetchedMessages].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
+		// Dedupe by message uuid before rendering: fetchedMessages (older paginated
+		// pages) can overlap chatMessagesQuery.data at the listBefore page boundary,
+		// and keyExtractor uses inner.uuid, so duplicate keys would corrupt FlashList.
+		const byUuid = new Map<string, ChatMessageWithInflightId>()
+
+		for (const message of chatMessagesQuery.data) {
+			byUuid.set(message.inner.uuid, message)
+		}
+
+		for (const message of fetchedMessages) {
+			if (!byUuid.has(message.inner.uuid)) {
+				byUuid.set(message.inner.uuid, message)
+			}
+		}
+
+		return [...byUuid.values()].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
 	})()
 
 	const headerStyle = useAnimatedStyle(() => {

@@ -44,6 +44,11 @@ class Transfers {
 	public cancelAll(): void {
 		this.globalAbortController.abort()
 		this.globalAbortController = new AbortController()
+		// Free the old pause signal's SDK handle before replacing it — uniffi handles are not
+		// GC'd. Safe here: cancelAll() has aborted all in-flight transfers, and each transfer
+		// drives the SDK via its own composite signal (disposed on settle), only attaching JS
+		// listeners to this one — so nothing still in flight reads the freed handle.
+		this.globalPauseSignal.dispose()
 		this.globalPauseSignal = new PauseSignal()
 	}
 
@@ -85,6 +90,9 @@ class Transfers {
 		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = new AbortController()
+		// When no caller-owned pauseSignal is supplied we allocate one here. Its inner SdkPauseSignal is a
+		// uniffi (Rust Arc-backed) handle, so we must dispose() the ones we own once the transfer settles.
+		const ownsTransferPauseSignal = !pauseSignal
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
 		const globalAbortController = this.globalAbortController
 		const globalPauseSignal = this.globalPauseSignal
@@ -95,9 +103,18 @@ class Transfers {
 
 		if (localFileOrDir instanceof FileSystem.Directory) {
 			const result = await run(async defer => {
+				// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
+				// released explicitly. Hoist it so we can destroy it once the transfer settles.
+				const wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+
 				defer(() => {
 					compositePauseSignal.dispose()
 					compositeAbortSignal.dispose()
+					wrappedAbortSignal.uniffiDestroy()
+
+					if (ownsTransferPauseSignal) {
+						transferPauseSignal.dispose()
+					}
 				})
 
 				if (!localFileOrDir.exists) {
@@ -362,7 +379,7 @@ class Transfers {
 					parentDir,
 					ManagedFuture.new({
 						pauseSignal: compositePauseSignal.getSignal(),
-						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
+						abortSignal: wrappedAbortSignal
 					}),
 					{
 						signal: compositeAbortSignal
@@ -416,9 +433,18 @@ class Transfers {
 		}
 
 		const result = await run(async defer => {
+			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
+			// released explicitly. Hoist it so we can destroy it once the transfer settles.
+			const wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+
 			defer(() => {
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
+				wrappedAbortSignal.uniffiDestroy()
+
+				if (ownsTransferPauseSignal) {
+					transferPauseSignal.dispose()
+				}
 			})
 
 			if (!localFileOrDir.exists) {
@@ -536,7 +562,7 @@ class Transfers {
 				},
 				ManagedFuture.new({
 					pauseSignal: compositePauseSignal.getSignal(),
-					abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
+					abortSignal: wrappedAbortSignal
 				}),
 				{
 					signal: compositeAbortSignal
@@ -663,6 +689,9 @@ class Transfers {
 		const id = randomUUID()
 		const { authedSdkClient } = await auth.getSdkClients()
 		const transferAbortController = new AbortController()
+		// When no caller-owned pauseSignal is supplied we allocate one here. Its inner SdkPauseSignal is a
+		// uniffi (Rust Arc-backed) handle, so we must dispose() the ones we own once the transfer settles.
+		const ownsTransferPauseSignal = !pauseSignal
 		const transferPauseSignal = pauseSignal ?? new PauseSignal()
 		const globalAbortController = this.globalAbortController
 		const globalPauseSignal = this.globalPauseSignal
@@ -673,9 +702,18 @@ class Transfers {
 
 		if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 			const result = await run(async defer => {
+				// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
+				// released explicitly. Hoist it so we can destroy it once the transfer settles.
+				const wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+
 				defer(() => {
 					compositePauseSignal.dispose()
 					compositeAbortSignal.dispose()
+					wrappedAbortSignal.uniffiDestroy()
+
+					if (ownsTransferPauseSignal) {
+						transferPauseSignal.dispose()
+					}
 				})
 
 				if (destination instanceof FileSystem.File) {
@@ -919,7 +957,7 @@ class Transfers {
 					targetDir,
 					ManagedFuture.new({
 						pauseSignal: compositePauseSignal.getSignal(),
-						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
+						abortSignal: wrappedAbortSignal
 					}),
 					{
 						signal: compositeAbortSignal
@@ -977,9 +1015,19 @@ class Transfers {
 		}
 
 		const result = await run(async defer => {
+			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
+			// released explicitly. Allocate it lazily (cache hits below never reach the SDK download) and
+			// destroy whatever we allocated once the transfer settles.
+			let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
+
 			defer(() => {
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
+				wrappedAbortSignal?.uniffiDestroy()
+
+				if (ownsTransferPauseSignal) {
+					transferPauseSignal.dispose()
+				}
 			})
 
 			if (!(destination instanceof FileSystem.File)) {
@@ -1122,6 +1170,8 @@ class Transfers {
 					)
 				}
 			} else {
+				wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+
 				await authedSdkClient.downloadFileToPath(
 					remoteAnyFile,
 					normalizeFilePathForSdk(destination.uri),
@@ -1141,7 +1191,7 @@ class Transfers {
 					},
 					ManagedFuture.new({
 						pauseSignal: compositePauseSignal.getSignal(),
-						abortSignal: wrapAbortSignalForSdk(compositeAbortSignal)
+						abortSignal: wrappedAbortSignal
 					}),
 					{
 						signal: compositeAbortSignal

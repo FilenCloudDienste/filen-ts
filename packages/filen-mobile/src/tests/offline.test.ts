@@ -1307,6 +1307,72 @@ describe("Offline", () => {
 			// Index should NOT have been written
 			expect(fs.has(INDEX_FILE_URI)).toBe(false)
 		})
+
+		// Regression (ref #35): two concurrent storeFile calls for the same UUID must not race.
+		// Without per-UUID serialization, both pass the cold-cache isItemStored guard, both reach the
+		// destructive `dataFile.parentDirectory.delete()`, and call B wipes call A's in-flight download
+		// target mid-transfer. The per-UUID lock serializes them: the download runs exactly once and the
+		// second call short-circuits (already stored) instead of deleting the first's directory.
+		it("serializes two concurrent storeFile calls for the same UUID (no in-flight wipe)", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "race.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+			const dataDirUri = `${FILES_DIR_URI}/${uuid}`
+
+			let releaseFirstDownload!: () => void
+			const firstDownloadGate = new Promise<void>(resolve => {
+				releaseFirstDownload = resolve
+			})
+
+			let downloadStarted!: () => void
+			const firstDownloadStarted = new Promise<void>(resolve => {
+				downloadStarted = resolve
+			})
+
+			vi.mocked(transfers.download).mockImplementation(async ({ destination }) => {
+				// First (and, with the fix, only) download blocks until released so we can probe
+				// the in-flight directory state from a second concurrent call.
+				downloadStarted()
+
+				await firstDownloadGate
+
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([1, 2, 3]))
+				}
+
+				return { files: [], directories: [] }
+			})
+
+			const offline = await createOffline()
+
+			const first = offline.storeFile({ file: fileItem, parent })
+
+			// Wait until the first download is in flight (lock + directory created, transfer awaiting gate).
+			await firstDownloadStarted
+
+			// Start the second concurrent call for the same UUID. It must block on the per-UUID lock
+			// rather than entering the body and deleting the first call's in-flight directory.
+			const second = offline.storeFile({ file: fileItem, parent })
+
+			// Give the second call a chance to (wrongly) run its destructive delete if unserialized.
+			await Promise.resolve()
+			await Promise.resolve()
+
+			// The first call's in-flight directory must still be present (not wiped by the second call).
+			expect(fs.get(dataDirUri)).toBe("dir")
+
+			// Release the first download and let both settle.
+			releaseFirstDownload()
+
+			await Promise.all([first, second])
+
+			// Download ran exactly once — the second call saw the item stored and skipped.
+			expect(transfers.download).toHaveBeenCalledTimes(1)
+
+			// Final state is intact: data + meta written once.
+			expect(fs.get(`${dataDirUri}/race.txt`)).toBeInstanceOf(Uint8Array)
+			expect(fs.get(`${dataDirUri}/${uuid}.filenmeta`)).toBeInstanceOf(Uint8Array)
+		})
 	})
 
 	describe("storeDirectory", () => {

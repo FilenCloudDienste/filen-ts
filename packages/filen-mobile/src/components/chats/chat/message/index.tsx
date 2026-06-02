@@ -801,7 +801,11 @@ const Message = memo(
 				{chat.participants.length > 2 && info.item.inner.senderId !== stringifiedClient?.userId && (
 					<View className="max-w-3/4 flex-row items-center px-4 pb-1 pl-6">
 						<Text className="text-xs text-muted-foreground">
-							{contactDisplayName(chat.participants.find(p => p.userId === info.item.inner.senderId)!)}
+							{(() => {
+								const senderParticipant = chat.participants.find(p => p.userId === info.item.inner.senderId)
+
+								return senderParticipant ? contactDisplayName(senderParticipant) : t("unknown")
+							})()}
 						</Text>
 					</View>
 				)}

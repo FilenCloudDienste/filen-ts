@@ -184,13 +184,21 @@ export class FileCache {
 			const { file, metadata: metadataFile, parentDirectory } = this.getFiles(item)
 
 			if (file.exists && metadataFile.exists && metadataFile.size > 0) {
-				const metadata = deserialize(await metadataFile.text()) as Metadata
+				try {
+					const metadata = deserialize(await metadataFile.text()) as Metadata
 
-				if (Object.keys(metadata).length > 0) {
-					const { cachedAt: _, ...metadataWithoutCachedAt } = metadata
+					if (Object.keys(metadata).length > 0) {
+						const { cachedAt: _, ...metadataWithoutCachedAt } = metadata
 
-					if (isEqual(metadataWithoutCachedAt, item)) {
-						return file
+						if (isEqual(metadataWithoutCachedAt, item)) {
+							return file
+						}
+					}
+				} catch (e) {
+					console.error(e)
+
+					if (metadataFile.exists) {
+						metadataFile.delete()
 					}
 				}
 			}

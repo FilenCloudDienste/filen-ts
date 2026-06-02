@@ -110,6 +110,7 @@ vi.mock("@/lib/utils", () => ({
 	PauseSignal: class {
 		pause() {}
 		resume() {}
+		dispose() {}
 	},
 	normalizeFilePathForSdk: (filePath: string): string => {
 		let normalizedPath = filePath

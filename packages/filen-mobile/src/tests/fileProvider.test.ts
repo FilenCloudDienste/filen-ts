@@ -12,7 +12,14 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+// Use the REAL Semaphore here (not the no-op mock) so writeMutex actually
+// serializes — the enable() race fix depends on genuine mutual exclusion.
+// The dist subpath bypasses this vi.mock interception of the bare specifier.
+vi.mock("@filen/utils", async () => ({
+	...(await import("@/tests/mocks/filenUtils")),
+	// @ts-expect-error — the dist subpath ships JS with no co-located .d.ts (types live under dist/types/); this is the real FIFO Semaphore, imported directly to bypass the bare-specifier vi.mock above
+	Semaphore: (await import("@filen/utils/dist/semaphore.js")).Semaphore
+}))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
@@ -50,6 +57,7 @@ vi.mock("@/lib/auth", () => ({
 
 import fileProvider, { AUTH_FILE, FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/lib/fileProvider"
 import { fs } from "@/tests/mocks/expoFileSystem"
+import auth from "@/lib/auth"
 
 beforeEach(() => {
 	fs.clear()
@@ -91,6 +99,59 @@ describe("fileProvider", () => {
 
 			expect(data.maxCacheFilesBudget).toBeDefined()
 			expect(data.maxThumbnailFilesBudget).toBeDefined()
+		})
+
+		it("does not re-create auth.json when disable() races a slow getSdkClients()", async () => {
+			// Reproduces ref #22: enable() must hold writeMutex across read ->
+			// getSdkClients -> write. A concurrent disable() landing inside the
+			// getSdkClients await must NOT be clobbered by enable()'s later write.
+			let resolveSdk: (() => void) | undefined
+
+			const sdkGate = new Promise<void>(resolve => {
+				resolveSdk = resolve
+			})
+
+			vi.mocked(auth.getSdkClients).mockImplementationOnce(async () => {
+				// Suspend enable() inside its locked transaction so disable() can race.
+				await sdkGate
+
+				return {
+					authedSdkClient: {
+						toSdkConfig: () => ({
+							email: "test@example.com",
+							masterKeys: ["key1"],
+							apiKey: "api-key",
+							publicKey: "pub",
+							privateKey: "priv",
+							authVersion: 2,
+							baseFolderUuid: "uuid-root",
+							userId: BigInt(12345),
+							metadataCache: true,
+							tmpPath: "/tmp",
+							connectToSocket: false
+						})
+					}
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				} as any
+			})
+
+			const enablePromise = fileProvider.enable()
+
+			// Let enable() acquire the mutex and reach the getSdkClients() await.
+			await Promise.resolve()
+
+			// disable() is issued while enable() is suspended. With the fix it must
+			// block on writeMutex and run only after enable()'s write completes.
+			const disablePromise = fileProvider.disable()
+
+			// Release getSdkClients so enable() finishes its write, then disable runs.
+			resolveSdk?.()
+
+			await Promise.all([enablePromise, disablePromise])
+
+			// disable()'s delete is serialized after enable()'s write by the mutex,
+			// so it must win: auth.json deleted, NOT silently re-created.
+			expect(AUTH_FILE.exists).toBe(false)
 		})
 	})
 

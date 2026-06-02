@@ -161,12 +161,20 @@ export class AudioCache {
 			const { audio, metadata: metadataFile } = this.getFiles(item)
 
 			if (audio.exists && metadataFile.exists && metadataFile.size > 0) {
-				const metadata = deserialize(await metadataFile.text()) as Metadata
+				try {
+					const metadata = deserialize(await metadataFile.text()) as Metadata
 
-				if (Object.keys(metadata ?? {}).length > 0) {
-					return {
-						audio,
-						metadata
+					if (Object.keys(metadata ?? {}).length > 0) {
+						return {
+							audio,
+							metadata
+						}
+					}
+				} catch (e) {
+					console.error(e)
+
+					if (metadataFile.exists) {
+						metadataFile.delete()
 					}
 				}
 			}

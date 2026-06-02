@@ -46,17 +46,15 @@ const Icon = memo(({ note, iconSize }: { note: Note; iconSize: number }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 
 	const { color, name } = (() => {
-		let iconKey: IconKey
-
-		if (note.trash) {
-			iconKey = NoteTypeExtended.Trash
-		}
+		let iconKey: IconKey = note.noteType
 
 		if (note.archive) {
 			iconKey = NoteTypeExtended.Archive
 		}
 
-		iconKey = note.noteType
+		if (note.trash) {
+			iconKey = NoteTypeExtended.Trash
+		}
 
 		return ICON_PROPS[iconKey]
 	})()

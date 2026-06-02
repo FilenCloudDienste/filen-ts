@@ -133,8 +133,6 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 				)}
 				<FlashList<T>
 					contentInsetAdjustmentBehavior="automatic"
-					refreshing={refreshing}
-					refreshControl={refreshControl}
 					numColumns={itemsPerRow}
 					drawDistance={0}
 					maintainVisibleContentPosition={{
@@ -151,6 +149,8 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 					ListFooterComponent={props.footerComponent}
 					ListHeaderComponent={props.headerComponent}
 					{...props}
+					refreshing={refreshing}
+					refreshControl={refreshControl}
 				/>
 			</View>
 		</Fragment>

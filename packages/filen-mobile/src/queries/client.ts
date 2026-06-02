@@ -102,7 +102,15 @@ export class QueryPersisterKv {
 		const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
 
 		for (const row of rows) {
-			this.buffer.set((row[0] as string).slice(prefix.length), deserialize(row[1] as string))
+			// Isolate each row's deserialize so a single corrupt/unparseable value
+			// (mid-write crash, storage corruption, serializer version mismatch)
+			// doesn't abort restoration of the remaining rows. Mirrors the per-row
+			// isolation in sqlite.kvAsync.getByPrefix.
+			try {
+				this.buffer.set((row[0] as string).slice(prefix.length), deserialize(row[1] as string))
+			} catch (err) {
+				console.error("[QueryPersisterKv] Failed to deserialize row, skipping", err)
+			}
 		}
 	}
 
@@ -115,10 +123,26 @@ export class QueryPersisterKv {
 
 		if (!this.persisting) {
 			this.persistNow()
+
+			return
+		}
+
+		// A persistAsync() run is already in flight. Entries added after its dirty-set
+		// snapshot (persistAsync lines: deletes/upserts copied then originals cleared)
+		// remain in the dirty sets but would otherwise only be re-persisted via the
+		// debounced finally-block re-trigger — which can be lost if the process is
+		// killed during backgrounding. Chain an immediate persist onto the in-flight
+		// run so those entries are flushed without waiting for the debounce window.
+		if (this.inFlight) {
+			this.inFlight.finally(() => {
+				this.persistDirty.cancel()
+				this.persistNow()
+			})
 		}
 	}
 
 	private persisting = false
+	private inFlight: Promise<void> | null = null
 
 	private persistNow(): void {
 		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
@@ -145,13 +169,27 @@ export class QueryPersisterKv {
 			})
 	}
 
-	private async persistAsync(): Promise<void> {
+	private persistAsync(): Promise<void> {
 		if (this.persisting) {
-			return
+			return this.inFlight ?? Promise.resolve()
 		}
 
 		this.persisting = true
 
+		const promise = this.runPersistAsync()
+
+		this.inFlight = promise
+
+		promise.finally(() => {
+			if (this.inFlight === promise) {
+				this.inFlight = null
+			}
+		})
+
+		return promise
+	}
+
+	private async runPersistAsync(): Promise<void> {
 		try {
 			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
 				return

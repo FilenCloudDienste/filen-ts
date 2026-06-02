@@ -110,7 +110,7 @@ const IncomingShare = memo(() => {
 	}, [])
 
 	useEffect(() => {
-		if (!isResolving || !error || !isEqual(currentPayloadsRef.current, resolvedSharedPayloads)) {
+		if (!isResolving && !error && !isEqual(currentPayloadsRef.current, resolvedSharedPayloads)) {
 			clear(currentPayloadsRef.current)
 
 			currentPayloadsRef.current = resolvedSharedPayloads

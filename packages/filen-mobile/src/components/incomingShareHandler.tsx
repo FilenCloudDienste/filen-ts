@@ -11,15 +11,23 @@ const IncomingShareHandler = memo(() => {
 	const isProcessingRef = useRef<boolean>(false)
 
 	useEffect(() => {
-		if (process && !isProcessingRef.current && !navigationId?.startsWith("/incomingShare") && !pathname.startsWith("/incomingShare")) {
-			isProcessingRef.current = true
+		if (!process) {
+			isProcessingRef.current = false
 
-			router.push("/incomingShare")
-
-			setTimeout(() => {
-				isProcessingRef.current = false
-			}, 1000)
+			return
 		}
+
+		if (pathname.startsWith("/incomingShare") || navigationId?.startsWith("/incomingShare")) {
+			return
+		}
+
+		if (isProcessingRef.current) {
+			return
+		}
+
+		isProcessingRef.current = true
+
+		router.push("/incomingShare")
 	}, [process, navigationId, pathname])
 
 	return null

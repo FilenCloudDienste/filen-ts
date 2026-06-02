@@ -194,6 +194,14 @@ export class PauseSignal {
 			this.pauseListeners.delete(callback)
 		}
 	}
+
+	// The underlying SdkPauseSignal is a uniffi (Rust Arc-backed) handle that must be released explicitly.
+	// Callers that own a PauseSignal must call dispose() once it is no longer needed.
+	public dispose(): void {
+		this.removeAllListeners()
+
+		this.signal.uniffiDestroy()
+	}
 }
 
 export function createCompositePauseSignal(...signals: PauseSignal[]): PauseSignal & {
@@ -220,6 +228,10 @@ export function createCompositePauseSignal(...signals: PauseSignal[]): PauseSign
 		)
 	}
 
+	// Capture the prototype method before Object.assign shadows it with the augmented dispose below,
+	// otherwise the augmented dispose would recurse into itself instead of freeing the SDK handle.
+	const disposeController = PauseSignal.prototype.dispose.bind(controller)
+
 	return Object.assign(controller, {
 		dispose: () => {
 			for (const sub of subscriptions) {
@@ -227,6 +239,9 @@ export function createCompositePauseSignal(...signals: PauseSignal[]): PauseSign
 			}
 
 			subscriptions.length = 0
+
+			// Free the SdkPauseSignal allocated for the composite controller above.
+			disposeController()
 		}
 	})
 }
@@ -822,6 +837,22 @@ export function contactDisplayName(contact: Contact | NoteParticipant | ChatPart
 	return contact.nickName && contact.nickName.length > 0 ? contact.nickName : contact.email
 }
 
+/**
+ * Make `filename` safe to write as a single path component on iOS (APFS) and
+ * Android (ext4/F2FS/FAT32/exFAT): NFC-normalizes, strips control/zero-width
+ * characters, replaces the cross-platform-illegal set (`/ : < > " \ | ? *`) and
+ * whitespace runs with `replacement` (default `"_"`), removes leading/trailing
+ * dots and spaces, drops a leading dot to avoid hidden files, and truncates to
+ * 255 UTF-8 bytes while preserving a trailing extension.
+ *
+ * Degenerate input — empty, all dots/spaces, `"."`, `".."`, or anything that
+ * reduces to empty after sanitization — returns the literal `"file"`; it never
+ * returns an empty string.
+ *
+ * Note: this does NOT percent-decode and does NOT strip `%`. A returned name may
+ * still contain a bare `%`, so callers must not pass the result to
+ * `decodeURIComponent` without their own guard.
+ */
 export function sanitizeFileName(filename: string, replacement: string = "_"): string {
 	// Normalize to UTF-8 NFC form (canonical decomposition followed by canonical composition)
 	let sanitizedFilename = filename.normalize("NFC")
@@ -891,7 +922,20 @@ export function normalizeFilePathForSdk(filePath: string): string {
 		.trim()
 		.replace(/^file:\/+/, "/")
 		.split("/")
-		.map(segment => (segment.length > 0 ? decodeURIComponent(segment) : segment))
+		.map(segment => {
+			if (segment.length === 0) {
+				return segment
+			}
+
+			// decodeURIComponent throws URIError on malformed percent-escapes (e.g. a literal "%" in a
+			// decrypted remote filename like "Invoice 50%.pdf"). Fall back to the raw segment so a single
+			// bad escape never crashes the surrounding transfer/offline/drive operation.
+			try {
+				return decodeURIComponent(segment)
+			} catch {
+				return segment
+			}
+		})
 		.join("/")
 
 	if (!normalizedPath.startsWith("/")) {

@@ -308,7 +308,7 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 									return
 								}
 
-								await run(async defer => {
+								const saveResult = await run(async defer => {
 									const destination = new FileSystem.File(
 										FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta!.name)
 									)
@@ -335,6 +335,10 @@ const Header = memo(({ items, drivePath }: { items: DriveItemFileExtracted[]; dr
 
 									await MediaLibrary.saveToLibraryAsync(destination.uri)
 								})
+
+								if (!saveResult.success) {
+									throw saveResult.error
+								}
 							}
 						})
 					}
