@@ -197,8 +197,19 @@ class Transfers {
 					})
 				}
 
+				let succeededUploadDirectory = false
+
 				if (!hideProgress) {
 					defer(() => {
+						const aborted =
+							transferAbortController.signal.aborted ||
+							globalAbortController.signal.aborted ||
+							signal?.aborted
+
+						if (!succeededUploadDirectory && !aborted) {
+							return
+						}
+
 						;(awaitExternalCompletionBeforeMarkingAsFinished
 							? awaitExternalCompletionBeforeMarkingAsFinished()
 							: Promise.resolve()
@@ -386,6 +397,8 @@ class Transfers {
 					}
 				)
 
+				succeededUploadDirectory = true
+
 				return transferred
 			})
 
@@ -525,8 +538,19 @@ class Transfers {
 				})
 			}
 
+			let succeededUploadFile = false
+
 			if (!hideProgress) {
 				defer(() => {
+					const aborted =
+						transferAbortController.signal.aborted ||
+						globalAbortController.signal.aborted ||
+						signal?.aborted
+
+					if (!succeededUploadFile && !aborted) {
+						return
+					}
+
 					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
 						.then(() => {
 							useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "uploadFile")))
@@ -568,6 +592,8 @@ class Transfers {
 					signal: compositeAbortSignal
 				}
 			)
+
+			succeededUploadFile = true
 
 			return transferred
 		})
@@ -800,8 +826,19 @@ class Transfers {
 					})
 				}
 
+				let succeededDownloadDirectory = false
+
 				if (!hideProgress) {
 					defer(() => {
+						const aborted =
+							transferAbortController.signal.aborted ||
+							globalAbortController.signal.aborted ||
+							signal?.aborted
+
+						if (!succeededDownloadDirectory && !aborted) {
+							return
+						}
+
 						;(awaitExternalCompletionBeforeMarkingAsFinished
 							? awaitExternalCompletionBeforeMarkingAsFinished()
 							: Promise.resolve()
@@ -964,6 +1001,8 @@ class Transfers {
 					}
 				)
 
+				succeededDownloadDirectory = true
+
 				return transferred
 			})
 
@@ -1121,8 +1160,19 @@ class Transfers {
 				})
 			}
 
+			let succeededDownloadFile = false
+
 			if (!hideProgress) {
 				defer(() => {
+					const aborted =
+						transferAbortController.signal.aborted ||
+						globalAbortController.signal.aborted ||
+						signal?.aborted
+
+					if (!succeededDownloadFile && !aborted) {
+						return
+					}
+
 					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
 						.then(() => {
 							useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "downloadFile")))
@@ -1208,6 +1258,8 @@ class Transfers {
 				],
 				directories: []
 			}
+
+			succeededDownloadFile = true
 
 			return transferred
 		})

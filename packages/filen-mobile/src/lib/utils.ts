@@ -1370,7 +1370,9 @@ export function safeParseUrl(raw: string): URL | null {
 			return null
 		}
 
-		if (PRIVATE_HOST.some(p => p.test(u.hostname))) {
+		const hostname = u.hostname.replace(/^\[|\]$/g, "")
+
+		if (PRIVATE_HOST.some(p => p.test(hostname))) {
 			return null
 		}
 
