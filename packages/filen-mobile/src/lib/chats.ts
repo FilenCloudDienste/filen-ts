@@ -62,11 +62,11 @@ class Chats {
 	}) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		await this.sendTyping({
+		this.sendTyping({
 			chat,
 			type: ChatTypingType.Up,
 			signal
-		})
+		}).catch(() => {})
 
 		chat = wrapChat(
 			await authedSdkClient.sendChatMessage(
@@ -207,8 +207,8 @@ class Chats {
 				prev.map(c =>
 					c.uuid === chat.uuid
 						? {
-								...chat,
-								lastMessage: chat.lastMessage?.inner.uuid === message.inner.uuid ? message : chat.lastMessage
+								...c,
+								lastMessage: c.lastMessage?.inner.uuid === message.inner.uuid ? message : c.lastMessage
 							}
 						: c
 				)

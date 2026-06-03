@@ -279,6 +279,20 @@ export class Offline {
 				throw new Error("Directory meta file is empty")
 			}
 
+			// Reject metas whose item is a directory type but lack an entries object.
+			// This can happen when a legacy or corrupt write serialized only {item, parent}
+			// (a FileOrDirectoryOfflineMeta) instead of the required DirectoryOfflineMeta.
+			// Treat as corrupt so the directory is re-downloaded rather than silently
+			// returning an entries-less meta that breaks listDirectories and clearAll.
+			if (
+				(meta.item.type === "directory" ||
+					meta.item.type === "sharedDirectory" ||
+					meta.item.type === "sharedRootDirectory") &&
+				(meta.entries === undefined || meta.entries === null)
+			) {
+				throw new Error("Directory meta is missing entries — treating as corrupt")
+			}
+
 			return meta
 		})
 
@@ -1011,12 +1025,15 @@ export class Offline {
 									item.data.decryptedMeta &&
 									unwrappedRemoteDir.meta.name !== item.data.decryptedMeta.name
 								) {
+									const existingMeta = await this.readDirectoryMeta(item.data.uuid)
+
 									this.atomicWrite(
 										metaFile,
 										serialize({
 											item: unwrappedDirIntoDriveItem(unwrappedRemoteDir),
-											parent
-										} satisfies FileOrDirectoryOfflineMeta)
+											parent,
+											entries: existingMeta?.entries ?? {}
+										} satisfies DirectoryOfflineMeta)
 									)
 								}
 							}
@@ -2218,7 +2235,7 @@ export class Offline {
 						continue
 					}
 
-					for (const entry of Object.values(meta.entries)) {
+					for (const entry of Object.values(meta.entries ?? {})) {
 						if (!entry) {
 							continue
 						}

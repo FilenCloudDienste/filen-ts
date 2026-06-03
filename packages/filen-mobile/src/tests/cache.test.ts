@@ -1239,7 +1239,7 @@ describe("Cache", () => {
 	})
 
 	describe("forgetItem", () => {
-		it("removes uuid from all six persistent maps", async () => {
+		it("removes uuid from all seven persistent per-uuid maps", async () => {
 			const cache = await createCache()
 
 			await cache.restore()
@@ -1255,6 +1255,7 @@ describe("Cache", () => {
 			cache.directoryUuidToAnyNormalDir.set(uuid, {} as any)
 			cache.directoryUuidToAnyDirWithContext.set(uuid, {} as any)
 			cache.directoryUuidToAnySharedDirWithContext.set(uuid, {} as any)
+			cache.directoryUuidToAnyLinkedDirWithMeta.set(uuid, { dir: {} as any, meta: {} as any })
 
 			cache.forgetItem(uuid)
 
@@ -1264,6 +1265,23 @@ describe("Cache", () => {
 			expect(cache.directoryUuidToAnyNormalDir.has(uuid)).toBe(false)
 			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(false)
 			expect(cache.directoryUuidToAnySharedDirWithContext.has(uuid)).toBe(false)
+			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(false)
+		})
+
+		it("removes directoryUuidToAnyLinkedDirWithMeta entry on forgetItem (regression: bug #12)", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "linked-dir-forget-uuid"
+
+			cache.directoryUuidToAnyLinkedDirWithMeta.set(uuid, { dir: { tag: "LinkedDir" } as any, meta: { uuid } as any })
+
+			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(true)
+
+			cache.forgetItem(uuid)
+
+			expect(cache.directoryUuidToAnyLinkedDirWithMeta.has(uuid)).toBe(false)
 		})
 
 		it("is a no-op for a uuid that was never cached", async () => {

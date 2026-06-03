@@ -1749,6 +1749,32 @@ describe("Offline", () => {
 			// Corrupt directory should not appear in the listing
 			expect(result.directories).toHaveLength(0)
 		})
+
+		// Regression (bug #4): after the old sync() rename branch wrote {item, parent} only,
+		// readDirectoryMeta would happily return this entries-less object, causing
+		// Object.values(meta.entries) to throw in clearAll and for...in undefined to silently
+		// skip all nested items in listDirectories/listDirectoriesRecursive.
+		// The hardened readDirectoryMeta must now reject such metas (treat as corrupt).
+		it("returns null when meta has a directory item type but no entries field", async () => {
+			const uuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const dirItem = makeDirItem(uuid, "NeedsEntries")
+			const parent = makeParent("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+			// Simulate the corrupt write from the old sync() rename branch: {item, parent} only
+			const noEntriesMeta = { item: dirItem, parent }
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
+			fs.set(
+				`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize(noEntriesMeta)))
+			)
+
+			const offline = await createOffline()
+			const result = await offline.listDirectories()
+
+			// This directory should NOT appear in the listing because its meta is corrupt
+			expect(result.directories).toHaveLength(0)
+		})
 	})
 
 	describe("updateIndex query updates", () => {
@@ -2516,6 +2542,68 @@ describe("Offline", () => {
 			const meta = deserialize(new TextDecoder().decode(metaBytes)) as DirectoryOfflineMeta
 
 			expect(meta.item.data.decryptedMeta?.name).toBe("NewName")
+		})
+
+		// Regression (bug #4): the old rename branch serialized {item, parent} only, silently
+		// discarding the existing entries map. The correct fix reads the existing meta first and
+		// writes {item, parent, entries} so nested children remain visible.
+		it("preserves entries when directory is renamed remotely (does not discard nested children)", async () => {
+			const dirUuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const nestedFileUuid = "44444444-4444-4444-4444-444444444444"
+			const nestedDirUuid = "55555555-5555-5555-5555-555555555555"
+			const dirItem = makeDirItem(dirUuid, "OldName")
+			const parent = makeParent(parentUuid)
+
+			// Store directory with non-empty entries so we can verify they survive the rename
+			writeDirectoryMeta(dirUuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/nested.txt": { item: makeFileItem(nestedFileUuid, "nested.txt") },
+					"/sub": { item: makeDirItem(nestedDirUuid, "sub") }
+				}
+			})
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Remote listing: same UUID, different name
+			const renamedDir = {
+				uuid: dirUuid,
+				meta: { tag: "Decoded", inner: [{ name: "NewName" }] }
+			}
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: [renamedDir]
+					}),
+					listDirRecursiveWithPaths: vi.fn().mockResolvedValue({
+						files: [],
+						dirs: []
+					})
+				}
+			} as any)
+
+			await offline.sync()
+
+			// Meta file should be updated with the new name
+			const metaUri = `${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`
+			const metaBytes = fs.get(metaUri) as Uint8Array
+			const meta = deserialize(new TextDecoder().decode(metaBytes)) as DirectoryOfflineMeta
+
+			// Name should be updated
+			expect(meta.item.data.decryptedMeta?.name).toBe("NewName")
+
+			// Entries must be preserved — the bug discarded them entirely
+			expect(Object.keys(meta.entries)).toHaveLength(2)
+			const entryUuids = Object.values(meta.entries).map((e: { item: DriveItem }) => e.item.data.uuid)
+
+			expect(entryUuids).toContain(nestedFileUuid)
+			expect(entryUuids).toContain(nestedDirUuid)
 		})
 
 		it("removes directory when it no longer exists in the remote parent listing", async () => {
@@ -5541,6 +5629,35 @@ describe("Offline", () => {
 			await expect(offline.clearAll()).resolves.toBeUndefined()
 			expect(fs.get(FILES_DIR_URI)).toBe("dir")
 			expect(fs.get(DIRECTORIES_DIR_URI)).toBe("dir")
+		})
+
+		// Regression (bug #4): a meta written by the old sync() rename branch had only
+		// {item, parent} — no `entries` field. Object.values(meta.entries) threw a
+		// TypeError, preventing clearAll() from completing and leaving orphaned disk usage
+		// that could never be reclaimed from the UI.
+		it("does not crash when a directory meta is missing the entries field (legacy corrupt meta)", async () => {
+			const dirUuid = "dd333333-dddd-3333-dddd-333333333333"
+			const dirItem = makeDirItem(dirUuid, "CorruptMeta")
+			const parent = makeParent("00000000-0000-0000-0000-000000000001")
+
+			// Write a meta that deliberately omits the `entries` field, simulating
+			// what the old sync() rename branch wrote ({item, parent} only).
+			const corruptMeta = { item: dirItem, parent }
+
+			const metaUri = `${DIRECTORIES_DIR_URI}/${dirUuid}/${dirUuid}.filenmeta`
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${dirUuid}`, "dir")
+			fs.set(metaUri, new Uint8Array(new TextEncoder().encode(serialize(corruptMeta))))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// clearAll must not throw even though meta.entries is undefined
+			await expect(offline.clearAll()).resolves.not.toThrow()
+
+			// After clearAll the directory should be gone
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${dirUuid}`)).toBe(false)
 		})
 
 		it("calls driveItemStoredOfflineQueryUpdate(false) for every stored item after clearAll", async () => {

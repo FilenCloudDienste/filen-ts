@@ -295,6 +295,37 @@ describe("chats.editMessage", () => {
 		expect((updated[0] as any).lastMessage?.inner.message).toBe("edited last")
 	})
 
+	it("chatsQueryUpdate uses live cache entry fields, not stale snapshot (concurrent update preserved)", async () => {
+		// Stale snapshot passed in as `chat` — simulates caller capturing chat before a concurrent write
+		const staleChat = makeChat({ uuid: "chat-live", lastFocus: 100n, muted: false })
+		const message = makeMessage("to edit", { inner: { uuid: "edit-live-uuid" } } as Partial<ChatMessageWithInflightId>)
+		const sdkResult = {
+			chat: "chat-live",
+			inner: { uuid: "edit-live-uuid", message: "edited", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
+			embedDisabled: false,
+			edited: true,
+			editedTimestamp: 500n,
+			sentTimestamp: 0n,
+			replyTo: undefined
+		}
+
+		mockSdkClient.editMessage.mockResolvedValueOnce(sdkResult)
+
+		await chats.editMessage({ chat: staleChat, message, newMessage: "edited" })
+
+		const updater = getLastChatsUpdater()
+
+		// liveEntry represents the cache state AFTER a concurrent write — its lastFocus differs from stale snapshot
+		const liveEntry = makeChat({ uuid: "chat-live", lastFocus: 999n, muted: true })
+		const updated = updater([liveEntry])
+
+		// The updater must spread `c` (liveEntry), not `chat` (staleChat).
+		// Concurrent lastFocus bump (999n) must be preserved.
+		expect((updated[0] as any).lastFocus).toBe(999n)
+		// Concurrent mute toggle must be preserved.
+		expect(updated[0]!.muted).toBe(true)
+	})
+
 	it("wrapMessage marks message as undecryptable when SDK returns undefined inner.message", async () => {
 		const chat = makeChat()
 		const message = makeMessage("some text")
@@ -849,9 +880,8 @@ describe("chats.sendMessage", () => {
 		mockSdkClient.updateLastChatFocusTimesNow.mockClear()
 	})
 
-	it("calls sendTypingSignal before sendChatMessage", async () => {
+	it("calls sendTypingSignal and sendChatMessage during sendMessage (typing is best-effort, not awaited)", async () => {
 		const chat = makeChat({ uuid: "chat-send" })
-		const callOrder: string[] = []
 		const sdkLastMessage = {
 			chat: "chat-send",
 			inner: { uuid: "new-msg", message: "hi", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
@@ -863,21 +893,16 @@ describe("chats.sendMessage", () => {
 		}
 		const updatedChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
-		mockSdkClient.sendTypingSignal.mockImplementation(async () => {
-			callOrder.push("typing")
-		})
-		mockSdkClient.sendChatMessage.mockImplementation(async () => {
-			callOrder.push("send")
-
-			return updatedChat
-		})
+		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
+		mockSdkClient.sendChatMessage.mockResolvedValueOnce(updatedChat)
 		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([updatedChat])
 		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
 
 		await chats.sendMessage({ chat, message: "hi", inflightId: "inflight-1" })
 
-		expect(callOrder[0]).toBe("typing")
-		expect(callOrder[1]).toBe("send")
+		// Both are invoked — typing is fire-and-forget, message delivery is not gated on it
+		expect(mockSdkClient.sendTypingSignal).toHaveBeenCalledTimes(1)
+		expect(mockSdkClient.sendChatMessage).toHaveBeenCalledTimes(1)
 	})
 
 	it("calls sendChatMessage with the correct args and returns chat + message", async () => {
@@ -932,6 +957,32 @@ describe("chats.sendMessage", () => {
 		await expect(chats.sendMessage({ chat, message: "test", inflightId: "inf-4" })).rejects.toThrow(
 			"No last message after sending message"
 		)
+	})
+
+	it("sendMessage succeeds even when sendTypingSignal rejects (typing failure must not gate delivery)", async () => {
+		const chat = makeChat({ uuid: "chat-send-typing-fail" })
+		const sdkLastMessage = {
+			chat: "chat-send-typing-fail",
+			inner: { uuid: "msg-tf", message: "hi", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
+			embedDisabled: false,
+			edited: false,
+			editedTimestamp: 0n,
+			sentTimestamp: 0n,
+			replyTo: undefined
+		}
+		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
+
+		// Typing signal rejects with a transient network error
+		mockSdkClient.sendTypingSignal.mockRejectedValueOnce(new Error("network timeout"))
+		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
+		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([sdkChat])
+		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
+
+		// Must resolve successfully, not throw
+		const result = await chats.sendMessage({ chat, message: "hi", inflightId: "inf-tf" })
+
+		expect(mockSdkClient.sendChatMessage).toHaveBeenCalledTimes(1)
+		expect(result.message.inner.message).toBe("hi")
 	})
 
 	it("chatMessagesQueryUpdate deduplicates by uuid and inflightId", async () => {
