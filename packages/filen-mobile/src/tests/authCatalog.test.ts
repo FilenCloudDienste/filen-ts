@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest"
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { common } from "@/locales/en/common"
 import { auth } from "@/locales/en/auth"
@@ -141,12 +144,33 @@ describe("auth catalog", () => {
 
 	// ── Locale JSON completeness ──────────────────────────────────────────────
 
-	it.todo(
-		"every non-English locale JSON file contains all keys present in the en catalog — " +
-			"3 keys (setup_failed_title, setup_failed_description, try_again) are missing from all 25 non-English locale " +
-			"files (bn, cs, da, de, es, fi, fr, hi, hu, id, it, ja, ko, nl, no, pl, pt, ro, ru, sv, th, tr, uk, vi, zh) " +
-			"AND from src/locales/.en-snapshot.json — these keys were added to src/locales/en/misc.ts after the last " +
-			"locale sync — to resolve: set ANTHROPIC_API_KEY and run `npm run translate-i18n` (DELTA mode will detect " +
-			"the missing keys automatically and fill all 25 files + update the snapshot)"
-	)
+	it("every non-English locale JSON file contains all non-plural keys present in the en catalog", () => {
+		const localesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../locales")
+		const localeCodes = fs
+			.readdirSync(localesDir)
+			.filter(file => file.endsWith(".json") && !file.startsWith("."))
+			.map(file => file.replace(/\.json$/, ""))
+
+		// Plural forms legitimately differ per language (en uses _one/_other; ru adds
+		// _few/_many, etc.), so completeness is asserted over non-plural keys only —
+		// the suffix-hygiene test above covers the plural keys.
+		const isPluralKey = (key: string) => PLURAL_CONTEXT_SUFFIXES.some(suffix => key.endsWith(suffix))
+		const enKeys = Object.keys(en).filter(key => !isPluralKey(key))
+
+		const missing: Record<string, string[]> = {}
+
+		for (const code of localeCodes) {
+			const locale = JSON.parse(fs.readFileSync(path.join(localesDir, `${code}.json`), "utf8")) as Record<string, unknown>
+			const localeKeys = new Set(Object.keys(locale))
+			const missingForCode = enKeys.filter(key => !localeKeys.has(key))
+
+			if (missingForCode.length > 0) {
+				missing[code] = missingForCode
+			}
+		}
+
+		// Guard against a vacuous pass if the directory scan finds nothing.
+		expect(localeCodes.length).toBeGreaterThan(0)
+		expect(missing).toEqual({})
+	})
 })
