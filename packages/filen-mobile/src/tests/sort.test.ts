@@ -769,12 +769,67 @@ describe("notesSorter", () => {
 			expect(monthHeader?.title).not.toContain("tbd_")
 			expect(monthHeader?.title).not.toContain("month_")
 
-			// The title must equal a locale-formatted long month name.
+			// The title must equal the month name of twoMonthsAgo (the bucket's lower boundary),
+			// not oneMonthAgo (bug #20 fix: label matches bucket span, not the month above it).
 			const expectedMonth = new Intl.DateTimeFormat("en-US", {
 				month: "long"
-			}).format(new Date(new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()).getTime()))
+			}).format(new Date(new Date(now.getFullYear(), now.getMonth() - 2, now.getDate()).getTime()))
 
 			expect(monthHeader?.title).toBe(expectedMonth)
+		})
+
+		it("previousMonth1 header label matches twoMonthsAgo, not oneMonthAgo (bug #20 regression)", () => {
+			const now = new Date()
+			// 45 days ago is inside previousMonth1 (editedTimestamp >= twoMonthsAgo, < thirtyDaysAgo extended bucket)
+			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "bug20-note", editedTimestamp: fortyFiveDaysAgo })
+
+			const result = notesSorter.group({ notes: [note] })
+			const month1Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1") as
+				| { title?: string }
+				| undefined
+
+			expect(month1Header).toBeDefined()
+
+			const twoMonthsAgoLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(
+				new Date(now.getFullYear(), now.getMonth() - 2, now.getDate())
+			)
+			const oneMonthAgoLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(
+				new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
+			)
+
+			// After the fix, the label is twoMonthsAgo, not oneMonthAgo
+			expect(month1Header?.title).toBe(twoMonthsAgoLabel)
+			// Only verify the two labels differ when the months are actually different (they may coincide in rare edge-date cases)
+			if (twoMonthsAgoLabel !== oneMonthAgoLabel) {
+				expect(month1Header?.title).not.toBe(oneMonthAgoLabel)
+			}
+		})
+
+		it("year-0 note is not dropped from grouped output (bug #26 regression: falsy !year guard)", () => {
+			// Proleptic Gregorian year 0 = 1 BC. new Date(ts).getFullYear() returns 0 for such timestamps.
+			// The old `if (!year) { continue }` guard would skip year 0 due to falsy coercion (!0 === true).
+			// new Date(-62167219200000).getFullYear() === 0 (0000-01-01T00:00:00.000Z)
+			const year0Ts = -62167219200000 // 0000-01-01T00:00:00.000Z, getFullYear() === 0
+
+			// The note must be older than oneYearAgo so it goes into a year bucket, not a monthly bucket.
+			// year0Ts is definitely older than oneYearAgo.
+			const note = makeNote({ uuid: "year-zero", editedTimestamp: BigInt(year0Ts) })
+
+			const result = notesSorter.group({ notes: [note] })
+			const noteItems = result.filter(item => item.type === "note")
+
+			// With the fix, the note must appear in the output (not be silently dropped)
+			expect(noteItems).toHaveLength(1)
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("year-zero")
+
+			// It should be under a year header with title "0"
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-0") as
+				| { title?: string }
+				| undefined
+
+			expect(yearHeader).toBeDefined()
+			expect(yearHeader?.title).toBe("0")
 		})
 	})
 })

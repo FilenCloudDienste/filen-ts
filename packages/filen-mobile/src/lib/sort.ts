@@ -435,7 +435,6 @@ class NotesSorter {
 		const nowDate = new Date(now)
 		const currentYear = nowDate.getFullYear()
 		const currentMonth = nowDate.getMonth()
-		const oneMonthAgo = new Date(currentYear, currentMonth - 1, nowDate.getDate()).getTime()
 		const twoMonthsAgo = new Date(currentYear, currentMonth - 2, nowDate.getDate()).getTime()
 		const oneYearAgo = new Date(currentYear - 1, currentMonth, nowDate.getDate()).getTime()
 		const today: NoteItem[] = []
@@ -634,7 +633,7 @@ class NotesSorter {
 		if (previousMonth1.length > 0) {
 			previousMonth1.sort(sortDesc)
 
-			const date = new Date(oneMonthAgo)
+			const date = new Date(twoMonthsAgo)
 
 			result.push({
 				type: "header",
@@ -694,7 +693,7 @@ class NotesSorter {
 		for (let i = 0; i < years.length; i++) {
 			const year = years[i]
 
-			if (!year) {
+			if (year === undefined) {
 				continue
 			}
 

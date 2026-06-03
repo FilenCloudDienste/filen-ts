@@ -193,16 +193,19 @@ describe("initI18n", () => {
 		}
 	})
 
-	it("calls setIntlLanguage with the resolved language after init", async () => {
+	it("calls setIntlLanguage with the device languageTag (not the bare language code) after init", async () => {
+		// Bug #16: setIntlLanguage must receive the full BCP-47 tag so region guards
+		// (startsWith("en-us"), "en-gb", etc.) inside detectLocaleInfo remain reachable.
 		mockSecureStoreGet.mockResolvedValue("fr")
+		mockGetLocales.mockReturnValue([{ languageCode: "fr", languageTag: "fr-FR" }])
 
 		await initI18n()
 
 		expect(mockSetIntlLanguage).toHaveBeenCalledTimes(1)
-		expect(mockSetIntlLanguage).toHaveBeenCalledWith("fr")
+		expect(mockSetIntlLanguage).toHaveBeenCalledWith("fr-FR")
 	})
 
-	it("falls back to 'en' and passes it to both init and setIntlLanguage when no preference is set", async () => {
+	it("falls back to the bare language code in setIntlLanguage when no device languageTag is available", async () => {
 		mockSecureStoreGet.mockResolvedValue(null)
 		mockGetLocales.mockReturnValue([])
 
@@ -210,6 +213,7 @@ describe("initI18n", () => {
 
 		const initArg: Record<string, unknown> = mockI18nInit.mock.calls[0]?.[0]
 		expect(initArg["lng"]).toBe("en")
+		// No languageTag available — falls back to the resolved Language code
 		expect(mockSetIntlLanguage).toHaveBeenCalledWith("en")
 	})
 })
@@ -223,15 +227,22 @@ describe("changeAppLanguage", () => {
 		expect(i18nMock.changeLanguage).toHaveBeenCalledWith("de")
 	})
 
-	it("calls setIntlLanguage with the supplied language as a side effect", async () => {
+	it("calls setIntlLanguage with the device languageTag (not the bare language code) as a side effect", async () => {
+		// Bug #16: after a language switch the device region tag must be preserved so
+		// date/clock format is not silently downgraded to a region-agnostic bare code.
+		mockGetLocales.mockReturnValue([{ languageCode: "ja", languageTag: "ja-JP" }])
+
 		await changeAppLanguage("ja")
 
 		expect(mockSetIntlLanguage).toHaveBeenCalledTimes(1)
-		expect(mockSetIntlLanguage).toHaveBeenCalledWith("ja")
+		expect(mockSetIntlLanguage).toHaveBeenCalledWith("ja-JP")
 	})
 
 	it("does NOT write to secureStore (persistence is owned by setLanguage/useSecureStore)", async () => {
 		const secureStoreMock = (await import("@/lib/secureStore")).default as unknown as { set?: ReturnType<typeof vi.fn> }
+		// No languageTag available — getLocales returns [] via beforeEach — so the
+		// fallback bare code is used. This also exercises the no-tag fallback path.
+		mockGetLocales.mockReturnValue([])
 
 		await changeAppLanguage("fr")
 
@@ -240,8 +251,42 @@ describe("changeAppLanguage", () => {
 		if (typeof secureStoreMock.set === "function") {
 			expect(secureStoreMock.set).not.toHaveBeenCalled()
 		}
-		// The important invariant: only the time module is notified, not the store.
+		// The important invariant: only the time module is notified (with the fallback
+		// bare code since no device tag is present), not the store.
 		expect(mockSetIntlLanguage).toHaveBeenCalledWith("fr")
+	})
+})
+
+describe("Bug #16 — setIntlLanguage receives full BCP-47 tag, not bare language code", () => {
+	it("initI18n passes 'en-US' to setIntlLanguage when device locale is en-US, regardless of resolved Language 'en'", async () => {
+		mockSecureStoreGet.mockResolvedValue("en")
+		mockGetLocales.mockReturnValue([{ languageCode: "en", languageTag: "en-US" }])
+
+		await initI18n()
+
+		// Must be the full tag — bare "en" would break detectLocaleInfo's MDY+12h guard
+		expect(mockSetIntlLanguage).toHaveBeenCalledWith("en-US")
+		expect(mockSetIntlLanguage).not.toHaveBeenCalledWith("en")
+	})
+
+	it("changeAppLanguage passes 'en-GB' to setIntlLanguage when device locale is en-GB", async () => {
+		mockGetLocales.mockReturnValue([{ languageCode: "en", languageTag: "en-GB" }])
+
+		await changeAppLanguage("en")
+
+		// Must be the full tag — bare "en" would break DMY+12h guard for en-GB
+		expect(mockSetIntlLanguage).toHaveBeenCalledWith("en-GB")
+		expect(mockSetIntlLanguage).not.toHaveBeenCalledWith("en")
+	})
+
+	it("initI18n falls back to bare language code when device returns no languageTag", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([])
+
+		await initI18n()
+
+		// No device tag — graceful fallback to the resolved Language
+		expect(mockSetIntlLanguage).toHaveBeenCalledWith("en")
 	})
 })
 
