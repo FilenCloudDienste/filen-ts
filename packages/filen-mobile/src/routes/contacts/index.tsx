@@ -1191,8 +1191,8 @@ const Contacts = memo(() => {
 		return (
 			<Contact
 				info={info}
-				nextItem={items.at(info.index + 1)}
-				prevItem={items.at(info.index - 1)}
+				nextItem={info.index < items.length - 1 ? items[info.index + 1] : undefined}
+				prevItem={info.index > 0 ? items[info.index - 1] : undefined}
 			/>
 		)
 	}

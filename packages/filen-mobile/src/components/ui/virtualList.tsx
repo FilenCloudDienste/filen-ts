@@ -144,7 +144,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 					}}
 					showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 					showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
-					scrollEnabled={!props.loading && (props.data ?? []).length > 0}
+					scrollEnabled={!props.loading && ((props.data ?? []).length > 0 || Boolean(props.onRefresh))}
 					ListEmptyComponent={emptyComponent}
 					ListFooterComponent={props.footerComponent}
 					ListHeaderComponent={props.headerComponent}

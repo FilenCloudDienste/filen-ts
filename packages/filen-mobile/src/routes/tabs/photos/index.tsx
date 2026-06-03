@@ -518,8 +518,8 @@ const DateRange = memo(() => {
 		return null
 	}
 
-	const startDate = visibleDateRange.start ? new Date(visibleDateRange.start) : null
-	const endDate = visibleDateRange.end ? new Date(visibleDateRange.end) : null
+	const startDate = visibleDateRange.start !== null ? new Date(visibleDateRange.start) : null
+	const endDate = visibleDateRange.end !== null ? new Date(visibleDateRange.end) : null
 
 	if (!startDate || !endDate) {
 		return null
@@ -635,10 +635,10 @@ const Photos = memo(() => {
 								const lastItem = items[items.length - 1]
 
 								usePhotosStore.getState().setVisibleDateRange({
-									start: firstItem?.item.data.decryptedMeta?.created
+									start: firstItem?.item.data.decryptedMeta?.created !== undefined
 										? Number(firstItem.item.data.decryptedMeta.created)
 										: Number(firstItem?.item.data.timestamp),
-									end: lastItem?.item.data.decryptedMeta?.created
+									end: lastItem?.item.data.decryptedMeta?.created !== undefined
 										? Number(lastItem.item.data.decryptedMeta.created)
 										: Number(lastItem?.item.data.timestamp)
 								})

@@ -1098,6 +1098,11 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	const checkConnectionIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 	const socketListenerHandleRef = useRef<ListenerHandle | null>(null)
 	const stringifiedClient = useStringifiedClient()
+	const stringifiedClientRef = useRef(stringifiedClient)
+
+	useEffect(() => {
+		stringifiedClientRef.current = stringifiedClient
+	}, [stringifiedClient])
 
 	const onAppStateChange = useCallback(
 		async (nextAppState: AppStateStatus) => {
@@ -1124,9 +1129,11 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 							socketListenerHandleRef.current = (await sdkClient.addEventListener(
 								{
 									onEvent: event => {
+										const client = stringifiedClientRef.current
+
 										onEvent({
 											event,
-											userId: stringifiedClient ? stringifiedClient.userId : BigInt(0)
+											userId: client ? client.userId : BigInt(0)
 										}).catch(console.error)
 									}
 								},
@@ -1166,7 +1173,7 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 				return
 			}
 		},
-		[sdkClient, stringifiedClient]
+		[sdkClient]
 	)
 
 	useEffect(() => {
