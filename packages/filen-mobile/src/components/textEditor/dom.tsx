@@ -24,9 +24,10 @@ const rehypeExternalLinks: Plugin<[], Root> = () => {
 		visit(tree, "element", (node: Element) => {
 			try {
 				if (node.tagName === "a" && node.properties?.["href"]) {
-					const href = String(node.properties["href"]).trim().toLowerCase()
+					const href = String(node.properties["href"]).trim()
+					const lower = href.toLowerCase()
 					const protocols = ["http://", "https://", "mailto:", "tel:", "sms:", "whatsapp:", "geo:", "maps:"]
-					const shouldIntercept = protocols.some(protocol => href.startsWith(protocol))
+					const shouldIntercept = protocols.some(protocol => lower.startsWith(protocol))
 
 					if (shouldIntercept) {
 						node.properties["data-external-url"] = href
@@ -208,7 +209,7 @@ const TextEditorDOM = memo(
 					return
 				}
 
-				const url = link.getAttribute("data-external-url")?.toLowerCase().trim()
+				const url = link.getAttribute("data-external-url")?.trim()
 
 				if (!url) {
 					return

@@ -113,7 +113,11 @@ function safeParseUrlInline(raw: string): URL | null {
 
 		if (u.protocol !== "https:") return null
 		if (u.username || u.password) return null
-		if (PRIVATE_HOST_REGEXES.some(p => p.test(u.hostname))) return null
+
+		// Strip IPv6 brackets so regexes match bare addresses (e.g. [::1] → ::1)
+		const hostname = u.hostname.replace(/^\[|\]$/g, "")
+
+		if (PRIVATE_HOST_REGEXES.some(p => p.test(hostname))) return null
 
 		return u
 	} catch {
@@ -225,7 +229,10 @@ describe("probeMedia", () => {
 		expect(result.success).toBe(false)
 	})
 
-	it("returns {success:false} when response URL fails safeParseUrl (private IP redirect — SSRF guard)", async () => {
+	it("returns {success:false} when response URL fails safeParseUrl (private IP redirect — SSRF guard, post-hoc check)", async () => {
+		// Simulate a redirect chain that somehow bypasses the manual-redirect guard
+		// and returns a response whose final URL is a private IP. The post-hoc
+		// safeParseUrl(res.url) check at the end of probeMedia must still reject it.
 		vi.stubGlobal(
 			"fetch",
 			vi.fn().mockResolvedValue(
@@ -238,6 +245,144 @@ describe("probeMedia", () => {
 		)
 
 		const result = await probeMedia("https://example.com/safe")
+
+		expect(result.success).toBe(false)
+	})
+
+	it("SSRF via open redirect: blocks redirect to private IPv4 (192.168.x.x) before issuing the request", async () => {
+		// First call: returns a 301 with Location pointing to an internal host.
+		// Second call should never happen — the guard must abort after validating Location.
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce({
+				ok: false,
+				status: 301,
+				url: "https://example.com/redirect",
+				headers: {
+					get: (key: string) => (key.toLowerCase() === "location" ? "https://192.168.1.1/admin" : null)
+				},
+				redirected: false,
+				type: "basic"
+			} as unknown as Response)
+			// If somehow a second fetch is made (to the internal host), fail the test
+			.mockResolvedValueOnce(
+				makeResponse({
+					url: "https://192.168.1.1/admin",
+					contentType: "image/jpeg",
+					contentLength: "1024"
+				})
+			)
+
+		vi.stubGlobal("fetch", fetchMock)
+
+		const result = await probeMedia("https://example.com/redirect")
+
+		// Must be blocked
+		expect(result.success).toBe(false)
+		// Must NOT have fetched the internal host — fetch called at most once (HEAD) + maybe GET, never for the internal IP
+		const internalCalls = fetchMock.mock.calls.filter(
+			(args: unknown[]) => typeof args[0] === "string" && args[0].includes("192.168")
+		)
+
+		expect(internalCalls).toHaveLength(0)
+	})
+
+	it("SSRF via open redirect: blocks redirect to private IPv6 (::1)", async () => {
+		const fetchMock = vi.fn().mockResolvedValueOnce({
+			ok: false,
+			status: 302,
+			url: "https://example.com/short",
+			headers: {
+				get: (key: string) => (key.toLowerCase() === "location" ? "https://[::1]/internal" : null)
+			},
+			redirected: false,
+			type: "basic"
+		} as unknown as Response)
+
+		vi.stubGlobal("fetch", fetchMock)
+
+		const result = await probeMedia("https://example.com/short")
+
+		expect(result.success).toBe(false)
+
+		const internalCalls = fetchMock.mock.calls.filter(
+			(args: unknown[]) => typeof args[0] === "string" && (args[0].includes("::1") || args[0].includes("%3A%3A1"))
+		)
+
+		expect(internalCalls).toHaveLength(0)
+	})
+
+	it("allows a valid redirect chain (public HTTPS → public HTTPS) and returns success", async () => {
+		// First hop: 301 to another public HTTPS URL
+		// Second hop: 200 OK with the final content
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce({
+				ok: false,
+				status: 301,
+				url: "https://short.example.com/abc",
+				headers: {
+					get: (key: string) => (key.toLowerCase() === "location" ? "https://cdn.example.com/img.jpg" : null)
+				},
+				redirected: false,
+				type: "basic"
+			} as unknown as Response)
+			.mockResolvedValueOnce(
+				makeResponse({
+					url: "https://cdn.example.com/img.jpg",
+					contentType: "image/jpeg",
+					contentLength: "2048"
+				})
+			)
+
+		vi.stubGlobal("fetch", fetchMock)
+
+		const result = await probeMedia("https://short.example.com/abc")
+
+		expect(result.success).toBe(true)
+
+		if (result.success) {
+			expect(result.contentType).toBe("image/jpeg")
+			expect(result.size).toBe(2048)
+		}
+	})
+
+	it("returns {success:false} when redirect chain exceeds MAX_REDIRECTS (6 hops for limit of 5)", async () => {
+		// Build a fetch mock that always returns a 301 to the same URL — infinite redirect
+		const alwaysRedirect = {
+			ok: false,
+			status: 301,
+			url: "https://loop.example.com/",
+			headers: {
+				get: (key: string) => (key.toLowerCase() === "location" ? "https://loop.example.com/" : null)
+			},
+			redirected: false,
+			type: "basic"
+		} as unknown as Response
+
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(alwaysRedirect))
+
+		const result = await probeMedia("https://loop.example.com/")
+
+		expect(result.success).toBe(false)
+	})
+
+	it("returns {success:false} when 301 Location header is missing", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 301,
+				url: "https://example.com/broken-redirect",
+				headers: {
+					get: (_key: string) => null
+				},
+				redirected: false,
+				type: "basic"
+			} as unknown as Response)
+		)
+
+		const result = await probeMedia("https://example.com/broken-redirect")
 
 		expect(result.success).toBe(false)
 	})
