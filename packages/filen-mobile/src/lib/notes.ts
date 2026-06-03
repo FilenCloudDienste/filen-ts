@@ -254,7 +254,7 @@ class Notes {
 			signal
 		})
 
-		if (!content) {
+		if (content === undefined) {
 			throw new Error("Note content is empty")
 		}
 
@@ -294,7 +294,7 @@ class Notes {
 					signal
 				})
 
-				if (!content) {
+				if (content === undefined) {
 					return
 				}
 
@@ -852,6 +852,11 @@ class Notes {
 				: undefined
 		)
 
+		const updatedNote: Note = {
+			...note,
+			participants: note.participants.map(p => (p.userId === participant.userId ? participant : p))
+		}
+
 		notesWithContentQueryUpdate({
 			updater: prev =>
 				prev.map(n =>
@@ -868,7 +873,7 @@ class Notes {
 				)
 		})
 
-		return note
+		return updatedNote
 	}
 }
 

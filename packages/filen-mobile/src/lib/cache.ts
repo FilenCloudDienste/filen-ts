@@ -508,6 +508,7 @@ class Cache {
 		this.directoryUuidToAnyNormalDir.delete(uuid)
 		this.directoryUuidToAnyDirWithContext.delete(uuid)
 		this.directoryUuidToAnySharedDirWithContext.delete(uuid)
+		this.directoryUuidToAnyLinkedDirWithMeta.delete(uuid)
 	}
 
 	public clear(): void {

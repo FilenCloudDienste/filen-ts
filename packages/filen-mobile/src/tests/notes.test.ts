@@ -1212,13 +1212,16 @@ describe("notes.export", () => {
 		await expect(notes.export({ note })).rejects.toThrow("Note content is empty")
 	})
 
-	it("throws 'Note content is empty' when getContent returns empty string", async () => {
+	it("BUGFIX #17: empty string content exports successfully to an empty .txt file (not thrown)", async () => {
 		const sdkClient = makeMockSdkClient({ getNoteContent: vi.fn().mockResolvedValue("") })
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
-		const note = makeNote()
+		const note = makeNote({ title: "EmptyNote", uuid: "empty-note-uuid" })
 
-		await expect(notes.export({ note })).rejects.toThrow("Note content is empty")
+		const { file } = await notes.export({ note })
+
+		expect(file).toBeDefined()
+		expect(file.name).toMatch(/\.txt$/)
 	})
 
 	it("uses note.title as filename base when title is non-null", async () => {
@@ -1306,16 +1309,29 @@ describe("notes.exportMultiple", () => {
 		await expect(notes.exportMultiple({ notes: [] })).rejects.toThrow("No exportable notes provided")
 	})
 
-	it("notes with null/empty content are silently skipped (not added to zip)", async () => {
+	it("notes with null/undefined content (undecryptable) are silently skipped (not added to zip)", async () => {
 		const sdkClient = makeMockSdkClient({ getNoteContent: vi.fn().mockResolvedValue(null) })
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
-		const note = makeNote({ title: "Empty Note" })
+		const note = makeNote({ title: "Undecryptable Note" })
 
 		// Should not throw even though content is null — just produces empty zip
 		const { file } = await notes.exportMultiple({ notes: [note] })
 
 		expect(file).toBeDefined()
+	})
+
+	it("BUGFIX #18: notes with empty string content are included in the zip (not silently dropped)", async () => {
+		const sdkClient = makeMockSdkClient({ getNoteContent: vi.fn().mockResolvedValue("") })
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ title: "Empty Note", uuid: "empty-note-uuid" })
+
+		// Should not skip the note — empty string is valid content
+		const { file } = await notes.exportMultiple({ notes: [note] })
+
+		expect(file).toBeDefined()
+		expect(file.name).toMatch(/notes_export_.*\.zip$/)
 	})
 
 	it("exported filename uses '{title}_{uuid}.txt' when title is truthy", async () => {
@@ -1733,5 +1749,91 @@ describe("notes.create", () => {
 		expect(withUuid).toHaveLength(1)
 		expect(withUuid[0].content).toBe("hello")
 		expect(result.find((n: Note & { content: string }) => n.uuid === "unrelated-uuid")).toBeDefined()
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Tests: Notes.setParticipantPermission
+// ---------------------------------------------------------------------------
+
+describe("notes.setParticipantPermission", () => {
+	beforeEach(() => {
+		mockGetSdkClients.mockReset()
+		mockNotesWithContentQueryUpdate.mockReset()
+	})
+
+	it("returns early (original note) when permission already matches", async () => {
+		const participant = makeParticipant({ userId: 99n, permissionsWrite: true })
+		const note = makeNote({ participants: [participant] })
+
+		const result = await notes.setParticipantPermission({ note, participant, permissionsWrite: true })
+
+		expect(result).toBe(note)
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+	})
+
+	it("calls SDK setNoteParticipantPermission with correct args", async () => {
+		const participant = makeParticipant({ userId: 99n, permissionsWrite: false })
+		const sdkClient = makeMockSdkClient({
+			setNoteParticipantPermission: vi.fn().mockResolvedValue(makeParticipant({ userId: 99n, permissionsWrite: true }))
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1", participants: [participant] })
+
+		await notes.setParticipantPermission({ note, participant, permissionsWrite: true })
+
+		expect(sdkClient.setNoteParticipantPermission).toHaveBeenCalledWith("note-uuid-1", participant, true, undefined)
+	})
+
+	it("BUGFIX #25: returned note has the updated participant permission (not stale)", async () => {
+		const participant = makeParticipant({ userId: 99n, permissionsWrite: false })
+		const updatedParticipant = makeParticipant({ userId: 99n, permissionsWrite: true })
+		const sdkClient = makeMockSdkClient({
+			setNoteParticipantPermission: vi.fn().mockResolvedValue(updatedParticipant)
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1", participants: [participant] })
+
+		const result = await notes.setParticipantPermission({ note, participant, permissionsWrite: true })
+
+		const updated = result.participants.find(p => p.userId === 99n)
+
+		expect(updated).toBeDefined()
+		expect(updated?.permissionsWrite).toBe(true)
+	})
+
+	it("cache updater patches LIVE cache entry (concurrency-safe), not the closure-captured note", async () => {
+		const participant = makeParticipant({ userId: 99n, permissionsWrite: false })
+		const updatedParticipant = makeParticipant({ userId: 99n, permissionsWrite: true })
+		const sdkClient = makeMockSdkClient({
+			setNoteParticipantPermission: vi.fn().mockResolvedValue(updatedParticipant)
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1", participants: [participant] })
+
+		await notes.setParticipantPermission({ note, participant, permissionsWrite: true })
+
+		expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledTimes(1)
+		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
+		if (!callArgs) throw new Error("expected a call")
+		const { updater } = callArgs[0]
+
+		// Simulate a LIVE cache entry that has an extra participant (concurrent update scenario)
+		const liveParticipant2 = makeParticipant({ userId: 77n, permissionsWrite: false })
+		const liveCacheEntry = { ...makeNote({ uuid: "note-uuid-1" }), participants: [participant, liveParticipant2], content: "live" }
+
+		const result = updater([liveCacheEntry])
+
+		expect(result).toHaveLength(1)
+		const p99 = result[0].participants.find((p: NoteParticipant) => p.userId === 99n)
+		const p77 = result[0].participants.find((p: NoteParticipant) => p.userId === 77n)
+
+		// p99 gets the updated permission
+		expect(p99?.permissionsWrite).toBe(true)
+		// p77 remains untouched (present in live cache, not in closure-captured note)
+		expect(p77).toBeDefined()
 	})
 })

@@ -727,6 +727,161 @@ describe("playlistsQueryUpdate", () => {
 	})
 })
 
+// ─── QueryPersisterKv dirty-set restoration on write failure ─────────────────
+//
+// Regression tests for Bug #21:
+// persistNow() and runPersistAsync() must restore dirty sets on SQLite failure
+// so entries are retried by the next debounce cycle rather than silently dropped.
+
+describe("QueryPersisterKv dirty-set restoration on write failure", () => {
+	it("persistNow: restores dirty upserts into dirtyUpserts when executeBatch rejects", async () => {
+		vi.resetModules()
+
+		const mockExecuteBatch = vi.fn().mockRejectedValue(new Error("disk full"))
+		const mockOpenDb = vi.fn().mockResolvedValue({ executeBatch: mockExecuteBatch })
+
+		vi.doMock("@/lib/sqlite", () => ({
+			default: {
+				openDb: mockOpenDb,
+				kvAsync: {
+					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+				}
+			}
+		}))
+
+		const { QueryPersisterKv } = await import("@/queries/client")
+		const kv = new QueryPersisterKv()
+
+		// Populate the in-memory buffer and mark it dirty
+		kv.setItem("keyA", "valueA")
+		kv.setItem("keyB", "valueB")
+
+		// Cancel the debounce so it doesn't fire on its own
+		// Access the private debounce via the prototype path
+		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; persistNow: () => void }
+		kvAny.persistDirty.cancel()
+
+		// Verify dirty set is populated before the flush
+		expect(kvAny.dirtyUpserts.has("keyA")).toBe(true)
+		expect(kvAny.dirtyUpserts.has("keyB")).toBe(true)
+
+		// Call persistNow directly
+		kvAny.persistNow()
+
+		// At this point dirtyUpserts should have been cleared by buildCommands()
+		expect(kvAny.dirtyUpserts.size).toBe(0)
+
+		// Let the rejected promise settle
+		await new Promise<void>(resolve => { setTimeout(resolve, 10) })
+
+		// After the catch block, dirty keys must be restored for retry
+		expect(kvAny.dirtyUpserts.has("keyA")).toBe(true)
+		expect(kvAny.dirtyUpserts.has("keyB")).toBe(true)
+	})
+
+	it("persistNow: does NOT restore a key that was re-removed after the snapshot", async () => {
+		vi.resetModules()
+
+		const mockExecuteBatch = vi.fn().mockRejectedValue(new Error("io error"))
+		const mockOpenDb = vi.fn().mockResolvedValue({ executeBatch: mockExecuteBatch })
+
+		vi.doMock("@/lib/sqlite", () => ({
+			default: {
+				openDb: mockOpenDb,
+				kvAsync: {
+					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+				}
+			}
+		}))
+
+		const { QueryPersisterKv } = await import("@/queries/client")
+		const kv = new QueryPersisterKv()
+
+		kv.setItem("keyX", "valueX")
+
+		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; persistNow: () => void }
+		kvAny.persistDirty.cancel()
+
+		kvAny.persistNow()
+
+		// Simulate a removeItem called between persistNow() firing and the promise rejecting
+		// — this puts keyX in dirtyDeletes, so it should NOT be re-added to dirtyUpserts
+		kvAny.dirtyDeletes.add("keyX")
+
+		await new Promise<void>(resolve => { setTimeout(resolve, 10) })
+
+		// keyX moved to dirtyDeletes — it must not be double-restored into dirtyUpserts
+		expect(kvAny.dirtyUpserts.has("keyX")).toBe(false)
+		expect(kvAny.dirtyDeletes.has("keyX")).toBe(true)
+	})
+
+	it("runPersistAsync: restores failed upserts so the finally re-trigger actually retries them", async () => {
+		vi.resetModules()
+
+		const mockExecuteBatch = vi.fn().mockRejectedValue(new Error("db locked"))
+		const mockOpenDb = vi.fn().mockResolvedValue({ executeBatch: mockExecuteBatch })
+
+		vi.doMock("@/lib/sqlite", () => ({
+			default: {
+				openDb: mockOpenDb,
+				kvAsync: {
+					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+				}
+			}
+		}))
+
+		const { QueryPersisterKv } = await import("@/queries/client")
+		const kv = new QueryPersisterKv()
+
+		kv.setItem("keyC", "valueC")
+
+		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; runPersistAsync: () => Promise<void> }
+		kvAny.persistDirty.cancel()
+
+		// Run the async persist path directly and await it
+		await kvAny.runPersistAsync()
+
+		// After runPersistAsync catches the error, it must restore the key
+		expect(kvAny.dirtyUpserts.has("keyC")).toBe(true)
+	})
+
+	it("runPersistAsync: does NOT restore a key that was overwritten after the snapshot", async () => {
+		vi.resetModules()
+
+		const mockExecuteBatch = vi.fn().mockRejectedValue(new Error("transient"))
+		const mockOpenDb = vi.fn().mockResolvedValue({ executeBatch: mockExecuteBatch })
+
+		vi.doMock("@/lib/sqlite", () => ({
+			default: {
+				openDb: mockOpenDb,
+				kvAsync: {
+					removeByPrefix: vi.fn().mockResolvedValue(undefined)
+				}
+			}
+		}))
+
+		const { QueryPersisterKv } = await import("@/queries/client")
+		const kv = new QueryPersisterKv()
+
+		kv.setItem("keyD", "valueD")
+
+		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; runPersistAsync: () => Promise<void> }
+		kvAny.persistDirty.cancel()
+
+		// Start the async persist
+		const persistPromise = kvAny.runPersistAsync()
+
+		// Simulate a new dirty write arriving after the snapshot was taken but before the promise settles
+		kvAny.dirtyUpserts.add("keyD")
+
+		await persistPromise
+
+		// keyD was re-dirtied after the snapshot — the catch should not overwrite it
+		// (the key is already in dirtyUpserts, so the guard prevents double-add, which is fine)
+		expect(kvAny.dirtyUpserts.has("keyD")).toBe(true)
+	})
+})
+
 // ─── fetchData from useCameraUploadAlbums.query ───────────────────────────────
 
 describe("useCameraUploadAlbums.query fetchData", () => {

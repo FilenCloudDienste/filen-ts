@@ -150,6 +150,11 @@ export class QueryPersisterKv {
 		}
 
 		const now = performance.now()
+
+		// Snapshot the keys being flushed before clearing so they can be restored on failure.
+		const snapshotUpserts = new Set(this.dirtyUpserts)
+		const snapshotDeletes = new Set(this.dirtyDeletes)
+
 		const commands = this.buildCommands()
 
 		if (commands.length === 0) {
@@ -163,6 +168,23 @@ export class QueryPersisterKv {
 			.then(db => db.executeBatch(commands))
 			.catch(err => {
 				console.error("[QueryPersisterKv] Failed to batch persist", err)
+
+				// Restore failed keys into the dirty sets so the next debounce retries them.
+				// Only re-add keys that have not been re-dirtied or removed in the interim
+				// (i.e. still absent from the dirty sets after buildCommands() cleared them).
+				for (const key of snapshotUpserts) {
+					if (!this.dirtyUpserts.has(key) && !this.dirtyDeletes.has(key)) {
+						this.dirtyUpserts.add(key)
+					}
+				}
+
+				for (const key of snapshotDeletes) {
+					if (!this.dirtyDeletes.has(key) && !this.dirtyUpserts.has(key)) {
+						this.dirtyDeletes.add(key)
+					}
+				}
+
+				this.persistDirty()
 			})
 			.finally(() => {
 				console.log(`[QueryPersisterKv] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
@@ -190,6 +212,10 @@ export class QueryPersisterKv {
 	}
 
 	private async runPersistAsync(): Promise<void> {
+		// Declare snapshot variables outside try so the catch block can restore them on failure.
+		let snapshotDeletes = new Set<string>()
+		let snapshotUpserts = new Set<string>()
+
 		try {
 			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
 				return
@@ -197,8 +223,8 @@ export class QueryPersisterKv {
 
 			const now = performance.now()
 
-			const deletes = new Set(this.dirtyDeletes)
-			const upserts = new Set(this.dirtyUpserts)
+			snapshotDeletes = new Set(this.dirtyDeletes)
+			snapshotUpserts = new Set(this.dirtyUpserts)
 
 			this.dirtyDeletes.clear()
 			this.dirtyUpserts.clear()
@@ -206,13 +232,13 @@ export class QueryPersisterKv {
 			const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 			const commands: [string, (string | Uint8Array)[]][] = []
 
-			for (const key of deletes) {
+			for (const key of snapshotDeletes) {
 				commands.push(["DELETE FROM kv WHERE key = ?", [prefix + key]])
 			}
 
 			let serialized = 0
 
-			for (const key of upserts) {
+			for (const key of snapshotUpserts) {
 				const value = this.buffer.get(key)
 
 				if (value !== undefined) {
@@ -241,6 +267,20 @@ export class QueryPersisterKv {
 			console.log(`[QueryPersisterKv] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
 		} catch (err) {
 			console.error("[QueryPersisterKv] Failed to persist", err)
+
+			// Restore failed keys so the finally-block re-trigger actually retries them.
+			// Only re-add keys that were not re-dirtied or re-removed after the snapshot.
+			for (const key of snapshotUpserts) {
+				if (!this.dirtyUpserts.has(key) && !this.dirtyDeletes.has(key)) {
+					this.dirtyUpserts.add(key)
+				}
+			}
+
+			for (const key of snapshotDeletes) {
+				if (!this.dirtyDeletes.has(key) && !this.dirtyUpserts.has(key)) {
+					this.dirtyDeletes.add(key)
+				}
+			}
 		} finally {
 			this.persisting = false
 
