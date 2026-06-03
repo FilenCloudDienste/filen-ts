@@ -575,7 +575,7 @@ export function createMenuButtons({
 					await new Promise<void>(resolve => setTimeout(resolve, 100))
 
 					await Sharing.shareAsync(result.data.uri, {
-						mimeType: "text/plain",
+						mimeType: item.data.decryptedMeta?.mime || mimeTypes.lookup(result.data.name) || "application/octet-stream",
 						dialogTitle: result.data.name
 					})
 				})

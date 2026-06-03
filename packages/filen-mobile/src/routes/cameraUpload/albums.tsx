@@ -47,7 +47,7 @@ const Albums = memo(() => {
 				transparent={Platform.OS === "ios"}
 				backgroundColor={Platform.select({
 					ios: undefined,
-					default: bgBackgroundSecondary.color as string | undefined
+					default: bgBackgroundSecondary.backgroundColor as string | undefined
 				})}
 				leftItems={Platform.select({
 					ios: [
@@ -105,7 +105,7 @@ const Albums = memo(() => {
 										return {
 											title: album.title,
 											badge: album.assetCount.toString(),
-											badgeColor: bgBackgroundSecondary.color as string | undefined,
+											badgeColor: bgBackgroundSecondary.backgroundColor as string | undefined,
 											rightItem: {
 												type: "switch",
 												value: config.albumIds?.includes(album.id) ?? false,
