@@ -63,6 +63,7 @@ describe("aggregateNoteSelectionFlags", () => {
 
 	it("includesTrashed mirrors any-trashed", () => {
 		expect(aggregateNoteSelectionFlags([note(), note({ trash: true })], ME).includesTrashed).toBe(true)
+		expect(aggregateNoteSelectionFlags([note(), note()], ME).includesTrashed).toBe(false)
 	})
 
 	it("includesArchived true when any note is archived", () => {
@@ -173,6 +174,19 @@ describe("aggregateNoteSelectionFlags", () => {
 		expect(aggregateNoteSelectionFlags([stranger], ME).participantOfEveryAndNotOwner).toBe(false)
 	})
 
+	it("participantOfEveryAndNotOwner: false when user is participant in some but not all notes (mixed)", () => {
+		const participated = note({
+			ownerId: SOMEONE_ELSE,
+			participants: [participant(ME, true)]
+		})
+		const absentFrom = note({
+			ownerId: SOMEONE_ELSE,
+			participants: [participant(SOMEONE_ELSE + 1n, true)]
+		})
+
+		expect(aggregateNoteSelectionFlags([participated, absentFrom], ME).participantOfEveryAndNotOwner).toBe(false)
+	})
+
 	it("combination: mixed favorited / pinned / owned", () => {
 		const notes = [
 			note({ favorite: true }),
@@ -217,5 +231,12 @@ describe("aggregateNoteTagSelectionFlags", () => {
 
 	it("includesFavorited false when none favorited", () => {
 		expect(aggregateNoteTagSelectionFlags([tag(), tag()]).includesFavorited).toBe(false)
+	})
+
+	it("single tag with favorite:true yields count 1 and includesFavorited true", () => {
+		const result = aggregateNoteTagSelectionFlags([tag({ favorite: true })])
+
+		expect(result.count).toBe(1)
+		expect(result.includesFavorited).toBe(true)
 	})
 })

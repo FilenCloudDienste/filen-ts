@@ -552,6 +552,15 @@ describe("sync pre-flight checks", () => {
 		expect(mockSetSyncing).not.toHaveBeenCalled()
 	})
 
+	it("skips when isInternetReachable is null (platform unable to determine reachability)", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: null } as any)
+
+		await cameraUpload.sync()
+
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+	})
+
 	it("skips on low battery when config.lowBattery is false", async () => {
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, lowBattery: false })
 		vi.mocked(Battery.isLowPowerModeEnabledAsync).mockResolvedValueOnce(true)
@@ -653,41 +662,65 @@ describe("constructor events", () => {
 	it("secureStoreChange with matching key triggers cancel", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
 
+		// Seed the parent-dir cache to verify it gets cleared too
+		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
+
+		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
+
 		eventHandlers["secureStoreChange"]!({ key: "cameraUploadConfig:v1" })
 
 		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
+		expect(dirCache.size).toBe(0)
 	})
 
 	it("secureStoreChange with unrelated key does not trigger cancel", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
+		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
+
+		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
 
 		eventHandlers["secureStoreChange"]!({ key: "someOtherKey" })
 
 		expect((cameraUpload as any).globalAbortController).toBe(controllerBefore)
+		// Cache must NOT be cleared for unrelated keys
+		expect(dirCache.size).toBe(1)
 	})
 
-	it("secureStoreClear triggers cancel", () => {
+	it("secureStoreClear triggers cancel and clears ensureParentDirectoryExistsCache", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
+		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
+
+		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
 
 		eventHandlers["secureStoreClear"]!()
 
 		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
+		expect(dirCache.size).toBe(0)
 	})
 
-	it("secureStoreRemove with matching key triggers cancel", () => {
+	it("secureStoreRemove with matching key triggers cancel and clears ensureParentDirectoryExistsCache", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
+		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
+
+		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
 
 		eventHandlers["secureStoreRemove"]!({ key: "cameraUploadConfig:v1" })
 
 		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
+		expect(dirCache.size).toBe(0)
 	})
 
 	it("secureStoreRemove with unrelated key does not trigger cancel", () => {
 		const controllerBefore = (cameraUpload as any).globalAbortController
+		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
+
+		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
 
 		eventHandlers["secureStoreRemove"]!({ key: "someOtherKey" })
 
 		expect((cameraUpload as any).globalAbortController).toBe(controllerBefore)
+		// Cache must NOT be cleared for unrelated keys
+		expect(dirCache.size).toBe(1)
 	})
 })
 
@@ -1620,14 +1653,50 @@ describe("MD5 hash cache", () => {
 		expect(transfers.upload).not.toHaveBeenCalled()
 	})
 
-	it("proceeds with upload when MD5 differs from cached value", async () => {
+	it("proceeds with upload when MD5 differs from cached value — the source branch genuinely distinguishes match vs. mismatch", async () => {
+		// The mock File always returns "mock-md5". Seed the cache with that same value
+		// to confirm the source skips upload (match), then prove mismatch triggers upload
+		// by overriding the md5 getter to return a different value for this one test.
+		// This verifies the comparison branch is exercised for real — not as a side-effect
+		// of the mock artefact.
+
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "old-md5")
+		// First: confirm the match path really skips upload
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "mock-md5")
 
 		await cameraUpload.sync()
 
-		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(transfers.upload).not.toHaveBeenCalled()
+
+		// Second: patch md5 to return a NEW hash so the branch goes the other way
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+
+		const originalMd5 = Object.getOwnPropertyDescriptor(MockFile.prototype, "md5")
+
+		Object.defineProperty(MockFile.prototype, "md5", {
+			get() {
+				return this.exists ? "changed-md5" : null
+			},
+			configurable: true
+		})
+
+		vi.clearAllMocks()
+		setupDefaultMocks()
+
+		setupLocalAssets([{ id: "a2", filename: "photo2.jpg" }])
+
+		cache.cameraUploadHashes.set("/camera roll/photo2.jpg", "old-hash-different-from-changed-md5")
+
+		try {
+			await cameraUpload.sync()
+
+			expect(transfers.upload).toHaveBeenCalledTimes(1)
+		} finally {
+			if (originalMd5) {
+				Object.defineProperty(MockFile.prototype, "md5", originalMd5)
+			}
+		}
 	})
 
 	it("proceeds with upload when no cached value exists", async () => {
@@ -1664,5 +1733,431 @@ describe("MD5 hash cache", () => {
 		await cameraUpload.sync()
 
 		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toBe("mock-md5")
+	})
+})
+
+// ─── compress() ──────────────────────────────────────────────────────────────
+
+describe("CameraUpload.compress()", () => {
+	it("returns file unchanged when extension is not in supported set", async () => {
+		// .txt is not in EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		const uri = `${Paths.cache.uri}/filen-tmp/test.txt`
+
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+
+		const file = new MockFile(uri)
+
+		// Access private compress via cast
+		const result = await (cameraUpload as any).compress(file)
+
+		// No manipulation for unsupported extension — returns same instance
+		expect(result).toBe(file)
+		expect(vi.mocked(ImageManipulator.manipulate)).not.toHaveBeenCalled()
+	})
+
+	it("throws when file is outside the cache directory", async () => {
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+		const uri = "file:///document/arbitrary/photo.jpg"
+
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+
+		const file = new MockFile(uri)
+
+		await expect((cameraUpload as any).compress(file)).rejects.toThrow("compress() called on file outside cache directory")
+	})
+
+	it("returns original file when manipulated result is larger or equal in size", async () => {
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		const originalUri = `${Paths.cache.uri}/filen-tmp/photo.png`
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.png`
+
+		// Original is 3 bytes; manipulated will be 10 bytes — larger
+		fs.set(originalUri, new Uint8Array([1, 2, 3]))
+		fs.set(manipulatedUri, new Uint8Array(new Array(10).fill(1)))
+
+		const file = new MockFile(originalUri)
+
+		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		const result = await (cameraUpload as any).compress(file)
+
+		// Manipulated is larger → return original
+		expect(result).toBe(file)
+		// Manipulated file should be deleted since it was larger
+		expect(fs.has(manipulatedUri)).toBe(false)
+	})
+
+	it("renames file from .png to .jpg when manipulated result is smaller", async () => {
+		const { File: MockFile, Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		const originalUri = `${Paths.cache.uri}/filen-tmp/photo.png`
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.png`
+
+		// Original is 10 bytes; manipulated is 3 bytes — smaller
+		fs.set(originalUri, new Uint8Array(new Array(10).fill(1)))
+		fs.set(manipulatedUri, new Uint8Array([1, 2, 3]))
+
+		const file = new MockFile(originalUri)
+
+		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		const result = await (cameraUpload as any).compress(file)
+
+		// Extension changed to .jpg since content is now JPEG
+		expect(result.uri).toMatch(/\.jpg$/)
+		// Manipulated temp file cleaned up
+		expect(fs.has(manipulatedUri)).toBe(false)
+	})
+})
+
+// ─── ensureParentDirectoryExistsCache TTL expiry ─────────────────────────────
+
+describe("ensureParentDirectoryExistsCache TTL expiry", () => {
+	function setupLocalAssets(
+		assets: Array<{
+			id: string
+			filename: string
+			creationTime?: number
+			modificationTime?: number
+		}>
+	) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: assets.map(a => a.id) })
+
+		for (const asset of assets) {
+			const uri = `file:///media/${asset.id}`
+
+			ml.addAsset({
+				id: asset.id,
+				filename: asset.filename,
+				uri,
+				mediaType: MediaType.IMAGE,
+				creationTime: asset.creationTime ?? 1000,
+				modificationTime: asset.modificationTime ?? 2000
+			})
+
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+		}
+	}
+
+	it("re-creates the directory when the cache entry has expired (expires <= Date.now())", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		const createDir = vi.fn(async () => ({ uuid: "new-dir-uuid" }))
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
+				createDir
+			}
+		} as any)
+
+		// First sync — creates the directory and caches it
+		await cameraUpload.sync()
+
+		const firstCallCount = createDir.mock.calls.length
+
+		expect(firstCallCount).toBe(1)
+
+		// Manually expire the cache entry so the next sync re-calls createDir
+		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, { value: unknown; expires: number }>
+
+		for (const [key, entry] of dirCache) {
+			dirCache.set(key, { value: entry.value, expires: Date.now() - 1 })
+		}
+
+		// Clear the md5 cache so the upload is not skipped on the second sync
+		// (otherwise the md5 match would break out before ensureParentDirectoryExists is called)
+		cache.cameraUploadHashes.clear()
+
+		// Second sync — cache entry is expired, createDir must be called again
+		await cameraUpload.sync()
+
+		expect(createDir.mock.calls.length).toBeGreaterThan(firstCallCount)
+	})
+
+	it("does not re-create the directory when the cache entry is still valid", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		const createDir = vi.fn(async () => ({ uuid: "dir-uuid" }))
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
+				createDir
+			}
+		} as any)
+
+		// First sync — populates the cache
+		await cameraUpload.sync()
+
+		const firstCallCount = createDir.mock.calls.length
+
+		// Second sync — cache still valid, no extra createDir
+		await cameraUpload.sync()
+
+		expect(createDir.mock.calls.length).toBe(firstCallCount)
+	})
+})
+
+// ─── deltas() remoteDir null guard ───────────────────────────────────────────
+
+describe("deltas() remoteDir null guard", () => {
+	it("sync() silently skips (no setSyncing, no setErrors) when remoteDir is null — guard fires before reaching deltas()", async () => {
+		// sync() has an early return at the config check level (!config.remoteDir),
+		// so setSyncing(true) is never called, and deltas() is never reached.
+		// This documents that the null guard in deltas() is a secondary safety net.
+		vi.mocked(secureStore.get).mockResolvedValueOnce({
+			...ENABLED_CONFIG,
+			remoteDir: null
+		})
+
+		await cameraUpload.sync()
+
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+		expect(mockSetErrors).not.toHaveBeenCalled()
+	})
+
+	it("deltas() throws when remoteDir is null (secondary guard — called directly)", async () => {
+		const configWithNullRemote = { ...ENABLED_CONFIG, remoteDir: null }
+
+		await expect(
+			(cameraUpload as any).deltas({
+				config: configWithNullRemote,
+				signal: new AbortController().signal
+			})
+		).rejects.toThrow("Remote directory is not set in config")
+	})
+})
+
+// ─── Remote collision resolution ─────────────────────────────────────────────
+
+describe("sync flow — remote collision resolution", () => {
+	function setupLocalAssets(
+		assets: Array<{
+			id: string
+			filename: string
+			creationTime?: number
+			modificationTime?: number
+		}>
+	) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: assets.map(a => a.id) })
+
+		for (const asset of assets) {
+			const uri = `file:///media/${asset.id}`
+
+			ml.addAsset({
+				id: asset.id,
+				filename: asset.filename,
+				uri,
+				mediaType: MediaType.IMAGE,
+				creationTime: asset.creationTime ?? 1000,
+				modificationTime: asset.modificationTime ?? 2000
+			})
+
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+		}
+	}
+
+	it("remote tree with duplicate filenames is resolved via collision strategy — upload does not re-send the file already matched", async () => {
+		// Remote tree has two files with the same path (the server can return dupe
+		// filenames). listRemote must resolve them with the same collision strategy
+		// used by listLocal so local file "photo.jpg" at creationTime=1000 matches
+		// its remote counterpart and is NOT re-uploaded.
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg", creationTime: 1000, modificationTime: 2000 }])
+
+		// Two remote files collide on /camera roll/photo.jpg.
+		// First one has creationTime 1000 — matches local → should be skipped.
+		// Second one is the collision-resolved path for the same name.
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [
+						{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-1" } },
+						{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-2" } }
+					]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockImplementation((file: any) => {
+			if (file.uuid === "remote-1") {
+				return { meta: { name: "photo.jpg", created: 1000n, modified: 2000n } } as any
+			}
+
+			return { meta: { name: "photo.jpg", created: 1000n, modified: 2000n } } as any
+		})
+
+		await cameraUpload.sync()
+
+		// The local file matches remote-1 (same path after collision resolution)
+		// so no re-upload is needed.
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
+// ─── afterActivation boundary ─────────────────────────────────────────────────
+
+describe("afterActivation boundary cases", () => {
+	function setupAlbumWithAsset(opts: { id: string; filename: string; creationTime: number }) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: [opts.id] })
+		ml.addAsset({
+			id: opts.id,
+			filename: opts.filename,
+			uri: `file:///media/${opts.id}`,
+			mediaType: MediaType.IMAGE,
+			creationTime: opts.creationTime
+		})
+		fs.set(`file:///media/${opts.id}`, new Uint8Array([1]))
+	}
+
+	it("includes asset when creationTime exactly equals activationTimestamp (gte boundary)", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({
+			...ENABLED_CONFIG,
+			afterActivation: true,
+			activationTimestamp: 5000
+		})
+
+		setupAlbumWithAsset({ id: "exact", filename: "exact.jpg", creationTime: 5000 })
+
+		await cameraUpload.sync()
+
+		// Asset at the boundary (creationTime === activationTimestamp) must be included
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("excludes asset one millisecond before activationTimestamp", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({
+			...ENABLED_CONFIG,
+			afterActivation: true,
+			activationTimestamp: 5000
+		})
+
+		setupAlbumWithAsset({ id: "before", filename: "before.jpg", creationTime: 4999 })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
+// ─── pause() and resume() ─────────────────────────────────────────────────────
+
+describe("pause() and resume()", () => {
+	it("pause() delegates to pause() on the current globalPauseSignal", () => {
+		// The utils mock provides a PauseSignal class with a no-op pause() method.
+		// Spy on the instance currently held by the singleton.
+		const pauseSignal = (cameraUpload as any).globalPauseSignal
+
+		const pauseSpy = vi.spyOn(pauseSignal, "pause")
+
+		cameraUpload.pause()
+
+		expect(pauseSpy).toHaveBeenCalledOnce()
+	})
+
+	it("resume() delegates to resume() on the current globalPauseSignal", () => {
+		const pauseSignal = (cameraUpload as any).globalPauseSignal
+
+		const resumeSpy = vi.spyOn(pauseSignal, "resume")
+
+		cameraUpload.resume()
+
+		expect(resumeSpy).toHaveBeenCalledOnce()
+	})
+
+	it("pause() after cancel() targets the replacement signal, not the discarded one", () => {
+		const originalSignal = (cameraUpload as any).globalPauseSignal
+		const originalPauseSpy = vi.spyOn(originalSignal, "pause")
+
+		cameraUpload.cancel()
+
+		const replacementSignal = (cameraUpload as any).globalPauseSignal
+
+		expect(replacementSignal).not.toBe(originalSignal)
+
+		const replacementPauseSpy = vi.spyOn(replacementSignal, "pause")
+
+		cameraUpload.pause()
+
+		expect(replacementPauseSpy).toHaveBeenCalledOnce()
+		expect(originalPauseSpy).not.toHaveBeenCalled()
+	})
+})
+
+// ─── uploadFailures increment through sync ────────────────────────────────────
+
+describe("uploadFailures increment on repeated failure", () => {
+	function setupSingleAsset() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+	}
+
+	it("asset is skipped after MAX_UPLOAD_FAILURES consecutive upload failures", async () => {
+		setupSingleAsset()
+
+		vi.mocked(transfers.upload).mockRejectedValue(new Error("Network error"))
+
+		// Drive 3 failures — each sync increments uploadFailures.get("a1") by 1
+		await cameraUpload.sync()
+		await cameraUpload.sync()
+		await cameraUpload.sync()
+
+		// Failure count is now MAX_UPLOAD_FAILURES (3). Switch to success mock so the
+		// only reason upload is not called is the skip guard, not the failure path.
+		vi.mocked(transfers.upload).mockResolvedValue({ files: [] } as any)
+
+		// Clear call history so the count we check below only reflects sync 4
+		vi.mocked(transfers.upload).mockClear()
+		mockAddSkippedAsset.mockClear()
+
+		await cameraUpload.sync()
+
+		// Skipped: upload never called in the 4th pass because count >= MAX_UPLOAD_FAILURES
+		expect(mockAddSkippedAsset).toHaveBeenCalledWith("a1")
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("asset is NOT skipped before reaching MAX_UPLOAD_FAILURES failures", async () => {
+		setupSingleAsset()
+
+		vi.mocked(transfers.upload).mockRejectedValue(new Error("Network error"))
+
+		// Two failures — one below the threshold of 3
+		await cameraUpload.sync()
+		await cameraUpload.sync()
+
+		// Switch to success mock for the third attempt; count is 2 < 3, should upload
+		vi.mocked(transfers.upload).mockResolvedValue({ files: [] } as any)
+
+		// Clear history so we only count calls from sync 3
+		vi.mocked(transfers.upload).mockClear()
+		mockAddSkippedAsset.mockClear()
+
+		await cameraUpload.sync()
+
+		// Should have uploaded on the third pass (count 2 < MAX_UPLOAD_FAILURES=3)
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(mockAddSkippedAsset).not.toHaveBeenCalledWith("a1")
 	})
 })

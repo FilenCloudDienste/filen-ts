@@ -29,6 +29,46 @@ function chat(overrides: Partial<Chat> = {}): Chat {
 	} as Chat
 }
 
+describe("EMPTY_CHAT_FLAGS", () => {
+	it("has count 0", () => {
+		expect(EMPTY_CHAT_FLAGS.count).toBe(0)
+	})
+
+	it("has includesUndecryptable false", () => {
+		expect(EMPTY_CHAT_FLAGS.includesUndecryptable).toBe(false)
+	})
+
+	it("has everyOwnedBySelf false", () => {
+		expect(EMPTY_CHAT_FLAGS.everyOwnedBySelf).toBe(false)
+	})
+
+	it("has includesMuted false", () => {
+		expect(EMPTY_CHAT_FLAGS.includesMuted).toBe(false)
+	})
+
+	it("has selfIsParticipantNotOwnerOfEvery false", () => {
+		expect(EMPTY_CHAT_FLAGS.selfIsParticipantNotOwnerOfEvery).toBe(false)
+	})
+
+	it("has includesUnread false", () => {
+		expect(EMPTY_CHAT_FLAGS.includesUnread).toBe(false)
+	})
+
+	it("mutation is silently ignored (frozen)", () => {
+		const before = EMPTY_CHAT_FLAGS.count
+		// In strict mode a mutation of a frozen object would throw,
+		// but in a vitest node env assignment to a frozen property is silently dropped.
+		// Either way the value must not change.
+		try {
+			EMPTY_CHAT_FLAGS.count = 999
+		} catch {
+			// thrown in strict mode — acceptable
+		}
+
+		expect(EMPTY_CHAT_FLAGS.count).toBe(before)
+	})
+})
+
 describe("aggregateChatSelectionFlags", () => {
 	it("returns EMPTY_CHAT_FLAGS on empty selection", () => {
 		expect(aggregateChatSelectionFlags([], ME)).toBe(EMPTY_CHAT_FLAGS)
@@ -38,11 +78,11 @@ describe("aggregateChatSelectionFlags", () => {
 		expect(aggregateChatSelectionFlags([chat()], undefined)).toBe(EMPTY_CHAT_FLAGS)
 	})
 
-	it("EMPTY_CHAT_FLAGS is frozen", () => {
-		expect(Object.isFrozen(EMPTY_CHAT_FLAGS)).toBe(true)
+	it("counts chats — single element", () => {
+		expect(aggregateChatSelectionFlags([chat()], ME).count).toBe(1)
 	})
 
-	it("counts chats", () => {
+	it("counts chats — multiple elements", () => {
 		expect(aggregateChatSelectionFlags([chat(), chat(), chat()], ME).count).toBe(3)
 	})
 
@@ -90,6 +130,18 @@ describe("aggregateChatSelectionFlags", () => {
 		expect(aggregateChatSelectionFlags([stranger], ME).selfIsParticipantNotOwnerOfEvery).toBe(false)
 	})
 
+	it("selfIsParticipantNotOwnerOfEvery: false when user is both owner and participant", () => {
+		// Edge case: ownerId === userId AND userId also appears in participants.
+		// The isOwner clause fires before the !isParticipant check, so the flag
+		// correctly resets to false (owner cannot "leave", they must delete).
+		const ownerWhoIsAlsoParticipant = chat({
+			ownerId: ME,
+			participants: [participant(ME), participant(SOMEONE_ELSE)]
+		})
+
+		expect(aggregateChatSelectionFlags([ownerWhoIsAlsoParticipant], ME).selfIsParticipantNotOwnerOfEvery).toBe(false)
+	})
+
 	it("combined: mixed muted + owner state", () => {
 		const flags = aggregateChatSelectionFlags(
 			[
@@ -123,10 +175,21 @@ describe("chatHasUnread", () => {
 		expect(chatHasUnread(c, ME)).toBe(false)
 	})
 
-	it("false when no lastFocus (never opened)", () => {
+	it("false when no lastFocus (undefined / never opened)", () => {
 		const c = chat({ lastMessage: chatMessage(SOMEONE_ELSE, 200n) })
 
 		expect(chatHasUnread(c, ME)).toBe(false)
+	})
+
+	it("true when lastFocus = 0n and a newer message from someone else exists", () => {
+		// 0n is a valid lastFocus (epoch / never opened); the guard uses an explicit
+		// undefined check so 0n is treated as a real timestamp, not a falsy sentinel.
+		const c = chat({
+			lastFocus: 0n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 1n)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(true)
 	})
 
 	it("false when last message is from self", () => {
@@ -163,6 +226,26 @@ describe("chatHasUnread", () => {
 		})
 
 		expect(chatHasUnread(c, ME)).toBe(true)
+	})
+
+	it("true when message is undecryptable but still newer (undecryptable flag does not suppress unread)", () => {
+		// chatHasUnread does not inspect the undecryptable flag on the message;
+		// an undecryptable message still contributes to the unread calculation.
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n, true)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(true)
+	})
+
+	it("false when message is undecryptable but sent by self (senderId guard fires first)", () => {
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(ME, 200n, true)
+		})
+
+		expect(chatHasUnread(c, ME)).toBe(false)
 	})
 })
 

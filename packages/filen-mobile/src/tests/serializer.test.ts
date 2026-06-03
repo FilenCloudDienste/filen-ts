@@ -247,25 +247,6 @@ describe("serializer", () => {
 	})
 
 	describe("mixed data", () => {
-		it("handles objects with BigInt and tagged unions together", () => {
-			const variant = new MockVariant("data")
-
-			const obj = {
-				timestamp: 1709000000000n,
-				userId: 42n,
-				meta: variant,
-				name: "test"
-			}
-
-			const result = roundtrip(obj)
-
-			expect(typeof result.timestamp).toBe("bigint")
-			expect(result.timestamp).toBe(1709000000000n)
-			expect(result.meta[uniffiTypeNameSymbol]).toBe("TestType")
-			expect(result.meta.tag).toBe("Variant1")
-			expect(result.name).toBe("test")
-		})
-
 		it("handles deeply nested structure with all custom types", () => {
 			const obj = {
 				users: [
@@ -1102,16 +1083,32 @@ describe("serializer", () => {
 			expect(Array.from(second)).toEqual([100, 200, 300, 400])
 		})
 
-		it("does not interpret a plain object with __bin: 1 as binary if shape mismatches", () => {
+		it("does not interpret a plain object with __bin: 2 as binary (sentinel mismatch)", () => {
+			// __bin sentinel must be exactly 1; any other value is treated as a plain object
 			const plain = { __bin: 2, k: "Uint8Array", d: "AQID" }
 			const result = roundtrip(plain)
 
-			expect(result).toEqual(plain)
+			expect(result.__bin).toBe(2)
+			expect(result.k).toBe("Uint8Array")
+			expect(result.d).toBe("AQID")
+		})
+
+		it("unknown binary kind falls back to Uint8Array", () => {
+			// reviveBinary: when __bin===1 but k is not in BINARY_CONSTRUCTORS and not
+			// Buffer/Uint8Array/ArrayBuffer/DataView, the fallback returns new Uint8Array(bytes)
+			const bytes = [0x01, 0x02, 0x03]
+			const d = Buffer.from(bytes).toString("base64")
+			// Inject a raw JSON string that looks like a __bin envelope with unknown kind
+			const raw = JSON.stringify({ __bin: 1, k: "UnknownKind", d })
+			const result = deserialize<Uint8Array>(raw)
+
+			expect(result).toBeInstanceOf(Uint8Array)
+			expect(Array.from(result)).toEqual(bytes)
 		})
 	})
 
 	describe("idempotency", () => {
-		it("double serialize/deserialize produces identical result", () => {
+		it("double serialize/deserialize produces identical result with instanceof check", () => {
 			const obj = {
 				id: 42n,
 				meta: new MockVariant("test"),
@@ -1129,17 +1126,9 @@ describe("serializer", () => {
 			expect(second.items[0].inner).toEqual(["a"])
 			expect(second.meta[uniffiTypeNameSymbol]).toBe("TestType")
 			expect(second.items[0][uniffiTypeNameSymbol]).toBe("TestType")
-		})
-
-		it("double serialize/deserialize preserves instanceof and symbol", () => {
-			const instance = new MockVariant("test")
-			const first = roundtrip(instance)
-			const second = roundtrip(first)
-
-			expect(second instanceof UniffiEnum).toBe(true)
-			expect(second[uniffiTypeNameSymbol]).toBe("TestType")
-			expect(second.tag).toBe("Variant1")
-			expect(second.inner).toEqual(["test"])
+			// instanceof survives both hops
+			expect(second.meta instanceof UniffiEnum).toBe(true)
+			expect(second.items[0] instanceof UniffiEnum).toBe(true)
 		})
 
 		it("double serialize/deserialize preserves unit variant shape", () => {
@@ -1152,6 +1141,56 @@ describe("serializer", () => {
 			expect(second.tag).toBe("UnitTag")
 			expect(second.inner).toBeUndefined()
 			expect("inner" in second).toBe(false)
+		})
+	})
+
+	describe("deserialize input overloads and error paths", () => {
+		it("deserialize(ArrayBuffer) decodes via TextDecoder and returns correct value", () => {
+			const serialized = serialize({ id: 7n, name: "buf" })
+			const encoded = new TextEncoder().encode(serialized)
+			// Pass the underlying ArrayBuffer (not Uint8Array) to exercise the TextDecoder branch
+			const result = deserialize<{ id: bigint; name: string }>(encoded.buffer as ArrayBuffer)
+
+			expect(result.id).toBe(7n)
+			expect(result.name).toBe("buf")
+		})
+
+		it("deserialize(Uint8Array) decodes via TextDecoder and returns correct value", () => {
+			const serialized = serialize({ count: 0n, tag: new MockVariant("via-bytes") })
+			const bytes = new TextEncoder().encode(serialized)
+			const result = deserialize<{ count: bigint; tag: unknown }>(bytes)
+
+			expect(result.count).toBe(0n)
+			const tag = result.tag as Record<symbol, unknown>
+			expect(tag[uniffiTypeNameSymbol]).toBe("TestType")
+		})
+
+		it("deserialize(Uint8Array) handles BigInt and binary data round-tripped through bytes", () => {
+			const original = {
+				size: 5368709120n,
+				payload: new Uint8Array([0xca, 0xfe])
+			}
+			const bytes = new TextEncoder().encode(serialize(original))
+			const result = deserialize<{ size: bigint; payload: Uint8Array }>(bytes)
+
+			expect(result.size).toBe(5368709120n)
+			expect(result.payload).toBeInstanceOf(Uint8Array)
+			expect(Array.from(result.payload)).toEqual([0xca, 0xfe])
+		})
+
+		it("corrupt BigInt envelope degrades to null instead of throwing", () => {
+			// The reviver catches SyntaxError from BigInt("not-a-number") and returns null.
+			// Construct a raw JSON string with a malformed __bi envelope.
+			const raw = JSON.stringify({ x: { __bi: 1, v: "not-a-number" } })
+			const result = deserialize<{ x: unknown }>(raw)
+
+			// Should return null (resilience behavior), not throw
+			expect(result.x).toBeNull()
+		})
+
+		it("deserialize throws SyntaxError on malformed JSON string", () => {
+			// The function has no try/catch — invalid JSON surfaces the native JSON.parse error.
+			expect(() => deserialize("{not valid json}")).toThrow(SyntaxError)
 		})
 	})
 })

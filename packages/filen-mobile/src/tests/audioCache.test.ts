@@ -45,6 +45,7 @@ import { type Metadata } from "@/lib/audioCache"
 
 const fileCache = (await import("@/lib/fileCache")).default
 const { parseWebStream } = await import("music-metadata")
+const { Image } = await import("expo-image")
 
 function extname(filename: string): string {
 	const dot = filename.lastIndexOf(".")
@@ -80,6 +81,24 @@ function makeDirItem(uuid: string): DriveItem {
 			uuid,
 			decryptedMeta: { name: "test-dir" },
 			undecryptable: false
+		}
+	} as unknown as DriveItem
+}
+
+function makeSharedRootFileItem(uuid: string, name: string): DriveItem {
+	return {
+		type: "sharedRootFile",
+		data: {
+			uuid,
+			decryptedMeta: {
+				name,
+				size: 100n,
+				modified: 1000,
+				created: 900,
+				mime: "audio/mpeg"
+			},
+			undecryptable: false,
+			size: 100n
 		}
 	} as unknown as DriveItem
 }
@@ -246,19 +265,48 @@ describe("AudioCache", () => {
 			expect(result).toBe(false)
 		})
 
-		it("returns false when metadata is empty/null", async () => {
+		it("returns false when metadata size is zero (empty file)", async () => {
 			const cache = await createAudioCache()
 			const item = wrapDrive(makeFileItem("uuid-6", "song.mp3"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-6/uuid-6.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/uuid-6.filenmeta`
 
+			// 0-byte file hits the metadata.size === 0 guard in has()
 			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(null))))
+			fs.set(metaPath, new Uint8Array(0))
 
 			const result = await cache.has(item)
 
 			expect(result).toBe(false)
+		})
+
+		it("returns true for sharedRootFile items with audio and metadata present", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-shared-root-has"
+			const item = wrapDrive(makeSharedRootFileItem(uuid, "song.mp3"))
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+
+			const metadata: Metadata = {
+				artist: "Root Artist",
+				title: "Root Song",
+				album: null,
+				date: null,
+				duration: 90,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
+
+			const result = await cache.has(item)
+
+			expect(result).toBe(true)
 		})
 	})
 
@@ -287,11 +335,14 @@ describe("AudioCache", () => {
 
 			const result = await cache.get({ item })
 
+			// Verify fast-path: no download, cached metadata is returned verbatim
 			expect(result.audio.uri).toBe(audioPath)
 			expect(result.metadata).not.toBeNull()
 			expect(result.metadata!.artist).toBe("Cached Artist")
 			expect(result.metadata!.title).toBe("Cached Song")
+			expect(result.metadata!.album).toBe("Cached Album")
 			expect(fileCache.get).not.toHaveBeenCalled()
+			expect(parseWebStream).not.toHaveBeenCalled()
 		})
 
 		it("recovers from a corrupt fast-path metadata sidecar instead of throwing", async () => {
@@ -408,37 +459,6 @@ describe("AudioCache", () => {
 			expect(fs.has(metaPath)).toBe(false)
 		})
 
-		it("reads existing metadata file instead of re-parsing", async () => {
-			const cache = await createAudioCache()
-			const uuid = "uuid-13"
-			const name = "song.mp3"
-			const item = wrapDrive(makeFileItem(uuid, name))
-
-			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
-
-			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
-
-			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
-			const existingMeta: Metadata = {
-				artist: "Existing Artist",
-				title: "Existing Song",
-				album: null,
-				date: null,
-				duration: 300,
-				pictureUri: null,
-				pictureBlurhash: null,
-				cachedAt: Date.now()
-			}
-
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(existingMeta))))
-
-			const result = await cache.get({ item })
-
-			expect(parseWebStream).not.toHaveBeenCalled()
-			expect(result.metadata).not.toBeNull()
-			expect(result.metadata!.artist).toBe("Existing Artist")
-		})
-
 		it("treats empty existing metadata as null", async () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-14"
@@ -524,6 +544,39 @@ describe("AudioCache", () => {
 			expect(result.metadata!.artist).toBe("Shared Artist")
 		})
 
+		it("works with sharedRootFile type items (cache hit)", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-shared-root-get"
+			const name = "root-song.mp3"
+			const item = wrapDrive(makeSharedRootFileItem(uuid, name))
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+
+			const metadata: Metadata = {
+				artist: "Root Artist",
+				title: "Root Song",
+				album: null,
+				date: null,
+				duration: 130,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
+
+			const result = await cache.get({ item })
+
+			expect(result.audio.uri).toBe(audioPath)
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.artist).toBe("Root Artist")
+			expect(result.metadata!.title).toBe("Root Song")
+			expect(fileCache.get).not.toHaveBeenCalled()
+		})
+
 		it("works with external items (cache hit by hashed url id)", async () => {
 			const cache = await createAudioCache()
 			const url = "https://example.com/track.mp3"
@@ -554,6 +607,119 @@ describe("AudioCache", () => {
 			expect(result.metadata).not.toBeNull()
 			expect(result.metadata!.artist).toBe("External Artist")
 			expect(fileCache.get).not.toHaveBeenCalled()
+		})
+
+		it("downloads external item via fileCache on cache miss and writes metadata sidecar", async () => {
+			const cache = await createAudioCache()
+			const url = "https://cdn.example.com/stream.mp3"
+			const item = makeExternalItem(url, "stream.mp3")
+			const id = externalId(url)
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${id}/${id}.mp3`
+			const metaPath = `${AUDIO_BASE_DIR}/${id}.filenmeta`
+
+			const mockAudioFile = new File(audioPath)
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
+
+			const result = await cache.get({ item })
+
+			// Confirm hashed id was used and fileCache was called for the external item
+			expect(fileCache.get).toHaveBeenCalledWith({ item, signal: undefined })
+			expect(parseWebStream).toHaveBeenCalled()
+			expect(result.audio.uri).toBe(audioPath)
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.artist).toBe("Test Artist")
+			// Metadata must be persisted under the hashed id, not the URL
+			expect(fs.has(metaPath)).toBe(true)
+		})
+
+		it("writes picture file and calls Image.loadAsync + Image.generateBlurhashAsync when picture data is present", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-with-picture"
+			const name = "picture-song.mp3"
+			const item = wrapDrive(makeFileItem(uuid, name))
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			const mockAudioFile = new File(audioPath)
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
+
+			// Return a picture in the parsed metadata
+			const pictureData = new Uint8Array([0xff, 0xd8, 0xff]) // minimal JPEG header bytes
+			vi.mocked(parseWebStream).mockResolvedValueOnce({
+				common: {
+					artist: "Picture Artist",
+					title: "Picture Song",
+					album: null,
+					date: null,
+					picture: [{ format: "image/jpeg", data: pictureData, type: "Cover (front)", description: "" }]
+				},
+				format: { duration: 99.0 }
+			} as any)
+
+			const result = await cache.get({ item })
+
+			// Picture file must be written under PARENT_DIRECTORY with the correct uuid name
+			const expectedPicturePath = `${AUDIO_BASE_DIR}/${uuid}.jpg`
+
+			expect(fs.has(expectedPicturePath)).toBe(true)
+			expect(fs.get(expectedPicturePath)).toEqual(pictureData)
+
+			// Image was loaded and blurhash generated
+			expect(Image.loadAsync).toHaveBeenCalledWith(expectedPicturePath)
+			expect(Image.generateBlurhashAsync).toHaveBeenCalled()
+
+			// Metadata sidecar stores the picture URI and blurhash
+			expect(fs.has(metaPath)).toBe(true)
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.pictureUri).toBe(expectedPicturePath)
+			expect(result.metadata!.pictureBlurhash).toBe("mock-blurhash")
+			expect(result.metadata!.artist).toBe("Picture Artist")
+		})
+
+		it("releases the ImageRef even when blurhash generation throws", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-blurhash-fail"
+			const name = "fail-song.mp3"
+			const item = wrapDrive(makeFileItem(uuid, name))
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
+
+			const mockAudioFile = new File(audioPath)
+			const mockRelease = vi.fn()
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
+
+			vi.mocked(parseWebStream).mockResolvedValueOnce({
+				common: {
+					artist: "Fail Artist",
+					title: "Fail Song",
+					album: null,
+					date: null,
+					picture: [{ format: "image/jpeg", data: new Uint8Array([1]), type: "Cover (front)", description: "" }]
+				},
+				format: { duration: 10.0 }
+			} as any)
+
+			// loadAsync succeeds but generateBlurhashAsync throws
+			vi.mocked(Image.loadAsync).mockResolvedValueOnce({ release: mockRelease } as any)
+			vi.mocked(Image.generateBlurhashAsync).mockRejectedValueOnce(new Error("Blurhash failed"))
+
+			const result = await cache.get({ item })
+
+			// The error must be swallowed; pictureBlurhash is null but the rest succeeds
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.pictureBlurhash).toBeNull()
+			expect(result.metadata!.artist).toBe("Fail Artist")
+
+			// The finally block must have released the image reference
+			expect(mockRelease).toHaveBeenCalled()
 		})
 	})
 
@@ -589,7 +755,7 @@ describe("AudioCache", () => {
 	})
 
 	describe("remove", () => {
-		it("deletes only the metadata file", async () => {
+		it("deletes only the metadata file when no pictureUri is stored", async () => {
 			const cache = await createAudioCache()
 			const item = wrapDrive(makeFileItem("uuid-16", "song.mp3"))
 
@@ -601,7 +767,40 @@ describe("AudioCache", () => {
 
 			await cache.remove(item)
 
+			// Only sidecar is deleted; audio in fileCache is untouched
 			expect(fs.has(metaPath)).toBe(false)
+			expect(fs.has(audioPath)).toBe(true)
+		})
+
+		it("also deletes the picture file when pictureUri is stored in metadata", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-remove-picture"
+			const item = wrapDrive(makeFileItem(uuid, "song.mp3"))
+
+			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
+			const picturePath = `${AUDIO_BASE_DIR}/${uuid}.jpg`
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			const metadata: Metadata = {
+				artist: "PicArtist",
+				title: "PicSong",
+				album: null,
+				date: null,
+				duration: 60,
+				pictureUri: picturePath,
+				pictureBlurhash: "some-blurhash",
+				cachedAt: Date.now()
+			}
+
+			fs.set(audioPath, new Uint8Array([1, 2, 3]))
+			fs.set(picturePath, new Uint8Array([0xff, 0xd8]))
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
+
+			await cache.remove(item)
+
+			// Both sidecar and picture file are deleted; audio in fileCache stays
+			expect(fs.has(metaPath)).toBe(false)
+			expect(fs.has(picturePath)).toBe(false)
 			expect(fs.has(audioPath)).toBe(true)
 		})
 
@@ -618,9 +817,34 @@ describe("AudioCache", () => {
 
 			await expect(cache.remove(item)).resolves.toBeUndefined()
 		})
+
+		it("throws for sharedRootFile items that reference directories", async () => {
+			// Verify the guard: remove() must accept sharedRootFile types (not throw "must be file")
+			const cache = await createAudioCache()
+			const uuid = "uuid-remove-shared-root"
+			const item = wrapDrive(makeSharedRootFileItem(uuid, "song.mp3"))
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize({ artist: "R", cachedAt: Date.now() }))))
+
+			// remove() should succeed (not throw) for sharedRootFile
+			await expect(cache.remove(item)).resolves.toBeUndefined()
+			expect(fs.has(metaPath)).toBe(false)
+		})
 	})
 
 	describe("gc", () => {
+		it("returns early without throwing when PARENT_DIRECTORY does not exist", async () => {
+			const cache = await createAudioCache()
+
+			// Wipe the directory that was created in the constructor
+			fs.delete(AUDIO_BASE_DIR)
+
+			// gc() must not throw and must not create the directory
+			await expect(cache.gc()).resolves.toBeUndefined()
+			expect(fs.has(AUDIO_BASE_DIR)).toBe(false)
+		})
+
 		it("deletes expired metadata files", async () => {
 			const cache = await createAudioCache()
 			const now = Date.now()
@@ -666,12 +890,13 @@ describe("AudioCache", () => {
 			expect(fs.has(metaPath)).toBe(true)
 		})
 
-		it("deletes empty/null metadata files", async () => {
+		it("deletes a 0-byte metadata file via the size===0 guard before deserialization", async () => {
 			const cache = await createAudioCache()
+			// A genuinely empty (0-byte) file hits metadata.size === 0 in has() and
+			// Object.keys({}).length === 0 in gc() — distinct from a null-serialized file.
+			const metaPath = `${AUDIO_BASE_DIR}/zerobyte-uuid.filenmeta`
 
-			const metaPath = `${AUDIO_BASE_DIR}/empty-uuid.filenmeta`
-
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(null))))
+			fs.set(metaPath, new Uint8Array(0))
 
 			await cache.gc()
 
@@ -878,6 +1103,16 @@ describe("AudioCache", () => {
 			fs.set(`${AUDIO_BASE_DIR}/a.filenmeta`, new Uint8Array([4]))
 
 			expect(cache.size()).toBe(1)
+		})
+
+		it("includes picture jpg files in total size", async () => {
+			const cache = await createAudioCache()
+
+			// size() sums ALL files under PARENT_DIRECTORY, not only .filenmeta files
+			fs.set(`${AUDIO_BASE_DIR}/uuid-pic.filenmeta`, new Uint8Array(new Array(8).fill(0)))
+			fs.set(`${AUDIO_BASE_DIR}/uuid-pic.jpg`, new Uint8Array(new Array(200).fill(0)))
+
+			expect(cache.size()).toBe(8 + 200)
 		})
 	})
 })

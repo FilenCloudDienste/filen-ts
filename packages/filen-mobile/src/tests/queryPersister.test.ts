@@ -1,6 +1,8 @@
 import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest"
 
-const { mockDb, open } = vi.hoisted(() => {
+const { mockDb, open, mockAppStateListeners } = vi.hoisted(() => {
+	const listeners: Array<(state: string) => void> = []
+
 	const mockDb = {
 		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
 		executeRaw: vi.fn().mockResolvedValue([]),
@@ -13,14 +15,26 @@ const { mockDb, open } = vi.hoisted(() => {
 		close: vi.fn()
 	}
 
-	return { mockDb, open: vi.fn(() => mockDb) }
+	return { mockDb, open: vi.fn(() => mockDb), mockAppStateListeners: listeners }
 })
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+vi.mock("react-native", () => ({
+	AppState: {
+		addEventListener: (_type: string, handler: (state: string) => void) => {
+			mockAppStateListeners.push(handler)
+
+			return { remove: () => {} }
+		}
+	},
+	Platform: {
+		OS: "ios",
+		select: <T>(specifics: { ios?: T; android?: T; default?: T }) => specifics["ios"] ?? specifics["default"]
+	}
+}))
 
 vi.mock("@op-engineering/op-sqlite", () => ({
 	open
@@ -28,7 +42,8 @@ vi.mock("@op-engineering/op-sqlite", () => ({
 
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/"),
-	unwrapSdkError: () => null
+	unwrapSdkError: () => null,
+	isNetworkClassError: () => false
 }))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
@@ -44,8 +59,10 @@ vi.mock("@tanstack/react-query", () => ({
 		defaultOptions = {}
 		setQueryData = vi.fn()
 		getQueryData = vi.fn()
+		onlineManager = { isOnline: vi.fn().mockReturnValue(true) }
 		constructor(_opts?: unknown) {}
 	},
+	onlineManager: { isOnline: vi.fn().mockReturnValue(true) },
 	useQuery: vi.fn()
 }))
 
@@ -69,8 +86,9 @@ vi.mock("expo-router", () => ({
 }))
 
 import { serialize, deserialize } from "@/lib/serializer"
-import { QueryPersisterKv, QUERY_CLIENT_PERSISTER_PREFIX } from "@/queries/client"
+import { QueryPersisterKv, QUERY_CLIENT_PERSISTER_PREFIX, QUERY_CLIENT_CACHE_TIME, shouldPersistQuery, restoreQueries, queryClientPersisterKv } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
+import queryClient from "@/queries/client"
 
 
 /**
@@ -260,6 +278,7 @@ describe("QueryPersisterKv", () => {
 
 	beforeEach(() => {
 		kvStore.clear()
+		mockAppStateListeners.length = 0
 		setupMockDb()
 		mockDb.executeBatch.mockClear()
 		vi.useFakeTimers()
@@ -531,14 +550,20 @@ describe("QueryPersisterKv", () => {
 	})
 
 	describe("flush()", () => {
-		it("triggers immediate persist", async () => {
+		it("schedules a debounced persist (trailing edge — not immediate)", async () => {
+			// flush() calls persistDirty() which is debounced at 1000ms trailing edge.
+			// The persist does NOT fire synchronously; it only fires after the debounce window.
 			const kv = new QueryPersisterKv()
 
 			kv.setItem("key-1", "value-1")
 			kv.setItem("key-2", "value-2")
 
+			// Calling flush() arms the debounce — nothing written yet
 			kv.flush()
 
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+
+			// Advance past the debounce window → persists now
 			await flushDebounce()
 
 			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
@@ -656,6 +681,133 @@ describe("QueryPersisterKv", () => {
 		})
 	})
 
+	describe("AppState 'background' listener", () => {
+		it("calls flushNow() when app transitions to background", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("bg-key", "bg-value")
+
+			// Simulate the app going to background — triggers the constructor-registered listener
+			for (const listener of mockAppStateListeners) {
+				listener("background")
+			}
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+			expect(readKvStore<string>("bg-key")).toBe("bg-value")
+		})
+
+		it("does not write to SQLite when app transitions to active (no dirty entries)", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("active-key", "active-value")
+
+			// Transition to active rather than background — must NOT trigger flushNow
+			for (const listener of mockAppStateListeners) {
+				listener("active")
+			}
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			// No executeBatch because the listener only fires for 'background'
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("persistAsync() re-entrancy guard", () => {
+		it("returns existing in-flight promise when already persisting", async () => {
+			// Two rapid setItem waves: first triggers debounced persist, second comes in while
+			// the first executeBatch is blocked — re-entrancy guard must yield the in-flight promise.
+			let releaseFirst: () => void = () => {}
+
+			const firstGate = new Promise<void>(resolve => {
+				releaseFirst = resolve
+			})
+
+			let callCount = 0
+
+			mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
+				callCount++
+
+				if (callCount === 1) {
+					await firstGate
+				}
+
+				for (const [query, params] of commands) {
+					if (query.startsWith("INSERT OR REPLACE")) {
+						kvStore.set(params[0] as string, params[1] as string)
+					}
+				}
+
+				return { rowsAffected: commands.length }
+			})
+
+			const kv = new QueryPersisterKv()
+
+			// First wave — starts the in-flight run
+			kv.setItem("wave-1-key", "wave-1-value")
+			await vi.advanceTimersByTimeAsync(1000)
+
+			// executeBatch called once (blocked)
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+			// Second wave while first is still blocked — re-entrancy guard holds
+			kv.setItem("wave-2-key", "wave-2-value")
+			await vi.advanceTimersByTimeAsync(1000)
+
+			// Still only one in-flight executeBatch call; the second wave is queued
+			// but no second executeBatch has been invoked yet
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+			// Release first — the finally block will re-trigger for wave-2
+			releaseFirst()
+			await vi.advanceTimersByTimeAsync(0)
+			await vi.advanceTimersByTimeAsync(1000)
+			await vi.advanceTimersByTimeAsync(0)
+
+			// Both waves eventually persisted
+			expect(readKvStore<string>("wave-1-key")).toBe("wave-1-value")
+			expect(readKvStore<string>("wave-2-key")).toBe("wave-2-value")
+		})
+	})
+
+	describe("runPersistAsync() chunk yielding", () => {
+		it("persists all entries when count exceeds PERSIST_CHUNK_SIZE (> 100 keys)", async () => {
+			const kv = new QueryPersisterKv()
+			const TOTAL = 110
+
+			for (let i = 0; i < TOTAL; i++) {
+				kv.setItem(`chunk-key-${i}`, `chunk-value-${i}`)
+			}
+
+			// Advance past debounce — setImmediate callbacks are processed by fake timers
+			await vi.runAllTimersAsync()
+
+			// All 110 entries must appear in the kvStore after the setImmediate yield
+			for (let i = 0; i < TOTAL; i++) {
+				expect(readKvStore<string>(`chunk-key-${i}`)).toBe(`chunk-value-${i}`)
+			}
+		})
+
+		it("executeBatch receives all commands even when chunked across setImmediate yields", async () => {
+			const kv = new QueryPersisterKv()
+			const TOTAL = 150
+
+			for (let i = 0; i < TOTAL; i++) {
+				kv.setItem(`big-key-${i}`, `big-value-${i}`)
+			}
+
+			await vi.runAllTimersAsync()
+
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+			const commands = mockDb.executeBatch.mock.calls[0]![0] as [string, unknown[]][]
+
+			expect(commands.length).toBe(TOTAL)
+		})
+	})
+
 	describe("round-trip", () => {
 		it("setItem → flush → new instance restore → getItem returns same value", async () => {
 			const kv1 = new QueryPersisterKv()
@@ -695,5 +847,182 @@ describe("QueryPersisterKv", () => {
 			expect(readKvStore<string>("key-a")).toBe("updated")
 			expect(readKvStore<string>("key-b")).toBe("2")
 		})
+	})
+})
+
+describe("shouldPersistQuery()", () => {
+	// Helper to build a minimal PersistedQuery-shaped object
+	function makeQuery(queryKey: unknown[], status: string = "success"): Parameters<typeof shouldPersistQuery>[0] {
+		return {
+			queryKey,
+			queryHash: serialize(queryKey),
+			state: { status, data: "data", dataUpdatedAt: Date.now() }
+		} as unknown as Parameters<typeof shouldPersistQuery>[0]
+	}
+
+	it("returns true for a cacheable top-level string key with status=success", () => {
+		expect(shouldPersistQuery(makeQuery(["useDriveItemsQuery"]))).toBe(true)
+	})
+
+	it("returns false for a top-level UNCACHED_QUERY_KEYS string key", () => {
+		const uncachedKeys = [
+			"useFileTextQuery",
+			"useFileBase64Query",
+			"useFileUriQuery",
+			"useFileUrlQuery",
+			"useMediaPermissionsQuery",
+			"useCameraUploadAlbumsQuery",
+			"useLocalAuthenticationQuery",
+			"useCacheSizes",
+			"useFileProviderCacheBudget"
+		]
+
+		for (const key of uncachedKeys) {
+			expect(shouldPersistQuery(makeQuery([key])), `expected false for key "${key}"`).toBe(false)
+		}
+	})
+
+	it("returns false when an UNCACHED key appears nested inside an array element", () => {
+		// queryKey = [["useFileTextQuery", {uuid: "x"}]] — nested array contains the string
+		expect(shouldPersistQuery(makeQuery([["useFileTextQuery", { uuid: "x" }]]))).toBe(false)
+	})
+
+	it("returns true when a nested array element contains only cacheable strings", () => {
+		expect(shouldPersistQuery(makeQuery([["useDriveItemsQuery", { uuid: "x" }]]))).toBe(true)
+	})
+
+	it("returns false when status is not 'success' even for a cacheable key", () => {
+		expect(shouldPersistQuery(makeQuery(["useDriveItemsQuery"], "loading"))).toBe(false)
+		expect(shouldPersistQuery(makeQuery(["useDriveItemsQuery"], "error"))).toBe(false)
+		expect(shouldPersistQuery(makeQuery(["useDriveItemsQuery"], "pending"))).toBe(false)
+	})
+
+	it("returns false when queryKey is empty", () => {
+		// Empty key: no elements to match, shouldNotPersist=false, but status check still applies
+		expect(shouldPersistQuery(makeQuery([]))).toBe(true)
+	})
+
+	it("returns false for UNCACHED key appearing alongside other keys", () => {
+		// Mixed array: one element is uncached → entire query is suppressed
+		expect(shouldPersistQuery(makeQuery(["useDriveItemsQuery", "useFileTextQuery"]))).toBe(false)
+	})
+
+	it("ignores non-string, non-array elements in queryKey", () => {
+		// Number, null, object elements should not accidentally block persistence
+		expect(shouldPersistQuery(makeQuery(["useDriveItemsQuery", 42, null, { foo: "bar" }]))).toBe(true)
+	})
+})
+
+describe("restoreQueries()", () => {
+	beforeEach(() => {
+		kvStore.clear()
+		// Clear the module-level singleton buffer so each test starts from a blank slate.
+		// Without this, previously restored entries linger in the in-memory buffer and
+		// bleed into subsequent restoreQueries() calls within the same test run.
+		queryClientPersisterKv.clear()
+		setupMockDb()
+		mockDb.executeBatch.mockClear()
+		vi.mocked(queryClient.setQueryData).mockClear()
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function makePersistedQuery(opts: {
+		key: string
+		queryKey: unknown[]
+		status?: string
+		dataUpdatedAt?: number
+		data?: unknown
+	}): void {
+		const { key, queryKey, status = "success", dataUpdatedAt = Date.now(), data = "payload" } = opts
+
+		seedKvStore(key, {
+			queryKey,
+			queryHash: serialize(queryKey),
+			state: { status, data, dataUpdatedAt }
+		})
+	}
+
+	it("calls setQueryData for each valid persisted success query", async () => {
+		makePersistedQuery({ key: "q1", queryKey: ["useDriveItemsQuery", "uuid-1"] })
+		makePersistedQuery({ key: "q2", queryKey: ["useDriveItemsQuery", "uuid-2"] })
+
+		await restoreQueries()
+
+		expect(queryClient.setQueryData).toHaveBeenCalledTimes(2)
+	})
+
+	it("prunes entries whose dataUpdatedAt is beyond QUERY_CLIENT_CACHE_TIME", async () => {
+		const expiredAt = Date.now() - QUERY_CLIENT_CACHE_TIME - 1
+
+		seedKvStore("expired-q", {
+			queryKey: ["useDriveItemsQuery"],
+			queryHash: "expired",
+			state: { status: "success", data: "stale", dataUpdatedAt: expiredAt }
+		})
+
+		await restoreQueries()
+
+		expect(queryClient.setQueryData).not.toHaveBeenCalled()
+
+		// removeItem() queues a debounced DELETE — drain the timer to confirm it fires
+		await flushDebounce()
+
+		expect(kvStore.has(kvKey("expired-q"))).toBe(false)
+	})
+
+	it("prunes entries with a non-success status and does not call setQueryData", async () => {
+		makePersistedQuery({ key: "error-q", queryKey: ["useDriveItemsQuery"], status: "error" })
+
+		await restoreQueries()
+
+		expect(queryClient.setQueryData).not.toHaveBeenCalled()
+	})
+
+	it("prunes entries for UNCACHED_QUERY_KEYS and does not call setQueryData", async () => {
+		makePersistedQuery({ key: "uncached-q", queryKey: ["useFileTextQuery"] })
+
+		await restoreQueries()
+
+		expect(queryClient.setQueryData).not.toHaveBeenCalled()
+	})
+
+	it("passes the correct queryKey and data to setQueryData", async () => {
+		const queryKey = ["useDriveItemsQuery", { uuid: "abc" }]
+
+		makePersistedQuery({ key: "exact-q", queryKey, data: { files: [1, 2, 3] } })
+
+		await restoreQueries()
+
+		expect(queryClient.setQueryData).toHaveBeenCalledWith(
+			queryKey,
+			{ files: [1, 2, 3] },
+			expect.objectContaining({ updatedAt: expect.any(Number) })
+		)
+	})
+
+	it("handles an empty store without errors", async () => {
+		await expect(restoreQueries()).resolves.toBeUndefined()
+
+		expect(queryClient.setQueryData).not.toHaveBeenCalled()
+	})
+
+	it("restores valid entries even when one entry has a null state", async () => {
+		// null state → pruned, not crashing
+		kvStore.set(kvKey("null-state-q"), serialize({ queryKey: ["useDriveItemsQuery"], state: null }))
+		makePersistedQuery({ key: "good-q", queryKey: ["useDriveItemsQuery", "ok"] })
+
+		await restoreQueries()
+
+		// Only the valid entry was passed to setQueryData
+		expect(queryClient.setQueryData).toHaveBeenCalledTimes(1)
+		expect(queryClient.setQueryData).toHaveBeenCalledWith(
+			["useDriveItemsQuery", "ok"],
+			"payload",
+			expect.any(Object)
+		)
 	})
 })

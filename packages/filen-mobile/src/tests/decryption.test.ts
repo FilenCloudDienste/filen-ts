@@ -26,6 +26,17 @@ function driveFile(uuid: string, undecryptable: boolean, name?: string | null): 
 	} as DriveItem
 }
 
+function driveDirectory(uuid: string, undecryptable: boolean, name?: string | null): DriveItem {
+	return {
+		type: "directory",
+		data: {
+			uuid,
+			undecryptable,
+			decryptedMeta: name === undefined ? null : name === null ? null : ({ name } as DriveItem["data"]["decryptedMeta"])
+		} as DriveItem["data"]
+	} as DriveItem
+}
+
 function note(uuid: string, undecryptable: boolean, title?: string): Note {
 	return {
 		uuid,
@@ -141,6 +152,14 @@ describe("driveItemDisplayName", () => {
 	it("falls back to uuid when decryptedMeta is null but item is decryptable", () => {
 		expect(driveItemDisplayName(driveFile("u1", false))).toBe("u1")
 	})
+
+	it("returns the decrypted name for a directory-type item", () => {
+		expect(driveItemDisplayName(driveDirectory("d1", false, "Documents"))).toBe("Documents")
+	})
+
+	it("returns empty string (not uuid) when decryptedMeta.name is the empty string", () => {
+		expect(driveItemDisplayName(driveFile("u1", false, ""))).toBe("")
+	})
 })
 
 describe("noteDisplayTitle", () => {
@@ -154,6 +173,10 @@ describe("noteDisplayTitle", () => {
 
 	it("falls back to uuid when title is undefined but note is decryptable", () => {
 		expect(noteDisplayTitle(note("u1", false))).toBe("u1")
+	})
+
+	it("returns empty string (not uuid) when title is the empty string", () => {
+		expect(noteDisplayTitle(note("u1", false, ""))).toBe("")
 	})
 })
 
@@ -169,6 +192,10 @@ describe("tagDisplayName", () => {
 	it("falls back to uuid when name is undefined but tag is decryptable", () => {
 		expect(tagDisplayName(tag("t1", false))).toBe("t1")
 	})
+
+	it("returns empty string (not uuid) when name is the empty string", () => {
+		expect(tagDisplayName(tag("t1", false, ""))).toBe("")
+	})
 })
 
 describe("messageDisplayBody", () => {
@@ -182,6 +209,10 @@ describe("messageDisplayBody", () => {
 
 	it("returns empty string when message is undefined but decryptable", () => {
 		expect(messageDisplayBody(message("m1", false))).toBe("")
+	})
+
+	it("returns empty string when message body is explicitly the empty string", () => {
+		expect(messageDisplayBody(message("m1", false, ""))).toBe("")
 	})
 })
 
@@ -298,6 +329,15 @@ describe("chatDisplayName", () => {
 				chat("c1", false, {
 					participants: [participant(ME, "me@x.com")]
 				}),
+				ME
+			)
+		).toBe("")
+	})
+
+	it("returns empty string when participants array is completely empty", () => {
+		expect(
+			chatDisplayName(
+				chat("c1", false, { participants: [] }),
 				ME
 			)
 		).toBe("")

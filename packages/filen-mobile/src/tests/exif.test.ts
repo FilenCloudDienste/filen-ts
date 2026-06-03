@@ -68,6 +68,15 @@ describe("parseExifDate", () => {
 
 			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T12:00:00Z"))
 		})
+
+		it("falls back to DateTimeDigitized when DateTimeOriginal is present but unparseable", () => {
+			const exif = {
+				DateTimeOriginal: "not-a-valid-date",
+				DateTimeDigitized: "2024:06:15 11:00:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T11:00:00Z"))
+		})
 	})
 
 	describe("SubSecTimeOriginal", () => {
@@ -144,6 +153,25 @@ describe("parseExifDate", () => {
 			}
 
 			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.456Z"))
+		})
+
+		it("applies OffsetTimeDigitized timezone when DateTimeOriginal is absent", () => {
+			const exif = {
+				DateTimeDigitized: BASE_DATE,
+				OffsetTimeDigitized: "+09:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45+09:00"))
+		})
+
+		it("combines SubSecTimeDigitized and OffsetTimeDigitized", () => {
+			const exif = {
+				DateTimeDigitized: BASE_DATE,
+				SubSecTimeDigitized: "200",
+				OffsetTimeDigitized: "-05:00"
+			}
+
+			expect(parseExifDate(exif)).toBe(Date.parse("2024-06-15T14:30:45.200-05:00"))
 		})
 	})
 
@@ -311,11 +339,15 @@ function buildJpegWithOrientation(orientation: number, littleEndian = true): Uin
 
 /**
  * Builds a minimal TIFF file (not wrapped in JPEG) with the given orientation value.
+ * Optionally overrides the IFD offset stored in the TIFF header (default 8).
  */
-function buildTiffWithOrientation(orientation: number, littleEndian = true): Uint8Array {
+function buildTiffWithOrientation(orientation: number, littleEndian = true, ifdOffsetOverride?: number): Uint8Array {
 	const byteOrder = littleEndian ? [0x49, 0x49] : [0x4d, 0x4d]
 	const magic42 = littleEndian ? [0x2a, 0x00] : [0x00, 0x2a]
-	const ifdOffset = littleEndian ? [0x08, 0x00, 0x00, 0x00] : [0x00, 0x00, 0x00, 0x08]
+	const rawOffset = ifdOffsetOverride ?? 8
+	const ifdOffset = littleEndian
+		? [rawOffset & 0xff, (rawOffset >> 8) & 0xff, 0x00, 0x00]
+		: [0x00, 0x00, (rawOffset >> 8) & 0xff, rawOffset & 0xff]
 	const entryCount = littleEndian ? [0x01, 0x00] : [0x00, 0x01]
 	const orientTag = littleEndian ? [0x12, 0x01] : [0x01, 0x12]
 	const typeShort = littleEndian ? [0x03, 0x00] : [0x00, 0x03]
@@ -323,6 +355,54 @@ function buildTiffWithOrientation(orientation: number, littleEndian = true): Uin
 	const orientValue = littleEndian ? [orientation, 0x00, 0x00, 0x00] : [0x00, orientation, 0x00, 0x00]
 
 	return new Uint8Array([...byteOrder, ...magic42, ...ifdOffset, ...entryCount, ...orientTag, ...typeShort, ...count1, ...orientValue])
+}
+
+/**
+ * Builds a minimal JPEG with an EXIF APP1 containing a 2-entry IFD where orientation
+ * is the SECOND entry (preceded by a Make tag 0x010F), exercising the IFD loop.
+ */
+function buildJpegWithOrientationAsSecondEntry(orientation: number): Uint8Array {
+	// Little-endian throughout
+	const byteOrder = [0x49, 0x49]
+	const magic42 = [0x2a, 0x00]
+	// IFD0 starts at byte 8 from TIFF header start
+	const ifdOffset = [0x08, 0x00, 0x00, 0x00]
+	// 2 entries
+	const entryCount = [0x02, 0x00]
+
+	// Entry 0: Make tag (0x010F), type ASCII (0x0002), count 1, value 0
+	const makeTag = [0x0f, 0x01, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+	// Entry 1: Orientation tag (0x0112), type SHORT (0x0003), count 1, value = orientation
+	const orientTag = [0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, orientation, 0x00, 0x00, 0x00]
+
+	const tiffIfd = [...byteOrder, ...magic42, ...ifdOffset, ...entryCount, ...makeTag, ...orientTag]
+	const exifHeader = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00]
+	const app1Data = [...exifHeader, ...tiffIfd]
+	const app1Length = app1Data.length + 2
+
+	return new Uint8Array([0xff, 0xd8, 0xff, 0xe1, (app1Length >> 8) & 0xff, app1Length & 0xff, ...app1Data, 0xff, 0xda])
+}
+
+/**
+ * Builds a minimal WebP file (RIFF container) with an embedded Exif block.
+ * Structure: RIFF header (12 bytes) + EXIF chunk marker + "Exif\0\0" + TIFF IFD.
+ */
+function buildWebPWithOrientation(orientation: number, littleEndian = true): Uint8Array {
+	const tiff = buildTiffWithOrientation(orientation, littleEndian)
+	const exifMarker = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00]
+	const exifData = [...exifMarker, ...tiff]
+
+	// RIFF header: "RIFF" + file size (4 bytes LE) + "WEBP"
+	const totalSize = 4 + 4 + 4 + exifData.length // "WEBP" + chunk-tag + chunk-size + exif
+	const riff = [0x52, 0x49, 0x46, 0x46] // "RIFF"
+	const fileSize = [totalSize & 0xff, (totalSize >> 8) & 0xff, (totalSize >> 16) & 0xff, (totalSize >> 24) & 0xff]
+	const webp = [0x57, 0x45, 0x42, 0x50] // "WEBP"
+	// EXIF chunk tag + chunk size
+	const exifChunkTag = [0x45, 0x58, 0x49, 0x46] // "EXIF"
+	const chunkSize = exifData.length
+	const chunkSizeBytes = [chunkSize & 0xff, (chunkSize >> 8) & 0xff, (chunkSize >> 16) & 0xff, (chunkSize >> 24) & 0xff]
+
+	return new Uint8Array([...riff, ...fileSize, ...webp, ...exifChunkTag, ...chunkSizeBytes, ...exifData])
 }
 
 /**
@@ -524,6 +604,43 @@ describe("parseExifOrientationFromBytes", () => {
 			const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe1, (app1Length >> 8) & 0xff, app1Length & 0xff, ...app1Data, 0xff, 0xda])
 
 			expect(parseExifOrientationFromBytes(bytes)).toBe(0)
+		})
+
+		it("returns 0 when TIFF ifdOffset is zero (early-exit guard)", () => {
+			// Build a TIFF where the IFD offset field is 0x00000000, which triggers the
+			// ifdOffset === 0 guard in parseTiffOrientation (source line 185).
+			const bytes = buildTiffWithOrientation(6, true, 0)
+
+			expect(parseExifOrientationFromBytes(bytes)).toBe(0)
+		})
+	})
+
+	describe("IFD multi-entry (orientation not first)", () => {
+		it("finds orientation tag when it is the second IFD entry", () => {
+			// Exercises the IFD loop: Make tag at index 0, Orientation at index 1.
+			expect(parseExifOrientationFromBytes(buildJpegWithOrientationAsSecondEntry(6))).toBe(90)
+		})
+
+		it("returns 180 when orientation 3 is the second IFD entry", () => {
+			expect(parseExifOrientationFromBytes(buildJpegWithOrientationAsSecondEntry(3))).toBe(180)
+		})
+
+		it("returns 0 for orientation 1 as the second IFD entry (no rotation needed)", () => {
+			expect(parseExifOrientationFromBytes(buildJpegWithOrientationAsSecondEntry(1))).toBe(0)
+		})
+	})
+
+	describe("WebP (scan-based)", () => {
+		it("finds orientation in a WebP RIFF container", () => {
+			expect(parseExifOrientationFromBytes(buildWebPWithOrientation(6))).toBe(90)
+		})
+
+		it("handles big-endian EXIF inside a WebP container", () => {
+			expect(parseExifOrientationFromBytes(buildWebPWithOrientation(3, false))).toBe(180)
+		})
+
+		it("returns 0 for normal orientation inside WebP", () => {
+			expect(parseExifOrientationFromBytes(buildWebPWithOrientation(1))).toBe(0)
 		})
 	})
 })

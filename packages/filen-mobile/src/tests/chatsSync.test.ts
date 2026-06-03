@@ -63,14 +63,15 @@ vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("@filen/sdk-rs", () => ({
 	FilenSdkError: {
-		hasInner: () => false,
-		getInner: () => new Error("sdk error")
+		hasInner: vi.fn().mockReturnValue(false),
+		getInner: vi.fn().mockReturnValue(new Error("sdk error"))
 	}
 }))
 
 import { onlineManager } from "@tanstack/react-query"
 import { Sync } from "@/components/chats/sync"
 import sqlite from "@/lib/sqlite"
+import { FilenSdkError } from "@filen/sdk-rs"
 import type { InflightChatMessages } from "@/stores/useChats.store"
 
 const KV_KEY = "inflightChatMessages"
@@ -107,6 +108,8 @@ describe("Sync (Chats)", () => {
 		vi.mocked(sqlite.kvAsync.get).mockClear()
 		vi.mocked(sqlite.kvAsync.set).mockClear()
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
+		vi.mocked(FilenSdkError.hasInner).mockReturnValue(false)
+		vi.mocked(FilenSdkError.getInner).mockReturnValue(new Error("sdk error") as unknown as FilenSdkError)
 	})
 
 	describe("restoreFromDisk", () => {
@@ -185,12 +188,48 @@ describe("Sync (Chats)", () => {
 			expect(chatsState.inflightMessages["chat-deleted"]).toBeUndefined()
 		})
 
-		it("resolves init even on failure", async () => {
+		it("resolves init even on failure — store is left empty and flushToDisk completes without throwing", async () => {
 			vi.mocked(sqlite.kvAsync.get).mockRejectedValueOnce(new Error("disk error"))
 
 			const sync = await createSync()
 
+			// Store should remain empty since restore failed
+			expect(chatsState.inflightMessages).toEqual({})
+
+			// flushToDisk must not throw and should call remove (empty data → delete key)
+			vi.mocked(sqlite.kvAsync.remove).mockClear()
+
 			await sync.flushToDisk({})
+
+			expect(sqlite.kvAsync.remove).toHaveBeenCalledWith(KV_KEY)
+		})
+
+		it("mutates the fromDisk object in-place when pruning deleted chats", async () => {
+			// The source does `delete fromDisk[chatUuid]` on the object returned by sqlite.kvAsync.get.
+			// This test confirms the pruned chat UUID is absent from the store state, which is the
+			// observable consequence of that in-place mutation path.
+			const storedData = {
+				"chat-exists": {
+					chat: mockChat("chat-exists"),
+					messages: [mockMessage("msg-1", "keep", 1000)]
+				},
+				"chat-gone": {
+					chat: mockChat("chat-gone"),
+					messages: [mockMessage("msg-2", "pruned", 1000)]
+				}
+			}
+
+			kvStore.set(KV_KEY, storedData)
+
+			// Only chat-exists is in the live list
+			mockFetchChats.mockResolvedValue([{ uuid: "chat-exists" }])
+
+			await createSync()
+
+			// "chat-gone" must be absent after pruning
+			expect(chatsState.inflightMessages["chat-gone"]).toBeUndefined()
+			// "chat-exists" must be present
+			expect(chatsState.inflightMessages["chat-exists"]).toBeDefined()
 		})
 	})
 
@@ -252,21 +291,25 @@ describe("Sync (Chats)", () => {
 			expect(kvStore.get(KV_KEY)).toEqual(data)
 		})
 
-		it("does not mutate input parameter", async () => {
+		it("writes only the non-empty entries — empty-messages entry is absent from sqlite", async () => {
+			// Replaces the tautological "does not mutate input parameter" test.
+			// The implementation builds a new filtered object via Object.fromEntries, so
+			// the observable claim is that the stored value excludes the empty-messages entry.
 			const sync = await createSync()
-			const data = {
+
+			await sync.flushToDisk({
 				"chat-1": { chat: mockChat("chat-1"), messages: [mockMessage("msg-1", "hello", 1000)] },
 				"chat-2": { chat: mockChat("chat-2"), messages: [] }
-			} as any
+			} as any)
 
-			const keysBefore = Object.keys(data)
+			const stored = kvStore.get(KV_KEY) as Record<string, unknown>
 
-			await sync.flushToDisk(data)
-
-			expect(Object.keys(data)).toEqual(keysBefore)
+			expect(Object.keys(stored)).toEqual(["chat-1"])
 		})
 
-		it("catches write errors", async () => {
+		it("catches write errors — console.error is called and the promise resolves", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
 			const sync = await createSync()
 
 			vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
@@ -277,6 +320,10 @@ describe("Sync (Chats)", () => {
 					messages: [mockMessage("msg-1", "hello", 1000)]
 				}
 			})
+
+			expect(consoleErrorSpy).toHaveBeenCalled()
+
+			consoleErrorSpy.mockRestore()
 		})
 	})
 
@@ -439,13 +486,13 @@ describe("Sync (Chats)", () => {
 			expect(chatsState.inflightMessages["chat-2"]).toBeUndefined()
 		})
 
-		it("skips messages with null content", async () => {
+		it("skips messages with null content and leaves them in store", async () => {
 			const sync = await createSync()
 
 			chatsState.inflightMessages = {
 				"chat-1": {
 					chat: mockChat("chat-1"),
-					messages: [{ inflightId: "msg-1", inner: { message: null }, sentTimestamp: BigInt(1000) }]
+					messages: [{ inflightId: "msg-null", inner: { message: null }, sentTimestamp: BigInt(1000) }]
 				}
 			}
 
@@ -454,6 +501,27 @@ describe("Sync (Chats)", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(mockSendMessage).not.toHaveBeenCalled()
+			// Skipped message is NOT cleaned up from the store (the continue skips the success cleanup block)
+			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-null")).toBe(true)
+		})
+
+		it("skips messages with empty-string content and leaves them in store", async () => {
+			// The source checks `!message.inner.message` which is falsy for "" as well as null.
+			const sync = await createSync()
+
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [{ inflightId: "msg-empty", inner: { message: "" }, sentTimestamp: BigInt(1000) }]
+				}
+			}
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockSendMessage).not.toHaveBeenCalled()
+			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-empty")).toBe(true)
 		})
 
 		it("flushes final state to disk after sync", async () => {
@@ -522,6 +590,148 @@ describe("Sync (Chats)", () => {
 
 			expect(observedSignal).toBeDefined()
 			expect(observedSignal?.aborted).toBe(true)
+		})
+
+		it("cancel() resets abortController so the next syncNow() runs unaborted", async () => {
+			const sync = await createSync()
+
+			// Cancel before any sync — this replaces the internal AbortController
+			sync.cancel()
+
+			// Now run a fresh sync — the new controller is NOT aborted
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-1", "hello", 1000)]
+				}
+			}
+
+			let signalAfterCancel: AbortSignal | undefined
+
+			mockSendMessage.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
+				signalAfterCancel = signal
+
+				return { chat: mockChat("chat-1"), message: { inner: { uuid: "x" } } }
+			})
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockSendMessage).toHaveBeenCalledTimes(1)
+			expect(signalAfterCancel).toBeDefined()
+			expect(signalAfterCancel?.aborted).toBe(false)
+		})
+
+		it("aborted signal during message loop causes early return, leaving remaining messages in store", async () => {
+			const sync = await createSync()
+
+			// First message triggers abort; second message should NOT be sent
+			mockSendMessage.mockImplementationOnce(async ({ signal }: { signal: AbortSignal }) => {
+				sync.cancel()
+
+				// The abortController was just replaced; but `signal` (captured before cancel) is now aborted
+				expect(signal.aborted).toBe(true)
+
+				return { chat: mockChat("chat-1"), message: { inner: { uuid: "x" } } }
+			})
+
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [
+						mockMessage("msg-1", "first", 1000),
+						mockMessage("msg-2", "second", 2000)
+					]
+				}
+			}
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// sendMessage was only called once (the loop returned after the abort check)
+			expect(mockSendMessage).toHaveBeenCalledTimes(1)
+
+			// msg-2 was not processed — it remains in the store
+			const remaining = chatsState.inflightMessages["chat-1"]?.messages ?? []
+
+			expect(remaining.some((m: { inflightId: string }) => m.inflightId === "msg-2")).toBe(true)
+		})
+
+		it("stores a FilenSdkError-wrapped error in inflightErrors when SDK error is thrown", async () => {
+			const sync = await createSync()
+
+			const sdkInnerError = new Error("sdk inner message")
+
+			vi.mocked(FilenSdkError.hasInner).mockReturnValue(true)
+			vi.mocked(FilenSdkError.getInner).mockReturnValue(sdkInnerError as unknown as FilenSdkError)
+
+			const fakeSdkError = { _tag: "FilenSdkError" }
+
+			mockSendMessage.mockRejectedValueOnce(fakeSdkError)
+
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-sdk", "sdk-fail", 1000)]
+				}
+			}
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// The FilenSdkError branch extracts the inner error via getInner()
+			expect(chatsState.inflightErrors["msg-sdk"]).toBe(sdkInnerError)
+		})
+
+		it("stores a stringified Error when a non-Error, non-SDK value is thrown", async () => {
+			const sync = await createSync()
+
+			vi.mocked(FilenSdkError.hasInner).mockReturnValue(false)
+
+			// Throw a plain string — the source wraps it in new Error(String(e))
+			mockSendMessage.mockRejectedValueOnce("plain string error")
+
+			chatsState.inflightMessages = {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-unknown", "unknown-fail", 1000)]
+				}
+			}
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			const storedError = chatsState.inflightErrors["msg-unknown"]
+
+			expect(storedError).toBeInstanceOf(Error)
+
+			if (!(storedError instanceof Error)) {
+				throw new Error("expected storedError to be an Error instance")
+			}
+
+			expect(storedError.message).toBe("plain string error")
+		})
+
+		it("skips chat entry with empty messages array without calling sendMessage", async () => {
+			// Covers the `if (messages.length === 0) return` guard inside the Promise.allSettled map.
+			const sync = await createSync()
+
+			chatsState.inflightMessages = {
+				"chat-empty": {
+					chat: mockChat("chat-empty"),
+					messages: []
+				}
+			}
+
+			sync.syncNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockSendMessage).not.toHaveBeenCalled()
 		})
 	})
 })

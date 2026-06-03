@@ -70,7 +70,9 @@ import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import { type DriveItem, type CacheItem } from "@/types"
 import auth from "@/lib/auth"
+import { wrapAbortSignalForSdk } from "@/lib/utils"
 import { type Metadata } from "@/lib/fileCache"
+import offline from "@/lib/offline"
 import { xxHash32 } from "js-xxhash"
 
 const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
@@ -78,6 +80,42 @@ const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
 function makeFileItem(uuid: string, name: string): DriveItem {
 	return {
 		type: "file",
+		data: {
+			uuid,
+			decryptedMeta: {
+				name,
+				size: 100n,
+				modified: 1000,
+				created: 900,
+				mime: "application/octet-stream"
+			},
+			undecryptable: false,
+			size: 100n
+		}
+	} as unknown as DriveItem
+}
+
+function makeSharedFileItem(uuid: string, name: string): DriveItem {
+	return {
+		type: "sharedFile",
+		data: {
+			uuid,
+			decryptedMeta: {
+				name,
+				size: 100n,
+				modified: 1000,
+				created: 900,
+				mime: "application/octet-stream"
+			},
+			undecryptable: false,
+			size: 100n
+		}
+	} as unknown as DriveItem
+}
+
+function makeSharedRootFileItem(uuid: string, name: string): DriveItem {
+	return {
+		type: "sharedRootFile",
 		data: {
 			uuid,
 			decryptedMeta: {
@@ -296,6 +334,53 @@ describe("FileCache", () => {
 
 			expect(result).toBe(false)
 		})
+
+		it("returns true via offline fast path when offline file exists", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("offline-uuid", "offline.txt"))
+
+			// Simulate an offline file on disk and return it from getLocalFile
+			const offlinePath = "file:///document/offline/v1/files/offline-uuid/offline.txt"
+
+			fs.set(offlinePath, new Uint8Array([1, 2, 3]))
+
+			const offlineFile = new File(offlinePath)
+
+			vi.mocked(offline.getLocalFile).mockResolvedValue(offlineFile as never)
+
+			// No fileCache entry written — the offline path must short-circuit to true
+			const result = await cache.has(item)
+
+			expect(result).toBe(true)
+			// Offline short-circuit must have been taken — getLocalFile was called with the DriveItem (item.data)
+			expect(vi.mocked(offline.getLocalFile)).toHaveBeenCalledWith(item.data)
+		})
+
+		it("returns true for sharedFile type when file and metadata exist and match", async () => {
+			const cache = await createFileCache()
+			const driveItem = makeSharedFileItem("shared-uuid", "shared.jpg")
+			const item = wrapDrive(driveItem)
+
+			writeFile("shared-uuid", "shared.jpg")
+			writeMetadata("shared-uuid", item)
+
+			const result = await cache.has(item)
+
+			expect(result).toBe(true)
+		})
+
+		it("returns true for sharedRootFile type when file and metadata exist and match", async () => {
+			const cache = await createFileCache()
+			const driveItem = makeSharedRootFileItem("sharedroot-uuid", "root.png")
+			const item = wrapDrive(driveItem)
+
+			writeFile("sharedroot-uuid", "root.png")
+			writeMetadata("sharedroot-uuid", item)
+
+			const result = await cache.has(item)
+
+			expect(result).toBe(true)
+		})
 	})
 
 	describe("get", () => {
@@ -498,6 +583,109 @@ describe("FileCache", () => {
 			expect(meta.type).toBe("external")
 			expect(meta.cachedAt).toBeTypeOf("number")
 		})
+
+		it("returns offline file directly without downloading when offline file exists", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("offline-get-uuid", "offline.bin"))
+
+			const offlinePath = "file:///document/offline/v1/files/offline-get-uuid/offline.bin"
+
+			fs.set(offlinePath, new Uint8Array([55, 66, 77]))
+
+			const offlineFile = new File(offlinePath)
+
+			vi.mocked(offline.getLocalFile).mockResolvedValue(offlineFile as never)
+
+			const file = await cache.get({ item })
+
+			// Must return the offline file, not a fileCache path
+			expect(file.uri).toBe(offlinePath)
+			// SDK download must NOT have been called
+			expect(auth.getSdkClients).not.toHaveBeenCalled()
+		})
+
+		it("passes the AbortSignal through wrapAbortSignalForSdk when provided", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("signal-uuid", "signal.bin"))
+			const controller = new AbortController()
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						fs.set("file://" + path, new Uint8Array([1]))
+					})
+				}
+			} as never)
+
+			await cache.get({ item, signal: controller.signal })
+
+			expect(vi.mocked(wrapAbortSignalForSdk)).toHaveBeenCalledWith(controller.signal)
+		})
+
+		it("does not call wrapAbortSignalForSdk when no signal is provided", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("nosignal-uuid", "nosignal.bin"))
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						fs.set("file://" + path, new Uint8Array([1]))
+					})
+				}
+			} as never)
+
+			await cache.get({ item })
+
+			expect(vi.mocked(wrapAbortSignalForSdk)).not.toHaveBeenCalled()
+		})
+
+		it("downloads sharedFile type via SDK and caches metadata correctly", async () => {
+			const cache = await createFileCache()
+			const driveItem = makeSharedFileItem("sf-uuid", "shared.bin")
+			const item = wrapDrive(driveItem)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						fs.set("file://" + path, new Uint8Array([11, 22]))
+					})
+				}
+			} as never)
+
+			const file = await cache.get({ item })
+
+			expect(file.uri).toBe(`${BASE_DIR}/sf-uuid/sf-uuid.bin`)
+
+			const metaFile = new File(`${BASE_DIR}/sf-uuid/sf-uuid.filenmeta`)
+			const meta = deserialize(new TextDecoder().decode(await metaFile.bytes())) as Metadata
+
+			expect(meta.type).toBe("drive")
+			expect((meta as Extract<Metadata, { type: "drive" }>).data.type).toBe("sharedFile")
+		})
+
+		it("downloads sharedRootFile type via SDK and caches metadata correctly", async () => {
+			const cache = await createFileCache()
+			const driveItem = makeSharedRootFileItem("srf-uuid", "rootshared.bin")
+			const item = wrapDrive(driveItem)
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						fs.set("file://" + path, new Uint8Array([33, 44]))
+					})
+				}
+			} as never)
+
+			const file = await cache.get({ item })
+
+			expect(file.uri).toBe(`${BASE_DIR}/srf-uuid/srf-uuid.bin`)
+
+			const metaFile = new File(`${BASE_DIR}/srf-uuid/srf-uuid.filenmeta`)
+			const meta = deserialize(new TextDecoder().decode(await metaFile.bytes())) as Metadata
+
+			expect(meta.type).toBe("drive")
+			expect((meta as Extract<Metadata, { type: "drive" }>).data.type).toBe("sharedRootFile")
+		})
 	})
 
 	describe("remove", () => {
@@ -527,6 +715,32 @@ describe("FileCache", () => {
 			const item = wrapDrive(makeFileItem("ghost-uuid", "phantom.txt"))
 
 			await expect(cache.remove(item)).resolves.toBeUndefined()
+		})
+
+		it("removes sharedFile entries without throwing", async () => {
+			const cache = await createFileCache()
+			const driveItem = makeSharedFileItem("rmshared-uuid", "rmshared.txt")
+			const item = wrapDrive(driveItem)
+
+			writeFile("rmshared-uuid", "rmshared.txt")
+			writeMetadata("rmshared-uuid", item)
+
+			await cache.remove(item)
+
+			expect(fs.has(`${BASE_DIR}/rmshared-uuid`)).toBe(false)
+		})
+
+		it("removes sharedRootFile entries without throwing", async () => {
+			const cache = await createFileCache()
+			const driveItem = makeSharedRootFileItem("rmsharedroot-uuid", "rmsharedroot.txt")
+			const item = wrapDrive(driveItem)
+
+			writeFile("rmsharedroot-uuid", "rmsharedroot.txt")
+			writeMetadata("rmsharedroot-uuid", item)
+
+			await cache.remove(item)
+
+			expect(fs.has(`${BASE_DIR}/rmsharedroot-uuid`)).toBe(false)
 		})
 	})
 
@@ -613,6 +827,35 @@ describe("FileCache", () => {
 			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: Date.now() }))))
 
 			await cache.gc(0)
+
+			expect(fs.has(dir)).toBe(false)
+		})
+
+		it("returns immediately without reading entries when parent directory does not exist", async () => {
+			const cache = await createFileCache()
+
+			// Remove the parent directory that the constructor created
+			fs.delete(BASE_DIR)
+
+			// Should return without throwing even though there is nothing to list
+			await expect(cache.gc()).resolves.toBeUndefined()
+		})
+
+		it("deletes an entry whose cachedAt is exactly at the expiry boundary (>=)", async () => {
+			const cache = await createFileCache()
+			const uuid = "boundary-uuid"
+			const item = wrapDrive(makeFileItem(uuid, "boundary.txt"))
+			const dir = `${BASE_DIR}/${uuid}`
+			const age = 86400 * 1000
+			const now = Date.now()
+			// cachedAt + age === now  →  the >= check must treat this as expired
+			const exactBoundaryTime = now - age
+
+			fs.set(dir, "dir")
+			fs.set(`${dir}/${uuid}.txt`, new Uint8Array([1]))
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: exactBoundaryTime }))))
+
+			await cache.gc(age)
 
 			expect(fs.has(dir)).toBe(false)
 		})
@@ -711,9 +954,18 @@ describe("FileCache", () => {
 				releaseDownload = resolve
 			})
 
+			// downloadStarted resolves as soon as downloadFileToPath begins executing,
+			// which guarantees that get() has already entered the ClearBarrier by that point.
+			let resolveDownloadStarted!: () => void
+			const downloadStarted = new Promise<void>(resolve => {
+				resolveDownloadStarted = resolve
+			})
+
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
 				authedSdkClient: {
 					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						// Signal that we are now inside the barrier, then wait for the test to proceed
+						resolveDownloadStarted()
 						await downloadGate
 						fs.set("file://" + path, new Uint8Array([7, 8, 9]))
 					})
@@ -722,16 +974,17 @@ describe("FileCache", () => {
 
 			const getPromise = cache.get({ item })
 
-			// Give the get() a chance to start and acquire the barrier.
-			await Promise.resolve()
-			await Promise.resolve()
+			// Wait until the download has actually started — at this point get() is
+			// inside the ClearBarrier, so clear() must block.
+			await downloadStarted
 
 			let clearResolved = false
 			const clearPromise = cache.clear().then(() => {
 				clearResolved = true
 			})
 
-			// Barrier should hold clear() until the in-flight get drains.
+			// Give clear() a chance to run — it must not have finished because the
+			// barrier is still held by the in-flight get().
 			await Promise.resolve()
 			await Promise.resolve()
 

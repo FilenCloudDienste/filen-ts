@@ -5,8 +5,8 @@ vi.mock("expo-localization", () => ({
 }))
 
 describe("time", () => {
-	// Use a fixed date: 2025-03-15 13:05:09 UTC
-	const fixedDate = new Date(Date.UTC(2025, 2, 15, 13, 5, 9))
+	// Use a fixed date: 2025-03-15 13:05:09 local time
+	const fixedDate = new Date(2025, 2, 15, 13, 5, 9)
 	const fixedMs = fixedDate.getTime()
 	const fixedSec = fixedMs / 1000
 
@@ -37,9 +37,14 @@ describe("time", () => {
 		})
 
 		it("uses milliseconds timestamp directly when >= 4102444800", () => {
+			// fixedMs is already in the milliseconds range (>= 4102444800)
 			const result = simpleDate(fixedMs)
+			const month = String(fixedDate.getMonth() + 1).padStart(2, "0")
+			const day = String(fixedDate.getDate()).padStart(2, "0")
+			const year = fixedDate.getFullYear()
 
-			expect(result).toContain("2025")
+			expect(result).toContain(`${month}/${day}/${year}`)
+			expect(result).toMatch(/\d{2}:\d{2}:\d{2} (AM|PM)/)
 		})
 
 		it("accepts a Date object", () => {
@@ -320,21 +325,31 @@ describe("time", () => {
 			expect(result).toBe("12:00:00 PM")
 		})
 
-		it("epoch 0 timestamp produces a valid date string", () => {
+		it("epoch 0 timestamp (treated as seconds) formats the resulting local date without asserting on a specific year", () => {
+			// 0 < 4102444800, so toDate(0) returns new Date(0 * 1000) = new Date(0)
+			// new Date(0) is UTC midnight Jan 1 1970, but local date depends on timezone.
+			// We only verify the output is a well-formed MDY 12-hour string.
 			const result = simpleDate(0)
 
-			// 0 < 4102444800, so treated as seconds → new Date(0)
-			// epoch 0 = Jan 1, 1970 00:00:00 UTC, formatted in local time
-			expect(result).toContain("1970")
-			expect(result).toMatch(/\d{2}\/\d{2}\/1970, \d{2}:\d{2}:\d{2} (AM|PM)/)
+			const expected = new Date(0)
+			const month = String(expected.getMonth() + 1).padStart(2, "0")
+			const day = String(expected.getDate()).padStart(2, "0")
+			const year = expected.getFullYear()
+
+			expect(result).toContain(`${month}/${day}/${year}`)
+			expect(result).toMatch(/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2} (AM|PM)/)
 		})
 
 		it("timestamp at boundary (4102444800) is treated as milliseconds", () => {
 			const result = simpleDate(4102444800)
 
-			// 4102444800 >= 4102444800 → treated as milliseconds
-			// new Date(4102444800) = Feb 17, 1970 in ms
-			expect(result).toContain("1970")
+			// new Date(4102444800) is in 1970 — confirms the ms path is taken (not *1000)
+			const expected = new Date(4102444800)
+			const month = String(expected.getMonth() + 1).padStart(2, "0")
+			const day = String(expected.getDate()).padStart(2, "0")
+			const year = expected.getFullYear()
+
+			expect(result).toContain(`${month}/${day}/${year}`)
 		})
 
 		it("timestamp just below boundary (4102444799) is treated as seconds", () => {
@@ -345,6 +360,19 @@ describe("time", () => {
 			const expected = new Date(4102444799 * 1000)
 
 			expect(result).toContain(String(expected.getFullYear()))
+		})
+
+		it("fractional seconds timestamp floors to a valid date (sub-second shift)", () => {
+			// 1742043909.5 < 4102444800, so treated as seconds; *1000 gives a half-millisecond offset
+			// The result must still be a well-formed MDY 12-hour string
+			const result = simpleDate(1742043909.5)
+			const expected = new Date(1742043909.5 * 1000)
+			const month = String(expected.getMonth() + 1).padStart(2, "0")
+			const day = String(expected.getDate()).padStart(2, "0")
+			const year = expected.getFullYear()
+
+			expect(result).toContain(`${month}/${day}/${year}`)
+			expect(result).toMatch(/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2} (AM|PM)/)
 		})
 	})
 
@@ -388,6 +416,100 @@ describe("time", () => {
 			const result = simpleDateNoDate(d)
 
 			expect(result).toBe("14:30:45")
+		})
+	})
+
+	describe("setIntlLanguage — live locale switch", () => {
+		it("a format call after setIntlLanguage picks up the new locale without a module reload", async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "en-US" }]
+			}))
+
+			const mod = await import("@/lib/time")
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+
+			// Baseline: en-US → MDY, 12-hour
+			const before = mod.simpleDate(d)
+			expect(before).toBe("01/15/2025, 02:30:45 PM")
+
+			// Switch to de-DE at runtime
+			mod.setIntlLanguage("de-DE")
+
+			// cachedLocaleInfo is null now; next call must re-derive from intlLanguage
+			const after = mod.simpleDate(d)
+			expect(after).toBe("15.01.2025, 14:30:45")
+		})
+
+		it("setIntlLanguage updates the exported intlLanguage binding", async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "en-US" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			mod.setIntlLanguage("fr-FR")
+
+			expect(mod.intlLanguage).toBe("fr-FR")
+		})
+	})
+
+	describe("intlLanguage fallback — getLocales() throws", () => {
+		it("falls back to en-US when getLocales() throws at module load", async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => {
+					throw new Error("locale unavailable")
+				}
+			}))
+
+			const mod = await import("@/lib/time")
+
+			// intlLanguage stays at the default 'en-US' initialiser since the try block threw
+			expect(mod.intlLanguage).toBe("en-US")
+
+			// The formatters must still work (fallback MDY, 12-hour)
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = mod.simpleDate(d)
+
+			expect(result).toBe("01/15/2025, 02:30:45 PM")
+		})
+	})
+
+	describe("detectLocaleInfo — unknown locale falls back to DMY/slash/24h", () => {
+		it("an unmapped locale tag (xx-XX) produces DMY slash-separated 24-hour output", async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "xx-XX" }]
+			}))
+
+			const mod = await import("@/lib/time")
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+
+			// Falls into the else branch: DMY, slash, 24-hour
+			const result = mod.simpleDate(d)
+
+			expect(result).toBe("15/01/2025, 14:30:45")
+		})
+
+		it("a bare unknown language code (zz) produces DMY slash-separated 24-hour output", async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "zz" }]
+			}))
+
+			const mod = await import("@/lib/time")
+			const d = new Date(2025, 0, 15, 9, 5, 3)
+
+			const result = mod.simpleDate(d)
+
+			expect(result).toBe("15/01/2025, 09:05:03")
 		})
 	})
 })
