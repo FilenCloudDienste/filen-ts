@@ -47,7 +47,7 @@ export function chatHasUnread(c: Chat, userId: bigint): boolean {
 		return false
 	}
 
-	if (!c.lastMessage || !c.lastFocus) {
+	if (!c.lastMessage || c.lastFocus === undefined || c.lastFocus === null) {
 		return false
 	}
 

@@ -258,7 +258,7 @@ class Notes {
 			throw new Error("Note content is empty")
 		}
 
-		const file = newTmpFile(sanitizeFileName(`${note.title ?? note.uuid}.txt`))
+		const file = newTmpFile(sanitizeFileName(`${note.title || note.uuid}.txt`))
 
 		if (file.exists) {
 			file.delete()

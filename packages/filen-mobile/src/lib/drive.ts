@@ -878,7 +878,7 @@ class Drive {
 						item.data,
 						{
 							name: undefined,
-							created: created ? BigInt(created) : undefined
+							created: created !== undefined ? BigInt(created) : undefined
 						},
 						signal
 							? {
@@ -891,8 +891,8 @@ class Drive {
 						{
 							name: undefined,
 							mime: undefined,
-							lastModified: modified ? BigInt(modified) : undefined,
-							created: created ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
+							lastModified: modified !== undefined ? BigInt(modified) : undefined,
+							created: created !== undefined ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
 						},
 						signal
 							? {
