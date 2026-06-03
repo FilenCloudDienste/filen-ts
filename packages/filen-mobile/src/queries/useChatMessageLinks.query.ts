@@ -8,16 +8,75 @@ import { Paths } from "expo-file-system"
 import mimeTypes from "mime-types"
 
 const MAX_FILE_SIZE_IMAGE = 32 * 1024 * 1024
+const MAX_REDIRECTS = 5
+
+/**
+ * Manually follow up to MAX_REDIRECTS hops for the given method, validating
+ * every redirect Location with safeParseUrl before issuing the next hop.
+ * This prevents SSRF via open redirect: no request is ever sent to a private
+ * or non-HTTPS host because we validate the Location header before following.
+ * Returns the final Response on success, or null if any hop is invalid/fails.
+ */
+async function fetchManual(
+	startUrl: string,
+	method: "HEAD" | "GET",
+	signal: AbortSignal
+): Promise<Response | null> {
+	let currentUrl = startUrl
+
+	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+		let res: Response
+
+		try {
+			res = await fetch(currentUrl, {
+				method,
+				signal,
+				redirect: "manual"
+			})
+		} catch {
+			return null
+		}
+
+		// 3xx redirect — validate the Location before following
+		if (res.status >= 300 && res.status < 400) {
+			const location = res.headers.get("location")
+
+			if (!location) {
+				return null
+			}
+
+			// Resolve the Location against the current URL (handles relative redirects)
+			let resolved: string
+
+			try {
+				resolved = new URL(location, currentUrl).href
+			} catch {
+				return null
+			}
+
+			// Validate the redirect destination — rejects private IPs, non-HTTPS, credentials
+			const safe = safeParseUrl(resolved)
+
+			if (!safe) {
+				return null
+			}
+
+			currentUrl = safe.href
+			continue
+		}
+
+		return res
+	}
+
+	// Exceeded max redirect hops
+	return null
+}
 
 async function fetchMetadata(url: string, signal: AbortSignal): Promise<Response | null> {
 	try {
-		const res = await fetch(url, {
-			method: "HEAD",
-			signal,
-			redirect: "follow"
-		})
+		const res = await fetchManual(url, "HEAD", signal)
 
-		if (res.ok) {
+		if (res && res.ok) {
 			return res
 		}
 	} catch {
@@ -39,11 +98,7 @@ async function fetchMetadata(url: string, signal: AbortSignal): Promise<Response
 	)
 
 	try {
-		const res = await fetch(url, {
-			method: "GET",
-			signal: ctrl.signal,
-			redirect: "follow"
-		})
+		const res = await fetchManual(url, "GET", ctrl.signal)
 
 		// We have status + headers at this point. Kill the body stream immediately.
 		// React Native's fetch will keep buffering otherwise.
@@ -51,7 +106,7 @@ async function fetchMetadata(url: string, signal: AbortSignal): Promise<Response
 			ctrl.abort()
 		})
 
-		if (!res.ok) {
+		if (!res || !res.ok) {
 			return null
 		}
 

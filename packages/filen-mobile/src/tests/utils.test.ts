@@ -148,7 +148,7 @@ vi.mock("@/constants", () => {
 		/^169\.254\./,
 		/^0\.0\.0\.0$/,
 		/^::1$/,
-		/^fc00:/i,
+		/^f[cd][0-9a-f]{2}:/i,
 		/^fe80:/i
 	]
 
@@ -643,6 +643,14 @@ describe("safeParseUrl", () => {
 
 	it("returns null for IPv6 ULA [fc00::1]", () => {
 		expect(safeParseUrl("https://[fc00::1]")).toBeNull()
+	})
+
+	it("returns null for IPv6 ULA fd00::/8 — [fd12:3456::1] (regression: was not blocked)", () => {
+		expect(safeParseUrl("https://[fd12:3456::1]")).toBeNull()
+	})
+
+	it("returns null for IPv6 ULA [fdff::1] (upper bound of fd00::/8)", () => {
+		expect(safeParseUrl("https://[fdff::1]")).toBeNull()
 	})
 
 	it("returns null for IPv6 link-local [fe80::1]", () => {

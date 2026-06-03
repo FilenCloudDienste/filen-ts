@@ -154,7 +154,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 
 									dispatch({
 										type: "quillAddLink",
-										data: response.value.trim().toLowerCase()
+										data: response.value.trim()
 									})
 								})
 						}
@@ -280,7 +280,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 
 						dispatch({
 							type: "quillAddLink",
-							data: response.value.trim().toLowerCase()
+							data: response.value.trim()
 						})
 					})
 
