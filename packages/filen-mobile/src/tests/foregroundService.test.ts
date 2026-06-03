@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+
+const platformMock = vi.hoisted(() => ({ OS: "android" as "ios" | "android" }))
 
 vi.mock("react-native", () => ({
-	Platform: { OS: "android" }
+	Platform: platformMock
+}))
+
+const mockBpsToReadable = vi.fn((speed: number) => `${speed}B/s`)
+
+vi.mock("@filen/utils", () => ({
+	bpsToReadable: mockBpsToReadable
 }))
 
 const mockNotifee = {
@@ -30,8 +38,15 @@ vi.mock("@/lib/i18n", () => ({
 beforeEach(() => {
 	vi.clearAllMocks()
 	vi.resetModules()
+	platformMock.OS = "android"
 	mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
 	mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })
+	mockNotifee.createChannel.mockResolvedValue(undefined)
+	mockBpsToReadable.mockImplementation((speed: number) => `${speed}B/s`)
+})
+
+afterEach(() => {
+	platformMock.OS = "android"
 })
 
 describe("foregroundService", () => {
@@ -65,7 +80,7 @@ describe("foregroundService", () => {
 		)
 	})
 
-	it("start with NOT_DETERMINED requests permission and displays on grant", async () => {
+	it("start with NOT_DETERMINED requests permission and displays notification with correct payload shape on grant", async () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 0 })
 		mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })
 
@@ -74,7 +89,15 @@ describe("foregroundService", () => {
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
 
 		expect(mockNotifee.requestPermission).toHaveBeenCalledTimes(1)
-		expect(mockNotifee.displayNotification).toHaveBeenCalled()
+		expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "filen-transfers-fgs",
+				android: expect.objectContaining({
+					asForegroundService: true,
+					foregroundServiceTypes: [1]
+				})
+			})
+		)
 	})
 
 	it("start with DENIED status silently no-ops", async () => {
@@ -127,12 +150,51 @@ describe("foregroundService", () => {
 		expect(mockNotifee.stopForegroundService).not.toHaveBeenCalled()
 	})
 
+	it("start with an already-aborted signal skips init and display", async () => {
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		const controller = new AbortController()
+		controller.abort()
+
+		await fgs.start({ count: 1, progress: 0.5, speed: 512 }, controller.signal)
+
+		expect(mockNotifee.registerForegroundService).not.toHaveBeenCalled()
+		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
+	})
+
 	it("update before successful start is a no-op", async () => {
 		const { default: fgs } = await import("@/lib/foregroundService")
 
 		await fgs.update({ count: 1, progress: 0.5, speed: 0 })
 
 		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
+	})
+
+	it("update after successful start calls displayNotification with the new progress payload", async () => {
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+
+		vi.clearAllMocks()
+		mockBpsToReadable.mockImplementation((speed: number) => `${speed}B/s`)
+
+		await fgs.update({ count: 3, progress: 0.75, speed: 2048 })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
+		expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "filen-transfers-fgs",
+				android: expect.objectContaining({
+					asForegroundService: true,
+					foregroundServiceTypes: [1],
+					progress: expect.objectContaining({
+						max: 100,
+						current: 75,
+						indeterminate: false
+					})
+				})
+			})
+		)
 	})
 
 	it("stop after successful start calls stopForegroundService once", async () => {
@@ -166,7 +228,7 @@ describe("foregroundService", () => {
 		expect(await fgs.getStatus()).toBe("authorized")
 	})
 
-	it("start with PROVISIONAL from requestPermission displays notification", async () => {
+	it("start with PROVISIONAL from requestPermission displays notification with correct payload shape", async () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 0 })
 		mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 3 })
 
@@ -175,7 +237,15 @@ describe("foregroundService", () => {
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
 
 		expect(mockNotifee.requestPermission).toHaveBeenCalledTimes(1)
-		expect(mockNotifee.displayNotification).toHaveBeenCalled()
+		expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "filen-transfers-fgs",
+				android: expect.objectContaining({
+					asForegroundService: true,
+					foregroundServiceTypes: [1]
+				})
+			})
+		)
 	})
 
 	it("openSettings opens Android notification settings", async () => {
@@ -186,8 +256,76 @@ describe("foregroundService", () => {
 		expect(mockNotifee.openNotificationSettings).toHaveBeenCalledTimes(1)
 	})
 
+	it("display sets progress.current to clamped percent and indeterminate false when ratio > 0", async () => {
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		await fgs.start({ count: 2, progress: 0.6, speed: 1024 })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
+
+		const call = mockNotifee.displayNotification.mock.calls[0]?.[0] as {
+			android: { progress: { max: number; current: number; indeterminate: boolean } }
+		}
+
+		expect(call.android.progress.max).toBe(100)
+		expect(call.android.progress.current).toBe(60)
+		expect(call.android.progress.indeterminate).toBe(false)
+	})
+
+	it("display sets indeterminate true when count > 0 and ratio is 0", async () => {
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		await fgs.start({ count: 3, progress: 0, speed: 0 })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
+
+		const call = mockNotifee.displayNotification.mock.calls[0]?.[0] as {
+			android: { progress: { max: number; current: number; indeterminate: boolean } }
+		}
+
+		expect(call.android.progress.indeterminate).toBe(true)
+		expect(call.android.progress.current).toBe(0)
+	})
+
+	it("display uses em-dash speedText and does not call bpsToReadable when speed is zero", async () => {
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.5, speed: 0 })
+
+		expect(mockBpsToReadable).not.toHaveBeenCalled()
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
+	})
+
+	it("display calls bpsToReadable when speed is non-zero", async () => {
+		mockBpsToReadable.mockReturnValue("512 B/s")
+
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.5, speed: 512 })
+
+		expect(mockBpsToReadable).toHaveBeenCalledWith(512)
+	})
+
+	it("init error-reset recovery: failed init resets initPromise so a retry succeeds", async () => {
+		const error = new Error("channel creation failed")
+		mockNotifee.createChannel.mockRejectedValueOnce(error)
+
+		const { default: fgs } = await import("@/lib/foregroundService")
+
+		// First call: createChannel rejects → initPromise is reset and error is thrown
+		await expect(fgs.init()).rejects.toThrow("channel creation failed")
+
+		// Reset createChannel to succeed for the retry
+		mockNotifee.createChannel.mockResolvedValueOnce(undefined)
+
+		// Second call: should retry because initPromise was reset to null on failure
+		await fgs.init()
+
+		expect(mockNotifee.createChannel).toHaveBeenCalledTimes(2)
+	})
+
 	it("is a no-op on iOS, getStatus returns notAndroid", async () => {
-		vi.doMock("react-native", () => ({ Platform: { OS: "ios" } }))
+		platformMock.OS = "ios"
 
 		const { default: fgs } = await import("@/lib/foregroundService")
 

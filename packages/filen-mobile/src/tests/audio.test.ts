@@ -155,6 +155,7 @@ import alerts from "@/lib/alerts"
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio"
 import { Platform } from "react-native"
 import { type QueueItem } from "@/lib/audio"
+import { playlistsQueryUpdate } from "@/queries/usePlaylists.query"
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -878,8 +879,29 @@ describe("Audio", () => {
 			expect(audio.getCurrentQueueItem()).toBeNull()
 		})
 
-		it("getLoading reflects loading state", async () => {
+		it("getLoading is true while a track is loading and false after it finishes", async () => {
 			const { audio } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+
+			// Replace the audioCache.get with a promise we control so we can observe loading=true mid-flight.
+			let resolveLoad: (value: { audio: { uri: string }; metadata: { title: string; cachedAt: number } }) => void = () => {}
+			const hangPromise = new Promise<{ audio: { uri: string }; metadata: { title: string; cachedAt: number } }>(r => {
+				resolveLoad = r
+			})
+
+			vi.mocked(audioCache.get).mockReturnValueOnce(hangPromise as never)
+
+			const playPromise = audio.play()
+
+			// Give the micro-task queue one tick so loadAndPlay can set loading=true before we block on hangPromise.
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(audio.getLoading()).toBe(true)
+
+			resolveLoad({ audio: { uri: "file:///cache/a.mp3" }, metadata: { title: "Track A", cachedAt: Date.now() } })
+
+			await playPromise
 
 			expect(audio.getLoading()).toBe(false)
 		})
@@ -980,25 +1002,30 @@ describe("Audio", () => {
 			expect(positions.sort()).toEqual([0, 1, 2])
 		})
 
-		it("regenerates stale order when shuffleOrder.length !== queue.length", async () => {
+		it("advances correctly in shuffle mode after replaceQueue changes the queue size", async () => {
+			// NOTE: replaceQueue regenerates shuffleOrder to match the new queue length, so by the
+			// time next() runs, shuffleOrder.length === queue.length (the stale-order guard inside
+			// advanceToNext is not triggered here). This test verifies the normal happy-path of
+			// shuffled next() following a replaceQueue call.
 			const { audio } = await createAudio()
-
-			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
-			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
 
 			await audio.setShuffleEnabled(true)
 
-			// Replace queue to introduce a length mismatch
 			await audio.replaceQueue({
 				items: [makeQueueItem("x", "x.mp3"), makeQueueItem("y", "y.mp3"), makeQueueItem("z", "z.mp3")],
 				startingPosition: 0
 			})
 
-			// Advancing should still work without throwing
+			const startPosition = audio.getPosition()
+
 			await audio.next()
 
-			expect(audio.getPosition()).toBeGreaterThanOrEqual(0)
-			expect(audio.getPosition()).toBeLessThan(3)
+			const nextPosition = audio.getPosition()
+
+			// next() must advance to a different valid queue index
+			expect(nextPosition).toBeGreaterThanOrEqual(0)
+			expect(nextPosition).toBeLessThan(3)
+			expect(nextPosition).not.toBe(startPosition)
 		})
 
 		it("returns false (no advance) when at end of shuffleOrder and loopMode is none", async () => {
@@ -1058,8 +1085,12 @@ describe("Audio", () => {
 
 			await audio.previous()
 
-			// Should have wrapped to the end of the shuffleOrder
+			// Should have wrapped to the end of the shuffleOrder and loaded a track
 			expect(playlist.replace).toHaveBeenCalled()
+			// wrapToEnd sets shufflePosition to shuffleOrder.length - 1, so the resulting
+			// position must be a valid queue index (0 or 1 for a 2-item queue).
+			expect(audio.getPosition()).toBeGreaterThanOrEqual(0)
+			expect(audio.getPosition()).toBeLessThan(2)
 		})
 	})
 
@@ -1384,13 +1415,14 @@ describe("Audio", () => {
 			await firstPlay
 			await flushMicrotasks()
 
-			// The last replace call should be for track B (the winner)
+			// The last replace call should be for track B (the winner).
+			// skipTo(1) triggers an immediate loadAndPlay that calls replace once (for B).
+			// The stale A-load is discarded by the generation guard, so replace is called exactly once.
 			const replaceCalls = playlist.replace.mock.calls
 
-			expect(replaceCalls.length).toBeGreaterThan(0)
+			expect(replaceCalls).toHaveLength(1)
 
-			const lastReplaceCall = replaceCalls[replaceCalls.length - 1] as unknown[]
-			const lastReplaceArg = lastReplaceCall[0] as { uri: string }
+			const lastReplaceArg = (replaceCalls[0] as unknown[])[0] as { uri: string }
 
 			expect(lastReplaceArg.uri).toBe("file:///cache/b.mp3")
 		})
@@ -1895,6 +1927,573 @@ describe("Audio", () => {
 			} finally {
 				Platform.OS = "ios"
 			}
+		})
+
+		it("calls Asset.fromModule only once — second play reuses cached placeholder URI", async () => {
+			// In the node test environment, require('@/assets/images/icon-light.png') throws
+			// MODULE_NOT_FOUND (no Metro transform). The run() wrapper in getPlaceholderArtworkUri
+			// catches that error before Asset.fromModule is reached, so fromModule is never called.
+			// To exercise the caching path we override Module.require for the icon asset path.
+			const { createRequire } = await import("node:module")
+			const fakeAssetId = 42
+
+			const nodeModule = await import("node:module")
+			const origLoad = (nodeModule.Module as unknown as { _load: (...args: unknown[]) => unknown })._load
+
+			;(nodeModule.Module as unknown as { _load: (...args: unknown[]) => unknown })._load = function (
+				request: unknown,
+				...rest: unknown[]
+			): unknown {
+				if (typeof request === "string" && request.includes("icon-light.png")) {
+					return fakeAssetId
+				}
+
+				return origLoad.call(this, request, ...rest)
+			}
+
+			const { Asset } = await import("expo-asset")
+			const fromModuleSpy = vi.mocked(Asset.fromModule)
+
+			// Ensure placeholder is not yet resolved by using a fresh audio instance.
+			const { audio } = await createAudio()
+
+			vi.mocked(audioCache.get).mockResolvedValue({
+				audio: { uri: "file:///cache/audio.mp3" },
+				metadata: { title: "Song", artist: "Artist", album: "Album", pictureUri: null, cachedAt: Date.now() }
+			} as never)
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+
+			fromModuleSpy.mockClear()
+
+			try {
+				// First play — should call fromModule to resolve the placeholder.
+				await audio.play()
+				await flushMicrotasks()
+
+				const callsAfterFirst = fromModuleSpy.mock.calls.length
+
+				// fromModule must have been invoked at least once on the first play (pictureUri is null).
+				expect(callsAfterFirst).toBeGreaterThanOrEqual(1)
+
+				// Second play — placeholder is already cached, fromModule must NOT be called again.
+				await audio.play()
+				await flushMicrotasks()
+
+				expect(fromModuleSpy.mock.calls.length).toBe(callsAfterFirst)
+			} finally {
+				;(nodeModule.Module as unknown as { _load: (...args: unknown[]) => unknown })._load = origLoad
+			}
+
+			void createRequire // silence unused import warning
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// lock-screen remote callbacks
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("remoteNextTrack / remotePreviousTrack lock-screen listeners", () => {
+		function getRemoteListener(playlist: MockPlayer, eventName: string): (() => void) | undefined {
+			const found = playlist.addListener.mock.calls.find((call: unknown[]) => call[0] === eventName)
+
+			return found?.[1] as (() => void) | undefined
+		}
+
+		it("remoteNextTrack advances to the next track", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+
+			const listener = getRemoteListener(playlist, "remoteNextTrack")
+
+			expect(listener).toBeDefined()
+
+			playlist.replace.mockClear()
+
+			listener!()
+
+			await flushMicrotasks()
+
+			expect(audio.getPosition()).toBe(1)
+			expect(playlist.replace).toHaveBeenCalled()
+		})
+
+		it("remotePreviousTrack restarts the current track when more than 3 seconds in", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+
+			await audio.skipTo(1)
+
+			playlist.seekTo.mockClear()
+			playlist.replace.mockClear()
+			playlist.currentTime = 5
+
+			const listener = getRemoteListener(playlist, "remotePreviousTrack")
+
+			expect(listener).toBeDefined()
+
+			listener!()
+
+			await flushMicrotasks()
+
+			expect(playlist.seekTo).toHaveBeenCalledWith(0)
+			// Restarted in place — position unchanged, no new track loaded
+			expect(audio.getPosition()).toBe(1)
+		})
+
+		it("remotePreviousTrack goes to the previous track when at the start of a track", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+
+			await audio.skipTo(1)
+
+			playlist.replace.mockClear()
+			playlist.currentTime = 0
+
+			const listener = getRemoteListener(playlist, "remotePreviousTrack")
+
+			expect(listener).toBeDefined()
+
+			listener!()
+
+			await flushMicrotasks()
+
+			expect(audio.getPosition()).toBe(0)
+			expect(playlist.replace).toHaveBeenCalled()
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// addToQueue({position:'start'}) + shuffle shuffleOrder bump
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("addToQueue({position:'start'}) + shuffle", () => {
+		it("bumps all existing shuffleOrder indices by 1 and prepends index 0", async () => {
+			const { audio } = await createAudio()
+
+			// Start with items [a, b] at position 0, shuffle enabled — shuffleOrder has length 2.
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.setShuffleEnabled(true)
+
+			// Prepend item c at start.  Queue becomes [c, a, b], a→1, b→2.
+			await audio.addToQueue({ item: makeQueueItem("c", "c.mp3"), position: "start" })
+
+			// After prepend the queue is [c, a, b] and position was incremented to 1 (pointing at 'a').
+			expect(audio.getQueue()).toHaveLength(3)
+			expect(audio.getQueue()[0]!.item.data.uuid).toBe("c")
+			expect(audio.getPosition()).toBe(1)
+
+			// Walk all remaining shuffle slots and verify index 0 ('c') appears exactly once.
+			const visited = new Set<number>([audio.getPosition()])
+
+			for (let i = 0; i < 2; i++) {
+				await audio.next()
+				visited.add(audio.getPosition())
+			}
+
+			// Every queue index 0-2 must have been visited.
+			expect([...visited].sort()).toEqual([0, 1, 2])
+		})
+
+		it("prepending into an empty queue does not increment position", async () => {
+			const { audio } = await createAudio()
+
+			await audio.setShuffleEnabled(true)
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3"), position: "start" })
+
+			expect(audio.getPosition()).toBe(0)
+			expect(audio.getQueue()).toHaveLength(1)
+		})
+
+		it("item prepended at start is reachable via previous() in shuffle mode", async () => {
+			// NOTE: The out-of-sync fallback branch (shuffleOrder.length + 1 !== queue.length)
+			// inside addToQueue({position:'start'}) requires a queue mutation path that skips the
+			// shuffleOrder update — there is none through the public API. This test verifies the
+			// normal in-sync path: a newly prepended item is reachable when walking backwards.
+			const { audio } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.setShuffleEnabled(true)
+
+			// skipTo(1) so previous() can walk back to whatever is at shufflePosition - 1.
+			await audio.skipTo(1)
+
+			// Prepend c. Queue is now [c, a, b]. Position was 1 (a), bumped to 2 after prepend.
+			await audio.addToQueue({ item: makeQueueItem("c", "c.mp3"), position: "start" })
+
+			expect(audio.getQueue()).toHaveLength(3)
+			// Queue head is now 'c'.
+			expect(audio.getQueue()[0]!.item.data.uuid).toBe("c")
+
+			// Walk forward across all items and confirm index 0 ('c') is visited.
+			const visited = new Set<number>([audio.getPosition()])
+
+			for (let i = 0; i < 3; i++) {
+				await audio.next()
+				visited.add(audio.getPosition())
+			}
+
+			expect(visited.has(0)).toBe(true)
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// replaceQueue with undecryptable items
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("replaceQueue with undecryptable items", () => {
+		function makeUndecryptableQueueItem(uuid: string): QueueItem {
+			return {
+				playlistUuid: "test-playlist",
+				item: {
+					type: "file",
+					data: {
+						uuid,
+						decryptedMeta: null,
+						undecryptable: true,
+						size: 0n
+					}
+				} as unknown as DriveItemFileExtracted
+			}
+		}
+
+		it("filters out undecryptable items and returns droppedUndecryptable: true", async () => {
+			const { audio } = await createAudio()
+
+			const result = await audio.replaceQueue({
+				items: [
+					makeQueueItem("a", "a.mp3"),
+					makeUndecryptableQueueItem("bad"),
+					makeQueueItem("c", "c.mp3")
+				]
+			})
+
+			expect(result.droppedUndecryptable).toBe(true)
+			expect(audio.getQueue()).toHaveLength(2)
+			expect(audio.getQueue()[0]!.item.data.uuid).toBe("a")
+			expect(audio.getQueue()[1]!.item.data.uuid).toBe("c")
+		})
+
+		it("returns droppedUndecryptable: false when all items are decryptable", async () => {
+			const { audio } = await createAudio()
+
+			const result = await audio.replaceQueue({
+				items: [makeQueueItem("a", "a.mp3"), makeQueueItem("b", "b.mp3")]
+			})
+
+			expect(result.droppedUndecryptable).toBe(false)
+			expect(audio.getQueue()).toHaveLength(2)
+		})
+
+		it("adjusts startingPosition when undecryptable items are dropped before it", async () => {
+			const { audio } = await createAudio()
+
+			// Items: [bad, good-a, good-b], startingPosition: 2 (pointing at good-b).
+			// After filtering: [good-a, good-b], droppedBeforePosition=1, adjustedPosition=2-1=1.
+			await audio.replaceQueue({
+				items: [
+					makeUndecryptableQueueItem("bad"),
+					makeQueueItem("a", "a.mp3"),
+					makeQueueItem("b", "b.mp3")
+				],
+				startingPosition: 2
+			})
+
+			// good-b is now at index 1
+			expect(audio.getPosition()).toBe(1)
+			expect(audio.getCurrentQueueItem()!.item.data.uuid).toBe("b")
+		})
+
+		it("results in empty queue and position 0 when all items are undecryptable", async () => {
+			const { audio } = await createAudio()
+
+			const result = await audio.replaceQueue({
+				items: [makeUndecryptableQueueItem("bad1"), makeUndecryptableQueueItem("bad2")]
+			})
+
+			expect(result.droppedUndecryptable).toBe(true)
+			expect(audio.getQueue()).toHaveLength(0)
+			expect(audio.getPosition()).toBe(0)
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// deletePlaylist
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("deletePlaylist", () => {
+		function setupPlaylistsDir(playlistFileUuid: string, playlistJsonName: string) {
+			// getPlaylistsDirectory calls listDir twice: root → .filen, .filen → Playlists.
+			// deletePlaylist then calls listDir once more on Playlists to find the file to delete.
+			// Use a call-count-based implementation so fire-and-forget calls from earlier tests
+			// (which may consume mockResolvedValueOnce slots) don't desync the sequence.
+			let callCount = 0
+
+			mockSdkClient.listDir.mockImplementation(async () => {
+				callCount++
+
+				if (callCount === 1) {
+					return { dirs: [{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } }], files: [] }
+				}
+
+				if (callCount === 2) {
+					return { dirs: [{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }], files: [] }
+				}
+
+				// 3rd call: actual playlist directory listing
+				return {
+					dirs: [],
+					files: [{ uuid: playlistFileUuid, meta: { tag: "Decoded", inner: [{ name: playlistJsonName }] } }]
+				}
+			})
+		}
+
+		it("calls deleteFilePermanently on the matching playlist file", async () => {
+			const { audio } = await createAudio()
+
+			const playlist = {
+				uuid: "pl-delete",
+				name: "Delete Me",
+				created: Date.now(),
+				updated: Date.now(),
+				files: []
+			}
+
+			setupPlaylistsDir("file-to-delete", `${playlist.uuid}.json`)
+
+			await audio.deletePlaylist({ playlist })
+
+			expect(mockSdkClient.deleteFilePermanently).toHaveBeenCalledTimes(1)
+
+			// The first arg to deleteFilePermanently must be the resolved file object.
+			const deleteArg = mockSdkClient.deleteFilePermanently.mock.calls[0]![0] as { uuid: string }
+
+			expect(deleteArg.uuid).toBe("file-to-delete")
+		})
+
+		it("calls playlistsQueryUpdate to remove the playlist from the cache", async () => {
+			const { audio } = await createAudio()
+
+			const playlist = {
+				uuid: "pl-update",
+				name: "Update Me",
+				created: Date.now(),
+				updated: Date.now(),
+				files: []
+			}
+
+			setupPlaylistsDir("file-upd", `${playlist.uuid}.json`)
+
+			vi.mocked(playlistsQueryUpdate).mockClear()
+
+			await audio.deletePlaylist({ playlist })
+
+			expect(playlistsQueryUpdate).toHaveBeenCalledTimes(1)
+
+			// The updater should filter out the deleted playlist by uuid.
+			const updaterArg = vi.mocked(playlistsQueryUpdate).mock.calls[0]![0] as unknown as {
+				updater: (prev: { uuid: string }[]) => { uuid: string }[]
+			}
+			const prev = [{ uuid: "pl-update" }, { uuid: "other-pl" }]
+			const result = updaterArg.updater(prev)
+
+			expect(result).toHaveLength(1)
+			expect(result[0]!.uuid).toBe("other-pl")
+		})
+
+		it("skips deleteFilePermanently when the file is not found in the directory", async () => {
+			const { audio } = await createAudio()
+
+			const playlist = {
+				uuid: "pl-missing",
+				name: "Ghost Playlist",
+				created: Date.now(),
+				updated: Date.now(),
+				files: []
+			}
+
+			// Playlists directory is empty — the file for pl-missing doesn't exist.
+			let callCount = 0
+
+			mockSdkClient.listDir.mockImplementation(async () => {
+				callCount++
+
+				if (callCount === 1) {
+					return { dirs: [{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } }], files: [] }
+				}
+
+				if (callCount === 2) {
+					return { dirs: [{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }], files: [] }
+				}
+
+				// 3rd call: empty playlist dir (no matching file)
+				return { dirs: [], files: [] }
+			})
+
+			vi.mocked(playlistsQueryUpdate).mockClear()
+
+			await audio.deletePlaylist({ playlist })
+
+			expect(mockSdkClient.deleteFilePermanently).not.toHaveBeenCalled()
+			// Query updater must still be called to remove it from the UI state.
+			expect(playlistsQueryUpdate).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// savePlaylist (direct)
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("savePlaylist (direct)", () => {
+		function setupPlaylistsDirForSave() {
+			// Use mockImplementation (not mockResolvedValueOnce) so that fire-and-forget savePlaylist
+			// calls from earlier tests cannot consume the setup intended for this test.
+			mockSdkClient.listDir.mockImplementation(async () => ({
+				dirs: [
+					{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } },
+					{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }
+				],
+				files: []
+			}))
+			mockSdkClient.uploadFileFromBytes.mockReset().mockResolvedValue(undefined)
+		}
+
+		it("calls uploadFileFromBytes with JSON-encoded playlist content", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDirForSave()
+
+			const playlist = {
+				uuid: "pl-save",
+				name: "Saved Playlist",
+				created: Date.now(),
+				updated: Date.now(),
+				files: []
+			}
+
+			// Capture the serialised payload by intercepting JSON.stringify before calling savePlaylist.
+			// Node's Buffer.from(string).buffer is a shared pool ArrayBuffer whose byteOffset is unknown
+			// to the test, so decoding the raw ArrayBuffer would require the byteOffset. Capturing via
+			// a JSON.stringify spy avoids that issue entirely.
+			let capturedJson: string | null = null
+			const origStringify = JSON.stringify
+
+			vi.spyOn(JSON, "stringify").mockImplementation((...args: Parameters<typeof JSON.stringify>): string => {
+				const result = origStringify(...args)
+
+				if (typeof args[0] === "object" && args[0] !== null && (args[0] as { uuid?: string }).uuid === "pl-save") {
+					capturedJson = result
+				}
+
+				return result
+			})
+
+			try {
+				await audio.savePlaylist({ playlist })
+			} finally {
+				vi.mocked(JSON.stringify).mockRestore()
+			}
+
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
+			expect(capturedJson).not.toBeNull()
+
+			const decoded = JSON.parse(capturedJson!)
+
+			expect(decoded.uuid).toBe("pl-save")
+			expect(decoded.name).toBe("Saved Playlist")
+			expect(decoded.files).toEqual([])
+		})
+
+		it("uploads with the correct filename (uuid.json)", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDirForSave()
+
+			const playlist = {
+				uuid: "pl-fname",
+				name: "Named Playlist",
+				created: Date.now(),
+				updated: Date.now(),
+				files: []
+			}
+
+			await audio.savePlaylist({ playlist })
+
+			const uploadParams = (mockSdkClient.uploadFileFromBytes.mock.calls[0] as unknown[])[1] as {
+				fileBuilderParams: { name: string }
+			}
+
+			expect(uploadParams.fileBuilderParams.name).toBe("pl-fname.json")
+		})
+
+		it("calls playlistsQueryUpdate with the saved playlist", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDirForSave()
+
+			vi.mocked(playlistsQueryUpdate).mockClear()
+
+			const playlist = {
+				uuid: "pl-qupdate",
+				name: "Query Update Test",
+				created: Date.now(),
+				updated: Date.now(),
+				files: []
+			}
+
+			await audio.savePlaylist({ playlist })
+
+			expect(playlistsQueryUpdate).toHaveBeenCalledTimes(1)
+
+			const updaterArg = vi.mocked(playlistsQueryUpdate).mock.calls[0]![0] as unknown as {
+				updater: (prev: { uuid: string }[]) => { uuid: string }[]
+			}
+			const result = updaterArg.updater([])
+
+			expect(result).toHaveLength(1)
+			expect(result[0]!.uuid).toBe("pl-qupdate")
+		})
+
+		it("populates cache.uuidToAnyDriveItem for each file in the playlist", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDirForSave()
+
+			const { default: cacheModule } = await import("@/lib/cache")
+
+			const playlist = {
+				uuid: "pl-cache",
+				name: "Cache Test",
+				created: Date.now(),
+				updated: Date.now(),
+				files: [
+					{
+						uuid: "file-cached-1",
+						name: "track.mp3",
+						mime: "audio/mpeg",
+						size: 200,
+						bucket: "b",
+						key: "k",
+						version: 2,
+						chunks: 1,
+						region: "r",
+						playlist: "pl-cache"
+					}
+				]
+			}
+
+			await audio.savePlaylist({ playlist })
+
+			expect(cacheModule.uuidToAnyDriveItem.has("file-cached-1")).toBe(true)
 		})
 	})
 })

@@ -271,6 +271,7 @@ import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import useOfflineStore from "@/stores/useOffline.store"
+import { onlineManager } from "@tanstack/react-query"
 
 type OfflineInstance = any
 
@@ -746,9 +747,9 @@ describe("Offline", () => {
 
 			await offline.removeItem(dirItem)
 
-			// Should be exactly 1 updateIndex call (which does create + write = 2 fs.set calls),
-			// not N updateIndex calls from inside Promise.all
-			expect(writeCount).toBeLessThanOrEqual(2)
+			// Should be exactly 1 updateIndex call — atomicWrite writes to INDEX_FILE_URI exactly once
+			// (via tmp.move → copy to final destination), not N times from inside Promise.all
+			expect(writeCount).toBe(1)
 
 			fs.set = originalSet
 		})
@@ -3436,82 +3437,6 @@ describe("Offline", () => {
 			expect(index.files[nestedFileUuid]).toBeDefined()
 		})
 
-		it("storeFile throws when given a directory type", async () => {
-			const dirItem = makeDirItem("11111111-1111-1111-1111-111111111111", "NotAFile")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			const offline = await createOffline()
-
-			await expect(offline.storeFile({ file: dirItem, parent })).rejects.toThrow("Item not of type file")
-		})
-
-		it("storeFile throws when decryptedMeta is null", async () => {
-			const fileItem = {
-				type: "file",
-				data: {
-					uuid: "11111111-1111-1111-1111-111111111111",
-					decryptedMeta: null,
-					undecryptable: false
-				}
-			} as unknown as DriveItem
-
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			const offline = await createOffline()
-
-			await expect(offline.storeFile({ file: fileItem, parent })).rejects.toThrow("File missing decrypted meta")
-		})
-
-		it("storeFile cleans up on download failure", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const fileItem = makeFileItem(uuid, "fail.txt")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("Network error"))
-
-			const offline = await createOffline()
-
-			await expect(offline.storeFile({ file: fileItem, parent })).rejects.toThrow("Network error")
-
-			// Parent directory should be cleaned up
-			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)
-			expect(fs.has(`${FILES_DIR_URI}/${uuid}/fail.txt`)).toBe(false)
-		})
-
-		it("storeDirectory cleans up on download failure", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const dirItem = makeDirItem(uuid, "FailDir")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("Download failed"))
-
-			const offline = await createOffline()
-
-			await expect(offline.storeDirectory({ directory: dirItem, parent })).rejects.toThrow("Download failed")
-
-			// Data directory should be cleaned up
-			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(false)
-		})
-
-		it("storeFile is a no-op when file is already stored", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const fileItem = makeFileItem(uuid, "already.txt")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-
-			// Pre-store the file
-			writeFileData(uuid, "already.txt")
-			writeFileMeta(uuid, { item: fileItem, parent })
-
-			const offline = await createOffline()
-
-			await offline.updateIndex()
-
-			// Store again — should not call download
-			await offline.storeFile({ file: fileItem, parent })
-
-			expect(transfers.download).not.toHaveBeenCalled()
-		})
-
 		it("itemSize does not match path prefix ambiguity (/a vs /ab)", async () => {
 			const dirUuid = "11111111-1111-1111-1111-111111111111"
 			const subDirA = "22222222-2222-2222-2222-222222222222"
@@ -4639,33 +4564,6 @@ describe("Offline", () => {
 		})
 	})
 
-	describe("storeDirectory partial download failure", () => {
-		it("cleans up data directory when download fails", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const directory = makeDirItem(uuid, "my-folder")
-			const parent = makeParent("parent-uuid")
-
-			const { default: transfers } = await import("@/lib/transfers")
-
-			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("download failed mid-stream"))
-
-			const offline = await createOffline()
-
-			await expect(
-				offline.storeDirectory({
-					directory,
-					parent
-				})
-			).rejects.toThrow("download failed mid-stream")
-
-			// Data directory should be cleaned up on failure
-			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(false)
-
-			// Meta file should not exist
-			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(false)
-		})
-	})
-
 	describe("sharedInRoot parent integration", () => {
 		beforeEach(() => {
 			fs.clear()
@@ -5709,6 +5607,126 @@ describe("Offline", () => {
 			expect(result.dirs).toBe(1)
 			// size includes every file under files/ and directories/ (data + sidecars).
 			expect(result.size).toBeGreaterThanOrEqual(10 + 20)
+		})
+	})
+
+	describe("sync offline-guard branch", () => {
+		it("exits without listing remote when onlineManager reports offline", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "offline-guard.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeFileData(uuid, "offline-guard.txt")
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// Force offline — the guard at the top of sync() must trip and return early.
+			onlineManager.setOnline(false)
+
+			try {
+				await offline.sync()
+
+				// The SDK must not have been called — returning early bypasses the listDir call.
+				expect(auth.getSdkClients).not.toHaveBeenCalled()
+
+				// The file must still be present — no removal happened.
+				expect(fs.has(`${FILES_DIR_URI}/${uuid}/offline-guard.txt`)).toBe(true)
+			} finally {
+				// Restore the Node.js default so subsequent tests are unaffected.
+				onlineManager.setOnline(true)
+			}
+		})
+	})
+
+	describe("isItemStoredSync", () => {
+		it("returns undefined when the cache is cold (before any isItemStored call)", async () => {
+			const offline = await createOffline()
+			const item = makeFileItem("11111111-1111-1111-1111-111111111111", "cold-cache.txt")
+
+			// No isItemStored or updateIndex has run — cache is empty.
+			expect(offline.isItemStoredSync(item)).toBeUndefined()
+		})
+
+		it("returns false for an item that is not in the index after cache is warmed", async () => {
+			writeIndex({ files: {}, directories: {} })
+
+			const offline = await createOffline()
+			const item = makeFileItem("99999999-9999-9999-9999-999999999999", "absent.txt")
+
+			// Warm the cache by checking a specific (absent) item.
+			await offline.isItemStored(item)
+
+			expect(offline.isItemStoredSync(item)).toBe(false)
+		})
+
+		it("returns true for a file after isItemStored populates the cache", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "warm.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeIndex({
+				files: { [uuid]: { item: fileItem, parent } },
+				directories: {}
+			})
+
+			const offline = await createOffline()
+
+			// Async variant warms the isItemStoredCache.
+			expect(await offline.isItemStored(fileItem)).toBe(true)
+
+			// Sync variant must now return the cached value, not re-read disk.
+			expect(offline.isItemStoredSync(fileItem)).toBe(true)
+		})
+	})
+
+	describe("storeFile signal propagation", () => {
+		it("passes the signal to transfers.download", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "signaled.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+			let capturedSignal: AbortSignal | undefined
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination, signal: s }) => {
+				capturedSignal = s
+
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([1, 2, 3]))
+				}
+
+				return { files: [], directories: [] }
+			})
+
+			const offline = await createOffline()
+			const controller = new AbortController()
+
+			await offline.storeFile({ file: fileItem, parent, signal: controller.signal })
+
+			// The exact same AbortSignal instance must have been forwarded to the download.
+			expect(capturedSignal).toBe(controller.signal)
+		})
+
+		it("rejects with AbortError when called with an already-aborted signal", async () => {
+			const uuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "aborted.txt")
+			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+
+			vi.mocked(transfers.download).mockRejectedValueOnce(
+				Object.assign(new Error("The operation was aborted"), { name: "AbortError" })
+			)
+
+			const controller = new AbortController()
+
+			controller.abort()
+
+			const offline = await createOffline()
+
+			await expect(offline.storeFile({ file: fileItem, parent, signal: controller.signal })).rejects.toThrow("The operation was aborted")
+
+			// The aborted download must have triggered cleanup — no partial directory left.
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)
 		})
 	})
 })

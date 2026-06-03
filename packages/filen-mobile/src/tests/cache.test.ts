@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest"
 
-const { mockDb, open } = vi.hoisted(() => {
+const { mockDb, open, mockAppStateListeners } = vi.hoisted(() => {
 	const mockDb = {
 		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
 		executeRaw: vi.fn().mockResolvedValue([]),
@@ -13,14 +13,31 @@ const { mockDb, open } = vi.hoisted(() => {
 		close: vi.fn()
 	}
 
-	return { mockDb, open: vi.fn(() => mockDb) }
+	// Track all AppState listeners added during tests so we can trigger them
+	const mockAppStateListeners: Array<(state: string) => void> = []
+
+	return { mockDb, open: vi.fn(() => mockDb), mockAppStateListeners }
 })
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+vi.mock("react-native", () => ({
+	AppState: {
+		addEventListener: (_type: string, handler: (state: string) => void) => {
+			mockAppStateListeners.push(handler)
+
+			return { remove: () => {} }
+		}
+	},
+	Platform: {
+		OS: "ios",
+		select(specifics: Record<string, unknown>) {
+			return specifics["ios"] ?? specifics["default"]
+		}
+	}
+}))
 
 vi.mock("@op-engineering/op-sqlite", () => ({
 	open
@@ -63,6 +80,7 @@ vi.mock("@filen/sdk-rs", () => {
 
 import { PersistentMap, GLOBAL_PREFIX } from "@/lib/cache"
 import { serialize, deserialize } from "@/lib/serializer"
+import { type DriveItem } from "@/types"
 
 type Cache = any
 
@@ -263,6 +281,90 @@ function createReadyMap<V>(onMutate: () => void = () => {}): PersistentMap<V> {
 	return map
 }
 
+/**
+ * Await all pending microtasks and timers until executeBatch is called or we
+ * exhaust MAX_TICKS. Returns whether executeBatch was actually invoked.
+ */
+async function drainUntilExecuteBatch(maxTicks = 20): Promise<boolean> {
+	for (let i = 0; i < maxTicks; i++) {
+		await Promise.resolve()
+
+		if (mockDb.executeBatch.mock.calls.length > 0) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Minimal DriveItem factories —————————————————————————————————————————————————
+
+function makeFileDriveItem(uuid: string): Extract<DriveItem, { type: "file" }> {
+	return {
+		type: "file",
+		data: {
+			uuid,
+			size: 1024n,
+			undecryptable: false,
+			decryptedMeta: { name: "test.txt", mime: "text/plain", key: "", created: 0n, modified: 0n },
+			parent: "parent-uuid",
+			region: "eu-west-1",
+			bucket: "filen-1",
+			chunks: 1,
+			version: 2,
+			key: "",
+			rm: "",
+			timestamp: 0n,
+			favorited: false,
+			tagged: false
+		} as any
+	}
+}
+
+function makeDirectoryDriveItem(uuid: string, name?: string): Extract<DriveItem, { type: "directory" }> {
+	return {
+		type: "directory",
+		data: {
+			uuid,
+			size: 0n,
+			undecryptable: false,
+			decryptedMeta: name ? { name, color: null } : null,
+			parent: "parent-uuid",
+			timestamp: 0n,
+			favorited: false,
+			color: null
+		} as any
+	}
+}
+
+function makeSdkFile(uuid: string): any {
+	return {
+		uuid,
+		parent: "parent-uuid",
+		region: "eu-west-1",
+		bucket: "filen-1",
+		chunks: 1,
+		version: 2,
+		key: "",
+		rm: "",
+		timestamp: 0n,
+		favorited: false,
+		tagged: false
+	}
+}
+
+function makeSdkDir(uuid: string): any {
+	return {
+		uuid,
+		parent: "parent-uuid",
+		timestamp: 0n,
+		favorited: false,
+		color: null
+	}
+}
+
+// —————————————————————————————————————————————————————————————————————————————
+
 describe("PersistentMap", () => {
 	it("throws on set before ready", () => {
 		const map = new PersistentMap<string>(() => {})
@@ -427,6 +529,7 @@ describe("Cache", () => {
 		kvStore.clear()
 		setupMockDb()
 		vi.useFakeTimers()
+		mockAppStateListeners.length = 0
 	})
 
 	afterEach(() => {
@@ -736,10 +839,18 @@ describe("Cache", () => {
 			}
 		})
 
-		it("does not throw when SQLite keys do not exist", async () => {
+		it("does not throw synchronously when SQLite keys do not exist", async () => {
 			const cache = await createCache()
 
+			// cache.clear() fires sqlite.kvAsync.removeByPrefix() as fire-and-forget promises.
+			// We verify the synchronous path doesn't throw; the async removal is fire-and-forget.
 			expect(() => cache.clear()).not.toThrow()
+
+			// Drain microtasks to ensure fire-and-forget promises resolve (not reject)
+			// without propagating to the caller
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
 		})
 
 		it("also clears secureStore", async () => {
@@ -772,26 +883,34 @@ describe("Cache", () => {
 			expect(kvStore.has(kvKey(name, "key"))).toBe(false)
 		})
 
-		it("does not trigger onMutate when clearing maps (uses Map.prototype.clear)", async () => {
+		it("does not trigger onMutate (uses Map.prototype.clear, bypassing PersistentMap)", async () => {
+			// cache.clear() calls Map.prototype.clear.call(map) directly to bypass
+			// PersistentMap.clear(), which would invoke onMutate and enqueue dirty state.
+			// Verify: no executeBatch call is made after clear(), even with timer advancement.
 			const cache = await createCache()
 
 			await cache.restore()
 
-			const { name, map } = getFirstMap(cache)
+			const { map } = getFirstMap(cache)
 
 			map.set("key", "value")
+
+			// Flush the initial set to SQLite so dirty state is clean
 			cache.flush()
 			vi.advanceTimersByTime(2000)
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			kvStore.delete(kvKey(name, "key"))
+			mockDb.executeBatch.mockClear()
 
+			// clear() should bypass onMutate — no new dirty entries should be enqueued
 			cache.clear()
 
 			vi.advanceTimersByTime(2000)
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			expect(kvStore.has(kvKey(name, "key"))).toBe(false)
+			// If onMutate were called by clear(), it would enqueue dirty entries and
+			// eventually trigger executeBatch. Absence of calls confirms the bypass.
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 		})
 	})
 
@@ -830,11 +949,10 @@ describe("Cache", () => {
 			// Call flushNow before the 1-second debounce would fire
 			cache.flushNow()
 
-			// Resolve the async openDb().then(db => db.executeBatch(...)) chain
-			await Promise.resolve()
-			await Promise.resolve()
-			await Promise.resolve()
+			// Drain microtasks until executeBatch resolves — resilient to mock depth changes
+			const called = await drainUntilExecuteBatch()
 
+			expect(called).toBe(true)
 			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
 
 			const stored = kvStore.get(kvKey(name, "flush-key"))
@@ -856,10 +974,8 @@ describe("Cache", () => {
 
 			cache.flushNow()
 
-			// Resolve the fire-and-forget promise
-			await Promise.resolve()
-			await Promise.resolve()
-			await Promise.resolve()
+			// Drain microtasks until the fire-and-forget executeBatch promise resolves
+			await drainUntilExecuteBatch()
 
 			// Now advance past the original debounce window — should NOT trigger a second batch
 			vi.advanceTimersByTime(2000)
@@ -877,11 +993,548 @@ describe("Cache", () => {
 
 			cache.flushNow()
 
+			await drainUntilExecuteBatch(10)
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("cacheNewFile", () => {
+		it("inserts file into uuidToAnyDriveItem and fileUuidToNormalFile", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "file-uuid-1"
+			const sdkFile = makeSdkFile(uuid)
+			const driveItem = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(sdkFile, driveItem)
+
+			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(driveItem)
+			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(sdkFile)
+		})
+
+		it("overwrites an existing file entry", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "file-uuid-overwrite"
+			const sdkFile1 = makeSdkFile(uuid)
+			const sdkFile2 = { ...makeSdkFile(uuid), chunks: 99 }
+			const driveItem1 = makeFileDriveItem(uuid)
+			const driveItem2 = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(sdkFile1, driveItem1)
+			cache.cacheNewFile(sdkFile2, driveItem2)
+
+			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(driveItem2)
+			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(sdkFile2)
+		})
+
+		it("persists both maps to SQLite after flush", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "file-uuid-persist"
+			const sdkFile = makeSdkFile(uuid)
+			const driveItem = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(sdkFile, driveItem)
+
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			expect(kvStore.has(kvKey("uuidToAnyDriveItem", uuid))).toBe(true)
+			expect(kvStore.has(kvKey("fileUuidToNormalFile", uuid))).toBe(true)
+		})
+	})
+
+	describe("cacheNewNormalDir", () => {
+		it("inserts dir into uuidToAnyDriveItem, directoryUuidToAnyNormalDir, and directoryUuidToAnyDirWithContext", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "dir-uuid-1"
+			const sdkDir = makeSdkDir(uuid)
+			const driveItem = makeDirectoryDriveItem(uuid, "My Documents")
+
+			cache.cacheNewNormalDir(sdkDir, driveItem)
+
+			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(driveItem)
+			expect(cache.directoryUuidToAnyNormalDir.has(uuid)).toBe(true)
+			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(true)
+		})
+
+		it("sets directoryUuidToName when decryptedMeta.name is present", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "dir-uuid-named"
+			const sdkDir = makeSdkDir(uuid)
+			const driveItem = makeDirectoryDriveItem(uuid, "Projects")
+
+			cache.cacheNewNormalDir(sdkDir, driveItem)
+
+			expect(cache.directoryUuidToName.get(uuid)).toBe("Projects")
+		})
+
+		it("does not set directoryUuidToName when decryptedMeta is null", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "dir-uuid-no-meta"
+			const sdkDir = makeSdkDir(uuid)
+			const driveItem = makeDirectoryDriveItem(uuid) // no name
+
+			cache.cacheNewNormalDir(sdkDir, driveItem)
+
+			expect(cache.directoryUuidToName.has(uuid)).toBe(false)
+		})
+
+		it("constructs AnyNormalDir.Dir and AnyDirWithContext.Normal wrappers around the raw dir", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "dir-uuid-wrapper"
+			const sdkDir = makeSdkDir(uuid)
+			const driveItem = makeDirectoryDriveItem(uuid, "Wrapped")
+
+			cache.cacheNewNormalDir(sdkDir, driveItem)
+
+			const normalDir = cache.directoryUuidToAnyNormalDir.get(uuid) as any
+			const dirWithCtx = cache.directoryUuidToAnyDirWithContext.get(uuid) as any
+
+			// StubDir wraps the raw sdk dir
+			expect(normalDir.tag).toBe("Dir")
+			expect(normalDir.inner[0]).toBe(sdkDir)
+
+			// StubNormal wraps the AnyNormalDir
+			expect(dirWithCtx.tag).toBe("Normal")
+			expect(dirWithCtx.inner[0]).toBe(normalDir)
+		})
+	})
+
+	describe("refreshCachedItem", () => {
+		it("updates uuidToAnyDriveItem for any drive item type", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "refresh-uuid-1"
+			const driveItem = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(makeSdkFile(uuid), driveItem)
+
+			const updatedItem = makeFileDriveItem(uuid)
+
+			cache.refreshCachedItem(updatedItem)
+
+			expect(cache.uuidToAnyDriveItem.get(uuid)).toBe(updatedItem)
+		})
+
+		it("updates fileUuidToNormalFile when type is file and sdk file is provided", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "refresh-file-1"
+			const original = makeSdkFile(uuid)
+			const driveItem = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(original, driveItem)
+
+			const updatedFile = { ...makeSdkFile(uuid), chunks: 5 }
+
+			cache.refreshCachedItem(driveItem, updatedFile)
+
+			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(updatedFile)
+		})
+
+		it("does not update fileUuidToNormalFile when no sdk file is passed", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "refresh-file-no-sdk"
+			const original = makeSdkFile(uuid)
+			const driveItem = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(original, driveItem)
+
+			cache.refreshCachedItem(driveItem)
+
+			// Original sdk file should still be present
+			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(original)
+		})
+
+		it("updates directoryUuidToName when type is directory and decryptedMeta.name is present", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "refresh-dir-1"
+			const sdkDir = makeSdkDir(uuid)
+			const driveItem = makeDirectoryDriveItem(uuid, "OldName")
+
+			cache.cacheNewNormalDir(sdkDir, driveItem)
+
+			const renamedItem = makeDirectoryDriveItem(uuid, "NewName")
+
+			cache.refreshCachedItem(renamedItem)
+
+			expect(cache.directoryUuidToName.get(uuid)).toBe("NewName")
+		})
+
+		it("does not update directoryUuidToName when directory decryptedMeta is null", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "refresh-dir-no-meta"
+			const sdkDir = makeSdkDir(uuid)
+			const driveItem = makeDirectoryDriveItem(uuid, "HasName")
+
+			cache.cacheNewNormalDir(sdkDir, driveItem)
+
+			// Now refresh with no name
+			const noMetaItem = makeDirectoryDriveItem(uuid)
+
+			cache.refreshCachedItem(noMetaItem)
+
+			// directoryUuidToName should still have the old name (no overwrite)
+			expect(cache.directoryUuidToName.get(uuid)).toBe("HasName")
+		})
+
+		it("updates fileUuidToNormalFile when type is sharedFile", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "refresh-shared-file"
+			const sdkFile = makeSdkFile(uuid)
+
+			// Pre-seed uuidToAnyDriveItem with a sharedFile item
+			const sharedDriveItem = {
+				type: "sharedFile" as const,
+				data: { uuid, size: 512n, undecryptable: false, decryptedMeta: null } as any
+			}
+
+			cache.uuidToAnyDriveItem.set(uuid, sharedDriveItem)
+			cache.fileUuidToNormalFile.set(uuid, sdkFile)
+
+			const updatedSdkFile = { ...sdkFile, chunks: 3 }
+
+			cache.refreshCachedItem(sharedDriveItem, updatedSdkFile)
+
+			expect(cache.fileUuidToNormalFile.get(uuid)).toBe(updatedSdkFile)
+		})
+	})
+
+	describe("forgetItem", () => {
+		it("removes uuid from all six persistent maps", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "forget-uuid-1"
+			const sdkFile = makeSdkFile(uuid)
+			const driveItem = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(sdkFile, driveItem)
+
+			// Manually seed the remaining maps
+			cache.directoryUuidToName.set(uuid, "SomeName")
+			cache.directoryUuidToAnyNormalDir.set(uuid, {} as any)
+			cache.directoryUuidToAnyDirWithContext.set(uuid, {} as any)
+			cache.directoryUuidToAnySharedDirWithContext.set(uuid, {} as any)
+
+			cache.forgetItem(uuid)
+
+			expect(cache.uuidToAnyDriveItem.has(uuid)).toBe(false)
+			expect(cache.fileUuidToNormalFile.has(uuid)).toBe(false)
+			expect(cache.directoryUuidToName.has(uuid)).toBe(false)
+			expect(cache.directoryUuidToAnyNormalDir.has(uuid)).toBe(false)
+			expect(cache.directoryUuidToAnyDirWithContext.has(uuid)).toBe(false)
+			expect(cache.directoryUuidToAnySharedDirWithContext.has(uuid)).toBe(false)
+		})
+
+		it("is a no-op for a uuid that was never cached", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			// Should not throw even when uuid doesn't exist in any map
+			expect(() => cache.forgetItem("nonexistent-uuid")).not.toThrow()
+		})
+
+		it("only removes the specific uuid, not other entries", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid1 = "forget-specific-1"
+			const uuid2 = "forget-specific-2"
+
+			cache.cacheNewFile(makeSdkFile(uuid1), makeFileDriveItem(uuid1))
+			cache.cacheNewFile(makeSdkFile(uuid2), makeFileDriveItem(uuid2))
+
+			cache.forgetItem(uuid1)
+
+			expect(cache.uuidToAnyDriveItem.has(uuid1)).toBe(false)
+			expect(cache.uuidToAnyDriveItem.has(uuid2)).toBe(true)
+			expect(cache.fileUuidToNormalFile.has(uuid1)).toBe(false)
+			expect(cache.fileUuidToNormalFile.has(uuid2)).toBe(true)
+		})
+
+		it("persists the deletions to SQLite after flush", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const uuid = "forget-persist-uuid"
+			const sdkFile = makeSdkFile(uuid)
+			const driveItem = makeFileDriveItem(uuid)
+
+			cache.cacheNewFile(sdkFile, driveItem)
+
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			expect(kvStore.has(kvKey("uuidToAnyDriveItem", uuid))).toBe(true)
+
+			cache.forgetItem(uuid)
+
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			expect(kvStore.has(kvKey("uuidToAnyDriveItem", uuid))).toBe(false)
+			expect(kvStore.has(kvKey("fileUuidToNormalFile", uuid))).toBe(false)
+		})
+	})
+
+	describe("AppState background flush", () => {
+		it("calls flushNow when AppState transitions to background", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("bg-key", "bg-value")
+
+			mockDb.executeBatch.mockClear()
+
+			// Trigger the AppState listener registered by this cache instance
+			// (last registered listener = this cache instance)
+			const listener = mockAppStateListeners[mockAppStateListeners.length - 1]
+
+			expect(listener).toBeDefined()
+
+			listener!("background")
+
+			const called = await drainUntilExecuteBatch()
+
+			expect(called).toBe(true)
+			expect(kvStore.get(kvKey(name, "bg-key"))).toBeDefined()
+			expect(deserialize(kvStore.get(kvKey(name, "bg-key")) as string)).toBe("bg-value")
+		})
+
+		it("does not flush when AppState transitions to active (not background)", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const { map } = getFirstMap(cache)
+
+			map.set("active-key", "active-value")
+
+			mockDb.executeBatch.mockClear()
+
+			const listener = mockAppStateListeners[mockAppStateListeners.length - 1]
+
+			expect(listener).toBeDefined()
+
+			listener!("active")
+
+			await drainUntilExecuteBatch(5)
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("persistAsync clearGeneration guard", () => {
+		it("aborts a stale in-flight persist if clear() is called before openDb resolves", async () => {
+			// Simulate: persistAsync starts, awaits openDb(), clear() is called in between.
+			// The generation check (generation !== this.clearGeneration) should prevent writing.
+			let resolveOpenDb!: () => void
+			const openDbPromise = new Promise<void>(resolve => {
+				resolveOpenDb = resolve
+			})
+
+			// Intercept openDb to hold the promise until we call clear()
+			let openDbCallCount = 0
+
+			mockDb.executeBatch.mockClear()
+
+			const originalExecuteBatch = mockDb.executeBatch
+
+			// We'll use the real executeBatch but track it
+			mockDb.executeBatch = vi.fn().mockImplementation(originalExecuteBatch)
+
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("stale-key", "stale-value")
+
+			// Override openDb on the sqlite singleton to intercept the async persist
+			const sqliteMod = await import("@/lib/sqlite")
+			const originalOpenDb = sqliteMod.default.openDb.bind(sqliteMod.default)
+
+			sqliteMod.default.openDb = vi.fn().mockImplementation(async () => {
+				openDbCallCount++
+
+				if (openDbCallCount === 1) {
+					// Block this first call to simulate in-flight persist
+					await openDbPromise
+				}
+
+				return await originalOpenDb()
+			})
+
+			try {
+				// Start the debounce timer which will trigger persistAsync
+				cache.flush()
+				vi.advanceTimersByTime(2000)
+
+				// Advance timer to fire the debounce without awaiting the persist itself
+				await Promise.resolve()
+
+				// Now call clear() while the in-flight persist is awaiting openDb
+				cache.clear()
+
+				// Resolve the blocked openDb — persistAsync will check generation and abort
+				resolveOpenDb()
+
+				// Give the async chain time to complete (post-openDb path)
+				await Promise.resolve()
+				await Promise.resolve()
+				await Promise.resolve()
+				await Promise.resolve()
+				await Promise.resolve()
+
+				// executeBatch should NOT have been called because generation was incremented
+				// by clear() between openDb start and openDb resolve
+				expect(mockDb.executeBatch).not.toHaveBeenCalled()
+
+				// The map should be empty after clear()
+				expect(cache[name].has("stale-key")).toBe(false)
+			} finally {
+				sqliteMod.default.openDb = originalOpenDb
+			}
+		})
+	})
+
+	describe("persistAsync concurrency dedup", () => {
+		it("does not run two concurrent persistAsync calls for the same dirty batch", async () => {
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const { map } = getFirstMap(cache)
+
+			// Trigger multiple mutations in rapid succession — they all share the same debounce window
+			map.set("a", "1")
+			map.set("b", "2")
+			map.set("c", "3")
+
+			mockDb.executeBatch.mockClear()
+
+			// Manually fire the debounce twice to simulate concurrent trigger attempts
+			cache.flush()
+			cache.flush()
+
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			// Despite two flush() calls, only one executeBatch should happen
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+		})
+
+		it("re-triggers a second persist for mutations that arrive during an in-flight persist", async () => {
+			// The finally block of persistAsync calls persistDirty() if there are still dirty entries.
+			// This test verifies mutations that arrive while a persist is in-flight are not lost.
+			const cache = await createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("first", "value-1")
+
+			mockDb.executeBatch.mockClear()
+
+			// Block executeBatch to hold persistAsync in the try block
+			let resolveFirstBatch!: () => void
+			const firstBatchPromise = new Promise<void>(resolve => {
+				resolveFirstBatch = resolve
+			})
+
+			let batchCallCount = 0
+
+			mockDb.executeBatch = vi.fn().mockImplementation(async (cmds: [string, unknown[]][]) => {
+				batchCallCount++
+
+				if (batchCallCount === 1) {
+					await firstBatchPromise
+				}
+
+				// Run the real implementation
+				for (const [query, params] of cmds) {
+					if (query.startsWith("INSERT OR REPLACE")) {
+						kvStore.set(params[0] as string, params[1] as string)
+					}
+				}
+
+				return { rowsAffected: cmds.length }
+			})
+
+			// Kick off the first persist
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await Promise.resolve() // let persistAsync start
+
+			// While first persist is blocked, add a new mutation
+			map.set("second", "value-2")
+
+			// Unblock the first batch
+			resolveFirstBatch()
+
+			// Let persistAsync's finally block fire, which should call persistDirty() again
+			await Promise.resolve()
 			await Promise.resolve()
 			await Promise.resolve()
 			await Promise.resolve()
 
-			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+			// Advance time for the second debounce
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			// Both mutations should now be in the store
+			expect(kvStore.has(kvKey(name, "first"))).toBe(true)
+			expect(kvStore.has(kvKey(name, "second"))).toBe(true)
 		})
 	})
 })

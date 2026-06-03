@@ -98,6 +98,79 @@ describe("SandboxCache", () => {
 			expect(fs.has(`${CACHE_DIR}/filen-tmp/staging.bin`)).toBe(true)
 			expect(fs.has(`${CACHE_DIR}/stray.bin`)).toBe(false)
 		})
+
+		it("returns early without deleting anything when directory.list() throws", async () => {
+			const sandbox = await createSandboxCache()
+
+			fs.set(CACHE_DIR, "dir")
+			fs.set(`${CACHE_DIR}/a.bin`, new Uint8Array([1]))
+			fs.set(`${CACHE_DIR}/b.bin`, new Uint8Array([2]))
+
+			const mod = await import("expo-file-system")
+			const DirClass = mod.Directory as unknown as { prototype: { list: () => (typeof mod.File | typeof mod.Directory)[] } }
+			const originalList = DirClass.prototype.list
+
+			DirClass.prototype.list = function (): never {
+				throw new Error("EACCES: list failed")
+			}
+
+			try {
+				await expect(sandbox.clear()).resolves.toBeUndefined()
+			} finally {
+				DirClass.prototype.list = originalList
+			}
+
+			// Neither file should be deleted — clear() bailed out before iterating
+			expect(fs.has(`${CACHE_DIR}/a.bin`)).toBe(true)
+			expect(fs.has(`${CACHE_DIR}/b.bin`)).toBe(true)
+		})
+
+		it("skips an entry that disappears between list() and the run() callback", async () => {
+			const sandbox = await createSandboxCache()
+
+			// "persistent" exists in the backing store and will be deleted normally.
+			// "phantom" is returned by list() but is absent from fs, so entry.exists
+			// returns false inside the run() callback — exercising the TOCTOU guard.
+			fs.set(CACHE_DIR, "dir")
+			fs.set(`${CACHE_DIR}/persistent`, new Uint8Array([2]))
+			// Deliberately do NOT add `${CACHE_DIR}/phantom` to fs
+
+			const mod = await import("expo-file-system")
+			const DirClass = mod.Directory as unknown as {
+				prototype: { list: () => (InstanceType<typeof mod.File> | InstanceType<typeof mod.Directory>)[] }
+			}
+			const originalList = DirClass.prototype.list
+
+			// Override list() to inject a File entry whose uri is not in fs
+			DirClass.prototype.list = function (this: InstanceType<typeof mod.Directory>) {
+				const real = originalList.call(this) as (InstanceType<typeof mod.File> | InstanceType<typeof mod.Directory>)[]
+				// Append a File handle pointing at a path that does not exist in fs
+				real.push(new mod.File(`${CACHE_DIR}/phantom`))
+
+				return real
+			}
+
+			const deleteCallUris: string[] = []
+			const FileClass = mod.File as unknown as { prototype: { delete: () => void } }
+			const originalDelete = FileClass.prototype.delete
+
+			FileClass.prototype.delete = function (this: { uri: string }): void {
+				deleteCallUris.push(this.uri)
+				originalDelete.call(this)
+			}
+
+			try {
+				await expect(sandbox.clear()).resolves.toBeUndefined()
+			} finally {
+				DirClass.prototype.list = originalList
+				FileClass.prototype.delete = originalDelete
+			}
+
+			// "persistent" was deleted normally
+			expect(fs.has(`${CACHE_DIR}/persistent`)).toBe(false)
+			// delete() was never called for "phantom" — the exists guard short-circuited
+			expect(deleteCallUris.some(u => u.endsWith("/phantom"))).toBe(false)
+		})
 	})
 
 	describe("size", () => {
@@ -137,6 +210,34 @@ describe("SandboxCache", () => {
 			fs.set(`${CACHE_DIR}/filen-tmp/staging.bin`, new Uint8Array(new Array(999).fill(0)))
 
 			expect(sandbox.size()).toBe(10)
+		})
+	})
+
+	describe("default export singleton", () => {
+		it("exports a pre-constructed SandboxCache instance as the default export", async () => {
+			const mod = await import("@/lib/sandboxCache")
+
+			// The default export is the module-level singleton — not a class, but an instance
+			expect(mod.default).toBeDefined()
+			expect(typeof mod.default.clear).toBe("function")
+			expect(typeof mod.default.size).toBe("function")
+			// It is an instance of the exported SandboxCache class
+			expect(mod.default).toBeInstanceOf(mod.SandboxCache)
+		})
+
+		it("singleton size() and clear() work identically to a fresh instance", async () => {
+			const mod = await import("@/lib/sandboxCache")
+			const singleton = mod.default
+
+			fs.set(CACHE_DIR, "dir")
+			fs.set(`${CACHE_DIR}/x.bin`, new Uint8Array(new Array(7).fill(0)))
+
+			expect(singleton.size()).toBe(7)
+
+			await singleton.clear()
+
+			expect(fs.has(`${CACHE_DIR}/x.bin`)).toBe(false)
+			expect(singleton.size()).toBe(0)
 		})
 	})
 })

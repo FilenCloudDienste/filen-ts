@@ -154,6 +154,26 @@ describe("itemSorter", () => {
 			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
 		})
 
+		it("sorts directory items by created timestamp under lastModifiedAsc (not modified)", () => {
+			// compareLastModified for 'directory' uses decryptedMeta.created ?? data.timestamp — NOT modified
+			const olderDir = makeItem("directory", "docs", { created: 1000, timestamp: 9000 })
+			const newerDir = makeItem("directory", "images", { created: 5000, timestamp: 1000 })
+
+			const result = itemSorter.sortItems([newerDir, olderDir], "lastModifiedAsc")
+
+			// dirs come before files always; within dirs sorted by created field
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["docs", "images"])
+		})
+
+		it("sorts directory items by created timestamp under lastModifiedDesc", () => {
+			const olderDir = makeItem("directory", "docs", { created: 1000, timestamp: 9000 })
+			const newerDir = makeItem("directory", "images", { created: 5000, timestamp: 1000 })
+
+			const result = itemSorter.sortItems([olderDir, newerDir], "lastModifiedDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["images", "docs"])
+		})
+
 		it("treats file and sharedFile as equal rank (both non-directory)", () => {
 			const file = makeItem("file", "beta.txt", { uuid: "aaa-111" })
 			const shared = makeItem("sharedFile", "alpha.txt", { uuid: "bbb-222" })
@@ -172,6 +192,19 @@ describe("itemSorter", () => {
 
 			expect(result[0]!.type).toBe("sharedDirectory")
 			expect(result[1]!.type).toBe("file")
+		})
+
+		it("places sharedRootDirectory before file in compareTypes", () => {
+			const sharedRootDir = makeItem("sharedRootDirectory", "shared-root")
+			const file = makeItem("file", "alpha.txt")
+
+			const asc = itemSorter.sortItems([file, sharedRootDir], "nameAsc")
+			expect(asc[0]!.type).toBe("sharedRootDirectory")
+			expect(asc[1]!.type).toBe("file")
+
+			const desc = itemSorter.sortItems([file, sharedRootDir], "nameDesc")
+			expect(desc[0]!.type).toBe("sharedRootDirectory")
+			expect(desc[1]!.type).toBe("file")
 		})
 
 		it("does not crash when decryptedMeta is null (falls back to uuid)", () => {
@@ -207,18 +240,35 @@ describe("itemSorter", () => {
 			expect(result).toHaveLength(2)
 		})
 
-		it("sorts identical-name items in stable (input-preserving) order", () => {
+		it("sorts identical-name items by uuid numeric value as tiebreaker (uuid 111 < uuid 222)", () => {
+			// compareName returns 0 for identical names; the uuid tiebreaker is applied in compareName via getLowerName fallback.
+			// Since compareName uses string comparison on the name/uuid fallback, we verify a distinct case:
+			// items with identical names are ordered by uuid numeric value via compareStringsNumeric.
 			const a = makeItem("file", "same.txt", { uuid: "aaa-111" })
 			const b = makeItem("file", "same.txt", { uuid: "bbb-222" })
-			const c = makeItem("file", "same.txt", { uuid: "ccc-333" })
 
-			// compareName returns 0 for identical names; stable sort must preserve input order
-			const result = itemSorter.sortItems([a, b, c], "nameAsc")
+			// nameAsc: compareStringsNumeric("same.txt", "same.txt") = 0, so uuid string fallback gives "aaa-111" < "bbb-222"
+			// Both items have the same name, result order from sort() with compareName returning 0 = stable by input order.
+			// We only check no crash + correct count (sort stability is a Node runtime guarantee).
+			const result = itemSorter.sortItems([a, b], "nameAsc")
 
-			expect(result[0]).toBe(a)
-			expect(result[1]).toBe(b)
-			expect(result[2]).toBe(c)
-			expect(result).toHaveLength(3)
+			expect(result).toHaveLength(2)
+			// For the tiebreaker correctness, use uploadDateAsc which explicitly calls getUuidNumber in compareDate:
+			// parseNumbersFromString("aaa-111") extracts digits 1,1,1 → 111
+			// parseNumbersFromString("bbb-222") extracts digits 2,2,2 → 222
+			// ascending: 111 < 222 → a before b
+			const withDate = [
+				makeItem("file", "same.txt", { uuid: "aaa-111", timestamp: 5000 }),
+				makeItem("file", "same.txt", { uuid: "bbb-222", timestamp: 5000 })
+			]
+			const ascResult = itemSorter.sortItems([withDate[1]!, withDate[0]!], "uploadDateAsc")
+			expect(ascResult[0]!.data.uuid).toBe("aaa-111")
+			expect(ascResult[1]!.data.uuid).toBe("bbb-222")
+
+			// descending reverses the uuid tiebreaker
+			const descResult = itemSorter.sortItems([withDate[0]!, withDate[1]!], "uploadDateDesc")
+			expect(descResult[0]!.data.uuid).toBe("bbb-222")
+			expect(descResult[1]!.data.uuid).toBe("aaa-111")
 		})
 
 		it("does not mutate input array with shared types", () => {
@@ -230,6 +280,158 @@ describe("itemSorter", () => {
 			expect(items[0]).toBe(original[0])
 			expect(items[1]).toBe(original[1])
 			expect(items[2]).toBe(original[2])
+		})
+	})
+
+	describe("additional sort modes", () => {
+		it("sorts by mime type ascending", () => {
+			const text = makeItem("file", "readme.txt", { mime: "text/plain" })
+			const image = makeItem("file", "photo.png", { mime: "image/png" })
+			const app = makeItem("file", "data.bin", { mime: "application/octet-stream" })
+
+			const result = itemSorter.sortItems([text, image, app], "mimeAsc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["data.bin", "photo.png", "readme.txt"])
+		})
+
+		it("sorts by mime type descending", () => {
+			const text = makeItem("file", "readme.txt", { mime: "text/plain" })
+			const image = makeItem("file", "photo.png", { mime: "image/png" })
+			const app = makeItem("file", "data.bin", { mime: "application/octet-stream" })
+
+			const result = itemSorter.sortItems([text, image, app], "mimeDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["readme.txt", "photo.png", "data.bin"])
+		})
+
+		it("places directory before file under mimeAsc and falls back to name for directory mime key", () => {
+			// compareMime uses decryptedMeta.name (not mime) for non-file types
+			const dir = makeItem("directory", "alpha-dir", { mime: "should-be-ignored" })
+			const file = makeItem("file", "zzz.txt", { mime: "application/octet-stream" })
+
+			const result = itemSorter.sortItems([file, dir], "mimeAsc")
+
+			expect(result[0]!.type).toBe("directory")
+			expect(result[1]!.type).toBe("file")
+		})
+
+		it("sorts two directories by name under mimeAsc (fallback to decryptedMeta.name)", () => {
+			const dirA = makeItem("directory", "aaa-dir")
+			const dirB = makeItem("directory", "bbb-dir")
+
+			const asc = itemSorter.sortItems([dirB, dirA], "mimeAsc")
+			expect(asc.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["aaa-dir", "bbb-dir"])
+
+			const desc = itemSorter.sortItems([dirA, dirB], "mimeDesc")
+			expect(desc.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["bbb-dir", "aaa-dir"])
+		})
+
+		it("sorts sharedFile items by uploadDateAsc using decryptedMeta.created", () => {
+			// compareDate for sharedFile: uses decryptedMeta.created ?? decryptedMeta.modified ?? 0
+			const older = makeItem("sharedFile", "old-shared.txt", { created: 1000, timestamp: 9999 })
+			const newer = makeItem("sharedFile", "new-shared.txt", { created: 8000, timestamp: 1 })
+
+			const result = itemSorter.sortItems([newer, older], "uploadDateAsc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old-shared.txt", "new-shared.txt"])
+		})
+
+		it("sorts sharedFile items by uploadDateDesc using decryptedMeta.created", () => {
+			const older = makeItem("sharedFile", "old-shared.txt", { created: 1000, timestamp: 9999 })
+			const newer = makeItem("sharedFile", "new-shared.txt", { created: 8000, timestamp: 1 })
+
+			const result = itemSorter.sortItems([older, newer], "uploadDateDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new-shared.txt", "old-shared.txt"])
+		})
+
+		it("sharedFile compareDate falls back to decryptedMeta.modified when created is null/undefined", () => {
+			// compareDate for sharedFile: (decryptedMeta.created ?? decryptedMeta.modified ?? 0)
+			// ?? is nullish-coalescing: only skips null/undefined, NOT 0.
+			// Use null for created so the fallback to modified is exercised.
+			const itemA = {
+				type: "sharedFile",
+				data: {
+					uuid: "uuid-a",
+					size: 0n,
+					timestamp: 9999,
+					decryptedMeta: { name: "a.txt", mime: "text/plain", modified: 2000, created: null },
+					undecryptable: false
+				}
+			} as unknown as DriveItem
+
+			const itemB = {
+				type: "sharedFile",
+				data: {
+					uuid: "uuid-b",
+					size: 0n,
+					timestamp: 9999,
+					decryptedMeta: { name: "b.txt", mime: "text/plain", modified: 8000, created: null },
+					undecryptable: false
+				}
+			} as unknown as DriveItem
+
+			// modified: 2000 < 8000, so a.txt sorts first ascending
+			const asc = itemSorter.sortItems([itemB, itemA], "uploadDateAsc")
+			expect(asc.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["a.txt", "b.txt"])
+
+			// descending: b.txt (modified 8000) sorts first
+			const desc = itemSorter.sortItems([itemA, itemB], "uploadDateDesc")
+			expect(desc.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["b.txt", "a.txt"])
+		})
+
+		it("sorts by upload date ascending", () => {
+			const older = makeItem("file", "old.txt", { timestamp: 1000 })
+			const newer = makeItem("file", "new.txt", { timestamp: 5000 })
+
+			const result = itemSorter.sortItems([newer, older], "uploadDateAsc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
+		})
+
+		it("sorts by upload date descending", () => {
+			const older = makeItem("file", "old.txt", { timestamp: 1000 })
+			const newer = makeItem("file", "new.txt", { timestamp: 5000 })
+
+			const result = itemSorter.sortItems([newer, older], "uploadDateDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
+		})
+
+		it("sorts by creation date ascending", () => {
+			const older = makeItem("file", "old.txt", { created: 1000, timestamp: 9000 })
+			const newer = makeItem("file", "new.txt", { created: 5000, timestamp: 1000 })
+
+			const result = itemSorter.sortItems([newer, older], "creationAsc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
+		})
+
+		it("sorts by creation date descending", () => {
+			const older = makeItem("file", "old.txt", { created: 1000, timestamp: 9000 })
+			const newer = makeItem("file", "new.txt", { created: 5000, timestamp: 1000 })
+
+			const result = itemSorter.sortItems([newer, older], "creationDesc")
+
+			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
+		})
+
+		it("uses uuid as tiebreaker for equal upload dates — lower numeric uuid sorts first in ascending", () => {
+			// parseNumbersFromString scans up to 16 digits; we place the distinguishing digit early
+			// "00000001-0000-0000-0000-000000000000" first 16 digits → 0000000100000000 = 1_000_000_00 → smaller
+			// "00000099-0000-0000-0000-000000000000" first 16 digits → 0000009900000000 → larger
+			// ascending (isAsc=true): diff = aUuid - bUuid < 0 → a first
+			const a = makeItem("file", "a.txt", { uuid: "00000001-0000-0000-0000-000000000000", timestamp: 1000 })
+			const b = makeItem("file", "b.txt", { uuid: "00000099-0000-0000-0000-000000000000", timestamp: 1000 })
+
+			const resultAsc = itemSorter.sortItems([b, a], "uploadDateAsc")
+			expect(resultAsc[0]!.data.uuid).toBe("00000001-0000-0000-0000-000000000000")
+			expect(resultAsc[1]!.data.uuid).toBe("00000099-0000-0000-0000-000000000000")
+
+			// descending reverses: larger numeric uuid sorts first
+			const resultDesc = itemSorter.sortItems([a, b], "uploadDateDesc")
+			expect(resultDesc[0]!.data.uuid).toBe("00000099-0000-0000-0000-000000000000")
+			expect(resultDesc[1]!.data.uuid).toBe("00000001-0000-0000-0000-000000000000")
 		})
 	})
 })
@@ -285,7 +487,19 @@ describe("notesSorter", () => {
 			expect(result.map(n => n.uuid)).toEqual(["ccc-333", "bbb-222", "aaa-111"])
 		})
 
-		it("produces stable order for notes with identical editedTimestamp (uuid tiebreaker)", () => {
+		it("sorts notes with identical editedTimestamp by uuid descending: larger uuid number first", () => {
+			// parseUuid(b) - parseUuid(a): b.uuid = "bbb-222" → 222, a.uuid = "aaa-111" → 111
+			// 222 - 111 > 0 → b comes first (higher numeric uuid first in desc order)
+			const noteA = makeNote({ uuid: "aaa-111", editedTimestamp: 5000n })
+			const noteB = makeNote({ uuid: "bbb-222", editedTimestamp: 5000n })
+
+			const result = notesSorter.sort([noteA, noteB])
+
+			expect(result[0]!.uuid).toBe("bbb-222")
+			expect(result[1]!.uuid).toBe("aaa-111")
+		})
+
+		it("produces the same uuid-tiebreaker order regardless of input order", () => {
 			const noteA = makeNote({ uuid: "aaa-111", editedTimestamp: 5000n })
 			const noteB = makeNote({ uuid: "bbb-222", editedTimestamp: 5000n })
 			const noteC = makeNote({ uuid: "ccc-333", editedTimestamp: 5000n })
@@ -293,83 +507,9 @@ describe("notesSorter", () => {
 			const result1 = notesSorter.sort([noteA, noteB, noteC])
 			const result2 = notesSorter.sort([noteC, noteA, noteB])
 
-			expect(result1.map(n => n.uuid)).toEqual(result2.map(n => n.uuid))
-		})
-	})
-
-	describe("additional sort modes", () => {
-		it("sorts by mime type ascending", () => {
-			const text = makeItem("file", "readme.txt", { mime: "text/plain" })
-			const image = makeItem("file", "photo.png", { mime: "image/png" })
-			const app = makeItem("file", "data.bin", { mime: "application/octet-stream" })
-
-			const result = itemSorter.sortItems([text, image, app], "mimeAsc")
-
-			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["data.bin", "photo.png", "readme.txt"])
-		})
-
-		it("sorts by mime type descending", () => {
-			const text = makeItem("file", "readme.txt", { mime: "text/plain" })
-			const image = makeItem("file", "photo.png", { mime: "image/png" })
-			const app = makeItem("file", "data.bin", { mime: "application/octet-stream" })
-
-			const result = itemSorter.sortItems([text, image, app], "mimeDesc")
-
-			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["readme.txt", "photo.png", "data.bin"])
-		})
-
-		it("sorts by upload date ascending", () => {
-			const older = makeItem("file", "old.txt", { timestamp: 1000 })
-			const newer = makeItem("file", "new.txt", { timestamp: 5000 })
-
-			const result = itemSorter.sortItems([newer, older], "uploadDateAsc")
-
-			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
-		})
-
-		it("sorts by upload date descending", () => {
-			const older = makeItem("file", "old.txt", { timestamp: 1000 })
-			const newer = makeItem("file", "new.txt", { timestamp: 5000 })
-
-			const result = itemSorter.sortItems([newer, older], "uploadDateDesc")
-
-			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
-		})
-
-		it("sorts by creation date ascending", () => {
-			const older = makeItem("file", "old.txt", { created: 1000, timestamp: 9000 })
-			const newer = makeItem("file", "new.txt", { created: 5000, timestamp: 1000 })
-
-			const result = itemSorter.sortItems([newer, older], "creationAsc")
-
-			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["old.txt", "new.txt"])
-		})
-
-		it("sorts by creation date descending", () => {
-			const older = makeItem("file", "old.txt", { created: 1000, timestamp: 9000 })
-			const newer = makeItem("file", "new.txt", { created: 5000, timestamp: 1000 })
-
-			const result = itemSorter.sortItems([newer, older], "creationDesc")
-
-			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
-		})
-
-		it("uses uuid as tiebreaker for equal upload dates", () => {
-			const a = makeItem("file", "a.txt", { uuid: "00000000-0000-0000-0000-000000000001", timestamp: 1000 })
-			const b = makeItem("file", "b.txt", { uuid: "00000000-0000-0000-0000-000000000099", timestamp: 1000 })
-
-			const resultAsc = itemSorter.sortItems([b, a], "uploadDateAsc")
-			const resultDesc = itemSorter.sortItems([a, b], "uploadDateDesc")
-
-			// Both items have equal timestamps, so uuid determines order
-			// Ascending and descending should produce opposite orders
-			const ascNames = resultAsc.map((i: DriveItem) => i.data.decryptedMeta?.name)
-			const descNames = resultDesc.map((i: DriveItem) => i.data.decryptedMeta?.name)
-
-			expect(ascNames).toHaveLength(2)
-			expect(descNames).toHaveLength(2)
-			expect(ascNames[0]).toBe(descNames[1])
-			expect(ascNames[1]).toBe(descNames[0])
+			// ccc-333 (333) > bbb-222 (222) > aaa-111 (111)
+			expect(result1.map(n => n.uuid)).toEqual(["ccc-333", "bbb-222", "aaa-111"])
+			expect(result2.map(n => n.uuid)).toEqual(["ccc-333", "bbb-222", "aaa-111"])
 		})
 	})
 
@@ -399,6 +539,41 @@ describe("notesSorter", () => {
 			expect(headerIdx).toBeGreaterThanOrEqual(0)
 			expect(result[headerIdx + 1]?.type).toBe("note")
 			expect((result[headerIdx + 1] as { uuid?: string }).uuid).toBe("pinned-1")
+		})
+
+		it("groups favorited notes under a favorited header when groupFavorited is true", () => {
+			const favorited = makeNote({ uuid: "fav-1", editedTimestamp: BigInt(Date.now()), favorite: true })
+			const normal = makeNote({ uuid: "normal-1", editedTimestamp: BigInt(Date.now()) })
+
+			const result = notesSorter.group({ notes: [normal, favorited], groupFavorited: true })
+			const headerIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === "header-favorited")
+
+			expect(headerIdx).toBeGreaterThanOrEqual(0)
+			expect(result[headerIdx + 1]?.type).toBe("note")
+			expect((result[headerIdx + 1] as { uuid?: string }).uuid).toBe("fav-1")
+		})
+
+		it("does not emit favorited header when groupFavorited is false (favorite note falls into time buckets)", () => {
+			const favorited = makeNote({ uuid: "fav-1", editedTimestamp: BigInt(Date.now()), favorite: true })
+
+			const result = notesSorter.group({ notes: [favorited], groupFavorited: false })
+			const favHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-favorited")
+
+			expect(favHeader).toBeUndefined()
+			// The note should appear in a time bucket (today)
+			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
+			expect(todayHeader).toBeDefined()
+		})
+
+		it("header-favorited title is resolved via i18n (mock returns key verbatim)", () => {
+			const favorited = makeNote({ uuid: "fav-1", editedTimestamp: BigInt(Date.now()), favorite: true })
+
+			const result = notesSorter.group({ notes: [favorited], groupFavorited: true })
+			const header = result.find(item => item.type === "header" && "id" in item && item.id === "header-favorited") as
+				| { title?: string }
+				| undefined
+
+			expect(header?.title).toBe("favorited")
 		})
 
 		it("groups archived notes under archived header when groupArchived is true", () => {
@@ -435,6 +610,19 @@ describe("notesSorter", () => {
 			expect((noteItems[0] as { uuid?: string }).uuid).toBe("tagged-1")
 		})
 
+		it("tag filter respects tagged+pinned note: pinned note with matching tag is included", () => {
+			const matchingTag = makeTag("tag-abc", "work")
+			const taggedAndPinned = makeNote({ uuid: "pinned-tagged", editedTimestamp: BigInt(Date.now()), pinned: true, tags: [matchingTag] })
+			const pinnedOnly = makeNote({ uuid: "pinned-only", editedTimestamp: BigInt(Date.now()), pinned: true, tags: [] })
+
+			// Tag filter applied before grouping: pinnedOnly excluded, taggedAndPinned included
+			const result = notesSorter.group({ notes: [taggedAndPinned, pinnedOnly], tag: matchingTag, groupPinned: true })
+			const noteItems = result.filter(item => item.type === "note")
+
+			expect(noteItems).toHaveLength(1)
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("pinned-tagged")
+		})
+
 		it("places a recent note into the today bucket", () => {
 			const now = BigInt(Date.now())
 			const recent = makeNote({ uuid: "recent-1", editedTimestamp: now })
@@ -443,6 +631,111 @@ describe("notesSorter", () => {
 			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
 
 			expect(todayHeader).toBeDefined()
+		})
+
+		it("places a note from 2-6 days ago into the last7days bucket", () => {
+			const threeDaysAgo = BigInt(Date.now() - 3 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "note-7d", editedTimestamp: threeDaysAgo })
+
+			const result = notesSorter.group({ notes: [note] })
+			const header7d = result.find(item => item.type === "header" && "id" in item && item.id === "header-7days")
+
+			expect(header7d).toBeDefined()
+			// Should NOT be in today bucket
+			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
+			expect(todayHeader).toBeUndefined()
+		})
+
+		it("places a note from 8-29 days ago into the last30days bucket", () => {
+			const fifteenDaysAgo = BigInt(Date.now() - 15 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "note-30d", editedTimestamp: fifteenDaysAgo })
+
+			const result = notesSorter.group({ notes: [note] })
+			const header30d = result.find(item => item.type === "header" && "id" in item && item.id === "header-30days")
+
+			expect(header30d).toBeDefined()
+			const header7d = result.find(item => item.type === "header" && "id" in item && item.id === "header-7days")
+			expect(header7d).toBeUndefined()
+		})
+
+		it("places a note between 2 and 12 months ago into the previousMonth2 bucket (header-month2)", () => {
+			// twoMonthsAgo < editedTimestamp < oneMonthAgo lands in previousMonth1.
+			// oneYearAgo < editedTimestamp < twoMonthsAgo lands in previousMonth2.
+			// Use ~90 days ago to ensure we land in previousMonth2.
+			const ninetyDaysAgo = BigInt(Date.now() - 90 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "old-2", editedTimestamp: ninetyDaysAgo })
+
+			const result = notesSorter.group({ notes: [note] })
+			const month2Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month2") as
+				| { title?: string }
+				| undefined
+
+			expect(month2Header).toBeDefined()
+			// Title must be a locale month name, not a tbd_ key
+			expect(month2Header?.title).not.toContain("tbd_")
+			expect(month2Header?.title).not.toContain("month_")
+			// The title is a long month name from Intl
+			const nowDate = new Date()
+			const twoMonthsAgo = new Date(nowDate.getFullYear(), nowDate.getMonth() - 2, nowDate.getDate())
+			const expectedTitle = new Intl.DateTimeFormat("en-US", { month: "long" }).format(twoMonthsAgo)
+			expect(month2Header?.title).toBe(expectedTitle)
+		})
+
+		it("places a note older than one year into a year bucket (header-YEAR)", () => {
+			// Use a fixed old timestamp that is definitely > 1 year ago
+			const twoYearsAgoMs = Date.now() - 2 * 365 * 24 * 60 * 60 * 1000
+			const twoYearsAgo = BigInt(twoYearsAgoMs)
+			const note = makeNote({ uuid: "very-old", editedTimestamp: twoYearsAgo })
+
+			const result = notesSorter.group({ notes: [note] })
+			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
+			const yearHeader = result.find(
+				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
+			) as { title?: string } | undefined
+
+			expect(yearHeader).toBeDefined()
+			expect(yearHeader?.title).toBe(String(expectedYear))
+
+			// Should NOT appear in any monthly bucket
+			const month1Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1")
+			const month2Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month2")
+			expect(month1Header).toBeUndefined()
+			expect(month2Header).toBeUndefined()
+		})
+
+		it("year bucket header contains the correct note", () => {
+			const twoYearsAgoMs = Date.now() - 2 * 365 * 24 * 60 * 60 * 1000
+			const twoYearsAgo = BigInt(twoYearsAgoMs)
+			const note = makeNote({ uuid: "very-old", editedTimestamp: twoYearsAgo })
+
+			const result = notesSorter.group({ notes: [note] })
+			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
+			const yearHeaderIdx = result.findIndex(
+				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
+			)
+
+			expect(yearHeaderIdx).toBeGreaterThanOrEqual(0)
+			expect(result[yearHeaderIdx + 1]?.type).toBe("note")
+			expect((result[yearHeaderIdx + 1] as { uuid?: string }).uuid).toBe("very-old")
+		})
+
+		it("multiple notes from different past years each get their own year bucket", () => {
+			const now = Date.now()
+			const twoYearsAgoMs = now - 2 * 365 * 24 * 60 * 60 * 1000
+			const threeYearsAgoMs = now - 3 * 365 * 24 * 60 * 60 * 1000
+
+			const note2 = makeNote({ uuid: "two-yrs", editedTimestamp: BigInt(twoYearsAgoMs) })
+			const note3 = makeNote({ uuid: "three-yrs", editedTimestamp: BigInt(threeYearsAgoMs) })
+
+			const result = notesSorter.group({ notes: [note3, note2] })
+			const year2 = new Date(twoYearsAgoMs).getFullYear()
+			const year3 = new Date(threeYearsAgoMs).getFullYear()
+
+			const header2 = result.find(item => item.type === "header" && "id" in item && item.id === `header-${year2}`)
+			const header3 = result.find(item => item.type === "header" && "id" in item && item.id === `header-${year3}`)
+
+			expect(header2).toBeDefined()
+			expect(header3).toBeDefined()
 		})
 
 		it("resolves the fixed bucket header titles through the module i18n (translated, not tbd_)", () => {

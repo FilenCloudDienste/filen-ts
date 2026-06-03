@@ -185,12 +185,28 @@ describe("fileProvider", () => {
 			expect(result).toBe(false)
 		})
 
+		it("syncs false to secureStore when no auth.json exists", async () => {
+			await fileProvider.enabled()
+
+			expect(mockSecureStoreData.get(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY)).toBe(false)
+		})
+
 		it("returns true after enable()", async () => {
 			await fileProvider.enable()
 
 			const result = await fileProvider.enabled()
 
 			expect(result).toBe(true)
+		})
+
+		it("syncs true to secureStore when auth.json has providerEnabled: true", async () => {
+			await fileProvider.enable()
+			// Clear to confirm enabled() itself drives the sync, not enable()
+			mockSecureStoreData.clear()
+
+			await fileProvider.enabled()
+
+			expect(mockSecureStoreData.get(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY)).toBe(true)
 		})
 
 		it("returns false after disable()", async () => {
@@ -200,6 +216,45 @@ describe("fileProvider", () => {
 			const result = await fileProvider.enabled()
 
 			expect(result).toBe(false)
+		})
+
+		it("returns false when auth.json exists but providerEnabled is false", async () => {
+			// Write an auth.json directly with providerEnabled:false to exercise the
+			// branch where the file exists but the flag is explicitly disabled.
+			AUTH_FILE.create()
+			AUTH_FILE.write(
+				JSON.stringify({
+					providerEnabled: false,
+					sdkConfig: null,
+					maxThumbnailFilesBudget: null,
+					maxCacheFilesBudget: null
+				})
+			)
+
+			const result = await fileProvider.enabled()
+
+			expect(result).toBe(false)
+		})
+
+		it("syncs false to secureStore when auth.json exists with providerEnabled: false", async () => {
+			// Write an auth.json with providerEnabled:false to test that enabled()
+			// unconditionally syncs the read value back to secureStore regardless of truth.
+			AUTH_FILE.create()
+			AUTH_FILE.write(
+				JSON.stringify({
+					providerEnabled: false,
+					sdkConfig: null,
+					maxThumbnailFilesBudget: null,
+					maxCacheFilesBudget: null
+				})
+			)
+
+			// Seed a stale truthy value to confirm it gets overwritten
+			mockSecureStoreData.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, true)
+
+			await fileProvider.enabled()
+
+			expect(mockSecureStoreData.get(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY)).toBe(false)
 		})
 	})
 
@@ -221,11 +276,13 @@ describe("fileProvider", () => {
 			await fileProvider.setCacheBudget(256 * 1024 * 1024)
 
 			const data = JSON.parse(AUTH_FILE.textSync())
-			const thumbnailBudget = Math.floor((256 * 1024 * 1024) / 4)
-			const cacheBudget = 256 * 1024 * 1024 - thumbnailBudget
 
-			expect(data.maxThumbnailFilesBudget).toBe(thumbnailBudget)
-			expect(data.maxCacheFilesBudget).toBe(cacheBudget)
+			// 256 MiB == 268435456 bytes
+			// thumbnails = floor(268435456 / 4) = 67108864 (25%)
+			// cache      = 268435456 - 67108864  = 201326592 (75%)
+			// Hard-coded so any change to the source ratio is caught immediately.
+			expect(data.maxThumbnailFilesBudget).toBe(67108864)
+			expect(data.maxCacheFilesBudget).toBe(201326592)
 		})
 
 		it("throws for budgets below MIN_CACHE_BUDGET_BYTES (64 MiB)", async () => {
@@ -249,6 +306,65 @@ describe("fileProvider", () => {
 
 		it("throws when called before enable()", async () => {
 			await expect(fileProvider.setCacheBudget(128 * 1024 * 1024)).rejects.toThrow("setCacheBudget called before enable()")
+		})
+
+		it("throws when called after disable() leaves no auth.json", async () => {
+			await fileProvider.enable()
+			await fileProvider.disable()
+
+			// After disable() the file is gone — same 'called before enable()' guard fires
+			await expect(fileProvider.setCacheBudget(128 * 1024 * 1024)).rejects.toThrow("setCacheBudget called before enable()")
+		})
+
+		it("returns 1 GiB default when only maxCacheFilesBudget is null (partial record)", async () => {
+			// Writes a file where maxThumbnailFilesBudget is present but maxCacheFilesBudget is null.
+			// The guard at fileProvider.ts line 85 must treat partial-null the same as both-null.
+			AUTH_FILE.create()
+			AUTH_FILE.write(
+				JSON.stringify({
+					providerEnabled: true,
+					sdkConfig: null,
+					maxThumbnailFilesBudget: 67108864,
+					maxCacheFilesBudget: null
+				})
+			)
+
+			const result = await fileProvider.cacheBudget()
+
+			expect(result).toBe(1024 * 1024 * 1024)
+		})
+
+		it("returns 1 GiB default when only maxThumbnailFilesBudget is null (partial record)", async () => {
+			// Writes a file where maxCacheFilesBudget is present but maxThumbnailFilesBudget is null.
+			AUTH_FILE.create()
+			AUTH_FILE.write(
+				JSON.stringify({
+					providerEnabled: true,
+					sdkConfig: null,
+					maxThumbnailFilesBudget: null,
+					maxCacheFilesBudget: 201326592
+				})
+			)
+
+			const result = await fileProvider.cacheBudget()
+
+			expect(result).toBe(1024 * 1024 * 1024)
+		})
+
+		it("TOCTOU: setCacheBudget after disable() does not recreate auth.json", async () => {
+			// Race: setCacheBudget reads current state (sees the file), then disable()
+			// deletes auth.json before setCacheBudget acquires writeMutex for the write.
+			// setCacheBudget should still throw because it checks current===null before
+			// the write — it reads null after the file is gone in an in-sequence scenario.
+			// This test validates the straightforward post-disable() path (sequential).
+			await fileProvider.enable()
+			await fileProvider.disable()
+
+			// After disable the read() returns null, so setCacheBudget must throw
+			await expect(fileProvider.setCacheBudget(128 * 1024 * 1024)).rejects.toThrow("setCacheBudget called before enable()")
+
+			// auth.json must NOT be recreated by the failed call
+			expect(AUTH_FILE.exists).toBe(false)
 		})
 	})
 })

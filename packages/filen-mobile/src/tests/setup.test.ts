@@ -67,6 +67,14 @@ import setup from "@/lib/setup"
 
 const STRINGIFIED_CLIENT = { rootUuid: "root-uuid-1" } as any
 
+// Flush all pending microtasks so fire-and-forget promise chains settle.
+// A single Promise.resolve() tick is enough because the chains are depth-1
+// (.catch() on a resolved promise).
+async function flushMicrotasks(): Promise<void> {
+	await Promise.resolve()
+	await Promise.resolve()
+}
+
 beforeEach(() => {
 	vi.clearAllMocks()
 	mockCache.rootUuid = null
@@ -143,13 +151,15 @@ describe("setup.setup", () => {
 		expect(mockOffline.sync).not.toHaveBeenCalled()
 	})
 
-	it("initialises secureStore, sqlite, cache, and queries unconditionally", async () => {
+	it("initialises secureStore, sqlite, cache, queries, i18n, and theme unconditionally", async () => {
 		await setup.setup()
 
 		expect(mockSecureStore.init).toHaveBeenCalledOnce()
 		expect(mockSqlite.init).toHaveBeenCalledOnce()
 		expect(mockCache.restore).toHaveBeenCalledOnce()
 		expect(mockRestoreQueries).toHaveBeenCalledOnce()
+		expect(mockInitI18n).toHaveBeenCalledOnce()
+		expect(mockInitTheme).toHaveBeenCalledOnce()
 	})
 
 	it("throws when the inner run callback rejects", async () => {
@@ -157,5 +167,61 @@ describe("setup.setup", () => {
 		mockSqlite.init.mockRejectedValue(boom)
 
 		await expect(setup.setup()).rejects.toThrow("sqlite exploded")
+	})
+
+	it("calls foregroundService.init, fileCache.gc, and audioCache.gc when isAuthed and not background", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+		await flushMicrotasks()
+
+		expect(mockForegroundService.init).toHaveBeenCalledOnce()
+		expect(mockFileCache.gc).toHaveBeenCalledOnce()
+		expect(mockAudioCache.gc).toHaveBeenCalledOnce()
+	})
+
+	it("calls offline.updateIndex and offline.sync when isAuthed and not background", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+		await flushMicrotasks()
+
+		expect(mockOffline.updateIndex).toHaveBeenCalledOnce()
+		expect(mockOffline.sync).toHaveBeenCalledOnce()
+	})
+
+	it("calls alerts.error when offline.updateIndex rejects in the fire-and-forget block", async () => {
+		const offlineErr = new Error("index failed")
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+		mockOffline.updateIndex.mockRejectedValue(offlineErr)
+
+		await setup.setup()
+		await flushMicrotasks()
+
+		expect(mockAlerts.error).toHaveBeenCalledWith(offlineErr)
+	})
+
+	it("does not call offline.updateIndex, offline.sync, foregroundService.init, fileCache.gc, or audioCache.gc when isAuthed is false (foreground)", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
+
+		await setup.setup()
+		await flushMicrotasks()
+
+		expect(mockOffline.updateIndex).not.toHaveBeenCalled()
+		expect(mockOffline.sync).not.toHaveBeenCalled()
+		expect(mockForegroundService.init).not.toHaveBeenCalled()
+		expect(mockFileCache.gc).not.toHaveBeenCalled()
+		expect(mockAudioCache.gc).not.toHaveBeenCalled()
+	})
+
+	it("skips foregroundService.init, fileCache.gc, and audioCache.gc in background mode even when authenticated", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup({ background: true })
+		await flushMicrotasks()
+
+		expect(mockForegroundService.init).not.toHaveBeenCalled()
+		expect(mockFileCache.gc).not.toHaveBeenCalled()
+		expect(mockAudioCache.gc).not.toHaveBeenCalled()
 	})
 })

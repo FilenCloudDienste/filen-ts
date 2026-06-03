@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const { kvStore, notesState, mockNotesSetContent, mockFetchNotesWithContent, mockCreateExecutableTimeout } = vi.hoisted(() => ({
@@ -12,7 +14,41 @@ const { kvStore, notesState, mockNotesSetContent, mockFetchNotesWithContent, moc
 	mockCreateExecutableTimeout: vi.fn()
 }))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+vi.mock("react-native", async () => {
+	const listeners = new Map<string, Set<(state: string) => void>>()
+
+	return {
+		AppState: {
+			addEventListener: vi.fn((type: string, handler: (state: string) => void) => {
+				if (!listeners.has(type)) {
+					listeners.set(type, new Set())
+				}
+
+				listeners.get(type)!.add(handler)
+
+				return {
+					remove: () => {
+						listeners.get(type)?.delete(handler)
+					}
+				}
+			}),
+			_emit: (type: string, nextState: string) => {
+				for (const handler of listeners.get(type) ?? []) {
+					handler(nextState)
+				}
+			},
+			_reset: () => {
+				listeners.clear()
+			}
+		},
+		Platform: {
+			OS: "ios",
+			select<T>(specifics: { ios?: T; android?: T; default?: T }): T | undefined {
+				return specifics["ios"] ?? specifics["default"]
+			}
+		}
+	}
+})
 
 vi.mock("@filen/utils", async () => ({
 	...await import("@/tests/mocks/filenUtils"),
@@ -52,8 +88,11 @@ vi.mock("@/queries/useNotesWithContent.query", () => ({
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-import { Sync } from "@/components/notes/sync"
+import { Sync, SyncHost } from "@/components/notes/sync"
 import sqlite from "@/lib/sqlite"
+import { AppState } from "react-native"
+import { render } from "@testing-library/react"
+import React from "react"
 import type { InflightContent } from "@/stores/useNotes.store"
 
 const KV_KEY = "inflightNoteContent"
@@ -82,6 +121,7 @@ describe("Sync (Notes)", () => {
 		vi.mocked(sqlite.kvAsync.get).mockClear()
 		vi.mocked(sqlite.kvAsync.set).mockClear()
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
+		;(AppState as unknown as { _reset: () => void })._reset()
 	})
 
 	describe("restoreFromDisk", () => {
@@ -126,6 +166,25 @@ describe("Sync (Notes)", () => {
 
 			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
 			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("new")
+		})
+
+		it("prunes entries whose timestamp equals editedTimestamp (strict greater-than filter)", async () => {
+			// The filter is c.timestamp > editedTimestamp (strict). An entry
+			// with timestamp === editedTimestamp must be pruned.
+			kvStore.set(KV_KEY, {
+				"note-1": [
+					{ timestamp: 1000, content: "equal-boundary", note: mockNote("note-1") },
+					{ timestamp: 1001, content: "one-above", note: mockNote("note-1") }
+				]
+			})
+
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+
+			await createSync()
+
+			// Only the entry strictly above the boundary must survive.
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("one-above")
 		})
 
 		it("handles empty disk gracefully", async () => {
@@ -232,14 +291,61 @@ describe("Sync (Notes)", () => {
 			expect(kvStore.has(KV_KEY)).toBe(false)
 		})
 
-		it("catches write errors", async () => {
+		it("catches write errors and logs them — does not throw", async () => {
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				const sync = await createSync()
+
+				vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
+
+				await sync.flushToDisk({
+					"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
+				})
+
+				// flushToDisk must not propagate the error
+				expect(consoleSpy).toHaveBeenCalledWith(
+					"Error flushing note sync to disk:",
+					expect.any(Error)
+				)
+			} finally {
+				consoleSpy.mockRestore()
+			}
+		})
+
+		it("writes only the remaining entries after a partial sync failure", async () => {
 			const sync = await createSync()
 
-			vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
+			// Prime inflight with two notes; note-1 will fail, note-2 will succeed.
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "will-fail", note: mockNote("note-1") }],
+				"note-2": [{ timestamp: 1000, content: "will-succeed", note: mockNote("note-2") }]
+			}
 
-			await sync.flushToDisk({
-				"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
-			})
+			mockNotesSetContent
+				.mockRejectedValueOnce(new Error("upload failed"))
+				.mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			vi.mocked(sqlite.kvAsync.set).mockClear()
+			vi.mocked(sqlite.kvAsync.remove).mockClear()
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// note-1 failed and must still be on disk; note-2 was cleaned and not written back.
+			const written = kvStore.get(KV_KEY) as InflightContent | undefined
+
+			expect(written).toBeDefined()
+			expect(written!["note-1"]).toHaveLength(1)
+			expect(written!["note-2"]).toBeUndefined()
 		})
 	})
 
@@ -452,6 +558,57 @@ describe("Sync (Notes)", () => {
 			// After syncing, the empty state is flushed (key removed)
 			expect(sqlite.kvAsync.remove).toHaveBeenCalledWith(KV_KEY)
 		})
+
+		it("skips upload of subsequent entries when signal is already aborted before sync starts", async () => {
+			// This exercises the per-entry `if (signal.aborted) { return }` guard inside sync().
+			// We pre-abort by calling cancel() before sync() has a chance to iterate entries.
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "first", note: mockNote("note-1") }],
+				"note-2": [{ timestamp: 1000, content: "second", note: mockNote("note-2") }],
+				"note-3": [{ timestamp: 1000, content: "third", note: mockNote("note-3") }]
+			}
+
+			// Make the first setContent call abort the controller so that
+			// subsequent entries see signal.aborted === true before their guard.
+			let callCount = 0
+
+			mockNotesSetContent.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
+				callCount++
+
+				if (callCount === 1) {
+					// Abort immediately so remaining entries in the allSettled loop
+					// see signal.aborted === true before their individual checks.
+					sync.cancel()
+
+					// Returning a valid response so the first entry itself is handled.
+					return { editedTimestamp: BigInt(5000) }
+				}
+
+				if (signal.aborted) {
+					throw new DOMException("Aborted", "AbortError")
+				}
+
+				return { editedTimestamp: BigInt(5000) }
+			})
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// Because abort is checked per-entry before calling setContent,
+			// at most 1 call (the one that triggered cancel) must have reached setContent.
+			// Entries guarded by signal.aborted===true return early without calling setContent.
+			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	describe("syncDebounced / executeNow", () => {
@@ -490,11 +647,31 @@ describe("Sync (Notes)", () => {
 			expect(executeFn).toHaveBeenCalledTimes(1)
 		})
 
-		it("executeNow is a no-op when no pending sync", async () => {
+		it("executeNow falls through to a direct sync() call when no debounce is queued (reconnect path)", async () => {
+			// Source comment: "Fall through to a direct sync() when no debounce is queued.
+			// This catches the cold-start + offline + reconnect case."
+			// When syncTimeout is null, executeNow must invoke sync() directly.
 			const sync = await createSync()
 
-			// Should not throw
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "reconnect-content", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			// No syncDebounced() called — syncTimeout is null.
 			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// The direct sync() path must have uploaded the inflight note.
+			expect(mockNotesSetContent).toHaveBeenCalledWith({
+				note: mockNote("note-1"),
+				content: "reconnect-content",
+				signal: expect.any(AbortSignal)
+			})
+			// And cleaned it from the store after success.
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
 		})
 
 		it("cancel() aborts the signal that is already threaded into setContent", async () => {
@@ -504,6 +681,7 @@ describe("Sync (Notes)", () => {
 			mockNotesSetContent.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
 				observedSignal = signal
 				sync.cancel()
+
 				return { editedTimestamp: BigInt(2000) }
 			})
 
@@ -524,6 +702,55 @@ describe("Sync (Notes)", () => {
 
 			expect(observedSignal).toBeDefined()
 			expect(observedSignal?.aborted).toBe(true)
+		})
+	})
+
+	describe("SyncHost component", () => {
+		it("registers an AppState change listener on mount", () => {
+			// SyncHost's useEffect wires AppState.addEventListener("change", ...)
+			const addEventListenerSpy = vi.spyOn(AppState, "addEventListener")
+
+			const { unmount } = render(React.createElement(SyncHost))
+
+			expect(addEventListenerSpy).toHaveBeenCalledWith("change", expect.any(Function))
+
+			unmount()
+			addEventListenerSpy.mockRestore()
+		})
+
+		it("calls executeNow when AppState transitions to active", async () => {
+			const appStateEmitter = AppState as unknown as { _emit: (type: string, state: string) => void }
+
+			// Mount SyncHost so its useEffect registers the listener.
+			const { unmount } = render(React.createElement(SyncHost))
+
+			// Prime inflight content so we can observe whether sync fired.
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "bg-content", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			// Simulate foreground transition.
+			appStateEmitter._emit("change", "active")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalled()
+
+			unmount()
+		})
+
+		it("removes AppState listener on unmount", () => {
+			const removeListenerSpy = vi.fn()
+
+			vi.mocked(AppState.addEventListener).mockReturnValueOnce({ remove: removeListenerSpy })
+
+			const { unmount } = render(React.createElement(SyncHost))
+
+			unmount()
+
+			expect(removeListenerSpy).toHaveBeenCalledTimes(1)
 		})
 	})
 })

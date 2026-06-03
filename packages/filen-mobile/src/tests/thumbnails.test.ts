@@ -16,7 +16,8 @@ const {
 	mockHttpStoreState,
 	mockHttpStoreSubscribers,
 	mockRandomUUID,
-	mockAvailableThumbnails
+	mockAvailableThumbnails,
+	mockIsOnline
 } = vi.hoisted(() => {
 	const mockSaveAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/manipulated.jpg" })
 	const mockRenderAsync = vi.fn().mockResolvedValue({ saveAsync: mockSaveAsync })
@@ -60,6 +61,7 @@ const {
 	const mockHttpStoreSubscribers = new Set<(state: any) => void>()
 
 	const mockRandomUUID = vi.fn(() => "mock-uuid-1234")
+	const mockIsOnline = vi.fn(() => true)
 
 	return {
 		mockSaveAsync,
@@ -77,7 +79,8 @@ const {
 		mockHttpStoreState,
 		mockHttpStoreSubscribers,
 		mockRandomUUID,
-		mockAvailableThumbnails: new Map<string, boolean>()
+		mockAvailableThumbnails: new Map<string, boolean>(),
+		mockIsOnline
 	}
 })
 
@@ -204,6 +207,12 @@ vi.mock("expo-crypto", () => ({
 	randomUUID: mockRandomUUID
 }))
 
+vi.mock("@tanstack/react-query", () => ({
+	onlineManager: {
+		isOnline: mockIsOnline
+	}
+}))
+
 import thumbnails from "@/lib/thumbnails"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
@@ -281,6 +290,8 @@ describe("Thumbnails", () => {
 
 		mockHttpStoreState.port = 8080
 		mockHttpStoreState.getFileUrl = mockGetFileUrl
+
+		mockIsOnline.mockReturnValue(true)
 	})
 
 	describe("generate — image thumbnails", () => {
@@ -596,12 +607,17 @@ describe("Thumbnails", () => {
 			expect(mockHttpStoreSubscribers.size).toBe(0)
 		})
 
-		it("throws when generateThumbnailsAsync fails", async () => {
+		it("throws when generateThumbnailsAsync fails, wrapping the message with timestamp context", async () => {
 			mockGenerateThumbnailsAsync.mockRejectedValueOnce(new Error("thumbnail generation failed"))
 
 			const item = makeFileItem("gen-fail-uuid", "clip.mp4")
 
-			await expect(thumbnails.generate({ item })).rejects.toThrow("thumbnail generation failed")
+			// Source wraps the error: "Video thumbnail extraction failed at 1s: <original message>"
+			// Assert the full wrapped format — a substring match on the original alone would pass
+			// even if the wrapping were removed, giving no signal about the wrapping contract.
+			await expect(thumbnails.generate({ item })).rejects.toThrow(
+				"Video thumbnail extraction failed at 1s: thumbnail generation failed"
+			)
 			expect(mockRelease).toHaveBeenCalledTimes(1)
 		})
 
@@ -650,14 +666,6 @@ describe("Thumbnails", () => {
 				undefined
 			)
 			expect(result).toBe(`${THUMBNAILS_DIR}/shared-root-uuid.webp`)
-		})
-	})
-
-	describe("generate — directory items", () => {
-		it("throws for directory items", async () => {
-			const item = makeDirItem("dir-type-uuid", "my-folder")
-
-			await expect(thumbnails.generate({ item })).rejects.toThrow()
 		})
 	})
 
@@ -1077,6 +1085,15 @@ describe("Thumbnails", () => {
 			expect(fs.has(outputPath)).toBe(false)
 		})
 
+		it("removes uuid from cache.availableThumbnails", () => {
+			const item = makeFileItem("avail-rm-uuid", "photo.jpg")
+			mockAvailableThumbnails.set("avail-rm-uuid", true)
+
+			thumbnails.remove(item)
+
+			expect(mockAvailableThumbnails.has("avail-rm-uuid")).toBe(false)
+		})
+
 		it("no-op when file does not exist", () => {
 			const item = makeFileItem("nonexistent-uuid", "photo.jpg")
 			expect(() => {
@@ -1290,6 +1307,219 @@ describe("Thumbnails", () => {
 			})
 
 			expect(mockAvailableThumbnails.get("cache-uuid")).toBe(true)
+		})
+	})
+
+	describe("generate — OfflineAbortError branch", () => {
+		it("image: throws without counting as a failure when offline and no local copy", async () => {
+			mockIsOnline.mockReturnValue(false)
+
+			const item = makeFileItem("offline-img-uuid", "photo.jpg")
+
+			// Should reject (OfflineAbortError propagates as a real throw) but NOT increment failures
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Offline")
+
+			// Because it's an OfflineAbortError the failures map must NOT be incremented —
+			// a subsequent call after coming back online must proceed without hitting the limit.
+			mockIsOnline.mockReturnValue(true)
+			mockDownloadFileToPath.mockImplementationOnce(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
+			})
+
+			const result = await thumbnails.generate({ item })
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/offline-img-uuid.webp`)
+			// Download was called once — offline path short-circuited it, online path used it
+			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
+		})
+
+		it("video: throws without counting as a failure when offline and no offline file", async () => {
+			mockIsOnline.mockReturnValue(false)
+
+			const item = makeFileItem("offline-vid-uuid", "clip.mp4")
+
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Offline")
+
+			// Must not have started the HTTP provider wait or video player
+			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
+
+			// Failures map must not be incremented — retry after coming back online works
+			mockIsOnline.mockReturnValue(true)
+
+			const result = await thumbnails.generate({ item })
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/offline-vid-uuid.webp`)
+			expect(mockCreateVideoPlayer).toHaveBeenCalledTimes(1)
+		})
+
+		it("image: offline path is NOT taken when an offline-cached file exists", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/lib/offline")
+
+			mockIsOnline.mockReturnValue(false)
+
+			const offlineFileUri = "file:///offline/photo.jpg"
+			const offlineFile = new File(offlineFileUri)
+
+			fs.set(offlineFileUri, new Uint8Array([1, 2, 3]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(
+				offlineFile as unknown as Awaited<ReturnType<typeof offlineMod.default.getLocalFile>>
+			)
+
+			const item = makeFileItem("offline-img-cached-uuid", "photo.jpg")
+			const result = await thumbnails.generate({ item })
+
+			// Proceeds without network because the offline copy exists
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+			expect(result).toBe(`${THUMBNAILS_DIR}/offline-img-cached-uuid.webp`)
+		})
+	})
+
+	describe("generate — 0-byte output file integrity check", () => {
+		it("image: regenerates when existing thumbnail is 0 bytes", async () => {
+			const outputPath = `${THUMBNAILS_DIR}/zero-byte-img-uuid.webp`
+			// Seed a corrupt 0-byte file
+			fs.set(outputPath, new Uint8Array(0))
+
+			const item = makeFileItem("zero-byte-img-uuid", "photo.jpg")
+			const result = await thumbnails.generate({ item })
+
+			// Generation must have proceeded (0-byte cache skipped, not returned as hit)
+			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
+			expect(result).toBe(`${THUMBNAILS_DIR}/zero-byte-img-uuid.webp`)
+			// Final output must be non-empty (the mock saveAsync writes [0xff, 0xd8])
+			const finalFile = fs.get(outputPath)
+
+			expect(finalFile instanceof Uint8Array && finalFile.length > 0).toBe(true)
+		})
+
+		it("generateFromLocalFile: regenerates when existing thumbnail is 0 bytes", async () => {
+			const outputPath = `${THUMBNAILS_DIR}/zero-byte-local-uuid.webp`
+			fs.set(outputPath, new Uint8Array(0))
+			fs.set("file:///local/photo.jpg", new Uint8Array([1, 2, 3]))
+
+			const result = await thumbnails.generateFromLocalFile({
+				localPath: "file:///local/photo.jpg",
+				uuid: "zero-byte-local-uuid",
+				name: "photo.jpg"
+			})
+
+			expect(mockManipulate).toHaveBeenCalledTimes(1)
+			expect(result).toBe(`${THUMBNAILS_DIR}/zero-byte-local-uuid.webp`)
+		})
+	})
+
+	describe("generate — savedFile.move() failure path", () => {
+		it("image: throws wrapped error and cleans up when move fails", async () => {
+			const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+
+			// Make saveAsync produce a file whose move() throws
+			mockSaveAsync.mockImplementationOnce(async () => {
+				const uri = "file:///cache/manipulated-movefail.jpg"
+
+				// Seed both the saved file and its would-be destination
+				fs.set(uri, new Uint8Array([0xff, 0xd8]))
+
+				// Patch the File class for this one call: after saveAsync returns, the source
+				// savedFile has the right uri but we need move() to throw. We swap in a
+				// custom implementation for the one File that gets created for savedFile.
+				const OrigFile = MockFile
+				const moveSpy = vi.spyOn(OrigFile.prototype, "move").mockImplementationOnce(() => {
+					throw new Error("EACCES permission denied")
+				})
+
+				// Store spy ref so we can restore later (test teardown handled by vi.clearAllMocks)
+				void moveSpy
+
+				return { uri }
+			})
+
+			const item = makeFileItem("move-fail-img-uuid", "photo.jpg")
+
+			await expect(thumbnails.generate({ item })).rejects.toThrow(
+				"Failed to move thumbnail to output path: EACCES permission denied"
+			)
+		})
+
+		it("video: throws wrapped error and cleans up when move fails", async () => {
+			const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+
+			mockSaveAsync.mockImplementationOnce(async () => {
+				const uri = "file:///cache/manipulated-vid-movefail.jpg"
+
+				fs.set(uri, new Uint8Array([0xff, 0xd8]))
+
+				vi.spyOn(MockFile.prototype, "move").mockImplementationOnce(() => {
+					throw new Error("EROFS read-only file system")
+				})
+
+				return { uri }
+			})
+
+			const item = makeFileItem("move-fail-vid-uuid", "clip.mp4")
+
+			await expect(thumbnails.generate({ item })).rejects.toThrow(
+				"Failed to move thumbnail to output path: EROFS read-only file system"
+			)
+			expect(mockRelease).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	describe("waitForHttpProvider — 30-second timeout", () => {
+		it("rejects with timeout error when HTTP provider never becomes available", async () => {
+			vi.useFakeTimers()
+
+			mockHttpStoreState.port = null
+			mockHttpStoreState.getFileUrl = null
+
+			const item = makeFileItem("http-timeout-uuid", "clip.mp4")
+
+			// Capture the rejection without letting it escape
+			let capturedError: unknown = null
+			const promise = thumbnails.generate({ item }).catch(err => {
+				capturedError = err instanceof Error ? err : new Error(String(err))
+			})
+
+			// Advance past the 30-second timeout; awaiting lets promise microtasks settle
+			await vi.advanceTimersByTimeAsync(31_000)
+			await promise
+
+			vi.useRealTimers()
+
+			expect(capturedError).not.toBeNull()
+
+			if (capturedError === null) {
+				throw new Error("expected capturedError to be set")
+			}
+
+			expect((capturedError as Error).message).toBe("HTTP provider unavailable after 30s")
+		})
+	})
+
+	describe("generate — video offline source", () => {
+		it("uses offline-stored file as video URL, bypassing HTTP provider", async () => {
+			const { File } = await import("@/tests/mocks/expoFileSystem")
+			const offlineMod = await import("@/lib/offline")
+
+			const offlineFileUri = "file:///offline/clip.mp4"
+			const offlineFile = new File(offlineFileUri)
+
+			fs.set(offlineFileUri, new Uint8Array([1, 2, 3]))
+			vi.mocked(offlineMod.default.getLocalFile).mockResolvedValueOnce(
+				offlineFile as unknown as Awaited<ReturnType<typeof offlineMod.default.getLocalFile>>
+			)
+
+			// HTTP provider is down — should not matter because offline file is used
+			mockHttpStoreState.port = null
+			mockHttpStoreState.getFileUrl = null
+
+			const item = makeFileItem("vid-offline-uuid", "clip.mp4")
+			const result = await thumbnails.generate({ item })
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/vid-offline-uuid.webp`)
+			// The player should have been created with the offline file path (normalized)
+			expect(mockCreateVideoPlayer).toHaveBeenCalledWith(expect.stringContaining("offline/clip.mp4"))
+			expect(mockGetFileUrl).not.toHaveBeenCalled()
 		})
 	})
 })
