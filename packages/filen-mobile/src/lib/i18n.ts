@@ -162,7 +162,13 @@ export async function initI18n(): Promise<void> {
 		}
 	})
 
-	setIntlLanguage(lng)
+	// Use the full BCP-47 device tag (e.g. "en-US") so detectLocaleInfo region guards
+	// (startsWith("en-us"), "en-gb", etc.) resolve correctly. The bare Language code from
+	// i18next ("en", "de", …) intentionally does NOT replace this — date/clock format is
+	// a device-region concern, not a UI-language concern.
+	const deviceTag = ExpoLocalization.getLocales()[0]?.languageTag
+
+	setIntlLanguage(deviceTag ?? lng)
 }
 
 // Side-effects ONLY. Persistence is owned by `setLanguage`/`useSecureStore` (Risk 4) — calling
@@ -170,7 +176,12 @@ export async function initI18n(): Promise<void> {
 export async function changeAppLanguage(lang: Language): Promise<void> {
 	await i18n.changeLanguage(lang)
 
-	setIntlLanguage(lang)
+	// Keep intlLanguage sourced from the device's full BCP-47 tag so region-sensitive
+	// date/clock guards (e.g. startsWith("en-us")) remain reachable after a language
+	// switch. If the device provides no tag, fall back to the bare language code.
+	const deviceTag = ExpoLocalization.getLocales()[0]?.languageTag
+
+	setIntlLanguage(deviceTag ?? lang)
 }
 
 // Whether a language actually ships any translations yet. `en` is always true (it's the

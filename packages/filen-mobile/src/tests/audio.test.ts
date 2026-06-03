@@ -720,6 +720,82 @@ describe("Audio", () => {
 	})
 
 	describe("handleTrackEnd", () => {
+		it("does not double-advance when user-initiated next() races with a suspended handleTrackEnd (fix #24)", async () => {
+			// This test exercises the race described in bug #24:
+			// 1. didJustFinish fires → handleTrackEnd stamps trackEndHandledGeneration and
+			//    suspends at the getLoopMode() await (secureStore read).
+			// 2. User taps next() while handleTrackEnd is suspended → next() calls
+			//    loadAndPlay() which bumps loadGeneration.
+			// 3. handleTrackEnd resumes → without the fix it would advanceToNext() again,
+			//    skipping an extra track. With the fix it detects gen !== loadGeneration and
+			//    returns early.
+			//
+			// We simulate the suspension by making secureStore.get hang until we release it.
+			const { default: secureStore } = await import("@/lib/secureStore")
+
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("c", "c.mp3") })
+
+			// Start at position 0 with loopMode "none" (default)
+			await audio.setLoopMode("none")
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			expect(statusListener).toBeDefined()
+
+			// Make secureStore.get hang so handleTrackEnd suspends at getLoopMode()
+			let releaseSecureStoreGet: () => void = () => {}
+			const hangPromise = new Promise<void>(resolve => {
+				releaseSecureStoreGet = resolve
+			})
+
+			let firstGetCall = true
+
+			vi.mocked(secureStore.get).mockImplementation(async (key: string) => {
+				if (key === audio.loopModeKey && firstGetCall) {
+					firstGetCall = false
+					await hangPromise
+
+					return "none" as unknown as never
+				}
+
+				return secureStoreMap.get(key) as never
+			})
+
+			playlist.replace.mockClear()
+
+			// Step 1: track ends — fires handleTrackEnd, which hangs at getLoopMode()
+			statusListener!({ didJustFinish: true, remoteAction: undefined })
+
+			// Give the microtask queue one tick so handleTrackEnd reaches its first await
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// Step 2: user taps next() while handleTrackEnd is still suspended.
+			// This advances position from 0 → 1 and bumps loadGeneration.
+			await audio.next()
+
+			expect(audio.getPosition()).toBe(1)
+
+			// Step 3: release the suspended getLoopMode() so handleTrackEnd continues
+			releaseSecureStoreGet()
+
+			// Flush remaining microtasks so handleTrackEnd finishes its async tail
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			// Position must still be 1 — handleTrackEnd should have bailed after detecting
+			// that loadGeneration changed, NOT advanced to 2.
+			expect(audio.getPosition()).toBe(1)
+
+			// loadAndPlay was called exactly once — by next(), not a second time by handleTrackEnd
+			const replaceCalls = playlist.replace.mock.calls.length
+
+			expect(replaceCalls).toBe(1)
+		})
+
 		it("advances to next track", async () => {
 			const { audio, playlist } = await createAudio()
 

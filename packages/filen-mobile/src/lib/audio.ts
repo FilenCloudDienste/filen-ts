@@ -324,9 +324,19 @@ export class Audio {
 
 		this.trackEndHandledGeneration = this.loadGeneration
 
+		// Capture the generation we are acting on. Any user-initiated next()/previous()/
+		// skipTo() that arrives while we are suspended at an await will call loadAndPlay(),
+		// which increments loadGeneration. Re-checking gen after each await lets us bail
+		// out before double-advancing the queue on top of the user navigation.
+		const gen = this.loadGeneration
+
 		this.clearTrackEndWatchdog()
 
 		const loopMode = await this.getLoopMode()
+
+		if (gen !== this.loadGeneration) {
+			return
+		}
 
 		if (loopMode === "track") {
 			await this.loadAndPlay(this.state.position)
@@ -335,13 +345,26 @@ export class Audio {
 		}
 
 		if (await this.advanceToNext()) {
+			if (gen !== this.loadGeneration) {
+				return
+			}
+
 			await this.loadAndPlay(this.state.position)
 
 			return
 		}
 
+		if (gen !== this.loadGeneration) {
+			return
+		}
+
 		if (loopMode === "queue" && this.state.queue.length > 0) {
 			await this.wrapToStart()
+
+			if (gen !== this.loadGeneration) {
+				return
+			}
+
 			await this.loadAndPlay(this.state.position)
 
 			return
