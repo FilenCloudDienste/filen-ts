@@ -21,7 +21,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 						n.uuid === inner.note
 							? {
 									...n,
-									archived: true
+									archive: true
 								}
 							: n
 					)
@@ -49,8 +49,8 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 						n.uuid === inner.note
 							? {
 									...n,
-									archived: false,
-									trashed: false
+									archive: false,
+									trash: false
 								}
 							: n
 					)
