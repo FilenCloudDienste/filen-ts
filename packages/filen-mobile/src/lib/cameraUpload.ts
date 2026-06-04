@@ -9,7 +9,7 @@ import {
 	normalizeFilePathForExpo,
 	normalizeModificationTimestampForComparison
 } from "@/lib/utils"
-import transfers from "@/lib/transfers"
+import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
 import { run, Semaphore, fastLocaleCompare } from "@filen/utils"
 import useCameraUploadStore from "@/stores/useCameraUpload.store"

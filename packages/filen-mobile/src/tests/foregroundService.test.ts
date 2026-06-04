@@ -51,7 +51,7 @@ afterEach(() => {
 
 describe("foregroundService", () => {
 	it("init registers runner and creates channel without requesting permission", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.init()
 		await fgs.init()
@@ -64,7 +64,7 @@ describe("foregroundService", () => {
 	it("start with AUTHORIZED status displays a DATA_SYNC FGS notification", async () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
 
@@ -84,7 +84,7 @@ describe("foregroundService", () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 0 })
 		mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
 
@@ -103,7 +103,7 @@ describe("foregroundService", () => {
 	it("start with DENIED status silently no-ops", async () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 1 })
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
 		await fgs.start({ count: 2, progress: 0.1, speed: 1024 })
@@ -116,7 +116,7 @@ describe("foregroundService", () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 0 })
 		mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 1 })
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
@@ -135,7 +135,7 @@ describe("foregroundService", () => {
 			})
 		)
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		const controller = new AbortController()
 		const startPromise = fgs.start({ count: 1, progress: 0, speed: 0 }, controller.signal)
@@ -151,7 +151,7 @@ describe("foregroundService", () => {
 	})
 
 	it("start with an already-aborted signal skips init and display", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		const controller = new AbortController()
 		controller.abort()
@@ -163,7 +163,7 @@ describe("foregroundService", () => {
 	})
 
 	it("update before successful start is a no-op", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.update({ count: 1, progress: 0.5, speed: 0 })
 
@@ -171,7 +171,7 @@ describe("foregroundService", () => {
 	})
 
 	it("update after successful start calls displayNotification with the new progress payload", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
 
@@ -198,7 +198,7 @@ describe("foregroundService", () => {
 	})
 
 	it("stop after successful start calls stopForegroundService once", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
 		await fgs.stop()
@@ -208,7 +208,7 @@ describe("foregroundService", () => {
 	})
 
 	it("getStatus reports the correct status", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
 		expect(await fgs.getStatus()).toBe("authorized")
@@ -221,7 +221,7 @@ describe("foregroundService", () => {
 	})
 
 	it("getStatus with PROVISIONAL authorization returns 'authorized'", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 3 })
 
@@ -232,7 +232,7 @@ describe("foregroundService", () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 0 })
 		mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 3 })
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0, speed: 0 })
 
@@ -249,7 +249,7 @@ describe("foregroundService", () => {
 	})
 
 	it("openSettings opens Android notification settings", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.openSettings()
 
@@ -257,7 +257,7 @@ describe("foregroundService", () => {
 	})
 
 	it("display sets progress.current to clamped percent and indeterminate false when ratio > 0", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 2, progress: 0.6, speed: 1024 })
 
@@ -273,7 +273,7 @@ describe("foregroundService", () => {
 	})
 
 	it("display sets indeterminate true when count > 0 and ratio is 0", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 3, progress: 0, speed: 0 })
 
@@ -288,7 +288,7 @@ describe("foregroundService", () => {
 	})
 
 	it("display uses em-dash speedText and does not call bpsToReadable when speed is zero", async () => {
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0.5, speed: 0 })
 
@@ -299,7 +299,7 @@ describe("foregroundService", () => {
 	it("display calls bpsToReadable when speed is non-zero", async () => {
 		mockBpsToReadable.mockReturnValue("512 B/s")
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.start({ count: 1, progress: 0.5, speed: 512 })
 
@@ -310,7 +310,7 @@ describe("foregroundService", () => {
 		const error = new Error("channel creation failed")
 		mockNotifee.createChannel.mockRejectedValueOnce(error)
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		// First call: createChannel rejects → initPromise is reset and error is thrown
 		await expect(fgs.init()).rejects.toThrow("channel creation failed")
@@ -327,7 +327,7 @@ describe("foregroundService", () => {
 	it("is a no-op on iOS, getStatus returns notAndroid", async () => {
 		platformMock.OS = "ios"
 
-		const { default: fgs } = await import("@/lib/foregroundService")
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
 
 		await fgs.init()
 		await fgs.start({ count: 1, progress: 0, speed: 0 })

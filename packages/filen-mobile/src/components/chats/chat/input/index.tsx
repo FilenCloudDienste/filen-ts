@@ -37,7 +37,7 @@ import * as ImagePicker from "expo-image-picker"
 import * as FileSystem from "expo-file-system"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
-import transfers from "@/lib/transfers"
+import transfers from "@/features/transfers/transfers"
 import drive from "@/lib/drive"
 import useAccountQuery from "@/queries/useAccount.query"
 

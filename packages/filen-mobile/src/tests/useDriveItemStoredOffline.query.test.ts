@@ -32,7 +32,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		isItemStored: vi.fn().mockResolvedValue(false)
 	}

@@ -59,7 +59,7 @@ vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))
 
-vi.mock("@/lib/transfers", () => ({
+vi.mock("@/features/transfers/transfers", () => ({
 	default: {
 		cancelAll: vi.fn(() => {
 			callLog.push("transfers.cancelAll")
@@ -93,7 +93,7 @@ vi.mock("@/features/notes/components/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		cancel: vi.fn(() => {
 			callLog.push("offline.cancel")

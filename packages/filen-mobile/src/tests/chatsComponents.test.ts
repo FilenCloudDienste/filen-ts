@@ -123,7 +123,7 @@ vi.mock("@/lib/events", () => ({
 		emit: vi.fn()
 	}
 }))
-vi.mock("@/lib/transfers", () => ({ default: { upload: vi.fn() } }))
+vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
 vi.mock("@/lib/drive", () => ({
 	default: {
 		enablePublicLink: vi.fn(),

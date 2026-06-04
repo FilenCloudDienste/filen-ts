@@ -8,7 +8,7 @@ import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk, normalizeFilePathForSdk } from "@/lib/utils"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
 import { FILE_CACHE_VERSION, FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 

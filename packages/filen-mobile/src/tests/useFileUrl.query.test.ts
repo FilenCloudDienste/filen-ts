@@ -100,7 +100,7 @@ vi.mock("@/lib/fileCache", () => ({
 	}
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		getLocalFile: mockOfflineGetLocalFile
 	}

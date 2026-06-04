@@ -30,7 +30,7 @@ vi.mock("react-native-blob-util", () => ({
 	}
 }))
 
-vi.mock("@/lib/transfers", () => ({
+vi.mock("@/features/transfers/transfers", () => ({
 	default: {
 		download: mockTransfersDownload
 	}

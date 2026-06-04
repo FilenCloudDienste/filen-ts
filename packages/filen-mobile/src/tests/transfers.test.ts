@@ -235,7 +235,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/stores/useTransfers.store", () => ({
+vi.mock("@/features/transfers/store/useTransfers.store", () => ({
 	default: {
 		getState: () => ({
 			setTransfers: mockSetTransfers,
@@ -299,7 +299,7 @@ vi.mock("@/lib/utils", () => ({
 	listLocalDirectoryRecursive: vi.fn(() => [])
 }))
 
-import transfers from "@/lib/transfers"
+import transfers from "@/features/transfers/transfers"
 import cache from "@/lib/cache"
 import { fs, File as MockFile, Directory as MockDir } from "@/tests/mocks/expoFileSystem"
 import type * as FileSystem from "expo-file-system"

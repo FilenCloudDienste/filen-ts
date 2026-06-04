@@ -188,7 +188,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		getLocalFile: vi.fn().mockResolvedValue(null)
 	}
@@ -354,7 +354,7 @@ describe("Thumbnails", () => {
 
 		it("uses offline-stored file when available, skipping download", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
-			const offlineMod = await import("@/lib/offline")
+			const offlineMod = await import("@/features/offline/offline")
 
 			const offlineFileUri = "file:///offline/photo.jpg"
 			const offlineFile = new File(offlineFileUri)
@@ -1354,7 +1354,7 @@ describe("Thumbnails", () => {
 
 		it("image: offline path is NOT taken when an offline-cached file exists", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
-			const offlineMod = await import("@/lib/offline")
+			const offlineMod = await import("@/features/offline/offline")
 
 			mockIsOnline.mockReturnValue(false)
 
@@ -1499,7 +1499,7 @@ describe("Thumbnails", () => {
 	describe("generate — video offline source", () => {
 		it("uses offline-stored file as video URL, bypassing HTTP provider", async () => {
 			const { File } = await import("@/tests/mocks/expoFileSystem")
-			const offlineMod = await import("@/lib/offline")
+			const offlineMod = await import("@/features/offline/offline")
 
 			const offlineFileUri = "file:///offline/clip.mp4"
 			const offlineFile = new File(offlineFileUri)

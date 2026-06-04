@@ -11,7 +11,7 @@ import {
 	ParentUuid,
 	AnyLinkedDirWithContext
 } from "@filen/sdk-rs"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
 
 export const BASE_QUERY_KEY = "useDirectorySizeQuery"

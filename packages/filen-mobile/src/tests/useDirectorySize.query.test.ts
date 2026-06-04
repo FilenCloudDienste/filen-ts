@@ -52,7 +52,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		itemSize: vi.fn().mockResolvedValue({ size: 0, files: 0, dirs: 0 })
 	}

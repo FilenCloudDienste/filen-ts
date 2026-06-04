@@ -6,7 +6,7 @@ import { run } from "@filen/utils"
 import type { DriveItem } from "@/types"
 import { listLocalDirectoryRecursive, normalizeFilePathForBlobUtil } from "@/lib/utils"
 import { newTmpDir } from "@/lib/tmp"
-import transfers from "@/lib/transfers"
+import transfers from "@/features/transfers/transfers"
 
 /**
  * Download a single Drive item (file or directory) to the device's downloads
