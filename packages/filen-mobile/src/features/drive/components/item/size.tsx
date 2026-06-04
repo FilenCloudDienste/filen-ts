@@ -1,7 +1,7 @@
 import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
-import useDirectorySizeQuery from "@/queries/useDirectorySize.query"
+import useDirectorySizeQuery from "@/features/drive/queries/useDirectorySize.query"
 import { formatBytes } from "@filen/utils"
 import type { DrivePath } from "@/hooks/useDrivePath"
 

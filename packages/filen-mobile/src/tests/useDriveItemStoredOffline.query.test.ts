@@ -40,7 +40,7 @@ vi.mock("@/features/offline/offline", () => ({
 
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import { driveItemStoredOfflineQueryUpdate, BASE_QUERY_KEY } from "@/queries/useDriveItemStoredOffline.query"
+import { driveItemStoredOfflineQueryUpdate, BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItemStoredOffline.query"
 
 // normalizeTypeForKey is private but its effect is observable via the query key emitted
 // by driveItemStoredOfflineQueryUpdate. Two variants that should normalize to the same

@@ -244,7 +244,7 @@ vi.mock("@/features/transfers/store/useTransfers.store", () => ({
 	}
 }))
 
-vi.mock("@/queries/useDriveItems.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdate
 }))
@@ -274,7 +274,7 @@ vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("@/lib/drive", () => ({
+vi.mock("@/features/drive/drive", () => ({
 	default: {
 		createDirectory: vi.fn().mockResolvedValue({ data: { uuid: "dir-uuid" } })
 	}
@@ -784,7 +784,7 @@ describe("Transfers", () => {
 				fs.set(dir.uri, "dir")
 				const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
 
-				const { default: drive } = await import("@/lib/drive")
+				const { default: drive } = await import("@/features/drive/drive")
 
 				await transfers.upload({
 					localFileOrDir: dir,

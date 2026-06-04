@@ -28,11 +28,11 @@ import {
 	createCompositePauseSignal,
 	unwrapParentUuid
 } from "@/lib/utils"
-import { driveItemsQueryUpdateForNormalParent } from "@/queries/useDriveItems.query"
+import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
-import drive from "@/lib/drive"
+import drive from "@/features/drive/drive"
 import thumbnails from "@/lib/thumbnails"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { randomUUID } from "expo-crypto"

@@ -119,7 +119,7 @@ vi.mock("@filen/sdk-rs", () => {
 	}
 })
 
-import { fetchData } from "@/queries/useDirectorySize.query"
+import { fetchData } from "@/features/drive/queries/useDirectorySize.query"
 
 beforeEach(() => {
 	mockGetSdkClients.mockReset()

@@ -14,7 +14,7 @@ import { chatsQueryUpdate, fetchData as chatsQueryFetch } from "@/features/chats
 import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/features/chats/queries/useChatMessages.query"
 import { Semaphore, run } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
-import drive from "@/lib/drive"
+import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/utils"
 import * as FileSystem from "expo-file-system"
 

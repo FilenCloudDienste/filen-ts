@@ -55,7 +55,7 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import { fetchData } from "@/queries/useDriveItemVersions.query"
+import { fetchData } from "@/features/drive/queries/useDriveItemVersions.query"
 
 beforeEach(() => {
 	mockGetSdkClients.mockReset()

@@ -246,7 +246,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-import { driveItemsQueryUpdateForNormalParent, fetchData, driveItemsQueryGet, BASE_QUERY_KEY } from "@/queries/useDriveItems.query"
+import { driveItemsQueryUpdateForNormalParent, fetchData, driveItemsQueryGet, BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapDirMeta, unwrapFileMeta, unwrapSdkError, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/utils"
 import { type DriveItem } from "@/types"
 
