@@ -11,22 +11,22 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/queries/useContacts.query", () => ({
+vi.mock("@/features/contacts/queries/useContacts.query", () => ({
 	contactsQueryUpdate: vi.fn((opts: { updater: (prev: unknown) => unknown }) => {
 		contactsQueryUpdates.push(opts)
 	})
 }))
 
-vi.mock("@/queries/useContactRequests.query", () => ({
+vi.mock("@/features/contacts/queries/useContactRequests.query", () => ({
 	contactRequestsQueryUpdate: vi.fn((opts: { updater: (prev: unknown) => unknown }) => {
 		contactRequestsQueryUpdates.push(opts)
 	})
 }))
 
 import auth from "@/lib/auth"
-import contacts from "@/lib/contacts"
-import { contactsQueryUpdate } from "@/queries/useContacts.query"
-import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
+import contacts from "@/features/contacts/contacts"
+import { contactsQueryUpdate } from "@/features/contacts/queries/useContacts.query"
+import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useContactRequests.query"
 
 function makeContact(overrides?: {
 	uuid?: string

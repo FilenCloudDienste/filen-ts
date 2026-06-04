@@ -5,7 +5,7 @@ import { useResolveClassNames, useUniwind } from "uniwind"
 import { useIsAuthed } from "@/lib/auth"
 import { memo } from "react"
 import useChatsUnreadCount from "@/hooks/useChatsUnreadCount"
-import useContactRequestsQuery from "@/queries/useContactRequests.query"
+import useContactRequestsQuery from "@/features/contacts/queries/useContactRequests.query"
 import { useTranslation } from "react-i18next"
 
 const TabsLayout = memo(() => {

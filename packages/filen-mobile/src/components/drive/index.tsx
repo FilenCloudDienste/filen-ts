@@ -47,7 +47,7 @@ import { runBulk } from "@/lib/bulkOps"
 import { aggregateDriveSelectionFlags } from "@/lib/driveSelectors"
 import { downloadDriveItemToDevice } from "@/lib/driveDownload"
 import { serialize } from "@/lib/serializer"
-import { selectContacts } from "@/routes/contacts"
+import { selectContacts } from "@/features/contacts/contactsSelect"
 import { driveItemDisplayName } from "@/lib/decryption"
 
 function buildSortMenuButton(

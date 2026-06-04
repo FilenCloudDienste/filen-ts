@@ -1,6 +1,6 @@
 import auth from "@/lib/auth"
-import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
-import { contactsQueryUpdate } from "@/queries/useContacts.query"
+import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useContactRequests.query"
+import { contactsQueryUpdate } from "@/features/contacts/queries/useContacts.query"
 
 class Contacts {
 	public async acceptRequest({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {

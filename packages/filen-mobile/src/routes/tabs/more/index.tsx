@@ -11,7 +11,7 @@ import { cn, formatBytes } from "@filen/utils"
 import { router } from "expo-router"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
-import useContactRequestsQuery from "@/queries/useContactRequests.query"
+import useContactRequestsQuery from "@/features/contacts/queries/useContactRequests.query"
 import useAccountQuery from "@/queries/useAccount.query"
 import { useTranslation } from "react-i18next"
 
