@@ -60,8 +60,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		}
 
 		case DriveEvent_Tags.FileArchived:
-		case DriveEvent_Tags.FileDeletedPermanent:
-		case DriveEvent_Tags.FolderDeletedPermanent: {
+		case DriveEvent_Tags.FileDeletedPermanent: {
 			const [inner] = eventInner.inner.inner
 
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
@@ -80,12 +79,30 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// Permanent delete — forget all cache entries. FileArchived
 			// is NOT a forget (item still exists, just moves to the
 			// archive listing — left in cache so it's previewable there).
-			if (
-				eventInner.inner.tag === DriveEvent_Tags.FileDeletedPermanent ||
-				eventInner.inner.tag === DriveEvent_Tags.FolderDeletedPermanent
-			) {
+			if (eventInner.inner.tag === DriveEvent_Tags.FileDeletedPermanent) {
 				cache.forgetItem(inner.uuid)
 			}
+
+			break
+		}
+
+		case DriveEvent_Tags.FolderDeletedPermanent: {
+			const [inner] = eventInner.inner.inner
+
+			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+
+			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
+				const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+
+				if (unwrappedParentUuid) {
+					driveItemsQueryUpdateGlobal({
+						parentUuid: unwrappedParentUuid,
+						updater: prev => prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid)
+					})
+				}
+			}
+
+			cache.forgetItem(inner.uuid)
 
 			break
 		}
