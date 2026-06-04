@@ -658,27 +658,44 @@ describe("notesSorter", () => {
 			expect(header7d).toBeUndefined()
 		})
 
-		it("places a note between 2 and 12 months ago into the previousMonth2 bucket (header-month2)", () => {
-			// twoMonthsAgo < editedTimestamp < oneMonthAgo lands in previousMonth1.
-			// oneYearAgo < editedTimestamp < twoMonthsAgo lands in previousMonth2.
-			// Use ~90 days ago to ensure we land in previousMonth2.
-			const ninetyDaysAgo = BigInt(Date.now() - 90 * 24 * 60 * 60 * 1000)
-			const note = makeNote({ uuid: "old-2", editedTimestamp: ninetyDaysAgo })
+		it("places a note ~90 days ago (older than two months) into a calendar-year bucket, not a month bucket", () => {
+			// New scheme: a single month bucket covers [twoMonthsAgo, 30 days ago). Anything older
+			// than twoMonthsAgo falls into a calendar-year bucket — there is no second month bucket.
+			const ninetyDaysAgoMs = Date.now() - 90 * 24 * 60 * 60 * 1000
+			const note = makeNote({ uuid: "old-2", editedTimestamp: BigInt(ninetyDaysAgoMs) })
 
 			const result = notesSorter.group({ notes: [note] })
-			const month2Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month2") as
-				| { title?: string }
-				| undefined
 
-			expect(month2Header).toBeDefined()
-			// Title must be a locale month name, not a tbd_ key
-			expect(month2Header?.title).not.toContain("tbd_")
-			expect(month2Header?.title).not.toContain("month_")
-			// The title is a long month name from Intl
-			const nowDate = new Date()
-			const twoMonthsAgo = new Date(nowDate.getFullYear(), nowDate.getMonth() - 2, nowDate.getDate())
-			const expectedTitle = new Intl.DateTimeFormat("en-US", { month: "long" }).format(twoMonthsAgo)
-			expect(month2Header?.title).toBe(expectedTitle)
+			// It lands in the year bucket for its own calendar year, labelled with that year.
+			const expectedYear = new Date(ninetyDaysAgoMs).getFullYear()
+			const yearHeader = result.find(
+				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
+			) as { title?: string } | undefined
+
+			expect(yearHeader).toBeDefined()
+			expect(yearHeader?.title).toBe(String(expectedYear))
+
+			// And NOT in a month bucket.
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month")
+			expect(monthHeader).toBeUndefined()
+		})
+
+		it("uses a single month bucket then calendar-year buckets (no duplicate month header)", () => {
+			const nowMs = Date.now()
+			const fortyFiveDaysAgoMs = nowMs - 45 * 24 * 60 * 60 * 1000 // inside the single month bucket
+			const oneHundredFiftyDaysAgoMs = nowMs - 150 * 24 * 60 * 60 * 1000 // older than two months → year bucket
+			const recentish = makeNote({ uuid: "month-note", editedTimestamp: BigInt(fortyFiveDaysAgoMs) })
+			const older = makeNote({ uuid: "year-note", editedTimestamp: BigInt(oneHundredFiftyDaysAgoMs) })
+
+			const result = notesSorter.group({ notes: [recentish, older] })
+
+			// Exactly one month header — the old code emitted two identically-labelled month headers.
+			const monthHeaders = result.filter(item => item.type === "header" && "id" in item && item.id === "header-month")
+			expect(monthHeaders).toHaveLength(1)
+
+			const olderYear = new Date(oneHundredFiftyDaysAgoMs).getFullYear()
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${olderYear}`)
+			expect(yearHeader).toBeDefined()
 		})
 
 		it("places a note older than one year into a year bucket (header-YEAR)", () => {
@@ -696,11 +713,9 @@ describe("notesSorter", () => {
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe(String(expectedYear))
 
-			// Should NOT appear in any monthly bucket
-			const month1Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1")
-			const month2Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month2")
-			expect(month1Header).toBeUndefined()
-			expect(month2Header).toBeUndefined()
+			// Should NOT appear in the (single) month bucket
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month")
+			expect(monthHeader).toBeUndefined()
 		})
 
 		it("year bucket header contains the correct note", () => {
@@ -756,12 +771,12 @@ describe("notesSorter", () => {
 
 		it("renders month-bucket headers with a real Intl month name (not a tbd_month_ key)", () => {
 			const now = new Date()
-			// ~45 days ago lands in the previousMonth1 bucket (between 30 days and two months ago).
+			// ~45 days ago lands in the single month bucket (between 30 days and two months ago).
 			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "old-1", editedTimestamp: fortyFiveDaysAgo })
 
 			const result = notesSorter.group({ notes: [note] })
-			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1") as
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
 
@@ -778,18 +793,18 @@ describe("notesSorter", () => {
 			expect(monthHeader?.title).toBe(expectedMonth)
 		})
 
-		it("previousMonth1 header label matches twoMonthsAgo, not oneMonthAgo (bug #20 regression)", () => {
+		it("month bucket header label matches twoMonthsAgo, not oneMonthAgo (bug #20 regression)", () => {
 			const now = new Date()
-			// 45 days ago is inside previousMonth1 (editedTimestamp >= twoMonthsAgo, < thirtyDaysAgo extended bucket)
+			// 45 days ago is inside the single month bucket (editedTimestamp >= twoMonthsAgo, < thirtyDaysAgo)
 			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "bug20-note", editedTimestamp: fortyFiveDaysAgo })
 
 			const result = notesSorter.group({ notes: [note] })
-			const month1Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1") as
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
 
-			expect(month1Header).toBeDefined()
+			expect(monthHeader).toBeDefined()
 
 			const twoMonthsAgoLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(
 				new Date(now.getFullYear(), now.getMonth() - 2, now.getDate())
@@ -799,10 +814,10 @@ describe("notesSorter", () => {
 			)
 
 			// After the fix, the label is twoMonthsAgo, not oneMonthAgo
-			expect(month1Header?.title).toBe(twoMonthsAgoLabel)
+			expect(monthHeader?.title).toBe(twoMonthsAgoLabel)
 			// Only verify the two labels differ when the months are actually different (they may coincide in rare edge-date cases)
 			if (twoMonthsAgoLabel !== oneMonthAgoLabel) {
-				expect(month1Header?.title).not.toBe(oneMonthAgoLabel)
+				expect(monthHeader?.title).not.toBe(oneMonthAgoLabel)
 			}
 		})
 
