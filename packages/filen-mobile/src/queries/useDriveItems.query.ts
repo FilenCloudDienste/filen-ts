@@ -25,7 +25,7 @@ import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapSdkError } from "@/lib/utils"
 import type { DriveItem } from "@/types"
 import offline from "@/features/offline/offline"
-import cameraUpload from "@/lib/cameraUpload"
+import cameraUpload from "@/features/cameraUpload/cameraUpload"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 

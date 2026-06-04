@@ -67,7 +67,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 	}
 }))
 
-vi.mock("@/lib/cameraUpload", () => ({
+vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	default: {
 		cancel: vi.fn(() => {
 			callLog.push("cameraUpload.cancel")
@@ -101,7 +101,7 @@ vi.mock("@/features/offline/offline", () => ({
 	}
 }))
 
-vi.mock("@/lib/backgroundTask", () => ({
+vi.mock("@/features/cameraUpload/backgroundTask", () => ({
 	unregisterBackgroundSync: vi.fn(async () => {
 		callLog.push("unregisterBackgroundSync")
 	})
@@ -298,7 +298,7 @@ describe("auth.logout", () => {
 	})
 
 	it("continues even when unregisterBackgroundSync throws", async () => {
-		const bg = await import("@/lib/backgroundTask")
+		const bg = await import("@/features/cameraUpload/backgroundTask")
 
 		vi.mocked(bg.unregisterBackgroundSync).mockRejectedValueOnce(new Error("task manager unavailable"))
 

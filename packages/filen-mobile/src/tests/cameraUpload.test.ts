@@ -69,7 +69,7 @@ const mockSetErrors = vi.fn()
 const mockAddSkippedAsset = vi.fn()
 const mockClearSkippedAssets = vi.fn()
 
-vi.mock("@/stores/useCameraUpload.store", () => ({
+vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
 	default: {
 		getState: () => ({
 			setSyncing: mockSetSyncing,
@@ -139,7 +139,7 @@ vi.mock("@/lib/utils", () => ({
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cache from "@/lib/cache"
-import cameraUpload, { modifyAssetPathOnCollision, type CollisionParams, type Config } from "@/lib/cameraUpload"
+import cameraUpload, { modifyAssetPathOnCollision, type CollisionParams, type Config } from "@/features/cameraUpload/cameraUpload"
 import secureStore from "@/lib/secureStore"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"

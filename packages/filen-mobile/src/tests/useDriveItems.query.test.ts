@@ -112,7 +112,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/lib/cameraUpload", () => ({
+vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	default: {
 		getConfig: mockCameraUploadGetConfig
 	}

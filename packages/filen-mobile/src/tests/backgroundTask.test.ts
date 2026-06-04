@@ -43,12 +43,12 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@/lib/setup", () => ({ default: mockSetup }))
 
-vi.mock("@/lib/cameraUpload", () => ({ default: mockCameraUpload }))
+vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: mockCameraUpload }))
 
 // ─── Static import of module under test ──────────────────────────────────────
 // Must be a static import so the module-level defineTask call is intercepted by
 // mockTaskManager.defineTask, which captures the callback into capturedTaskCallback.
-import { registerBackgroundSync, unregisterBackgroundSync } from "@/lib/backgroundTask"
+import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
 import { Platform } from "react-native"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -61,7 +61,7 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@filen/sdk-rs", () => ({}))
 
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
-import { useCameraUploadStore } from "@/stores/useCameraUpload.store"
+import { useCameraUploadStore } from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useContactsStore } from "@/stores/useContacts.store"
 import { useHttpStore } from "@/stores/useHttp.store"
 import { useAppStore } from "@/stores/useApp.store"

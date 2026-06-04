@@ -4,7 +4,7 @@ import { BackgroundTaskResult, BackgroundTaskStatus } from "expo-background-task
 import { Platform } from "react-native"
 import { run } from "@filen/utils"
 import setup from "@/lib/setup"
-import cameraUpload from "@/lib/cameraUpload"
+import cameraUpload from "@/features/cameraUpload/cameraUpload"
 
 const TASK_NAME = "filen-camera-upload-sync"
 
