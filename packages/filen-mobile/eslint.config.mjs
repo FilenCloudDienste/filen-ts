@@ -48,7 +48,6 @@ export default [
 			"tailwind.config.js",
 			"index.js",
 			"eslint.config.mjs",
-			"metro.config.js",
 			"plugins/**/*",
 			"scripts/**/*",
 			"src/uniwind-types.d.ts",
