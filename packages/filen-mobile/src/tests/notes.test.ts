@@ -36,18 +36,18 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/queries/useNotesWithContent.query", () => ({
+vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 	notesWithContentQueryUpdate: mockNotesWithContentQueryUpdate,
 	notesWithContentQueryGet: vi.fn().mockReturnValue([]),
 	fetchData: vi.fn().mockResolvedValue([])
 }))
 
-vi.mock("@/queries/useNoteContent.query", () => ({
+vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
 	noteContentQueryUpdate: mockNoteContentQueryUpdate,
 	fetchData: vi.fn().mockResolvedValue(undefined)
 }))
 
-vi.mock("@/queries/useNotesTags.query", () => ({
+vi.mock("@/features/notes/queries/useNotesTags.query", () => ({
 	notesTagsQueryUpdate: mockNotesTagsQueryUpdate,
 	fetchData: vi.fn().mockResolvedValue([])
 }))
@@ -106,7 +106,7 @@ vi.mock("@filen/sdk-rs", () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import notes from "@/lib/notes"
+import notes from "@/features/notes/notes"
 import { type Note, type NoteTag, type NoteParticipant } from "@/types"
 import { type NoteType } from "@filen/sdk-rs"
 import { fs } from "@/tests/mocks/expoFileSystem"

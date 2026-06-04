@@ -1,6 +1,6 @@
 import { parseNumbersFromString } from "@filen/utils"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
-import type { ListItem as NoteListItem, Item as NoteItem } from "@/components/notes/note"
+import type { ListItem as NoteListItem, Item as NoteItem } from "@/features/notes/components/note"
 import i18n from "@/lib/i18n"
 import { intlLanguage } from "@/lib/time"
 

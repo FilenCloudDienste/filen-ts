@@ -30,7 +30,7 @@ vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: vi.fn() }
 }))
 
-vi.mock("@/stores/useNotes.store", () => ({
+vi.mock("@/features/notes/store/useNotes.store", () => ({
 	default: {
 		getState: vi.fn(() => ({
 			toggleSelectedNote: vi.fn()
@@ -38,7 +38,7 @@ vi.mock("@/stores/useNotes.store", () => ({
 	}
 }))
 
-vi.mock("@/lib/notes", () => ({
+vi.mock("@/features/notes/notes", () => ({
 	default: {}
 }))
 
@@ -125,7 +125,7 @@ vi.mock("@/components/ui/view", () => ({
 }))
 
 import { NoteType } from "@filen/sdk-rs"
-import { createMenuButtons, NOTE_TYPE_OPTIONS, NOTE_TYPE_LABEL_KEY, type NoteTypeString } from "@/components/notes/note/menu"
+import { createMenuButtons, NOTE_TYPE_OPTIONS, NOTE_TYPE_LABEL_KEY, type NoteTypeString } from "@/features/notes/components/note/menu"
 import type { Note } from "@/types"
 
 function makeNote(overrides: Partial<Note> = {}): Note {

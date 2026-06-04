@@ -1,4 +1,4 @@
-import NotesComponent from "@/components/notes"
+import NotesComponent from "@/features/notes/components"
 import { memo } from "react"
 
 const Notes = memo(() => {

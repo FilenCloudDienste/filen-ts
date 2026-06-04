@@ -29,7 +29,7 @@ import {
 	notesWithContentQueryUpdate,
 	fetchData as notesWithContentQueryFetch,
 	notesWithContentQueryGet
-} from "@/queries/useNotesWithContent.query"
+} from "@/features/notes/queries/useNotesWithContent.query"
 import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate, driveItemsQueryUpdateForNormalParent } from "@/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"

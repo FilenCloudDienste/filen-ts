@@ -1,12 +1,12 @@
 import { useEffect, memo } from "react"
 import { run, Semaphore, createExecutableTimeout } from "@filen/utils"
 import { onlineManager } from "@tanstack/react-query"
-import notes from "@/lib/notes"
+import notes from "@/features/notes/notes"
 import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
-import useNotesStore, { type InflightContent } from "@/stores/useNotes.store"
+import useNotesStore, { type InflightContent } from "@/features/notes/store/useNotes.store"
 import sqlite from "@/lib/sqlite"
-import { fetchData as notesWithContentQueryFetch } from "@/queries/useNotesWithContent.query"
+import { fetchData as notesWithContentQueryFetch } from "@/features/notes/queries/useNotesWithContent.query"
 
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
