@@ -8,12 +8,11 @@ import * as Clipboard from "expo-clipboard"
 import alerts from "@/lib/alerts"
 import { run } from "@filen/utils"
 import { useStringifiedClient } from "@/lib/auth"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import chats from "@/features/chats/chats"
-import prompts from "@/lib/prompts"
 import { simpleDate } from "@/lib/time"
 import events from "@/lib/events"
 import { useTranslation } from "react-i18next"
+import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
 
 export const Menu = memo(
 	({
@@ -43,42 +42,17 @@ export const Menu = memo(
 			icon: "delete" as const,
 			destructive: true,
 			requiresOnline: true,
-			onPress: async () => {
-				const promptResponse = await run(async () => {
-					return await prompts.alert({
-						title: t("delete_message"),
-						message: t("delete_message_confirmation"),
-						cancelText: t("cancel"),
-						okText: t("delete"),
-						destructive: true
-					})
-				})
-
-				if (!promptResponse.success) {
-					console.error(promptResponse.error)
-					alerts.error(promptResponse.error)
-
-					return
-				}
-
-				if (promptResponse.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await chats.deleteMessage({
+			// Message deletes never pop a route, so no dismissPathnamePrefix.
+			onPress: confirmedChatAction({
+				promptTitle: t("delete_message"),
+				promptMessage: t("delete_message_confirmation"),
+				promptOkText: t("delete"),
+				action: () =>
+					chats.deleteMessage({
 						chat,
 						message: info.item
 					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-			}
+			})
 		} satisfies MenuButton
 
 		const buttons = info.item.undecryptable

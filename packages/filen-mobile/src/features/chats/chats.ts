@@ -13,6 +13,10 @@ import { type Chat, type ChatMessage } from "@/types"
 import { chatsQueryUpdate, fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
 import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/features/chats/queries/useChatMessages.query"
 import { Semaphore, run } from "@filen/utils"
+import transfers from "@/features/transfers/transfers"
+import drive from "@/lib/drive"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/utils"
+import * as FileSystem from "expo-file-system"
 
 function wrapChat(chat: SdkChat): Chat {
 	return {
@@ -573,6 +577,95 @@ class Chats {
 		}
 
 		return chatUploadsDir
+	}
+
+	// Uploads the given local assets into the chat-uploads directory, enables a public
+	// link for each resulting file and returns the shareable link strings. Silent: throws
+	// on failure, never surfaces UI — callers own the loading/error UX.
+	public async uploadAssetsAndGenerateLinks(
+		assets: {
+			uri: string
+			name: string
+			lastModified?: number
+			mimeType?: string
+		}[]
+	): Promise<string[]> {
+		const parent = new AnyNormalDir.Dir(await this.getChatUploadsDirectory())
+
+		return (
+			await Promise.all(
+				assets.map(async asset => {
+					const result = await run(async defer => {
+						const assetFile = new FileSystem.File(asset.uri)
+
+						defer(() => {
+							if (assetFile.exists) {
+								assetFile.delete()
+							}
+						})
+
+						if (!assetFile.exists) {
+							throw new Error("Asset file does not exist")
+						}
+
+						const assetNameParsed = FileSystem.Paths.parse(asset.name)
+						const uploadResult = await transfers.upload({
+							localFileOrDir: assetFile,
+							parent,
+							name: `${assetNameParsed.name}.${Date.now()}${assetNameParsed.ext}`,
+							modified: asset.lastModified,
+							mime: asset.mimeType
+						})
+
+						if (!uploadResult) {
+							return []
+						}
+
+						const items = uploadResult.files.map(f => unwrappedFileIntoDriveItem(unwrapFileMeta(f)))
+
+						const links = (
+							await Promise.all(
+								items.map(async item => {
+									const link = await drive.enablePublicLink({
+										item
+									})
+
+									if (link.type !== "file") {
+										return null
+									}
+
+									return {
+										link: link.link,
+										item
+									}
+								})
+							)
+						).filter((l): l is NonNullable<typeof l> => l !== null)
+
+						return links
+					})
+
+					if (!result.success) {
+						throw result.error
+					}
+
+					const links = result.data
+						.map(link => {
+							return makeDriveItemPublicLink({
+								item: link.item,
+								linkUuid: link.link.linkUuid
+							})
+						})
+						.filter((l): l is NonNullable<typeof l> => l !== null)
+
+					if (links.length === 0) {
+						return []
+					}
+
+					return links
+				})
+			)
+		).flat()
 	}
 }
 

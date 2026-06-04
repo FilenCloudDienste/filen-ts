@@ -82,6 +82,17 @@ vi.mock("@filen/sdk-rs", () => ({
 	DirMeta_Tags: { Decoded: "Decoded" }
 }))
 
+// chats.ts now pulls in the upload-and-link helper deps. They're only exercised by the
+// uploadAssetsAndGenerateLinks path (not covered here) — mock them so the module loads.
+vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
+vi.mock("@/lib/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
+vi.mock("@/lib/utils", () => ({
+	unwrapFileMeta: vi.fn(),
+	unwrappedFileIntoDriveItem: vi.fn(),
+	makeDriveItemPublicLink: vi.fn()
+}))
+
 import chats from "@/features/chats/chats"
 import type { Chat } from "@/types"
 import type { ChatParticipant, Contact } from "@filen/sdk-rs"
