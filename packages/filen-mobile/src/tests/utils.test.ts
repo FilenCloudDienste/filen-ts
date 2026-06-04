@@ -187,7 +187,8 @@ import {
 	makeDriveItemPublicLink,
 	unwrapParentUuid,
 	resolveMimeType,
-	resolveCreatedOrTimestamp
+	resolveCreatedOrTimestamp,
+	convertBigInts
 } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
@@ -1198,5 +1199,70 @@ describe("resolveCreatedOrTimestamp", () => {
 
 	it("falls back to timestamp only when created is undefined", () => {
 		expect(resolveCreatedOrTimestamp({ created: undefined, timestamp: 1700000000000n })).toBe(1700000000000)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// convertBigInts
+// ---------------------------------------------------------------------------
+
+describe("convertBigInts", () => {
+	it("converts a top-level bigint to a number", () => {
+		expect(convertBigInts(42n)).toBe(42)
+	})
+
+	it("converts epoch-0 bigint to 0 (no falsy short-circuit)", () => {
+		expect(convertBigInts(0n)).toBe(0)
+	})
+
+	it("leaves a plain number untouched", () => {
+		expect(convertBigInts(7)).toBe(7)
+	})
+
+	it("passes null and undefined through unchanged", () => {
+		expect(convertBigInts(null)).toBe(null)
+		expect(convertBigInts(undefined)).toBe(undefined)
+	})
+
+	it("converts bigints inside an array", () => {
+		expect(convertBigInts([1n, 2n, 3n])).toEqual([1, 2, 3])
+	})
+
+	it("converts bigints in a nested object structure", () => {
+		expect(
+			convertBigInts({
+				a: 1n,
+				b: {
+					c: 2n,
+					d: "x"
+				},
+				e: [3n, { f: 4n }]
+			})
+		).toEqual({
+			a: 1,
+			b: {
+				c: 2,
+				d: "x"
+			},
+			e: [3, { f: 4 }]
+		})
+	})
+
+	it("preserves Date instances rather than walking into them", () => {
+		const date = new Date("2024-01-01T00:00:00.000Z")
+		const result = convertBigInts({ when: date })
+
+		expect(result.when).toBeInstanceOf(Date)
+		expect(result.when.getTime()).toBe(date.getTime())
+	})
+
+	it("produces a JSON-serializable result", () => {
+		const result = convertBigInts({ size: 9007199254740993n, name: "f" })
+
+		expect(() => JSON.stringify(result)).not.toThrow()
+		expect(JSON.parse(JSON.stringify(result))).toEqual({
+			size: 9007199254740993,
+			name: "f"
+		})
 	})
 })

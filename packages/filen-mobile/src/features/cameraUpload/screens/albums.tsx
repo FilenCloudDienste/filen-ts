@@ -1,5 +1,5 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
-import { Group } from "@/routes/tabs/more"
+import { Group } from "@/components/ui/settingsGroup"
 import { useCameraUpload, DEFAULT_CONFIG } from "@/features/cameraUpload/cameraUpload"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, useEffect } from "react"
