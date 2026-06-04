@@ -55,7 +55,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-import fileProvider, { AUTH_FILE, FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/lib/fileProvider"
+import fileProvider, { AUTH_FILE, FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
 import { fs } from "@/tests/mocks/expoFileSystem"
 import auth from "@/lib/auth"
 

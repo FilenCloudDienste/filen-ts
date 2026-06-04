@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { queryClient } from "@/queries/client"
-import fileProvider from "@/lib/fileProvider"
+import fileProvider from "@/features/settings/fileProvider"
 
 export const BASE_QUERY_KEY = "useFileProviderCacheBudget"
 

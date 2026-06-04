@@ -107,7 +107,7 @@ vi.mock("@/features/cameraUpload/backgroundTask", () => ({
 	})
 }))
 
-vi.mock("@/lib/fileProvider", () => ({
+vi.mock("@/features/settings/fileProvider", () => ({
 	default: {
 		disable: vi.fn(async () => {
 			callLog.push("fileProvider.disable")
@@ -319,7 +319,7 @@ describe("auth.logout", () => {
 	})
 
 	it("continues even when fileProvider.disable throws", async () => {
-		const fp = await import("@/lib/fileProvider")
+		const fp = await import("@/features/settings/fileProvider")
 
 		vi.mocked(fp.default.disable).mockRejectedValueOnce(new Error("provider unavailable"))
 
