@@ -185,7 +185,9 @@ import {
 	normalizeModificationTimestampForComparison,
 	contactDisplayName,
 	makeDriveItemPublicLink,
-	unwrapParentUuid
+	unwrapParentUuid,
+	resolveMimeType,
+	resolveCreatedOrTimestamp
 } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
@@ -1156,5 +1158,45 @@ describe("unwrapParentUuid", () => {
 		} as any
 
 		expect(unwrapParentUuid(parent)).toBe("first-uuid")
+	})
+})
+
+describe("resolveMimeType", () => {
+	it("returns the explicit mime when present", () => {
+		expect(resolveMimeType({ mime: "image/jpeg", name: "photo.jpg" })).toBe("image/jpeg")
+	})
+
+	it("falls back to a lookup by filename when mime is undefined", () => {
+		expect(resolveMimeType({ mime: undefined, name: "doc.pdf" })).toBe("application/pdf")
+	})
+
+	it("falls back to a lookup when mime is null", () => {
+		expect(resolveMimeType({ mime: null, name: "image.png" })).toBe("image/png")
+	})
+
+	it("falls back to a lookup when mime is an empty string", () => {
+		expect(resolveMimeType({ mime: "", name: "clip.mp4" })).toBe("video/mp4")
+	})
+
+	it("returns application/octet-stream when neither mime nor a known extension is available", () => {
+		expect(resolveMimeType({ mime: undefined, name: "archive.unknownext" })).toBe("application/octet-stream")
+	})
+
+	it("returns application/octet-stream for a name with no extension and no mime", () => {
+		expect(resolveMimeType({ mime: null, name: "Makefile" })).toBe("application/octet-stream")
+	})
+})
+
+describe("resolveCreatedOrTimestamp", () => {
+	it("uses created when it is defined", () => {
+		expect(resolveCreatedOrTimestamp({ created: 1700000000000n, timestamp: 999n })).toBe(1700000000000)
+	})
+
+	it("treats epoch-0 created as a real value, not as absent (falsy-bigint guard)", () => {
+		expect(resolveCreatedOrTimestamp({ created: 0n, timestamp: 1700000000000n })).toBe(0)
+	})
+
+	it("falls back to timestamp only when created is undefined", () => {
+		expect(resolveCreatedOrTimestamp({ created: undefined, timestamp: 1700000000000n })).toBe(1700000000000)
 	})
 })

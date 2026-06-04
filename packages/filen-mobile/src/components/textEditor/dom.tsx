@@ -13,6 +13,7 @@ import type { TextEditorType, Font, Colors, TextEditorEvents } from "@/component
 import { createTextThemes, parseExtension, loadLanguage } from "@/components/textEditor/codeMirror"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
+import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import MDEditor from "@uiw/react-md-editor"
 import rehypeSanitize from "rehype-sanitize"
 import { visit } from "unist-util-visit"
@@ -24,13 +25,10 @@ const rehypeExternalLinks: Plugin<[], Root> = () => {
 		visit(tree, "element", (node: Element) => {
 			try {
 				if (node.tagName === "a" && node.properties?.["href"]) {
-					const href = String(node.properties["href"]).trim()
-					const lower = href.toLowerCase()
-					const protocols = ["http://", "https://", "mailto:", "tel:", "sms:", "whatsapp:", "geo:", "maps:"]
-					const shouldIntercept = protocols.some(protocol => lower.startsWith(protocol))
+					const { url, intercept } = classifyExternalLinkHref(String(node.properties["href"]))
 
-					if (shouldIntercept) {
-						node.properties["data-external-url"] = href
+					if (intercept) {
+						node.properties["data-external-url"] = url
 						node.properties["href"] = "#"
 					}
 				}

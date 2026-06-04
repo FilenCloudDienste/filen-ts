@@ -15,7 +15,7 @@ import { Platform, type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import offline from "@/lib/offline"
-import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, getRealDriveItemParent } from "@/lib/utils"
+import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, getRealDriveItemParent, resolveMimeType } from "@/lib/utils"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import mimeTypes from "mime-types"
 import * as Sharing from "expo-sharing"
@@ -575,7 +575,7 @@ export function createMenuButtons({
 					await new Promise<void>(resolve => setTimeout(resolve, 100))
 
 					await Sharing.shareAsync(result.data.uri, {
-						mimeType: item.data.decryptedMeta?.mime || mimeTypes.lookup(result.data.name) || "application/octet-stream",
+						mimeType: resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: result.data.name }),
 						dialogTitle: result.data.name
 					})
 				})

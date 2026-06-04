@@ -9,6 +9,7 @@ import useRichtextStore from "@/stores/useRichtext.store"
 import { useShallow } from "zustand/shallow"
 import type { TextEditorEvents } from "@/components/textEditor"
 import type { QuillFormats } from "@/components/textEditor/richText/dom"
+import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
 import * as Linking from "expo-linking"
@@ -154,7 +155,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 
 									dispatch({
 										type: "quillAddLink",
-										data: response.value.trim()
+										data: classifyExternalLinkHref(response.value).url
 									})
 								})
 						}
