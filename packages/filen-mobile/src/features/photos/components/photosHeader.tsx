@@ -7,7 +7,7 @@ import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import { useTranslation } from "react-i18next"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
-import useDriveStore from "@/stores/useDrive.store"
+import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useSecureStore } from "@/lib/secureStore"
 import usePhotoBulkActions from "@/features/photos/hooks/usePhotoBulkActions"
 

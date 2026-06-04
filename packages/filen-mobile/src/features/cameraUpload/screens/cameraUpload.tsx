@@ -4,7 +4,7 @@ import cameraUpload, { useCameraUpload, DEFAULT_CONFIG, type Config } from "@/fe
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
-import { selectDriveItems } from "@/routes/driveSelect/[uuid]"
+import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import alerts from "@/lib/alerts"
 import { run } from "@filen/utils"
 import cache from "@/lib/cache"

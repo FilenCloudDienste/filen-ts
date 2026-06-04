@@ -9,7 +9,7 @@ vi.mock("@/constants", () => ({
 	EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set<string>([".mp4", ".mov", ".m4v", ".3gp", ".webm"])
 }))
 
-import { aggregateDriveSelectionFlags, EMPTY_DRIVE_FLAGS } from "@/lib/driveSelectors"
+import { aggregateDriveSelectionFlags, EMPTY_DRIVE_FLAGS } from "@/features/drive/driveSelectors"
 import type { DriveItem } from "@/types"
 
 // ---------------------------------------------------------------------------

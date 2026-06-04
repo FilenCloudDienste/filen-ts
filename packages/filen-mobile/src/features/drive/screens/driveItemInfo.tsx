@@ -1,33 +1,30 @@
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
-import { useLocalSearchParams, useNavigation } from "expo-router"
+import { useLocalSearchParams, router } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
+import { DirectoryIcon } from "@/components/itemIcons"
+import { DirColor } from "@filen/sdk-rs"
 import Header from "@/components/ui/header"
 import { Fragment, memo } from "react"
-import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
-import Thumbnail from "@/features/drive/components/item/thumbnail"
-import DismissStack from "@/components/dismissStack"
-import { Information } from "@/features/drive/components/information"
-import useHttpStore from "@/stores/useHttp.store"
-import { useShallow } from "zustand/shallow"
-import { createMenuButtons } from "@/features/drive/components/item/menu"
 import { driveItemDisplayName } from "@/lib/decryption"
+import Thumbnail from "@/features/drive/components/item/thumbnail"
+import { Information } from "@/features/drive/components/information"
+import DismissStack from "@/components/dismissStack"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
+import { useTranslation } from "react-i18next"
 
-const LinkedFile = memo(() => {
-	const { t } = useTranslation()
+const DriveItemInfo = memo(() => {
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
-	const navigation = useNavigation()
+	const { t } = useTranslation()
 
 	const item = (() => {
 		if (!itemSerialized) {
@@ -35,26 +32,24 @@ const LinkedFile = memo(() => {
 		}
 
 		try {
-			return deserialize(itemSerialized) as Extract<
-				DriveItem,
-				{
-					type: "file"
-				}
-			>
+			return deserialize(itemSerialized) as DriveItem
 		} catch {
 			return null
 		}
 	})()
 
-	if (!item || item.type !== "file") {
+	if (!item) {
 		return <DismissStack />
 	}
 
+	// Deep-link defensive guard: if the user opens info for an undecryptable
+	// item, show the cannot-decrypt screen instead of an info sheet that would
+	// surface uuid-only fallbacks for every metadata row.
 	if (item.data.undecryptable) {
 		return (
 			<CannotDecryptScreen
 				uuid={item.data.uuid}
-				surface="linkedFile"
+				surface="driveInfo"
 			/>
 		)
 	}
@@ -62,7 +57,7 @@ const LinkedFile = memo(() => {
 	return (
 		<Fragment>
 			<Header
-				title={driveItemDisplayName(item)}
+				title={t("item_info")}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -81,41 +76,13 @@ const LinkedFile = memo(() => {
 							},
 							props: {
 								onPress: () => {
-									navigation.getParent()?.goBack()
+									router.back()
 								}
 							}
 						}
 					],
 					default: undefined
 				})}
-				rightItems={[
-					{
-						type: "menu",
-						props: {
-							type: "dropdown",
-							hitSlop: 20,
-							buttons: getFileUrl
-								? createMenuButtons({
-										item,
-										drivePath: {
-											type: "linked",
-											uuid: null
-										},
-										isStoredOffline: false,
-										t
-									})
-								: []
-						},
-						triggerProps: {
-							hitSlop: 20
-						},
-						icon: {
-							name: "ellipsis-horizontal",
-							size: 24,
-							color: textForeground.color
-						}
-					}
-				]}
 			/>
 			<SafeAreaView
 				className="flex-1 bg-background-secondary"
@@ -127,15 +94,23 @@ const LinkedFile = memo(() => {
 					showsVerticalScrollIndicator={false}
 				>
 					<View className="bg-transparent items-center justify-center flex-col px-4">
-						<Thumbnail
-							item={item}
-							size={{
-								icon: 128,
-								thumbnail: 128
-							}}
-							contentFit="cover"
-							className="rounded-3xl"
-						/>
+						{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory" ? (
+							<DirectoryIcon
+								color={item.type === "directory" ? item.data.color : DirColor.Default.new()}
+								width={128}
+								height={128}
+							/>
+						) : (
+							<Thumbnail
+								item={item}
+								size={{
+									icon: 128,
+									thumbnail: 128
+								}}
+								contentFit="cover"
+								className="rounded-3xl"
+							/>
+						)}
 						<Text
 							className="text-lg font-bold mt-4"
 							numberOfLines={1}
@@ -143,13 +118,14 @@ const LinkedFile = memo(() => {
 						>
 							{driveItemDisplayName(item)}
 						</Text>
-						<Text className="text-muted-foreground">{t("file")}</Text>
+						<Text className="text-muted-foreground">
+							{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+								? t("directory")
+								: t("file")}
+						</Text>
 					</View>
 					<View className="bg-transparent mt-10">
-						<Information
-							item={item}
-							linked={true}
-						/>
+						<Information item={item} />
 					</View>
 				</ScrollView>
 			</SafeAreaView>
@@ -157,4 +133,4 @@ const LinkedFile = memo(() => {
 	)
 })
 
-export default LinkedFile
+export default DriveItemInfo

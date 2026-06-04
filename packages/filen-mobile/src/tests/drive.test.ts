@@ -195,18 +195,18 @@ vi.mock("@/lib/utils", () => ({
 	unwrapSdkError: vi.fn().mockReturnValue(null)
 }))
 
-vi.mock("@/queries/useDriveItems.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateGlobal: mockDriveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryGet: mockDriveItemsQueryGet
 }))
 
-vi.mock("@/queries/useDriveItemVersions.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItemVersions.query", () => ({
 	driveItemVersionsQueryUpdate: vi.fn()
 }))
 
-vi.mock("@/queries/useDriveItemPublicLinkStatus.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItemPublicLinkStatus.query", () => ({
 	driveItemPublicLinkStatusQueryUpdate: vi.fn()
 }))
 
@@ -220,7 +220,7 @@ vi.mock("expo-router", () => ({ router: { push: vi.fn(), back: vi.fn() } }))
 vi.mock("@filen/sdk-rs", () => mockSdkModule)
 
 // --- import real unit under test AFTER all vi.mock calls ----------------------
-import drive from "@/lib/drive"
+import drive from "@/features/drive/drive"
 import type { DriveItem } from "@/types"
 
 // --- factory helpers ----------------------------------------------------------

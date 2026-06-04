@@ -35,10 +35,10 @@ import {
 	driveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent,
 	driveItemsQueryGet
-} from "@/queries/useDriveItems.query"
-import { driveItemVersionsQueryUpdate } from "@/queries/useDriveItemVersions.query"
+} from "@/features/drive/queries/useDriveItems.query"
+import { driveItemVersionsQueryUpdate } from "@/features/drive/queries/useDriveItemVersions.query"
 import cache from "@/lib/cache"
-import { driveItemPublicLinkStatusQueryUpdate } from "@/queries/useDriveItemPublicLinkStatus.query"
+import { driveItemPublicLinkStatusQueryUpdate } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { run } from "@filen/utils"

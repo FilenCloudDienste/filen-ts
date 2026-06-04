@@ -1,0 +1,194 @@
+import Text from "@/components/ui/text"
+import SafeAreaView from "@/components/ui/safeAreaView"
+import { Platform } from "react-native"
+import { useLocalSearchParams, useNavigation } from "expo-router"
+import { deserialize } from "@/lib/serializer"
+import type { DriveItem } from "@/types"
+import View from "@/components/ui/view"
+import { DirectoryIcon, unwrapDirColor, directoryColorToHex } from "@/components/itemIcons"
+import Header from "@/components/ui/header"
+import { Fragment, useState, memo } from "react"
+import { useResolveClassNames } from "uniwind"
+import { cn } from "@filen/utils"
+import { DirColor } from "@filen/sdk-rs"
+import ColorPicker, { Panel1, Preview, HueSlider } from "reanimated-color-picker"
+import alerts from "@/lib/alerts"
+import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import drive from "@/features/drive/drive"
+import { ScrollView } from "react-native-gesture-handler"
+import { Information } from "@/features/drive/components/information"
+import DismissStack from "@/components/dismissStack"
+import useIsOnline from "@/hooks/useIsOnline"
+import { driveItemDisplayName } from "@/lib/decryption"
+import { useTranslation } from "react-i18next"
+
+const ChangeDirectoryColor = memo(() => {
+	const { item: itemSerialized } = useLocalSearchParams<{
+		item?: string
+	}>()
+	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const textForeground = useResolveClassNames("text-foreground")
+	const textBlue500 = useResolveClassNames("text-blue-500")
+	const navigation = useNavigation()
+	const [selectedColor, setSelectedColor] = useState<string | null>(null)
+	const isOnline = useIsOnline()
+	const { t } = useTranslation()
+
+	const item = (() => {
+		if (!itemSerialized) {
+			return null
+		}
+
+		try {
+			return deserialize(itemSerialized) as DriveItem
+		} catch {
+			return null
+		}
+	})()
+
+	const [hexColor, setHexColor] = useState<string>(() => {
+		if (!item || item.type !== "directory") {
+			return directoryColorToHex(unwrapDirColor(DirColor.Default.new()))
+		}
+
+		return directoryColorToHex(unwrapDirColor(item.data.color))
+	})
+
+	if (!item || item.type !== "directory") {
+		return <DismissStack />
+	}
+
+	return (
+		<Fragment>
+			<Header
+				title={t("change_directory_color")}
+				transparent={Platform.OS === "ios"}
+				shadowVisible={false}
+				backVisible={Platform.OS === "android"}
+				backgroundColor={Platform.select({
+					ios: undefined,
+					default: bgBackgroundSecondary.backgroundColor as string
+				})}
+				leftItems={Platform.select({
+					ios: [
+						{
+							type: "button",
+							icon: {
+								name: "close",
+								color: textForeground.color,
+								size: 20
+							},
+							props: {
+								onPress: () => {
+									navigation.getParent()?.goBack()
+								}
+							}
+						}
+					],
+					default: undefined
+				})}
+				rightItems={() => {
+					if (!selectedColor || !isOnline) {
+						return null
+					}
+
+					return [
+						{
+							type: "button",
+							icon: {
+								name: "checkmark-outline",
+								color: textBlue500.color,
+								size: 20
+							},
+							props: {
+								onPress: async () => {
+									const result = await runWithLoading(async () => {
+										await drive.setDirColor({
+											item,
+											color: DirColor.Custom.new(selectedColor)
+										})
+									})
+
+									if (!result.success) {
+										console.error(result.error)
+										alerts.error(result.error)
+
+										return
+									}
+
+									setHexColor(selectedColor)
+									setSelectedColor(null)
+								}
+							}
+						}
+					]
+				}}
+			/>
+			<SafeAreaView
+				className="flex-1 bg-background-secondary"
+				edges={Platform.select({
+					ios: ["left", "right"],
+					default: ["left", "right"]
+				})}
+			>
+				<ScrollView
+					contentContainerClassName={cn("bg-transparent px-4 flex-col pb-40 pt-10", Platform.OS === "ios" && "pt-24")}
+					showsHorizontalScrollIndicator={true}
+					showsVerticalScrollIndicator={false}
+				>
+					<View className="bg-transparent items-center justify-center flex-col">
+						<DirectoryIcon
+							color={selectedColor ? DirColor.Custom.new(selectedColor) : DirColor.Custom.new(hexColor)}
+							width={128}
+							height={128}
+						/>
+						<Text
+							className="text-lg font-bold mt-4"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{driveItemDisplayName(item)}
+						</Text>
+						<Text className="text-muted-foreground">{t("directory")}</Text>
+					</View>
+					<View className="bg-background-tertiary rounded-3xl p-4 mt-10 items-center justify-center flex-row">
+						<ColorPicker
+							style={{
+								width: "100%"
+							}}
+							value={hexColor}
+							onCompleteJS={e => setSelectedColor(e.hex)}
+						>
+							<Preview
+								style={{
+									borderTopLeftRadius: 12,
+									borderTopRightRadius: 12,
+									borderBottomLeftRadius: 0,
+									borderBottomRightRadius: 0
+								}}
+							/>
+							<Panel1
+								style={{
+									borderRadius: 0
+								}}
+							/>
+							<HueSlider
+								style={{
+									borderTopLeftRadius: 0,
+									borderTopRightRadius: 0,
+									borderBottomLeftRadius: 12,
+									borderBottomRightRadius: 12
+								}}
+							/>
+						</ColorPicker>
+					</View>
+					<View className="bg-transparent mt-10">
+						<Information item={item} />
+					</View>
+				</ScrollView>
+			</SafeAreaView>
+		</Fragment>
+	)
+})
+
+export default ChangeDirectoryColor

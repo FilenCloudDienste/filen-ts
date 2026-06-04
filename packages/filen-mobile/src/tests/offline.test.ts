@@ -56,11 +56,11 @@ vi.mock("@/features/offline/store/useOffline.store", () => ({
 	}
 }))
 
-vi.mock("@/queries/useDriveItemStoredOffline.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItemStoredOffline.query", () => ({
 	driveItemStoredOfflineQueryUpdate: vi.fn()
 }))
 
-vi.mock("@/queries/useDriveItems.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: vi.fn()
 }))
 
@@ -266,8 +266,8 @@ import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
 import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
 import transfers from "@/features/transfers/transfers"
-import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
-import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import useOfflineStore from "@/features/offline/store/useOffline.store"

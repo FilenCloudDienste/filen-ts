@@ -124,7 +124,7 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
-vi.mock("@/lib/drive", () => ({
+vi.mock("@/features/drive/drive", () => ({
 	default: {
 		enablePublicLink: vi.fn(),
 		openLinkedDirectory: vi.fn(),
@@ -230,7 +230,7 @@ vi.mock("@/components/itemIcons", () => ({
 }))
 // NOTE: do NOT mock @/features/chats/components/chat/message/regexed — we test its exports directly.
 vi.mock("@/features/chats/components/chat/message/menu", () => ({ default: () => null }))
-vi.mock("@/routes/driveSelect/[uuid]", () => ({ selectDriveItems: vi.fn() }))
+vi.mock("@/features/drive/screens/driveSelect", () => ({ selectDriveItems: vi.fn() }))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn(x => JSON.stringify(x)) }))
 
 // ─── Actual imports ───────────────────────────────────────────────────────────

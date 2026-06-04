@@ -123,7 +123,7 @@ vi.mock("@/lib/tmp", () => ({
 
 import * as FileSystem from "expo-file-system"
 import { fs } from "@/tests/mocks/expoFileSystem"
-import { downloadDriveItemToDevice } from "@/lib/driveDownload"
+import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import type { DriveItem } from "@/types"
 
 // ------------------------------------------------------------------

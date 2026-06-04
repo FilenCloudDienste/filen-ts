@@ -41,8 +41,8 @@ import { newTmpFile } from "@/lib/tmp"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
-import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
-import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import {
 	OFFLINE_VERSION,
 	OFFLINE_DIRECTORY,
