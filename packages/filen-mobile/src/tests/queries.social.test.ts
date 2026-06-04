@@ -163,8 +163,8 @@ vi.mock("@/lib/utils", () => ({
 
 import { probeMedia, fetchData as fetchChatMessageLinks } from "@/queries/useChatMessageLinks.query"
 import { fetchData as fetchChatMessages } from "@/queries/useChatMessages.query"
-import { fetchData as fetchNotesWithContent } from "@/queries/useNotesWithContent.query"
-import { fetchData as fetchNotesTags } from "@/queries/useNotesTags.query"
+import { fetchData as fetchNotesWithContent } from "@/features/notes/queries/useNotesWithContent.query"
+import { fetchData as fetchNotesTags } from "@/features/notes/queries/useNotesTags.query"
 import { fetchData as fetchChats } from "@/queries/useChats.query"
 
 // ---------------------------------------------------------------------------

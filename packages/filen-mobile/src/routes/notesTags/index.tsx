@@ -1,4 +1,4 @@
-import Notes from "@/components/notes"
+import Notes from "@/features/notes/components"
 import { memo } from "react"
 
 export const NotesTags = memo(() => {

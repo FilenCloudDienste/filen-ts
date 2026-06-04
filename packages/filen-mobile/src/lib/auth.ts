@@ -16,7 +16,7 @@ import sqlite from "@/lib/sqlite"
 import audio from "@/lib/audio"
 import offline from "@/lib/offline"
 import { sync as chatsSync } from "@/components/chats/sync"
-import { sync as notesSync } from "@/components/notes/sync"
+import { sync as notesSync } from "@/features/notes/components/sync"
 import { reloadAppAsync } from "expo"
 
 class Auth {

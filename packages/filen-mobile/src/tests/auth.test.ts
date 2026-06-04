@@ -84,7 +84,7 @@ vi.mock("@/components/chats/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
-vi.mock("@/components/notes/sync", () => ({
+vi.mock("@/features/notes/components/sync", () => ({
 	sync: {
 		cancel: vi.fn(() => {
 			callLog.push("notesSync.cancel")

@@ -1,11 +1,11 @@
 import { useRef, useEffect, Fragment, memo } from "react"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
 import { checklistParser, type ChecklistItem } from "@filen/utils"
-import Item from "@/components/notes/content/checklist/item"
+import Item from "@/features/notes/components/content/checklist/item"
 import useChecklistStore from "@/stores/useChecklist.store"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
-import Toolbar from "@/components/notes/content/checklist/toolbar"
+import Toolbar from "@/features/notes/components/content/checklist/toolbar"
 
 const Checklist = memo(
 	({

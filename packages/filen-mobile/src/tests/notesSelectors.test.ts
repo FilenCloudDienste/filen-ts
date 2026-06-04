@@ -4,7 +4,7 @@ import {
 	aggregateNoteTagSelectionFlags,
 	EMPTY_NOTE_FLAGS,
 	EMPTY_NOTE_TAG_FLAGS
-} from "@/lib/notesSelectors"
+} from "@/features/notes/notesSelectors"
 import { type Note, type NoteTag, type NoteParticipant } from "@/types"
 
 const ME = 100n
