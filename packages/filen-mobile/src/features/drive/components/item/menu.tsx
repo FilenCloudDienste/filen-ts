@@ -11,23 +11,90 @@ import * as FileSystem from "expo-file-system"
 import transfers from "@/features/transfers/transfers"
 import { randomUUID } from "expo-crypto"
 import { newTmpDir } from "@/lib/tmp"
-import { Platform, type StyleProp, type ViewStyle } from "react-native"
+import { type StyleProp, type ViewStyle } from "react-native"
 import * as MediaLibrary from "expo-media-library"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import offline from "@/features/offline/offline"
-import { getPreviewType, listLocalDirectoryRecursive, normalizeFilePathForBlobUtil, getRealDriveItemParent, resolveMimeType } from "@/lib/utils"
-import * as ReactNativeBlobUtil from "react-native-blob-util"
-import mimeTypes from "mime-types"
+import { getPreviewType, getRealDriveItemParent, resolveMimeType } from "@/lib/utils"
 import * as Sharing from "expo-sharing"
 import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
 import { serialize } from "@/lib/serializer"
-import auth from "@/lib/auth"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import cache from "@/lib/cache"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
+import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
+import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
+
+// Shared shape for confirmed destructive drive actions (trash / delete / remove
+// offline / remove share / stop sharing / disable link): prompt → guard cancel →
+// runWithLoading(action) → guard failure → optionally pop back when we just purged
+// a file we may be previewing. Returns the onPress handler. Mirrors notes'
+// `confirmedNoteAction`.
+function confirmedDriveAction({
+	item,
+	t,
+	promptTitle,
+	promptMessage,
+	promptOkText,
+	promptDestructive = true,
+	action,
+	dismissOnSuccess
+}: {
+	item: DriveItem
+	t: TFunction
+	promptTitle: string
+	promptMessage: string
+	promptOkText: string
+	// The plain `trash` action is the one site that omits destructive styling on the
+	// alert itself — default true preserves the destructive look everywhere else.
+	promptDestructive?: boolean
+	// Return value is awaited then discarded (matches the original `await drive.X(...)`).
+	action: () => Promise<unknown>
+	// When true and the purged item is a file we can navigate away from, pop back
+	// (closes a file preview / detail route sitting on top).
+	dismissOnSuccess: boolean
+}): () => Promise<void> {
+	return async () => {
+		const promptResult = await run(async () => {
+			return await prompts.alert({
+				title: promptTitle,
+				message: promptMessage,
+				cancelText: t("cancel"),
+				okText: promptOkText,
+				destructive: promptDestructive
+			})
+		})
+
+		if (!promptResult.success) {
+			console.error(promptResult.error)
+			alerts.error(promptResult.error)
+
+			return
+		}
+
+		if (promptResult.data.cancelled) {
+			return
+		}
+
+		const result = await runWithLoading(async () => {
+			await action()
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+
+		if (dismissOnSuccess && item.type === "file" && router.canGoBack()) {
+			router.back()
+		}
+	}
+}
 
 export function createMenuButtons({
 	item,
@@ -78,45 +145,15 @@ export function createMenuButtons({
 					title: t("delete_permanently"),
 					icon: "delete",
 					destructive: true,
-					onPress: async () => {
-						const promptResult = await run(async () => {
-							return await prompts.alert({
-								title: t("delete_permanently_item"),
-								message: t("confirm_delete_permanently"),
-								cancelText: t("cancel"),
-								okText: t("delete_permanently"),
-								destructive: true
-							})
-						})
-
-						if (!promptResult.success) {
-							console.error(promptResult.error)
-							alerts.error(promptResult.error)
-
-							return
-						}
-
-						if (promptResult.data.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async () => {
-							await drive.deletePermanently({
-								item
-							})
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
-
-						if (item.type === "file" && router.canGoBack()) {
-							router.back()
-						}
-					}
+					onPress: confirmedDriveAction({
+						item,
+						t,
+						promptTitle: t("delete_permanently_item"),
+						promptMessage: t("confirm_delete_permanently"),
+						promptOkText: t("delete_permanently"),
+						action: () => drive.deletePermanently({ item }),
+						dismissOnSuccess: true
+					})
 				})
 			}
 
@@ -132,41 +169,15 @@ export function createMenuButtons({
 				title: t("trash"),
 				icon: "trash",
 				destructive: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("trash_item"),
-							message: t("confirm_trash"),
-							cancelText: t("cancel"),
-							okText: t("trash"),
-							destructive: true
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await drive.trash({
-							item
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-				}
+				onPress: confirmedDriveAction({
+					item,
+					t,
+					promptTitle: t("trash_item"),
+					promptMessage: t("confirm_trash"),
+					promptOkText: t("trash"),
+					action: () => drive.trash({ item }),
+					dismissOnSuccess: false
+				})
 			})
 		}
 
@@ -175,7 +186,7 @@ export function createMenuButtons({
 
 	const menuButtons: MenuButton[] = []
 	const previewType =
-		item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+		isFileItem(item)
 			? getPreviewType(item.data.decryptedMeta?.name ?? "")
 			: null
 
@@ -206,7 +217,7 @@ export function createMenuButtons({
 	}
 
 	if (
-		(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") &&
+		(isDirectoryItem(item)) &&
 		(drivePath.type === "drive" ||
 			drivePath.type === "sharedIn" ||
 			drivePath.type === "sharedOut" ||
@@ -263,123 +274,7 @@ export function createMenuButtons({
 			icon: "download",
 			requiresOnline: true,
 			onPress: async () => {
-				const result = await run(async defer => {
-					if (!item.data.decryptedMeta) {
-						throw new Error("Missing decrypted metadata")
-					}
-
-					const destination = Platform.select({
-						ios:
-							item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-								? new FileSystem.File(
-										FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name)
-									)
-								: new FileSystem.Directory(
-										FileSystem.Paths.join(FileSystem.Paths.document, "Downloads", item.data.decryptedMeta.name)
-									),
-						default:
-							item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-								? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-								: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-					})
-
-					defer(() => {
-						if (Platform.OS === "android" && destination.parentDirectory.exists) {
-							destination.parentDirectory.delete()
-						}
-					})
-
-					if (!destination.parentDirectory.exists) {
-						destination.parentDirectory.create({
-							intermediates: true,
-							idempotent: true
-						})
-					}
-
-					if (destination.exists) {
-						destination.delete()
-					}
-
-					const result = await transfers.download({
-						item,
-						destination
-					})
-
-					if (!result) {
-						return
-					}
-
-					if (Platform.OS === "android") {
-						if (
-							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
-							destination instanceof FileSystem.File
-						) {
-							await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
-								{
-									name: item.data.decryptedMeta.name,
-									parentFolder: "Filen",
-									mimeType: item.data.decryptedMeta.mime
-								},
-								"Download",
-								destination.uri
-							)
-						}
-
-						if (
-							(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") &&
-							destination instanceof FileSystem.Directory
-						) {
-							const entries = listLocalDirectoryRecursive(destination)
-
-							await Promise.all(
-								entries.map(async entry => {
-									if (entry instanceof FileSystem.Directory) {
-										return
-									}
-
-									const normalizedEntryPath = normalizeFilePathForBlobUtil(entry.uri)
-									const destinationUriNormalized = normalizeFilePathForBlobUtil(destination.uri)
-
-									// `entry.name` (already decoded by expo's Paths.basename) and the decrypted
-									// plaintext name are passed raw — decoding them again threw URIError on
-									// names with a bare "%" (e.g. "50% off.jpg"). The parentFolder segments
-									// are different: FileSystem.Paths.join re-encodes them (" " -> "%20",
-									// "%" -> "%25"), so they must be decoded back, otherwise files land in
-									// literally mis-named directories ("Sub%20Folder"). The per-segment decode
-									// is guarded so a malformed sequence falls back to the raw segment.
-									const parentFolder = FileSystem.Paths.join(
-										"Filen",
-										item.data.decryptedMeta?.name ?? item.data.uuid,
-										FileSystem.Paths.dirname(normalizedEntryPath.slice(destinationUriNormalized.length))
-									)
-										.split("/")
-										.map(segment => {
-											if (segment.length === 0) {
-												return segment
-											}
-
-											try {
-												return decodeURIComponent(segment)
-											} catch {
-												return segment
-											}
-										})
-										.join("/")
-
-									await ReactNativeBlobUtil.default.MediaCollection.copyToMediaStore(
-										{
-											name: entry.name,
-											parentFolder: parentFolder.startsWith("/") ? parentFolder.slice(1) : parentFolder,
-											mimeType: mimeTypes.lookup(entry.name) || "application/octet-stream"
-										},
-										"Download",
-										normalizedEntryPath
-									)
-								})
-							)
-						}
-					}
-				})
+				const result = await downloadDriveItemToDevice({ item })
 
 				if (!result.success) {
 					console.error(result.error)
@@ -398,7 +293,7 @@ export function createMenuButtons({
 			title: t("make_available_offline"),
 			icon: "archive",
 			onPress: async () => {
-				if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+				if (isFileItem(item)) {
 					const result = await run(async () => {
 						return await offline.storeFile({
 							file: item,
@@ -432,7 +327,7 @@ export function createMenuButtons({
 	}
 
 	if (
-		(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+		(isFileItem(item)) &&
 		(previewType === "image" || previewType === "video") &&
 		item.data.decryptedMeta
 	) {
@@ -507,7 +402,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if ((item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") && item.data.decryptedMeta) {
+	if ((isFileItem(item)) && item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "export",
 			requiresOnline: true,
@@ -656,7 +551,7 @@ export function createMenuButtons({
 					}
 
 					const destination =
-						item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+						isFileItem(item)
 							? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 							: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 
@@ -691,17 +586,17 @@ export function createMenuButtons({
 						parent: remoteDir,
 						name: item.data.decryptedMeta.name,
 						created:
-							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+							(isFileItem(item)) &&
 							item.data.decryptedMeta.created
 								? Number(item.data.decryptedMeta.created)
 								: undefined,
 						modified:
-							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+							(isFileItem(item)) &&
 							item.data.decryptedMeta.modified
 								? Number(item.data.decryptedMeta.modified)
 								: undefined,
 						mime:
-							(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") &&
+							(isFileItem(item)) &&
 							item.data.decryptedMeta.mime
 								? item.data.decryptedMeta.mime
 								: undefined
@@ -888,9 +783,7 @@ export function createMenuButtons({
 				icon: "move",
 				onPress: async () => {
 					const driveRootUuidResult = await run(async () => {
-						const { authedSdkClient } = await auth.getSdkClients()
-
-						return authedSdkClient.root().uuid
+						return await drive.getRootUuid()
 					})
 
 					if (!driveRootUuidResult.success) {
@@ -922,7 +815,7 @@ export function createMenuButtons({
 	if (
 		downloadSubButtons.length > 0 &&
 		drivePath.type !== "offline" &&
-		(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+		(isFileItem(item)
 			? (item.data.decryptedMeta?.size ?? 0) > 0
 			: true)
 	) {
@@ -1026,39 +919,15 @@ export function createMenuButtons({
 			title: t("remove_offline"),
 			icon: "trash",
 			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("remove_offline_item"),
-						message: t("confirm_remove_offline"),
-						cancelText: t("cancel"),
-						okText: t("remove_offline"),
-						destructive: true
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await offline.removeItem(item)
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-			}
+			onPress: confirmedDriveAction({
+				item,
+				t,
+				promptTitle: t("remove_offline_item"),
+				promptMessage: t("confirm_remove_offline"),
+				promptOkText: t("remove_offline"),
+				action: () => offline.removeItem(item),
+				dismissOnSuccess: false
+			})
 		})
 	}
 
@@ -1069,44 +938,20 @@ export function createMenuButtons({
 			title: t("remove_share"),
 			icon: "delete",
 			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("remove_share_item"),
-						message: t("confirm_remove_share"),
-						cancelText: t("cancel"),
-						okText: t("remove_share"),
-						destructive: true
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await drive.removeShare({
+			// TODO: if we are in a preview, close the preview after removing the share
+			onPress: confirmedDriveAction({
+				item,
+				t,
+				promptTitle: t("remove_share_item"),
+				promptMessage: t("confirm_remove_share"),
+				promptOkText: t("remove_share"),
+				action: () =>
+					drive.removeShare({
 						item,
 						parentUuid: drivePath.uuid ?? undefined
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				// TODO: if we are in a preview, close the preview after removing the share
-			}
+					}),
+				dismissOnSuccess: false
+			})
 		})
 	}
 
@@ -1117,43 +962,16 @@ export function createMenuButtons({
 			title: t("stop_sharing"),
 			icon: "delete",
 			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("stop_sharing_item"),
-						message: t("confirm_stop_sharing"),
-						cancelText: t("cancel"),
-						okText: t("stop_sharing"),
-						destructive: true
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await drive.removeShare({
-						item
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				// TODO: if we are in a preview, close the preview after stopping sharing the item
-			}
+			// TODO: if we are in a preview, close the preview after stopping sharing the item
+			onPress: confirmedDriveAction({
+				item,
+				t,
+				promptTitle: t("stop_sharing_item"),
+				promptMessage: t("confirm_stop_sharing"),
+				promptOkText: t("stop_sharing"),
+				action: () => drive.removeShare({ item }),
+				dismissOnSuccess: false
+			})
 		})
 	}
 
@@ -1164,43 +982,16 @@ export function createMenuButtons({
 			title: t("disable_public_link"),
 			icon: "delete",
 			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("disable_public_link"),
-						message: t("confirm_disable_public_link"),
-						cancelText: t("cancel"),
-						okText: t("disable"),
-						destructive: true
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await drive.disablePublicLink({
-						item
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				// TODO: if we are in a preview, close the preview after
-			}
+			// TODO: if we are in a preview, close the preview after
+			onPress: confirmedDriveAction({
+				item,
+				t,
+				promptTitle: t("disable_public_link"),
+				promptMessage: t("confirm_disable_public_link"),
+				promptOkText: t("disable"),
+				action: () => drive.disablePublicLink({ item }),
+				dismissOnSuccess: false
+			})
 		})
 	}
 
@@ -1216,42 +1007,20 @@ export function createMenuButtons({
 			title: t("trash"),
 			icon: "trash",
 			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("trash_item"),
-						message: t("confirm_trash"),
-						cancelText: t("cancel"),
-						okText: t("trash")
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await drive.trash({
-						item
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				// TODO: if we are in a preview, close the preview after trashing the item
-			}
+			// TODO: if we are in a preview, close the preview after trashing the item
+			//
+			// Note: this is the one destructive action whose confirm alert is NOT styled
+			// destructive (no `destructive: true` on the prompt) — preserved via promptDestructive: false.
+			onPress: confirmedDriveAction({
+				item,
+				t,
+				promptTitle: t("trash_item"),
+				promptMessage: t("confirm_trash"),
+				promptOkText: t("trash"),
+				promptDestructive: false,
+				action: () => drive.trash({ item }),
+				dismissOnSuccess: false
+			})
 		})
 	}
 
@@ -1285,45 +1054,15 @@ export function createMenuButtons({
 			title: t("delete_permanently"),
 			icon: "delete",
 			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("delete_permanently_item"),
-						message: t("confirm_delete_permanently"),
-						cancelText: t("cancel"),
-						okText: t("delete_permanently"),
-						destructive: true
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await drive.deletePermanently({
-						item
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				if (item.type === "file" && router.canGoBack()) {
-					router.back()
-				}
-			}
+			onPress: confirmedDriveAction({
+				item,
+				t,
+				promptTitle: t("delete_permanently_item"),
+				promptMessage: t("confirm_delete_permanently"),
+				promptOkText: t("delete_permanently"),
+				action: () => drive.deletePermanently({ item }),
+				dismissOnSuccess: true
+			})
 		})
 	}
 

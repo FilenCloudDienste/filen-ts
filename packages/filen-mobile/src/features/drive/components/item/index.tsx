@@ -19,13 +19,13 @@ import { useShallow } from "zustand/shallow"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
-import { serialize } from "@/lib/serializer"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { useRecyclingState } from "@shopify/flash-list"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/utils"
 import { driveItemDisplayName } from "@/lib/decryption"
+import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 
 const Item = memo(
 	({ info, drivePath, getListItems }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath; getListItems: () => DriveItem[] }) => {
@@ -51,86 +51,19 @@ const Item = memo(
 			type: info.item.type
 		})
 
-		const disabled = (() => {
-			if (!drivePath.selectOptions) {
-				return false
-			}
+		const disabled = isDriveItemDisabled({
+			item: info.item,
+			drivePath,
+			previewType,
+			selectedFromDriveSelectCount: selectedItemsFromDriveSelectLength,
+			isSelectedFromDriveSelect
+		})
 
-			switch (drivePath.selectOptions.intention) {
-				case "move": {
-					// Undecryptable items can't be valid move/copy destinations — we
-					// don't know what they are, and the SDK can't act on them either.
-					if (info.item.data.undecryptable) {
-						return true
-					}
-
-					return drivePath.selectOptions.items.some(i => i.data.uuid === info.item.data.uuid)
-				}
-
-				case "select": {
-					// Undecryptable items aren't valid picks for any select intent —
-					// we can't know whether they'd satisfy file/directory or previewType filters.
-					if (info.item.data.undecryptable) {
-						return true
-					}
-
-					const allowedItemTypes: ("file" | "directory")[] = []
-
-					if (drivePath.selectOptions.files) {
-						allowedItemTypes.push("file")
-					}
-
-					if (drivePath.selectOptions.directories) {
-						allowedItemTypes.push("directory")
-					}
-
-					const normalizeItemType =
-						info.item.type === "sharedDirectory" || info.item.type === "directory" || info.item.type === "sharedRootDirectory"
-							? "directory"
-							: "file"
-
-					if (
-						!allowedItemTypes.includes(normalizeItemType) ||
-						(drivePath.selectOptions.previewType && drivePath.selectOptions.previewType !== previewType) ||
-						drivePath.selectOptions.items.some(i => i.data.uuid === info.item.data.uuid)
-					) {
-						return true
-					}
-
-					switch (drivePath.selectOptions.type) {
-						case "single": {
-							return selectedItemsFromDriveSelectLength > 0 && !isSelectedFromDriveSelect
-						}
-
-						case "multiple": {
-							return false
-						}
-					}
-				}
-			}
-		})()
-
-		// True when the row is "disabled" only because the caller's selectOptions exclude
-		// directories (e.g. files-only picker), but the item itself is a directory the user
-		// must still be able to navigate into. Selection stays blocked; row-tap navigates.
-		const navigateOnly = (() => {
-			if (!disabled || !drivePath.selectOptions) {
-				return false
-			}
-
-			if (drivePath.selectOptions.intention !== "select") {
-				return false
-			}
-
-			if (drivePath.selectOptions.directories) {
-				return false
-			}
-
-			const isDirectory =
-				info.item.type === "directory" || info.item.type === "sharedDirectory" || info.item.type === "sharedRootDirectory"
-
-			return isDirectory
-		})()
+		const navigateOnly = isDriveItemNavigateOnly({
+			item: info.item,
+			drivePath,
+			disabled
+		})
 
 		const onPressSelectForDriveSelect = () => {
 			if (disabled) {
@@ -206,99 +139,13 @@ const Item = memo(
 				}
 			}
 
-			if (
-				(info.item.type === "directory" || info.item.type === "sharedDirectory" || info.item.type === "sharedRootDirectory") &&
-				drivePath.type !== "trash"
-			) {
-				if (drivePath.type === "offline") {
-					router.push({
-						pathname: "/offline/[uuid]",
-						params: {
-							uuid: info.item.data.uuid
-						}
-					})
+			const navigationTarget = resolveDriveNavigationTarget({
+				item: info.item,
+				drivePath
+			})
 
-					return
-				}
-
-				if (drivePath.type === "sharedIn") {
-					router.push({
-						pathname: "/sharedIn/[uuid]",
-						params: {
-							uuid: info.item.data.uuid
-						}
-					})
-
-					return
-				}
-
-				if (drivePath.type === "sharedOut") {
-					router.push({
-						pathname: "/sharedOut/[uuid]",
-						params: {
-							uuid: info.item.data.uuid
-						}
-					})
-
-					return
-				}
-
-				if (drivePath.type === "favorites") {
-					router.push({
-						pathname: "/favorites/[uuid]",
-						params: {
-							uuid: info.item.data.uuid
-						}
-					})
-
-					return
-				}
-
-				if (drivePath.type === "links") {
-					router.push({
-						pathname: "/links/[uuid]",
-						params: {
-							uuid: info.item.data.uuid
-						}
-					})
-
-					return
-				}
-
-				if (drivePath.selectOptions) {
-					router.push({
-						pathname: "/driveSelect/[uuid]",
-						params: {
-							uuid: info.item.data.uuid,
-							selectOptions: serialize(drivePath.selectOptions)
-						}
-					})
-
-					return
-				}
-
-				if (drivePath.type === "linked") {
-					if (!drivePath.linked) {
-						return
-					}
-
-					router.push({
-						pathname: "/linkedDir/[uuid]",
-						params: {
-							uuid: info.item.data.uuid,
-							linked: serialize(drivePath.linked)
-						}
-					})
-
-					return
-				}
-
-				router.push({
-					pathname: "/tabs/drive/[uuid]",
-					params: {
-						uuid: info.item.data.uuid
-					}
-				})
+			if (navigationTarget) {
+				router.push(navigationTarget)
 
 				return
 			}

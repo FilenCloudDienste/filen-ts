@@ -1458,6 +1458,24 @@ class Drive {
 			}
 		})
 	}
+
+	// The drive root uuid is stable for the lifetime of an authenticated session.
+	// Cache it after the first resolve so repeated callers (header bulk-move,
+	// per-item move) don't each round-trip through `getSdkClients()`.
+	private cachedRootUuid: string | null = null
+
+	public async getRootUuid(): Promise<string> {
+		if (this.cachedRootUuid) {
+			return this.cachedRootUuid
+		}
+
+		const { authedSdkClient } = await auth.getSdkClients()
+		const rootUuid = authedSdkClient.root().uuid
+
+		this.cachedRootUuid = rootUuid
+
+		return rootUuid
+	}
 }
 
 const drive = new Drive()
