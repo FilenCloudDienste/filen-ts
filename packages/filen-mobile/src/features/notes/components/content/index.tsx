@@ -3,6 +3,7 @@ import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
 import useNoteContentQuery from "@/features/notes/queries/useNoteContent.query"
 import Checklist from "@/features/notes/components/content/checklist"
+import { noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
 import { ActivityIndicator } from "react-native"
@@ -230,17 +231,7 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 					onValueChange={onValueChange}
 					readOnly={!hasWriteAccess}
 					placeholder={t("note_editor_placeholder")}
-					type={
-						note.noteType === NoteType.Text
-							? "text"
-							: note.noteType === NoteType.Code
-								? "code"
-								: note.noteType === NoteType.Md
-									? "markdown"
-									: note.noteType === NoteType.Rich
-										? "richtext"
-										: "text"
-					}
+					type={noteTypeToEditorType(note.noteType)}
 					id={`note:${note.uuid}`}
 					paddingBottom={insets.bottom}
 				/>

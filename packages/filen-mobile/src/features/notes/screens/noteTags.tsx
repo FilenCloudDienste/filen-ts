@@ -23,40 +23,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
-
-// Tri-state of a tag against the working set of notes:
-//   "all"  — every note already carries this tag (tap → remove from all)
-//   "some" — some but not all carry it (tap → add to the rest, promoting to "all")
-//   "none" — no note carries it yet (tap → add to all)
-type TagState = "all" | "some" | "none"
-
-function computeTagState(targetNotes: readonly Note[], tag: NoteTag): TagState {
-	let tagged = 0
-
-	for (let i = 0; i < targetNotes.length; i++) {
-		const note = targetNotes[i]
-
-		if (note && note.tags.some(t => t.uuid === tag.uuid)) {
-			tagged++
-		}
-	}
-
-	if (tagged === 0) {
-		return "none"
-	}
-
-	if (tagged === targetNotes.length) {
-		return "all"
-	}
-
-	return "some"
-}
+import { computeTagState } from "@/features/notes/utils"
 
 const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
-	const state = computeTagState(targetNotes, tag)
+	const state = computeTagState({ notes: targetNotes, tag })
 	const isSingle = targetNotes.length === 1
 
 	const toggleTitle =
