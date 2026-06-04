@@ -26,6 +26,10 @@ export type Metadata = {
 export const VERSION = AUDIO_CACHE_VERSION
 export const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
 
+function parseMetadata(raw: string): Metadata {
+	return deserialize(raw) as Metadata
+}
+
 export class AudioCache {
 	private readonly mutexes = new Map<string, Semaphore>()
 	private readonly clearBarrier = new ClearBarrier()
@@ -94,7 +98,7 @@ export class AudioCache {
 				return false
 			}
 
-			const metadataContent = deserialize(await metadata.text()) as Metadata
+			const metadataContent = parseMetadata(await metadata.text())
 
 			if (Object.keys(metadataContent ?? {}).length === 0) {
 				return false
@@ -162,7 +166,7 @@ export class AudioCache {
 
 			if (audio.exists && metadataFile.exists && metadataFile.size > 0) {
 				try {
-					const metadata = deserialize(await metadataFile.text()) as Metadata
+					const metadata = parseMetadata(await metadataFile.text())
 
 					if (Object.keys(metadata ?? {}).length > 0) {
 						return {
@@ -256,7 +260,7 @@ export class AudioCache {
 
 						metadataFile.write(serialize(metadata))
 					} else {
-						metadata = deserialize(await metadataFile.text()) as Metadata
+						metadata = parseMetadata(await metadataFile.text())
 
 						if (Object.keys(metadata ?? {}).length === 0) {
 							metadata = null
@@ -308,7 +312,7 @@ export class AudioCache {
 
 			if (metadataFile.exists) {
 				const parseResult = await run(async () => {
-					return deserialize(await metadataFile.text()) as Metadata
+					return parseMetadata(await metadataFile.text())
 				})
 
 				if (parseResult.success && parseResult.data?.pictureUri) {
@@ -352,7 +356,7 @@ export class AudioCache {
 					let pictureUri: string | null = null
 
 					const parseResult = await run(async () => {
-						const metadata = deserialize(await entry.text()) as Metadata
+						const metadata = parseMetadata(await entry.text())
 
 						pictureUri = metadata?.pictureUri ?? null
 
@@ -387,7 +391,7 @@ export class AudioCache {
 					}
 
 					const recheck = await run(async () => {
-						const metadata = deserialize(await entry.text()) as Metadata
+						const metadata = parseMetadata(await entry.text())
 
 						pictureUri = metadata?.pictureUri ?? null
 
