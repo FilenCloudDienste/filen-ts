@@ -9,14 +9,51 @@ import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import chats from "@/features/chats/chats"
 import { router } from "expo-router"
-import useAppStore from "@/stores/useApp.store"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
 import { serialize } from "@/lib/serializer"
 import { t } from "@/lib/i18n"
+import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
 
 export type ChatMenuOrigin = "chats" | "search" | "chat"
+
+// The owner "delete chat" and non-owner "leave chat" buttons are emitted in both the
+// undecryptable and the normal branch — build them once here so the prompt copy, icons and
+// detail-route dismissal stay in lockstep.
+function deleteChatButton(chat: TChat): MenuButton {
+	return {
+		id: "delete",
+		requiresOnline: true,
+		title: t("delete"),
+		destructive: true,
+		icon: "delete",
+		onPress: confirmedChatAction({
+			promptTitle: t("delete_chat"),
+			promptMessage: t("delete_chat_confirmation"),
+			promptOkText: t("delete"),
+			action: () => chats.delete({ chat }),
+			dismissPathnamePrefix: `/chat/${chat.uuid}`
+		})
+	}
+}
+
+function leaveChatButton(chat: TChat): MenuButton {
+	return {
+		id: "leave",
+		requiresOnline: true,
+		title: t("leave"),
+		destructive: true,
+		icon: "exit",
+		onPress: confirmedChatAction({
+			promptTitle: t("leave_chat"),
+			promptMessage: t("leave_chat_confirmation"),
+			promptOkText: t("leave"),
+			action: () => chats.leave({ chat }),
+			dismissPathnamePrefix: `/chat/${chat.uuid}`
+		})
+	}
+}
 
 export function createMenuButtons({
 	chat,
@@ -53,106 +90,10 @@ export function createMenuButtons({
 				: []
 
 		if (isOwner) {
-			return [
-				...selectButton,
-				{
-					id: "delete",
-					requiresOnline: true,
-					title: t("delete"),
-					destructive: true,
-					icon: "delete",
-					onPress: async () => {
-						const promptResponse = await run(async () => {
-							return await prompts.alert({
-								title: t("delete_chat"),
-								message: t("delete_chat_confirmation"),
-								cancelText: t("cancel"),
-								okText: t("delete"),
-								destructive: true
-							})
-						})
-
-						if (!promptResponse.success) {
-							console.error(promptResponse.error)
-							alerts.error(promptResponse.error)
-
-							return
-						}
-
-						if (promptResponse.data.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async () => {
-							await chats.delete({
-								chat
-							})
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-
-							return
-						}
-
-						if (useAppStore.getState().pathname.startsWith(`/chat/${chat.uuid}`) && router.canGoBack()) {
-							router.back()
-						}
-					}
-				}
-			]
+			return [...selectButton, deleteChatButton(chat)]
 		}
 
-		return [
-			...selectButton,
-			{
-				id: "leave",
-				requiresOnline: true,
-				title: t("leave"),
-				destructive: true,
-				icon: "exit",
-				onPress: async () => {
-					const promptResponse = await run(async () => {
-						return await prompts.alert({
-							title: t("leave_chat"),
-							message: t("leave_chat_confirmation"),
-							cancelText: t("cancel"),
-							okText: t("leave"),
-							destructive: true
-						})
-					})
-
-					if (!promptResponse.success) {
-						console.error(promptResponse.error)
-						alerts.error(promptResponse.error)
-
-						return
-					}
-
-					if (promptResponse.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await chats.leave({
-							chat
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					if (useAppStore.getState().pathname.startsWith(`/chat/${chat.uuid}`) && router.canGoBack()) {
-						router.back()
-					}
-				}
-			}
-		]
+		return [...selectButton, leaveChatButton(chat)]
 	}
 
 	return [
@@ -282,101 +223,9 @@ export function createMenuButtons({
 							}
 						}
 					},
-					{
-						id: "delete",
-						requiresOnline: true,
-						title: t("delete"),
-						destructive: true,
-						icon: "delete",
-						onPress: async () => {
-							const promptResponse = await run(async () => {
-								return await prompts.alert({
-									title: t("delete_chat"),
-									message: t("delete_chat_confirmation"),
-									cancelText: t("cancel"),
-									okText: t("delete"),
-									destructive: true
-								})
-							})
-
-							if (!promptResponse.success) {
-								console.error(promptResponse.error)
-								alerts.error(promptResponse.error)
-
-								return
-							}
-
-							if (promptResponse.data.cancelled) {
-								return
-							}
-
-							const result = await runWithLoading(async () => {
-								await chats.delete({
-									chat
-								})
-							})
-
-							if (!result.success) {
-								console.error(result.error)
-								alerts.error(result.error)
-
-								return
-							}
-
-							if (useAppStore.getState().pathname.startsWith(`/chat/${chat.uuid}`) && router.canGoBack()) {
-								router.back()
-							}
-						}
-					}
+					deleteChatButton(chat)
 				] satisfies MenuButton[])
-			: ([
-					{
-						id: "leave",
-						requiresOnline: true,
-						title: t("leave"),
-						destructive: true,
-						icon: "exit",
-						onPress: async () => {
-							const promptResponse = await run(async () => {
-								return await prompts.alert({
-									title: t("leave_chat"),
-									message: t("leave_chat_confirmation"),
-									cancelText: t("cancel"),
-									okText: t("leave"),
-									destructive: true
-								})
-							})
-
-							if (!promptResponse.success) {
-								console.error(promptResponse.error)
-								alerts.error(promptResponse.error)
-
-								return
-							}
-
-							if (promptResponse.data.cancelled) {
-								return
-							}
-
-							const result = await runWithLoading(async () => {
-								await chats.leave({
-									chat
-								})
-							})
-
-							if (!result.success) {
-								console.error(result.error)
-								alerts.error(result.error)
-
-								return
-							}
-
-							if (useAppStore.getState().pathname.startsWith(`/chat/${chat.uuid}`) && router.canGoBack()) {
-								router.back()
-							}
-						}
-					}
-				] satisfies MenuButton[]))
+			: ([leaveChatButton(chat)] satisfies MenuButton[]))
 	] satisfies MenuButton[]
 }
 
