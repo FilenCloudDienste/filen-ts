@@ -7,7 +7,7 @@ import View, { CrossGlassContainerView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header from "@/components/ui/header"
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/utils"
 import VirtualList from "@/components/ui/virtualList"
@@ -27,7 +27,7 @@ import Icon from "@/features/notes/components/note/icon"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 
-const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) => {
+const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -137,9 +137,9 @@ const History = memo(({ history, note }: { history: TNoteHistory; note: Note }) 
 			</View>
 		</View>
 	)
-})
+}
 
-const NoteHistory = memo(() => {
+const NoteHistory = () => {
 	const { t } = useTranslation()
 	const { note: noteSerialized } = useLocalSearchParams<{
 		note?: string
@@ -259,6 +259,6 @@ const NoteHistory = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default NoteHistory

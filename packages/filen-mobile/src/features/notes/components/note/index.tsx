@@ -8,7 +8,6 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
-import { memo } from "react"
 import { useStringifiedClient } from "@/lib/auth"
 import { simpleDate } from "@/lib/time"
 import Icon from "@/features/notes/components/note/icon"
@@ -38,100 +37,115 @@ export type DataItem = Item & {
 
 export type ListItem = SectionHeader | DataItem
 
-const Note = memo(
-	({
-		info,
-		menuOrigin,
-		nextNote,
-		prevNote
-	}: {
-		info: ListRenderItemInfo<ListItem>
-		menuOrigin?: NoteMenuOrigin
-		nextNote?: ListItem
-		prevNote?: ListItem
-	}) => {
-		const router = useRouter()
-		const textForeground = useResolveClassNames("text-foreground")
-		const textRed500 = useResolveClassNames("text-red-500")
-		const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
-		const isInflight = useNotesStore(useShallow(state => (state.inflightContent[itemUuid] ?? []).length > 0))
-		const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
-		const stringifiedClient = useStringifiedClient()
-		const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.uuid === itemUuid)))
-		const areNotesSelected = useNotesStore(useShallow(state => state.selectedNotes.length > 0))
+const Note = ({
+	info,
+	menuOrigin,
+	nextNote,
+	prevNote
+}: {
+	info: ListRenderItemInfo<ListItem>
+	menuOrigin?: NoteMenuOrigin
+	nextNote?: ListItem
+	prevNote?: ListItem
+}) => {
+	const router = useRouter()
+	const textForeground = useResolveClassNames("text-foreground")
+	const textRed500 = useResolveClassNames("text-red-500")
+	const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
+	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[itemUuid] ?? []).length > 0))
+	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
+	const stringifiedClient = useStringifiedClient()
+	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.uuid === itemUuid)))
+	const areNotesSelected = useNotesStore(useShallow(state => state.selectedNotes.length > 0))
 
-		const onPress = () => {
-			if (info.item.type === "header") {
-				return
-			}
-
-			if (info.item.undecryptable) {
-				return
-			}
-
-			if (useNotesStore.getState().selectedNotes.length > 0) {
-				useNotesStore.getState().toggleSelectedNote(info.item)
-
-				return
-			}
-
-			router.push(`/note/${itemUuid}`)
-		}
-
-		const participantsWithoutCurrentUser =
-			info.item.type === "header"
-				? []
-				: info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
-		const tags = info.item.type === "header" ? [] : info.item.tags.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
-
-		// Notes are rendered inside a sectioned list (pinned / favorited /
-		// time-bucketed / archived / trashed) where each section starts with a
-		// SectionHeader. A note's rounded corners reflect its position within
-		// its enclosing section:
-		//   first-in-section → top corners rounded (or all, if solo)
-		//   last-in-section  → bottom corners rounded (or all, if solo)
-		//   middle           → no corners
-		//
-		// "First" means the previous list item is either a header or undefined
-		// (the list itself ends just above). "Last" is symmetric. Solo notes
-		// (first AND last) get all four corners.
-		const isFirstInSection = !prevNote || prevNote.type === "header"
-		const isLastInSection = !nextNote || nextNote.type === "header"
-		const roundedCn = cn(isFirstInSection && "rounded-t-4xl", isLastInSection && "rounded-b-4xl")
-
+	const onPress = () => {
 		if (info.item.type === "header") {
-			return (
-				<View className="w-full h-auto px-4 py-4 pb-2 flex-row items-center gap-2">
-					{info.item.icon && (
-						<Ionicons
-							name={info.item.icon}
-							size={18}
-							color={textForeground.color}
-						/>
-					)}
-					<Text className="text-lg">{info.item.title}</Text>
-				</View>
-			)
+			return
 		}
 
+		if (info.item.undecryptable) {
+			return
+		}
+
+		if (useNotesStore.getState().selectedNotes.length > 0) {
+			useNotesStore.getState().toggleSelectedNote(info.item)
+
+			return
+		}
+
+		router.push(`/note/${itemUuid}`)
+	}
+
+	const participantsWithoutCurrentUser =
+		info.item.type === "header"
+			? []
+			: info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
+	const tags = info.item.type === "header" ? [] : info.item.tags.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
+
+	// Notes are rendered inside a sectioned list (pinned / favorited /
+	// time-bucketed / archived / trashed) where each section starts with a
+	// SectionHeader. A note's rounded corners reflect its position within
+	// its enclosing section:
+	//   first-in-section → top corners rounded (or all, if solo)
+	//   last-in-section  → bottom corners rounded (or all, if solo)
+	//   middle           → no corners
+	//
+	// "First" means the previous list item is either a header or undefined
+	// (the list itself ends just above). "Last" is symmetric. Solo notes
+	// (first AND last) get all four corners.
+	const isFirstInSection = !prevNote || prevNote.type === "header"
+	const isLastInSection = !nextNote || nextNote.type === "header"
+	const roundedCn = cn(isFirstInSection && "rounded-t-4xl", isLastInSection && "rounded-b-4xl")
+
+	if (info.item.type === "header") {
 		return (
-			<View className="w-full h-auto flex-col">
-				<Menu
+			<View className="w-full h-auto px-4 py-4 pb-2 flex-row items-center gap-2">
+				{info.item.icon && (
+					<Ionicons
+						name={info.item.icon}
+						size={18}
+						color={textForeground.color}
+					/>
+				)}
+				<Text className="text-lg">{info.item.title}</Text>
+			</View>
+		)
+	}
+
+	return (
+		<View className="w-full h-auto flex-col">
+			<Menu
+				className={cn(
+					"flex-row w-full h-auto",
+					Platform.OS === "android" && cn("px-4", nextNote?.type === "note" ? "pb-0" : "pb4")
+				)}
+				type="context"
+				note={info.item}
+				origin={menuOrigin ?? "notes"}
+				isAnchoredToRight={true}
+			>
+				<PressableScale
+					onPress={onPress}
 					className={cn(
-						"flex-row w-full h-auto",
-						Platform.OS === "android" && cn("px-4", nextNote?.type === "note" ? "pb-0" : "pb4")
+						"w-full h-auto flex-row",
+						Platform.OS === "ios" && cn("px-4", nextNote?.type === "note" ? "pb-0" : "pb4"),
+						roundedCn
 					)}
-					type="context"
-					note={info.item}
-					origin={menuOrigin ?? "notes"}
-					isAnchoredToRight={true}
+					style={{
+						borderCurve: "continuous"
+					}}
 				>
-					<PressableScale
-						onPress={onPress}
+					<View
 						className={cn(
-							"w-full h-auto flex-row",
-							Platform.OS === "ios" && cn("px-4", nextNote?.type === "note" ? "pb-0" : "pb4"),
-							roundedCn
+							"w-full h-auto flex-row px-4 shadow-sm",
+							roundedCn,
+							isActive
+								? Platform.select({
+										ios: "bg-background-tertiary rounded-4xl",
+										default: "bg-background-tertiary"
+									})
+								: "bg-background-secondary",
+							isSelected && "bg-background-tertiary"
 						)}
 						style={{
 							borderCurve: "continuous"
@@ -139,142 +153,125 @@ const Note = memo(
 					>
 						<View
 							className={cn(
-								"w-full h-auto flex-row px-4 shadow-sm",
-								roundedCn,
-								isActive
-									? Platform.select({
-											ios: "bg-background-tertiary rounded-4xl",
-											default: "bg-background-tertiary"
-										})
-									: "bg-background-secondary",
-								isSelected && "bg-background-tertiary"
+								"flex-1 flex-row gap-4 w-full h-auto bg-transparent py-3",
+								nextNote?.type === "note" &&
+									Platform.select({
+										ios: isActive ? "" : "border-b border-border",
+										default: "border-b border-border"
+									})
 							)}
-							style={{
-								borderCurve: "continuous"
-							}}
 						>
-							<View
-								className={cn(
-									"flex-1 flex-row gap-4 w-full h-auto bg-transparent py-3",
-									nextNote?.type === "note" &&
-										Platform.select({
-											ios: isActive ? "" : "border-b border-border",
-											default: "border-b border-border"
-										})
-								)}
-							>
-								{areNotesSelected && (
-									<AnimatedView
-										className="flex-row h-full items-center justify-center bg-transparent pr-2 shrink-0"
-										entering={FadeIn}
-										exiting={FadeOut}
-									>
-										<Checkbox value={isSelected} />
-									</AnimatedView>
-								)}
-								<View className="shrink-0 h-auto w-auto bg-transparent flex-col gap-2 items-center justify-start">
-									<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
-										{isInflight ? (
-											<ActivityIndicator
-												size="small"
-												color={textForeground.color}
-											/>
-										) : (
-											<Icon
-												note={info.item}
-												iconSize={18}
-											/>
-										)}
-									</View>
-									{info.item.pinned && (
-										<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
-											<Ionicons
-												name="pin-outline"
-												size={18}
-												color={textForeground.color}
-											/>
-										</View>
-									)}
-									{info.item.favorite && (
-										<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
-											<Ionicons
-												name="heart-outline"
-												size={18}
-												color={textRed500.color}
-											/>
-										</View>
+							{areNotesSelected && (
+								<AnimatedView
+									className="flex-row h-full items-center justify-center bg-transparent pr-2 shrink-0"
+									entering={FadeIn}
+									exiting={FadeOut}
+								>
+									<Checkbox value={isSelected} />
+								</AnimatedView>
+							)}
+							<View className="shrink-0 h-auto w-auto bg-transparent flex-col gap-2 items-center justify-start">
+								<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
+									{isInflight ? (
+										<ActivityIndicator
+											size="small"
+											color={textForeground.color}
+										/>
+									) : (
+										<Icon
+											note={info.item}
+											iconSize={18}
+										/>
 									)}
 								</View>
-								<View className="gap-1 w-full h-auto bg-transparent flex-col flex-1">
+								{info.item.pinned && (
+									<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
+										<Ionicons
+											name="pin-outline"
+											size={18}
+											color={textForeground.color}
+										/>
+									</View>
+								)}
+								{info.item.favorite && (
+									<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
+										<Ionicons
+											name="heart-outline"
+											size={18}
+											color={textRed500.color}
+										/>
+									</View>
+								)}
+							</View>
+							<View className="gap-1 w-full h-auto bg-transparent flex-col flex-1">
+								<Text
+									numberOfLines={1}
+									ellipsizeMode="middle"
+								>
+									{noteDisplayTitle(info.item)}
+								</Text>
+								{info.item.preview && (
 									<Text
-										numberOfLines={1}
-										ellipsizeMode="middle"
-									>
-										{noteDisplayTitle(info.item)}
-									</Text>
-									{info.item.preview && (
-										<Text
-											numberOfLines={2}
-											ellipsizeMode="tail"
-											className="text-muted-foreground text-xs"
-										>
-											{info.item.preview}
-										</Text>
-									)}
-									<Text
-										numberOfLines={1}
+										numberOfLines={2}
 										ellipsizeMode="tail"
 										className="text-muted-foreground text-xs"
 									>
-										{simpleDate(Number(info.item.editedTimestamp))}
+										{info.item.preview}
 									</Text>
-									{participantsWithoutCurrentUser.length > 0 && (
-										<View className="flex-row flex-wrap gap-2 bg-transparent pt-1">
-											{participantsWithoutCurrentUser.map(participant => {
-												return (
-													<Avatar
-														className="shrink-0"
-														key={participant.userId}
-														source={participant.avatar?.startsWith("https://") ? participant.avatar : undefined}
-														size={24}
+								)}
+								<Text
+									numberOfLines={1}
+									ellipsizeMode="tail"
+									className="text-muted-foreground text-xs"
+								>
+									{simpleDate(Number(info.item.editedTimestamp))}
+								</Text>
+								{participantsWithoutCurrentUser.length > 0 && (
+									<View className="flex-row flex-wrap gap-2 bg-transparent pt-1">
+										{participantsWithoutCurrentUser.map(participant => {
+											return (
+												<Avatar
+													className="shrink-0"
+													key={participant.userId}
+													source={participant.avatar?.startsWith("https://") ? participant.avatar : undefined}
+													size={24}
+												/>
+											)
+										})}
+									</View>
+								)}
+								{tags.length > 0 && (
+									<View className="flex-row flex-wrap gap-1.5 bg-transparent pt-1">
+										{tags.map(tag => (
+											<View
+												key={tag.uuid}
+												className="px-2 py-1 rounded-full border border-border flex-row items-center gap-1 bg-background-tertiary"
+											>
+												{tag.favorite && (
+													<Ionicons
+														name="heart-outline"
+														size={12}
+														color={textRed500.color}
 													/>
-												)
-											})}
-										</View>
-									)}
-									{tags.length > 0 && (
-										<View className="flex-row flex-wrap gap-1.5 bg-transparent pt-1">
-											{tags.map(tag => (
-												<View
-													key={tag.uuid}
-													className="px-2 py-1 rounded-full border border-border flex-row items-center gap-1 bg-background-tertiary"
+												)}
+												<Text
+													className="text-xs text-muted-foreground"
+													ellipsizeMode="middle"
+													numberOfLines={1}
 												>
-													{tag.favorite && (
-														<Ionicons
-															name="heart-outline"
-															size={12}
-															color={textRed500.color}
-														/>
-													)}
-													<Text
-														className="text-xs text-muted-foreground"
-														ellipsizeMode="middle"
-														numberOfLines={1}
-													>
-														{tag.name ?? tag.uuid}
-													</Text>
-												</View>
-											))}
-										</View>
-									)}
-								</View>
+													{tag.name ?? tag.uuid}
+												</Text>
+											</View>
+										))}
+									</View>
+								)}
 							</View>
 						</View>
-					</PressableScale>
-				</Menu>
-			</View>
-		)
-	}
-)
+					</View>
+				</PressableScale>
+			</Menu>
+		</View>
+	)
+}
 
 export default Note

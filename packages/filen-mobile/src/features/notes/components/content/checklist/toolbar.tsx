@@ -7,9 +7,8 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { PressableScale } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
-import { memo } from "react"
 
-const Toolbar = memo(() => {
+const Toolbar = () => {
 	const keyboardState = useKeyboardState()
 	const textPrimary = useResolveClassNames("text-primary")
 
@@ -57,6 +56,6 @@ const Toolbar = memo(() => {
 			</AnimatedView>
 		</KeyboardStickyView>
 	)
-})
+}
 
 export default Toolbar

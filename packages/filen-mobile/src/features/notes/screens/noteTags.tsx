@@ -6,7 +6,7 @@ import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run, fastLocaleCompare } from "@filen/utils"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -25,7 +25,7 @@ import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 import { computeTagState } from "@/features/notes/utils"
 
-const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
+const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -210,9 +210,9 @@ const Tag = memo(({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly No
 			</PressableScale>
 		</Menu>
 	)
-})
+}
 
-const NoteTags = memo(() => {
+const NoteTags = () => {
 	const { t } = useTranslation()
 	const { notes: notesSerialized } = useLocalSearchParams<{
 		notes?: string
@@ -388,6 +388,6 @@ const NoteTags = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default NoteTags

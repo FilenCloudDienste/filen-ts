@@ -2,7 +2,6 @@ import { NoteType } from "@filen/sdk-rs"
 import { type Note as TNote } from "@/types"
 import { noteDisplayTitle } from "@/lib/decryption"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
-import { memo } from "react"
 import View from "@/components/ui/view"
 import { useStringifiedClient } from "@/lib/auth"
 import useNotesStore from "@/features/notes/store/useNotes.store"
@@ -60,6 +59,68 @@ export const NOTE_TYPE_OPTIONS: { type: NoteType; typeString: NoteTypeString }[]
 	}
 ]
 
+// Shared shape for confirmed destructive note actions (trash / delete / leave):
+// prompt → guard cancel → runWithLoading(action) → guard failure → optionally pop
+// back if we're sitting on the note's detail route. Returns the onPress handler.
+function confirmedNoteAction({
+	note,
+	promptTitle,
+	promptMessage,
+	promptOkText,
+	promptDestructive = true,
+	action,
+	dismissOnSuccess
+}: {
+	note: TNote
+	promptTitle: string
+	promptMessage: string
+	promptOkText: string
+	// The non-owner "leave" prompt is the one site that omits destructive styling on
+	// the alert itself — default true preserves the destructive look everywhere else.
+	promptDestructive?: boolean
+	// Return value is awaited then discarded (matches the original `await notes.X(...)`).
+	action: () => Promise<unknown>
+	dismissOnSuccess: boolean
+}): () => Promise<void> {
+	return async () => {
+		const promptResult = await run(async () => {
+			return await prompts.alert({
+				title: promptTitle,
+				message: promptMessage,
+				cancelText: t("cancel"),
+				okText: promptOkText,
+				destructive: promptDestructive
+			})
+		})
+
+		if (!promptResult.success) {
+			console.error(promptResult.error)
+			alerts.error(promptResult.error)
+
+			return
+		}
+
+		if (promptResult.data.cancelled) {
+			return
+		}
+
+		const result = await runWithLoading(async () => {
+			await action()
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+
+		if (dismissOnSuccess && useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
+			router.back()
+		}
+	}
+}
+
 export function createMenuButtons({
 	note,
 	isSelected = false,
@@ -107,45 +168,14 @@ export function createMenuButtons({
 				title: t("delete"),
 				icon: "delete",
 				destructive: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("delete_note"),
-							message: t("are_you_sure_delete_note"),
-							cancelText: t("cancel"),
-							okText: t("delete"),
-							destructive: true
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await notes.delete({
-							note
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
-						router.back()
-					}
-				}
+				onPress: confirmedNoteAction({
+					note,
+					promptTitle: t("delete_note"),
+					promptMessage: t("are_you_sure_delete_note"),
+					promptOkText: t("delete"),
+					action: () => notes.delete({ note }),
+					dismissOnSuccess: true
+				})
 			})
 		} else if (isOwner) {
 			buttons.push({
@@ -154,45 +184,14 @@ export function createMenuButtons({
 				title: t("trash"),
 				icon: "trash",
 				destructive: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("trash_note"),
-							message: t("are_you_sure_trash_note"),
-							cancelText: t("cancel"),
-							okText: t("trash"),
-							destructive: true
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await notes.trash({
-							note
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
-						router.back()
-					}
-				}
+				onPress: confirmedNoteAction({
+					note,
+					promptTitle: t("trash_note"),
+					promptMessage: t("are_you_sure_trash_note"),
+					promptOkText: t("trash"),
+					action: () => notes.trash({ note }),
+					dismissOnSuccess: true
+				})
 			})
 		} else {
 			buttons.push({
@@ -201,45 +200,14 @@ export function createMenuButtons({
 				title: t("leave"),
 				icon: "exit",
 				destructive: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("leave_note"),
-							message: t("are_you_sure_leave_note"),
-							cancelText: t("cancel"),
-							okText: t("leave"),
-							destructive: true
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await notes.leave({
-							note
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
-						router.back()
-					}
-				}
+				onPress: confirmedNoteAction({
+					note,
+					promptTitle: t("leave_note"),
+					promptMessage: t("are_you_sure_leave_note"),
+					promptOkText: t("leave"),
+					action: () => notes.leave({ note }),
+					dismissOnSuccess: true
+				})
 			})
 		}
 
@@ -580,45 +548,14 @@ export function createMenuButtons({
 				title: t("trash"),
 				icon: "trash",
 				destructive: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("trash_note"),
-							message: t("are_you_sure_trash_note"),
-							cancelText: t("cancel"),
-							okText: t("trash"),
-							destructive: true
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await notes.trash({
-							note
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
-						router.back()
-					}
-				}
+				onPress: confirmedNoteAction({
+					note,
+					promptTitle: t("trash_note"),
+					promptMessage: t("are_you_sure_trash_note"),
+					promptOkText: t("trash"),
+					action: () => notes.trash({ note }),
+					dismissOnSuccess: true
+				})
 			})
 		}
 
@@ -629,45 +566,14 @@ export function createMenuButtons({
 				title: t("delete"),
 				icon: "delete",
 				destructive: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("delete_note"),
-							message: t("are_you_sure_delete_note"),
-							cancelText: t("cancel"),
-							okText: t("delete"),
-							destructive: true
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await notes.delete({
-							note
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
-						router.back()
-					}
-				}
+				onPress: confirmedNoteAction({
+					note,
+					promptTitle: t("delete_note"),
+					promptMessage: t("are_you_sure_delete_note"),
+					promptOkText: t("delete"),
+					action: () => notes.delete({ note }),
+					dismissOnSuccess: true
+				})
 			})
 		}
 	} else {
@@ -677,106 +583,75 @@ export function createMenuButtons({
 			title: t("leave"),
 			icon: "exit",
 			destructive: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("leave_note"),
-						message: t("are_you_sure_leave_note"),
-						cancelText: t("cancel"),
-						okText: t("leave")
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await notes.leave({
-						note
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				if (useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
-					router.back()
-				}
-			}
+			onPress: confirmedNoteAction({
+				note,
+				promptTitle: t("leave_note"),
+				promptMessage: t("are_you_sure_leave_note"),
+				promptOkText: t("leave"),
+				promptDestructive: false,
+				action: () => notes.leave({ note }),
+				dismissOnSuccess: true
+			})
 		})
 	}
 
 	return buttons
 }
 
-const Menu = memo(
-	({
-		children,
-		origin,
-		note,
-		...rest
-	}: {
-		children: React.ReactNode
-		note: TNote
-		origin: NoteMenuOrigin
-	} & React.ComponentPropsWithoutRef<typeof MenuComponent>) => {
-		const stringifiedClient = useStringifiedClient()
-		const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
-		const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+const Menu = ({
+	children,
+	origin,
+	note,
+	...rest
+}: {
+	children: React.ReactNode
+	note: TNote
+	origin: NoteMenuOrigin
+} & React.ComponentPropsWithoutRef<typeof MenuComponent>) => {
+	const stringifiedClient = useStringifiedClient()
+	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
+	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 
-		const writeAccess =
-			note.ownerId === stringifiedClient?.userId ||
-			note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
+	const writeAccess =
+		note.ownerId === stringifiedClient?.userId ||
+		note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
 
-		const isOwner = note.ownerId === stringifiedClient?.userId
+	const isOwner = note.ownerId === stringifiedClient?.userId
 
-		const onOpenMenu = () => {
-			useNotesStore.getState().setActiveNote(note)
-		}
-
-		const onCloseMenu = () => {
-			useNotesStore.getState().setActiveNote(null)
-		}
-
-		const buttons =
-			rest.disabled || isInflight
-				? []
-				: createMenuButtons({
-						note,
-						isSelected,
-						writeAccess,
-						origin,
-						isOwner
-					})
-
-		if (buttons.length === 0 || rest.disabled) {
-			return <View className={rest.className}>{children}</View>
-		}
-
-		return (
-			<MenuComponent
-				key={`note-menu-${note.uuid}`}
-				buttons={buttons}
-				onOpenMenu={onOpenMenu}
-				onCloseMenu={onCloseMenu}
-				{...rest}
-			>
-				{children}
-			</MenuComponent>
-		)
+	const onOpenMenu = () => {
+		useNotesStore.getState().setActiveNote(note)
 	}
-)
+
+	const onCloseMenu = () => {
+		useNotesStore.getState().setActiveNote(null)
+	}
+
+	const buttons =
+		rest.disabled || isInflight
+			? []
+			: createMenuButtons({
+					note,
+					isSelected,
+					writeAccess,
+					origin,
+					isOwner
+				})
+
+	if (buttons.length === 0 || rest.disabled) {
+		return <View className={rest.className}>{children}</View>
+	}
+
+	return (
+		<MenuComponent
+			key={`note-menu-${note.uuid}`}
+			buttons={buttons}
+			onOpenMenu={onOpenMenu}
+			onCloseMenu={onCloseMenu}
+			{...rest}
+		>
+			{children}
+		</MenuComponent>
+	)
+}
 
 export default Menu

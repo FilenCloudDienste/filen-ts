@@ -8,7 +8,6 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
-import { memo } from "react"
 import { simpleDate } from "@/lib/time"
 import Menu from "@/features/notes/components/tag/menu"
 import { cn } from "@filen/utils"
@@ -19,7 +18,7 @@ import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 
-const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
+const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
 	const { t } = useTranslation()
 	const router = useRouter()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -167,6 +166,6 @@ const Tag = memo(({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; no
 			</Menu>
 		</View>
 	)
-})
+}
 
 export default Tag

@@ -13,7 +13,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
-import { useEffect, memo, useCallback } from "react"
+import { useEffect, useCallback } from "react"
 import { runEffect, run } from "@filen/utils"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 
-const Loading = memo(({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
+const Loading = ({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textEditorReady = useTextEditorStore(useShallow(state => state.ready))
 
@@ -45,9 +45,9 @@ const Loading = memo(({ children, loading, noteType }: { children: React.ReactNo
 			{children}
 		</View>
 	)
-})
+}
 
-const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | null }) => {
+const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
 	const insets = useSafeAreaInsets()
@@ -238,6 +238,6 @@ const Content = memo(({ note, history }: { note: Note; history?: NoteHistory | n
 			)}
 		</Loading>
 	)
-})
+}
 
 export default Content
