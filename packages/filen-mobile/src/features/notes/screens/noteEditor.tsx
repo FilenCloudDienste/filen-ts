@@ -1,4 +1,4 @@
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
@@ -27,7 +27,7 @@ import useTextEditorStore from "@/stores/useTextEditor.store"
 import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
 import { useTranslation } from "react-i18next"
 
-const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
+const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
 	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const textForeground = useResolveClassNames("text-foreground")
@@ -186,9 +186,9 @@ const Header = memo(({ note, history }: { note: TNote; history?: NoteHistory | n
 			}}
 		/>
 	)
-})
+}
 
-const Note = memo(() => {
+const Note = () => {
 	const { uuid, history: historySerialized } = useLocalSearchParams<{
 		uuid: string
 		history?: string
@@ -250,6 +250,6 @@ const Note = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default Note

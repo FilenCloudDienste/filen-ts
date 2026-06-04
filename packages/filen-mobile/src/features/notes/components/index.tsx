@@ -1,4 +1,4 @@
-import { Fragment, useState, memo, useCallback } from "react"
+import { Fragment, useState, useCallback } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
@@ -19,7 +19,7 @@ import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
 
-const Notes = memo(() => {
+const Notes = () => {
 	const { t } = useTranslation()
 	const notesQuery = useNotesWithContentQuery()
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
@@ -222,6 +222,6 @@ const Notes = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default Notes

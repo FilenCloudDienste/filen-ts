@@ -2,7 +2,7 @@ import { Platform } from "react-native"
 import { useLocalSearchParams, router, useFocusEffect } from "expo-router"
 import { deserialize } from "@/lib/serializer"
 import { type HeaderItem } from "@/components/ui/header"
-import { memo, useCallback } from "react"
+import { useCallback } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/utils"
 import prompts from "@/lib/prompts"
@@ -23,7 +23,7 @@ import { useTranslation } from "react-i18next"
 import ParticipantList from "@/components/participants/participantList"
 import { type ParticipantRowProps } from "@/components/participants/participantRow"
 
-const NoteParticipants = memo(() => {
+const NoteParticipants = () => {
 	const { t } = useTranslation()
 	const { note: noteSerialized } = useLocalSearchParams<{
 		note?: string
@@ -365,6 +365,6 @@ const NoteParticipants = memo(() => {
 			headerRightItems={headerRightItems}
 		/>
 	)
-})
+}
 
 export default NoteParticipants
