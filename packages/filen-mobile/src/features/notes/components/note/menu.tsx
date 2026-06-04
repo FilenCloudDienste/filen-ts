@@ -11,6 +11,7 @@ import notes from "@/features/notes/notes"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
+import { confirmedAction } from "@/lib/confirmedAction"
 import { router } from "expo-router"
 import { Platform } from "react-native"
 import useAppStore from "@/stores/useApp.store"
@@ -82,43 +83,14 @@ function confirmedNoteAction({
 	action: () => Promise<unknown>
 	dismissOnSuccess: boolean
 }): () => Promise<void> {
-	return async () => {
-		const promptResult = await run(async () => {
-			return await prompts.alert({
-				title: promptTitle,
-				message: promptMessage,
-				cancelText: t("cancel"),
-				okText: promptOkText,
-				destructive: promptDestructive
-			})
-		})
-
-		if (!promptResult.success) {
-			console.error(promptResult.error)
-			alerts.error(promptResult.error)
-
-			return
-		}
-
-		if (promptResult.data.cancelled) {
-			return
-		}
-
-		const result = await runWithLoading(async () => {
-			await action()
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
-		}
-
-		if (dismissOnSuccess && useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) && router.canGoBack()) {
-			router.back()
-		}
-	}
+	return confirmedAction({
+		promptTitle,
+		promptMessage,
+		promptOkText,
+		promptDestructive,
+		action,
+		dismiss: dismissOnSuccess ? () => useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) : undefined
+	})
 }
 
 export function createMenuButtons({
