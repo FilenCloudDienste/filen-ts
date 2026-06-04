@@ -62,12 +62,12 @@ vi.mock("@filen/sdk-rs", () => ({}))
 
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
 import { useCameraUploadStore } from "@/features/cameraUpload/store/useCameraUpload.store"
-import { useContactsStore } from "@/stores/useContacts.store"
+import { useContactsStore } from "@/features/contacts/store/useContacts.store"
 import { useHttpStore } from "@/stores/useHttp.store"
 import { useAppStore } from "@/stores/useApp.store"
 import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
-import type { ContactListItem } from "@/stores/useContacts.store"
+import type { ContactListItem } from "@/features/contacts/store/useContacts.store"
 import type { AnyFile } from "@filen/sdk-rs"
 
 // ---------------------------------------------------------------------------
