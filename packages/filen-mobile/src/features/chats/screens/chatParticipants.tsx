@@ -1,7 +1,7 @@
 import { Platform } from "react-native"
 import { useLocalSearchParams, router, useFocusEffect } from "expo-router"
 import { useTranslation } from "react-i18next"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import { type HeaderItem } from "@/components/ui/header"
 import { useCallback } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -43,17 +43,7 @@ const ChatParticipants = () => {
 		}, [])
 	)
 
-	const chatParsed = (() => {
-		if (!chatSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(chatSerialized) as Chat
-		} catch {
-			return null
-		}
-	})()
+	const chatParsed = deserializeRouteParam<Chat>(chatSerialized)
 
 	const chatsQuery = useChatsQuery({
 		enabled: false

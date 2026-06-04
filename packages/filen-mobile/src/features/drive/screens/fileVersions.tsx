@@ -2,7 +2,7 @@ import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, useNavigation, useFocusEffect } from "expo-router"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
@@ -212,17 +212,7 @@ const FileVersions = memo(() => {
 		}, [])
 	)
 
-	const item = (() => {
-		if (!itemSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(itemSerialized) as DriveItem
-		} catch {
-			return null
-		}
-	})()
+	const item = deserializeRouteParam<DriveItem>(itemSerialized)
 
 	const driveItemVersionsQuery = useDriveItemVersionsQuery(
 		{

@@ -2,7 +2,7 @@ import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
 import { useLocalSearchParams, useNavigation } from "expo-router"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
 import Header from "@/components/ui/header"
@@ -29,22 +29,7 @@ const LinkedFile = memo(() => {
 	const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
 	const navigation = useNavigation()
 
-	const item = (() => {
-		if (!itemSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(itemSerialized) as Extract<
-				DriveItem,
-				{
-					type: "file"
-				}
-			>
-		} catch {
-			return null
-		}
-	})()
+	const item = deserializeRouteParam<Extract<DriveItem, { type: "file" }>>(itemSerialized)
 
 	if (!item || item.type !== "file") {
 		return <DismissStack />

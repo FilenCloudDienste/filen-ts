@@ -17,7 +17,7 @@ import prompts from "@/lib/prompts"
 import notes from "@/features/notes/notes"
 import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import { createMenuButtons } from "@/features/notes/components/note/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import DismissStack from "@/components/dismissStack"
@@ -203,17 +203,7 @@ const Note = () => {
 			? (notesWithContentQuery.data.find(n => n.uuid === uuid) as TNote)
 			: (null as unknown as TNote)
 
-	const history = (() => {
-		if (!historySerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(historySerialized) as NoteHistory
-		} catch {
-			return null
-		}
-	})()
+	const history = deserializeRouteParam<NoteHistory>(historySerialized)
 
 	if (!(note as TNote | undefined)) {
 		return <DismissStack />

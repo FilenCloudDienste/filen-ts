@@ -2,7 +2,7 @@ import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
 import { useLocalSearchParams, router } from "expo-router"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import View from "@/components/ui/view"
 import Header from "@/components/ui/header"
 import { Fragment } from "react"
@@ -20,17 +20,7 @@ const EventInfo = () => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const { t } = useTranslation()
 
-	const event = (() => {
-		if (!eventSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(eventSerialized) as UserEvent
-		} catch {
-			return null
-		}
-	})()
+	const event = deserializeRouteParam<UserEvent>(eventSerialized)
 
 	if (!event) {
 		return <DismissStack />

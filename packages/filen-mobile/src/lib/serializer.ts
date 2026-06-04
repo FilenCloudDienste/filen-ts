@@ -175,3 +175,15 @@ export function deserialize<T>(input: string | ArrayBuffer | Uint8Array): T {
 
 	return JSON.parse(json, reviver) as T
 }
+
+export function deserializeRouteParam<T>(serialized: string | undefined | null): T | null {
+	if (!serialized) {
+		return null
+	}
+
+	try {
+		return deserialize(serialized) as T
+	} catch {
+		return null
+	}
+}
