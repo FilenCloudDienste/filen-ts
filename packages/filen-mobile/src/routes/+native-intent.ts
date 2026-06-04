@@ -1,5 +1,5 @@
 import auth from "@/lib/auth"
-import useIncomingShareStore from "@/stores/useIncomingShare.store"
+import useIncomingShareStore from "@/features/incomingShare/store/useIncomingShare.store"
 
 export async function redirectSystemPath({ path, initial: _ }: { path: string; initial: boolean }) {
 	try {

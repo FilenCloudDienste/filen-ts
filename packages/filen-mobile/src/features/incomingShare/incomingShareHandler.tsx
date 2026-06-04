@@ -1,9 +1,9 @@
-import { memo, useEffect, useRef } from "react"
-import useIncomingShareStore from "@/stores/useIncomingShare.store"
+import { useEffect, useRef } from "react"
+import useIncomingShareStore from "@/features/incomingShare/store/useIncomingShare.store"
 import { useShallow } from "zustand/shallow"
 import { router, useNavigation, usePathname } from "expo-router"
 
-const IncomingShareHandler = memo(() => {
+const IncomingShareHandler = () => {
 	const process = useIncomingShareStore(useShallow(state => state.process))
 	const { getId } = useNavigation()
 	const navigationId = getId()
@@ -31,6 +31,6 @@ const IncomingShareHandler = memo(() => {
 	}, [process, navigationId, pathname])
 
 	return null
-})
+}
 
 export default IncomingShareHandler
