@@ -896,7 +896,7 @@ describe("drive.trash", () => {
 		expect(after.some(i => i.data.uuid === "other-dir-uuid")).toBe(true)
 	})
 
-	it("recents updater removes old entry then appends trashed item (filter-then-append)", async () => {
+	it("does not optimistically touch the recents listing (relies on refetch-on-focus)", async () => {
 		const item = makeFileItem({ uuid: "trash-file-uuid" })
 		const trashed: DriveItem = { type: "file", data: { ...item.data, trash: true } as any }
 		const returned = { region: "us-east-1", ...item.data, trash: true }
@@ -910,20 +910,7 @@ describe("drive.trash", () => {
 			call => call[0]?.params?.path?.type === "recents"
 		)
 
-		expect(recentsUpdate).toBeDefined()
-
-		const updater = recentsUpdate![0].updater as (prev: DriveItem[]) => DriveItem[]
-		const other = makeFileItem({ uuid: "other-uuid" })
-		// Pre-existing entry for same uuid should be replaced
-		const prev = [item, other]
-		const after = updater(prev)
-
-		// Only one entry for the trashed item
-		expect(after.filter(i => i.data.uuid === "trash-file-uuid")).toHaveLength(1)
-		// It appears at the end
-		expect(after[after.length - 1]!.data.uuid).toBe("trash-file-uuid")
-		// Other item retained
-		expect(after.some(i => i.data.uuid === "other-uuid")).toBe(true)
+		expect(recentsUpdate).toBeUndefined()
 	})
 
 	it("trash query updater appends item at end (idempotency on re-trash)", async () => {

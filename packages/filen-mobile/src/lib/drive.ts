@@ -290,17 +290,9 @@ class Drive {
 			})
 		}
 
-		// We have to add it to recents again after removing it above in the global call
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "recents",
-					uuid: null
-				}
-			},
-			updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
-		})
-
+		// Recents is intentionally not re-added here: the global update above already
+		// removed the item from every listing, and the recents query refetches on focus
+		// (listRecents returns recent trashed items), so recents stays server-authoritative.
 		driveItemsQueryUpdate({
 			params: {
 				path: {
