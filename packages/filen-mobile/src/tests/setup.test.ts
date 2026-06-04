@@ -59,7 +59,7 @@ vi.mock("@/lib/tmp", () => ({ sweepTmpDir: mockSweepTmpDir }))
 vi.mock("@/lib/fsUtils", () => ({ sweepStrayDownloadFiles: mockSweepStrayDownloadFiles }))
 vi.mock("@/lib/reconnect", () => ({ startReconnectListener: mockStartReconnectListener }))
 vi.mock("@/lib/fileCache", () => ({ default: mockFileCache }))
-vi.mock("@/lib/audioCache", () => ({ default: mockAudioCache }))
+vi.mock("@/features/audio/audioCache", () => ({ default: mockAudioCache }))
 vi.mock("@/lib/i18n", () => ({ initI18n: mockInitI18n }))
 vi.mock("@/lib/theme", () => ({ initTheme: mockInitTheme }))
 

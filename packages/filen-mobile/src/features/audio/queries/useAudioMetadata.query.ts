@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
-import audioCache from "@/lib/audioCache"
+import audioCache from "@/features/audio/audioCache"
 
 export const BASE_QUERY_KEY = "useAudioMetadataQuery"
 

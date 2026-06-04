@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { PlaylistWithItems } from "@/lib/audio"
+import type { PlaylistWithItems } from "@/features/audio/audio"
 import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type PlaylistsStore = {

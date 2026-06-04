@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { queryClient } from "@/queries/client"
 import thumbnails from "@/lib/thumbnails"
 import fileCache from "@/lib/fileCache"
-import audioCache from "@/lib/audioCache"
+import audioCache from "@/features/audio/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
 import offline from "@/features/offline/offline"
 

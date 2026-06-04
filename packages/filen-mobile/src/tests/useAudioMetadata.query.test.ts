@@ -45,7 +45,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/audioCache", () => ({
+vi.mock("@/features/audio/audioCache", () => ({
 	default: {
 		getMetadata: mockAudioCacheGetMetadata
 	}
@@ -59,8 +59,8 @@ vi.mock("@/queries/client", () => ({
 	}
 }))
 
-import { fetchData } from "@/queries/useAudioMetadata.query"
-import { type UseAudioMetadataQueryParams } from "@/queries/useAudioMetadata.query"
+import { fetchData } from "@/features/audio/queries/useAudioMetadata.query"
+import { type UseAudioMetadataQueryParams } from "@/features/audio/queries/useAudioMetadata.query"
 
 const FAKE_METADATA = {
 	title: "Test Track",

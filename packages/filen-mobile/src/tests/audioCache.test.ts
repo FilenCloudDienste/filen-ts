@@ -41,7 +41,7 @@ import { fs, File, Directory } from "@/tests/mocks/expoFileSystem"
 import { serialize } from "@/lib/serializer"
 import { xxHash32 } from "js-xxhash"
 import { type DriveItem, type CacheItem } from "@/types"
-import { type Metadata } from "@/lib/audioCache"
+import { type Metadata } from "@/features/audio/audioCache"
 
 const fileCache = (await import("@/lib/fileCache")).default
 const { parseWebStream } = await import("music-metadata")
@@ -148,8 +148,8 @@ function setupFileCacheGetFiles(): void {
 	}) as any)
 }
 
-async function createAudioCache(): Promise<InstanceType<(typeof import("@/lib/audioCache"))["AudioCache"]>> {
-	const mod = await import("@/lib/audioCache")
+async function createAudioCache(): Promise<InstanceType<(typeof import("@/features/audio/audioCache"))["AudioCache"]>> {
+	const mod = await import("@/features/audio/audioCache")
 	return new (mod.AudioCache as new () => any)()
 }
 

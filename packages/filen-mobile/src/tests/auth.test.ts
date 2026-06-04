@@ -123,7 +123,7 @@ vi.mock("@/lib/sqlite", () => ({
 	}
 }))
 
-vi.mock("@/lib/audio", () => ({
+vi.mock("@/features/audio/audio", () => ({
 	default: {
 		stop: vi.fn(async () => {
 			callLog.push("audio.stop")
@@ -277,7 +277,7 @@ describe("auth.logout", () => {
 	})
 
 	it("continues even when audio.stop throws", async () => {
-		const audio = await import("@/lib/audio")
+		const audio = await import("@/features/audio/audio")
 
 		vi.mocked(audio.default.stop).mockRejectedValueOnce(new Error("audio session busy"))
 

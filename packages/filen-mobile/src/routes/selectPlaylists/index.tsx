@@ -1,8 +1,7 @@
-import { memo } from "react"
-import Playlists from "@/routes/playlists"
+import Playlists from "@/features/audio/screens/playlists"
 
-const SelectPlaylists = memo(() => {
+export function SelectPlaylists() {
 	return <Playlists />
-})
+}
 
 export default SelectPlaylists

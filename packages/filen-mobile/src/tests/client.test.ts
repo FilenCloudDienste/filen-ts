@@ -87,7 +87,7 @@ vi.mock("@tanstack/query-persist-client-core", () => ({
 import { type PersistedQuery } from "@tanstack/query-persist-client-core"
 import { ErrorKind } from "@filen/sdk-rs"
 import { shouldPersistQuery, DEFAULT_QUERY_OPTIONS, QueryUpdater, QUERY_CLIENT_CACHE_TIME, restoreQueries } from "@/queries/client"
-import { type PlaylistWithItems } from "@/lib/audio"
+import { type PlaylistWithItems } from "@/features/audio/audio"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -634,7 +634,7 @@ describe("playlistsQueryUpdate", () => {
 		vi.resetModules()
 
 		// Re-import audio mock so usePlaylists.query can load without crashing
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
@@ -645,7 +645,7 @@ describe("playlistsQueryUpdate", () => {
 			capturedInnerUpdater = updaterFn
 		})
 
-		const { playlistsQueryUpdate } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
 		const fn = vi.fn((prev: unknown[]) => [...prev, "item"])
 
 		playlistsQueryUpdate({ updater: fn as unknown as (prev: PlaylistWithItems[]) => PlaylistWithItems[] })
@@ -659,7 +659,7 @@ describe("playlistsQueryUpdate", () => {
 	it("passes existing prev array to the function updater unchanged", async () => {
 		vi.resetModules()
 
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
@@ -670,7 +670,7 @@ describe("playlistsQueryUpdate", () => {
 			capturedInnerUpdater = updaterFn
 		})
 
-		const { playlistsQueryUpdate } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
 		const existing = [{ id: "pl-1" }]
 		const fn = vi.fn((prev: unknown[]) => prev)
 
@@ -684,7 +684,7 @@ describe("playlistsQueryUpdate", () => {
 	it("replaces the cache directly when a plain value updater is provided", async () => {
 		vi.resetModules()
 
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
@@ -695,7 +695,7 @@ describe("playlistsQueryUpdate", () => {
 			capturedInnerUpdater = updaterFn
 		})
 
-		const { playlistsQueryUpdate } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
 		const replacement = [{ id: "pl-2" }]
 
 		playlistsQueryUpdate({ updater: replacement as unknown as PlaylistWithItems[] })
@@ -709,13 +709,13 @@ describe("playlistsQueryUpdate", () => {
 	it("uses the correct BASE_QUERY_KEY", async () => {
 		vi.resetModules()
 
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
 		}))
 
-		const { playlistsQueryUpdate, BASE_QUERY_KEY } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate, BASE_QUERY_KEY } = await import("@/features/audio/queries/usePlaylists.query")
 
 		playlistsQueryUpdate({ updater: [] })
 

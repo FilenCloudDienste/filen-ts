@@ -10,7 +10,7 @@ vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 // modules. Mock them so their full transitive deps (SDK, auth, etc.) don't load.
 vi.mock("@/features/offline/offline", () => ({ VERSION: 1 }))
 vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/audioCache", () => ({ VERSION: 1 }))
+vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
 vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
 import { fs } from "@/tests/mocks/expoFileSystem"
