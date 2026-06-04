@@ -43,3 +43,6 @@ app-example
 /android
 
 **/android/build/**/*
+
+# local-only docs (design specs, notes) — kept out of the repo
+/docs/
