@@ -6,7 +6,7 @@ vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("@/lib/transfers", () => ({
+vi.mock("@/features/transfers/transfers", () => ({
 	default: {
 		download: vi.fn().mockResolvedValue({
 			files: [],
@@ -48,7 +48,7 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
-vi.mock("@/stores/useOffline.store", () => ({
+vi.mock("@/features/offline/store/useOffline.store", () => ({
 	default: {
 		getState: vi.fn().mockReturnValue({
 			setSyncing: vi.fn()
@@ -260,22 +260,22 @@ vi.mock("uuid", () => ({
 	validate: (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 }))
 
-import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta } from "@/lib/offline"
+import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta } from "@/features/offline/offline"
 import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
 import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
-import transfers from "@/lib/transfers"
+import transfers from "@/features/transfers/transfers"
 import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
-import useOfflineStore from "@/stores/useOffline.store"
+import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
 
 type OfflineInstance = any
 
-import { VERSION as OFFLINE_VERSION } from "@/lib/offline"
+import { VERSION as OFFLINE_VERSION } from "@/features/offline/offline"
 
 const BASE_DIR_URI = `file:///shared/group.io.filen.app/offline/v${OFFLINE_VERSION}`
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
@@ -387,7 +387,7 @@ function writeDirectoryMeta(uuid: string, meta: DirectoryOfflineMeta): void {
 }
 
 async function createOffline(): Promise<OfflineInstance> {
-	const mod = await import("@/lib/offline")
+	const mod = await import("@/features/offline/offline")
 
 	return new (mod.Offline as new () => OfflineInstance)()
 }

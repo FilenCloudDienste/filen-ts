@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { Platform } from "react-native"
-import foregroundService from "@/lib/foregroundService"
-import useTransfersStore, { type TransfersStore } from "@/stores/useTransfers.store"
+import foregroundService from "@/features/transfers/foregroundService"
+import useTransfersStore, { type TransfersStore } from "@/features/transfers/store/useTransfers.store"
 
 function ForegroundService() {
 	useEffect(() => {

@@ -7,7 +7,7 @@ import useHttpStore from "@/stores/useHttp.store"
 import { normalizeFilePathForExpo } from "@/lib/utils"
 import type { DriveItemFileExtracted } from "@/types"
 import type { FileSource } from "@/queries/fileSource"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
 
 export const BASE_QUERY_KEY = "useFileUrlQuery"

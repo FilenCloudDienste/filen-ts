@@ -16,7 +16,7 @@ import {
 	AnyFile,
 	type SharedFile
 } from "@filen/sdk-rs"
-import useTransfersStore from "@/stores/useTransfers.store"
+import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import {
 	normalizeFilePathForSdk,
 	normalizeFilePathForExpo,

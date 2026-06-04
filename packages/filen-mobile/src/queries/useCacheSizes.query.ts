@@ -4,7 +4,7 @@ import thumbnails from "@/lib/thumbnails"
 import fileCache from "@/lib/fileCache"
 import audioCache from "@/lib/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 
 export const BASE_QUERY_KEY = "useCacheSizes"
 

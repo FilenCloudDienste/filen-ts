@@ -99,7 +99,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		listFiles: mockOfflineListFiles,
 		listDirectories: mockOfflineListDirectories

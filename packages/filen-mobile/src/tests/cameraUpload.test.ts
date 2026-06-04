@@ -60,7 +60,7 @@ vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: vi.fn() }
 }))
 
-vi.mock("@/lib/transfers", () => ({
+vi.mock("@/features/transfers/transfers", () => ({
 	default: { upload: vi.fn() }
 }))
 
@@ -145,7 +145,7 @@ import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
 import { getPermissionsAsync } from "expo-media-library"
 import auth from "@/lib/auth"
-import transfers from "@/lib/transfers"
+import transfers from "@/features/transfers/transfers"
 import { unwrapFileMeta } from "@/lib/utils"
 import events from "@/lib/events"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"

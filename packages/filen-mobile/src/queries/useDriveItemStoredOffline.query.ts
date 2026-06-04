@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import type { DriveItem } from "@/types"
 
 export const BASE_QUERY_KEY = "useDriveItemStoredOfflineQuery"

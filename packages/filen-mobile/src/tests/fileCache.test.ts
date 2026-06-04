@@ -48,7 +48,7 @@ vi.mock("@/lib/utils", () => ({
 			.replace(/\/$/, "")
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	VERSION: 1,
 	default: {
 		getLocalFile: vi.fn().mockResolvedValue(null)
@@ -72,7 +72,7 @@ import { type DriveItem, type CacheItem } from "@/types"
 import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk } from "@/lib/utils"
 import { type Metadata } from "@/lib/fileCache"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
 
 const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"

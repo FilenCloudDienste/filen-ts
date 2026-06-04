@@ -1,7 +1,7 @@
 import { memo, useEffect } from "react"
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated"
 import { useResolveClassNames } from "uniwind"
-import useTransfersStore from "@/stores/useTransfers.store"
+import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import View from "@/components/ui/view"
 import { useShallow } from "zustand/shallow"
 
