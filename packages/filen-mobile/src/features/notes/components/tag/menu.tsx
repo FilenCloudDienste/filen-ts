@@ -67,18 +67,11 @@ const Menu = memo(
 			}
 
 			const createResult = await runWithLoading(async () => {
-				const n = await notes.create({
+				return await notes.createWithOptionalTag({
 					title,
-					content: "",
-					type
-				})
-
-				await notes.addTag({
-					note: n,
+					type,
 					tag
 				})
-
-				return n
 			})
 
 			if (!createResult.success) {
