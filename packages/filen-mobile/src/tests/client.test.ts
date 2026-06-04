@@ -898,7 +898,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: vi.fn().mockResolvedValue([{ id: "album-1", title: "Camera Roll" }])
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		const result = await fetchData()
 
 		expect(result).toEqual([])
@@ -918,7 +918,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: vi.fn().mockResolvedValue(mockAlbums)
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		const result = await fetchData()
 
 		expect(result).toEqual(mockAlbums)
@@ -935,7 +935,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: mockGetAlbumsAsync
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		await fetchData()
 
 		expect(mockGetAlbumsAsync).toHaveBeenCalledWith({ includeSmartAlbums: true })
@@ -952,7 +952,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: vi.fn().mockResolvedValue([])
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		await fetchData()
 
 		expect(mockHasPermissions).toHaveBeenCalledWith({ shouldRequest: true })

@@ -1,7 +1,7 @@
-import { useEffect, memo } from "react"
+import { useEffect } from "react"
 import { AppState } from "react-native"
-import cameraUpload, { useCameraUpload } from "@/lib/cameraUpload"
-import { registerBackgroundSync, unregisterBackgroundSync } from "@/lib/backgroundTask"
+import cameraUpload, { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
+import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
 import { debounce } from "es-toolkit/function"
 
 const syncDebounced = debounce(
@@ -30,7 +30,7 @@ const updateBackgroundTask = debounce(
 	}
 )
 
-const CameraUploadSync = memo(() => {
+const CameraUploadSync = () => {
 	const { config } = useCameraUpload()
 
 	const shouldSync = config.enabled && config.remoteDir !== null && config.albumIds.length > 0
@@ -67,6 +67,6 @@ const CameraUploadSync = memo(() => {
 	}, [shouldRegisterBackground])
 
 	return null
-})
+}
 
 export default CameraUploadSync

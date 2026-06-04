@@ -12,7 +12,7 @@ import {
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
 import { run, Semaphore, fastLocaleCompare } from "@filen/utils"
-import useCameraUploadStore from "@/stores/useCameraUpload.store"
+import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { randomUUID } from "expo-crypto"
 import { newTmpFile } from "@/lib/tmp"
