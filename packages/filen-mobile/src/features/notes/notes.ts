@@ -8,6 +8,7 @@ import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWi
 import JSZip from "jszip"
 import { sanitizeFileName } from "@/lib/utils"
 import { newTmpFile } from "@/lib/tmp"
+import * as FileSystem from "expo-file-system"
 
 function wrapSdkNote(sdk: SdkNote): Note {
 	return {
@@ -582,6 +583,62 @@ class Notes {
 		})
 
 		return note
+	}
+
+	public async createWithOptionalTag({
+		title,
+		type,
+		tag,
+		signal
+	}: {
+		title: string
+		type: NoteType
+		tag?: NoteTag
+		signal?: AbortSignal
+	}): Promise<Note> {
+		const note = await this.create({
+			title,
+			content: "",
+			type,
+			signal
+		})
+
+		if (tag) {
+			return await this.addTag({
+				note,
+				tag,
+				signal
+			})
+		}
+
+		return note
+	}
+
+	public async importFromFile({
+		uri,
+		title,
+		type,
+		signal
+	}: {
+		uri: string
+		title: string
+		type: NoteType
+		signal?: AbortSignal
+	}): Promise<Note> {
+		const file = new FileSystem.File(uri)
+
+		if (!file.exists || file.size === 0) {
+			throw new Error("Import file not found or empty")
+		}
+
+		const content = await file.text()
+
+		return await this.create({
+			title,
+			content,
+			type,
+			signal
+		})
 	}
 
 	public async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {
