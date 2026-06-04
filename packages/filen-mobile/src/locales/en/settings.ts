@@ -7,7 +7,7 @@
 //  - used_of interpolates {{used}} and {{max}} (already-formatted byte strings).
 //  - offline_files_count / offline_dirs_count are ICU plural pairs ({{count}}).
 // Event-kind labels (file_uploaded, directory_renamed, …) are resolved from a typed map in
-// src/routes/events/index.tsx with the module-level i18n.t because eventKindToReadable() is a
+// src/features/events/eventDetails.ts with the module-level i18n.t because eventKindToReadable() is a
 // plain (non-React) function and cannot use the useTranslation() hook.
 export const settings = {
 	// ── More tab (top-level settings menu) ────────────────────────────────────
