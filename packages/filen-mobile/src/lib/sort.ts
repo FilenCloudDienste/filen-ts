@@ -436,12 +436,10 @@ class NotesSorter {
 		const currentYear = nowDate.getFullYear()
 		const currentMonth = nowDate.getMonth()
 		const twoMonthsAgo = new Date(currentYear, currentMonth - 2, nowDate.getDate()).getTime()
-		const oneYearAgo = new Date(currentYear - 1, currentMonth, nowDate.getDate()).getTime()
 		const today: NoteItem[] = []
 		const last7Days: NoteItem[] = []
 		const last30Days: NoteItem[] = []
-		const previousMonth1: NoteItem[] = []
-		const previousMonth2: NoteItem[] = []
+		const previousMonth: NoteItem[] = []
 		const trashed: NoteItem[] = []
 		const archived: NoteItem[] = []
 		const pinned: NoteItem[] = []
@@ -492,9 +490,7 @@ class NotesSorter {
 			} else if (editedTimestamp >= thirtyDaysAgo) {
 				last30Days.push(note)
 			} else if (editedTimestamp >= twoMonthsAgo) {
-				previousMonth1.push(note)
-			} else if (editedTimestamp >= oneYearAgo) {
-				previousMonth2.push(note)
+				previousMonth.push(note)
 			} else {
 				const year = new Date(editedTimestamp).getFullYear()
 
@@ -630,50 +626,22 @@ class NotesSorter {
 			}
 		}
 
-		if (previousMonth1.length > 0) {
-			previousMonth1.sort(sortDesc)
+		if (previousMonth.length > 0) {
+			previousMonth.sort(sortDesc)
 
 			const date = new Date(twoMonthsAgo)
 
 			result.push({
 				type: "header",
-				id: "header-month1",
+				id: "header-month",
 				title: new Intl.DateTimeFormat(intlLanguage, {
 					month: "long"
 				}).format(date),
 				icon: "calendar-outline"
 			})
 
-			for (let i = 0; i < previousMonth1.length; i++) {
-				const notes = previousMonth1[i]
-
-				if (!notes) {
-					continue
-				}
-
-				result.push({
-					...notes,
-					type: "note"
-				})
-			}
-		}
-
-		if (previousMonth2.length > 0) {
-			previousMonth2.sort(sortDesc)
-
-			const date = new Date(twoMonthsAgo)
-
-			result.push({
-				type: "header",
-				id: "header-month2",
-				title: new Intl.DateTimeFormat(intlLanguage, {
-					month: "long"
-				}).format(date),
-				icon: "calendar-outline"
-			})
-
-			for (let i = 0; i < previousMonth2.length; i++) {
-				const notes = previousMonth2[i]
+			for (let i = 0; i < previousMonth.length; i++) {
+				const notes = previousMonth[i]
 
 				if (!notes) {
 					continue
