@@ -2,7 +2,7 @@ import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
-import { deserialize, serialize } from "@/lib/serializer"
+import { deserializeRouteParam, serialize } from "@/lib/serializer"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -149,17 +149,7 @@ const NoteHistory = () => {
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 
-	const noteParsed = (() => {
-		if (!noteSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(noteSerialized) as Note
-		} catch {
-			return null
-		}
-	})()
+	const noteParsed = deserializeRouteParam<Note>(noteSerialized)
 
 	const notesWithContentQuery = useNotesWithContentQuery({
 		enabled: false

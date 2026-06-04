@@ -13,7 +13,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import auth from "@/lib/auth"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import DismissStack from "@/components/dismissStack"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
@@ -31,19 +31,7 @@ function Personal() {
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const insets = useSafeAreaInsets()
 	const [personal, setPersonal] = useState<Awaited<ReturnType<typeof fetchData>>["personal"] | null>(
-		(() => {
-			if (!personalSerialized) {
-				return null
-			}
-
-			try {
-				const deserialized = deserialize(personalSerialized) as Awaited<ReturnType<typeof fetchData>>["personal"]
-
-				return deserialized
-			} catch {
-				return null
-			}
-		})()
+		deserializeRouteParam<Awaited<ReturnType<typeof fetchData>>["personal"]>(personalSerialized)
 	)
 	const [modified, setModified] = useState<boolean>(false)
 

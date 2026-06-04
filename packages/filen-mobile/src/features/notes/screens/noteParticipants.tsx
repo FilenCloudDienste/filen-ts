@@ -1,6 +1,6 @@
 import { Platform } from "react-native"
 import { useLocalSearchParams, router, useFocusEffect } from "expo-router"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import { type HeaderItem } from "@/components/ui/header"
 import { useCallback } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -42,17 +42,7 @@ const NoteParticipants = () => {
 		}, [])
 	)
 
-	const noteParsed = (() => {
-		if (!noteSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(noteSerialized) as Note
-		} catch {
-			return null
-		}
-	})()
+	const noteParsed = deserializeRouteParam<Note>(noteSerialized)
 
 	const notesWithContentQuery = useNotesWithContentQuery({
 		enabled: false

@@ -8,7 +8,7 @@ import { vi, describe, it, expect } from "vitest"
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 // Must import after vi.mock so the mock is active when serializer.ts loads
-import { serialize, deserialize } from "@/lib/serializer"
+import { serialize, deserialize, deserializeRouteParam } from "@/lib/serializer"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function roundtrip(value: unknown): any {
@@ -1141,6 +1141,39 @@ describe("serializer", () => {
 			expect(second.tag).toBe("UnitTag")
 			expect(second.inner).toBeUndefined()
 			expect("inner" in second).toBe(false)
+		})
+	})
+
+	describe("deserializeRouteParam", () => {
+		it("round-trips a serialized object back to the original value", () => {
+			const obj = { uuid: "abc-123", name: "test.txt", size: 1024n }
+			const serialized = serialize(obj)
+			const result = deserializeRouteParam<typeof obj>(serialized)
+
+			expect(result).not.toBeNull()
+			expect(result!.uuid).toBe("abc-123")
+			expect(result!.name).toBe("test.txt")
+			expect(result!.size).toBe(1024n)
+		})
+
+		it("returns null for undefined input", () => {
+			expect(deserializeRouteParam(undefined)).toBeNull()
+		})
+
+		it("returns null for null input", () => {
+			expect(deserializeRouteParam(null)).toBeNull()
+		})
+
+		it("returns null for empty string input", () => {
+			expect(deserializeRouteParam("")).toBeNull()
+		})
+
+		it("returns null for malformed/garbage input without throwing", () => {
+			expect(deserializeRouteParam("{not valid json}")).toBeNull()
+		})
+
+		it("returns null for random garbage string without throwing", () => {
+			expect(deserializeRouteParam("zzz###garbage")).toBeNull()
 		})
 	})
 

@@ -1,7 +1,7 @@
 import Text from "@/components/ui/text"
 import { Platform, ActivityIndicator } from "react-native"
 import { useLocalSearchParams, useNavigation } from "expo-router"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -226,17 +226,7 @@ const NoteTags = () => {
 	// menu) and bulk callers (notes-list bulk action) both serialize a Note[] —
 	// even a single note is wrapped as a one-element array so the route stays
 	// uniform.
-	const notesParsed = (() => {
-		if (!notesSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(notesSerialized) as Note[]
-		} catch {
-			return null
-		}
-	})()
+	const notesParsed = deserializeRouteParam<Note[]>(notesSerialized)
 
 	// Re-anchor the navigated notes against the live query result. Selection /
 	// route params are snapshots; a tag change after this screen opens (or a

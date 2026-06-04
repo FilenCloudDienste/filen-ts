@@ -2,7 +2,7 @@ import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform } from "react-native"
 import { useLocalSearchParams, useNavigation } from "expo-router"
-import { deserialize } from "@/lib/serializer"
+import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
 import { DirectoryIcon, unwrapDirColor, directoryColorToHex } from "@/components/itemIcons"
@@ -34,17 +34,7 @@ const ChangeDirectoryColor = memo(() => {
 	const isOnline = useIsOnline()
 	const { t } = useTranslation()
 
-	const item = (() => {
-		if (!itemSerialized) {
-			return null
-		}
-
-		try {
-			return deserialize(itemSerialized) as DriveItem
-		} catch {
-			return null
-		}
-	})()
+	const item = deserializeRouteParam<DriveItem>(itemSerialized)
 
 	const [hexColor, setHexColor] = useState<string>(() => {
 		if (!item || item.type !== "directory") {
