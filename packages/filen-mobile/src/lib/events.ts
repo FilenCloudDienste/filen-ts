@@ -3,7 +3,7 @@ import type { ShowActionSheetOptions } from "@/providers/actionSheet.provider"
 import type { NoteContentEdited, Contact, AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import type { AudioStatus } from "expo-audio"
-import type { QueueItem, PlaylistWithItems } from "@/lib/audio"
+import type { QueueItem, PlaylistWithItems } from "@/features/audio/audio"
 
 export type Events = {
 	secureStoreChange: {

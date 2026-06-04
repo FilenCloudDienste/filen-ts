@@ -45,7 +45,7 @@ vi.mock("expo-asset", () => ({
 	}
 }))
 
-vi.mock("@/lib/audioCache", () => ({
+vi.mock("@/features/audio/audioCache", () => ({
 	default: {
 		get: vi.fn().mockResolvedValue({
 			audio: { uri: "file:///cache/audio.mp3" },
@@ -118,7 +118,7 @@ vi.mock("@/lib/utils", () => ({
 	wrapAbortSignalForSdk: vi.fn((signal: unknown) => signal)
 }))
 
-vi.mock("@/queries/usePlaylists.query", () => ({
+vi.mock("@/features/audio/queries/usePlaylists.query", () => ({
 	playlistsQueryUpdate: vi.fn()
 }))
 
@@ -149,13 +149,13 @@ vi.mock("react-native-quick-crypto", async () => {
 
 import { Buffer } from "node:buffer"
 import { type DriveItemFileExtracted } from "@/types"
-import audioCache from "@/lib/audioCache"
+import audioCache from "@/features/audio/audioCache"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio"
 import { Platform } from "react-native"
-import { type QueueItem } from "@/lib/audio"
-import { playlistsQueryUpdate } from "@/queries/usePlaylists.query"
+import { type QueueItem } from "@/features/audio/audio"
+import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -187,12 +187,12 @@ function makeQueueItem(uuid: string, name: string): QueueItem {
 }
 
 interface AudioTestContext {
-	audio: InstanceType<typeof import("@/lib/audio").Audio>
+	audio: InstanceType<typeof import("@/features/audio/audio").Audio>
 	playlist: MockPlayer
 }
 
 async function createAudio(): Promise<AudioTestContext> {
-	const mod = await import("@/lib/audio")
+	const mod = await import("@/features/audio/audio")
 	const audio = new (mod.Audio as new () => InstanceType<typeof mod.Audio>)()
 
 	return {
@@ -252,7 +252,7 @@ describe("Audio", () => {
 
 			// On first import, the module-level singleton also creates 1 player.
 			// Take a fresh measurement after importing to isolate just our new Audio().
-			await import("@/lib/audio")
+			await import("@/features/audio/audio")
 
 			const callsBefore = vi.mocked(mockCreate).mock.calls.length
 

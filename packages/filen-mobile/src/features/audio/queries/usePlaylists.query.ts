@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
-import audio from "@/lib/audio"
+import audio from "@/features/audio/audio"
 
 export const BASE_QUERY_KEY = "usePlaylistsQuery"
 

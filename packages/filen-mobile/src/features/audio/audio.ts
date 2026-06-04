@@ -1,8 +1,8 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-audio"
 import { Platform } from "react-native"
 import { Asset } from "expo-asset"
-import audioCache, { type Metadata } from "@/lib/audioCache"
-import type { DriveItemFileExtracted } from "@/types"
+import audioCache, { type Metadata } from "@/features/audio/audioCache"
+import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import { useEffect, useState } from "react"
 import events from "@/lib/events"
 import { run } from "@filen/utils"
@@ -11,7 +11,7 @@ import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUui
 import { Buffer } from "react-native-quick-crypto"
 import { type } from "arktype"
 import { wrapAbortSignalForSdk } from "@/lib/utils"
-import { playlistsQueryUpdate } from "@/queries/usePlaylists.query"
+import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 
@@ -1038,6 +1038,92 @@ export class Audio {
 
 		playlistsQueryUpdate({
 			updater: prev => [...prev.filter(p => p.uuid !== playlist.uuid), playlistWithItems]
+		})
+	}
+
+	/**
+	 * Appends drive-selected files to a playlist and persists it. Accepts the raw
+	 * `selectedItems` payload returned by the drive picker; filters down to decryptable
+	 * audio file items that aren't already in the playlist, maps them to playlist file
+	 * objects and saves once. Returns the number of files that were actually added.
+	 */
+	public async addFilesToPlaylist({
+		playlist,
+		items,
+		signal
+	}: {
+		playlist: Playlist
+		items: (
+			| {
+					type: "driveItem"
+					data: DriveItem
+			  }
+			| {
+					type: "root"
+					data: AnyNormalDir
+			  }
+		)[]
+		signal?: AbortSignal
+	}): Promise<number> {
+		const currentFilesUuids = new Set(playlist.files.map(file => file.uuid))
+		const newItems = items
+			.filter(
+				(
+					item
+				): item is {
+					type: "driveItem"
+					data: DriveItemFileExtracted
+				} =>
+					item.type === "driveItem" &&
+					!currentFilesUuids.has(item.data.data.uuid) &&
+					!item.data.data.undecryptable &&
+					Boolean(item.data.data.decryptedMeta) &&
+					(item.data.type === "file" || item.data.type === "sharedFile" || item.data.type === "sharedRootFile")
+			)
+			.map(item => item.data)
+
+		if (newItems.length === 0) {
+			return 0
+		}
+
+		await this.savePlaylist({
+			playlist: {
+				...playlist,
+				files: [
+					...playlist.files,
+					...newItems.map(item => ({
+						uuid: item.data.uuid,
+						name: item.data.decryptedMeta?.name ?? item.data.uuid,
+						mime: item.data.decryptedMeta?.mime ?? "application/octet-stream",
+						size: Number(item.data.size),
+						bucket: item.data.bucket,
+						key: item.data.decryptedMeta?.key ?? "",
+						version: item.data.decryptedMeta?.version ? Number(item.data.decryptedMeta?.version) : 0,
+						chunks: Number(item.data.chunks),
+						region: item.data.region,
+						playlist: playlist.uuid,
+						item
+					}))
+				]
+			},
+			signal
+		})
+
+		return newItems.length
+	}
+
+	/**
+	 * Persists a playlist under a new name. The prompt and name validation (trim,
+	 * empty-name guard) stay in the UI; this only stamps `updated` and saves.
+	 */
+	public async renamePlaylist({ playlist, name, signal }: { playlist: Playlist; name: string; signal?: AbortSignal }): Promise<void> {
+		await this.savePlaylist({
+			playlist: {
+				...playlist,
+				name,
+				updated: Date.now()
+			},
+			signal
 		})
 	}
 

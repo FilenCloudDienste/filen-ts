@@ -39,7 +39,7 @@ vi.mock("@/lib/cache", () => ({
 // Mock them with just the VERSION export so their full transitive deps
 // (expo-image via thumbnails, etc.) don't load in this test.
 vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/audioCache", () => ({ VERSION: 1 }))
+vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
 vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
 vi.mock("@/lib/events", () => ({

@@ -11,7 +11,7 @@ import { sweepTmpDir } from "@/lib/tmp"
 import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
 import { startReconnectListener } from "@/lib/reconnect"
 import fileCache from "@/lib/fileCache"
-import audioCache from "@/lib/audioCache"
+import audioCache from "@/features/audio/audioCache"
 import { initI18n } from "@/lib/i18n"
 import { initTheme } from "@/lib/theme"
 
