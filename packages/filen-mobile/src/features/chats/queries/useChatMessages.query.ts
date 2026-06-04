@@ -3,7 +3,7 @@ import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { sortParams } from "@filen/utils"
-import type { ChatMessageWithInflightId } from "@/stores/useChats.store"
+import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 
 export const BASE_QUERY_KEY = "useChatMessagesQuery"
 

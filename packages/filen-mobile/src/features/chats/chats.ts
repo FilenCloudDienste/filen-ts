@@ -10,8 +10,8 @@ import {
 	DirMeta_Tags
 } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
-import { chatsQueryUpdate, fetchData as chatsQueryFetch } from "@/queries/useChats.query"
-import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/queries/useChatMessages.query"
+import { chatsQueryUpdate, fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
+import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/features/chats/queries/useChatMessages.query"
 import { Semaphore, run } from "@filen/utils"
 
 function wrapChat(chat: SdkChat): Chat {

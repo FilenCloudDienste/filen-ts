@@ -20,7 +20,7 @@ vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
-vi.mock("@/stores/useChats.store", () => {
+vi.mock("@/features/chats/store/useChats.store", () => {
 	const mockSetInflightMessages = vi.fn((fn: unknown) => {
 		if (typeof fn === "function") {
 			chatsState.inflightMessages = fn(chatsState.inflightMessages)
@@ -49,13 +49,13 @@ vi.mock("@/stores/useChats.store", () => {
 	}
 })
 
-vi.mock("@/lib/chats", () => ({
+vi.mock("@/features/chats/chats", () => ({
 	default: {
 		sendMessage: mockSendMessage
 	}
 }))
 
-vi.mock("@/queries/useChats.query", () => ({
+vi.mock("@/features/chats/queries/useChats.query", () => ({
 	fetchData: mockFetchChats
 }))
 
@@ -69,10 +69,10 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import { onlineManager } from "@tanstack/react-query"
-import { Sync } from "@/components/chats/sync"
+import { Sync } from "@/features/chats/components/sync"
 import sqlite from "@/lib/sqlite"
 import { FilenSdkError } from "@filen/sdk-rs"
-import type { InflightChatMessages } from "@/stores/useChats.store"
+import type { InflightChatMessages } from "@/features/chats/store/useChats.store"
 
 const KV_KEY = "inflightChatMessages"
 

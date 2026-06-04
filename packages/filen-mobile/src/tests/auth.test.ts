@@ -75,7 +75,7 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	}
 }))
 
-vi.mock("@/components/chats/sync", () => ({
+vi.mock("@/features/chats/components/sync", () => ({
 	sync: {
 		cancel: vi.fn(() => {
 			callLog.push("chatsSync.cancel")

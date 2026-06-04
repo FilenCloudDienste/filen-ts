@@ -39,7 +39,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@/features/offline/offline", () => ({ default: { sync: () => mockOfflineSync() } }))
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: { sync: () => mockCameraUploadSync() } }))
 vi.mock("@/features/notes/components/sync", () => ({ sync: { executeNow: () => mockNotesExecuteNow() } }))
-vi.mock("@/components/chats/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
+vi.mock("@/features/chats/components/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
 
 function fireOnlineEvent(isOnline: boolean) {
 	for (const sub of capturedSubscribers) { sub(isOnline) }

@@ -1,5 +1,5 @@
 import { type Chat } from "@/types"
-import useChatMessagesQuery from "@/queries/useChatMessages.query"
+import useChatMessagesQuery from "@/features/chats/queries/useChatMessages.query"
 import { useStringifiedClient } from "@/lib/auth"
 
 export function useChatUnreadCount(chat: Chat): number {

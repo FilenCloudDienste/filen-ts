@@ -102,7 +102,7 @@ vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 vi.mock("@/lib/prompts", () => ({
 	default: { alert: vi.fn(), input: vi.fn() }
 }))
-vi.mock("@/lib/chats", () => ({
+vi.mock("@/features/chats/chats", () => ({
 	default: {
 		mute: vi.fn(),
 		delete: vi.fn(),
@@ -177,7 +177,7 @@ vi.mock("@/lib/cache", () => ({
 }))
 
 // ── Stores ────────────────────────────────────────────────────────────────────
-vi.mock("@/stores/useChats.store", () => ({
+vi.mock("@/features/chats/store/useChats.store", () => ({
 	default: vi.fn(() => ({})),
 	useChatsStore: vi.fn(() => ({}))
 }))
@@ -195,11 +195,11 @@ vi.mock("@/stores/useHttp.store", () => ({
 }))
 
 // ── Queries ───────────────────────────────────────────────────────────────────
-vi.mock("@/queries/useChatMessages.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryUpdate: vi.fn(),
 	default: vi.fn(() => ({ status: "pending" }))
 }))
-vi.mock("@/queries/useChatMessageLinks.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessageLinks.query", () => ({
 	default: vi.fn(() => ({ status: "pending" }))
 }))
 vi.mock("@/queries/useAccount.query", () => ({
@@ -212,14 +212,14 @@ vi.mock("@/hooks/useViewLayout", () => ({
 }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: vi.fn(() => true) }))
 vi.mock("@/hooks/useEffectOnce", () => ({ default: vi.fn() }))
-vi.mock("@/hooks/useChatUnreadCount", () => ({ default: vi.fn(() => 0) }))
+vi.mock("@/features/chats/hooks/useChatUnreadCount", () => ({ default: vi.fn(() => 0) }))
 vi.mock("@/hooks/useMediaPermissions", () => ({
 	default: vi.fn(() => ({ loading: false, granted: true })),
 	hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true)
 }))
 
 // ── Other component deps ──────────────────────────────────────────────────────
-vi.mock("@/components/chats/sync", () => ({
+vi.mock("@/features/chats/components/sync", () => ({
 	sync: { flushToDisk: vi.fn(), syncNow: vi.fn() }
 }))
 vi.mock("@/components/ui/virtualList", () => ({ default: () => null }))
@@ -228,8 +228,8 @@ vi.mock("@/components/itemIcons", () => ({
 	FileIcon: () => null,
 	DirectoryIcon: () => null
 }))
-// NOTE: do NOT mock @/components/chats/chat/message/regexed — we test its exports directly.
-vi.mock("@/components/chats/chat/message/menu", () => ({ default: () => null }))
+// NOTE: do NOT mock @/features/chats/components/chat/message/regexed — we test its exports directly.
+vi.mock("@/features/chats/components/chat/message/menu", () => ({ default: () => null }))
 vi.mock("@/routes/driveSelect/[uuid]", () => ({ selectDriveItems: vi.fn() }))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn(x => JSON.stringify(x)) }))
 
@@ -241,9 +241,9 @@ import {
 	EMOJI_REGEX_WITH_SKIN_TONES,
 	LINE_BREAK_REGEX,
 	customEmojisSet
-} from "@/components/chats/chat/message/regexed"
+} from "@/features/chats/components/chat/message/regexed"
 
-import { createMenuButtons } from "@/components/chats/list/chat/menu"
+import { createMenuButtons } from "@/features/chats/components/list/chat/menu"
 import type { Chat } from "@/types"
 
 // ─── Factory helpers ──────────────────────────────────────────────────────────
