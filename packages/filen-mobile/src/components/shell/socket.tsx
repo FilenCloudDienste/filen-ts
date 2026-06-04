@@ -5,7 +5,6 @@ import {
 	ChatTypingType,
 	ListenerHandle,
 	ChatEvent_Tags,
-	NoteEvent_Tags,
 	GeneralEvent_Tags,
 	DriveEvent_Tags,
 	ContactEvent_Tags,
@@ -25,11 +24,7 @@ import alerts from "@/lib/alerts"
 import { AppState, type AppStateStatus } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import chats from "@/lib/chats"
-import {
-	notesWithContentQueryUpdate,
-	fetchData as notesWithContentQueryFetch,
-	notesWithContentQueryGet
-} from "@/features/notes/queries/useNotesWithContent.query"
+import { handleNoteEvent } from "@/features/notes/socketHandlers"
 import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate, driveItemsQueryUpdateForNormalParent } from "@/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
@@ -867,179 +862,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 			}
 
 			case SocketEvent_Tags.Note: {
-				const [eventInner] = event.inner
-
-				switch (eventInner.inner.tag) {
-					case NoteEvent_Tags.Archived: {
-						const [inner] = eventInner.inner.inner
-
-						notesWithContentQueryUpdate({
-							updater: prev =>
-								prev.map(n =>
-									n.uuid === inner.note
-										? {
-												...n,
-												archived: true
-											}
-										: n
-								)
-						})
-
-						break
-					}
-
-					case NoteEvent_Tags.Deleted: {
-						const [inner] = eventInner.inner.inner
-
-						notesWithContentQueryUpdate({
-							updater: prev => prev.filter(n => n.uuid !== inner.note)
-						})
-
-						break
-					}
-
-					case NoteEvent_Tags.Restored: {
-						const [inner] = eventInner.inner.inner
-
-						notesWithContentQueryUpdate({
-							updater: prev =>
-								prev.map(n =>
-									n.uuid === inner.note
-										? {
-												...n,
-												archived: false,
-												trashed: false
-											}
-										: n
-								)
-						})
-
-						break
-					}
-
-					case NoteEvent_Tags.TitleEdited: {
-						const [inner] = eventInner.inner.inner
-
-						switch (inner.newTitle.tag) {
-							case MaybeEncryptedUniffi_Tags.Decrypted: {
-								const [newTitle] = inner.newTitle.inner
-
-								notesWithContentQueryUpdate({
-									updater: prev =>
-										prev.map(n =>
-											n.uuid === inner.note
-												? {
-														...n,
-														title: newTitle
-													}
-												: n
-										)
-								})
-							}
-						}
-
-						break
-					}
-
-					case NoteEvent_Tags.ParticipantNew: {
-						const [inner] = eventInner.inner.inner
-
-						notesWithContentQueryUpdate({
-							updater: prev =>
-								prev.map(n =>
-									n.uuid === inner.note
-										? {
-												...n,
-												participants: [
-													...n.participants.filter(p => p.userId !== inner.participant.userId),
-													inner.participant
-												]
-											}
-										: n
-								)
-						})
-
-						break
-					}
-
-					case NoteEvent_Tags.ParticipantRemoved: {
-						const [inner] = eventInner.inner.inner
-
-						notesWithContentQueryUpdate({
-							updater: prev =>
-								prev.map(n =>
-									n.uuid === inner.note
-										? {
-												...n,
-												participants: n.participants.filter(p => p.userId !== inner.userId)
-											}
-										: n
-								)
-						})
-
-						break
-					}
-
-					case NoteEvent_Tags.ParticipantPermissions: {
-						const [inner] = eventInner.inner.inner
-
-						notesWithContentQueryUpdate({
-							updater: prev =>
-								prev.map(n =>
-									n.uuid === inner.note
-										? {
-												...n,
-												participants: n.participants.map(p =>
-													p.userId === inner.userId
-														? {
-																...p,
-																permissionsWrite: inner.permissionsWrite
-															}
-														: p
-												)
-											}
-										: n
-								)
-						})
-
-						break
-					}
-
-					case NoteEvent_Tags.New: {
-						// TODO: Don't refetch the query, build from socket event once added
-						const notesWithContent = await notesWithContentQueryFetch()
-
-						notesWithContentQueryUpdate({
-							updater: () => notesWithContent
-						})
-
-						break
-					}
-
-					case NoteEvent_Tags.ContentEdited: {
-						const [inner] = eventInner.inner.inner
-
-						const notes = notesWithContentQueryGet()
-						const note = notes?.find(n => n.uuid === inner.note)
-
-						if (!note) {
-							break
-						}
-
-						events.emit("noteContentEdited", {
-							noteUuid: inner.note,
-							contentEdited: inner
-						})
-
-						break
-					}
-
-					default: {
-						console.error(eventInner)
-
-						throw new Error("Unhandled note event")
-					}
-				}
+				await handleNoteEvent({ event })
 
 				break
 			}
