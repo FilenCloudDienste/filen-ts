@@ -14,7 +14,7 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@/queries/useChatMessages.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	default: (_params: unknown, _options: unknown) => ({
 		status: mocks.chatMessagesQueryStatus,
 		data: mocks.chatMessages
@@ -29,7 +29,7 @@ vi.mock("@/lib/auth", () => ({
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { renderHook } from "@testing-library/react"
-import { useChatUnreadCount } from "@/hooks/useChatUnreadCount"
+import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
 import type { Chat, ChatMessage } from "@/types"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

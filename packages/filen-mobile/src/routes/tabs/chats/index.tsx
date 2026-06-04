@@ -1,4 +1,4 @@
-import ChatsComponent from "@/components/chats"
+import ChatsComponent from "@/features/chats/components"
 import { memo } from "react"
 
 const Chats = memo(() => {

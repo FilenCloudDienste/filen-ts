@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS, chatHasUnread } from "@/lib/chatSelectors"
+import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS, chatHasUnread } from "@/features/chats/chatSelectors"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import type { Chat, ChatMessage } from "@/types"
 

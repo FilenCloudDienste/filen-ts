@@ -161,11 +161,11 @@ vi.mock("@/lib/utils", () => ({
 // Imports under test (placed AFTER all vi.mock() calls)
 // ---------------------------------------------------------------------------
 
-import { probeMedia, fetchData as fetchChatMessageLinks } from "@/queries/useChatMessageLinks.query"
-import { fetchData as fetchChatMessages } from "@/queries/useChatMessages.query"
+import { probeMedia, fetchData as fetchChatMessageLinks } from "@/features/chats/queries/useChatMessageLinks.query"
+import { fetchData as fetchChatMessages } from "@/features/chats/queries/useChatMessages.query"
 import { fetchData as fetchNotesWithContent } from "@/features/notes/queries/useNotesWithContent.query"
 import { fetchData as fetchNotesTags } from "@/features/notes/queries/useNotesTags.query"
-import { fetchData as fetchChats } from "@/queries/useChats.query"
+import { fetchData as fetchChats } from "@/features/chats/queries/useChats.query"
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal Response-like object

@@ -54,13 +54,13 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/queries/useChats.query", () => ({
+vi.mock("@/features/chats/queries/useChats.query", () => ({
 	chatsQueryUpdate: mockChatsQueryUpdate,
 	chatsQueryGet: mockChatsQueryGet,
 	fetchData: mockChatsQueryFetch
 }))
 
-vi.mock("@/queries/useChatMessages.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryUpdate: mockChatMessagesQueryUpdate,
 	fetchData: mockChatMessagesQueryFetch
 }))
@@ -82,10 +82,10 @@ vi.mock("@filen/sdk-rs", () => ({
 	DirMeta_Tags: { Decoded: "Decoded" }
 }))
 
-import chats from "@/lib/chats"
+import chats from "@/features/chats/chats"
 import type { Chat } from "@/types"
 import type { ChatParticipant, Contact } from "@filen/sdk-rs"
-import type { ChatMessageWithInflightId } from "@/stores/useChats.store"
+import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 
 function makeChat(overrides: Partial<Chat> = {}): Chat {
 	return {

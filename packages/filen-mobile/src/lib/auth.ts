@@ -15,7 +15,7 @@ import fileProvider from "@/features/settings/fileProvider"
 import sqlite from "@/lib/sqlite"
 import audio from "@/features/audio/audio"
 import offline from "@/features/offline/offline"
-import { sync as chatsSync } from "@/components/chats/sync"
+import { sync as chatsSync } from "@/features/chats/components/sync"
 import { sync as notesSync } from "@/features/notes/components/sync"
 import { reloadAppAsync } from "expo"
 
