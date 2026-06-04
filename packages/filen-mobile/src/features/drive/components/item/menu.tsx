@@ -4,6 +4,7 @@ import type { DriveItem } from "@/types"
 import { router } from "expo-router"
 import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
+import { confirmedAction } from "@/lib/confirmedAction"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
@@ -35,7 +36,6 @@ import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 // `confirmedNoteAction`.
 function confirmedDriveAction({
 	item,
-	t,
 	promptTitle,
 	promptMessage,
 	promptOkText,
@@ -44,6 +44,8 @@ function confirmedDriveAction({
 	dismissOnSuccess
 }: {
 	item: DriveItem
+	// `t` is still accepted from callers but no longer read — the shared helper uses the module
+	// i18n. Left in the type to avoid touching every call site; remove when item/menu.tsx is split.
 	t: TFunction
 	promptTitle: string
 	promptMessage: string
@@ -57,43 +59,14 @@ function confirmedDriveAction({
 	// (closes a file preview / detail route sitting on top).
 	dismissOnSuccess: boolean
 }): () => Promise<void> {
-	return async () => {
-		const promptResult = await run(async () => {
-			return await prompts.alert({
-				title: promptTitle,
-				message: promptMessage,
-				cancelText: t("cancel"),
-				okText: promptOkText,
-				destructive: promptDestructive
-			})
-		})
-
-		if (!promptResult.success) {
-			console.error(promptResult.error)
-			alerts.error(promptResult.error)
-
-			return
-		}
-
-		if (promptResult.data.cancelled) {
-			return
-		}
-
-		const result = await runWithLoading(async () => {
-			await action()
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
-		}
-
-		if (dismissOnSuccess && item.type === "file" && router.canGoBack()) {
-			router.back()
-		}
-	}
+	return confirmedAction({
+		promptTitle,
+		promptMessage,
+		promptOkText,
+		promptDestructive,
+		action,
+		dismiss: dismissOnSuccess ? () => item.type === "file" : undefined
+	})
 }
 
 export function createMenuButtons({
