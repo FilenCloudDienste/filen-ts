@@ -12,7 +12,7 @@ import { type View as RNView, Platform, type ViewStyle } from "react-native"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import useViewLayout from "@/hooks/useViewLayout"
-import { getPreviewType, getRealDriveItemParent } from "@/lib/utils"
+import { getPreviewType, getRealDriveItemParent, resolveCreatedOrTimestamp } from "@/lib/utils"
 import { driveItemDisplayName } from "@/lib/decryption"
 import Thumbnail from "@/components/drive/item/thumbnail"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -634,13 +634,19 @@ const Photos = memo(() => {
 								const firstItem = items[0]
 								const lastItem = items[items.length - 1]
 
+								if (!firstItem || !lastItem) {
+									return
+								}
+
 								usePhotosStore.getState().setVisibleDateRange({
-									start: firstItem?.item.data.decryptedMeta?.created !== undefined
-										? Number(firstItem.item.data.decryptedMeta.created)
-										: Number(firstItem?.item.data.timestamp),
-									end: lastItem?.item.data.decryptedMeta?.created !== undefined
-										? Number(lastItem.item.data.decryptedMeta.created)
-										: Number(lastItem?.item.data.timestamp)
+									start: resolveCreatedOrTimestamp({
+										created: firstItem.item.data.decryptedMeta?.created,
+										timestamp: firstItem.item.data.timestamp
+									}),
+									end: resolveCreatedOrTimestamp({
+										created: lastItem.item.data.decryptedMeta?.created,
+										timestamp: lastItem.item.data.timestamp
+									})
 								})
 							}}
 							data={items}

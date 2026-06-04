@@ -1382,6 +1382,14 @@ export function safeParseUrl(raw: string): URL | null {
 	}
 }
 
+export function resolveMimeType({ mime, name }: { mime: string | null | undefined; name: string }): string {
+	return mime || mimeTypes.lookup(name) || "application/octet-stream"
+}
+
+export function resolveCreatedOrTimestamp({ created, timestamp }: { created: bigint | undefined; timestamp: bigint }): number {
+	return created !== undefined ? Number(created) : Number(timestamp)
+}
+
 export function linkedFileIntoDriveItem(file: LinkedFile): DriveItem {
 	return unwrappedFileIntoDriveItem(
 		unwrapFileMeta({
