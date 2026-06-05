@@ -16,6 +16,4 @@ export const CannotDecryptScreen = ({ uuid }: { uuid: string; surface?: CannotDe
 	)
 }
 
-CannotDecryptScreen.displayName = "CannotDecryptScreen"
-
 export default CannotDecryptScreen
