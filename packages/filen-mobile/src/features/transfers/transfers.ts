@@ -22,12 +22,9 @@ import {
 	normalizeFilePathForExpo,
 	unwrapDirMeta,
 	unwrapFileMeta,
-	wrapAbortSignalForSdk,
-	PauseSignal,
-	createCompositeAbortSignal,
-	createCompositePauseSignal,
 	unwrapParentUuid
 } from "@/lib/utils"
+import { wrapAbortSignalForSdk, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"

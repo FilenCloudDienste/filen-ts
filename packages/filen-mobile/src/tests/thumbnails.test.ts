@@ -178,7 +178,10 @@ vi.mock("@/stores/useHttp.store", () => ({
 
 vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForExpo: vi.fn((path: string) => (path.startsWith("file://") ? path : `file://${path}`)),
-	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
+	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", ""))
+}))
+
+vi.mock("@/lib/signals", () => ({
 	wrapAbortSignalForSdk: vi.fn(() => ({}))
 }))
 
@@ -705,7 +708,7 @@ describe("Thumbnails", () => {
 	describe("generate — abort signal", () => {
 		it("image: passes signal through generate() to ManagedFuture", async () => {
 			const { ManagedFuture } = await import("@filen/sdk-rs")
-			const { wrapAbortSignalForSdk } = await import("@/lib/utils")
+			const { wrapAbortSignalForSdk } = await import("@/lib/signals")
 
 			const controller = new AbortController()
 			const item = makeFileItem("abort-img-uuid", "photo.jpg")

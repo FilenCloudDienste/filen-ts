@@ -39,13 +39,16 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	wrapAbortSignalForSdk: vi.fn(s => s),
 	normalizeFilePathForSdk: (p: string) =>
 		p
 			.trim()
 			.replace(/^file:\/+/, "/")
 			.replace(/\/+/g, "/")
 			.replace(/\/$/, "")
+}))
+
+vi.mock("@/lib/signals", () => ({
+	wrapAbortSignalForSdk: vi.fn(s => s)
 }))
 
 vi.mock("@/features/offline/offline", () => ({
@@ -70,7 +73,7 @@ import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import { type DriveItem, type CacheItem } from "@/types"
 import auth from "@/lib/auth"
-import { wrapAbortSignalForSdk } from "@/lib/utils"
+import { wrapAbortSignalForSdk } from "@/lib/signals"
 import { type Metadata } from "@/lib/fileCache"
 import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
