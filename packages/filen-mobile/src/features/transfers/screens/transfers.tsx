@@ -156,135 +156,149 @@ const Transfer = ({ info: { item: transfer, target } }: { info: ListRenderItemIn
 	)
 }
 
+const TransfersHeader = () => {
+	const { t } = useTranslation()
+	// Subscribe only to the two header-relevant derivations, not the whole
+	// transfers array. Byte-progress updates replace the array reference ~10x/s
+	// but leave count/allPaused unchanged, so useShallow skips header re-renders.
+	const { count, allPaused } = useTransfersStore(
+		useShallow(state => ({
+			count: state.transfers.length,
+			allPaused: state.transfers.length > 0 && state.transfers.every(transfer => transfer.paused)
+		}))
+	)
+	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const textForeground = useResolveClassNames("text-foreground")
+
+	return (
+		<Header
+			title={t("transfers")}
+			transparent={Platform.OS === "ios"}
+			shadowVisible={false}
+			backVisible={Platform.OS === "android"}
+			backgroundColor={Platform.select({
+				ios: undefined,
+				default: bgBackgroundSecondary.backgroundColor as string
+			})}
+			leftItems={Platform.select({
+				ios: [
+					{
+						type: "button",
+						icon: {
+							name: "close",
+							color: textForeground.color,
+							size: 20
+						},
+						props: {
+							onPress: () => {
+								router.back()
+							}
+						}
+					}
+				] satisfies HeaderItem[],
+				default: undefined
+			})}
+			rightItems={
+				count > 0
+					? [
+							{
+								type: "menu",
+								props: {
+									type: "dropdown",
+									hitSlop: 20,
+									buttons: [
+										...(allPaused
+											? [
+													{
+														id: "resumeAll",
+														title: t("resume_all"),
+														icon: "play" as const,
+														onPress: () => {
+															// Iterate per-transfer instead of resuming the
+															// global signal: the store's `paused` flag is
+															// driven by the per-transfer signal, so a global
+															// resume would leave individually-paused transfers
+															// stuck (store says resumed, SDK still paused).
+															// Read the live array imperatively to avoid a stale
+															// closure (the header no longer subscribes to it).
+															for (const transfer of useTransfersStore.getState().transfers) {
+																transfer.resume()
+															}
+														}
+													}
+												]
+											: [
+													{
+														id: "pauseAll",
+														title: t("pause_all"),
+														icon: "pause" as const,
+														onPress: () => {
+															// Same reason — iterate per-transfer so the
+															// per-transfer signal stays in sync with the store
+															// and so the global pause signal doesn't stay
+															// sticky and silently pause future uploads.
+															for (const transfer of useTransfersStore.getState().transfers) {
+																transfer.pause()
+															}
+														}
+													}
+												]),
+										{
+											id: "abortAll",
+											title: t("cancel_all"),
+											icon: "cancel",
+											destructive: true,
+											onPress: async () => {
+												const promptResult = await run(async () => {
+													return await prompts.alert({
+														title: t("cancel_all_transfers"),
+														message: t("confirm_cancel_all_transfers"),
+														cancelText: t("cancel"),
+														okText: t("cancel_all"),
+														destructive: true
+													})
+												})
+
+												if (!promptResult.success) {
+													console.error(promptResult.error)
+													alerts.error(promptResult.error)
+
+													return
+												}
+
+												if (promptResult.data.cancelled) {
+													return
+												}
+
+												transfersLib.cancelAll()
+											}
+										}
+									]
+								},
+								triggerProps: {
+									hitSlop: 20
+								},
+								icon: {
+									name: "ellipsis-horizontal",
+									size: 24,
+									color: textForeground.color
+								}
+							}
+						]
+					: undefined
+			}
+		/>
+	)
+}
+
 const Transfers = () => {
 	const { t } = useTranslation()
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 	const insets = useSafeAreaInsets()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
-
-	// Derive the pause-all state from the live transfers array so that closing
-	// and reopening the modal reflects truth — local component state would be
-	// reset to false on remount even if every transfer is actually paused.
-	const allPaused = transfers.length > 0 && transfers.every(t => t.paused)
 
 	return (
 		<Fragment>
-			<Header
-				title={t("transfers")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.back()
-								}
-							}
-						}
-					] satisfies HeaderItem[],
-					default: undefined
-				})}
-				rightItems={
-					transfers.length > 0
-						? [
-								{
-									type: "menu",
-									props: {
-										type: "dropdown",
-										hitSlop: 20,
-										buttons: [
-											...(allPaused
-												? [
-														{
-															id: "resumeAll",
-															title: t("resume_all"),
-															icon: "play" as const,
-															onPress: () => {
-																// Iterate per-transfer instead of resuming the
-																// global signal: the store's `paused` flag is
-																// driven by the per-transfer signal, so a global
-																// resume would leave individually-paused transfers
-																// stuck (store says resumed, SDK still paused).
-																for (const transfer of transfers) {
-																	transfer.resume()
-																}
-															}
-														}
-													]
-												: [
-														{
-															id: "pauseAll",
-															title: t("pause_all"),
-															icon: "pause" as const,
-															onPress: () => {
-																// Same reason — iterate per-transfer so the
-																// per-transfer signal stays in sync with the store
-																// and so the global pause signal doesn't stay
-																// sticky and silently pause future uploads.
-																for (const transfer of transfers) {
-																	transfer.pause()
-																}
-															}
-														}
-													]),
-											{
-												id: "abortAll",
-												title: t("cancel_all"),
-												icon: "cancel",
-												destructive: true,
-												onPress: async () => {
-													const promptResult = await run(async () => {
-														return await prompts.alert({
-															title: t("cancel_all_transfers"),
-															message: t("confirm_cancel_all_transfers"),
-															cancelText: t("cancel"),
-															okText: t("cancel_all"),
-															destructive: true
-														})
-													})
-
-													if (!promptResult.success) {
-														console.error(promptResult.error)
-														alerts.error(promptResult.error)
-
-														return
-													}
-
-													if (promptResult.data.cancelled) {
-														return
-													}
-
-													transfersLib.cancelAll()
-												}
-											}
-										]
-									},
-									triggerProps: {
-										hitSlop: 20
-									},
-									icon: {
-										name: "ellipsis-horizontal",
-										size: 24,
-										color: textForeground.color
-									}
-								}
-							]
-						: undefined
-				}
-			/>
+			<TransfersHeader />
 			<SafeAreaView
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
