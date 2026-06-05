@@ -1,3 +1,4 @@
+import DetailRow from "@/components/ui/detailRow"
 import Text from "@/components/ui/text"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
@@ -306,31 +307,11 @@ export const Information = ({ item, linked }: { item: DriveItem; linked?: boolea
 				<Text className="text-lg text-muted-foreground font-bold">{t("information")}</Text>
 			</View>
 			{info.map(({ type, value, title }) => (
-				<View
+				<DetailRow
 					key={type}
-					className="bg-transparent border-b border-border pb-2 flex-row items-center justify-between gap-4"
-				>
-					<Text
-						className="text-muted-foreground shrink-0"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{title}
-					</Text>
-					<View className="bg-transparent flex-1 justify-end items-center flex-row gap-2">
-						{typeof value === "string" ? (
-							<Text
-								className="text-foreground flex-1 text-right"
-								numberOfLines={1}
-								ellipsizeMode="middle"
-							>
-								{value}
-							</Text>
-						) : (
-							value
-						)}
-					</View>
-				</View>
+					title={title}
+					value={value}
+				/>
 			))}
 		</View>
 	)

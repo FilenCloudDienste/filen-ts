@@ -1,12 +1,11 @@
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment } from "react"
 import { useNavigation } from "expo-router"
 import { Image } from "expo-image"
 import { run, formatBytes } from "@filen/utils"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
@@ -90,7 +89,6 @@ async function confirmAndRun(options: {
 }
 
 function Advanced() {
-	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const { t } = useTranslation()
 
@@ -122,15 +120,7 @@ function Advanced() {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				<GestureHandlerScrollView
-					className="bg-transparent flex-1"
-					contentInsetAdjustmentBehavior="automatic"
-					contentContainerClassName="px-4 gap-4"
-					showsHorizontalScrollIndicator={false}
-					contentContainerStyle={{
-						paddingBottom: insets.bottom
-					}}
-				>
+				<SettingsScrollView>
 					<Group
 						className="bg-background-tertiary"
 						buttons={[
@@ -253,7 +243,7 @@ function Advanced() {
 							}
 						]}
 					/>
-				</GestureHandlerScrollView>
+				</SettingsScrollView>
 			</SafeAreaView>
 		</Fragment>
 	)

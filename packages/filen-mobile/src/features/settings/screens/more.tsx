@@ -27,7 +27,7 @@ function More() {
 
 	const accountQuery = useAccountQuery()
 
-	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
+	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.some(sub => Number(sub.activated) === 1)
 
 	return (
 		<Fragment>
