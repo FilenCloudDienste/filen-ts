@@ -343,9 +343,7 @@ describe("contacts.acceptRequest", () => {
 		const contactUpdate = vi.mocked(contactsQueryUpdate).mock.calls[0]![0]
 		const staleContacts = [makeContact({ email: "stale@example.com", uuid: "uuid-stale" })]
 		const contactPrev = { contacts: staleContacts, blocked: [] }
-		const contactNext = (
-			contactUpdate as unknown as { updater: (p: typeof contactPrev) => typeof contactPrev }
-		).updater(contactPrev)
+		const contactNext = (contactUpdate as unknown as { updater: (p: typeof contactPrev) => typeof contactPrev }).updater(contactPrev)
 
 		// contacts is fully replaced with the fresh list fetched from the SDK
 		expect(contactNext.contacts).toHaveLength(2)

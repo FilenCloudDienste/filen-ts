@@ -19,13 +19,7 @@ import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
 
-function buildPlaylistRowButtons({
-	t,
-	playlist
-}: {
-	t: TFunction
-	playlist: PlaylistWithItems
-}): ShowActionSheetOptions["buttons"] {
+function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: PlaylistWithItems }): ShowActionSheetOptions["buttons"] {
 	return [
 		{
 			title: t("select"),

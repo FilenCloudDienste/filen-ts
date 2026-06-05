@@ -38,10 +38,7 @@ export function createMenuButtons({
 	}
 
 	const menuButtons: MenuButton[] = []
-	const previewType =
-		isFileItem(item)
-			? getPreviewType(item.data.decryptedMeta?.name ?? "")
-			: null
+	const previewType = isFileItem(item) ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
 
 	const parentForOfflineStorage = getRealDriveItemParent({
 		item,
@@ -70,7 +67,7 @@ export function createMenuButtons({
 	}
 
 	if (
-		(isDirectoryItem(item)) &&
+		isDirectoryItem(item) &&
 		(drivePath.type === "drive" ||
 			drivePath.type === "sharedIn" ||
 			drivePath.type === "sharedOut" ||
@@ -110,7 +107,15 @@ export function createMenuButtons({
 		})
 	}
 
-	const downloadSubButtons = buildDownloadSubButtons({ item, drivePath, isStoredOffline, parentForOfflineStorage, previewType, isOwner, t })
+	const downloadSubButtons = buildDownloadSubButtons({
+		item,
+		drivePath,
+		isStoredOffline,
+		parentForOfflineStorage,
+		previewType,
+		isOwner,
+		t
+	})
 
 	// download + share moved further down (after rename/move) so the menu
 	// reads: meta (favorite/info/versions/color) → modify (rename/move) →
@@ -310,9 +315,7 @@ export function createMenuButtons({
 	if (
 		downloadSubButtons.length > 0 &&
 		drivePath.type !== "offline" &&
-		(isFileItem(item)
-			? (item.data.decryptedMeta?.size ?? 0) > 0
-			: true)
+		(isFileItem(item) ? (item.data.decryptedMeta?.size ?? 0) > 0 : true)
 	) {
 		menuButtons.push({
 			id: "download",
@@ -405,9 +408,7 @@ export function createMenuButtons({
 	//     known top-level stored. /offline nested view and /linked never show.
 	if (
 		(drivePath.type === "offline" && !drivePath.uuid) ||
-		(offline.isItemTopLevelStoredSync(item) === true &&
-			drivePath.type !== "offline" &&
-			drivePath.type !== "linked")
+		(offline.isItemTopLevelStoredSync(item) === true && drivePath.type !== "offline" && drivePath.type !== "linked")
 	) {
 		menuButtons.push({
 			id: "removeOffline",
@@ -490,12 +491,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		drivePath.type !== "trash" &&
-		drivePath.type !== "sharedIn" &&
-		drivePath.type !== "offline" &&
-		drivePath.type !== "linked"
-	) {
+	if (drivePath.type !== "trash" && drivePath.type !== "sharedIn" && drivePath.type !== "offline" && drivePath.type !== "linked") {
 		menuButtons.push({
 			id: "trash",
 			requiresOnline: true,

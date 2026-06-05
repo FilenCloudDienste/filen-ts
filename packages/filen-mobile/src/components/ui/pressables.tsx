@@ -15,7 +15,9 @@ export const PressableWithoutFeedback = withUniwind(PresstoPressableWithoutFeedb
 
 export const PressablesGroup = withUniwind(PresstoPressablesGroup)
 
-export const AndroidIconButton = (props: React.ComponentProps<typeof PressableOpacity> & { className?: string; children?: React.ReactNode }) => {
+export const AndroidIconButton = (
+	props: React.ComponentProps<typeof PressableOpacity> & { className?: string; children?: React.ReactNode }
+) => {
 	return (
 		<PressableOpacity
 			{...props}

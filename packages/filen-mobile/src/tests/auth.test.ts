@@ -567,7 +567,9 @@ describe("auth.login", () => {
 		vi.mocked(secureStore.default.set).mockResolvedValueOnce(undefined)
 		mockLogin.mockResolvedValue(null)
 
-		await expect(auth.login({ email: "u@v.w", password: "pass", twoFactorCode: "" })).rejects.toThrow("Login failed, authed client is null")
+		await expect(auth.login({ email: "u@v.w", password: "pass", twoFactorCode: "" })).rejects.toThrow(
+			"Login failed, authed client is null"
+		)
 	})
 
 	it("resolves getSdkClients() waiters after login succeeds", async () => {

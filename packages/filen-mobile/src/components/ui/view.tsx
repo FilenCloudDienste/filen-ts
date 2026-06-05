@@ -22,9 +22,13 @@ export const View = ((props: React.ComponentPropsWithRef<typeof RNView>) => {
 	)
 }) as unknown as React.FC<React.ComponentPropsWithRef<typeof RNView>>
 
-export const UniwindKeyboardAvoidingView = withUniwind(RNKeyboardControllerKeyboardAvoidingView) as React.FC<React.ComponentProps<typeof RNKeyboardControllerKeyboardAvoidingView>>
+export const UniwindKeyboardAvoidingView = withUniwind(RNKeyboardControllerKeyboardAvoidingView) as React.FC<
+	React.ComponentProps<typeof RNKeyboardControllerKeyboardAvoidingView>
+>
 
-export const KeyboardAvoidingView = (props: React.ComponentProps<typeof RNKeyboardControllerKeyboardAvoidingView> & React.RefAttributes<RNView>) => {
+export const KeyboardAvoidingView = (
+	props: React.ComponentProps<typeof RNKeyboardControllerKeyboardAvoidingView> & React.RefAttributes<RNView>
+) => {
 	return (
 		<UniwindKeyboardAvoidingView
 			{...props}
@@ -37,7 +41,9 @@ export const UniwindKeyboardAwareScrollView = withUniwind(RNKeyboardControllerKe
 	React.ComponentProps<typeof RNKeyboardControllerKeyboardAwareScrollView>
 >
 
-export const KeyboardAwareScrollView = (props: React.ComponentProps<typeof RNKeyboardControllerKeyboardAwareScrollView> & React.RefAttributes<RNView>) => {
+export const KeyboardAwareScrollView = (
+	props: React.ComponentProps<typeof RNKeyboardControllerKeyboardAwareScrollView> & React.RefAttributes<RNView>
+) => {
 	return (
 		<UniwindKeyboardAwareScrollView
 			{...props}
@@ -46,9 +52,13 @@ export const KeyboardAwareScrollView = (props: React.ComponentProps<typeof RNKey
 	)
 }
 
-export const UniwindKeyboardStickyView = withUniwind(RNKeyboardControllerKeyboardStickyView) as React.FC<React.ComponentProps<typeof RNKeyboardControllerKeyboardStickyView>>
+export const UniwindKeyboardStickyView = withUniwind(RNKeyboardControllerKeyboardStickyView) as React.FC<
+	React.ComponentProps<typeof RNKeyboardControllerKeyboardStickyView>
+>
 
-export const KeyboardStickyView = (props: React.ComponentProps<typeof RNKeyboardControllerKeyboardStickyView> & React.RefAttributes<RNView>) => {
+export const KeyboardStickyView = (
+	props: React.ComponentProps<typeof RNKeyboardControllerKeyboardStickyView> & React.RefAttributes<RNView>
+) => {
 	return (
 		<UniwindKeyboardStickyView
 			{...props}
@@ -75,7 +85,15 @@ export const LiquidGlassContainerView = (props: React.ComponentProps<typeof Expo
 	return <UniwindGlassContainerView {...props} />
 }
 
-const AndroidGlassContainer = ({ children, className, style }: { children: React.ReactNode; className?: string; style?: StyleProp<ViewStyle> }) => {
+const AndroidGlassContainer = ({
+	children,
+	className,
+	style
+}: {
+	children: React.ReactNode
+	className?: string
+	style?: StyleProp<ViewStyle>
+}) => {
 	return (
 		<View
 			className={cn("border border-border rounded-full overflow-hidden bg-background-secondary/85", className)}
@@ -163,7 +181,9 @@ export const CrossGlassContainerView = ({
 	)
 }
 
-export const UniwindGestureHandlerScrollView = withUniwind(RNGestureHandlerScrollView) as React.FC<React.ComponentProps<typeof RNGestureHandlerScrollView>>
+export const UniwindGestureHandlerScrollView = withUniwind(RNGestureHandlerScrollView) as React.FC<
+	React.ComponentProps<typeof RNGestureHandlerScrollView>
+>
 
 export const GestureHandlerScrollView = (props: React.ComponentProps<typeof RNGestureHandlerScrollView> & React.RefAttributes<RNView>) => {
 	return <UniwindGestureHandlerScrollView {...props} />

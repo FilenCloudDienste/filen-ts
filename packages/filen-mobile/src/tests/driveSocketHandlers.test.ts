@@ -157,9 +157,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 			await handleDriveEvent({ event: makeFolderDeletedPermanentEvent("folder-1") })
 
 			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
-			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledWith(
-				expect.objectContaining({ parentUuid: "parent-1" })
-			)
+			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "parent-1" }))
 		})
 
 		it("the updater removes only the folder's uuid from the parent listing", async () => {

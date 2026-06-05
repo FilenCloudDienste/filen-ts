@@ -37,7 +37,7 @@ const { mockAppState } = vi.hoisted(() => {
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	// runEffect is used by useIsAppActive — provide a real-ish implementation
 	// that calls the setup function and returns a cleanup wrapper.
 	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {

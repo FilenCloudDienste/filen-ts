@@ -4,13 +4,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mock factories — must be declared before any vi.mock() calls
 // ---------------------------------------------------------------------------
 
-const {
-	mockGetSdkClients,
-	mockAuthedSdkClient,
-	mockChatUuidToChat,
-	mockNoteUuidToNote,
-	mockParseFilenPublicLink
-} = vi.hoisted(() => {
+const { mockGetSdkClients, mockAuthedSdkClient, mockChatUuidToChat, mockNoteUuidToNote, mockParseFilenPublicLink } = vi.hoisted(() => {
 	const mockAuthedSdkClient = {
 		getDirPublicLinkInfo: vi.fn(),
 		getLinkedFile: vi.fn(),
@@ -176,12 +170,7 @@ import { fetchData as fetchChats } from "@/features/chats/queries/useChats.query
 // Helper: build a minimal Response-like object
 // ---------------------------------------------------------------------------
 
-function makeResponse(opts: {
-	url?: string
-	ok?: boolean
-	contentType?: string | null
-	contentLength?: string | null
-}): Response {
+function makeResponse(opts: { url?: string; ok?: boolean; contentType?: string | null; contentLength?: string | null }): Response {
 	const headers = new Map<string, string>()
 
 	if (opts.contentType !== undefined && opts.contentType !== null) {
@@ -285,9 +274,7 @@ describe("probeMedia", () => {
 		// Must be blocked
 		expect(result.success).toBe(false)
 		// Must NOT have fetched the internal host — fetch called at most once (HEAD) + maybe GET, never for the internal IP
-		const internalCalls = fetchMock.mock.calls.filter(
-			(args: unknown[]) => typeof args[0] === "string" && args[0].includes("192.168")
-		)
+		const internalCalls = fetchMock.mock.calls.filter((args: unknown[]) => typeof args[0] === "string" && args[0].includes("192.168"))
 
 		expect(internalCalls).toHaveLength(0)
 	})

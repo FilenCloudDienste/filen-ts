@@ -223,9 +223,7 @@ function TwoFactor() {
 											}
 
 											const exportResult = await runWithLoading(async () => {
-												const file = newTmpFile(
-													`${accountQuery.data.email}.twoFactorRecoveryKey.${Date.now()}.txt`
-												)
+												const file = newTmpFile(`${accountQuery.data.email}.twoFactorRecoveryKey.${Date.now()}.txt`)
 
 												if (file.exists) {
 													file.delete()

@@ -29,11 +29,23 @@ describe("useEffectOnce", () => {
 		let callCount = 0
 
 		const { rerender } = renderHook(({ cb }) => useEffectOnce(cb), {
-			initialProps: { cb: () => { callCount++ } }
+			initialProps: {
+				cb: () => {
+					callCount++
+				}
+			}
 		})
 
-		rerender({ cb: () => { callCount += 100 } })
-		rerender({ cb: () => { callCount += 1000 } })
+		rerender({
+			cb: () => {
+				callCount += 100
+			}
+		})
+		rerender({
+			cb: () => {
+				callCount += 1000
+			}
+		})
 
 		expect(callCount).toBe(1)
 	})

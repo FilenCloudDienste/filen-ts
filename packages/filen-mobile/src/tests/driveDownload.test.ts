@@ -146,12 +146,7 @@ type DecryptedMeta = {
 	created: number
 }
 
-function makeFileItem(overrides: {
-	name?: string
-	mime?: string
-	uuid?: string
-	decryptedMeta?: DecryptedMeta | null
-}): DriveItem {
+function makeFileItem(overrides: { name?: string; mime?: string; uuid?: string; decryptedMeta?: DecryptedMeta | null }): DriveItem {
 	const name = overrides.name ?? "testfile.txt"
 	const uuid = overrides.uuid ?? "test-file-uuid"
 
@@ -177,11 +172,7 @@ function makeFileItem(overrides: {
 	} as unknown as DriveItem
 }
 
-function makeDirItem(overrides: {
-	name?: string
-	uuid?: string
-	decryptedMeta?: DecryptedMeta | null
-}): DriveItem {
+function makeDirItem(overrides: { name?: string; uuid?: string; decryptedMeta?: DecryptedMeta | null }): DriveItem {
 	const name = overrides.name ?? "testdir"
 	const uuid = overrides.uuid ?? "test-dir-uuid"
 

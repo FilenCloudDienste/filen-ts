@@ -12,7 +12,7 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	sortParams: (p: Record<string, unknown>) => {
 		const keys = Object.keys(p).sort()
 		const result: Record<string, unknown> = {}

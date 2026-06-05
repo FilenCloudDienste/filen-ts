@@ -38,10 +38,7 @@ function BiometricComponent() {
 	const [biometric, setBiometric] = useSecureStore<Biometric>("biometric", {
 		enabled: false
 	})
-	const [fileProviderEnabled, setFileProviderEnabled] = useSecureStore<boolean>(
-		FILE_PROVIDER_ENABLED_SECURE_STORE_KEY,
-		false
-	)
+	const [fileProviderEnabled, setFileProviderEnabled] = useSecureStore<boolean>(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)
 	const localAuthenticationQuery = useLocalAuthenticationQuery()
 
 	return (

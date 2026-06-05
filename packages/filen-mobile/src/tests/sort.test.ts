@@ -612,7 +612,12 @@ describe("notesSorter", () => {
 
 		it("tag filter respects tagged+pinned note: pinned note with matching tag is included", () => {
 			const matchingTag = makeTag("tag-abc", "work")
-			const taggedAndPinned = makeNote({ uuid: "pinned-tagged", editedTimestamp: BigInt(Date.now()), pinned: true, tags: [matchingTag] })
+			const taggedAndPinned = makeNote({
+				uuid: "pinned-tagged",
+				editedTimestamp: BigInt(Date.now()),
+				pinned: true,
+				tags: [matchingTag]
+			})
 			const pinnedOnly = makeNote({ uuid: "pinned-only", editedTimestamp: BigInt(Date.now()), pinned: true, tags: [] })
 
 			// Tag filter applied before grouping: pinnedOnly excluded, taggedAndPinned included
@@ -668,9 +673,9 @@ describe("notesSorter", () => {
 
 			// It lands in the year bucket for its own calendar year, labelled with that year.
 			const expectedYear = new Date(ninetyDaysAgoMs).getFullYear()
-			const yearHeader = result.find(
-				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
-			) as { title?: string } | undefined
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
+				| { title?: string }
+				| undefined
 
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe(String(expectedYear))
@@ -706,9 +711,9 @@ describe("notesSorter", () => {
 
 			const result = notesSorter.group({ notes: [note] })
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
-			const yearHeader = result.find(
-				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
-			) as { title?: string } | undefined
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
+				| { title?: string }
+				| undefined
 
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe(String(expectedYear))
@@ -725,9 +730,7 @@ describe("notesSorter", () => {
 
 			const result = notesSorter.group({ notes: [note] })
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
-			const yearHeaderIdx = result.findIndex(
-				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
-			)
+			const yearHeaderIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`)
 
 			expect(yearHeaderIdx).toBeGreaterThanOrEqual(0)
 			expect(result[yearHeaderIdx + 1]?.type).toBe("note")

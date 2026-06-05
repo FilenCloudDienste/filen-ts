@@ -4,12 +4,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ---------------------------------------------------------------------------
 
-const {
-	mockGetSdkClients,
-	mockNotesWithContentQueryUpdate,
-	mockNoteContentQueryUpdate,
-	mockNotesTagsQueryUpdate
-} = vi.hoisted(() => ({
+const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockNoteContentQueryUpdate, mockNotesTagsQueryUpdate } = vi.hoisted(() => ({
 	mockGetSdkClients: vi.fn(),
 	mockNotesWithContentQueryUpdate: vi.fn(),
 	mockNoteContentQueryUpdate: vi.fn(),
@@ -194,9 +189,13 @@ function makeMockSdkClient(overrides: Record<string, unknown> = {}) {
 		setNoteType: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1", { noteType: "md" as unknown as NoteType })),
 		setNotePinned: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1", { pinned: true })),
 		setNoteFavorited: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1", { favorite: true })),
-		renameNoteTag: vi.fn().mockResolvedValue({ uuid: "tag-uuid-1", name: "new-name", favorite: false, editedTimestamp: 1000n, createdTimestamp: 1000n }),
+		renameNoteTag: vi
+			.fn()
+			.mockResolvedValue({ uuid: "tag-uuid-1", name: "new-name", favorite: false, editedTimestamp: 1000n, createdTimestamp: 1000n }),
 		deleteNoteTag: vi.fn().mockResolvedValue(undefined),
-		setNoteTagFavorited: vi.fn().mockResolvedValue({ uuid: "tag-uuid-1", name: "work", favorite: true, editedTimestamp: 1000n, createdTimestamp: 1000n }),
+		setNoteTagFavorited: vi
+			.fn()
+			.mockResolvedValue({ uuid: "tag-uuid-1", name: "work", favorite: true, editedTimestamp: 1000n, createdTimestamp: 1000n }),
 		removeNoteParticipant: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1")),
 		addNoteParticipant: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1")),
 		setNoteParticipantPermission: vi.fn().mockResolvedValue(makeParticipant({ permissionsWrite: true })),
@@ -207,7 +206,13 @@ function makeMockSdkClient(overrides: Record<string, unknown> = {}) {
 			duplicated: makeSdkNote("note-uuid-2")
 		}),
 		createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new")),
-		createNoteTag: vi.fn().mockResolvedValue({ uuid: "tag-uuid-new", name: "fresh-tag", favorite: false, editedTimestamp: 1000n, createdTimestamp: 1000n }),
+		createNoteTag: vi.fn().mockResolvedValue({
+			uuid: "tag-uuid-new",
+			name: "fresh-tag",
+			favorite: false,
+			editedTimestamp: 1000n,
+			createdTimestamp: 1000n
+		}),
 		toStringified: vi.fn().mockResolvedValue({ userId: 42n }),
 		...overrides
 	}
@@ -281,7 +286,9 @@ describe("wrapSdkNoteTag (via createTag)", () => {
 
 	it("sets undecryptable: false when name is present", async () => {
 		const sdkClient = makeMockSdkClient({
-			createNoteTag: vi.fn().mockResolvedValue({ uuid: "tag-uuid-1", name: "work", favorite: false, editedTimestamp: 1000n, createdTimestamp: 1000n })
+			createNoteTag: vi
+				.fn()
+				.mockResolvedValue({ uuid: "tag-uuid-1", name: "work", favorite: false, editedTimestamp: 1000n, createdTimestamp: 1000n })
 		})
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -293,7 +300,13 @@ describe("wrapSdkNoteTag (via createTag)", () => {
 
 	it("sets undecryptable: true when name is undefined", async () => {
 		const sdkClient = makeMockSdkClient({
-			createNoteTag: vi.fn().mockResolvedValue({ uuid: "tag-uuid-2", name: undefined, favorite: false, editedTimestamp: 1000n, createdTimestamp: 1000n })
+			createNoteTag: vi.fn().mockResolvedValue({
+				uuid: "tag-uuid-2",
+				name: undefined,
+				favorite: false,
+				editedTimestamp: 1000n,
+				createdTimestamp: 1000n
+			})
 		})
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -922,7 +935,13 @@ describe("notes.renameTag", () => {
 
 	it("notesTagsQueryUpdate mapper replaces matching tag, leaves others", async () => {
 		const sdkClient = makeMockSdkClient({
-			renameNoteTag: vi.fn().mockResolvedValue({ uuid: "tag-uuid-1", name: "personal", favorite: false, editedTimestamp: 2000n, createdTimestamp: 1000n })
+			renameNoteTag: vi.fn().mockResolvedValue({
+				uuid: "tag-uuid-1",
+				name: "personal",
+				favorite: false,
+				editedTimestamp: 2000n,
+				createdTimestamp: 1000n
+			})
 		})
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
@@ -1038,7 +1057,16 @@ describe("notes.addParticipant", () => {
 	it("returns note unchanged when contact.userId already in note.participants", async () => {
 		const participant = makeParticipant({ userId: 77n })
 		const note = makeNote({ participants: [participant] })
-		const contact = { userId: 77n, email: "user@test.com", uuid: "contact-uuid", avatar: undefined, nickName: undefined, lastActive: 0n, timestamp: 0n, publicKey: "k" }
+		const contact = {
+			userId: 77n,
+			email: "user@test.com",
+			uuid: "contact-uuid",
+			avatar: undefined,
+			nickName: undefined,
+			lastActive: 0n,
+			timestamp: 0n,
+			publicKey: "k"
+		}
 
 		const result = await notes.addParticipant({ note, contact, permissionsWrite: false })
 
@@ -1051,7 +1079,16 @@ describe("notes.addParticipant", () => {
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 
 		const note = makeNote({ participants: [] })
-		const contact = { userId: 88n, email: "new@test.com", uuid: "contact-uuid", avatar: undefined, nickName: undefined, lastActive: 0n, timestamp: 0n, publicKey: "k" }
+		const contact = {
+			userId: 88n,
+			email: "new@test.com",
+			uuid: "contact-uuid",
+			avatar: undefined,
+			nickName: undefined,
+			lastActive: 0n,
+			timestamp: 0n,
+			publicKey: "k"
+		}
 
 		await notes.addParticipant({ note, contact, permissionsWrite: true })
 
@@ -1127,7 +1164,8 @@ describe("notes.setParticipantPermission", () => {
 		// After applying both updaters in sequence, both p1 and p2 should have permissionsWrite=true.
 
 		const sdkClient = makeMockSdkClient({
-			setNoteParticipantPermission: vi.fn()
+			setNoteParticipantPermission: vi
+				.fn()
 				.mockResolvedValueOnce(makeParticipant({ userId: 10n, permissionsWrite: true }))
 				.mockResolvedValueOnce(makeParticipant({ userId: 20n, permissionsWrite: true }))
 		})
@@ -1139,9 +1177,11 @@ describe("notes.setParticipantPermission", () => {
 
 		// Collect updaters from both calls
 		const updaters: Array<(prev: (Note & { content: string })[]) => (Note & { content: string })[]> = []
-		mockNotesWithContentQueryUpdate.mockImplementation(({ updater }: { updater: (prev: (Note & { content: string })[]) => (Note & { content: string })[] }) => {
-			updaters.push(updater)
-		})
+		mockNotesWithContentQueryUpdate.mockImplementation(
+			({ updater }: { updater: (prev: (Note & { content: string })[]) => (Note & { content: string })[] }) => {
+				updaters.push(updater)
+			}
+		)
 
 		// Both calls use the same stale closure note (simulating concurrent dispatch)
 		await notes.setParticipantPermission({ note: staleNote, participant: p1, permissionsWrite: true })
@@ -1652,7 +1692,13 @@ describe("notes.createTag", () => {
 
 	it("notesTagsQueryUpdate appends new tag, removes any existing entry with same uuid (filter then append)", async () => {
 		const sdkClient = makeMockSdkClient({
-			createNoteTag: vi.fn().mockResolvedValue({ uuid: "tag-uuid-new", name: "fresh", favorite: false, editedTimestamp: 1000n, createdTimestamp: 1000n })
+			createNoteTag: vi.fn().mockResolvedValue({
+				uuid: "tag-uuid-new",
+				name: "fresh",
+				favorite: false,
+				editedTimestamp: 1000n,
+				createdTimestamp: 1000n
+			})
 		})
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
 

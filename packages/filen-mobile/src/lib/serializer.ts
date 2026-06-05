@@ -41,8 +41,7 @@ function encodeBinaryView(this: ArrayBufferView): {
 	k: string
 	d: string
 } {
-	const bytes =
-		this instanceof Uint8Array ? this : new Uint8Array(this.buffer, this.byteOffset, this.byteLength)
+	const bytes = this instanceof Uint8Array ? this : new Uint8Array(this.buffer, this.byteOffset, this.byteLength)
 
 	return {
 		__bin: 1,

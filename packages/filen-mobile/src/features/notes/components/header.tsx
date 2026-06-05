@@ -119,7 +119,21 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 		router.push(`/note/${createResult.data.uuid}`)
 	}
 
-	const headerRightItems = buildNotesHeaderRightItems({ t, textForeground, selectedNotes, selectedTags, notesViewMode, setNotesViewMode, tagFlags, noteFlags, tag, viewMode, onlyNotes, notesTags, createNote })
+	const headerRightItems = buildNotesHeaderRightItems({
+		t,
+		textForeground,
+		selectedNotes,
+		selectedTags,
+		notesViewMode,
+		setNotesViewMode,
+		tagFlags,
+		noteFlags,
+		tag,
+		viewMode,
+		onlyNotes,
+		notesTags,
+		createNote
+	})
 
 	const headerLeftItems = (() => {
 		if (selectedNotes.length === 0 && selectedTags.length === 0) {

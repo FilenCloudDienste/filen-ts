@@ -359,7 +359,6 @@ describe("SecureStore", () => {
 
 			expect(result).toBeNull()
 		})
-
 	})
 
 	describe("multiple set/get operations", () => {

@@ -516,7 +516,6 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	const set = useCallback(
 		(fn: T | ((prev: T) => T)): void => {
 			isLocalUpdateRef.current = true
-
 			;(async () => {
 				const result = await run(async defer => {
 					await flushMutexRef.current.acquire()

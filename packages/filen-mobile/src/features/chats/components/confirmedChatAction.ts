@@ -25,8 +25,6 @@ export function confirmedChatAction({
 		promptOkText,
 		promptDestructive,
 		action,
-		dismiss: dismissPathnamePrefix
-			? () => useAppStore.getState().pathname.startsWith(dismissPathnamePrefix)
-			: undefined
+		dismiss: dismissPathnamePrefix ? () => useAppStore.getState().pathname.startsWith(dismissPathnamePrefix) : undefined
 	})
 }

@@ -2246,11 +2246,7 @@ describe("Audio", () => {
 			const { audio } = await createAudio()
 
 			const result = await audio.replaceQueue({
-				items: [
-					makeQueueItem("a", "a.mp3"),
-					makeUndecryptableQueueItem("bad"),
-					makeQueueItem("c", "c.mp3")
-				]
+				items: [makeQueueItem("a", "a.mp3"), makeUndecryptableQueueItem("bad"), makeQueueItem("c", "c.mp3")]
 			})
 
 			expect(result.droppedUndecryptable).toBe(true)
@@ -2276,11 +2272,7 @@ describe("Audio", () => {
 			// Items: [bad, good-a, good-b], startingPosition: 2 (pointing at good-b).
 			// After filtering: [good-a, good-b], droppedBeforePosition=1, adjustedPosition=2-1=1.
 			await audio.replaceQueue({
-				items: [
-					makeUndecryptableQueueItem("bad"),
-					makeQueueItem("a", "a.mp3"),
-					makeQueueItem("b", "b.mp3")
-				],
+				items: [makeUndecryptableQueueItem("bad"), makeQueueItem("a", "a.mp3"), makeQueueItem("b", "b.mp3")],
 				startingPosition: 2
 			})
 

@@ -13,7 +13,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	parseNumbersFromString(s: unknown) {
 		const digits = (s as string).replace(/\D/g, "")
 		const n = parseInt(digits, 10)
@@ -148,7 +148,7 @@ vi.mock("@/lib/decryption", () => ({
 
 // @/lib/utils — needed only for the contactDisplayName helper
 vi.mock("@/lib/utils", () => ({
-	contactDisplayName: (p: { nickName?: string; email: string }) => p.nickName && p.nickName.length > 0 ? p.nickName : p.email
+	contactDisplayName: (p: { nickName?: string; email: string }) => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email)
 }))
 
 vi.mock("@/lib/sdkUnwrap", () => ({

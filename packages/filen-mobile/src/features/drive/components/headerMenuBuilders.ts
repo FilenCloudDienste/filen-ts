@@ -153,12 +153,7 @@ export function buildBulkActionMenu({
 
 	// Favorite/Unfavorite first — toggle is the most-tapped bulk
 	// action, belongs at the top of the menu.
-	if (
-		drivePath.type === "drive" ||
-		drivePath.type === "recents" ||
-		drivePath.type === "favorites" ||
-		drivePath.type === "sharedOut"
-	) {
+	if (drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut") {
 		menuButtons.push({
 			id: "bulkFavorite",
 			title: driveFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
@@ -339,12 +334,7 @@ export function buildBulkActionMenu({
 	// recipient's public key (SDK shareDir / shareFile). Grouped with
 	// the other "output" actions (download / save-to-photos). The
 	// picker is the confirmation gesture; no extra confirm dialog.
-	if (
-		drivePath.type === "drive" ||
-		drivePath.type === "recents" ||
-		drivePath.type === "favorites" ||
-		drivePath.type === "sharedOut"
-	) {
+	if (drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut") {
 		menuButtons.push({
 			id: "bulkShareFilenUser",
 			title: t("share_filen_user_selected"),

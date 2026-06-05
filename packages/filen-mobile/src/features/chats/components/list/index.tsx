@@ -40,10 +40,7 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 			const currentUserId = stringigiedClient?.userId
 
 			chats = chats.filter(chat => {
-				if (
-					currentUserId !== undefined &&
-					chatDisplayName(chat, currentUserId).toLowerCase().includes(searchQueryNormalized)
-				) {
+				if (currentUserId !== undefined && chatDisplayName(chat, currentUserId).toLowerCase().includes(searchQueryNormalized)) {
 					return true
 				}
 

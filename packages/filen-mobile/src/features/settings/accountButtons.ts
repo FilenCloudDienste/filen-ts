@@ -202,9 +202,7 @@ export function buildDangerZoneButtons({
 				const confirmPromptResult = await run(async () => {
 					return await prompts.alert({
 						title: t("are_you_sure"),
-						message: t(
-							"request_account_deletion_description_non_reversible_will_send_email_first_to_confirm_are_you_sure"
-						),
+						message: t("request_account_deletion_description_non_reversible_will_send_email_first_to_confirm_are_you_sure"),
 						okText: t("request"),
 						cancelText: t("cancel"),
 						destructive: true
@@ -276,7 +274,6 @@ export function buildDangerZoneButtons({
 	]
 }
 
-
 // Profile settings buttons (change email / nickname / personal info / GDPR export /
 // more settings). Extracted verbatim from the account screen.
 export function buildProfileButtons({
@@ -337,10 +334,7 @@ export function buildProfileButtons({
 					return
 				}
 
-				if (
-					confirmNewEmailPromptResult.data.cancelled ||
-					confirmNewEmailPromptResult.data.type !== "string"
-				) {
+				if (confirmNewEmailPromptResult.data.cancelled || confirmNewEmailPromptResult.data.type !== "string") {
 					return
 				}
 
@@ -621,11 +615,7 @@ export function buildAccountToggleButtons({
 }
 
 // Logout button (confirm prompt -> auth.logout()).
-export function buildLogoutButtons({
-	t
-}: {
-	t: TFunction
-}): Button[] {
+export function buildLogoutButtons({ t }: { t: TFunction }): Button[] {
 	return [
 		{
 			icon: "log-out-outline",

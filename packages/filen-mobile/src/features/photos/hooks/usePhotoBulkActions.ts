@@ -98,9 +98,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 						}
 
 						const saveResult = await run(async defer => {
-							const destination = new FileSystem.File(
-								FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta!.name)
-							)
+							const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta!.name))
 
 							defer(() => {
 								if (destination.parentDirectory.exists) {

@@ -186,17 +186,20 @@ describe("DOMException polyfill", () => {
 			expect(ctor[name]).toBe(value)
 		})
 
-		it.each(ALL_LEGACY_CONSTANTS)("%s descriptor on constructor: value=%i, writable=false, configurable=false, enumerable=true", async (name, value) => {
-			await loadPolyfill()
+		it.each(ALL_LEGACY_CONSTANTS)(
+			"%s descriptor on constructor: value=%i, writable=false, configurable=false, enumerable=true",
+			async (name, value) => {
+				await loadPolyfill()
 
-			const descriptor = Object.getOwnPropertyDescriptor(global.DOMException, name)
+				const descriptor = Object.getOwnPropertyDescriptor(global.DOMException, name)
 
-			expect(descriptor).toBeDefined()
-			expect(descriptor!.value).toBe(value)
-			expect(descriptor!.writable).toBe(false)
-			expect(descriptor!.configurable).toBe(false)
-			expect(descriptor!.enumerable).toBe(true)
-		})
+				expect(descriptor).toBeDefined()
+				expect(descriptor!.value).toBe(value)
+				expect(descriptor!.writable).toBe(false)
+				expect(descriptor!.configurable).toBe(false)
+				expect(descriptor!.enumerable).toBe(true)
+			}
+		)
 	})
 
 	describe("LEGACY_CONSTANTS on prototype", () => {
@@ -208,18 +211,21 @@ describe("DOMException polyfill", () => {
 			expect(proto[name]).toBe(value)
 		})
 
-		it.each(ALL_LEGACY_CONSTANTS)("%s descriptor on prototype: value=%i, writable=false, configurable=false, enumerable=true", async (name, value) => {
-			await loadPolyfill()
+		it.each(ALL_LEGACY_CONSTANTS)(
+			"%s descriptor on prototype: value=%i, writable=false, configurable=false, enumerable=true",
+			async (name, value) => {
+				await loadPolyfill()
 
-			const proto = (global.DOMException as unknown as { prototype: Record<string, unknown> }).prototype
-			const descriptor = Object.getOwnPropertyDescriptor(proto, name)
+				const proto = (global.DOMException as unknown as { prototype: Record<string, unknown> }).prototype
+				const descriptor = Object.getOwnPropertyDescriptor(proto, name)
 
-			expect(descriptor).toBeDefined()
-			expect(descriptor!.value).toBe(value)
-			expect(descriptor!.writable).toBe(false)
-			expect(descriptor!.configurable).toBe(false)
-			expect(descriptor!.enumerable).toBe(true)
-		})
+				expect(descriptor).toBeDefined()
+				expect(descriptor!.value).toBe(value)
+				expect(descriptor!.writable).toBe(false)
+				expect(descriptor!.configurable).toBe(false)
+				expect(descriptor!.enumerable).toBe(true)
+			}
+		)
 	})
 
 	it("LEGACY_CONSTANTS are enumerable via for-in on the constructor", async () => {

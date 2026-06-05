@@ -48,8 +48,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 	//   - !history (history is read-only — no edits possible)
 	//   - noteType is Rich (text/markdown/code/checklist use other UI)
 	//   - dispatch is non-null (TextEditor is mounted and reachable)
-	const showToolbar =
-		keyboardState.isVisible && !history && note.noteType === NoteType.Rich && dispatch !== null
+	const showToolbar = keyboardState.isVisible && !history && note.noteType === NoteType.Rich && dispatch !== null
 
 	return (
 		<StackHeader

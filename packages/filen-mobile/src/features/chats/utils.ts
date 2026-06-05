@@ -33,10 +33,7 @@ export type ResolvedLinkMedia = {
 // decision. Mirrors the original branch order exactly: image → video → internal → none.
 // `getFileUrl` is the only effectful dependency (it builds an AnyFile.Linked HTTP url); when
 // absent, internal media cannot be served so those links fall through to the internal/none path.
-export function resolveLinkMedia(
-	link: SuccessfulLink,
-	getFileUrl: ((file: AnyFile) => string) | null | undefined
-): ResolvedLinkMedia {
+export function resolveLinkMedia(link: SuccessfulLink, getFileUrl: ((file: AnyFile) => string) | null | undefined): ResolvedLinkMedia {
 	const internalData = link.type === "internal" ? link.data : null
 
 	const linkedFileName = (data: InternalLinkData): string | null => {

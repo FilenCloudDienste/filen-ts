@@ -308,10 +308,7 @@ describe("SecureStore", () => {
 			s.readCache = null
 
 			// Two concurrent reads — the second should hit the cache set by the first
-			const [a, b] = await Promise.all([
-				secureStore.get<string>("cacheKey"),
-				secureStore.get<string>("cacheKey")
-			])
+			const [a, b] = await Promise.all([secureStore.get<string>("cacheKey"), secureStore.get<string>("cacheKey")])
 
 			expect(a).toBe("cacheValue")
 			expect(b).toBe("cacheValue")

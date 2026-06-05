@@ -144,10 +144,7 @@ describe("aggregateChatSelectionFlags", () => {
 
 	it("combined: mixed muted + owner state", () => {
 		const flags = aggregateChatSelectionFlags(
-			[
-				chat({ muted: true }),
-				chat({ ownerId: SOMEONE_ELSE, participants: [participant(ME)] })
-			],
+			[chat({ muted: true }), chat({ ownerId: SOMEONE_ELSE, participants: [participant(ME)] })],
 			ME
 		)
 

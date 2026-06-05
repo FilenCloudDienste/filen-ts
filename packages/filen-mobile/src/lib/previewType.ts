@@ -1,9 +1,5 @@
 import * as FileSystem from "expo-file-system"
-import {
-	EXPO_IMAGE_SUPPORTED_EXTENSIONS,
-	EXPO_AUDIO_SUPPORTED_EXTENSIONS,
-	EXPO_VIDEO_SUPPORTED_EXTENSIONS
-} from "@/constants"
+import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import mimeTypes from "mime-types"
 
 export type PreviewType = "image" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"

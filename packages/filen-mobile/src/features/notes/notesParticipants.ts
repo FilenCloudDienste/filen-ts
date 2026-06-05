@@ -43,7 +43,15 @@ export async function leave({ note, signal }: { note: Note; signal?: AbortSignal
 	return note
 }
 
-export async function removeParticipant({ note, signal, participantUserId }: { note: Note; signal?: AbortSignal; participantUserId: bigint }) {
+export async function removeParticipant({
+	note,
+	signal,
+	participantUserId
+}: {
+	note: Note
+	signal?: AbortSignal
+	participantUserId: bigint
+}) {
 	if (!note.participants.find(p => p.userId === participantUserId)) {
 		return note
 	}

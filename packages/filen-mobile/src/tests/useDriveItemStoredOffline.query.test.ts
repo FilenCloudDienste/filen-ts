@@ -45,7 +45,9 @@ import { driveItemStoredOfflineQueryUpdate, BASE_QUERY_KEY } from "@/features/dr
 // normalizeTypeForKey is private but its effect is observable via the query key emitted
 // by driveItemStoredOfflineQueryUpdate. Two variants that should normalize to the same
 // base type must produce identical query keys.
-function captureKeyFor(type: "file" | "sharedFile" | "sharedRootFile" | "directory" | "sharedDirectory" | "sharedRootDirectory"): unknown[] {
+function captureKeyFor(
+	type: "file" | "sharedFile" | "sharedRootFile" | "directory" | "sharedDirectory" | "sharedRootDirectory"
+): unknown[] {
 	driveItemStoredOfflineQueryUpdate({
 		params: { uuid: "test-uuid", type },
 		updater: false

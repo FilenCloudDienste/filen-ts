@@ -77,9 +77,7 @@ const Note = ({
 	}
 
 	const participantsWithoutCurrentUser =
-		info.item.type === "header"
-			? []
-			: info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
+		info.item.type === "header" ? [] : info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
 	const tags = info.item.type === "header" ? [] : info.item.tags.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
 	// Notes are rendered inside a sectioned list (pinned / favorited /

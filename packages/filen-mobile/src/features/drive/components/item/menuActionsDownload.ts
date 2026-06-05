@@ -110,11 +110,7 @@ export function buildDownloadSubButtons({
 		})
 	}
 
-	if (
-		(isFileItem(item)) &&
-		(previewType === "image" || previewType === "video") &&
-		item.data.decryptedMeta
-	) {
+	if (isFileItem(item) && (previewType === "image" || previewType === "video") && item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "saveToPhotos",
 			requiresOnline: true,
@@ -186,7 +182,7 @@ export function buildDownloadSubButtons({
 		})
 	}
 
-	if ((isFileItem(item)) && item.data.decryptedMeta) {
+	if (isFileItem(item) && item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "export",
 			requiresOnline: true,
@@ -329,10 +325,9 @@ export function buildDownloadSubButtons({
 						throw new Error("Missing decrypted metadata")
 					}
 
-					const destination =
-						isFileItem(item)
-							? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-							: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
+					const destination = isFileItem(item)
+						? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
+						: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 
 					defer(() => {
 						if (destination.parentDirectory.exists) {
@@ -364,21 +359,10 @@ export function buildDownloadSubButtons({
 						localFileOrDir: destination,
 						parent: remoteDir,
 						name: item.data.decryptedMeta.name,
-						created:
-							(isFileItem(item)) &&
-							item.data.decryptedMeta.created
-								? Number(item.data.decryptedMeta.created)
-								: undefined,
+						created: isFileItem(item) && item.data.decryptedMeta.created ? Number(item.data.decryptedMeta.created) : undefined,
 						modified:
-							(isFileItem(item)) &&
-							item.data.decryptedMeta.modified
-								? Number(item.data.decryptedMeta.modified)
-								: undefined,
-						mime:
-							(isFileItem(item)) &&
-							item.data.decryptedMeta.mime
-								? item.data.decryptedMeta.mime
-								: undefined
+							isFileItem(item) && item.data.decryptedMeta.modified ? Number(item.data.decryptedMeta.modified) : undefined,
+						mime: isFileItem(item) && item.data.decryptedMeta.mime ? item.data.decryptedMeta.mime : undefined
 					})
 
 					if (!uploadResult) {

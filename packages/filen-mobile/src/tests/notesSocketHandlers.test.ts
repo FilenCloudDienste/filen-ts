@@ -4,22 +4,20 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted state — captured updater callback from the mocked query function
 // ---------------------------------------------------------------------------
 
-const { capturedUpdaters, mockNotesWithContentQueryUpdate, mockFetchData, mockNotesWithContentQueryGet } = vi.hoisted(
-	() => {
-		const capturedUpdaters: Array<(prev: unknown[]) => unknown[]> = []
+const { capturedUpdaters, mockNotesWithContentQueryUpdate, mockFetchData, mockNotesWithContentQueryGet } = vi.hoisted(() => {
+	const capturedUpdaters: Array<(prev: unknown[]) => unknown[]> = []
 
-		const mockNotesWithContentQueryUpdate = vi.fn(({ updater }: { updater: (prev: unknown[]) => unknown[] }) => {
-			capturedUpdaters.push(updater)
-		})
+	const mockNotesWithContentQueryUpdate = vi.fn(({ updater }: { updater: (prev: unknown[]) => unknown[] }) => {
+		capturedUpdaters.push(updater)
+	})
 
-		return {
-			capturedUpdaters,
-			mockNotesWithContentQueryUpdate,
-			mockFetchData: vi.fn().mockResolvedValue([]),
-			mockNotesWithContentQueryGet: vi.fn().mockReturnValue([])
-		}
+	return {
+		capturedUpdaters,
+		mockNotesWithContentQueryUpdate,
+		mockFetchData: vi.fn().mockResolvedValue([]),
+		mockNotesWithContentQueryGet: vi.fn().mockReturnValue([])
 	}
-)
+})
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared before any imports that pull in the modules

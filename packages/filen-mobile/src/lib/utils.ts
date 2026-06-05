@@ -1,10 +1,4 @@
-import {
-	type ChatParticipant,
-	type NoteParticipant,
-	type Contact,
-	type ContactRequestIn,
-	type ContactRequestOut
-} from "@filen/sdk-rs"
+import { type ChatParticipant, type NoteParticipant, type Contact, type ContactRequestIn, type ContactRequestOut } from "@filen/sdk-rs"
 import mimeTypes from "mime-types"
 
 export function contactDisplayName(contact: Contact | NoteParticipant | ChatParticipant | ContactRequestIn | ContactRequestOut): string {

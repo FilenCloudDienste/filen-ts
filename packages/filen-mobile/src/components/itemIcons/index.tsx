@@ -353,7 +353,17 @@ export const directorySvg = memoize(
 	}
 )
 
-export const DirectoryIcon = ({ color, width, height, className }: { color?: DirColor; width?: number; height?: number; className?: string }) => {
+export const DirectoryIcon = ({
+	color,
+	width,
+	height,
+	className
+}: {
+	color?: DirColor
+	width?: number
+	height?: number
+	className?: string
+}) => {
 	return (
 		<ExpoImage
 			className={cn("shrink-0 bg-transparent", className, "rounded-none")}

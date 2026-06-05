@@ -41,7 +41,17 @@ export const ICON_SIZE = Platform.select({
 	default: 24
 })
 
-export const HeaderLeftRightWrapper = ({ className, isLeft, isRight, items }: { className?: string; isLeft?: boolean; isRight?: boolean; items?: HeaderItem[] }) => {
+export const HeaderLeftRightWrapper = ({
+	className,
+	isLeft,
+	isRight,
+	items
+}: {
+	className?: string
+	isLeft?: boolean
+	isRight?: boolean
+	items?: HeaderItem[]
+}) => {
 	return (
 		<View
 			className={cn(

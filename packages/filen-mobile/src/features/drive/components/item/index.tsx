@@ -26,7 +26,15 @@ import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 
-const Item = ({ info, drivePath, getListItems }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath; getListItems: () => DriveItem[] }) => {
+const Item = ({
+	info,
+	drivePath,
+	getListItems
+}: {
+	info: ListRenderItemInfo<DriveItem>
+	drivePath: DrivePath
+	getListItems: () => DriveItem[]
+}) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
 	const textGreen500 = useResolveClassNames("text-green-500")

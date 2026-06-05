@@ -288,11 +288,11 @@ describe("useDrivePreviewStore.open", () => {
 		// The mock constants set includes: .jpg, .jpeg, .png, .heic, .webp
 		// .gif is NOT in the mock EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS
 		const items: GalleryItemTagged[] = [
-			makeDriveGalleryItem("img1", "photo.jpg"),       // image + supported ext → included
-			makeDriveGalleryItem("img2", "photo.gif"),       // image but NOT in manipulator set → excluded
-			makeDriveGalleryItem("vid1", "clip.mp4"),        // video → included
-			makeDriveGalleryItem("aud1", "track.mp3"),       // audio → excluded
-			makeDriveGalleryItem("doc1", "readme.txt")       // text → excluded
+			makeDriveGalleryItem("img1", "photo.jpg"), // image + supported ext → included
+			makeDriveGalleryItem("img2", "photo.gif"), // image but NOT in manipulator set → excluded
+			makeDriveGalleryItem("vid1", "clip.mp4"), // video → included
+			makeDriveGalleryItem("aud1", "track.mp3"), // audio → excluded
+			makeDriveGalleryItem("doc1", "readme.txt") // text → excluded
 		]
 
 		useDrivePreviewStore.getState().open({
@@ -313,12 +313,12 @@ describe("useDrivePreviewStore.open", () => {
 
 	it("for a general drive path, audio files are included but docx/pdf/code files are excluded", () => {
 		const items: GalleryItemTagged[] = [
-			makeDriveGalleryItem("img1", "photo.jpg"),     // image → included
-			makeDriveGalleryItem("vid1", "clip.mp4"),      // video → included
-			makeDriveGalleryItem("aud1", "track.mp3"),     // audio → included
-			makeDriveGalleryItem("pdf1", "doc.pdf"),       // pdf → excluded
-			makeDriveGalleryItem("code1", "main.ts"),      // code → excluded
-			makeDriveGalleryItem("docx1", "report.docx")   // docx → excluded
+			makeDriveGalleryItem("img1", "photo.jpg"), // image → included
+			makeDriveGalleryItem("vid1", "clip.mp4"), // video → included
+			makeDriveGalleryItem("aud1", "track.mp3"), // audio → included
+			makeDriveGalleryItem("pdf1", "doc.pdf"), // pdf → excluded
+			makeDriveGalleryItem("code1", "main.ts"), // code → excluded
+			makeDriveGalleryItem("docx1", "report.docx") // docx → excluded
 		]
 
 		useDrivePreviewStore.getState().open({
@@ -368,10 +368,7 @@ describe("useDrivePreviewStore.open", () => {
 		useDrivePreviewStore.setState({ currentIndex: null, currentItem: null })
 
 		// Second open with different items
-		const itemsSecond = [
-			makeDriveGalleryItem("img2", "second.jpg"),
-			makeDriveGalleryItem("img3", "third.jpg")
-		]
+		const itemsSecond = [makeDriveGalleryItem("img2", "second.jpg"), makeDriveGalleryItem("img3", "third.jpg")]
 
 		useDrivePreviewStore.getState().open({
 			items: itemsSecond,
@@ -418,10 +415,7 @@ describe("useDrivePreviewStore.open", () => {
 		const stateAfterFirst = { ...useDrivePreviewStore.getState() }
 
 		// Try to call open again with different items (should be a no-op)
-		const newItems: GalleryItemTagged[] = [
-			makeDriveGalleryItem("img2", "other.jpg"),
-			makeDriveGalleryItem("img3", "third.jpg")
-		]
+		const newItems: GalleryItemTagged[] = [makeDriveGalleryItem("img2", "other.jpg"), makeDriveGalleryItem("img3", "third.jpg")]
 
 		useDrivePreviewStore.getState().open({ items: newItems, initialItem: makeInitialDriveItem("img2", "other.jpg") })
 

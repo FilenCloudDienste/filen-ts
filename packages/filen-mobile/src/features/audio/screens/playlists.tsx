@@ -244,8 +244,7 @@ export function Playlists() {
 		]
 	})()
 
-	const title =
-		selectedPlaylists.length > 0 && !selectOptions ? t("selected", { count: selectedPlaylists.length }) : t("playlists")
+	const title = selectedPlaylists.length > 0 && !selectOptions ? t("selected", { count: selectedPlaylists.length }) : t("playlists")
 
 	return (
 		<Fragment>
