@@ -7,7 +7,7 @@ import {
 	unwrapParentUuid,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem
-} from "@/lib/utils"
+} from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import cache from "@/lib/cache"

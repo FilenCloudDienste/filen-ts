@@ -21,7 +21,9 @@ vi.mock("@filen/sdk-rs", () => {
 
 // The rest are only needed so utils.ts (which also exports the effectful openAttachmentPreview)
 // loads cleanly in the node env — resolveLinkMedia itself touches none of them.
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	linkedFileIntoDriveItem: vi.fn()
 }))
 vi.mock("@/stores/useDrivePreview.store", () => ({

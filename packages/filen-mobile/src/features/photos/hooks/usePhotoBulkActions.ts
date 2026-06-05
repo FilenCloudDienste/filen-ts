@@ -14,7 +14,7 @@ import drive from "@/features/drive/drive"
 import offline from "@/features/offline/offline"
 import transfers from "@/features/transfers/transfers"
 import { newTmpDir } from "@/lib/tmp"
-import { getRealDriveItemParent } from "@/lib/utils"
+import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import alerts from "@/lib/alerts"
 

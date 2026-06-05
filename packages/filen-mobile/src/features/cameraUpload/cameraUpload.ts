@@ -2,10 +2,8 @@ import * as MediaLibrary from "expo-media-library/next"
 import * as MediaLibraryLegacy from "expo-media-library"
 import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
-import {
-	unwrapFileMeta,
-	normalizeModificationTimestampForComparison
-} from "@/lib/utils"
+import { normalizeModificationTimestampForComparison } from "@/lib/utils"
+import { unwrapFileMeta } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"

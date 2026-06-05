@@ -12,7 +12,7 @@ import {
 	AnyLinkedDirWithContext
 } from "@filen/sdk-rs"
 import offline from "@/features/offline/offline"
-import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
+import { unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 
 export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 

@@ -17,11 +17,7 @@ import {
 	type SharedFile
 } from "@filen/sdk-rs"
 import useTransfersStore from "@/features/transfers/store/useTransfers.store"
-import {
-	unwrapDirMeta,
-	unwrapFileMeta,
-	unwrapParentUuid
-} from "@/lib/utils"
+import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { wrapAbortSignalForSdk, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"

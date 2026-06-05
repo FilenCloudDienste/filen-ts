@@ -146,23 +146,12 @@ vi.mock("@/lib/decryption", () => ({
 	cannotDecryptPlaceholder: (uuid: string) => `cannot_decrypt_${uuid}`
 }))
 
-// @/lib/utils — needed only for the contactDisplayName + safeParseUrl + extractLinks helpers
+// @/lib/utils — needed only for the contactDisplayName helper
 vi.mock("@/lib/utils", () => ({
-	contactDisplayName: (p: { nickName?: string; email: string }) => p.nickName && p.nickName.length > 0 ? p.nickName : p.email,
-	safeParseUrl: (url: string) => {
-		try {
-			const u = new URL(url)
-			if (u.protocol !== "https:") return null
-			if (u.hostname === "localhost") return null
-			return u
-		} catch {
-			return null
-		}
-	},
-	extractLinks: (text: string) => {
-		const matches = [...text.matchAll(/https?:\/\/[^\s]+/g)]
-		return matches.map(m => ({ url: m[0], start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }))
-	},
+	contactDisplayName: (p: { nickName?: string; email: string }) => p.nickName && p.nickName.length > 0 ? p.nickName : p.email
+}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapFileMeta: vi.fn(),
 	unwrappedFileIntoDriveItem: vi.fn(),
 	makeDriveItemPublicLink: vi.fn(),

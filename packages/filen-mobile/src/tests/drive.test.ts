@@ -186,12 +186,15 @@ vi.mock("@/lib/cache", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
+	unwrapSdkError: vi.fn().mockReturnValue(null)
+}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapParentUuid: mockUnwrapParentUuid,
 	unwrappedDirIntoDriveItem: mockUnwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem: mockUnwrappedFileIntoDriveItem,
 	unwrapDirMeta: mockUnwrapDirMeta,
-	unwrapFileMeta: mockUnwrapFileMeta,
-	unwrapSdkError: vi.fn().mockReturnValue(null)
+	unwrapFileMeta: mockUnwrapFileMeta
 }))
 
 vi.mock("@/lib/paths", () => ({
