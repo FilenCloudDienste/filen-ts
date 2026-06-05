@@ -1,6 +1,5 @@
 import { confirmedAction } from "@/lib/confirmedAction"
 import type { DriveItem } from "@/types"
-import { type TFunction } from "i18next"
 
 // Shared shape for confirmed destructive drive actions (trash / delete / remove
 // offline / remove share / stop sharing / disable link): prompt → guard cancel →
@@ -17,9 +16,6 @@ export function confirmedDriveAction({
 	dismissOnSuccess
 }: {
 	item: DriveItem
-	// `t` is still accepted from callers but no longer read — the shared helper uses the module
-	// i18n. Left in the type to avoid touching every call site; remove when item/menu.tsx is split.
-	t: TFunction
 	promptTitle: string
 	promptMessage: string
 	promptOkText: string

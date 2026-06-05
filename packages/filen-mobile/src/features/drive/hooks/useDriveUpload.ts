@@ -13,12 +13,19 @@ import { normalizeFilePathForExpo } from "@/lib/paths"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
+import prompts from "@/lib/prompts"
+import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import { newTmpDir } from "@/lib/tmp"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
+import type { DrivePath } from "@/hooks/useDrivePath"
 
 export type UseDriveUpload = {
 	uploadFiles: () => Promise<void>
 	uploadPhotosOrVideos: () => Promise<void>
 	takePhotoOrVideo: () => Promise<void>
 	scanDocument: () => Promise<void>
+	createTextFile: () => Promise<void>
 }
 
 /**
@@ -32,7 +39,15 @@ export type UseDriveUpload = {
  * no-ops when there is no upload target — the menu only renders these entries
  * when a parent exists anyway.
  */
-export function useDriveUpload({ parent, t }: { parent: AnyNormalDir | null; t: TFunction }): UseDriveUpload {
+export function useDriveUpload({
+	parent,
+	drivePath,
+	t
+}: {
+	parent: AnyNormalDir | null
+	drivePath: DrivePath
+	t: TFunction
+}): UseDriveUpload {
 	// Shared tail: surface rejected fan-out entries and failed uploads.
 	const reportTransferResults = (results: PromiseSettledResult<Result<unknown>>[]): void => {
 		for (const r of results) {
@@ -324,11 +339,125 @@ export function useDriveUpload({ parent, t }: { parent: AnyNormalDir | null; t: 
 		reportTransferResults(transferResult.data)
 	}
 
+	const createTextFile = async (): Promise<void> => {
+		if (!parent) {
+			return
+		}
+
+		const promptResult = await run(async () => {
+			return await prompts.input({
+				title: t("create_text_file"),
+				message: t("enter_text_file_name"),
+				cancelText: t("cancel"),
+				okText: t("create"),
+				placeholder: t("text_file_name")
+			})
+		})
+
+		if (!promptResult.success) {
+			console.error(promptResult.error)
+			alerts.error(promptResult.error)
+
+			return
+		}
+
+		if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+			return
+		}
+
+		let fileName = promptResult.data.value.trim()
+
+		if (fileName.length === 0) {
+			return
+		}
+
+		const extname = FileSystem.Paths.extname(fileName)
+
+		if (extname.length === 0) {
+			fileName += ".txt"
+		}
+
+		const result = await runWithLoading(async defer => {
+			const tmpDir = newTmpDir()
+			const tmpFile = new FileSystem.File(FileSystem.Paths.join(tmpDir.uri, fileName))
+
+			defer(() => {
+				if (tmpDir.exists) {
+					tmpDir.delete()
+				}
+			})
+
+			if (!tmpDir.exists) {
+				tmpDir.create({
+					idempotent: true,
+					intermediates: true
+				})
+			}
+
+			if (tmpFile.exists) {
+				tmpFile.delete()
+			}
+
+			tmpFile.write("", {
+				encoding: "utf8"
+			})
+
+			return await transfers.upload({
+				localFileOrDir: tmpFile,
+				parent,
+				name: fileName,
+				mime: "text/plain",
+				modified: Date.now(),
+				created: Date.now()
+			})
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+
+		if (!result.data) {
+			return
+		}
+
+		const file = result.data.files.at(0)
+
+		if (!file) {
+			return
+		}
+
+		const item = unwrappedFileIntoDriveItem(unwrapFileMeta(file))
+
+		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+			return
+		}
+
+		useDrivePreviewStore.getState().open({
+			initialItem: {
+				type: "drive",
+				data: {
+					item: item,
+					drivePath
+				}
+			},
+			items: [
+				{
+					type: "drive",
+					data: item
+				}
+			]
+		})
+	}
+
 	return {
 		uploadFiles,
 		uploadPhotosOrVideos,
 		takePhotoOrVideo,
-		scanDocument
+		scanDocument,
+		createTextFile
 	}
 }
 

@@ -5,7 +5,6 @@ import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import { run } from "@filen/utils"
-import * as FileSystem from "expo-file-system"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
 import useDrivePath from "@/hooks/useDrivePath"
@@ -18,11 +17,7 @@ import drive from "@/features/drive/drive"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
-import transfers from "@/features/transfers/transfers"
-import { newTmpDir } from "@/lib/tmp"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import offline from "@/features/offline/offline"
-import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { aggregateDriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { resolveDriveHeaderTitle } from "@/features/drive/utils"
@@ -88,7 +83,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 		return fromCache ?? null
 	})()
 
-	const upload = useDriveUpload({ parent, t })
+	const upload = useDriveUpload({ parent, drivePath, t })
 
 	const rightItems = (() => {
 		if (drivePath.selectOptions) {
@@ -217,114 +212,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 						id: "createTextFile",
 						title: t("create_text_file"),
 						icon: "text",
-						onPress: async () => {
-							const promptResult = await run(async () => {
-								return await prompts.input({
-									title: t("create_text_file"),
-									message: t("enter_text_file_name"),
-									cancelText: t("cancel"),
-									okText: t("create"),
-									placeholder: t("text_file_name")
-								})
-							})
-
-							if (!promptResult.success) {
-								console.error(promptResult.error)
-								alerts.error(promptResult.error)
-
-								return
-							}
-
-							if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-								return
-							}
-
-							let fileName = promptResult.data.value.trim()
-
-							if (fileName.length === 0) {
-								return
-							}
-
-							const extname = FileSystem.Paths.extname(fileName)
-
-							if (extname.length === 0) {
-								fileName += ".txt"
-							}
-
-							const result = await runWithLoading(async defer => {
-								const tmpDir = newTmpDir()
-								const tmpFile = new FileSystem.File(FileSystem.Paths.join(tmpDir.uri, fileName))
-
-								defer(() => {
-									if (tmpDir.exists) {
-										tmpDir.delete()
-									}
-								})
-
-								if (!tmpDir.exists) {
-									tmpDir.create({
-										idempotent: true,
-										intermediates: true
-									})
-								}
-
-								if (tmpFile.exists) {
-									tmpFile.delete()
-								}
-
-								tmpFile.write("", {
-									encoding: "utf8"
-								})
-
-								return await transfers.upload({
-									localFileOrDir: tmpFile,
-									parent,
-									name: fileName,
-									mime: "text/plain",
-									modified: Date.now(),
-									created: Date.now()
-								})
-							})
-
-							if (!result.success) {
-								console.error(result.error)
-								alerts.error(result.error)
-
-								return
-							}
-
-							if (!result.data) {
-								return
-							}
-
-							const file = result.data.files.at(0)
-
-							if (!file) {
-								return
-							}
-
-							const item = unwrappedFileIntoDriveItem(unwrapFileMeta(file))
-
-							if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
-								return
-							}
-
-							useDrivePreviewStore.getState().open({
-								initialItem: {
-									type: "drive",
-									data: {
-										item: item,
-										drivePath
-									}
-								},
-								items: [
-									{
-										type: "drive",
-										data: item
-									}
-								]
-							})
-						}
+						onPress: upload.createTextFile
 					}
 				]
 			})

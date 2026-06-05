@@ -53,7 +53,6 @@ export function buildUndecryptableMenuButtons({
 				destructive: true,
 				onPress: confirmedDriveAction({
 					item,
-					t,
 					promptTitle: t("delete_permanently_item"),
 					promptMessage: t("confirm_delete_permanently"),
 					promptOkText: t("delete_permanently"),
@@ -77,7 +76,6 @@ export function buildUndecryptableMenuButtons({
 			destructive: true,
 			onPress: confirmedDriveAction({
 				item,
-				t,
 				promptTitle: t("trash_item"),
 				promptMessage: t("confirm_trash"),
 				promptOkText: t("trash"),
