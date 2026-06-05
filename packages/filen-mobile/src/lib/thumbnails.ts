@@ -9,7 +9,6 @@ import { run, Semaphore } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import auth from "@/lib/auth"
-import useHttpStore from "@/stores/useHttp.store"
 import { Platform } from "react-native"
 import { randomUUID } from "expo-crypto"
 import cache from "@/lib/cache"
@@ -17,6 +16,7 @@ import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
 import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
 import { onlineManager } from "@tanstack/react-query"
+import { abortError, OfflineAbortError, getPath, ensureDirectory, driveItemToAnyFile, getExtension, waitForHttpProvider } from "@/lib/thumbnailsHelpers"
 
 export type ThumbnailParams = {
 	item: DriveItem
@@ -40,28 +40,6 @@ export const MAX_FAILURES = 3
 export const VERSION = THUMBNAILS_VERSION
 export const DIRECTORY = THUMBNAILS_DIRECTORY
 
-function abortError(signal?: AbortSignal): Error {
-	const reason = signal?.reason
-
-	if (reason instanceof Error) {
-		return reason
-	}
-
-	if (typeof reason !== "undefined" && reason !== null) {
-		return new Error(String(reason))
-	}
-
-	return new Error("Aborted")
-}
-
-class OfflineAbortError extends Error {
-	public constructor() {
-		super("Offline")
-
-		this.name = "OfflineAbortError"
-	}
-}
-
 class Thumbnails {
 	private readonly pending = new Map<string, Promise<string>>()
 	private readonly failures = new Map<string, number>()
@@ -69,117 +47,7 @@ class Thumbnails {
 	private readonly clearBarrier = new ClearBarrier()
 
 	public constructor() {
-		this.ensureDirectory()
-	}
-
-	private getPath(item: DriveItem): string {
-		return FileSystem.Paths.join(DIRECTORY.uri, `${item.data.uuid}.webp`)
-	}
-
-	private ensureDirectory(): void {
-		if (!DIRECTORY.exists) {
-			DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
-	}
-
-	private driveItemToAnyFile(item: DriveItem): AnyFile | null {
-		switch (item.type) {
-			case "file": {
-				return new AnyFile.File(item.data)
-			}
-
-			case "sharedFile":
-			case "sharedRootFile": {
-				return new AnyFile.Shared(item.data)
-			}
-
-			default: {
-				return null
-			}
-		}
-	}
-
-	private getExtension(item: DriveItem): string | null {
-		switch (item.type) {
-			case "file":
-			case "sharedFile":
-			case "sharedRootFile": {
-				const name = item.data.decryptedMeta?.name
-
-				if (!name) {
-					return null
-				}
-
-				return FileSystem.Paths.extname(name).toLowerCase().trim()
-			}
-
-			default: {
-				return null
-			}
-		}
-	}
-
-	private waitForHttpProvider(signal?: AbortSignal): Promise<(file: AnyFile) => string> {
-		const state = useHttpStore.getState()
-
-		if (state.port !== null && state.getFileUrl) {
-			return Promise.resolve(state.getFileUrl)
-		}
-
-		return new Promise<(file: AnyFile) => string>((resolve, reject) => {
-			if (signal?.aborted) {
-				reject(abortError(signal))
-
-				return
-			}
-
-			let timeoutId: ReturnType<typeof setTimeout> | null = null
-
-			const cleanup = () => {
-				unsubscribe()
-
-				signal?.removeEventListener("abort", onAbort)
-
-				if (timeoutId !== null) {
-					clearTimeout(timeoutId)
-
-					timeoutId = null
-				}
-			}
-
-			const unsubscribe = useHttpStore.subscribe(
-				s => ({
-					port: s.port,
-					getFileUrl: s.getFileUrl
-				}),
-				({ port, getFileUrl }) => {
-					if (port !== null && getFileUrl) {
-						cleanup()
-
-						resolve(getFileUrl)
-					}
-				}
-			)
-
-			const onAbort = () => {
-				cleanup()
-
-				reject(abortError(signal))
-			}
-
-			signal?.addEventListener("abort", onAbort, {
-				once: true
-			})
-
-			timeoutId = setTimeout(() => {
-				cleanup()
-
-				reject(new Error("HTTP provider unavailable after 30s"))
-			}, 30_000)
-		})
+		ensureDirectory()
 	}
 
 	private async generateImage(
@@ -249,7 +117,7 @@ class Thumbnails {
 						})
 					}
 
-					const ext = this.getExtension(params.item)
+					const ext = getExtension(params.item)
 
 					if (!ext) {
 						throw new Error("File has no extension")
@@ -387,7 +255,7 @@ class Thumbnails {
 						throw new OfflineAbortError()
 					}
 
-					const getFileUrl = await this.waitForHttpProvider(params.signal)
+					const getFileUrl = await waitForHttpProvider(params.signal)
 
 					url = getFileUrl(params.file)
 				}
@@ -540,7 +408,7 @@ class Thumbnails {
 	}
 
 	public canGenerate(item: DriveItem): boolean {
-		const ext = this.getExtension(item)
+		const ext = getExtension(item)
 
 		if (!ext) {
 			return false
@@ -565,7 +433,7 @@ class Thumbnails {
 			}
 
 			const uuid = params.item.data.uuid
-			const ext = this.getExtension(params.item)
+			const ext = getExtension(params.item)
 
 			if (!ext) {
 				throw new Error("File has no extension")
@@ -582,7 +450,7 @@ class Thumbnails {
 				throw new Error("Max thumbnail generation failures reached")
 			}
 
-			const outputPath = this.getPath(params.item)
+			const outputPath = getPath(params.item)
 			const outputFile = new FileSystem.File(outputPath)
 
 			if (outputFile.exists) {
@@ -662,9 +530,9 @@ class Thumbnails {
 
 		try {
 			const result = await run(async () => {
-				this.ensureDirectory()
+				ensureDirectory()
 
-				const file = this.driveItemToAnyFile(params.item)
+				const file = driveItemToAnyFile(params.item)
 
 				if (!file) {
 					throw new Error("Unsupported item type")
@@ -805,7 +673,7 @@ class Thumbnails {
 			await this.semaphore.acquire()
 
 			try {
-				this.ensureDirectory()
+				ensureDirectory()
 
 				if (isImage) {
 					await this.generateImage({
@@ -880,7 +748,7 @@ class Thumbnails {
 				exists: true
 				path: string
 		  } {
-		const file = new FileSystem.File(this.getPath(item))
+		const file = new FileSystem.File(getPath(item))
 
 		if (!file.exists) {
 			return {
@@ -895,7 +763,7 @@ class Thumbnails {
 	}
 
 	public remove(item: DriveItem): void {
-		const file = new FileSystem.File(this.getPath(item))
+		const file = new FileSystem.File(getPath(item))
 
 		if (file.exists) {
 			file.delete()
