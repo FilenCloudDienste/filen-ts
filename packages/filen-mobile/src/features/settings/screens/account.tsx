@@ -1,14 +1,14 @@
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
+import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import View, { GestureHandlerScrollView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import { Fragment } from "react"
 import { useNavigation } from "expo-router"
 import { run, cn } from "@filen/utils"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { ActivityIndicator } from "react-native"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useAccountQuery from "@/queries/useAccount.query"
 import {
@@ -30,8 +30,6 @@ import { prepareAvatarFileForUpload } from "@/features/settings/avatarUpload"
 
 function Account() {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
-	const textForeground = useResolveClassNames("text-foreground")
-	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const textRed500 = useResolveClassNames("text-red-500")
 	const isOnline = useIsOnline()
@@ -53,22 +51,9 @@ function Account() {
 				edges={["left", "right"]}
 			>
 				{accountQuery.status !== "success" ? (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<ActivityIndicator
-							size="large"
-							color={textForeground.color as string}
-						/>
-					</View>
+					<SettingsLoadingView />
 				) : (
-					<GestureHandlerScrollView
-						className="bg-transparent flex-1"
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName="px-4 gap-4"
-						showsHorizontalScrollIndicator={false}
-						contentContainerStyle={{
-							paddingBottom: insets.bottom
-						}}
-					>
+					<SettingsScrollView>
 						<PressableScale
 							className={cn(
 								"bg-background-tertiary rounded-3xl overflow-hidden flex-row gap-4 items-center p-4",
@@ -182,7 +167,7 @@ function Account() {
 								buttons={buildDangerZoneButtons({ t, accountQuery, isOnline, textRed500 })}
 							/>
 						</View>
-					</GestureHandlerScrollView>
+					</SettingsScrollView>
 				)}
 			</SafeAreaView>
 		</Fragment>
