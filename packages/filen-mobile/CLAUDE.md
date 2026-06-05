@@ -50,9 +50,9 @@ Native: Three git submodules at packages/filen-mobile/, integrated via custom Ex
 | `settings` | More tab + account, security (+ biometric/twoFactor), fileProvider (File/Documents Provider toggle), appearance, advanced, fileProvider bridge. Lib: `fileProvider.ts`, `startScreen.ts`. |
 | `auth` | Login + register screens. (The SDK client lifecycle lives in `src/lib/auth.ts` — infra, not this feature.) |
 
-Note: `socketHandlers.ts` currently exists only for `drive`/`chats`/`notes`
-(`handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`). Contact events are dispatched
-inline by the shell socket component via `contactRequestsQueryUpdate`.
+Note: `socketHandlers.ts` exists for `drive`/`chats`/`notes`/`contacts`
+(`handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`/`handleContactEvent`); the shell
+`socket.tsx` dispatcher delegates to each.
 
 ## Conventions
 
@@ -233,10 +233,10 @@ Feature stores moved into `src/features/<feature>/store/`. What remains is share
 | `useSocket` | `state: "connected" \| "disconnected" \| "reconnecting"` |
 | `useHttp` | `port: number \| null`, `getFileUrl: (file: AnyFile) => string` (subscribeWithSelector middleware) |
 | `useDrivePreview` | `currentItem`, `items`, `headerHeight`, `drivePath`, scroll index (gallery state) |
-| `useFileVersions` | file version selection / preview state |
-| `useChecklist` | parsed: Checklist, inputRefs, initialIds, ids |
-| `useRichtext` | formats: QuillFormats |
-| `useTextEditor` | ready: boolean |
+| `useRichtext` | formats: QuillFormats (state of the shared `components/textEditor`) |
+| `useTextEditor` | ready: boolean (state of the shared `components/textEditor`) |
+
+(`useFileVersions` → `features/drive/store/`, `useChecklist` → `features/notes/store/` — relocated to their owning feature.)
 
 `createSelectionSlice` — shared Zustand slice factory for `selectedItems` (composed by per-feature selection stores).
 
@@ -256,8 +256,6 @@ Eternal variant: staleTime/gcTime: Infinity, no refetch (for unchanging data).
 | `useFileTextQuery` | {item} | UTF-8 text body |
 | `useFileBase64Query` | {item} | base64 string body |
 | `useAccountQuery` | — | account / user info (incl. `didExportMasterKeys`) |
-| `useCacheSizesQuery` | — | aggregated sizes: thumbnails, fileCache, audioCache, sandbox, offline |
-| `useFileProviderCacheBudgetQuery` | — | File/Documents Provider cache budget |
 | `useLocalAuthenticationQuery` | — | `{hasHardware, isEnrolled}` device biometric capability |
 | `useMediaPermissionsQuery` | — | media library permission status |
 
@@ -340,7 +338,7 @@ DriveItemDirectoryExtracted = all dir/root types
 
 ### Shell components (`components/shell/`)
 Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never render their own UI rows.
-- `socket.tsx` — WebSocket connection lifecycle + dispatcher → delegates per-feature events to `handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`; contact events dispatched inline via `contactRequestsQueryUpdate`
+- `socket.tsx` — WebSocket connection lifecycle + dispatcher → delegates per-feature events to `handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`/`handleContactEvent`
 - `http.tsx` — HTTP provider lifecycle (start on foreground, stop on background) for file serving
 - `pathname.tsx` — syncs router pathname to `useApp` store
 - `biometric.tsx` — full-screen lock overlay (`BiometricInner` + `Locked` countdown)
