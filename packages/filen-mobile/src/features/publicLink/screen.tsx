@@ -336,7 +336,7 @@ function PublicLink() {
 											className="bg-background-tertiary"
 											buttons={[
 												{
-													icon: "time-outline",
+													icon: "link-outline",
 													title: t("enabled"),
 													rightItem: {
 														type: "switch",
@@ -365,7 +365,7 @@ function PublicLink() {
 											className="bg-background-tertiary"
 											buttons={[
 												{
-													icon: "time-outline",
+													icon: "lock-closed-outline",
 													title: t("password"),
 													rightItem: {
 														type: "custom",
@@ -424,7 +424,7 @@ function PublicLink() {
 													}
 												},
 												{
-													icon: "time-outline",
+													icon: "calendar-outline",
 													title: t("expiration"),
 													rightItem: {
 														type: "custom",
@@ -498,7 +498,7 @@ function PublicLink() {
 													}
 												},
 												{
-													icon: "time-outline",
+													icon: "cloud-download-outline",
 													title: t("downloadable"),
 													rightItem: {
 														type: "switch",
@@ -512,8 +512,8 @@ function PublicLink() {
 															setEdited(prev => ({
 																...(prev ?? {}),
 																downloadable:
-																	edited && typeof edited.downloadable === "boolean"
-																		? !edited.downloadable
+																	prev && typeof prev.downloadable === "boolean"
+																		? !prev.downloadable
 																		: publicLinkStatusQuery.data
 																			? publicLinkStatusQuery.data.type === "file"
 																				? !publicLinkStatusQuery.data.status.downloadable
