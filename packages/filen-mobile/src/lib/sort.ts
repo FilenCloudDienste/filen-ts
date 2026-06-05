@@ -205,37 +205,26 @@ class ItemSorter {
 		return isAsc ? cmp : -cmp
 	}
 
-	private compareDate = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
+	// Shared skeleton for the timestamp-based comparators: dirs-before-files, then compare a
+	// per-mode extracted timestamp, with the numeric-uuid tiebreaker and asc/desc flip. Each
+	// mode only differs in how it reads the timestamp off an item — passed in as `getTimestamp`.
+	private compareByTimestamp = (
+		a: DriveItem,
+		b: DriveItem,
+		isAsc: boolean,
+		getTimestamp: (item: DriveItem) => number
+	): number => {
 		const typeComp = this.compareTypes(a.type, b.type)
 
 		if (typeComp !== 0) {
 			return typeComp
 		}
 
-		const aTimestamp = Number(
-			a.type === "file"
-				? a.data.timestamp
-				: a.type === "directory"
-					? a.data.timestamp
-					: a.type === "sharedFile" || a.type === "sharedRootFile"
-						? (a.data.decryptedMeta?.created ?? a.data.decryptedMeta?.modified ?? 0)
-						: (a.data.decryptedMeta?.created ?? 0)
-		)
-
-		const bTimestamp = Number(
-			b.type === "file"
-				? b.data.timestamp
-				: b.type === "directory"
-					? b.data.timestamp
-					: b.type === "sharedFile" || b.type === "sharedRootFile"
-						? (b.data.decryptedMeta?.created ?? b.data.decryptedMeta?.modified ?? 0)
-						: (b.data.decryptedMeta?.created ?? 0)
-		)
+		const aTimestamp = getTimestamp(a)
+		const bTimestamp = getTimestamp(b)
 
 		if (aTimestamp === bTimestamp) {
-			const aUuid = this.getUuidNumber(a.data.uuid)
-			const bUuid = this.getUuidNumber(b.data.uuid)
-			const diff = aUuid - bUuid
+			const diff = this.getUuidNumber(a.data.uuid) - this.getUuidNumber(b.data.uuid)
 
 			return isAsc ? diff : -diff
 		}
@@ -245,85 +234,44 @@ class ItemSorter {
 		return isAsc ? diff : -diff
 	}
 
-	private compareLastModified = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
-		const typeComp = this.compareTypes(a.type, b.type)
-
-		if (typeComp !== 0) {
-			return typeComp
-		}
-
-		const aModified = Number(
-			a.type === "file"
-				? (a.data.decryptedMeta?.modified ?? a.data.timestamp)
-				: a.type === "directory"
-					? (a.data.decryptedMeta?.created ?? a.data.timestamp)
-					: a.type === "sharedFile" || a.type === "sharedRootFile"
-						? (a.data.decryptedMeta?.modified ?? a.data.decryptedMeta?.created ?? 0)
-						: (a.data.decryptedMeta?.created ?? 0)
+	private compareDate = (a: DriveItem, b: DriveItem, isAsc: boolean): number =>
+		this.compareByTimestamp(a, b, isAsc, item =>
+			Number(
+				item.type === "file"
+					? item.data.timestamp
+					: item.type === "directory"
+						? item.data.timestamp
+						: item.type === "sharedFile" || item.type === "sharedRootFile"
+							? (item.data.decryptedMeta?.created ?? item.data.decryptedMeta?.modified ?? 0)
+							: (item.data.decryptedMeta?.created ?? 0)
+			)
 		)
 
-		const bModified = Number(
-			b.type === "file"
-				? (b.data.decryptedMeta?.modified ?? b.data.timestamp)
-				: b.type === "directory"
-					? (b.data.decryptedMeta?.created ?? b.data.timestamp)
-					: b.type === "sharedFile" || b.type === "sharedRootFile"
-						? (b.data.decryptedMeta?.modified ?? b.data.decryptedMeta?.created ?? 0)
-						: (b.data.decryptedMeta?.created ?? 0)
+	private compareLastModified = (a: DriveItem, b: DriveItem, isAsc: boolean): number =>
+		this.compareByTimestamp(a, b, isAsc, item =>
+			Number(
+				item.type === "file"
+					? (item.data.decryptedMeta?.modified ?? item.data.timestamp)
+					: item.type === "directory"
+						? (item.data.decryptedMeta?.created ?? item.data.timestamp)
+						: item.type === "sharedFile" || item.type === "sharedRootFile"
+							? (item.data.decryptedMeta?.modified ?? item.data.decryptedMeta?.created ?? 0)
+							: (item.data.decryptedMeta?.created ?? 0)
+			)
 		)
 
-		if (aModified === bModified) {
-			const aUuid = this.getUuidNumber(a.data.uuid)
-			const bUuid = this.getUuidNumber(b.data.uuid)
-			const diff = aUuid - bUuid
-
-			return isAsc ? diff : -diff
-		}
-
-		const diff = aModified - bModified
-
-		return isAsc ? diff : -diff
-	}
-
-	private compareCreation = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
-		const typeComp = this.compareTypes(a.type, b.type)
-
-		if (typeComp !== 0) {
-			return typeComp
-		}
-
-		const aTimestamp = Number(
-			a.type === "file"
-				? (a.data.decryptedMeta?.created ?? a.data.timestamp)
-				: a.type === "directory"
-					? (a.data.decryptedMeta?.created ?? a.data.timestamp)
-					: a.type === "sharedFile" || a.type === "sharedRootFile"
-						? (a.data.decryptedMeta?.created ?? a.data.decryptedMeta?.modified ?? 0)
-						: (a.data.decryptedMeta?.created ?? 0)
+	private compareCreation = (a: DriveItem, b: DriveItem, isAsc: boolean): number =>
+		this.compareByTimestamp(a, b, isAsc, item =>
+			Number(
+				item.type === "file"
+					? (item.data.decryptedMeta?.created ?? item.data.timestamp)
+					: item.type === "directory"
+						? (item.data.decryptedMeta?.created ?? item.data.timestamp)
+						: item.type === "sharedFile" || item.type === "sharedRootFile"
+							? (item.data.decryptedMeta?.created ?? item.data.decryptedMeta?.modified ?? 0)
+							: (item.data.decryptedMeta?.created ?? 0)
+			)
 		)
-
-		const bTimestamp = Number(
-			b.type === "file"
-				? (b.data.decryptedMeta?.created ?? b.data.timestamp)
-				: b.type === "directory"
-					? (b.data.decryptedMeta?.created ?? b.data.timestamp)
-					: b.type === "sharedFile" || b.type === "sharedRootFile"
-						? (b.data.decryptedMeta?.created ?? b.data.decryptedMeta?.modified ?? 0)
-						: (b.data.decryptedMeta?.created ?? 0)
-		)
-
-		if (aTimestamp === bTimestamp) {
-			const aUuid = this.getUuidNumber(a.data.uuid)
-			const bUuid = this.getUuidNumber(b.data.uuid)
-			const diff = aUuid - bUuid
-
-			return isAsc ? diff : -diff
-		}
-
-		const diff = aTimestamp - bTimestamp
-
-		return isAsc ? diff : -diff
-	}
 
 	private readonly sortMap: Record<string, (a: DriveItem, b: DriveItem) => number> = {
 		nameAsc: (a, b) => this.compareName(a, b, true),
