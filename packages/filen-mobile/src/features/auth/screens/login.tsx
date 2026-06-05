@@ -1,15 +1,15 @@
 import { Fragment, useState } from "react"
-import { Platform, TextInput, Image } from "react-native"
+import { Platform, Image } from "react-native"
 import { Trans, useTranslation } from "react-i18next"
 import { router } from "expo-router"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { cn, run } from "@filen/utils"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import View, { KeyboardAwareScrollView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableOpacity } from "@/components/ui/pressables"
+import IconTextField from "@/components/ui/iconTextField"
 import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
@@ -222,48 +222,36 @@ const Login = () => {
 						<Text className="text-muted-foreground text-sm text-center">{t("sign_in_to_your_account")}</Text>
 					</View>
 					<View className="bg-background-secondary rounded-2xl overflow-hidden">
-						<View className="flex-row items-center px-4">
-							<Ionicons
-								name="mail-outline"
-								size={18}
-								color={textMutedForeground.color}
-							/>
-							<TextInput
-								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
-								placeholderTextColor={textMutedForeground.color as string}
-								placeholder={t("email")}
-								keyboardType="email-address"
-								autoCapitalize="none"
-								autoComplete="email"
-								autoCorrect={false}
-								textContentType="emailAddress"
-								returnKeyType="next"
-								value={email}
-								onChangeText={setEmail}
-							/>
-						</View>
-						<View className="h-px bg-border ml-12" />
-						<View className="flex-row items-center px-4">
-							<Ionicons
-								name="lock-closed-outline"
-								size={18}
-								color={textMutedForeground.color}
-							/>
-							<TextInput
-								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
-								placeholderTextColor={textMutedForeground.color as string}
-								placeholder={t("password")}
-								secureTextEntry
-								autoCapitalize="none"
-								autoComplete="current-password"
-								autoCorrect={false}
-								textContentType="password"
-								returnKeyType="go"
-								value={password}
-								onChangeText={setPassword}
-								onSubmitEditing={handleLogin}
-							/>
-						</View>
+						<IconTextField
+							icon="mail-outline"
+							iconColor={textMutedForeground.color as string}
+							showDividerBelow
+							placeholderTextColor={textMutedForeground.color as string}
+							placeholder={t("email")}
+							keyboardType="email-address"
+							autoCapitalize="none"
+							autoComplete="email"
+							autoCorrect={false}
+							textContentType="emailAddress"
+							returnKeyType="next"
+							value={email}
+							onChangeText={setEmail}
+						/>
+						<IconTextField
+							icon="lock-closed-outline"
+							iconColor={textMutedForeground.color as string}
+							placeholderTextColor={textMutedForeground.color as string}
+							placeholder={t("password")}
+							secureTextEntry
+							autoCapitalize="none"
+							autoComplete="current-password"
+							autoCorrect={false}
+							textContentType="password"
+							returnKeyType="go"
+							value={password}
+							onChangeText={setPassword}
+							onSubmitEditing={handleLogin}
+						/>
 					</View>
 					<View className="px-4 pb-2 pt-2 gap-3">
 						<PressableOpacity

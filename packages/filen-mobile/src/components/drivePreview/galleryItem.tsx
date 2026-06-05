@@ -11,6 +11,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useFileUrlQuery from "@/queries/useFileUrl.query"
 import PreviewPdf from "@/components/drivePreview/previewPdf"
 import PreviewDocx from "@/components/drivePreview/previewDocx"
+import PreviewSlot from "@/components/drivePreview/previewSlot"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -121,16 +122,9 @@ const GalleryItem = ({
 					className="bg-transparent"
 					style={itemStyle}
 				>
-					{isActive ? (
+					<PreviewSlot isActive={isActive}>
 						<PreviewPdf item={info.item} />
-					) : (
-						<View className="bg-transparent flex-1 items-center justify-center">
-							<ActivityIndicator
-								size="small"
-								color="white"
-							/>
-						</View>
-					)}
+					</PreviewSlot>
 				</View>
 			)
 		}
@@ -141,16 +135,9 @@ const GalleryItem = ({
 					className="bg-transparent"
 					style={itemStyle}
 				>
-					{isActive ? (
+					<PreviewSlot isActive={isActive}>
 						<PreviewDocx item={info.item} />
-					) : (
-						<View className="bg-transparent flex-1 items-center justify-center">
-							<ActivityIndicator
-								size="small"
-								color="white"
-							/>
-						</View>
-					)}
+					</PreviewSlot>
 				</View>
 			)
 		}
@@ -161,16 +148,9 @@ const GalleryItem = ({
 					className="bg-transparent"
 					style={itemStyle}
 				>
-					{isActive ? (
+					<PreviewSlot isActive={isActive}>
 						<PreviewVideo fileUrl={fileUrl} />
-					) : (
-						<View className="bg-transparent flex-1 items-center justify-center">
-							<ActivityIndicator
-								size="small"
-								color="white"
-							/>
-						</View>
-					)}
+					</PreviewSlot>
 				</View>
 			)
 		}
@@ -181,19 +161,12 @@ const GalleryItem = ({
 					className="bg-transparent"
 					style={itemStyle}
 				>
-					{isActive ? (
+					<PreviewSlot isActive={isActive}>
 						<PreviewAudio
 							item={info.item}
 							fileUrl={fileUrl}
 						/>
-					) : (
-						<View className="bg-transparent flex-1 items-center justify-center">
-							<ActivityIndicator
-								size="small"
-								color="white"
-							/>
-						</View>
-					)}
+					</PreviewSlot>
 				</View>
 			)
 		}
@@ -205,16 +178,9 @@ const GalleryItem = ({
 					className="bg-transparent"
 					style={itemStyle}
 				>
-					{isActive ? (
+					<PreviewSlot isActive={isActive}>
 						<PreviewText item={info.item} />
-					) : (
-						<View className="bg-transparent flex-1 items-center justify-center">
-							<ActivityIndicator
-								size="small"
-								color="white"
-							/>
-						</View>
-					)}
+					</PreviewSlot>
 				</View>
 			)
 		}

@@ -1,4 +1,3 @@
-import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
 import { useLocalSearchParams, router } from "expo-router"
@@ -11,6 +10,7 @@ import { type UserEvent } from "@filen/sdk-rs"
 import { buildEventDetails } from "@/features/events/eventDetails"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
+import DetailRow from "@/components/ui/detailRow"
 
 const EventInfo = () => {
 	const { event: eventSerialized } = useLocalSearchParams<{
@@ -70,27 +70,11 @@ const EventInfo = () => {
 				>
 					<View className="bg-transparent flex-col gap-2">
 						{rows.map(({ title, value }) => (
-							<View
+							<DetailRow
 								key={title}
-								className="bg-transparent border-b border-border pb-2 flex-row items-center justify-between gap-4"
-							>
-								<Text
-									className="text-muted-foreground shrink-0"
-									numberOfLines={1}
-									ellipsizeMode="middle"
-								>
-									{title}
-								</Text>
-								<View className="bg-transparent flex-1 justify-end items-center flex-row gap-2">
-									<Text
-										className="text-foreground flex-1 text-right"
-										numberOfLines={1}
-										ellipsizeMode="middle"
-									>
-										{value}
-									</Text>
-								</View>
-							</View>
+								title={title}
+								value={value}
+							/>
 						))}
 					</View>
 				</ScrollView>
