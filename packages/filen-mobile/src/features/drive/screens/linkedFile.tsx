@@ -1,4 +1,4 @@
-import Text from "@/components/ui/text"
+import DriveItemHero from "@/components/ui/driveItemHero"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
 import { useLocalSearchParams, useNavigation } from "expo-router"
@@ -10,7 +10,6 @@ import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
-import Thumbnail from "@/features/drive/components/item/thumbnail"
 import DismissStack from "@/components/dismissStack"
 import { Information } from "@/features/drive/components/information"
 import useHttpStore from "@/stores/useHttp.store"
@@ -111,25 +110,7 @@ const LinkedFile = () => {
 					showsHorizontalScrollIndicator={true}
 					showsVerticalScrollIndicator={false}
 				>
-					<View className="bg-transparent items-center justify-center flex-col px-4">
-						<Thumbnail
-							item={item}
-							size={{
-								icon: 128,
-								thumbnail: 128
-							}}
-							contentFit="cover"
-							className="rounded-3xl"
-						/>
-						<Text
-							className="text-lg font-bold mt-4"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{driveItemDisplayName(item)}
-						</Text>
-						<Text className="text-muted-foreground">{t("file")}</Text>
-					</View>
+					<DriveItemHero item={item} />
 					<View className="bg-transparent mt-10">
 						<Information
 							item={item}

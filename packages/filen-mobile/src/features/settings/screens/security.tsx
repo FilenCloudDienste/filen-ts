@@ -1,13 +1,12 @@
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
+import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment } from "react"
 import { router, useNavigation } from "expo-router"
 import { run } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { ActivityIndicator } from "react-native"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useAccountQuery from "@/queries/useAccount.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
@@ -20,8 +19,6 @@ import { useTranslation } from "react-i18next"
 
 function Security() {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
-	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const textRed500 = useResolveClassNames("text-red-500")
 	const isOnline = useIsOnline()
@@ -42,22 +39,9 @@ function Security() {
 				edges={["left", "right"]}
 			>
 				{accountQuery.status !== "success" ? (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<ActivityIndicator
-							size="large"
-							color={textForeground.color as string}
-						/>
-					</View>
+					<SettingsLoadingView />
 				) : (
-					<GestureHandlerScrollView
-						className="bg-transparent flex-1"
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName="px-4 gap-4"
-						showsHorizontalScrollIndicator={false}
-						contentContainerStyle={{
-							paddingBottom: insets.bottom
-						}}
-					>
+					<SettingsScrollView>
 						<Group
 							className="bg-background-tertiary"
 							buttons={[
@@ -269,7 +253,7 @@ function Security() {
 								}
 							]}
 						/>
-					</GestureHandlerScrollView>
+					</SettingsScrollView>
 				)}
 			</SafeAreaView>
 		</Fragment>

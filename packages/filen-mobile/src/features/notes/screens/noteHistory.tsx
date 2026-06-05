@@ -1,9 +1,10 @@
+import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
 import { deserializeRouteParam, serialize } from "@/lib/serializer"
-import View, { CrossGlassContainerView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header from "@/components/ui/header"
@@ -15,10 +16,8 @@ import { simpleDate } from "@/lib/time"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import { type NoteHistory as TNoteHistory, type Note } from "@/types"
 import Menu from "@/components/ui/menu"
-import { PressableScale } from "@/components/ui/pressables"
 import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
 import useNoteHistoryQuery from "@/features/notes/queries/useNoteHistory.query"
 import notes from "@/features/notes/notes"
@@ -29,7 +28,6 @@ import { useTranslation } from "react-i18next"
 
 const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
 		<View className="flex-row items-center px-4 bg-transparent">
@@ -123,15 +121,7 @@ const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 							}
 						]}
 					>
-						<CrossGlassContainerView>
-							<PressableScale className="size-9 items-center justify-center">
-								<Ionicons
-									name="ellipsis-horizontal"
-									size={20}
-									color={textForeground.color}
-								/>
-							</PressableScale>
-						</CrossGlassContainerView>
+						<EllipsisMenuTrigger />
 					</Menu>
 				</View>
 			</View>

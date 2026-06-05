@@ -1,12 +1,11 @@
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
-import { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment } from "react"
 import { router } from "expo-router"
 import { run, formatBytes } from "@filen/utils"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { Platform } from "react-native"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { useSecureStore } from "@/lib/secureStore"
@@ -36,7 +35,6 @@ const CACHE_SIZE_PRESETS_BYTES: readonly number[] = [
 const CACHE_SIZE_SAFETY_BUFFER_BYTES = 1024 * 1024 * 1024
 
 function FileProviderSettings() {
-	const insets = useSafeAreaInsets()
 	const { t } = useTranslation()
 	const featureLabel = Platform.OS === "ios" ? t("file_provider") : t("documents_provider")
 	const featureDescription = Platform.OS === "ios" ? t("file_provider_description") : t("documents_provider_description")
@@ -197,21 +195,13 @@ function FileProviderSettings() {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				<GestureHandlerScrollView
-					className="bg-transparent flex-1"
-					contentInsetAdjustmentBehavior="automatic"
-					contentContainerClassName="px-4 gap-2"
-					showsHorizontalScrollIndicator={false}
-					contentContainerStyle={{
-						paddingBottom: insets.bottom
-					}}
-				>
+				<SettingsScrollView contentContainerClassName="px-4 gap-2">
 					<Group
 						className="bg-background-tertiary"
 						buttons={groupButtons}
 					/>
 					<Text className="text-sm text-muted-foreground px-4 leading-5">{featureDescription}</Text>
-				</GestureHandlerScrollView>
+				</SettingsScrollView>
 			</SafeAreaView>
 		</Fragment>
 	)

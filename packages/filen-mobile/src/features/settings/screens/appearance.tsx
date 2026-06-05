@@ -1,11 +1,10 @@
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
-import { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment } from "react"
 import { useNavigation } from "expo-router"
 import { run } from "@filen/utils"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { useDriveSortPreferences, DEFAULT_SORT_PREFERENCES } from "@/features/drive/driveSortPreference"
@@ -18,7 +17,6 @@ import { changeAppLanguage, hasTranslations } from "@/lib/i18n"
 import { useThemeSetting, THEME_SETTINGS, changeAppTheme, type ThemeSetting } from "@/lib/theme"
 
 function Appearance() {
-	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
 	const [startScreen, setStartScreen] = useStartScreen()
@@ -189,15 +187,7 @@ function Appearance() {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				<GestureHandlerScrollView
-					className="bg-transparent flex-1"
-					contentInsetAdjustmentBehavior="automatic"
-					contentContainerClassName="px-4 gap-4"
-					showsHorizontalScrollIndicator={false}
-					contentContainerStyle={{
-						paddingBottom: insets.bottom
-					}}
-				>
+				<SettingsScrollView>
 					<Group
 						className="bg-background-tertiary"
 						buttons={generalButtons}
@@ -206,7 +196,7 @@ function Appearance() {
 						className="bg-background-tertiary"
 						buttons={sortButtons}
 					/>
-				</GestureHandlerScrollView>
+				</SettingsScrollView>
 			</SafeAreaView>
 		</Fragment>
 	)
