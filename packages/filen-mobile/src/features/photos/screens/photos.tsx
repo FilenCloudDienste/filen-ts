@@ -28,7 +28,6 @@ import Header from "@/features/photos/components/photosHeader"
 import Photo from "@/features/photos/components/photoItem"
 import DateRange from "@/features/photos/components/dateRange"
 import { filterPhotoGridItems } from "@/features/photos/utils"
-import { type DriveItemFileExtracted } from "@/types"
 
 const Photos = () => {
 	const { t } = useTranslation()
@@ -59,19 +58,17 @@ const Photos = () => {
 
 	const size = !layout ? 0 : layout.width / Math.min(Math.max(1, photosGridTiles), 5)
 
-	const items = (
-		driveItemsQuery.data
-			? itemSorter.sortItems(
-					filterPhotoGridItems({
-						items: driveItemsQuery.data,
-						getPreviewType,
-						supportedImageExtensions: EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS,
-						extname: name => FileSystem.Paths.extname(name)
-					}),
-					"creationDesc"
-				)
-			: []
-	) as DriveItemFileExtracted[]
+	const items = driveItemsQuery.data
+		? itemSorter.sortItems(
+				filterPhotoGridItems({
+					items: driveItemsQuery.data,
+					getPreviewType,
+					supportedImageExtensions: EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS,
+					extname: name => FileSystem.Paths.extname(name)
+				}),
+				"creationDesc"
+			)
+		: []
 
 	return (
 		<Fragment>

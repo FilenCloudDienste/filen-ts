@@ -113,8 +113,7 @@ class Cache {
 	public rootUuid: string | null = null
 
 	// Not persisted — managed separately by secureStore.ts with its own encryption
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	public readonly secureStore = new Map<string, any>()
+	public readonly secureStore = new Map<string, unknown>()
 
 	// Persisted — each entry independently persisted to SQLite KV
 	public readonly directoryUuidToName: PersistentMap<string>

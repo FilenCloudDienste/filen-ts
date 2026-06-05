@@ -269,7 +269,7 @@ const sortMap: Record<string, (a: DriveItem, b: DriveItem) => number> = {
 	creationDesc: (a, b) => compareCreation(a, b, false)
 }
 
-function sortItems(items: DriveItem[], type: SortByType): DriveItem[] {
+function sortItems<T extends DriveItem>(items: T[], type: SortByType): T[] {
 	const compareFunction = sortMap[type] ?? sortMap["nameAsc"]
 
 	return items.slice().sort(compareFunction)
