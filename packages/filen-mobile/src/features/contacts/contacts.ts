@@ -2,8 +2,10 @@ import auth from "@/lib/auth"
 import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useContactRequests.query"
 import { contactsQueryUpdate } from "@/features/contacts/queries/useContacts.query"
 
-class Contacts {
-	public async acceptRequest({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
+// Stateless namespace of contact operations (requests, block/unblock, delete). No instance
+// state, so a plain object rather than a class. Silent: throws on failure; UI owns error UX.
+const contacts = {
+	async acceptRequest({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		await authedSdkClient.acceptContactRequest(
@@ -36,9 +38,9 @@ class Contacts {
 				contacts
 			})
 		})
-	}
+	},
 
-	public async denyRequest({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
+	async denyRequest({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		await authedSdkClient.denyContactRequest(
@@ -56,9 +58,9 @@ class Contacts {
 				incoming: prev.incoming.filter(r => r.uuid !== uuid)
 			})
 		})
-	}
+	},
 
-	public async cancelRequest({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
+	async cancelRequest({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		await authedSdkClient.cancelContactRequest(
@@ -76,9 +78,9 @@ class Contacts {
 				outgoing: prev.outgoing.filter(r => r.uuid !== uuid)
 			})
 		})
-	}
+	},
 
-	public async block({ email, signal }: { email: string; signal?: AbortSignal }) {
+	async block({ email, signal }: { email: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const contacts = await authedSdkClient.getContacts(
 			signal
@@ -119,9 +121,9 @@ class Contacts {
 				]
 			})
 		})
-	}
+	},
 
-	public async delete({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
+	async delete({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		await authedSdkClient.deleteContact(
@@ -139,9 +141,9 @@ class Contacts {
 				contacts: prev.contacts.filter(c => c.uuid !== uuid)
 			})
 		})
-	}
+	},
 
-	public async unblock({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
+	async unblock({ uuid, signal }: { uuid: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		await authedSdkClient.unblockContact(
@@ -168,9 +170,9 @@ class Contacts {
 				blocked: prev.blocked.filter(c => c.uuid !== uuid)
 			})
 		})
-	}
+	},
 
-	public async sendRequest({ email, signal }: { email: string; signal?: AbortSignal }) {
+	async sendRequest({ email, signal }: { email: string; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		await authedSdkClient.sendContactRequest(
@@ -198,7 +200,5 @@ class Contacts {
 		})
 	}
 }
-
-const contacts = new Contacts()
 
 export default contacts

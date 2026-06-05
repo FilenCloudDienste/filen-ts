@@ -43,50 +43,30 @@ function wrapSdkNote(sdk: SdkNote): Note {
 	}
 }
 
-class Notes {
-	public addTag = addTag
+const notes = {
+	addTag,
+	removeTag,
+	createTag,
+	renameTag,
+	deleteTag,
+	favoriteTag,
+	leave,
+	removeParticipant,
+	addParticipant,
+	setParticipantPermission,
+	getContent,
+	setContent,
+	setType,
+	setTitle,
+	setPinned,
+	setFavorited,
+	archive,
+	restore,
+	restoreFromHistory,
+	trash,
+	delete: deleteNote,
 
-	public removeTag = removeTag
-
-	public createTag = createTag
-
-	public renameTag = renameTag
-
-	public deleteTag = deleteTag
-
-	public favoriteTag = favoriteTag
-
-	public leave = leave
-
-	public removeParticipant = removeParticipant
-
-	public addParticipant = addParticipant
-
-	public setParticipantPermission = setParticipantPermission
-
-	public getContent = getContent
-
-	public setContent = setContent
-
-	public setType = setType
-
-	public setTitle = setTitle
-
-	public setPinned = setPinned
-
-	public setFavorited = setFavorited
-
-	public archive = archive
-
-	public restore = restore
-
-	public restoreFromHistory = restoreFromHistory
-
-	public trash = trash
-
-	public delete = deleteNote
-
-	public async duplicate({ note, signal }: { note: Note; signal?: AbortSignal }) {
+	async duplicate({ note, signal }: { note: Note; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const [sdkResult, content] = await Promise.all([
 			authedSdkClient.duplicateNote(
@@ -125,9 +105,9 @@ class Notes {
 			original,
 			duplicated
 		}
-	}
+	},
 
-	public async export({ note, signal }: { note: Note; signal?: AbortSignal }) {
+	async export({ note, signal }: { note: Note; signal?: AbortSignal }) {
 		if (note.undecryptable) {
 			throw new Error("Cannot export an undecryptable note")
 		}
@@ -159,9 +139,9 @@ class Notes {
 				}
 			}
 		}
-	}
+	},
 
-	public async exportMultiple({ signal, notes }: { signal?: AbortSignal; notes: Note[] }) {
+	async exportMultiple({ signal, notes }: { signal?: AbortSignal; notes: Note[] }) {
 		const exportable = notes.filter(n => !n.undecryptable)
 
 		if (exportable.length === 0) {
@@ -204,9 +184,9 @@ class Notes {
 				}
 			}
 		}
-	}
+	},
 
-	public async createWithOptionalTag({
+	async createWithOptionalTag({
 		title,
 		type,
 		tag,
@@ -233,9 +213,9 @@ class Notes {
 		}
 
 		return note
-	}
+	},
 
-	public async importFromFile({
+	async importFromFile({
 		uri,
 		title,
 		type,
@@ -260,9 +240,9 @@ class Notes {
 			type,
 			signal
 		})
-	}
+	},
 
-	public async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {
+	async create({ title, content, type, signal }: { title: string; content: string; type: NoteType; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 		let note = wrapSdkNote(
 			await authedSdkClient.createNote(
@@ -302,7 +282,5 @@ class Notes {
 		return note
 	}
 }
-
-const notes = new Notes()
 
 export default notes
