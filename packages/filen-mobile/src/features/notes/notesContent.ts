@@ -1,16 +1,10 @@
 import auth from "@/lib/auth"
-import { NoteType, type Note as SdkNote } from "@filen/sdk-rs"
+import { NoteType } from "@filen/sdk-rs"
 import { type Note } from "@/types"
+import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { createNotePreviewFromContentText } from "@filen/utils"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
-
-function wrapSdkNote(sdk: SdkNote): Note {
-	return {
-		...sdk,
-		undecryptable: sdk.encryptionKey === undefined
-	}
-}
 
 export async function getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()

@@ -1,5 +1,19 @@
-import { NoteType } from "@filen/sdk-rs"
+import { NoteType, type Note as SdkNote, type NoteTag as SdkNoteTag } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
+
+export function wrapSdkNote(sdk: SdkNote): Note {
+	return {
+		...sdk,
+		undecryptable: sdk.encryptionKey === undefined
+	}
+}
+
+export function wrapSdkNoteTag(sdk: SdkNoteTag): NoteTag {
+	return {
+		...sdk,
+		undecryptable: sdk.name === undefined
+	}
+}
 
 export type EditorType = "text" | "code" | "markdown" | "richtext"
 

@@ -1,15 +1,9 @@
 import auth from "@/lib/auth"
-import { type Note as SdkNote, type Contact } from "@filen/sdk-rs"
+import { type Contact } from "@filen/sdk-rs"
 import { type Note, type NoteParticipant } from "@/types"
+import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
-
-function wrapSdkNote(sdk: SdkNote): Note {
-	return {
-		...sdk,
-		undecryptable: sdk.encryptionKey === undefined
-	}
-}
 
 export async function leave({ note, signal }: { note: Note; signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()

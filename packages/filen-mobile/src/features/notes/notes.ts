@@ -1,6 +1,7 @@
 import auth from "@/lib/auth"
-import { NoteType, type Note as SdkNote } from "@filen/sdk-rs"
+import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
+import { wrapSdkNote } from "@/features/notes/utils"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
 import JSZip from "jszip"
 import { sanitizeFileName } from "@/lib/utils"
@@ -10,13 +11,6 @@ import { addTag, removeTag, createTag, renameTag, deleteTag, favoriteTag } from 
 import { leave, removeParticipant, addParticipant, setParticipantPermission } from "@/features/notes/notesParticipants"
 import { getContent, setContent, setType, setTitle } from "@/features/notes/notesContent"
 import { setPinned, setFavorited, archive, restore, restoreFromHistory, trash, deleteNote } from "@/features/notes/notesLifecycle"
-
-function wrapSdkNote(sdk: SdkNote): Note {
-	return {
-		...sdk,
-		undecryptable: sdk.encryptionKey === undefined
-	}
-}
 
 const notes = {
 	addTag,
