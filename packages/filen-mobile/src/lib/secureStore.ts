@@ -553,7 +553,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		const { cleanup } = runEffect(defer => {
 			const secureStoreChangeSubscription = events.subscribe("secureStoreChange", payload => {
 				if (payload.key === key && !isLocalUpdateRef.current) {
-					setStateChecked(payload.value)
+					setStateChecked(payload.value as T)
 				}
 			})
 

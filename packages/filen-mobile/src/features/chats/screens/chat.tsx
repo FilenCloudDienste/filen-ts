@@ -208,7 +208,7 @@ const Chat = () => {
 		enabled: false
 	})
 
-	const chat = chatsQuery.data?.find(c => c.uuid === uuid) as TChat
+	const chat = chatsQuery.data?.find(c => c.uuid === uuid)
 
 	const containerStyle = useAnimatedStyle(() => {
 		return {
@@ -240,7 +240,7 @@ const Chat = () => {
 		}
 	}, [uuid, router])
 
-	if (!(chat as TChat | undefined)) {
+	if (!chat) {
 		return <DismissStack />
 	}
 

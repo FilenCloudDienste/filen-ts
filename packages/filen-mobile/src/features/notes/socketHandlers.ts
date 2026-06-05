@@ -77,6 +77,14 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 									: n
 							)
 					})
+
+					break
+				}
+
+				default: {
+					console.warn("TitleEdited: received encrypted title, skipping cache update", inner)
+
+					break
 				}
 			}
 
