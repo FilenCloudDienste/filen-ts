@@ -12,9 +12,9 @@ import AnimatedProgressBar from "@/components/floatingBar/animatedProgressBar"
 
 const TransfersSlot = () => {
 	const { t } = useTranslation()
-	const transfersActive = useTransfersStore(useShallow(state => state.transfers.length > 0))
-	const { count, speed } = useTransfersStore(
+	const { transfersActive, count, speed } = useTransfersStore(
 		useShallow(state => ({
+			transfersActive: state.transfers.length > 0,
 			count: state.stats.count,
 			speed: state.stats.speed
 		}))
