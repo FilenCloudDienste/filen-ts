@@ -11,7 +11,7 @@ import useContactsStore, { type ContactListItemWithHeader } from "@/features/con
 import { useFocusEffect } from "expo-router"
 import events from "@/lib/events"
 import Header from "@/features/contacts/components/contactsHeader"
-import Contact from "@/features/contacts/components/contactRow"
+import Contact, { ContactSectionHeader } from "@/features/contacts/components/contactRow"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 import useContactSections from "@/features/contacts/hooks/useContactSections"
 
@@ -67,6 +67,10 @@ const Contacts = () => {
 	}
 
 	const renderItem = (info: ListRenderItemInfo<ContactListItemWithHeader>) => {
+		if (info.item.type === "header") {
+			return <ContactSectionHeader title={info.item.data.title} />
+		}
+
 		return (
 			<Contact
 				info={info}

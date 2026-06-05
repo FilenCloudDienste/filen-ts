@@ -10,16 +10,39 @@ import { PressableScale } from "@/components/ui/pressables"
 import { useResolveClassNames } from "uniwind"
 import AnimatedProgressBar from "@/components/floatingBar/animatedProgressBar"
 
+const SpeedDisplay = () => {
+	const speed = useTransfersStore(s => s.stats.speed)
+	const textForeground = useResolveClassNames("text-foreground")
+
+	if (speed === 0) {
+		return (
+			<ActivityIndicator
+				className="shrink-0"
+				size="small"
+				color={textForeground.color}
+			/>
+		)
+	}
+
+	return (
+		<Text
+			className="text-xs shrink-0"
+			numberOfLines={1}
+			ellipsizeMode="middle"
+		>
+			{bpsToReadable(speed)}
+		</Text>
+	)
+}
+
 const TransfersSlot = () => {
 	const { t } = useTranslation()
-	const { transfersActive, count, speed } = useTransfersStore(
+	const { transfersActive, count } = useTransfersStore(
 		useShallow(state => ({
 			transfersActive: state.transfers.length > 0,
-			count: state.stats.count,
-			speed: state.stats.speed
+			count: state.stats.count
 		}))
 	)
-	const textForeground = useResolveClassNames("text-foreground")
 
 	if (!transfersActive) {
 		return null
@@ -41,21 +64,7 @@ const TransfersSlot = () => {
 				>
 					{t("transfers_active", { count })}
 				</Text>
-				{speed === 0 ? (
-					<ActivityIndicator
-						className="shrink-0"
-						size="small"
-						color={textForeground.color}
-					/>
-				) : (
-					<Text
-						className="text-xs shrink-0"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{bpsToReadable(speed)}
-					</Text>
-				)}
+				<SpeedDisplay />
 			</View>
 			<AnimatedProgressBar />
 		</PressableScale>

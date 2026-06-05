@@ -6,7 +6,6 @@ import { PressableOpacity } from "@/components/ui/pressables"
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import useRichtextStore from "@/stores/useRichtext.store"
-import { useShallow } from "zustand/shallow"
 import type { TextEditorEvents } from "@/components/textEditor"
 import type { QuillFormats, HeaderLevel } from "@/components/textEditor/richText/dom"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
@@ -25,7 +24,7 @@ const BUTTON_CLASS = "flex-row items-center justify-center shrink-0 size-8"
 
 const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event: TextEditorEvents) => void }) => {
 	const { t } = useTranslation()
-	const formats = useRichtextStore(useShallow(state => state.formats))
+	const active = useRichtextStore(state => state.formats[type])
 	const textForeground = useResolveClassNames("text-foreground")
 	const textPrimary = useResolveClassNames("text-primary")
 
@@ -55,7 +54,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 			}
 
 			case "link": {
-				if (!formats.link) {
+				if (!active) {
 					return []
 				}
 
@@ -65,11 +64,11 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 						title: t("open"),
 						icon: "openExternal" as const,
 						onPress: () => {
-							if (type !== "link" || !formats.link) {
+							if (type !== "link" || !active) {
 								return
 							}
 
-							Linking.openURL(formats.link).catch(console.error)
+							Linking.openURL(active as string).catch(console.error)
 						}
 					},
 					{
@@ -77,7 +76,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 						title: t("edit"),
 						icon: "edit" as const,
 						onPress: () => {
-							if (type !== "link" || !formats.link) {
+							if (type !== "link" || !active) {
 								return
 							}
 
@@ -86,7 +85,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 									title: t("edit_link"),
 									message: t("enter_url"),
 									placeholder: t("url_placeholder"),
-									defaultValue: formats.link,
+									defaultValue: active as string,
 									okText: t("save"),
 									cancelText: t("cancel")
 								})
@@ -107,7 +106,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 						title: t("remove"),
 						icon: "minus" as const,
 						onPress: () => {
-							if (type !== "link" || !formats.link) {
+							if (type !== "link" || !active) {
 								return
 							}
 
@@ -154,7 +153,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 							})
 						}
 					},
-					...(formats.list
+					...(active
 						? [
 								{
 									id: "remove",
@@ -204,7 +203,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 			}
 
 			case "link": {
-				if (formats.link) {
+				if (active) {
 					break
 				}
 
@@ -266,27 +265,27 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 						<FontAwesome6
 							name="heading"
 							size={ICON_SIZE}
-							color={formats[type] ? (textPrimary.color as string) : (textForeground.color as string)}
+							color={active ? (textPrimary.color as string) : (textForeground.color as string)}
 						/>
-						{formats[type] && (
+						{active && (
 							<View className="flex-row items-center justify-center absolute rounded-full size-4 -mt-4 -mr-4 overflow-hidden bg-background-secondary border border-border">
-								<Text className="text-foreground text-xs">{formats[type]}</Text>
+								<Text className="text-foreground text-xs">{active}</Text>
 							</View>
 						)}
 					</Fragment>
 				) : type === "list" ? (
 					<FontAwesome6
 						name={
-							formats[type] === "ordered"
+							active === "ordered"
 								? "list-ol"
-								: formats[type] === "bullet"
+								: active === "bullet"
 									? "list-ul"
-									: formats[type] === "checked" || formats[type] === "unchecked"
+									: active === "checked" || active === "unchecked"
 										? "list-check"
 										: "list"
 						}
 						size={ICON_SIZE}
-						color={formats[type] ? (textPrimary.color as string) : (textForeground.color as string)}
+						color={active ? (textPrimary.color as string) : (textForeground.color as string)}
 					/>
 				) : (
 					<FontAwesome6
@@ -306,7 +305,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 													: "question"
 						}
 						size={ICON_SIZE}
-						color={formats[type] ? (textPrimary.color as string) : (textForeground.color as string)}
+						color={active ? (textPrimary.color as string) : (textForeground.color as string)}
 					/>
 				)}
 			</PressableOpacity>

@@ -19,6 +19,14 @@ import { useShallow } from "zustand/shallow"
 import { run, cn } from "@filen/utils"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 
+export const ContactSectionHeader = ({ title }: { title: string }) => {
+	return (
+		<View className={cn("w-full h-auto px-4 bg-transparent", "py-2 pt-4")}>
+			<Text className="text-lg">{title}</Text>
+		</View>
+	)
+}
+
 export const Contact = ({
 	info,
 	nextItem,
@@ -30,11 +38,13 @@ export const Contact = ({
 }) => {
 	const { t } = useTranslation()
 	const selectOptions = useSelectOptions()
-	const isSelected = useContactsStore(
-		useShallow(state => state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid))
+	const { isSelected, selectedCount, bulkMode } = useContactsStore(
+		useShallow(state => ({
+			isSelected: state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid),
+			selectedCount: state.selectedContacts.length,
+			bulkMode: state.bulkMode
+		}))
 	)
-	const selectedCount = useContactsStore(useShallow(state => state.selectedContacts.length))
-	const bulkMode = useContactsStore(useShallow(state => state.bulkMode))
 	const showCheckbox = !!selectOptions || bulkMode
 
 	const onAccept = async () => {

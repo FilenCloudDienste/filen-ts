@@ -4,7 +4,7 @@ import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, useNavigation, useFocusEffect } from "expo-router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
-import View, { CrossGlassContainerView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"
@@ -19,7 +19,6 @@ import drive from "@/features/drive/drive"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import type { FileVersion } from "@filen/sdk-rs"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
@@ -31,10 +30,10 @@ import { runBulk } from "@/lib/bulkOps"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
+import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 
 const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
 	const isSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.some(v => v.uuid === version.uuid)))
 	const areVersionsSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.length > 0))
 
@@ -175,15 +174,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 							}
 						]}
 					>
-						<CrossGlassContainerView>
-							<PressableScale className="size-9 items-center justify-center">
-								<Ionicons
-									name="ellipsis-horizontal"
-									size={20}
-									color={textForeground.color}
-								/>
-							</PressableScale>
-						</CrossGlassContainerView>
+						<EllipsisMenuTrigger />
 					</Menu>
 				</View>
 			</View>
@@ -191,46 +182,12 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 	)
 }
 
-const FileVersions = () => {
+const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item: DriveItem }) => {
 	const { t } = useTranslation()
-	const { item: itemSerialized } = useLocalSearchParams<{
-		item?: string
-	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const selectedVersions = useFileVersionsStore(useShallow(state => state.selectedVersions))
-
-	useFocusEffect(
-		useCallback(() => {
-			useFileVersionsStore.getState().clearSelectedVersions()
-
-			return () => {
-				useFileVersionsStore.getState().clearSelectedVersions()
-			}
-		}, [])
-	)
-
-	const item = deserializeRouteParam<DriveItem>(itemSerialized)
-
-	const driveItemVersionsQuery = useDriveItemVersionsQuery(
-		{
-			uuid: item?.data.uuid ?? ""
-		},
-		{
-			enabled: !!item && item.type === "file"
-		}
-	)
-
-	const versions =
-		driveItemVersionsQuery.status === "success" && item
-			? driveItemVersionsQuery.data.filter(version => version.uuid !== item.data.uuid)
-			: []
-
-	if (!item || item.type !== "file") {
-		return <DismissStack />
-	}
 
 	const inSelectionMode = selectedVersions.length > 0
 
@@ -393,18 +350,63 @@ const FileVersions = () => {
 	})()
 
 	return (
+		<Header
+			title={inSelectionMode ? t("selected", { count: selectedVersions.length }) : t("file_versions")}
+			transparent={Platform.OS === "ios"}
+			shadowVisible={false}
+			backVisible={Platform.OS === "android"}
+			backgroundColor={Platform.select({
+				ios: undefined,
+				default: bgBackgroundSecondary.backgroundColor as string
+			})}
+			leftItems={leftItems}
+			rightItems={rightItems}
+		/>
+	)
+}
+
+const FileVersions = () => {
+	const { t } = useTranslation()
+	const { item: itemSerialized } = useLocalSearchParams<{
+		item?: string
+	}>()
+	const insets = useSafeAreaInsets()
+
+	useFocusEffect(
+		useCallback(() => {
+			useFileVersionsStore.getState().clearSelectedVersions()
+
+			return () => {
+				useFileVersionsStore.getState().clearSelectedVersions()
+			}
+		}, [])
+	)
+
+	const item = deserializeRouteParam<DriveItem>(itemSerialized)
+
+	const driveItemVersionsQuery = useDriveItemVersionsQuery(
+		{
+			uuid: item?.data.uuid ?? ""
+		},
+		{
+			enabled: !!item && item.type === "file"
+		}
+	)
+
+	const versions =
+		driveItemVersionsQuery.status === "success" && item
+			? driveItemVersionsQuery.data.filter(version => version.uuid !== item.data.uuid)
+			: []
+
+	if (!item || item.type !== "file") {
+		return <DismissStack />
+	}
+
+	return (
 		<Fragment>
-			<Header
-				title={inSelectionMode ? t("selected", { count: selectedVersions.length }) : t("file_versions")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={leftItems}
-				rightItems={rightItems}
+			<FileVersionsHeader
+				versions={versions}
+				item={item}
 			/>
 			<SafeAreaView
 				className="flex-1 bg-background-secondary"

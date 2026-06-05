@@ -8,6 +8,7 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import { useStringifiedClient } from "@/lib/auth"
 import { simpleDate } from "@/lib/time"
 import Icon from "@/features/notes/components/note/icon"
@@ -52,7 +53,7 @@ const Note = ({
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
-	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[itemUuid]?.length ?? 0) > 0))
+	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[itemUuid]?.length ?? 0) > 0))
 	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.uuid === itemUuid)))
@@ -78,7 +79,8 @@ const Note = ({
 
 	const participantsWithoutCurrentUser =
 		info.item.type === "header" ? [] : info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
-	const tags = info.item.type === "header" ? [] : info.item.tags.sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
+	const tags =
+		info.item.type === "header" ? [] : [...info.item.tags].sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
 	// Notes are rendered inside a sectioned list (pinned / favorited /
 	// time-bucketed / archived / trashed) where each section starts with a

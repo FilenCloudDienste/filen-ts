@@ -123,6 +123,128 @@ function IncomingShare() {
 		return unsubscribe
 	}, [navigation, clear])
 
+	const handleUpload = useCallback(async () => {
+		const selectResult = await run(async () => {
+			return await selectDriveItems({
+				type: "single",
+				files: false,
+				directories: true,
+				items: []
+			})
+		})
+
+		if (!selectResult.success) {
+			console.error(selectResult.error)
+			alerts.error(selectResult.error)
+
+			return
+		}
+
+		if (selectResult.data.cancelled) {
+			return
+		}
+
+		const selectedItem = selectResult.data.selectedItems[0]
+
+		if (!selectedItem) {
+			return
+		}
+
+		const remoteDir = (() => {
+			if (selectedItem.type === "root") {
+				return selectedItem.data
+			}
+
+			const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
+
+			if (!fromCache) {
+				return null
+			}
+
+			return fromCache
+		})()
+
+		if (!remoteDir) {
+			return
+		}
+
+		const assetsResult = await runWithLoading(async defer => {
+			return await Promise.all(
+				payloads.map(async payload => {
+					if (!payload.contentUri || !payload.originalName) {
+						return null
+					}
+
+					const file = new FileSystem.File(payload.contentUri)
+
+					defer(() => {
+						if (file.exists) {
+							file.delete()
+						}
+					})
+
+					const tmpFile = newTmpFile()
+
+					if (tmpFile.exists) {
+						tmpFile.delete()
+					}
+
+					file.copy(tmpFile)
+
+					return {
+						name: payload.originalName,
+						file: tmpFile
+					}
+				})
+			)
+		})
+
+		if (!assetsResult.success) {
+			console.error(assetsResult.error)
+			alerts.error(assetsResult.error)
+
+			return
+		}
+
+		const assets = assetsResult.data.filter(
+			(
+				asset
+			): asset is {
+				name: string
+				file: FileSystem.File
+			} => asset !== null
+		)
+
+		clear(currentPayloadsRef.current)
+
+		navigation.getParent()?.goBack()
+
+		const result = await run(async defer => {
+			return await Promise.all(
+				assets.map(async asset => {
+					defer(() => {
+						if (asset.file.exists) {
+							asset.file.delete()
+						}
+					})
+
+					return await transfers.upload({
+						localFileOrDir: asset.file,
+						parent: remoteDir,
+						name: asset.name
+					})
+				})
+			)
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+	}, [payloads, navigation, clear])
+
 	useFocusEffect(
 		useCallback(() => {
 			useIncomingShareStore.getState().setProcess(false)
@@ -173,127 +295,7 @@ function IncomingShare() {
 										size: 20
 									},
 									props: {
-										onPress: async () => {
-											const selectResult = await run(async () => {
-												return await selectDriveItems({
-													type: "single",
-													files: false,
-													directories: true,
-													items: []
-												})
-											})
-
-											if (!selectResult.success) {
-												console.error(selectResult.error)
-												alerts.error(selectResult.error)
-
-												return
-											}
-
-											if (selectResult.data.cancelled) {
-												return
-											}
-
-											const selectedItem = selectResult.data.selectedItems[0]
-
-											if (!selectedItem) {
-												return
-											}
-
-											const remoteDir = (() => {
-												if (selectedItem.type === "root") {
-													return selectedItem.data
-												}
-
-												const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
-
-												if (!fromCache) {
-													return null
-												}
-
-												return fromCache
-											})()
-
-											if (!remoteDir) {
-												return
-											}
-
-											const assetsResult = await runWithLoading(async defer => {
-												return await Promise.all(
-													payloads.map(async payload => {
-														if (!payload.contentUri || !payload.originalName) {
-															return null
-														}
-
-														const file = new FileSystem.File(payload.contentUri)
-
-														defer(() => {
-															if (file.exists) {
-																file.delete()
-															}
-														})
-
-														const tmpFile = newTmpFile()
-
-														if (tmpFile.exists) {
-															tmpFile.delete()
-														}
-
-														file.copy(tmpFile)
-
-														return {
-															name: payload.originalName,
-															file: tmpFile
-														}
-													})
-												)
-											})
-
-											if (!assetsResult.success) {
-												console.error(assetsResult.error)
-												alerts.error(assetsResult.error)
-
-												return
-											}
-
-											const assets = assetsResult.data.filter(
-												(
-													asset
-												): asset is {
-													name: string
-													file: FileSystem.File
-												} => asset !== null
-											)
-
-											clear(currentPayloadsRef.current)
-
-											navigation.getParent()?.goBack()
-
-											const result = await run(async defer => {
-												return await Promise.all(
-													assets.map(async asset => {
-														defer(() => {
-															if (asset.file.exists) {
-																asset.file.delete()
-															}
-														})
-
-														return await transfers.upload({
-															localFileOrDir: asset.file,
-															parent: remoteDir,
-															name: asset.name
-														})
-													})
-												)
-											})
-
-											if (!result.success) {
-												console.error(result.error)
-												alerts.error(result.error)
-
-												return
-											}
-										}
+										onPress: handleUpload
 									}
 								}
 							]

@@ -1,6 +1,6 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import { useCameraUpload, DEFAULT_CONFIG } from "@/features/cameraUpload/cameraUpload"
+import { useCameraUploadConfig, DEFAULT_CONFIG } from "@/features/cameraUpload/cameraUpload"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, useEffect } from "react"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -16,7 +16,7 @@ import { useTranslation } from "react-i18next"
 
 const Albums = () => {
 	const { t } = useTranslation()
-	const { config, setConfig } = useCameraUpload()
+	const { config, setConfig } = useCameraUploadConfig()
 	const insets = useSafeAreaInsets()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")

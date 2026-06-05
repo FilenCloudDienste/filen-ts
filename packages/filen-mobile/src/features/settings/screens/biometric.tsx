@@ -1,21 +1,18 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import View, { GestureHandlerScrollView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import { Fragment } from "react"
 import { router } from "expo-router"
-import { run } from "@filen/utils"
-import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { ActivityIndicator } from "react-native"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
-import prompts from "@/lib/prompts"
-import alerts from "@/lib/alerts"
 import { useSecureStore } from "@/lib/secureStore"
 import useLocalAuthenticationQuery from "@/queries/useLocalAuthentication.query"
 import Text from "@/components/ui/text"
 import { actionSheet } from "@/providers/actionSheet.provider"
-import fileProvider, { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
+import { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
 import { useTranslation } from "react-i18next"
+import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
+import { disableBiometric, enableBiometric } from "@/features/settings/biometricButtons"
 
 export type Biometric =
 	| {
@@ -32,8 +29,6 @@ export type Biometric =
 
 function BiometricComponent() {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
-	const insets = useSafeAreaInsets()
 	const [biometric, setBiometric] = useSecureStore<Biometric>("biometric", {
 		enabled: false
 	})
@@ -57,15 +52,7 @@ function BiometricComponent() {
 			>
 				{localAuthenticationQuery.status === "success" ? (
 					localAuthenticationQuery.data.hasHardware && localAuthenticationQuery.data.isEnrolled ? (
-						<GestureHandlerScrollView
-							className="bg-transparent flex-1"
-							contentInsetAdjustmentBehavior="automatic"
-							contentContainerClassName="px-4 gap-4"
-							showsHorizontalScrollIndicator={false}
-							contentContainerStyle={{
-								paddingBottom: insets.bottom
-							}}
-						>
+						<SettingsScrollView>
 							<Group
 								className="bg-background-tertiary"
 								buttons={[
@@ -78,123 +65,17 @@ function BiometricComponent() {
 											value: biometric.enabled,
 											onValueChange: async () => {
 												if (biometric.enabled) {
-													setBiometric({
-														enabled: false
-													})
+													disableBiometric({ setBiometric })
 
 													return
 												}
 
-												// If the file/documents provider is on, warn the user
-												// that enabling biometric will disable it. The native
-												// provider extensions read auth.json directly and
-												// bypass the JS biometric gate, so having both on at
-												// the same time creates a false sense of security.
-												if (fileProviderEnabled) {
-													const confirmProviderDisableResult = await run(async () => {
-														return await prompts.alert({
-															title: t("biometric_disables_file_provider_title"),
-															message: t("biometric_disables_file_provider_message"),
-															okText: t("continue"),
-															cancelText: t("cancel")
-														})
-													})
-
-													if (!confirmProviderDisableResult.success) {
-														console.error(confirmProviderDisableResult.error)
-														alerts.error(confirmProviderDisableResult.error)
-
-														return
-													}
-
-													if (confirmProviderDisableResult.data.cancelled) {
-														return
-													}
-
-													const disableProviderResult = await run(async () => {
-														await fileProvider.disable()
-													})
-
-													if (!disableProviderResult.success) {
-														console.error(disableProviderResult.error)
-														alerts.error(disableProviderResult.error)
-
-														return
-													}
-
-													setFileProviderEnabled(false)
-												}
-
-												const fallbackPromptResult = await run(async () => {
-													return await prompts.input({
-														title: t("fallback_password"),
-														message: t("enter_fallback_password"),
-														cancelText: t("cancel"),
-														okText: t("continue"),
-														inputType: "secure-text"
-													})
-												})
-
-												if (!fallbackPromptResult.success) {
-													console.error(fallbackPromptResult.error)
-													alerts.error(fallbackPromptResult.error)
-
-													return
-												}
-
-												if (fallbackPromptResult.data.cancelled || fallbackPromptResult.data.type !== "string") {
-													return
-												}
-
-												const fallbackPassword = fallbackPromptResult.data.value
-
-												if (fallbackPassword.length === 0) {
-													return
-												}
-
-												const confirmFallbackPasswordPromptResult = await run(async () => {
-													return await prompts.input({
-														title: t("fallback_password"),
-														message: t("enter_confirm_fallback_password"),
-														cancelText: t("cancel"),
-														okText: t("save"),
-														inputType: "secure-text"
-													})
-												})
-
-												if (!confirmFallbackPasswordPromptResult.success) {
-													console.error(confirmFallbackPasswordPromptResult.error)
-													alerts.error(confirmFallbackPasswordPromptResult.error)
-
-													return
-												}
-
-												if (
-													confirmFallbackPasswordPromptResult.data.cancelled ||
-													confirmFallbackPasswordPromptResult.data.type !== "string"
-												) {
-													return
-												}
-
-												const confirmFallbackPassword = confirmFallbackPasswordPromptResult.data.value
-
-												if (confirmFallbackPassword.length === 0) {
-													return
-												}
-
-												if (fallbackPassword !== confirmFallbackPassword) {
-													alerts.error(t("fallback_passwords_do_not_match"))
-
-													return
-												}
-
-												setBiometric({
-													lockAfter: 0,
-													enabled: true,
-													fallback: fallbackPassword,
-													lockedUntil: 0,
-													pinOnly: false,
-													lockedMultiplier: 1
+												await enableBiometric({
+													biometric,
+													setBiometric,
+													fileProviderEnabled,
+													setFileProviderEnabled,
+													t
 												})
 											}
 										}
@@ -297,19 +178,14 @@ function BiometricComponent() {
 									]}
 								/>
 							)}
-						</GestureHandlerScrollView>
+						</SettingsScrollView>
 					) : (
 						<View className="flex-1 bg-transparent items-center justify-center px-10">
 							<Text className="text-center">{t("biometric_not_supported")}</Text>
 						</View>
 					)
 				) : (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<ActivityIndicator
-							size="large"
-							color={textForeground.color as string}
-						/>
-					</View>
+					<SettingsLoadingView />
 				)}
 			</SafeAreaView>
 		</Fragment>

@@ -4,7 +4,7 @@ import { onlineManager } from "@tanstack/react-query"
 import notes from "@/features/notes/notes"
 import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
-import useNotesStore, { type InflightContent } from "@/features/notes/store/useNotes.store"
+import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesWithContentQueryFetch } from "@/features/notes/queries/useNotesWithContent.query"
 
@@ -70,7 +70,7 @@ export class Sync {
 				}
 			}
 
-			useNotesStore.getState().setInflightContent(fromDisk)
+			useNotesInflightStore.getState().setInflightContent(fromDisk)
 
 			return fromDisk
 		})
@@ -118,7 +118,7 @@ export class Sync {
 				this.mutex.release()
 			})
 
-			const inflightContent = useNotesStore.getState().inflightContent
+			const inflightContent = useNotesInflightStore.getState().inflightContent
 
 			if (Object.keys(inflightContent).length === 0) {
 				return
@@ -146,7 +146,7 @@ export class Sync {
 						signal
 					})
 
-					useNotesStore.getState().setInflightContent(prev => {
+					useNotesInflightStore.getState().setInflightContent(prev => {
 						const updated = {
 							...prev
 						}
@@ -170,7 +170,7 @@ export class Sync {
 				}
 			}
 
-			await this.flushToDisk(useNotesStore.getState().inflightContent)
+			await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
 		})
 
 		if (!result.success) {

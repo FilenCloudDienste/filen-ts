@@ -1197,4 +1197,21 @@ export function useAudioQueue() {
 	}
 }
 
+export function useIsCurrentTrack(trackUuid: string): boolean {
+	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
+	const [position, setPosition] = useState<number>(audio.getPosition())
+
+	useEffect(() => {
+		const queueSubscription = events.subscribe("audioQueue", setQueue)
+		const positionSubscription = events.subscribe("audioQueuePosition", setPosition)
+
+		return () => {
+			queueSubscription.remove()
+			positionSubscription.remove()
+		}
+	}, [])
+
+	return (queue[position] ?? null)?.item.data.uuid === trackUuid
+}
+
 export default audio

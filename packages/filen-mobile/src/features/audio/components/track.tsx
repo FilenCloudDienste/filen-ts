@@ -1,15 +1,13 @@
-import { useResolveClassNames } from "uniwind"
 import { run, formatBytes, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import audio, { type PlaylistWithItems, useAudioQueue } from "@/features/audio/audio"
+import audio, { type PlaylistWithItems, useIsCurrentTrack } from "@/features/audio/audio"
 import { PressableScale } from "@/components/ui/pressables"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
-import Image from "@/components/ui/image"
+import AudioThumbnail from "@/components/ui/audioThumbnail"
 import { useReorderableDrag } from "react-native-reorderable-list"
 import { selectPlaylists } from "@/features/audio/playlistsSelect"
 import { actionSheet, type ShowActionSheetOptions } from "@/providers/actionSheet.provider"
@@ -228,13 +226,10 @@ function buildTrackButtons({
 
 export function Track({ track, playlist }: { track: TrackType; playlist: PlaylistWithItems }) {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
 	const drag = useReorderableDrag()
-	const { queueItem } = useAudioQueue()
+	const isCurrent = useIsCurrentTrack(track.item.data.uuid)
 	const isSelected = usePlaylistTracksStore(useShallow(state => state.selectedTracks.some(t => t.uuid === track.uuid)))
 	const areTracksSelected = usePlaylistTracksStore(useShallow(state => state.selectedTracks.length > 0))
-
-	const isCurrent = !!queueItem && track.uuid === queueItem.item.data.uuid
 
 	const audioMetadataQuery = useAudioMetadataQuery({
 		type: "drive",
@@ -279,33 +274,11 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 					<Checkbox value={isSelected} />
 				</AnimatedView>
 			)}
-			{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
-				<Image
-					className={cn(
-						"size-10 rounded-lg bg-background-tertiary",
-						isCurrent ? "border border-blue-500" : "border border-transparent"
-					)}
-					source={{
-						uri: audioMetadataQuery.data.pictureUri
-					}}
-					contentFit="contain"
-					cachePolicy="disk"
-					recyclingKey={`toolbar-audio-picture-${track.item.data.uuid}`}
-				/>
-			) : (
-				<View
-					className={cn(
-						"bg-background-tertiary size-10 rounded-lg flex-row items-center justify-center",
-						isCurrent ? "border border-blue-500" : "border border-transparent"
-					)}
-				>
-					<Ionicons
-						name="musical-note"
-						size={16}
-						color={textForeground.color}
-					/>
-				</View>
-			)}
+			<AudioThumbnail
+				pictureUri={audioMetadataQuery.status === "success" ? audioMetadataQuery.data?.pictureUri : null}
+				active={isCurrent}
+				recyclingKey={`toolbar-audio-picture-${track.item.data.uuid}`}
+			/>
 			<View className="flex-col bg-transparent flex-1 border-b border-border py-2.5">
 				<Text
 					numberOfLines={1}

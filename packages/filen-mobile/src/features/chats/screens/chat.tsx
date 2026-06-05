@@ -194,15 +194,38 @@ const Unread = ({ chat }: { chat: TChat }) => {
 	)
 }
 
-const Chat = () => {
+const DisconnectedBanner = () => {
+	const socketState = useSocketStore(useShallow(state => state.state))
+	const textForeground = useResolveClassNames("text-foreground")
 	const { t } = useTranslation()
+
+	if (socketState === "connected") {
+		return null
+	}
+
+	return (
+		<View className="absolute top-0 left-0 right-0 items-center z-10 bg-red-500 py-1 flex-row justify-center gap-2">
+			<ActivityIndicator
+				size="small"
+				color={textForeground.color}
+			/>
+			<Text
+				className="text-foreground"
+				numberOfLines={1}
+				ellipsizeMode="middle"
+			>
+				{socketState === "disconnected" ? t("disconnected") : t("reconnecting")}
+			</Text>
+		</View>
+	)
+}
+
+const Chat = () => {
 	const { uuid } = useLocalSearchParams<{
 		uuid: string
 	}>()
 	const keyboardAnimation = useReanimatedKeyboardAnimation()
 	const router = useRouter()
-	const socketState = useSocketStore(useShallow(state => state.state))
-	const textForeground = useResolveClassNames("text-foreground")
 
 	const chatsQuery = useChatsQuery({
 		enabled: false
@@ -252,21 +275,7 @@ const Chat = () => {
 					className="flex-1 bg-transparent"
 					style={containerStyle}
 				>
-					{socketState !== "connected" && (
-						<View className="absolute top-0 left-0 right-0 items-center z-10 bg-red-500 py-1 flex-row justify-center gap-2">
-							<ActivityIndicator
-								size="small"
-								color={textForeground.color}
-							/>
-							<Text
-								className="text-foreground"
-								numberOfLines={1}
-								ellipsizeMode="middle"
-							>
-								{socketState === "disconnected" ? t("disconnected") : t("reconnecting")}
-							</Text>
-						</View>
-					)}
+					<DisconnectedBanner />
 					<Unread chat={chat} />
 					<Messages chat={chat} />
 				</AnimatedView>

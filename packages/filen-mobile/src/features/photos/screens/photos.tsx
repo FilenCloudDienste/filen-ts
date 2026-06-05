@@ -15,7 +15,7 @@ import { getPreviewType } from "@/lib/previewType"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useDrivePath from "@/hooks/useDrivePath"
 import { router, useFocusEffect } from "expo-router"
-import cameraUpload, { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
 import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
@@ -33,7 +33,7 @@ const Photos = () => {
 	const { t } = useTranslation()
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
-	const { config } = useCameraUpload()
+	const [config] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
 	const drivePath = useDrivePath()
 	const [photosGridTiles] = useSecureStore<number>("photosGridTiles", 4)
 

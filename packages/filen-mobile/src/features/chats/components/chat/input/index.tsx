@@ -2,7 +2,7 @@ import { ChatTypingType } from "@filen/sdk-rs"
 import { useTranslation } from "react-i18next"
 import { type Chat } from "@/types"
 import { useRef, useEffect, Fragment, useCallback } from "react"
-import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent } from "react-native"
+import { TextInput, type View as TView, useWindowDimensions, type TextInputSelectionChangeEvent, type ScaledSize } from "react-native"
 import View, { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames } from "uniwind"
@@ -38,6 +38,83 @@ import MentionSuggestions from "@/features/chats/components/chat/input/mentionSu
 import EmojiSuggestions from "@/features/chats/components/chat/input/emojiSuggestions"
 import ReplyTo from "@/features/chats/components/chat/input/replyTo"
 
+type ChatTextInputProps = {
+	chatInputValue: string
+	onChangeText: (text: string) => void
+	inputRef: React.RefObject<TextInput | null>
+	onKeyPress: () => void
+	onFocus: () => void
+	onBlur: () => void
+	onSelectionChange: (e: TextInputSelectionChangeEvent) => void
+	onSend: () => void
+	windowDimensions: ScaledSize
+}
+
+const ChatTextInput = ({
+	chatInputValue,
+	onChangeText,
+	inputRef,
+	onKeyPress,
+	onFocus,
+	onBlur,
+	onSelectionChange,
+	onSend,
+	windowDimensions
+}: ChatTextInputProps) => {
+	const { t } = useTranslation()
+	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
+	const disableAssist = suggestionsVisible.length > 0 || chatInputValue.length === 0
+
+	return (
+		<CrossGlassContainerView className="flex-1 rounded-3xl min-h-11">
+			<View className="flex-1 bg-transparent">
+				<TextInput
+					ref={inputRef}
+					value={chatInputValue}
+					onChangeText={onChangeText}
+					className="ios:py-3 text-foreground min-h-11 flex-1 rounded-3xl py-2 pl-3 pr-12 leading-5"
+					placeholderTextColorClassName="text-muted-foreground"
+					placeholder={t("type_a_message")}
+					multiline={true}
+					scrollEnabled={true}
+					autoFocus={false}
+					autoCapitalize={disableAssist ? "none" : undefined}
+					autoComplete={disableAssist ? "off" : undefined}
+					autoCorrect={disableAssist ? false : undefined}
+					spellCheck={disableAssist ? false : undefined}
+					keyboardType="default"
+					returnKeyType="default"
+					enterKeyHint="enter"
+					onKeyPress={onKeyPress}
+					onFocus={onFocus}
+					onBlur={onBlur}
+					onSelectionChange={onSelectionChange}
+					style={{
+						maxHeight: Math.max(128, windowDimensions.height / 4)
+					}}
+				/>
+				<AnimatedView
+					className="absolute z-50 bottom-2 right-2"
+					entering={FadeIn}
+					exiting={FadeOut}
+				>
+					<PressableScale
+						className="ios:rounded-full rounded-full size-7 bg-blue-500 items-center justify-center"
+						onPress={onSend}
+						hitSlop={15}
+					>
+						<Ionicons
+							name="arrow-up-outline"
+							size={18}
+							color="white"
+						/>
+					</PressableScale>
+				</AnimatedView>
+			</View>
+		</CrossGlassContainerView>
+	)
+}
+
 const Input = ({ chat }: { chat: Chat }) => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
@@ -47,7 +124,6 @@ const Input = ({ chat }: { chat: Chat }) => {
 	const windowDimensions = useWindowDimensions()
 	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
 	const inputRef = useRef<TextInput>(null)
-	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const stringifiedClient = useStringifiedClient()
 	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 	const sendTypingEventSemaphoreRef = useRef<Semaphore>(new Semaphore(1))
@@ -566,52 +642,17 @@ const Input = ({ chat }: { chat: Chat }) => {
 						</PressableScale>
 					</CrossGlassContainerView>
 				</Menu>
-				<CrossGlassContainerView className="flex-1 rounded-3xl min-h-11">
-					<View className="flex-1 bg-transparent">
-						<TextInput
-							ref={inputRef}
-							value={chatInputValue}
-							onChangeText={onChangeText}
-							className="ios:py-3 text-foreground min-h-11 flex-1 rounded-3xl py-2 pl-3 pr-12 leading-5"
-							placeholderTextColorClassName="text-muted-foreground"
-							placeholder={t("type_a_message")}
-							multiline={true}
-							scrollEnabled={true}
-							autoFocus={false}
-							autoCapitalize={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "none" : undefined}
-							autoComplete={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? "off" : undefined}
-							autoCorrect={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
-							spellCheck={suggestionsVisible.length > 0 || chatInputValue.length === 0 ? false : undefined}
-							keyboardType="default"
-							returnKeyType="default"
-							enterKeyHint="enter"
-							onKeyPress={onKeyPress}
-							onFocus={onFocus}
-							onBlur={onBlur}
-							onSelectionChange={onSelectionChange}
-							style={{
-								maxHeight: Math.max(128, windowDimensions.height / 4)
-							}}
-						/>
-						<AnimatedView
-							className="absolute z-50 bottom-2 right-2"
-							entering={FadeIn}
-							exiting={FadeOut}
-						>
-							<PressableScale
-								className="ios:rounded-full rounded-full size-7 bg-blue-500 items-center justify-center"
-								onPress={send}
-								hitSlop={15}
-							>
-								<Ionicons
-									name="arrow-up-outline"
-									size={18}
-									color="white"
-								/>
-							</PressableScale>
-						</AnimatedView>
-					</View>
-				</CrossGlassContainerView>
+				<ChatTextInput
+					chatInputValue={chatInputValue}
+					onChangeText={onChangeText}
+					inputRef={inputRef}
+					onKeyPress={onKeyPress}
+					onFocus={onFocus}
+					onBlur={onBlur}
+					onSelectionChange={onSelectionChange}
+					onSend={send}
+					windowDimensions={windowDimensions}
+				/>
 			</View>
 		</KeyboardStickyView>
 	)

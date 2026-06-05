@@ -1,6 +1,6 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
-import cameraUpload, { useCameraUpload, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
@@ -26,7 +26,7 @@ type BooleanConfigKey = {
 
 const CameraUpload = () => {
 	const { t } = useTranslation()
-	const { config, setConfig } = useCameraUpload()
+	const { config, setConfig } = useCameraUploadConfig()
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")

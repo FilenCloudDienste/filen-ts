@@ -57,7 +57,7 @@ vi.mock("@filen/utils", async () => ({
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
-vi.mock("@/features/notes/store/useNotes.store", () => {
+vi.mock("@/features/notes/store/useNotesInflight.store", () => {
 	const mockSetInflightContent = vi.fn((fn: unknown) => {
 		if (typeof fn === "function") {
 			notesState.inflightContent = fn(notesState.inflightContent)

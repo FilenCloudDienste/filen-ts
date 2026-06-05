@@ -8,6 +8,7 @@ import { useRouter } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import { simpleDate } from "@/lib/time"
 import Menu from "@/features/notes/components/tag/menu"
 import { cn } from "@filen/utils"
@@ -27,7 +28,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 	const isActive = useNotesStore(useShallow(state => state.activeTag?.uuid === info.item.uuid))
 	const isSelected = useNotesStore(useShallow(state => state.selectedTags.some(selectedTag => selectedTag.uuid === info.item.uuid)))
 	const areTagsSelected = useNotesStore(useShallow(state => state.selectedTags.length > 0))
-	const isInflight = useNotesStore(
+	const isInflight = useNotesInflightStore(
 		useShallow(state => {
 			return notesForTag.some(n => (state.inflightContent[n.uuid] ?? []).length > 0)
 		})
