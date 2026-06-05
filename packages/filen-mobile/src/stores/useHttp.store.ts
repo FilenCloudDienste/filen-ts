@@ -14,9 +14,7 @@ export const useHttpStore = create<HttpStore>()(
 		port: null,
 		getFileUrl: null,
 		setGetFileUrl(fn) {
-			set(state => ({
-				getFileUrl: typeof fn === "function" || fn === null ? fn : state.getFileUrl
-			}))
+			set({ getFileUrl: fn })
 		},
 		setPort(fn) {
 			set(state => ({

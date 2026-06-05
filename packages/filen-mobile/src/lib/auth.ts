@@ -91,10 +91,6 @@ class Auth {
 		}
 	}
 
-	public async getStringifiedAuthedClientFromSecureStorage(): Promise<StringifiedClient | null> {
-		return await secureStore.get<StringifiedClient>(this.stringifiedClientStorageKey)
-	}
-
 	public async getSdkClients(): Promise<{
 		authedSdkClient: JsClientInterface
 		unauthedSdkClient: UnauthJsClientInterface

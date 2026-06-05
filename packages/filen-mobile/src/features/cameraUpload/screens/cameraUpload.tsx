@@ -64,8 +64,6 @@ const CameraUpload = () => {
 	useFocusEffect(
 		useCallback(() => {
 			return () => {
-				console.log("[CameraUpload] Screen unfocused, syncing camera uploads...")
-
 				cameraUpload.sync().catch(console.error)
 			}
 		}, [])
