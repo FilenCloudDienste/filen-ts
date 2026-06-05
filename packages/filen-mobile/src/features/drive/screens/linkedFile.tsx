@@ -15,7 +15,7 @@ import DismissStack from "@/components/dismissStack"
 import { Information } from "@/features/drive/components/information"
 import useHttpStore from "@/stores/useHttp.store"
 import { useShallow } from "zustand/shallow"
-import { createMenuButtons } from "@/features/drive/components/item/menu"
+import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 
