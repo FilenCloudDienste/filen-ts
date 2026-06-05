@@ -5,8 +5,8 @@ import { Fragment } from "react"
 import { router, useNavigation } from "expo-router"
 import { run } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
-import Header from "@/components/ui/header"
-import { Platform, ActivityIndicator } from "react-native"
+import SettingsHeader from "@/components/ui/settingsHeader"
+import { ActivityIndicator } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useAccountQuery from "@/queries/useAccount.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -20,7 +20,6 @@ import { useTranslation } from "react-i18next"
 
 function Security() {
 	const { t } = useTranslation()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
@@ -31,35 +30,11 @@ function Security() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("security")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={() => {
-					if (Platform.OS === "android") {
-						return null
-					}
-
-					return [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					]
+				icon="close"
+				onDismiss={() => {
+					navigation.getParent()?.goBack()
 				}}
 			/>
 			<SafeAreaView

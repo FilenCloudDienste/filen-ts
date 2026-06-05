@@ -4,8 +4,7 @@ import { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment } from "react"
 import { router } from "expo-router"
 import { run, formatBytes } from "@filen/utils"
-import { useResolveClassNames } from "uniwind"
-import Header from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { Platform } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import prompts from "@/lib/prompts"
@@ -37,8 +36,6 @@ const CACHE_SIZE_PRESETS_BYTES: readonly number[] = [
 const CACHE_SIZE_SAFETY_BUFFER_BYTES = 1024 * 1024 * 1024
 
 function FileProviderSettings() {
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const { t } = useTranslation()
 	const featureLabel = Platform.OS === "ios" ? t("file_provider") : t("documents_provider")
@@ -187,37 +184,13 @@ function FileProviderSettings() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={featureLabel}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={() => {
-					if (Platform.OS === "android") {
-						return null
+				icon="close"
+				onDismiss={() => {
+					if (router.canGoBack()) {
+						router.back()
 					}
-
-					return [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									if (router.canGoBack()) {
-										router.back()
-									}
-								}
-							}
-						}
-					]
 				}}
 			/>
 			<SafeAreaView

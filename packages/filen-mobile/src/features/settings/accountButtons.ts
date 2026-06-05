@@ -614,6 +614,183 @@ export function buildAccountToggleButtons({
 	]
 }
 
+// 2FA enable / disable switch button. Extracted verbatim from twoFactor.tsx.
+export function buildTwoFactorButtons({ t, accountQuery }: { t: TFunction; accountQuery: AccountQuerySuccess }): Button[] {
+	return [
+		{
+			icon: "time-outline",
+			title: t("two_factor_authentication"),
+			subTitle: t("two_factor_authentication_description"),
+			rightItem: {
+				type: "switch",
+				value: accountQuery.data.twoFactorEnabled,
+				onValueChange: async () => {
+					if (accountQuery.data.twoFactorEnabled) {
+						const promptResult = await run(async () => {
+							return await prompts.alert({
+								title: t("disable_two_factor_authentication"),
+								message: t("disable_two_factor_authentication_description"),
+								okText: t("continue"),
+								cancelText: t("cancel"),
+								destructive: true
+							})
+						})
+
+						if (!promptResult.success) {
+							console.error(promptResult.error)
+							alerts.error(promptResult.error)
+
+							return
+						}
+
+						if (promptResult.data.cancelled) {
+							return
+						}
+
+						const twoFactorPromptResult = await run(async () => {
+							return await prompts.input({
+								title: t("enter_two_factor_code"),
+								message: t("enter_two_factor_code_description"),
+								cancelText: t("cancel"),
+								okText: t("disable"),
+								inputType: "secure-text",
+								destructive: true
+							})
+						})
+
+						if (!twoFactorPromptResult.success) {
+							console.error(twoFactorPromptResult.error)
+							alerts.error(twoFactorPromptResult.error)
+
+							return
+						}
+
+						if (twoFactorPromptResult.data.cancelled || twoFactorPromptResult.data.type !== "string") {
+							return
+						}
+
+						const twoFactor = twoFactorPromptResult.data.value
+
+						if (twoFactor.length === 0) {
+							return
+						}
+
+						const result = await runWithLoading(async () => {
+							await (await auth.getSdkClients()).authedSdkClient.disable2fa(twoFactor)
+							await accountQuery.refetch()
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
+						}
+
+						return
+					}
+
+					const twoFactorPromptResult = await run(async () => {
+						return await prompts.input({
+							title: t("enter_two_factor_code"),
+							message: t("enter_two_factor_code_description"),
+							cancelText: t("cancel"),
+							okText: t("enable"),
+							inputType: "secure-text"
+						})
+					})
+
+					if (!twoFactorPromptResult.success) {
+						console.error(twoFactorPromptResult.error)
+						alerts.error(twoFactorPromptResult.error)
+
+						return
+					}
+
+					if (twoFactorPromptResult.data.cancelled || twoFactorPromptResult.data.type !== "string") {
+						return
+					}
+
+					const twoFactor = twoFactorPromptResult.data.value
+
+					if (twoFactor.length === 0) {
+						return
+					}
+
+					const result = await runWithLoading(async () => {
+						const recoverKey = await (await auth.getSdkClients()).authedSdkClient.enable2faGetRecoveryKey(twoFactor)
+
+						await accountQuery.refetch()
+
+						return recoverKey
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					const recoverKey = result.data
+
+					const promptResult = await run(async () => {
+						return await prompts.alert({
+							title: t("two_factor_recovery_key"),
+							message: t("two_factor_recovery_key_description"),
+							okText: t("continue"),
+							cancelText: t("close")
+						})
+					})
+
+					if (!promptResult.success) {
+						console.error(promptResult.error)
+						alerts.error(promptResult.error)
+
+						return
+					}
+
+					const exportResult = await runWithLoading(async () => {
+						const file = newTmpFile(`${accountQuery.data.email}.twoFactorRecoveryKey.${Date.now()}.txt`)
+
+						if (file.exists) {
+							file.delete()
+						}
+
+						file.write(recoverKey)
+
+						return file
+					})
+
+					if (!exportResult.success) {
+						console.error(exportResult.error)
+						alerts.error(exportResult.error)
+
+						return
+					}
+
+					const shareResult = await shareTmpFile({
+						uri: exportResult.data.uri,
+						name: exportResult.data.name,
+						cleanup: () => {
+							if (exportResult.data.exists) {
+								exportResult.data.delete()
+							}
+						}
+					})
+
+					if (!shareResult.success) {
+						console.error(shareResult.error)
+						alerts.error(shareResult.error)
+
+						return
+					}
+				}
+			}
+		}
+	]
+}
+
 // Logout button (confirm prompt -> auth.logout()).
 export function buildLogoutButtons({ t }: { t: TFunction }): Button[] {
 	return [

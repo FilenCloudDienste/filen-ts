@@ -6,8 +6,8 @@ import { useNavigation } from "expo-router"
 import { run, cn } from "@filen/utils"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
-import Header from "@/components/ui/header"
-import { Platform, ActivityIndicator } from "react-native"
+import SettingsHeader from "@/components/ui/settingsHeader"
+import { ActivityIndicator } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useAccountQuery from "@/queries/useAccount.query"
@@ -29,7 +29,6 @@ import { useTranslation } from "react-i18next"
 import { prepareAvatarFileForUpload } from "@/features/settings/avatarUpload"
 
 function Account() {
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -42,35 +41,11 @@ function Account() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("account")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={() => {
-					if (Platform.OS === "android") {
-						return null
-					}
-
-					return [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					]
+				icon="close"
+				onDismiss={() => {
+					navigation.getParent()?.goBack()
 				}}
 			/>
 			<SafeAreaView

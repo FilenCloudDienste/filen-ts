@@ -5,8 +5,7 @@ import { Fragment, useState } from "react"
 import { router, useLocalSearchParams } from "expo-router"
 import { run } from "@filen/utils"
 import { useResolveClassNames } from "uniwind"
-import Header from "@/components/ui/header"
-import { Platform } from "react-native"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { type fetchData } from "@/queries/useAccount.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -26,8 +25,6 @@ function Personal() {
 		personal?: string
 	}>()
 	const { t } = useTranslation()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const insets = useSafeAreaInsets()
 	const [personal, setPersonal] = useState<Awaited<ReturnType<typeof fetchData>>["personal"] | null>(
@@ -90,37 +87,13 @@ function Personal() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("personal_information")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={() => {
-					if (Platform.OS === "android") {
-						return null
+				icon="chevron-back-outline"
+				onDismiss={() => {
+					if (router.canGoBack()) {
+						router.back()
 					}
-
-					return [
-						{
-							type: "button",
-							icon: {
-								name: "chevron-back-outline",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									if (router.canGoBack()) {
-										router.back()
-									}
-								}
-							}
-						}
-					]
 				}}
 				rightItems={() => {
 					if (!modified) {
