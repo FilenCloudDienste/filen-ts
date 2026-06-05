@@ -4,8 +4,6 @@ import {
 	DirColor,
 	type FileVersion,
 	SharedRootItem,
-	type DirPublicLinkRw,
-	type FilePublicLink,
 	NonRootNormalItem,
 	NonRootNormalItem_Tags,
 	NonRootItem_Tags,
@@ -38,7 +36,6 @@ import {
 } from "@/features/drive/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/features/drive/queries/useDriveItemVersions.query"
 import cache from "@/lib/cache"
-import { driveItemPublicLinkStatusQueryUpdate } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { run } from "@filen/utils"
@@ -47,6 +44,13 @@ import { router } from "expo-router"
 import { serialize } from "@/lib/serializer"
 import type { Linked } from "@/hooks/useDrivePath"
 import i18n from "@/lib/i18n"
+import {
+	enablePublicLink,
+	disablePublicLink,
+	updatePublicLink,
+	removeDirLink,
+	removeFileLink
+} from "@/features/drive/drivePublicLink"
 
 class Drive {
 	public async favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
@@ -580,60 +584,9 @@ class Drive {
 		})
 	}
 
-	public async removeDirLink({ item, signal, link }: { item: DriveItem; signal?: AbortSignal; link: DirPublicLinkRw }) {
-		if (item.type !== "directory") {
-			throw new Error("Invalid item type")
-		}
+	public removeDirLink = removeDirLink
 
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		await authedSdkClient.removeDirLink(
-			link,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "links",
-					uuid: null
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
-	}
-
-	public async removeFileLink({ item, signal, link }: { item: DriveItem; signal?: AbortSignal; link: FilePublicLink }) {
-		if (item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		await authedSdkClient.removeFileLink(
-			item.data,
-			link,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "links",
-					uuid: null
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
-	}
+	public removeFileLink = removeFileLink
 
 	public async createDirectory({
 		parent,
@@ -923,329 +876,11 @@ class Drive {
 		return item
 	}
 
-	public async enablePublicLink({
-		item,
-		signal,
-		onProgress
-	}: {
-		item: DriveItem
-		signal?: AbortSignal
-		onProgress?: (bytesDownloaded: number, totalBytes: number | undefined) => void
-	}) {
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
+	public enablePublicLink = enablePublicLink
 
-		const { authedSdkClient } = await auth.getSdkClients()
+	public disablePublicLink = disablePublicLink
 
-		if (item.type === "directory") {
-			let status = await authedSdkClient.getDirLinkStatus(
-				item.data,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			if (status) {
-				return {
-					type: "directory" as const,
-					link: status
-				}
-			}
-
-			status = await authedSdkClient.publicLinkDir(
-				item.data,
-				onProgress
-					? {
-							onProgress: (bytesDownloaded, totalBytes) => {
-								onProgress(Number(bytesDownloaded), totalBytes ? Number(totalBytes) : undefined)
-							}
-						}
-					: undefined,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "links",
-						uuid: null
-					}
-				},
-				updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
-			})
-
-			driveItemPublicLinkStatusQueryUpdate({
-				params: {
-					uuid: item.data.uuid
-				},
-				updater: () => ({
-					type: "directory" as const,
-					status
-				})
-			})
-
-			return {
-				type: "directory" as const,
-				link: status
-			}
-		} else {
-			let status = await authedSdkClient.getFileLinkStatus(
-				item.data,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			if (status) {
-				return {
-					type: "file" as const,
-					link: status
-				}
-			}
-
-			status = await authedSdkClient.publicLinkFile(
-				item.data,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "links",
-						uuid: null
-					}
-				},
-				updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
-			})
-
-			driveItemPublicLinkStatusQueryUpdate({
-				params: {
-					uuid: item.data.uuid
-				},
-				updater: () => ({
-					type: "file" as const,
-					status
-				})
-			})
-
-			return {
-				type: "file" as const,
-				link: status
-			}
-		}
-	}
-
-	public async disablePublicLink({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		if (item.type === "directory") {
-			const status = await authedSdkClient.getDirLinkStatus(
-				item.data,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			if (!status) {
-				return
-			}
-
-			await authedSdkClient.removeDirLink(
-				status,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "links",
-						uuid: null
-					}
-				},
-				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-			})
-
-			driveItemPublicLinkStatusQueryUpdate({
-				params: {
-					uuid: item.data.uuid
-				},
-				updater: () => null
-			})
-		} else {
-			const status = await authedSdkClient.getFileLinkStatus(
-				item.data,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			if (!status) {
-				return
-			}
-
-			await authedSdkClient.removeFileLink(
-				item.data,
-				status,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "links",
-						uuid: null
-					}
-				},
-				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-			})
-
-			driveItemPublicLinkStatusQueryUpdate({
-				params: {
-					uuid: item.data.uuid
-				},
-				updater: () => null
-			})
-		}
-	}
-
-	public async updatePublicLink({
-		item,
-		signal,
-		link
-	}: {
-		item: DriveItem
-		signal?: AbortSignal
-		link:
-			| {
-					type: "directory"
-					link: DirPublicLinkRw
-			  }
-			| {
-					type: "file"
-					link: FilePublicLink
-			  }
-	}) {
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		if (item.type === "directory") {
-			if (link.type !== "directory") {
-				throw new Error("Invalid link type for directory")
-			}
-
-			const status = await authedSdkClient.getDirLinkStatus(
-				item.data,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			if (!status) {
-				return
-			}
-
-			const merged: DirPublicLinkRw = {
-				...status,
-				...link.link
-			}
-
-			await authedSdkClient.updateDirLink(
-				item.data,
-				merged,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			driveItemPublicLinkStatusQueryUpdate({
-				params: {
-					uuid: item.data.uuid
-				},
-				updater: () => ({
-					type: "directory" as const,
-					status: merged
-				})
-			})
-		} else {
-			if (link.type !== "file") {
-				throw new Error("Invalid link type for file")
-			}
-
-			const status = await authedSdkClient.getFileLinkStatus(
-				item.data,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			if (!status) {
-				return
-			}
-
-			const merged: FilePublicLink = {
-				...status,
-				...link.link
-			}
-
-			await authedSdkClient.updateFileLink(
-				item.data,
-				merged,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-
-			driveItemPublicLinkStatusQueryUpdate({
-				params: {
-					uuid: item.data.uuid
-				},
-				updater: () => ({
-					type: "file" as const,
-					status: merged
-				})
-			})
-		}
-	}
+	public updatePublicLink = updatePublicLink
 
 	public async openLinkedDirectory({
 		linkUuid,
