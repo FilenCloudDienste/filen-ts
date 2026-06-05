@@ -57,21 +57,22 @@ export function sanitizeFileName(filename: string, replacement: string = "_"): s
 	// Android: ext4 supports 255 bytes, F2FS supports 255 bytes
 	// Both measure in bytes, not characters
 	const maxByteLength = 255
-	const byteLength = new TextEncoder().encode(sanitizedFilename).length
+	const encoder = new TextEncoder()
+	const byteLength = encoder.encode(sanitizedFilename).length
 
 	// Trim filename preserving extension if possible
 	if (byteLength > maxByteLength) {
 		const extensionMatch = sanitizedFilename.match(/(\.[^.]{1,10})$/)
 		const extension = extensionMatch ? extensionMatch[1] : ""
-		const extensionBytes = new TextEncoder().encode(extension).length
+		const extensionBytes = encoder.encode(extension).length
 		const maxNameBytes = maxByteLength - extensionBytes
 
 		let baseName = extension ? sanitizedFilename.slice(0, -extension.length) : sanitizedFilename
-		let baseBytes = new TextEncoder().encode(baseName).length
+		let baseBytes = encoder.encode(baseName).length
 
 		while (baseBytes > maxNameBytes && baseName.length > 0) {
 			baseName = baseName.slice(0, -1)
-			baseBytes = new TextEncoder().encode(baseName).length
+			baseBytes = encoder.encode(baseName).length
 		}
 
 		sanitizedFilename = baseName + extension
