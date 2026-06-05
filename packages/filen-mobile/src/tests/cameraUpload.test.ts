@@ -107,6 +107,12 @@ vi.mock("@/lib/i18n", () => ({
 
 
 vi.mock("@/lib/utils", () => ({
+	unwrapFileMeta: vi.fn(),
+	unwrapSdkError: vi.fn().mockReturnValue(null),
+	normalizeModificationTimestampForComparison: (ts: number) => ts
+}))
+
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (filePath: string): string => {
 		let normalizedPath = filePath
 			.trim()
@@ -125,10 +131,7 @@ vi.mock("@/lib/utils", () => ({
 
 		return pathModule.posix.normalize(normalizedPath)
 	},
-	normalizeFilePathForExpo: (p: string) => p,
-	unwrapFileMeta: vi.fn(),
-	unwrapSdkError: vi.fn().mockReturnValue(null),
-	normalizeModificationTimestampForComparison: (ts: number) => ts
+	normalizeFilePathForExpo: (p: string) => p
 }))
 
 vi.mock("@/lib/signals", () => ({

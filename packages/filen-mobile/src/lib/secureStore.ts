@@ -11,7 +11,7 @@ import events from "@/lib/events"
 import { Buffer } from "react-native-quick-crypto"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import isEqual from "react-fast-compare"
-import { normalizeFilePathForSdk } from "@/lib/utils"
+import { normalizeFilePathForSdk } from "@/lib/paths"
 import useEffectOnce from "@/hooks/useEffectOnce"
 
 export const VERSION = 1

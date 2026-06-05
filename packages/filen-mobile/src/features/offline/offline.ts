@@ -25,15 +25,14 @@ import {
 import cache from "@/lib/cache"
 import {
 	unwrapFileMeta,
-	normalizeFilePathForSdk,
 	unwrapDirMeta,
 	unwrapAnyDirUuid,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
 	unwrapParentUuid,
-	normalizeModificationTimestampForComparison,
-	extractPathInsideUuidDirectory
+	normalizeModificationTimestampForComparison
 } from "@/lib/utils"
+import { normalizeFilePathForSdk, extractPathInsideUuidDirectory } from "@/lib/paths"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"

@@ -287,12 +287,15 @@ vi.mock("@/lib/thumbnails", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
-	normalizeFilePathForExpo: vi.fn((path: string) => path),
 	unwrapDirMeta: mockUnwrapDirMeta,
 	unwrapFileMeta: mockUnwrapFileMeta,
 	unwrapParentUuid: mockUnwrapParentUuid,
 	listLocalDirectoryRecursive: vi.fn(() => [])
+}))
+
+vi.mock("@/lib/paths", () => ({
+	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
+	normalizeFilePathForExpo: vi.fn((path: string) => path)
 }))
 
 vi.mock("@/lib/signals", () => ({

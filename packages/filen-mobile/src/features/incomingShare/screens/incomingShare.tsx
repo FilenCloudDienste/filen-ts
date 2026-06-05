@@ -23,7 +23,7 @@ import { newTmpFile } from "@/lib/tmp"
 import isEqual from "react-fast-compare"
 import useIncomingShareStore from "@/features/incomingShare/store/useIncomingShare.store"
 import Image from "@/components/ui/image"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 import { FileIcon } from "@/components/itemIcons"
 
 function Payload({ payload }: { payload: ResolvedSharePayload }) {

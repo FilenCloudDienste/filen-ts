@@ -1,5 +1,6 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
-import { getPreviewType, unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/utils"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"

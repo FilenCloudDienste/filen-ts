@@ -45,7 +45,9 @@ vi.mock("react-fast-compare", async () => await import("@/tests/mocks/reactFastC
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))
 

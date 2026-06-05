@@ -23,7 +23,7 @@ import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { useRecyclingState } from "@shopify/flash-list"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 

@@ -176,7 +176,9 @@ vi.mock("@/stores/useHttp.store", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForExpo: vi.fn((path: string) => (path.startsWith("file://") ? path : `file://${path}`)),
 	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", ""))
 }))

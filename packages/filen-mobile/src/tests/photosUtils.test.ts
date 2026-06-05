@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 
 import { isPhotoGridItem, filterPhotoGridItems } from "@/features/photos/utils"
-import { type PreviewType } from "@/lib/utils"
+import { type PreviewType } from "@/lib/previewType"
 import { type DriveItem } from "@/types"
 
 // Minimal injected dependencies — kept in the test so the helper stays free of

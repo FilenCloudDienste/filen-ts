@@ -170,10 +170,6 @@ vi.mock("@/constants", () => {
 
 import {
 	sanitizeFileName,
-	normalizeFilePathForSdk,
-	normalizeFilePathForExpo,
-	extractPathInsideUuidDirectory,
-	getPreviewType,
 	normalizeModificationTimestampForComparison,
 	contactDisplayName,
 	makeDriveItemPublicLink,
@@ -182,6 +178,8 @@ import {
 	resolveCreatedOrTimestamp,
 	convertBigInts
 } from "@/lib/utils"
+import { normalizeFilePathForSdk, normalizeFilePathForExpo, extractPathInsideUuidDirectory } from "@/lib/paths"
+import { getPreviewType } from "@/lib/previewType"
 import { extractLinks, trimUnbalanced, safeParseUrl } from "@/lib/linkParser"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { createCompositeAbortSignal, PauseSignal, createCompositePauseSignal } from "@/lib/signals"

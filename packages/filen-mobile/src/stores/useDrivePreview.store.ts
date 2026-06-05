@@ -2,7 +2,7 @@ import { create } from "zustand"
 import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
 import { router } from "expo-router"
 import type { DrivePath } from "@/hooks/useDrivePath"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import { Paths } from "expo-file-system"
 

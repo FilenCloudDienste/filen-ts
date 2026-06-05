@@ -38,7 +38,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 
 // Provide only the functions that driveDownload.ts actually imports from utils.
 // listLocalDirectoryRecursive uses the real expo-file-system mock internally so we
-// implement it faithfully; normalizeFilePathForBlobUtil is a trivial wrapper.
+// implement it faithfully.
 vi.mock("@/lib/utils", async () => {
 	const { File, Directory } = await import("@/tests/mocks/expoFileSystem")
 
@@ -71,6 +71,13 @@ vi.mock("@/lib/utils", async () => {
 		return entries
 	}
 
+	return {
+		listLocalDirectoryRecursive: walkDir
+	}
+})
+
+// normalizeFilePathForBlobUtil is a trivial wrapper around normalizeFilePathForSdk.
+vi.mock("@/lib/paths", () => {
 	function normalizeFilePathForSdk(filePath: string): string {
 		const cleaned = filePath
 			.trim()
@@ -104,7 +111,6 @@ vi.mock("@/lib/utils", async () => {
 	}
 
 	return {
-		listLocalDirectoryRecursive: walkDir,
 		normalizeFilePathForBlobUtil,
 		normalizeFilePathForSdk
 	}

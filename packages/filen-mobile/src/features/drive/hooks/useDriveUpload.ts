@@ -9,7 +9,7 @@ import DocumentScanner, {
 	ScanDocumentResponseStatus
 } from "react-native-document-scanner-plugin"
 import { randomUUID } from "expo-crypto"
-import { normalizeFilePathForExpo } from "@/lib/utils"
+import { normalizeFilePathForExpo } from "@/lib/paths"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"

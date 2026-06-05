@@ -4,7 +4,7 @@ import { Paths } from "expo-file-system"
 import { isValidHexColor, cn } from "@filen/utils"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 
 const FILE_ICONS = {
 	dmg: require("@/components/itemIcons/svg/iso.svg"),

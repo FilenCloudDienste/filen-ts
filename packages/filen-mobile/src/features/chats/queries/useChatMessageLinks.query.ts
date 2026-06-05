@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import auth from "@/lib/auth"
 import { sortParams, parseFilenPublicLink, run } from "@filen/utils"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 import { safeParseUrl, extractLinks } from "@/lib/linkParser"
 import { MaybeEncryptedUniffi_Tags, type DirPublicInfo, type LinkedFile } from "@filen/sdk-rs"
 import { Paths } from "expo-file-system"
