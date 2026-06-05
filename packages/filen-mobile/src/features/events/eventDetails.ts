@@ -63,7 +63,7 @@ export function eventKindToReadable(kind: UserEventKind, t: TFunction = i18n.t):
 	return t(EVENT_KIND_KEY[kind.tag])
 }
 
-export function extractFileMetaName(meta: FileMeta, t: TFunction): string {
+function extractFileMetaName(meta: FileMeta, t: TFunction): string {
 	if (meta.tag === FileMeta_Tags.Decoded) {
 		return meta.inner[0].name
 	}
@@ -71,7 +71,7 @@ export function extractFileMetaName(meta: FileMeta, t: TFunction): string {
 	return t("encrypted")
 }
 
-export function extractDirMetaName(meta: DirMeta, t: TFunction): string {
+function extractDirMetaName(meta: DirMeta, t: TFunction): string {
 	if (meta.tag === DirMeta_Tags.Decoded) {
 		return meta.inner[0].name
 	}

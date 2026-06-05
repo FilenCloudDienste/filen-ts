@@ -15,9 +15,8 @@ export const DateRange = () => {
 	}
 
 	const startDate = visibleDateRange.start !== null ? new Date(visibleDateRange.start) : null
-	const endDate = visibleDateRange.end !== null ? new Date(visibleDateRange.end) : null
 
-	if (!startDate || !endDate) {
+	if (!startDate) {
 		return null
 	}
 

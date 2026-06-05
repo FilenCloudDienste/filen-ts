@@ -21,7 +21,6 @@ export type SortByType =
 const uuidCache = new Map<string, number>()
 const lowerCache = new Map<string, string>()
 const numericPartsCache = new Map<string, (string | number)[]>()
-const MAX_CACHE_SIZE = Infinity // Might adjust later if needed
 
 function getUuidNumber(uuid: string): number {
 	let cached = uuidCache.get(uuid)
@@ -30,10 +29,6 @@ function getUuidNumber(uuid: string): number {
 		cached = parseNumbersFromString(uuid)
 
 		uuidCache.set(uuid, cached)
-
-		if (uuidCache.size > MAX_CACHE_SIZE) {
-			uuidCache.clear()
-		}
 	}
 
 	return cached
@@ -46,10 +41,6 @@ function getLowerName(name: string): string {
 		cached = name.toLowerCase()
 
 		lowerCache.set(name, cached)
-
-		if (lowerCache.size > MAX_CACHE_SIZE) {
-			lowerCache.clear()
-		}
 	}
 
 	return cached
@@ -101,10 +92,6 @@ function getNumericParts(str: string): (string | number)[] {
 		}
 
 		numericPartsCache.set(str, cached)
-
-		if (numericPartsCache.size > MAX_CACHE_SIZE) {
-			numericPartsCache.clear()
-		}
 	}
 
 	return cached
@@ -290,22 +277,6 @@ function sortItems(items: DriveItem[], type: SortByType): DriveItem[] {
 
 export const itemSorter = { sortItems }
 
-const notesUuidCache: Map<string, number> = new Map()
-
-function parseUuid(uuid: string): number {
-	const cached = notesUuidCache.get(uuid)
-
-	if (cached !== undefined) {
-		return cached
-	}
-
-	const result = parseNumbersFromString(uuid)
-
-	notesUuidCache.set(uuid, result)
-
-	return result
-}
-
 function sort(
 	notes: (
 		| Note
@@ -333,7 +304,7 @@ function sort(
 		}
 
 		if (b.editedTimestamp === a.editedTimestamp) {
-			return parseUuid(b.uuid) - parseUuid(a.uuid)
+			return getUuidNumber(b.uuid) - getUuidNumber(a.uuid)
 		}
 
 		return Number(b.editedTimestamp) - Number(a.editedTimestamp)

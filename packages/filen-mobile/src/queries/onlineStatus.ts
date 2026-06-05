@@ -12,10 +12,6 @@ onlineManager.setEventListener(setOnline => {
 	})
 })
 
-NetInfo.addEventListener(state => {
-	onlineManager.setOnline(computeOnline(state))
-})
-
 AppState.addEventListener("change", nextAppState => {
 	if (nextAppState !== "active") {
 		return
