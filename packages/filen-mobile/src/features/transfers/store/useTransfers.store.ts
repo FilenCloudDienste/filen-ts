@@ -212,7 +212,7 @@ function updateTransfers({
 	}
 
 	if (dropCount > 0) {
-		samples = samples.slice(dropCount)
+		samples.splice(0, dropCount)
 	}
 
 	let speed = 0

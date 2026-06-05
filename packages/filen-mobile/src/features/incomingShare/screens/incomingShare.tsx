@@ -92,8 +92,6 @@ function IncomingShare() {
 	)
 
 	const clear = useCallback(async (paylodsToClear: ResolvedSharePayload[]) => {
-		console.log("Clearing shared payloads and deleting files")
-
 		await run(() => {
 			for (const payload of paylodsToClear) {
 				if (!payload.contentUri) {
@@ -329,7 +327,7 @@ function IncomingShare() {
 					renderItem={({ item: payload }) => {
 						return <Payload payload={payload} />
 					}}
-					keyExtractor={payload => JSON.stringify(payload)}
+					keyExtractor={payload => payload.contentUri ?? payload.originalName ?? JSON.stringify(payload)}
 				/>
 			</SafeAreaView>
 		</Fragment>
