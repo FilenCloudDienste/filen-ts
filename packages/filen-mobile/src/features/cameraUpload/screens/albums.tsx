@@ -27,18 +27,19 @@ const Albums = () => {
 	})
 
 	const albumsQuery = useCameraUploadAlbumsQuery()
+	const { refetch } = albumsQuery
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "active") {
-				albumsQuery.refetch()
+				refetch()
 			}
 		})
 
 		return () => {
 			subscription.remove()
 		}
-	}, [albumsQuery])
+	}, [refetch])
 
 	return (
 		<Fragment>
@@ -100,6 +101,7 @@ const Albums = () => {
 							<Group
 								className="bg-background-tertiary"
 								buttons={albumsQuery.data
+									.slice()
 									.sort((a, b) => b.assetCount - a.assetCount)
 									.map(album => {
 										return {
