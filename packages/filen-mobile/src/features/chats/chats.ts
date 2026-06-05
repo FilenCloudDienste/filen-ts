@@ -15,7 +15,7 @@ import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/
 import { Semaphore, run } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
 import drive from "@/features/drive/drive"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/utils"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import * as FileSystem from "expo-file-system"
 
 function wrapChat(chat: SdkChat): Chat {

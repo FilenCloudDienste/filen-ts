@@ -87,7 +87,9 @@ vi.mock("@filen/sdk-rs", () => ({
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
 vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapFileMeta: vi.fn(),
 	unwrappedFileIntoDriveItem: vi.fn(),
 	makeDriveItemPublicLink: vi.fn()

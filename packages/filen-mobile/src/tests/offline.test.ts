@@ -84,7 +84,10 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000),
+	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000)
+}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapFileMeta: vi.fn((file: unknown) => {
 		const f = file as any
 
@@ -3969,7 +3972,7 @@ describe("Offline", () => {
 				shareInfo: { tag: SharingRole_Tags.Receiver }
 			} as any)
 
-			const { unwrapParentUuid } = await import("@/lib/utils")
+			const { unwrapParentUuid } = await import("@/lib/sdkUnwrap")
 
 			vi.mocked(unwrapParentUuid).mockReturnValueOnce(grandparentUuid)
 
@@ -4078,7 +4081,7 @@ describe("Offline", () => {
 				shareInfo: { tag: SharingRole_Tags.Receiver }
 			} as any)
 
-			const { unwrapParentUuid } = await import("@/lib/utils")
+			const { unwrapParentUuid } = await import("@/lib/sdkUnwrap")
 
 			vi.mocked(unwrapParentUuid).mockReset()
 			vi.mocked(unwrapParentUuid).mockImplementation(() => sharedParentUuid)

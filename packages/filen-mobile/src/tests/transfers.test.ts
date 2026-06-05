@@ -287,10 +287,13 @@ vi.mock("@/lib/thumbnails", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
+	listLocalDirectoryRecursive: vi.fn(() => [])
+}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapDirMeta: mockUnwrapDirMeta,
 	unwrapFileMeta: mockUnwrapFileMeta,
-	unwrapParentUuid: mockUnwrapParentUuid,
-	listLocalDirectoryRecursive: vi.fn(() => [])
+	unwrapParentUuid: mockUnwrapParentUuid
 }))
 
 vi.mock("@/lib/paths", () => ({

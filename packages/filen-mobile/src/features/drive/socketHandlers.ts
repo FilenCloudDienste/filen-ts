@@ -4,7 +4,7 @@ import {
 	driveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent
 } from "@/features/drive/queries/useDriveItems.query"
-import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/utils"
+import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>

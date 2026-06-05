@@ -58,7 +58,9 @@ vi.mock("@/features/offline/offline", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapDirMeta: vi.fn().mockImplementation((dir: unknown) => ({
 		uuid: (dir as Record<string, unknown>)?.["uuid"] ?? "dir-uuid",
 		meta: { name: "Dir" },

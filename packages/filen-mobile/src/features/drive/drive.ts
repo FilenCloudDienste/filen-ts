@@ -9,10 +9,7 @@ import {
 	ParentUuid,
 	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
-import {
-	unwrapFileMeta,
-	unwrappedFileIntoDriveItem
-} from "@/lib/utils"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"

@@ -23,15 +23,15 @@ import {
 	AnyLinkedDir_Tags
 } from "@filen/sdk-rs"
 import cache from "@/lib/cache"
+import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import {
 	unwrapFileMeta,
 	unwrapDirMeta,
 	unwrapAnyDirUuid,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
-	unwrapParentUuid,
-	normalizeModificationTimestampForComparison
-} from "@/lib/utils"
+	unwrapParentUuid
+} from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, extractPathInsideUuidDirectory } from "@/lib/paths"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"

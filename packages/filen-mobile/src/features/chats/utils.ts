@@ -1,6 +1,6 @@
 import { AnyFile, MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
 import { type LinkResult } from "@/features/chats/queries/useChatMessageLinks.query"
-import { linkedFileIntoDriveItem } from "@/lib/utils"
+import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import alerts from "@/lib/alerts"
 import { t as i18nT } from "@/lib/i18n"

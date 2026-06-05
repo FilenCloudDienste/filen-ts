@@ -107,9 +107,12 @@ vi.mock("@/lib/i18n", () => ({
 
 
 vi.mock("@/lib/utils", () => ({
-	unwrapFileMeta: vi.fn(),
 	unwrapSdkError: vi.fn().mockReturnValue(null),
 	normalizeModificationTimestampForComparison: (ts: number) => ts
+}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapFileMeta: vi.fn()
 }))
 
 vi.mock("@/lib/paths", () => ({
@@ -152,7 +155,7 @@ import * as Battery from "expo-battery"
 import { getPermissionsAsync } from "expo-media-library"
 import auth from "@/lib/auth"
 import transfers from "@/features/transfers/transfers"
-import { unwrapFileMeta } from "@/lib/utils"
+import { unwrapFileMeta } from "@/lib/sdkUnwrap"
 import events from "@/lib/events"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"

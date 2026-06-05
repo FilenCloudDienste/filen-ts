@@ -118,7 +118,9 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapDirMeta: vi.fn().mockImplementation((dir: unknown) => ({
 		uuid: (dir as Record<string, unknown>)?.["uuid"] as string ?? "dir-uuid",
 		meta: { name: "Dir" },
@@ -155,7 +157,7 @@ vi.mock("@/lib/utils", () => ({
 				decryptedMeta: null
 			}
 		}
-	}),
+	})
 }))
 
 vi.mock("@/lib/sdkErrors", () => ({
@@ -250,7 +252,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import { driveItemsQueryUpdateForNormalParent, fetchData, driveItemsQueryGet, BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItems.query"
-import { unwrapDirMeta, unwrapFileMeta, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/utils"
+import { unwrapDirMeta, unwrapFileMeta, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { type DriveItem } from "@/types"
 

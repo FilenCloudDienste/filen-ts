@@ -172,12 +172,10 @@ import {
 	sanitizeFileName,
 	normalizeModificationTimestampForComparison,
 	contactDisplayName,
-	makeDriveItemPublicLink,
-	unwrapParentUuid,
 	resolveMimeType,
-	resolveCreatedOrTimestamp,
 	convertBigInts
 } from "@/lib/utils"
+import { makeDriveItemPublicLink, unwrapParentUuid, resolveCreatedOrTimestamp } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo, extractPathInsideUuidDirectory } from "@/lib/paths"
 import { getPreviewType } from "@/lib/previewType"
 import { extractLinks, trimUnbalanced, safeParseUrl } from "@/lib/linkParser"

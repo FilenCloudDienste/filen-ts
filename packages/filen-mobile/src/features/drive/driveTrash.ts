@@ -7,7 +7,7 @@ import {
 	unwrapParentUuid,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem
-} from "@/lib/utils"
+} from "@/lib/sdkUnwrap"
 import {
 	driveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdate,

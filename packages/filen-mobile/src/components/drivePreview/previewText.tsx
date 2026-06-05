@@ -1,5 +1,5 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/utils"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import { getPreviewType } from "@/lib/previewType"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
 import { useShallow } from "zustand/shallow"

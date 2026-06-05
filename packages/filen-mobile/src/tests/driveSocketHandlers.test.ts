@@ -44,7 +44,9 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapParentUuid: mockUnwrapParentUuid,
 	unwrapDirMeta: vi.fn(x => x),
 	unwrappedDirIntoDriveItem: vi.fn(x => x),
