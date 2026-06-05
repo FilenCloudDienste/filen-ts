@@ -148,7 +148,8 @@ vi.mock("@/lib/signals", () => ({
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cache from "@/lib/cache"
-import cameraUpload, { modifyAssetPathOnCollision, type CollisionParams, type Config } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
+import { modifyAssetPathOnCollision, type CollisionParams } from "@/features/cameraUpload/cameraUploadHelpers"
 import secureStore from "@/lib/secureStore"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
