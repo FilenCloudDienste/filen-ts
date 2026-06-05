@@ -1,5 +1,4 @@
 import { type Chat as TChat } from "@/types"
-import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
@@ -229,45 +228,43 @@ export function createMenuButtons({
 	] satisfies MenuButton[]
 }
 
-const Menu = memo(
-	({
-		info,
-		children,
-		className,
-		isAnchoredToRight,
-		origin
-	}: {
-		info: ListRenderItemInfo<TChat>
-		children: React.ReactNode
-		className?: string
-		isAnchoredToRight?: boolean
-		origin: ChatMenuOrigin
-	}) => {
-		const stringifiedClient = useStringifiedClient()
-		const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === info.item.uuid)))
-		const chatUnreadCount = useChatUnreadCount(info.item)
+const Menu = ({
+	info,
+	children,
+	className,
+	isAnchoredToRight,
+	origin
+}: {
+	info: ListRenderItemInfo<TChat>
+	children: React.ReactNode
+	className?: string
+	isAnchoredToRight?: boolean
+	origin: ChatMenuOrigin
+}) => {
+	const stringifiedClient = useStringifiedClient()
+	const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === info.item.uuid)))
+	const chatUnreadCount = useChatUnreadCount(info.item)
 
-		const buttons = stringifiedClient
-			? createMenuButtons({
-					chat: info.item,
-					userId: stringifiedClient.userId,
-					origin,
-					isSelected,
-					unreadCount: chatUnreadCount
-				})
-			: []
+	const buttons = stringifiedClient
+		? createMenuButtons({
+				chat: info.item,
+				userId: stringifiedClient.userId,
+				origin,
+				isSelected,
+				unreadCount: chatUnreadCount
+			})
+		: []
 
-		return (
-			<MenuComponent
-				type="context"
-				buttons={buttons}
-				className={className}
-				isAnchoredToRight={isAnchoredToRight}
-			>
-				{children}
-			</MenuComponent>
-		)
-	}
-)
+	return (
+		<MenuComponent
+			type="context"
+			buttons={buttons}
+			className={className}
+			isAnchoredToRight={isAnchoredToRight}
+		>
+			{children}
+		</MenuComponent>
+	)
+}
 
 export default Menu

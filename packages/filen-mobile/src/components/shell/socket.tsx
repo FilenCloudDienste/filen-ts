@@ -6,7 +6,7 @@ import {
 	GeneralEvent_Tags,
 	type SocketEvent
 } from "@filen/sdk-rs"
-import { useEffect, useRef, memo, useCallback } from "react"
+import { useEffect, useRef, useCallback } from "react"
 import { runEffect, run, Semaphore } from "@filen/utils"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import useSocketStore from "@/stores/useSocket.store"
@@ -116,7 +116,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 const mutex = new Semaphore(1)
 
-const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
+const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	const checkConnectionIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 	const socketListenerHandleRef = useRef<ListenerHandle | null>(null)
 	const stringifiedClient = useStringifiedClient()
@@ -229,9 +229,9 @@ const InnerSocket = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	})
 
 	return null
-})
+}
 
-const Socket = memo(() => {
+const Socket = () => {
 	const { authedSdkClient } = useSdkClients()
 
 	if (!authedSdkClient) {
@@ -239,6 +239,6 @@ const Socket = memo(() => {
 	}
 
 	return <InnerSocket sdkClient={authedSdkClient} />
-})
+}
 
 export default Socket

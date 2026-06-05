@@ -1,4 +1,3 @@
-import { memo } from "react"
 import { useTranslation } from "react-i18next"
 import { router } from "expo-router"
 import { ActivityIndicator } from "react-native"
@@ -12,7 +11,7 @@ import Image from "@/components/ui/image"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { driveItemDisplayName } from "@/lib/decryption"
 
-const AudioSlot = memo(() => {
+const AudioSlot = () => {
 	const { t } = useTranslation()
 	const { status, loading, queueItem } = useAudio()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -116,6 +115,6 @@ const AudioSlot = memo(() => {
 			</PressableScale>
 		</PressableScale>
 	)
-})
+}
 
 export default AudioSlot

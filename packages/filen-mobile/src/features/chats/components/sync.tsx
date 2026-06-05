@@ -1,4 +1,4 @@
-import { useEffect, memo } from "react"
+import { useEffect } from "react"
 import { run, Semaphore } from "@filen/utils"
 import { onlineManager } from "@tanstack/react-query"
 import chats from "@/features/chats/chats"
@@ -212,7 +212,7 @@ export class Sync {
 
 export const sync = new Sync()
 
-export const SyncHost = memo(() => {
+export const SyncHost = () => {
 	useEffect(() => {
 		sync.start()
 
@@ -230,6 +230,6 @@ export const SyncHost = memo(() => {
 	}, [])
 
 	return null
-})
+}
 
 export default SyncHost

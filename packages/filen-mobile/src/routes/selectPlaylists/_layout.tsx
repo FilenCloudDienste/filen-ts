@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useNavigation } from "expo-router"
-import { memo, Fragment } from "react"
+import { Fragment } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import { deserialize } from "@/lib/serializer"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
@@ -79,13 +79,13 @@ function Toolbar() {
 	)
 }
 
-const Layout = memo(() => {
+const Layout = () => {
 	return (
 		<Fragment>
 			<Stack />
 			<Toolbar />
 		</Fragment>
 	)
-})
+}
 
 export default Layout

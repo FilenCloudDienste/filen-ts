@@ -1,4 +1,3 @@
-import { memo } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { type StyleProp, type ViewStyle, Platform } from "react-native"
 import { MenuView, type NativeActionEvent, type MenuAction } from "@react-native-menu/menu"
@@ -294,7 +293,7 @@ export type MenuProps = {
 	previewConfig?: MenuPreviewConfig
 }
 
-const MenuInnerIos = memo(({ children, ...props }: MenuProps) => {
+const MenuInnerIos = ({ children, ...props }: MenuProps) => {
 	const uniqueButtons = props.buttons && checkIfButtonIdsAreUnique(props.buttons) ? props.buttons : []
 
 	const onPressMenuItem = (e: OnPressMenuItemEventObject) => {
@@ -358,9 +357,9 @@ const MenuInnerIos = memo(({ children, ...props }: MenuProps) => {
 			{children}
 		</ContextMenuView>
 	)
-})
+}
 
-const MenuInnerAndroid = memo(({ children, ...props }: MenuProps) => {
+const MenuInnerAndroid = ({ children, ...props }: MenuProps) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -416,9 +415,9 @@ const MenuInnerAndroid = memo(({ children, ...props }: MenuProps) => {
 			{children}
 		</MenuView>
 	)
-})
+}
 
-const MenuInner = memo(({ children, ...props }: MenuProps) => {
+const MenuInner = ({ children, ...props }: MenuProps) => {
 	const isOnline = useIsOnline()
 
 	// Apply the per-button requiresOnline gate once; downstream iOS/Android
@@ -435,8 +434,8 @@ const MenuInner = memo(({ children, ...props }: MenuProps) => {
 	}
 
 	return <MenuInnerAndroid {...effectiveProps}>{children}</MenuInnerAndroid>
-})
+}
 
-export const Menu = memo(withUniwind(MenuInner) as typeof MenuInner)
+export const Menu = withUniwind(MenuInner) as typeof MenuInner
 
 export default Menu

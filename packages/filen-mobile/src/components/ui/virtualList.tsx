@@ -1,4 +1,4 @@
-import { useRef, useState, Fragment, memo } from "react"
+import { useRef, useState, Fragment } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { type View as RNView, RefreshControl, ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
@@ -31,7 +31,7 @@ export type VirtualListExtraProps = {
 	headerComponent?: () => React.ReactNode
 }
 
-const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) => {
+const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) => {
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
 	const [refreshing, setRefreshing] = useState<boolean>(false)
@@ -159,7 +159,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 	displayName?: string
 }
 
-const VirtualList = memo(withUniwind(VirtualListInner) as typeof VirtualListInner) as (<T>(
+const VirtualList = withUniwind(VirtualListInner) as typeof VirtualListInner as (<T>(
 	props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps
 ) => React.JSX.Element) & {
 	displayName?: string

@@ -2,7 +2,7 @@ import "react-native-reanimated"
 import "@/queries/onlineStatus"
 
 import StyleProvider from "@/providers/style.provider"
-import { useState, Fragment, memo } from "react"
+import { useState, Fragment } from "react"
 import { Stack } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import View from "@/components/ui/view"
@@ -45,7 +45,7 @@ SplashScreen.setOptions({
 
 SplashScreen.preventAutoHideAsync().catch(console.error)
 
-const RootLayout = memo(() => {
+const RootLayout = () => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const [isSetupDone, setIsSetupDone] = useState<boolean>(false)
@@ -324,6 +324,6 @@ const RootLayout = memo(() => {
 			</KeyboardProvider>
 		</StyleProvider>
 	)
-})
+}
 
 export default RootLayout

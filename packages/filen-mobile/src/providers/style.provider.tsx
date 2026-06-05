@@ -1,12 +1,12 @@
 import "@/global.css"
 
-import { useEffect, memo } from "react"
+import { useEffect } from "react"
 import * as NavigationBar from "expo-navigation-bar"
 import { Platform } from "react-native"
 import { ThemeProvider, DefaultTheme } from "@react-navigation/native"
 import { useUniwind } from "uniwind"
 
-const StyleProvider = memo(({ children }: { children: React.ReactNode }) => {
+const StyleProvider = ({ children }: { children: React.ReactNode }) => {
 	const { theme } = useUniwind()
 
 	useEffect(() => {
@@ -29,6 +29,6 @@ const StyleProvider = memo(({ children }: { children: React.ReactNode }) => {
 			{children}
 		</ThemeProvider>
 	)
-})
+}
 
 export default StyleProvider

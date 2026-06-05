@@ -1,4 +1,4 @@
-import { Fragment, memo, useState } from "react"
+import { Fragment, useState } from "react"
 import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
@@ -35,7 +35,7 @@ export function formatAudioTime(seconds: number): string {
 	return `${mins}:${secs < 10 ? "0" : ""}${secs}`
 }
 
-const Background = memo(({ children, blurhash }: { children: React.ReactNode; blurhash?: string }) => {
+const Background = ({ children, blurhash }: { children: React.ReactNode; blurhash?: string }) => {
 	if (!blurhash) {
 		return <View className="bg-transparent flex-1 items-center justify-center px-4">{children}</View>
 	}
@@ -53,9 +53,9 @@ const Background = memo(({ children, blurhash }: { children: React.ReactNode; bl
 			{children}
 		</ImageBackground>
 	)
-})
+}
 
-const Picture = memo(({ blurhash, pictureUri, id }: { blurhash?: string; pictureUri?: string; id: string }) => {
+const Picture = ({ blurhash, pictureUri, id }: { blurhash?: string; pictureUri?: string; id: string }) => {
 	const dimensions = useWindowDimensions()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -114,7 +114,7 @@ const Picture = memo(({ blurhash, pictureUri, id }: { blurhash?: string; picture
 			/>
 		</ImageBackground>
 	)
-})
+}
 
 const THUMB_SIZE = 14
 const TRACK_HEIGHT = 4
@@ -175,108 +175,106 @@ function buildSliderTapGesture(sv: SliderSharedValues, trackWidth: number, seekT
 	})
 }
 
-export const AudioSlider = memo(
-	({ currentTime, duration, onSeek }: { currentTime: number; duration: number; onSeek: (seconds: number) => void }) => {
-		const [trackWidth, setTrackWidth] = useState<number>(0)
-		const isSeeking = useSharedValue<boolean>(false)
-		const seekProgress = useSharedValue<number>(0)
-		const thumbScale = useSharedValue<number>(1)
+export const AudioSlider = ({ currentTime, duration, onSeek }: { currentTime: number; duration: number; onSeek: (seconds: number) => void }) => {
+	const [trackWidth, setTrackWidth] = useState<number>(0)
+	const isSeeking = useSharedValue<boolean>(false)
+	const seekProgress = useSharedValue<number>(0)
+	const thumbScale = useSharedValue<number>(1)
 
-		const normalizedProgress = duration > 0 ? Math.min(currentTime / duration, 1) : 0
+	const normalizedProgress = duration > 0 ? Math.min(currentTime / duration, 1) : 0
 
-		const progress = useDerivedValue(() => {
-			if (isSeeking.value) {
-				return seekProgress.value
-			}
-
-			return normalizedProgress
-		})
-
-		const seekToPosition = (fraction: number) => {
-			if (duration > 0) {
-				onSeek(fraction * duration)
-			}
+	const progress = useDerivedValue(() => {
+		if (isSeeking.value) {
+			return seekProgress.value
 		}
 
-		const sv = {
-			isSeeking,
-			seekProgress,
-			thumbScale
+		return normalizedProgress
+	})
+
+	const seekToPosition = (fraction: number) => {
+		if (duration > 0) {
+			onSeek(fraction * duration)
 		}
+	}
 
-		const gesture = Gesture.Exclusive(
-			buildSliderPanGesture(sv, trackWidth, seekToPosition),
-			buildSliderTapGesture(sv, trackWidth, seekToPosition)
-		)
+	const sv = {
+		isSeeking,
+		seekProgress,
+		thumbScale
+	}
 
-		const fillStyle = useAnimatedStyle(() => {
-			"worklet"
+	const gesture = Gesture.Exclusive(
+		buildSliderPanGesture(sv, trackWidth, seekToPosition),
+		buildSliderTapGesture(sv, trackWidth, seekToPosition)
+	)
 
-			return {
-				width: `${progress.value * 100}%`
-			}
-		})
+	const fillStyle = useAnimatedStyle(() => {
+		"worklet"
 
-		const thumbStyle = useAnimatedStyle(() => {
-			"worklet"
+		return {
+			width: `${progress.value * 100}%`
+		}
+	})
 
-			return {
-				left: `${progress.value * 100}%`,
-				marginLeft: -(THUMB_SIZE / 2),
-				transform: [
-					{
-						scale: thumbScale.value
-					}
-				]
-			}
-		})
+	const thumbStyle = useAnimatedStyle(() => {
+		"worklet"
 
-		return (
-			<GestureDetector gesture={gesture}>
+		return {
+			left: `${progress.value * 100}%`,
+			marginLeft: -(THUMB_SIZE / 2),
+			transform: [
+				{
+					scale: thumbScale.value
+				}
+			]
+		}
+	})
+
+	return (
+		<GestureDetector gesture={gesture}>
+			<View
+				className="w-full justify-center bg-transparent"
+				style={{
+					height: THUMB_SIZE * 2
+				}}
+				onLayout={e => {
+					setTrackWidth(e.nativeEvent.layout.width)
+				}}
+			>
 				<View
-					className="w-full justify-center bg-transparent"
+					className="w-full bg-white/20 rounded-full"
 					style={{
-						height: THUMB_SIZE * 2
-					}}
-					onLayout={e => {
-						setTrackWidth(e.nativeEvent.layout.width)
+						height: TRACK_HEIGHT
 					}}
 				>
-					<View
-						className="w-full bg-white/20 rounded-full"
-						style={{
-							height: TRACK_HEIGHT
-						}}
-					>
-						<AnimatedView
-							className="bg-white rounded-full"
-							style={[
-								{
-									height: TRACK_HEIGHT
-								},
-								fillStyle
-							]}
-						/>
-					</View>
 					<AnimatedView
-						className="absolute bg-white rounded-full"
+						className="bg-white rounded-full"
 						style={[
 							{
-								width: THUMB_SIZE,
-								height: THUMB_SIZE,
-								top: "50%",
-								marginTop: -(THUMB_SIZE / 2)
+								height: TRACK_HEIGHT
 							},
-							thumbStyle
+							fillStyle
 						]}
 					/>
 				</View>
-			</GestureDetector>
-		)
-	}
-)
+				<AnimatedView
+					className="absolute bg-white rounded-full"
+					style={[
+						{
+							width: THUMB_SIZE,
+							height: THUMB_SIZE,
+							top: "50%",
+							marginTop: -(THUMB_SIZE / 2)
+						},
+						thumbStyle
+					]}
+				/>
+			</View>
+		</GestureDetector>
+	)
+}
 
-const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItemTagged; metadata: Metadata; fileUrl: string }) => {
+const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagged; metadata: Metadata; fileUrl: string }) => {
 	const { t } = useTranslation()
 	const player = useAudioPlayer(fileUrl, {
 		updateInterval: 1000,
@@ -394,9 +392,9 @@ const PreviewAudioInner = memo(({ item, metadata, fileUrl }: { item: GalleryItem
 			</View>
 		</Background>
 	)
-})
+}
 
-const PreviewAudio = memo(({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: string }) => {
+const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: string }) => {
 	const audioMetadataQuery = useAudioMetadataQuery(
 		item.type === "drive"
 			? {
@@ -432,6 +430,6 @@ const PreviewAudio = memo(({ item, fileUrl }: { item: GalleryItemTagged; fileUrl
 			fileUrl={fileUrl}
 		/>
 	)
-})
+}
 
 export default PreviewAudio

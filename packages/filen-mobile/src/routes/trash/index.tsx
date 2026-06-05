@@ -1,8 +1,7 @@
-import { memo } from "react"
 import Drive from "@/features/drive/components"
 
-const Trash = memo(() => {
+const Trash = () => {
 	return <Drive />
-})
+}
 
 export default Trash

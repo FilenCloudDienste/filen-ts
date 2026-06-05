@@ -8,7 +8,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { ActivityIndicator } from "react-native"
 import useFileTextQuery from "@/queries/useFileText.query"
-import { memo } from "react"
 import { useTranslation } from "react-i18next"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -21,7 +20,7 @@ import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 import type { DriveItemFileExtracted } from "@/types"
 
-const PreviewTextInner = memo(({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: GalleryItemTagged }) => {
+const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
@@ -167,9 +166,9 @@ const PreviewTextInner = memo(({ previewType, text, item }: { previewType: "text
 			/>
 		</View>
 	)
-})
+}
 
-const PreviewText = memo(({ item }: { item: GalleryItemTagged }) => {
+const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 
@@ -218,6 +217,6 @@ const PreviewText = memo(({ item }: { item: GalleryItemTagged }) => {
 			item={item}
 		/>
 	)
-})
+}
 
 export default PreviewText

@@ -1,8 +1,7 @@
 import Notes from "@/features/notes/components"
-import { memo } from "react"
 
-export const NotesTags = memo(() => {
+export const NotesTags = () => {
 	return <Notes />
-})
+}
 
 export default NotesTags

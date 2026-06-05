@@ -1,4 +1,4 @@
-import { useEffect, memo } from "react"
+import { useEffect } from "react"
 import type { LayoutChangeEvent, StyleProp, ViewStyle } from "react-native"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
 import Animated, { type SharedValue, useSharedValue, useAnimatedStyle, withTiming, withDecay } from "react-native-reanimated"
@@ -409,108 +409,106 @@ function buildComposedGesture(
 	return Gesture.Simultaneous(pinchGesture, panGesture, doubleTapGesture, singleTapGesture)
 }
 
-const ZoomableView = memo(
-	({
-		children,
-		minZoom = DEFAULT_MIN_ZOOM,
-		maxZoom = DEFAULT_MAX_ZOOM,
-		doubleTapZoom = DEFAULT_DOUBLE_TAP_ZOOM,
-		onZoomChange,
-		onSingleTap,
-		enabled = true,
-		style,
-		scaleValue,
-		onPinchDismiss
-	}: ZoomableViewProps) => {
-		const scale = useSharedValue<number>(1)
-		const translateX = useSharedValue<number>(0)
-		const translateY = useSharedValue<number>(0)
-		const savedScale = useSharedValue<number>(1)
-		const savedTranslateX = useSharedValue<number>(0)
-		const savedTranslateY = useSharedValue<number>(0)
-		const focalX = useSharedValue<number>(0)
-		const focalY = useSharedValue<number>(0)
-		const containerWidth = useSharedValue<number>(0)
-		const containerHeight = useSharedValue<number>(0)
+const ZoomableView = ({
+	children,
+	minZoom = DEFAULT_MIN_ZOOM,
+	maxZoom = DEFAULT_MAX_ZOOM,
+	doubleTapZoom = DEFAULT_DOUBLE_TAP_ZOOM,
+	onZoomChange,
+	onSingleTap,
+	enabled = true,
+	style,
+	scaleValue,
+	onPinchDismiss
+}: ZoomableViewProps) => {
+	const scale = useSharedValue<number>(1)
+	const translateX = useSharedValue<number>(0)
+	const translateY = useSharedValue<number>(0)
+	const savedScale = useSharedValue<number>(1)
+	const savedTranslateX = useSharedValue<number>(0)
+	const savedTranslateY = useSharedValue<number>(0)
+	const focalX = useSharedValue<number>(0)
+	const focalY = useSharedValue<number>(0)
+	const containerWidth = useSharedValue<number>(0)
+	const containerHeight = useSharedValue<number>(0)
 
-		const onLayout = (e: LayoutChangeEvent) => {
-			containerWidth.value = e.nativeEvent.layout.width
-			containerHeight.value = e.nativeEvent.layout.height
-		}
-
-		const notifyZoomChange = (zoom: number) => {
-			onZoomChange?.(zoom)
-		}
-
-		const notifySingleTap = () => {
-			onSingleTap?.()
-		}
-
-		const notifyPinchDismiss = () => {
-			onPinchDismiss?.()
-		}
-
-		const composed = buildComposedGesture(
-			{
-				scale,
-				translateX,
-				translateY,
-				savedScale,
-				savedTranslateX,
-				savedTranslateY,
-				focalX,
-				focalY,
-				containerWidth,
-				containerHeight,
-				scaleValue
-			},
-			enabled,
-			minZoom,
-			maxZoom,
-			doubleTapZoom,
-			onZoomChange,
-			notifyZoomChange,
-			onSingleTap,
-			notifySingleTap,
-			onPinchDismiss,
-			notifyPinchDismiss
-		)
-
-		const animatedStyle = useAnimatedStyle(() => {
-			"worklet"
-
-			return {
-				transform: [
-					{
-						translateX: translateX.value
-					},
-					{
-						translateY: translateY.value
-					},
-					{
-						scale: scale.value
-					}
-				]
-			}
-		})
-
-		useEffect(() => {
-			if (!enabled && scale.value !== 1) {
-				resetZoom(scale, translateX, translateY, scaleValue)
-			}
-		}, [enabled, scale, translateX, translateY, scaleValue])
-
-		return (
-			<GestureDetector gesture={composed}>
-				<Animated.View
-					style={[containerViewStyle, style]}
-					onLayout={onLayout}
-				>
-					<Animated.View style={[innerViewStyle, animatedStyle]}>{children}</Animated.View>
-				</Animated.View>
-			</GestureDetector>
-		)
+	const onLayout = (e: LayoutChangeEvent) => {
+		containerWidth.value = e.nativeEvent.layout.width
+		containerHeight.value = e.nativeEvent.layout.height
 	}
-)
+
+	const notifyZoomChange = (zoom: number) => {
+		onZoomChange?.(zoom)
+	}
+
+	const notifySingleTap = () => {
+		onSingleTap?.()
+	}
+
+	const notifyPinchDismiss = () => {
+		onPinchDismiss?.()
+	}
+
+	const composed = buildComposedGesture(
+		{
+			scale,
+			translateX,
+			translateY,
+			savedScale,
+			savedTranslateX,
+			savedTranslateY,
+			focalX,
+			focalY,
+			containerWidth,
+			containerHeight,
+			scaleValue
+		},
+		enabled,
+		minZoom,
+		maxZoom,
+		doubleTapZoom,
+		onZoomChange,
+		notifyZoomChange,
+		onSingleTap,
+		notifySingleTap,
+		onPinchDismiss,
+		notifyPinchDismiss
+	)
+
+	const animatedStyle = useAnimatedStyle(() => {
+		"worklet"
+
+		return {
+			transform: [
+				{
+					translateX: translateX.value
+				},
+				{
+					translateY: translateY.value
+				},
+				{
+					scale: scale.value
+				}
+			]
+		}
+	})
+
+	useEffect(() => {
+		if (!enabled && scale.value !== 1) {
+			resetZoom(scale, translateX, translateY, scaleValue)
+		}
+	}, [enabled, scale, translateX, translateY, scaleValue])
+
+	return (
+		<GestureDetector gesture={composed}>
+			<Animated.View
+				style={[containerViewStyle, style]}
+				onLayout={onLayout}
+			>
+				<Animated.View style={[innerViewStyle, animatedStyle]}>{children}</Animated.View>
+			</Animated.View>
+		</GestureDetector>
+	)
+}
 
 export default ZoomableView

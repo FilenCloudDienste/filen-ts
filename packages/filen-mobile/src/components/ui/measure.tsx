@@ -1,9 +1,9 @@
-import { useRef, memo } from "react"
+import { useRef } from "react"
 import useViewLayout from "@/hooks/useViewLayout"
 import View from "@/components/ui/view"
 import type { View as RNView } from "react-native"
 
-const Measure = memo(({ children, id }: { children: React.ReactNode; id?: string }) => {
+const Measure = ({ children, id }: { children: React.ReactNode; id?: string }) => {
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
 
@@ -21,6 +21,6 @@ const Measure = memo(({ children, id }: { children: React.ReactNode; id?: string
 			{children}
 		</View>
 	)
-})
+}
 
 export default Measure

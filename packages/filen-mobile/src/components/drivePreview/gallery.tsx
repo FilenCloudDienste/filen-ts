@@ -1,4 +1,4 @@
-import { useState, useEffect, memo } from "react"
+import { useState, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
@@ -174,7 +174,7 @@ function changeZoom(zoomScale: SharedValue<number>, newZoom: number) {
 	zoomScale.value = newZoom
 }
 
-const Gallery = memo(() => {
+const Gallery = () => {
 	const { t } = useTranslation()
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
@@ -403,6 +403,6 @@ const Gallery = memo(() => {
 			</GestureDetector>
 		</View>
 	)
-})
+}
 
 export default Gallery
