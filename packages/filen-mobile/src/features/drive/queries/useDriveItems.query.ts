@@ -22,7 +22,8 @@ import {
 	AnyLinkedDirWithContext
 } from "@filen/sdk-rs"
 import { type DrivePath, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
-import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapSdkError } from "@/lib/utils"
+import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/utils"
+import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
 import offline from "@/features/offline/offline"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"

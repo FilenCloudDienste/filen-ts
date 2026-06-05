@@ -34,7 +34,9 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: mockUnwrapSdkError,
 	isNetworkClassError: mockIsNetworkClassError
 }))

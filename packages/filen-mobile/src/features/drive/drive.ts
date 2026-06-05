@@ -11,9 +11,9 @@ import {
 } from "@filen/sdk-rs"
 import {
 	unwrapFileMeta,
-	unwrappedFileIntoDriveItem,
-	unwrapSdkError
+	unwrappedFileIntoDriveItem
 } from "@/lib/utils"
+import { unwrapSdkError } from "@/lib/sdkErrors"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { run } from "@filen/utils"

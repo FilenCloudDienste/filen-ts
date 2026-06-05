@@ -3,7 +3,7 @@ import { Notifier, NotifierComponents } from "react-native-notifier"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { memo } from "react"
-import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/utils"
+import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
 import i18n from "@/lib/i18n"
 
 const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }) => {

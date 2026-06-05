@@ -11,7 +11,7 @@ import VirtualList from "@/components/ui/virtualList"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useCameraUploadStore, { type CameraUploadError } from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useShallow } from "zustand/shallow"
-import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/utils"
+import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import { useTranslation } from "react-i18next"
 

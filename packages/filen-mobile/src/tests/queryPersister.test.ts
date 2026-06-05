@@ -41,7 +41,10 @@ vi.mock("@op-engineering/op-sqlite", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/"),
+	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
+}))
+
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: () => null,
 	isNetworkClassError: () => false
 }))

@@ -174,11 +174,6 @@ import {
 	normalizeFilePathForExpo,
 	extractPathInsideUuidDirectory,
 	getPreviewType,
-	extractLinks,
-	trimUnbalanced,
-	safeParseUrl,
-	unwrapSdkError,
-	isNetworkClassError,
 	normalizeModificationTimestampForComparison,
 	contactDisplayName,
 	makeDriveItemPublicLink,
@@ -187,6 +182,8 @@ import {
 	resolveCreatedOrTimestamp,
 	convertBigInts
 } from "@/lib/utils"
+import { extractLinks, trimUnbalanced, safeParseUrl } from "@/lib/linkParser"
+import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { createCompositeAbortSignal, PauseSignal, createCompositePauseSignal } from "@/lib/signals"
 
 // ---------------------------------------------------------------------------

@@ -48,8 +48,8 @@ vi.mock("@/lib/i18n", () => ({
 	}
 }))
 
-// Mock the utils boundary so we control what unwrapSdkError returns
-vi.mock("@/lib/utils", () => ({
+// Mock the sdkErrors boundary so we control what unwrapSdkError returns
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: mockUnwrapSdkError,
 	unwrappedSdkErrorToHumanReadable: mockUnwrappedSdkErrorToHumanReadable
 }))

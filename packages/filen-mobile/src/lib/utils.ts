@@ -12,7 +12,6 @@ import {
 	type Contact,
 	ParentUuid_Tags,
 	ParentUuid,
-	FilenSdkError,
 	type ContactRequestIn,
 	type ContactRequestOut,
 	type SharedRootDir,
@@ -28,8 +27,7 @@ import {
 	AnyLinkedDir_Tags,
 	type LinkedFile,
 	FileMeta,
-	MaybeEncryptedUniffi_Tags,
-	ErrorKind
+	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
 import {
@@ -37,148 +35,13 @@ import {
 	EXPO_AUDIO_SUPPORTED_EXTENSIONS,
 	EXPO_VIDEO_SUPPORTED_EXTENSIONS,
 	FILE_PUBLIC_LINK_URL_PREFIX,
-	DIRECTORY_PUBLIC_LINK_URL_PREFIX,
-	URL_REGEX,
-	TRAILING_PUNCT,
-	PRIVATE_HOST
+	DIRECTORY_PUBLIC_LINK_URL_PREFIX
 } from "@/constants"
 import mimeTypes from "mime-types"
 import pathModule from "path"
 import type { DriveItem, Prettify } from "@/types"
 import cache from "@/lib/cache"
 import type { DrivePath } from "@/hooks/useDrivePath"
-import i18n from "@/lib/i18n"
-
-export function unwrapSdkError(error: unknown): FilenSdkError | null {
-	if (FilenSdkError.hasInner(error)) {
-		const inner = FilenSdkError.getInner(error)
-
-		return inner
-	}
-
-	return null
-}
-
-export function isNetworkClassError(error: unknown): boolean {
-	const unwrapped = unwrapSdkError(error)
-
-	if (!unwrapped) {
-		return false
-	}
-
-	const kind = unwrapped.kind()
-
-	return kind === ErrorKind.Reqwest || kind === ErrorKind.RetryFailed || kind === ErrorKind.Response
-}
-
-// Maps the SDK's finite error KIND to a translated, user-readable string and appends the raw
-// `message()` as an untranslated diagnostic suffix. Per Google AIP-193 only the enumerable kind
-// is localized; `message()` is an open-ended English/developer string and must stay raw. Module
-// level (not a hook) → uses the imported module `i18n`.
-export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
-	const errorKey = (() => {
-		switch (unwrapped.kind()) {
-			case ErrorKind.BadRecoveryKey: {
-				return "bad_recovery_key" as const
-			}
-
-			case ErrorKind.FolderNotFound: {
-				return "directory_not_found" as const
-			}
-
-			case ErrorKind.WrongPassword: {
-				return "wrong_password" as const
-			}
-
-			case ErrorKind.Cancelled: {
-				return "operation_cancelled" as const
-			}
-
-			case ErrorKind.ChunkTooLarge: {
-				return "chunk_too_large" as const
-			}
-
-			case ErrorKind.Conversion: {
-				return "conversion_error" as const
-			}
-
-			case ErrorKind.FileChangedDuringSync: {
-				return "file_changed_during_sync" as const
-			}
-
-			case ErrorKind.HeifError: {
-				return "heif_error" as const
-			}
-
-			case ErrorKind.ImageError: {
-				return "image_error" as const
-			}
-
-			case ErrorKind.InsufficientMemory: {
-				return "insufficient_memory" as const
-			}
-
-			case ErrorKind.Internal: {
-				return "internal_error" as const
-			}
-
-			case ErrorKind.InvalidName: {
-				return "invalid_name" as const
-			}
-
-			case ErrorKind.InvalidState: {
-				return "invalid_state" as const
-			}
-
-			case ErrorKind.InvalidType: {
-				return "invalid_type" as const
-			}
-
-			case ErrorKind.Io: {
-				return "fs_io_error" as const
-			}
-
-			case ErrorKind.MaxStorageReached: {
-				return "max_remote_storage_reached" as const
-			}
-
-			case ErrorKind.MetadataWasNotDecrypted: {
-				return "metadata_was_not_decrypted" as const
-			}
-
-			case ErrorKind.Reqwest: {
-				return "network_error" as const
-			}
-
-			case ErrorKind.Response: {
-				return "network_error" as const
-			}
-
-			case ErrorKind.RetryFailed: {
-				return "network_retry_failed" as const
-			}
-
-			case ErrorKind.Server: {
-				return "server_error" as const
-			}
-
-			case ErrorKind.Unauthenticated: {
-				return "unauthenticated" as const
-			}
-
-			case ErrorKind.Walk: {
-				return "fs_directory_walk_error" as const
-			}
-
-			default: {
-				return "error_generic" as const
-			}
-		}
-	})()
-
-	// Translated kind + UNTRANSLATED raw message() diagnostic (AIP-193).
-	return `${i18n.t(errorKey)}: (${unwrapped.message()})`
-}
 
 export function unwrapAnyDirUuid(dir: AnyDirWithContext): string | null {
 	switch (dir.tag) {
@@ -1109,79 +972,6 @@ export function makeDriveItemPublicLink({
 		default: {
 			return null
 		}
-	}
-}
-
-export function trimUnbalanced(s: string, open: string, close: string): string {
-	while (s.endsWith(close)) {
-		const opens = (s.match(new RegExp(`\\${open}`, "g")) ?? []).length
-		const closes = (s.match(new RegExp(`\\${close}`, "g")) ?? []).length
-
-		if (closes > opens) {
-			s = s.slice(0, -1)
-		} else {
-			break
-		}
-	}
-
-	return s
-}
-
-type ParsedLink = {
-	url: string
-	start: number
-	end: number
-}
-
-export function extractLinks(text: string): ParsedLink[] {
-	const links: ParsedLink[] = []
-
-	for (const match of text.matchAll(URL_REGEX)) {
-		let raw = match[0]
-		const start = match.index
-
-		raw = raw.replace(TRAILING_PUNCT, "")
-		raw = trimUnbalanced(raw, "(", ")")
-		raw = trimUnbalanced(raw, "[", "]")
-		raw = trimUnbalanced(raw, "{", "}")
-
-		if (raw.length < 4) {
-			continue
-		}
-
-		const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
-
-		links.push({
-			url,
-			start,
-			end: start + raw.length
-		})
-	}
-
-	return links
-}
-
-export function safeParseUrl(raw: string): URL | null {
-	try {
-		const u = new URL(raw.trim())
-
-		if (u.protocol !== "https:") {
-			return null
-		}
-
-		if (u.username || u.password) {
-			return null
-		}
-
-		const hostname = u.hostname.replace(/^\[|\]$/g, "")
-
-		if (PRIVATE_HOST.some(p => p.test(hostname))) {
-			return null
-		}
-
-		return u
-	} catch {
-		return null
 	}
 }
 

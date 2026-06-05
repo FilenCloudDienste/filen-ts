@@ -1,6 +1,6 @@
 import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
-import { extractLinks } from "@/lib/utils"
+import { extractLinks } from "@/lib/linkParser"
 import { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import Regexed from "@/features/chats/components/chat/message/regexed"

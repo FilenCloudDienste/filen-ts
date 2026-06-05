@@ -156,6 +156,9 @@ vi.mock("@/lib/utils", () => ({
 			}
 		}
 	}),
+}))
+
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: vi.fn().mockReturnValue(null)
 }))
 
@@ -247,7 +250,8 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import { driveItemsQueryUpdateForNormalParent, fetchData, driveItemsQueryGet, BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItems.query"
-import { unwrapDirMeta, unwrapFileMeta, unwrapSdkError, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/utils"
+import { unwrapDirMeta, unwrapFileMeta, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/utils"
+import { unwrapSdkError } from "@/lib/sdkErrors"
 import { type DriveItem } from "@/types"
 
 beforeEach(() => {
