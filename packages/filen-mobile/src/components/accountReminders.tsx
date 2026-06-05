@@ -1,36 +1,20 @@
-import { useEffect, useRef, useState } from "react"
-import { AppState, type AppStateStatus } from "react-native"
+import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { router, usePathname } from "expo-router"
-import { run, runEffect } from "@filen/utils"
+import { run } from "@filen/utils"
 import useAccountQuery from "@/queries/useAccount.query"
 import useAppStore from "@/stores/useApp.store"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
+import useIsAppActive from "@/hooks/useIsAppActive"
 
 const AccountReminders = () => {
 	const { t } = useTranslation()
 	const accountQuery = useAccountQuery()
 	const pathname = usePathname()
 	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
-	const [appState, setAppState] = useState<AppStateStatus>(() => AppState.currentState)
+	const isActive = useIsAppActive()
 	const firedRef = useRef<boolean>(false)
-
-	useEffect(() => {
-		const { cleanup } = runEffect(defer => {
-			const subscription = AppState.addEventListener("change", nextAppState => {
-				setAppState(nextAppState)
-			})
-
-			defer(() => {
-				subscription.remove()
-			})
-		})
-
-		return () => {
-			cleanup()
-		}
-	}, [])
 
 	useEffect(() => {
 		if (firedRef.current) {
@@ -45,7 +29,7 @@ const AccountReminders = () => {
 			return
 		}
 
-		if (appState !== "active") {
+		if (!isActive) {
 			return
 		}
 
@@ -88,7 +72,7 @@ const AccountReminders = () => {
 				alerts.error(result.error)
 			}
 		})
-	}, [pathname, biometricUnlocked, appState, accountQuery.status, accountQuery.isFetching, accountQuery.data, t])
+	}, [pathname, biometricUnlocked, isActive, accountQuery.status, accountQuery.isFetching, accountQuery.data, t])
 
 	return null
 }

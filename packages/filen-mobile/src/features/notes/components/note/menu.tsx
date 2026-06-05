@@ -5,6 +5,7 @@ import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
 import View from "@/components/ui/view"
 import { useStringifiedClient } from "@/lib/auth"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import { useShallow } from "zustand/shallow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import notes from "@/features/notes/notes"
@@ -570,7 +571,7 @@ const Menu = ({
 } & React.ComponentPropsWithoutRef<typeof MenuComponent>) => {
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(selectedNote => selectedNote.uuid === note.uuid)))
-	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 
 	const writeAccess =
 		note.ownerId === stringifiedClient?.userId ||

@@ -8,7 +8,7 @@ import { noteDisplayTitle } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import Content from "@/features/notes/components/content"
 import { Platform } from "react-native"
-import useNotesStore from "@/features/notes/store/useNotes.store"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import { useShallow } from "zustand/shallow"
 import { simpleDate } from "@/lib/time"
 import { run } from "@filen/utils"
@@ -29,7 +29,7 @@ import { useTranslation } from "react-i18next"
 
 const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
-	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
 	const navigation = useNavigation()

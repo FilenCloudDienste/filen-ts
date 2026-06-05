@@ -1,4 +1,3 @@
-import { useMemo } from "react"
 import { useWindowDimensions, type ViewStyle } from "react-native"
 import { VideoView, useVideoPlayer } from "expo-video"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
@@ -18,15 +17,12 @@ const PreviewVideo = ({ fileUrl }: { fileUrl: string }) => {
 		p.play()
 	})
 
-	const videoViewStyle = useMemo<ViewStyle>(
-		() => ({
-			width: dimensions.width,
-			height: dimensions.height,
-			paddingTop: headerHeight ? headerHeight + insets.top : 0,
-			paddingBottom: insets.bottom
-		}),
-		[dimensions.width, dimensions.height, headerHeight, insets.top, insets.bottom]
-	)
+	const videoViewStyle: ViewStyle = {
+		width: dimensions.width,
+		height: dimensions.height,
+		paddingTop: headerHeight ? headerHeight + insets.top : 0,
+		paddingBottom: insets.bottom
+	}
 
 	return (
 		<View

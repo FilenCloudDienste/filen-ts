@@ -9,13 +9,29 @@ import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/
 import { useShallow } from "zustand/shallow"
 import { contactDisplayName } from "@/lib/utils"
 import { extractLinks, safeParseUrl } from "@/lib/linkParser"
-import { Fragment } from "react"
+import { Fragment, useMemo } from "react"
 import { simpleDate } from "@/lib/time"
 import Regexed from "@/features/chats/components/chat/message/regexed"
 import Menu from "@/features/chats/components/chat/message/menu"
 import { messageDisplayBody } from "@/lib/decryption"
 import Typing from "@/features/chats/components/chat/message/typing"
 import Attachments from "@/features/chats/components/chat/message/attachments"
+
+function computeIsMessageOnlyLink(message: string | undefined): boolean {
+	if (!message) {
+		return false
+	}
+
+	const normalized = message.trim().toLowerCase()
+	const links = extractLinks(normalized).map(link => safeParseUrl(link.url))
+	const link = links.length === 1 ? links[0] : null
+
+	if (!link) {
+		return false
+	}
+
+	return link.href.trim().toLowerCase() === normalized
+}
 
 const Message = ({
 	chat,
@@ -37,21 +53,7 @@ const Message = ({
 	const stringifiedClient = useStringifiedClient()
 	const isInflightError = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""]))
 
-	const isMessageOnlyLink = (() => {
-		if (!info.item.inner.message) {
-			return false
-		}
-
-		const normalized = info.item.inner.message.trim().toLowerCase()
-		const links = extractLinks(normalized).map(link => safeParseUrl(link.url))
-		const link = links.length === 1 ? links[0] : null
-
-		if (!link) {
-			return false
-		}
-
-		return link.href.trim().toLowerCase() === normalized
-	})()
+	const isMessageOnlyLink = useMemo(() => computeIsMessageOnlyLink(info.item.inner.message), [info.item.inner.message])
 
 	return (
 		<View

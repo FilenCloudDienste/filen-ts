@@ -190,15 +190,15 @@ const Item = ({
 	}
 
 	useEffect(() => {
-		if (!item) {
+		if (item?.id == null) {
 			return
 		}
 
 		useChecklistStore.getState().setInputRefs(prev => ({
 			...prev,
-			[item.id]: textInputRef
+			[id]: textInputRef
 		}))
-	}, [item])
+	}, [item?.id, id])
 
 	if (!item) {
 		return null

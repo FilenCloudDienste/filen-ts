@@ -823,6 +823,12 @@ class CameraUpload {
 
 const cameraUpload = new CameraUpload()
 
+export function useCameraUploadConfig() {
+	const [config, setConfig] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
+
+	return { config, setConfig }
+}
+
 export function useCameraUpload() {
 	const syncing = useCameraUploadStore(useShallow(state => state.syncing))
 	const errors = useCameraUploadStore(useShallow(state => state.errors))

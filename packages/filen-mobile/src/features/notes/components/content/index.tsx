@@ -10,7 +10,7 @@ import { ActivityIndicator } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
-import useNotesStore from "@/features/notes/store/useNotes.store"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
 import { useEffect, useCallback } from "react"
@@ -52,7 +52,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	const stringifiedClient = useStringifiedClient()
 	const insets = useSafeAreaInsets()
 	const isOnline = useIsOnline()
-	const hasInflightContent = useNotesStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const hasInflightContent = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
 
 	// Gate the query on three conditions to make editing race-free:
 	//
@@ -92,6 +92,8 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		? false
 		: noteContentQuery.isFetching || noteContentQuery.isPending || noteContentQuery.isError || typeof initialValue !== "string"
 
+	const { refetch } = noteContentQuery
+
 	const hasWriteAccess = (() => {
 		if (!stringifiedClient || history) {
 			return false
@@ -110,7 +112,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 		const now = Date.now()
 
-		useNotesStore.getState().setInflightContent(prev => ({
+		useNotesInflightStore.getState().setInflightContent(prev => ({
 			...prev,
 			[note.uuid]: [
 				{
@@ -123,7 +125,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		}))
 
 		const result = await run(async () => {
-			await sync.flushToDisk(useNotesStore.getState().inflightContent)
+			await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 		})
 
 		if (!result.success) {
@@ -170,7 +172,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			// query (enabled gate at line 83) so refetch() can remount the editor
 			// with the fresh server content.
 			const result = await run(async () => {
-				useNotesStore.getState().setInflightContent(prev => {
+				useNotesInflightStore.getState().setInflightContent(prev => {
 					const updated = {
 						...prev
 					}
@@ -180,9 +182,9 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					return updated
 				})
 
-				await sync.flushToDisk(useNotesStore.getState().inflightContent)
+				await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 
-				return await noteContentQuery.refetch()
+				return await refetch()
 			})
 
 			if (!result.success) {
@@ -192,7 +194,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 				return
 			}
 		},
-		[note.uuid, stringifiedClient, noteContentQuery, t]
+		[note.uuid, stringifiedClient, refetch, t]
 	)
 
 	useEffect(() => {

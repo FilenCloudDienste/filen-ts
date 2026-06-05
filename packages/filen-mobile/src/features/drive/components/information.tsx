@@ -11,9 +11,26 @@ import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
 
-export const Information = ({ item, linked }: { item: DriveItem; linked?: boolean }) => {
+function OfflineStatusRow({ uuid, type }: { uuid: string; type: DriveItem["type"] }) {
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textGreen500 = useResolveClassNames("text-green-500")
+	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({ uuid, type })
+
+	return (
+		<Ionicons
+			name="cloud-download-outline"
+			size={16}
+			color={
+				driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data ? textGreen500.color : textRed500.color
+			}
+		/>
+	)
+}
+
+function useDriveItemInfoRows(
+	item: DriveItem,
+	linked: boolean | undefined
+): { type: string; title: string; value: string | React.ReactNode }[] {
 	const { t } = useTranslation()
 
 	const directorySizeQuery = useDirectorySizeQuery(
@@ -33,17 +50,8 @@ export const Information = ({ item, linked }: { item: DriveItem; linked?: boolea
 		}
 	)
 
-	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
-		uuid: item?.data.uuid ?? "",
-		type: item?.type ?? "file"
-	})
-
 	// TODO: extract to function and clean up
-	const info: {
-		type: string
-		title: string
-		value: string | React.ReactNode
-	}[] = (
+	return (
 		[
 			{
 				type: "type",
@@ -276,14 +284,9 @@ export const Information = ({ item, linked }: { item: DriveItem; linked?: boolea
 							type: "offline",
 							title: t("offline_status"),
 							value: (
-								<Ionicons
-									name="cloud-download-outline"
-									size={16}
-									color={
-										driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data
-											? textGreen500.color
-											: textRed500.color
-									}
+								<OfflineStatusRow
+									uuid={item.data.uuid}
+									type={item.type}
 								/>
 							)
 						}
@@ -291,6 +294,11 @@ export const Information = ({ item, linked }: { item: DriveItem; linked?: boolea
 				: [])
 		] as const
 	).filter(info => info.value !== null)
+}
+
+export const Information = ({ item, linked }: { item: DriveItem; linked?: boolean }) => {
+	const { t } = useTranslation()
+	const info = useDriveItemInfoRows(item, linked)
 
 	return (
 		<View className="bg-transparent flex-col gap-2">

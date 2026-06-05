@@ -27,8 +27,12 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const unreadCount = useChatUnreadCount(info.item)
 	const typing = useChatsStore(useShallow(state => state.typing[info.item.uuid] ?? []))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
-	const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === info.item.uuid)))
-	const areChatsSelected = useChatsStore(useShallow(state => state.selectedChats.length > 0))
+	const { isSelected, areChatsSelected } = useChatsStore(
+		useShallow(state => ({
+			isSelected: state.selectedChats.some(n => n.uuid === info.item.uuid),
+			areChatsSelected: state.selectedChats.length > 0
+		}))
+	)
 
 	const typingUsers = typing
 		.map(t => t.senderId)
