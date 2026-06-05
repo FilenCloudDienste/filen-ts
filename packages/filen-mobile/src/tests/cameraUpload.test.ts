@@ -107,11 +107,6 @@ vi.mock("@/lib/i18n", () => ({
 
 
 vi.mock("@/lib/utils", () => ({
-	PauseSignal: class {
-		pause() {}
-		resume() {}
-		dispose() {}
-	},
 	normalizeFilePathForSdk: (filePath: string): string => {
 		let normalizedPath = filePath
 			.trim()
@@ -134,6 +129,14 @@ vi.mock("@/lib/utils", () => ({
 	unwrapFileMeta: vi.fn(),
 	unwrapSdkError: vi.fn().mockReturnValue(null),
 	normalizeModificationTimestampForComparison: (ts: number) => ts
+}))
+
+vi.mock("@/lib/signals", () => ({
+	PauseSignal: class {
+		pause() {}
+		resume() {}
+		dispose() {}
+	}
 }))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))

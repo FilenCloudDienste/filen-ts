@@ -291,12 +291,15 @@ vi.mock("@/lib/utils", () => ({
 	normalizeFilePathForExpo: vi.fn((path: string) => path),
 	unwrapDirMeta: mockUnwrapDirMeta,
 	unwrapFileMeta: mockUnwrapFileMeta,
+	unwrapParentUuid: mockUnwrapParentUuid,
+	listLocalDirectoryRecursive: vi.fn(() => [])
+}))
+
+vi.mock("@/lib/signals", () => ({
 	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,
 	PauseSignal: MockPauseSignal,
 	createCompositePauseSignal: mockCreateCompositePauseSignal,
-	createCompositeAbortSignal: mockCreateCompositeAbortSignal,
-	unwrapParentUuid: mockUnwrapParentUuid,
-	listLocalDirectoryRecursive: vi.fn(() => [])
+	createCompositeAbortSignal: mockCreateCompositeAbortSignal
 }))
 
 import transfers from "@/features/transfers/transfers"

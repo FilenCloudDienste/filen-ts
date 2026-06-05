@@ -177,9 +177,6 @@ import {
 	extractLinks,
 	trimUnbalanced,
 	safeParseUrl,
-	createCompositeAbortSignal,
-	PauseSignal,
-	createCompositePauseSignal,
 	unwrapSdkError,
 	isNetworkClassError,
 	normalizeModificationTimestampForComparison,
@@ -190,6 +187,7 @@ import {
 	resolveCreatedOrTimestamp,
 	convertBigInts
 } from "@/lib/utils"
+import { createCompositeAbortSignal, PauseSignal, createCompositePauseSignal } from "@/lib/signals"
 
 // ---------------------------------------------------------------------------
 // sanitizeFileName
