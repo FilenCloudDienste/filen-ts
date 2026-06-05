@@ -4,6 +4,7 @@ import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import cache from "@/lib/cache"
+import { toSignalOpts } from "@/lib/signals"
 
 export async function favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
 	if (item.type !== "directory" && item.type !== "file") {
@@ -18,11 +19,7 @@ export async function favorite({ item, favorited, signal }: { item: DriveItem; f
 	const modifiedItem = await authedSdkClient.setFavorite(
 		item.type === "directory" ? new NonRootNormalItem.Dir(item.data) : new NonRootNormalItem.File(item.data),
 		favorited,
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 
 	if (modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
@@ -83,11 +80,7 @@ export async function rename({ item, newName, signal }: { item: DriveItem; newNa
 						name: newName,
 						created: undefined
 					},
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 			: await authedSdkClient.updateFileMetadata(
 					item.data,
@@ -97,11 +90,7 @@ export async function rename({ item, newName, signal }: { item: DriveItem; newNa
 						lastModified: undefined,
 						created: CreatedTime.Keep.new()
 					},
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 
 	// Ugly but works for now, until we have a better way
@@ -140,15 +129,7 @@ export async function setDirColor({ item, color, signal }: { item: DriveItem; co
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
-	const modifiedDir = await authedSdkClient.setDirColor(
-		item.data,
-		color,
-		signal
-			? {
-					signal
-				}
-			: undefined
-	)
+	const modifiedDir = await authedSdkClient.setDirColor(item.data, color, toSignalOpts(signal))
 
 	item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedDir))
 
@@ -196,11 +177,7 @@ export async function updateTimestamps({
 						name: undefined,
 						created: created !== undefined ? BigInt(created) : undefined
 					},
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 			: await authedSdkClient.updateFileMetadata(
 					item.data,
@@ -210,11 +187,7 @@ export async function updateTimestamps({
 						lastModified: modified !== undefined ? BigInt(modified) : undefined,
 						created: created !== undefined ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
 					},
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 
 	// Ugly but works for now, until we have a better way
