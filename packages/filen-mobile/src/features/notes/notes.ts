@@ -1,8 +1,6 @@
 import auth from "@/lib/auth"
 import { NoteType, type Note as SdkNote } from "@filen/sdk-rs"
-import { type Note, type NoteTag, type NoteHistory } from "@/types"
-import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
-import { createNotePreviewFromContentText } from "@filen/utils"
+import { type Note, type NoteTag } from "@/types"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
 import JSZip from "jszip"
 import { sanitizeFileName } from "@/lib/utils"
@@ -22,6 +20,21 @@ import {
 	addParticipant,
 	setParticipantPermission
 } from "@/features/notes/notesParticipants"
+import {
+	getContent,
+	setContent,
+	setType,
+	setTitle
+} from "@/features/notes/notesContent"
+import {
+	setPinned,
+	setFavorited,
+	archive,
+	restore,
+	restoreFromHistory,
+	trash,
+	deleteNote
+} from "@/features/notes/notesLifecycle"
 
 function wrapSdkNote(sdk: SdkNote): Note {
 	return {
@@ -51,184 +64,27 @@ class Notes {
 
 	public setParticipantPermission = setParticipantPermission
 
-	public async getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		const { authedSdkClient } = await auth.getSdkClients()
+	public getContent = getContent
 
-		return await authedSdkClient.getNoteContent(
-			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-	}
+	public setContent = setContent
 
-	public async setContent({
-		note,
-		content,
-		signal,
-		updateQuery
-	}: {
-		note: Note
-		content: string
-		signal?: AbortSignal
-		updateQuery?: boolean
-	}) {
-		const { authedSdkClient } = await auth.getSdkClients()
+	public setType = setType
 
-		note = wrapSdkNote(
-			await authedSdkClient.setNoteContent(
-				note,
-				content,
-				createNotePreviewFromContentText(
-					note.noteType === NoteType.Checklist ? "checklist" : note.noteType === NoteType.Rich ? "rich" : "other",
-					content
-				),
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
+	public setTitle = setTitle
 
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content
-							}
-						: n
-				)
-		})
+	public setPinned = setPinned
 
-		if (updateQuery) {
-			noteContentQueryUpdate({
-				params: {
-					uuid: note.uuid
-				},
-				updater: content
-			})
-		}
+	public setFavorited = setFavorited
 
-		return note
-	}
+	public archive = archive
 
-	public async setType({
-		note,
-		type,
-		signal,
-		knownContent
-	}: {
-		note: Note
-		type: NoteType
-		signal?: AbortSignal
-		knownContent?: string
-	}) {
-		if (type === note.noteType) {
-			return note
-		}
+	public restore = restore
 
-		const { authedSdkClient } = await auth.getSdkClients()
+	public restoreFromHistory = restoreFromHistory
 
-		note = wrapSdkNote(
-			await authedSdkClient.setNoteType(
-				note,
-				type,
-				knownContent,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
+	public trash = trash
 
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async setPinned({ note, pinned, signal }: { note: Note; pinned: boolean; signal?: AbortSignal }) {
-		if (pinned === note.pinned) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.setNotePinned(
-				note,
-				pinned,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async setFavorited({ note, favorite, signal }: { note: Note; favorite: boolean; signal?: AbortSignal }) {
-		if (favorite === note.favorite) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.setNoteFavorited(
-				note,
-				favorite,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
+	public delete = deleteNote
 
 	public async duplicate({ note, signal }: { note: Note; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
@@ -348,200 +204,6 @@ class Notes {
 				}
 			}
 		}
-	}
-
-	public async archive({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		if (note.archive || note.trash) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.archiveNote(
-				note,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async restore({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		if (!(note.trash || note.archive)) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.restoreNote(
-				note,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async restoreFromHistory({ note, history, signal }: { note: Note; history: NoteHistory; signal?: AbortSignal }) {
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.restoreNoteFromHistory(
-				note,
-				history,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async trash({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		if (note.trash) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.trashNote(
-				note,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async delete({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		if (!note.trash) {
-			return
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		await authedSdkClient.deleteNote(
-			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
-		setTimeout(() => {
-			notesWithContentQueryUpdate({
-				updater: prev => prev.filter(n => n.uuid !== note.uuid)
-			})
-
-			noteContentQueryUpdate({
-				params: {
-					uuid: note.uuid
-				},
-				updater: () => undefined
-			})
-		}, 3000)
-	}
-
-	public async setTitle({ note, newTitle, signal }: { note: Note; newTitle: string; signal?: AbortSignal }) {
-		if (newTitle === note.title || newTitle.trim().length === 0) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.setNoteTitle(
-				note,
-				newTitle,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
 	}
 
 	public async createWithOptionalTag({
