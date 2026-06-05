@@ -17,7 +17,7 @@ import fileCache from "@/lib/fileCache"
 import audioCache from "@/features/audio/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
 import offline from "@/features/offline/offline"
-import useCacheSizesQuery, { invalidateCacheSizesQuery } from "@/queries/useCacheSizes.query"
+import useCacheSizesQuery, { invalidateCacheSizesQuery } from "@/features/settings/queries/useCacheSizes.query"
 import { useTranslation } from "react-i18next"
 import i18n from "@/lib/i18n"
 

@@ -5,7 +5,7 @@ import { useResolveClassNames } from "uniwind"
 import { type ChecklistItem, cn } from "@filen/utils"
 import { PressableOpacity } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
-import useChecklistStore from "@/stores/useChecklist.store"
+import useChecklistStore from "@/features/notes/store/useChecklist.store"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 
