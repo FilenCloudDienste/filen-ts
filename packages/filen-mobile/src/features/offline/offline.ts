@@ -4,7 +4,6 @@ import { run, Semaphore } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize } from "@/lib/serializer"
 import auth from "@/lib/auth"
-import { randomUUID } from "expo-crypto"
 import {
 	type File,
 	type Dir,
@@ -18,9 +17,7 @@ import {
 	AnySharedDir,
 	AnyNormalDir,
 	AnyDirWithContext_Tags,
-	AnySharedDir_Tags,
-	AnyNormalDir_Tags,
-	AnyLinkedDir_Tags
+	AnySharedDir_Tags
 } from "@filen/sdk-rs"
 import cache from "@/lib/cache"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
@@ -36,7 +33,7 @@ import { normalizeFilePathForSdk, extractPathInsideUuidDirectory } from "@/lib/p
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import { newTmpFile } from "@/lib/tmp"
+import { atomicWrite, parentCacheKey, type OfflineParent } from "@/features/offline/offlineHelpers"
 import { validate as validateUuid } from "uuid"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
@@ -50,8 +47,6 @@ import {
 	OFFLINE_INDEX_FILE
 } from "@/lib/storageRoots"
 
-// "sharedInRoot" means the item lives at the top level of Shared In (no parent dir, just the shared root listing).
-export type OfflineParent = AnyDirWithContext | "sharedInRoot"
 
 export type FileOrDirectoryOfflineMeta = {
 	item: DriveItem
@@ -176,32 +171,6 @@ export class Offline {
 		}
 
 		this.directoriesEnsured = true
-	}
-
-	/**
-	 * Write data to a file atomically using write-to-temp-then-move.
-	 * Prevents corruption from crashes mid-write.
-	 */
-	private atomicWrite(file: FileSystem.File, data: string | Uint8Array): FileSystem.File {
-		const tmp = newTmpFile(`.tmp-${randomUUID()}`)
-
-		tmp.write(data)
-
-		try {
-			if (file.exists) {
-				file.delete()
-			}
-
-			tmp.move(file)
-
-			return file
-		} catch (e) {
-			if (tmp.exists) {
-				tmp.delete()
-			}
-
-			throw e
-		}
 	}
 
 	/**
@@ -412,7 +381,7 @@ export class Offline {
 					directories: indexDirectories
 				}
 
-				this.atomicWrite(INDEX_FILE, serialize(index satisfies Index))
+				atomicWrite(INDEX_FILE, serialize(index satisfies Index))
 
 				this.indexCache = index
 
@@ -580,68 +549,6 @@ export class Offline {
 		}
 	}
 
-	// Produces a stable string key from the deeply-nested AnyDirWithContext tagged union.
-	// Used to dedup parent listings in sync() and for the listDirectories cache.
-	private parentCacheKey(parent: OfflineParent): string {
-		if (typeof parent === "string") {
-			return parent
-		}
-
-		switch (parent.tag) {
-			case AnyDirWithContext_Tags.Normal: {
-				switch (parent.inner[0].tag) {
-					case AnyNormalDir_Tags.Dir: {
-						return `dir:${parent.inner[0].inner[0].uuid}`
-					}
-
-					case AnyNormalDir_Tags.Root: {
-						return `root:${parent.inner[0].inner[0].uuid}`
-					}
-
-					default: {
-						throw new Error("Unknown AnyNormalDir tag")
-					}
-				}
-			}
-
-			case AnyDirWithContext_Tags.Shared: {
-				switch (parent.inner[0].dir.tag) {
-					case AnySharedDir_Tags.Dir: {
-						return `shared-dir:${parent.inner[0].dir.inner[0].inner.uuid}`
-					}
-
-					case AnySharedDir_Tags.Root: {
-						return `shared-root:${parent.inner[0].dir.inner[0].inner.uuid}`
-					}
-
-					default: {
-						throw new Error("Unknown AnySharedDir tag")
-					}
-				}
-			}
-
-			case AnyDirWithContext_Tags.Linked: {
-				switch (parent.inner[0].dir.tag) {
-					case AnyLinkedDir_Tags.Dir: {
-						return `linked-dir:${parent.inner[0].dir.inner[0].inner.uuid}`
-					}
-
-					case AnyLinkedDir_Tags.Root: {
-						return `linked-root:${parent.inner[0].dir.inner[0].inner.uuid}`
-					}
-
-					default: {
-						throw new Error("Unknown AnyLinkedDir tag")
-					}
-				}
-			}
-
-			default: {
-				throw new Error("Unknown AnyDirWithContext tag")
-			}
-		}
-	}
-
 	// Compares local offline items against remote server state and reconciles:
 	// 1. Collects unique parents from all stored files/dirs, fetches their remote listings in parallel.
 	// 2. For each stored file: deletes if removed remotely, re-downloads if modified, or re-stores under a new UUID if renamed.
@@ -687,7 +594,7 @@ export class Offline {
 				const uniqueParents = new Map<string, OfflineParent>()
 
 				for (const { parent } of files) {
-					const key = this.parentCacheKey(parent)
+					const key = parentCacheKey(parent)
 
 					if (!uniqueParents.has(key)) {
 						uniqueParents.set(key, parent)
@@ -695,7 +602,7 @@ export class Offline {
 				}
 
 				for (const { parent } of topLevelDirectories) {
-					const key = this.parentCacheKey(parent)
+					const key = parentCacheKey(parent)
 
 					if (!uniqueParents.has(key)) {
 						uniqueParents.set(key, parent)
@@ -873,7 +780,7 @@ export class Offline {
 								return
 							}
 
-							const key = this.parentCacheKey(parent)
+							const key = parentCacheKey(parent)
 
 							if (!parentListings.has(key)) {
 								return
@@ -902,7 +809,7 @@ export class Offline {
 								if (unwrappedFileMeta.meta && unwrappedFileMeta.meta.name !== item.data.decryptedMeta.name) {
 									dataFile.rename(unwrappedFileMeta.meta.name)
 
-									this.atomicWrite(
+									atomicWrite(
 										metaFile,
 										serialize({
 											item: unwrappedFileIntoDriveItem(unwrappedFileMeta),
@@ -993,7 +900,7 @@ export class Offline {
 								return
 							}
 
-							const key = this.parentCacheKey(parent)
+							const key = parentCacheKey(parent)
 
 							if (!parentListings.has(key)) {
 								return
@@ -1026,7 +933,7 @@ export class Offline {
 								) {
 									const existingMeta = await this.readDirectoryMeta(item.data.uuid)
 
-									this.atomicWrite(
+									atomicWrite(
 										metaFile,
 										serialize({
 											item: unwrappedDirIntoDriveItem(unwrappedRemoteDir),
@@ -1448,7 +1355,7 @@ export class Offline {
 				})
 
 				if (result) {
-					this.atomicWrite(
+					atomicWrite(
 						metaFile,
 						serialize({
 							item: file,
@@ -1644,7 +1551,7 @@ export class Offline {
 					// Must invalidate before writing meta — the dedup above changed the filesystem.
 					this.invalidateCaches()
 
-					this.atomicWrite(
+					atomicWrite(
 						metaFile,
 						serialize({
 							item: directory,
@@ -1738,7 +1645,7 @@ export class Offline {
 			parent: OfflineParent
 		}[]
 	}> {
-		const cacheKey: string = parent ? this.parentCacheKey(parent) : "root"
+		const cacheKey: string = parent ? parentCacheKey(parent) : "root"
 		const cached = this.listDirectoriesCache.get(cacheKey)
 
 		if (cached) {
