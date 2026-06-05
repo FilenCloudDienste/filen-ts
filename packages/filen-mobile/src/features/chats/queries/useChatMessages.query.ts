@@ -4,6 +4,7 @@ import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { sortParams } from "@filen/utils"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import { wrapMessage } from "@/features/chats/chatsWrap"
 
 export const BASE_QUERY_KEY = "useChatMessagesQuery"
 
@@ -34,9 +35,8 @@ export async function fetchData(
 	)
 
 	return messages.map(m => ({
-		...m,
-		inflightId: "", // Placeholder, actual inflightId is only needed for send sync
-		undecryptable: m.inner.message === undefined
+		...wrapMessage(m),
+		inflightId: "" // Placeholder, actual inflightId is only needed for send sync
 	})) satisfies ChatMessageWithInflightId[]
 }
 

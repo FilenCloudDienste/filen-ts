@@ -1,36 +1,14 @@
 import auth from "@/lib/auth"
-import {
-	type ChatMessagePartial,
-	ChatTypingType,
-	type Contact,
-	type ChatParticipant,
-	type Chat as SdkChat,
-	type ChatMessage as SdkChatMessage,
-	AnyNormalDir,
-	DirMeta_Tags
-} from "@filen/sdk-rs"
+import { type ChatMessagePartial, ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir, DirMeta_Tags } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
 import { chatsQueryUpdate, fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
 import { chatMessagesQueryUpdate, fetchData as chatMessagesQueryFetch } from "@/features/chats/queries/useChatMessages.query"
+import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import { Semaphore, run } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
 import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import * as FileSystem from "expo-file-system"
-
-function wrapChat(chat: SdkChat): Chat {
-	return {
-		...chat,
-		undecryptable: chat.key === undefined
-	}
-}
-
-function wrapMessage(message: SdkChatMessage): ChatMessage {
-	return {
-		...message,
-		undecryptable: message.inner.message === undefined
-	}
-}
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)

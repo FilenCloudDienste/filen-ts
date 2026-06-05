@@ -4,6 +4,7 @@ import chats from "@/features/chats/chats"
 import { useEffect } from "react"
 import { useStringifiedClient } from "@/lib/auth"
 import useEffectOnce from "@/hooks/useEffectOnce"
+import { isMessageUnread } from "@/features/chats/chatSelectors"
 
 export function useChatsUnreadCount() {
 	const stringifiedClient = useStringifiedClient()
@@ -38,15 +39,7 @@ export function useChatsUnreadCount() {
 				continue
 			}
 
-			count += messages.filter(
-				message =>
-					chat.lastFocus !== undefined &&
-					chat.lastFocus !== null &&
-					chat.lastMessage &&
-					!chat.muted &&
-					message.sentTimestamp > chat.lastFocus &&
-					message.inner.senderId !== stringifiedClient?.userId
-			).length
+			count += messages.filter(message => isMessageUnread(message, chat, stringifiedClient?.userId)).length
 		}
 
 		return {

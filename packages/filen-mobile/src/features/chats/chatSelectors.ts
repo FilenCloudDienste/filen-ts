@@ -1,4 +1,4 @@
-import { type Chat } from "@/types"
+import { type Chat, type ChatMessage } from "@/types"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.
@@ -41,6 +41,17 @@ export const EMPTY_CHAT_FLAGS: ChatSelectionFlags = Object.freeze({
 	includesUnread: false,
 	includesUndecryptable: false
 }) as ChatSelectionFlags
+
+export function isMessageUnread(message: ChatMessage, chat: Chat, userId: bigint | undefined): boolean {
+	return (
+		chat.lastFocus !== undefined &&
+		chat.lastFocus !== null &&
+		!!chat.lastMessage &&
+		!chat.muted &&
+		message.sentTimestamp > chat.lastFocus &&
+		message.inner.senderId !== userId
+	)
+}
 
 export function chatHasUnread(c: Chat, userId: bigint): boolean {
 	if (c.muted) {
