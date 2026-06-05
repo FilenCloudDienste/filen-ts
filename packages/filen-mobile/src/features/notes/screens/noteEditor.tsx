@@ -197,10 +197,7 @@ const Note = () => {
 		enabled: false
 	})
 
-	const note =
-		notesWithContentQuery.status === "success"
-			? (notesWithContentQuery.data.find(n => n.uuid === uuid) ?? null)
-			: null
+	const note = notesWithContentQuery.status === "success" ? (notesWithContentQuery.data.find(n => n.uuid === uuid) ?? null) : null
 
 	const history = deserializeRouteParam<NoteHistory>(historySerialized)
 

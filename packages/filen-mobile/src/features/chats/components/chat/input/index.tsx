@@ -60,10 +60,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
 
 	const insertLinksIntoInput = (links: string[]) => {
-		const replacedMessage =
-			chatInputValue.trim().length === 0
-				? `${links.join("\n")} `
-				: `${chatInputValue} ${links.join("\n")}`
+		const replacedMessage = chatInputValue.trim().length === 0 ? `${links.join("\n")} ` : `${chatInputValue} ${links.join("\n")}`
 
 		if (replacedMessage.length === 0) {
 			return

@@ -252,10 +252,7 @@ export class Offline {
 			// (a FileOrDirectoryOfflineMeta) instead of the required DirectoryOfflineMeta.
 			// Treat as corrupt so the directory is re-downloaded rather than silently
 			// returning an entries-less meta that breaks listDirectories and clearAll.
-			if (
-				isDirectoryItem(meta.item) &&
-				(meta.entries === undefined || meta.entries === null)
-			) {
+			if (isDirectoryItem(meta.item) && (meta.entries === undefined || meta.entries === null)) {
 				throw new Error("Directory meta is missing entries — treating as corrupt")
 			}
 
@@ -1124,12 +1121,7 @@ export class Offline {
 									continue
 								}
 
-								if (
-									remoteFile &&
-									localFile &&
-									localFile.item.data.decryptedMeta &&
-									isFileItem(localFile.item)
-								) {
+								if (remoteFile && localFile && localFile.item.data.decryptedMeta && isFileItem(localFile.item)) {
 									const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
 
 									if (
