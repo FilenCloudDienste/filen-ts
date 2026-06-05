@@ -8,7 +8,7 @@ import Menu, { type MenuButton } from "@/components/ui/menu"
 import useRichtextStore from "@/stores/useRichtext.store"
 import { useShallow } from "zustand/shallow"
 import type { TextEditorEvents } from "@/components/textEditor"
-import type { QuillFormats } from "@/components/textEditor/richText/dom"
+import type { QuillFormats, HeaderLevel } from "@/components/textEditor/richText/dom"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
@@ -33,72 +33,14 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 		switch (type) {
 			case "header": {
 				return [
-					{
-						id: "header-1",
-						title: "1",
+					...Array.from({ length: 6 }, (_, i) => ({
+						id: `header-${i + 1}`,
+						title: String(i + 1),
 						icon: "headerH" as const,
 						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 1
-							})
+							dispatch({ type: "quillToggleHeader", data: (i + 1) as HeaderLevel })
 						}
-					},
-					{
-						id: "header-2",
-						title: "2",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 2
-							})
-						}
-					},
-					{
-						id: "header-3",
-						title: "3",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 3
-							})
-						}
-					},
-					{
-						id: "header-4",
-						title: "4",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 4
-							})
-						}
-					},
-					{
-						id: "header-5",
-						title: "5",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 5
-							})
-						}
-					},
-					{
-						id: "header-6",
-						title: "6",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 6
-							})
-						}
-					},
+					})),
 					{
 						id: "header-normal",
 						title: t("normal"),

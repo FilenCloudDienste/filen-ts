@@ -200,7 +200,7 @@ export class Audio {
 			for (let i = indices.length - 1; i > 0; i--) {
 				const j = Math.floor(Math.random() * (i + 1))
 
-				;[indices[i], indices[j]] = [indices[j]!, indices[i]!]
+				const tmp = indices[i] ?? 0; indices[i] = indices[j] ?? 0; indices[j] = tmp
 			}
 
 			return indices
@@ -211,7 +211,7 @@ export class Audio {
 		for (let i = others.length - 1; i > 0; i--) {
 			const j = Math.floor(Math.random() * (i + 1))
 
-			;[others[i], others[j]] = [others[j]!, others[i]!]
+			const tmp = others[i] ?? 0; others[i] = others[j] ?? 0; others[j] = tmp
 		}
 
 		return [firstIdx, ...others]
@@ -835,6 +835,42 @@ export class Audio {
 		return playlistsDir
 	}
 
+	private playlistFileToDriveItem(file: PlaylistFile, now: number): DriveItemFileExtracted {
+		const meta = {
+			name: file.name,
+			mime: file.mime,
+			created: undefined,
+			modified: BigInt(now),
+			hash: undefined,
+			size: BigInt(file.size),
+			key: file.key,
+			version: file.version
+		}
+
+		const item: DriveItemFileExtracted = {
+			type: "file",
+			data: {
+				uuid: file.uuid,
+				meta: new FileMeta.Decoded(meta),
+				parent: new ParentUuid.Uuid(file.uuid),
+				size: BigInt(file.size),
+				favorited: false,
+				region: file.region,
+				bucket: file.bucket,
+				timestamp: BigInt(now),
+				chunks: BigInt(file.chunks),
+				canMakeThumbnail: false,
+				decryptedMeta: meta,
+				undecryptable: false
+			}
+		}
+
+		// We need to cache it here for the audioMetadata query to work later, since it relies on the cache
+		cache.uuidToAnyDriveItem.set(file.uuid, item)
+
+		return item
+	}
+
 	private parsePlaylistBytes(bytes: ArrayBuffer): Playlist | null {
 		let parsed: unknown
 
@@ -909,37 +945,7 @@ export class Audio {
 								return null
 							}
 
-							const meta = {
-								name: file.name,
-								mime: file.mime,
-								created: undefined,
-								modified: BigInt(now),
-								hash: undefined,
-								size: BigInt(file.size),
-								key: file.key,
-								version: file.version
-							}
-
-							const item: DriveItemFileExtracted = {
-								type: "file",
-								data: {
-									uuid: file.uuid,
-									meta: new FileMeta.Decoded(meta),
-									parent: new ParentUuid.Uuid(file.uuid),
-									size: BigInt(file.size),
-									favorited: false,
-									region: file.region,
-									bucket: file.bucket,
-									timestamp: BigInt(now),
-									chunks: BigInt(file.chunks),
-									canMakeThumbnail: false,
-									decryptedMeta: meta,
-									undecryptable: false
-								}
-							}
-
-							// We need to cache it here for the audioMetadata query to work later, since it relies on the cache
-							cache.uuidToAnyDriveItem.set(file.uuid, item)
+							const item = this.playlistFileToDriveItem(file, now)
 
 							return {
 								...file,
@@ -997,37 +1003,7 @@ export class Audio {
 		const playlistWithItems = {
 			...playlist,
 			files: playlist.files.map(file => {
-				const meta = {
-					name: file.name,
-					mime: file.mime,
-					created: undefined,
-					modified: BigInt(now),
-					hash: undefined,
-					size: BigInt(file.size),
-					key: file.key,
-					version: file.version
-				}
-
-				const item: DriveItemFileExtracted = {
-					type: "file",
-					data: {
-						uuid: file.uuid,
-						meta: new FileMeta.Decoded(meta),
-						parent: new ParentUuid.Uuid(file.uuid),
-						size: BigInt(file.size),
-						favorited: false,
-						region: file.region,
-						bucket: file.bucket,
-						timestamp: BigInt(now),
-						chunks: BigInt(file.chunks),
-						canMakeThumbnail: false,
-						decryptedMeta: meta,
-						undecryptable: false
-					}
-				}
-
-				// We need to cache it here for the audioMetadata query to work later, since it relies on the cache
-				cache.uuidToAnyDriveItem.set(file.uuid, item)
+				const item = this.playlistFileToDriveItem(file, now)
 
 				return {
 					...file,

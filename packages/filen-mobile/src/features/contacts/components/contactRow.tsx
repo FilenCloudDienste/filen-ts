@@ -79,15 +79,6 @@ export const Contact = ({
 					})
 				}
 
-				case "blocked": {
-					return await prompts.alert({
-						title: t("unblock_contact"),
-						message: t("unblock_contact_confirmation"),
-						cancelText: t("cancel"),
-						okText: t("unblock")
-					})
-				}
-
 				default: {
 					return {
 						cancelled: false
@@ -125,15 +116,8 @@ export const Contact = ({
 					break
 				}
 
-				case "blocked": {
-					await contacts.unblock({
-						uuid: info.item.data.uuid
-					})
-
-					break
-				}
-
 				default: {
+					// Blocked contacts are unblocked exclusively via the context-menu "unblock" button (lines 267-310).
 					throw new Error("Invalid contact request type")
 				}
 			}
