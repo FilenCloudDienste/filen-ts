@@ -1,22 +1,18 @@
-import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
 import { useLocalSearchParams, router } from "expo-router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
-import { DirectoryIcon } from "@/components/itemIcons"
-import { DirColor } from "@filen/sdk-rs"
 import Header from "@/components/ui/header"
 import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
-import { driveItemDisplayName } from "@/lib/decryption"
-import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { Information } from "@/features/drive/components/information"
 import DismissStack from "@/components/dismissStack"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import { useTranslation } from "react-i18next"
+import DriveItemHero from "@/components/ui/driveItemHero"
 
 const DriveItemInfo = () => {
 	const { item: itemSerialized } = useLocalSearchParams<{
@@ -83,37 +79,7 @@ const DriveItemInfo = () => {
 					showsHorizontalScrollIndicator={true}
 					showsVerticalScrollIndicator={false}
 				>
-					<View className="bg-transparent items-center justify-center flex-col px-4">
-						{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory" ? (
-							<DirectoryIcon
-								color={item.type === "directory" ? item.data.color : DirColor.Default.new()}
-								width={128}
-								height={128}
-							/>
-						) : (
-							<Thumbnail
-								item={item}
-								size={{
-									icon: 128,
-									thumbnail: 128
-								}}
-								contentFit="cover"
-								className="rounded-3xl"
-							/>
-						)}
-						<Text
-							className="text-lg font-bold mt-4"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{driveItemDisplayName(item)}
-						</Text>
-						<Text className="text-muted-foreground">
-							{item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-								? t("directory")
-								: t("file")}
-						</Text>
-					</View>
+					<DriveItemHero item={item} />
 					<View className="bg-transparent mt-10">
 						<Information item={item} />
 					</View>

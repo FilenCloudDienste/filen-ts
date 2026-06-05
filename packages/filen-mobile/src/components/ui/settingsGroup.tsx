@@ -45,6 +45,27 @@ export type Button = {
 		  }
 }
 
+function BadgePill({ value, color, textClassName }: { value: string | React.ReactNode; color?: string; textClassName?: string }) {
+	return (
+		<View
+			className={cn("rounded-full size-5 flex-row items-center justify-center", !color && "bg-red-500")}
+			style={color ? { backgroundColor: color } : undefined}
+		>
+			{typeof value === "string" ? (
+				<Text
+					className={textClassName}
+					numberOfLines={1}
+					ellipsizeMode="middle"
+				>
+					{value}
+				</Text>
+			) : (
+				value
+			)}
+		</View>
+	)
+}
+
 export function GroupButtonContainer(
 	props: React.ComponentPropsWithoutRef<typeof PressableOpacity> &
 		React.ComponentPropsWithoutRef<typeof View> & {
@@ -127,31 +148,11 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 								)}
 								<View className="flex-row items-center gap-2 shrink-0 bg-transparent">
 									{badge && (
-										<View
-											className={cn(
-												"rounded-full size-5 flex-row items-center justify-center",
-												!badgeColor && "bg-red-500"
-											)}
-											style={
-												badgeColor
-													? {
-															backgroundColor: badgeColor
-														}
-													: undefined
-											}
-										>
-											{typeof badge === "string" ? (
-												<Text
-													className="text-xs"
-													numberOfLines={1}
-													ellipsizeMode="middle"
-												>
-													{badge}
-												</Text>
-											) : (
-												badge
-											)}
-										</View>
+										<BadgePill
+											value={badge}
+											color={badgeColor}
+											textClassName="text-xs"
+										/>
 									)}
 									{rightItem?.type === "text" && (
 										<View className="items-center flex-row bg-transparent max-w-32">
@@ -165,31 +166,11 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 										</View>
 									)}
 									{rightItem?.type === "badge" && (
-										<View
-											className={cn(
-												"rounded-full size-5 flex-row items-center justify-center",
-												!rightItem.color && "bg-red-500"
-											)}
-											style={
-												rightItem.color
-													? {
-															backgroundColor: rightItem.color
-														}
-													: undefined
-											}
-										>
-											{typeof rightItem.value === "string" ? (
-												<Text
-													className="text-white text-xs"
-													numberOfLines={1}
-													ellipsizeMode="middle"
-												>
-													{rightItem.value}
-												</Text>
-											) : (
-												rightItem.value
-											)}
-										</View>
+										<BadgePill
+											value={rightItem.value}
+											color={rightItem.color}
+											textClassName="text-white text-xs"
+										/>
 									)}
 									{rightItem?.type === "switch" && (
 										<View className="items-center flex-row bg-transparent">
