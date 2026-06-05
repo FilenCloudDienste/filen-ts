@@ -4,9 +4,7 @@ import { toggleInArray } from "@/stores/createSelectionSlice"
 
 export type NoteParticipantsStore = {
 	selectedNoteParticipants: NoteParticipant[]
-	setSelectedNoteParticipants: (
-		fn: NoteParticipant[] | ((prev: NoteParticipant[]) => NoteParticipant[])
-	) => void
+	setSelectedNoteParticipants: (fn: NoteParticipant[] | ((prev: NoteParticipant[]) => NoteParticipant[])) => void
 	toggleSelectedNoteParticipant: (participant: NoteParticipant) => void
 	clearSelectedNoteParticipants: () => void
 	selectAllNoteParticipants: (participants: NoteParticipant[]) => void

@@ -12,7 +12,8 @@ const compat = new FlatCompat()
 // store and re-renders on every change.
 const ZUSTAND_SELECTOR_RULE = {
 	selector: "CallExpression[callee.name=/^use[A-Z][a-zA-Z]*Store$/][arguments.length=0]",
-	message: "Zustand store hooks must be called with a selector — e.g. useXStore(s => s.foo) or useXStore(useShallow(...)); never a bare useXStore()."
+	message:
+		"Zustand store hooks must be called with a selector — e.g. useXStore(s => s.foo) or useXStore(useShallow(...)); never a bare useXStore()."
 }
 // No barrel re-export aggregators inside features/ (hurt Metro tree-shaking + fast refresh).
 const NO_FEATURE_BARREL_RULE = {
@@ -133,7 +134,8 @@ export default [
 						},
 						{
 							group: ["@/features/*/store", "@/features/*/store/*", "@/features/*/queries", "@/features/*/queries/*"],
-							message: "Routes must stay thin — no feature store/query imports. Move logic into the feature's screen/hook; the route should only re-export or render a feature screen/component."
+							message:
+								"Routes must stay thin — no feature store/query imports. Move logic into the feature's screen/hook; the route should only re-export or render a feature screen/component."
 						}
 					]
 				}

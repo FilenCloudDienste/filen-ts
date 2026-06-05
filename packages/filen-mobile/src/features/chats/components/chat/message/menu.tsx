@@ -54,7 +54,9 @@ export const Menu = ({
 	} satisfies MenuButton
 
 	const buttons = info.item.undecryptable
-		? (isOwner ? [deleteButton] : ([] as MenuButton[]))
+		? isOwner
+			? [deleteButton]
+			: ([] as MenuButton[])
 		: ([
 				{
 					id: "reply",

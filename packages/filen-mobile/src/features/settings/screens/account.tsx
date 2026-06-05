@@ -11,7 +11,12 @@ import { Platform, ActivityIndicator } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useAccountQuery from "@/queries/useAccount.query"
-import { buildDangerZoneButtons, buildProfileButtons, buildAccountToggleButtons, buildLogoutButtons } from "@/features/settings/accountButtons"
+import {
+	buildDangerZoneButtons,
+	buildProfileButtons,
+	buildAccountToggleButtons,
+	buildLogoutButtons
+} from "@/features/settings/accountButtons"
 import { PressableScale } from "@/components/ui/pressables"
 import Avatar from "@/components/ui/avatar"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"

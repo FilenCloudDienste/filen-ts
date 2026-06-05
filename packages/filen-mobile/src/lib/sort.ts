@@ -207,12 +207,7 @@ const compareSize = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
 // Shared skeleton for the timestamp-based comparators: dirs-before-files, then compare a
 // per-mode extracted timestamp, with the numeric-uuid tiebreaker and asc/desc flip. Each
 // mode only differs in how it reads the timestamp off an item — passed in as `getTimestamp`.
-const compareByTimestamp = (
-	a: DriveItem,
-	b: DriveItem,
-	isAsc: boolean,
-	getTimestamp: (item: DriveItem) => number
-): number => {
+const compareByTimestamp = (a: DriveItem, b: DriveItem, isAsc: boolean, getTimestamp: (item: DriveItem) => number): number => {
 	const typeComp = compareTypes(a.type, b.type)
 
 	if (typeComp !== 0) {

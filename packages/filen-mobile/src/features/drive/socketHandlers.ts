@@ -35,8 +35,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 						...prev.filter(
 							i =>
 								i.data.uuid !== unwrappedFileMeta.file.uuid &&
-								i.data.decryptedMeta?.name.toLowerCase().trim() !==
-									unwrappedFileMeta.meta?.name.toLowerCase().trim()
+								i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
 						),
 						driveItem
 					]
@@ -166,8 +165,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 							...prev.filter(
 								i =>
 									i.data.uuid !== unwrappedFileMeta.file.uuid &&
-									i.data.decryptedMeta?.name.toLowerCase().trim() !==
-										unwrappedFileMeta.meta?.name.toLowerCase().trim()
+									i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedFileMeta.meta?.name.toLowerCase().trim()
 							),
 							driveItem
 						]
@@ -206,8 +204,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 							...prev.filter(
 								i =>
 									i.data.uuid !== unwrappedDirMeta.uuid &&
-									i.data.decryptedMeta?.name.toLowerCase().trim() !==
-										unwrappedDirMeta.meta?.name.toLowerCase().trim()
+									i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedDirMeta.meta?.name.toLowerCase().trim()
 							),
 							driveItem
 						]
@@ -383,8 +380,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 						...prev.filter(
 							i =>
 								i.data.uuid !== unwrappedDirMeta.uuid &&
-								i.data.decryptedMeta?.name.toLowerCase().trim() !==
-									unwrappedDirMeta.meta?.name.toLowerCase().trim()
+								i.data.decryptedMeta?.name.toLowerCase().trim() !== unwrappedDirMeta.meta?.name.toLowerCase().trim()
 						),
 						driveItem
 					]
@@ -423,9 +419,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 								parentUuid: unwrappedParentUuid,
 								updater: prev =>
 									prev.map(i =>
-										i.data.uuid === unwrappedFileMeta.file.uuid
-											? unwrappedFileIntoDriveItem(unwrappedFileMeta)
-											: i
+										i.data.uuid === unwrappedFileMeta.file.uuid ? unwrappedFileIntoDriveItem(unwrappedFileMeta) : i
 									)
 							})
 						}
@@ -445,9 +439,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 							driveItemsQueryUpdateGlobal({
 								parentUuid: unwrappedParentUuid,
 								updater: prev =>
-									prev.map(i =>
-										i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i
-									)
+									prev.map(i => (i.data.uuid === unwrappedDirMeta.uuid ? unwrappedDirIntoDriveItem(unwrappedDirMeta) : i))
 							})
 						}
 					}

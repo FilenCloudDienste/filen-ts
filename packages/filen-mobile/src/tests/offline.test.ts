@@ -273,7 +273,15 @@ import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta 
 import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
-import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
+import {
+	AnyDirWithContext,
+	AnyNormalDir,
+	AnySharedDir,
+	AnySharedDirWithContext,
+	SharingRole_Tags,
+	NonRootDir_Tags,
+	type Dir
+} from "@filen/sdk-rs"
 import transfers from "@/features/transfers/transfers"
 import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
@@ -1773,10 +1781,7 @@ describe("Offline", () => {
 			const noEntriesMeta = { item: dirItem, parent }
 
 			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
-			fs.set(
-				`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`,
-				new Uint8Array(new TextEncoder().encode(serialize(noEntriesMeta)))
-			)
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize(noEntriesMeta))))
 
 			const offline = await createOffline()
 			const result = await offline.listDirectories()
@@ -3821,7 +3826,7 @@ describe("Offline", () => {
 			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
 				authedSdkClient: {
 					listDir: vi.fn().mockImplementation((dir: { inner: unknown[] }) => {
-						const uuid = ((dir as any).inner ?? [(dir as any)])[0]?.uuid ?? (dir as any).uuid
+						const uuid = ((dir as any).inner ?? [dir as any])[0]?.uuid ?? (dir as any).uuid
 
 						if (uuid === parent1Uuid) {
 							return listDirParent1()
@@ -5849,7 +5854,9 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await expect(offline.storeFile({ file: fileItem, parent, signal: controller.signal })).rejects.toThrow("The operation was aborted")
+			await expect(offline.storeFile({ file: fileItem, parent, signal: controller.signal })).rejects.toThrow(
+				"The operation was aborted"
+			)
 
 			// The aborted download must have triggered cleanup — no partial directory left.
 			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)

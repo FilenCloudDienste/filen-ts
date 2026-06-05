@@ -394,11 +394,9 @@ describe("restoreQueries", () => {
 
 		await restoreQueries()
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			freshQuery.queryKey,
-			freshQuery.state.data,
-			{ updatedAt: freshQuery.state.dataUpdatedAt }
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith(freshQuery.queryKey, freshQuery.state.data, {
+			updatedAt: freshQuery.state.dataUpdatedAt
+		})
 		expect(removeSpy).not.toHaveBeenCalled()
 	})
 
@@ -507,11 +505,9 @@ describe("restoreQueries", () => {
 
 		await restoreQueries()
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			goodQuery.queryKey,
-			goodQuery.state.data,
-			{ updatedAt: goodQuery.state.dataUpdatedAt }
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith(goodQuery.queryKey, goodQuery.state.data, {
+			updatedAt: goodQuery.state.dataUpdatedAt
+		})
 	})
 })
 
@@ -585,11 +581,7 @@ describe("QueryUpdater.set", () => {
 
 		updater.set<string>(["testKey"], "value", fixedTimestamp)
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			["testKey"],
-			expect.any(Function),
-			{ updatedAt: fixedTimestamp }
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith(["testKey"], expect.any(Function), { updatedAt: fixedTimestamp })
 	})
 
 	it("falls back to Date.now() when dataUpdatedAt is undefined", () => {
@@ -721,11 +713,7 @@ describe("playlistsQueryUpdate", () => {
 
 		playlistsQueryUpdate({ updater: [] })
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			[BASE_QUERY_KEY],
-			expect.any(Function),
-			expect.any(Object)
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith([BASE_QUERY_KEY], expect.any(Function), expect.any(Object))
 	})
 })
 
@@ -760,7 +748,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		// Cancel the debounce so it doesn't fire on its own
 		// Access the private debounce via the prototype path
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; persistNow: () => void }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			persistNow: () => void
+		}
 		kvAny.persistDirty.cancel()
 
 		// Verify dirty set is populated before the flush
@@ -774,7 +767,9 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 		expect(kvAny.dirtyUpserts.size).toBe(0)
 
 		// Let the rejected promise settle
-		await new Promise<void>(resolve => { setTimeout(resolve, 10) })
+		await new Promise<void>(resolve => {
+			setTimeout(resolve, 10)
+		})
 
 		// After the catch block, dirty keys must be restored for retry
 		expect(kvAny.dirtyUpserts.has("keyA")).toBe(true)
@@ -801,7 +796,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		kv.setItem("keyX", "valueX")
 
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; persistNow: () => void }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			persistNow: () => void
+		}
 		kvAny.persistDirty.cancel()
 
 		kvAny.persistNow()
@@ -810,7 +810,9 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 		// — this puts keyX in dirtyDeletes, so it should NOT be re-added to dirtyUpserts
 		kvAny.dirtyDeletes.add("keyX")
 
-		await new Promise<void>(resolve => { setTimeout(resolve, 10) })
+		await new Promise<void>(resolve => {
+			setTimeout(resolve, 10)
+		})
 
 		// keyX moved to dirtyDeletes — it must not be double-restored into dirtyUpserts
 		expect(kvAny.dirtyUpserts.has("keyX")).toBe(false)
@@ -837,7 +839,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		kv.setItem("keyC", "valueC")
 
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; runPersistAsync: () => Promise<void> }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			runPersistAsync: () => Promise<void>
+		}
 		kvAny.persistDirty.cancel()
 
 		// Run the async persist path directly and await it
@@ -867,7 +874,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		kv.setItem("keyD", "valueD")
 
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; runPersistAsync: () => Promise<void> }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			runPersistAsync: () => Promise<void>
+		}
 		kvAny.persistDirty.cancel()
 
 		// Start the async persist

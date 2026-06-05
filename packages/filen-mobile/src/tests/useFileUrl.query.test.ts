@@ -1,32 +1,25 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const {
-	mockCacheMap,
-	mockFileCacheHas,
-	mockFileCacheGet,
-	mockOfflineGetLocalFile,
-	mockIsOnline,
-	mockHttpStoreState,
-	mockGetFileUrl
-} = vi.hoisted(() => {
-	const mockGetFileUrl = vi.fn((file: { tag?: string; inner?: unknown }) => {
-		return `http://localhost:8080/file/${(file as { inner?: [{ uuid?: string }] }).inner?.[0]?.uuid ?? "unknown"}`
+const { mockCacheMap, mockFileCacheHas, mockFileCacheGet, mockOfflineGetLocalFile, mockIsOnline, mockHttpStoreState, mockGetFileUrl } =
+	vi.hoisted(() => {
+		const mockGetFileUrl = vi.fn((file: { tag?: string; inner?: unknown }) => {
+			return `http://localhost:8080/file/${(file as { inner?: [{ uuid?: string }] }).inner?.[0]?.uuid ?? "unknown"}`
+		})
+
+		const mockHttpStoreState: { getFileUrl: typeof mockGetFileUrl | null } = {
+			getFileUrl: mockGetFileUrl
+		}
+
+		return {
+			mockCacheMap: new Map<string, unknown>(),
+			mockFileCacheHas: vi.fn().mockResolvedValue(false),
+			mockFileCacheGet: vi.fn().mockResolvedValue(null),
+			mockOfflineGetLocalFile: vi.fn().mockResolvedValue(null),
+			mockIsOnline: vi.fn().mockReturnValue(true),
+			mockHttpStoreState,
+			mockGetFileUrl
+		}
 	})
-
-	const mockHttpStoreState: { getFileUrl: typeof mockGetFileUrl | null } = {
-		getFileUrl: mockGetFileUrl
-	}
-
-	return {
-		mockCacheMap: new Map<string, unknown>(),
-		mockFileCacheHas: vi.fn().mockResolvedValue(false),
-		mockFileCacheGet: vi.fn().mockResolvedValue(null),
-		mockOfflineGetLocalFile: vi.fn().mockResolvedValue(null),
-		mockIsOnline: vi.fn().mockReturnValue(true),
-		mockHttpStoreState,
-		mockGetFileUrl
-	}
-})
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
@@ -35,7 +28,7 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	sortParams: (p: Record<string, unknown>) => {
 		const keys = Object.keys(p).sort()
 		const result: Record<string, unknown> = {}
@@ -190,10 +183,12 @@ describe("fetchData (useFileUrl.query)", () => {
 		mockFileCacheGet.mockReset().mockResolvedValue(null)
 		mockOfflineGetLocalFile.mockReset().mockResolvedValue(null)
 		mockIsOnline.mockReset().mockReturnValue(true)
-		mockGetFileUrl.mockReset().mockImplementation(
-			(file: { tag?: string; inner?: unknown }) =>
-				`http://localhost:8080/file/${(file as { inner?: [{ uuid?: string }] }).inner?.[0]?.uuid ?? "unknown"}`
-		)
+		mockGetFileUrl
+			.mockReset()
+			.mockImplementation(
+				(file: { tag?: string; inner?: unknown }) =>
+					`http://localhost:8080/file/${(file as { inner?: [{ uuid?: string }] }).inner?.[0]?.uuid ?? "unknown"}`
+			)
 		mockHttpStoreState.getFileUrl = mockGetFileUrl
 	})
 

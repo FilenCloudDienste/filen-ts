@@ -4,9 +4,7 @@ import { simpleDate } from "@/lib/time"
 
 // File-variant date resolution is identical across file / sharedFile /
 // sharedRootFile: prefer modified, then created, then the upload timestamp.
-function resolveFileDate(
-	item: Extract<DriveItem, { type: "file" | "sharedFile" | "sharedRootFile" }>
-): string {
+function resolveFileDate(item: Extract<DriveItem, { type: "file" | "sharedFile" | "sharedRootFile" }>): string {
 	if (item.data.decryptedMeta?.modified) {
 		return simpleDate(Number(item.data.decryptedMeta.modified))
 	}

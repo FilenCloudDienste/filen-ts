@@ -147,7 +147,6 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
@@ -641,7 +640,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("network failure")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; upload: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; upload: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "uploadFile")
 
 				expect(entry).toBeDefined()
@@ -709,16 +712,18 @@ describe("Transfers", () => {
 					}
 				})
 
-				mockUploadFile.mockImplementationOnce(async (_opts: unknown, _path: string, callbacks: { onUpdate: (n: bigint) => void }) => {
-					// Fire the onUpdate callback — this calls setTransfers with a map-updater
-					// that increments bytesTransferred on the matching in-flight transfer.
-					callbacks.onUpdate(512n)
+				mockUploadFile.mockImplementationOnce(
+					async (_opts: unknown, _path: string, callbacks: { onUpdate: (n: bigint) => void }) => {
+						// Fire the onUpdate callback — this calls setTransfers with a map-updater
+						// that increments bytesTransferred on the matching in-flight transfer.
+						callbacks.onUpdate(512n)
 
-					return {
-						uuid: "uploaded-file-uuid",
-						parent: { tag: "Uuid", inner: ["parent-uuid"] }
+						return {
+							uuid: "uploaded-file-uuid",
+							parent: { tag: "Uuid", inner: ["parent-uuid"] }
+						}
 					}
-				})
+				)
 
 				await transfers.upload({
 					localFileOrDir: file,
@@ -849,11 +854,9 @@ describe("Transfers", () => {
 					meta: { name: "file.txt" }
 				})
 
-				mockUploadDirRecursively.mockImplementationOnce(
-					async (_path: string, callbacks: any) => {
-						callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 512n)
-					}
-				)
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 512n)
+				})
 
 				await transfers.upload({
 					localFileOrDir: dir,
@@ -886,11 +889,9 @@ describe("Transfers", () => {
 					meta: { name: "shared-dir" }
 				})
 
-				mockUploadDirRecursively.mockImplementationOnce(
-					async (_path: string, callbacks: any) => {
-						callbacks.onUploadUpdate([uploadedDir], [], 0n)
-					}
-				)
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadUpdate([uploadedDir], [], 0n)
+				})
 
 				await transfers.upload({
 					localFileOrDir: dir,
@@ -909,11 +910,9 @@ describe("Transfers", () => {
 				const uploadedDir = { uuid: "dir-1", parent: { tag: "Uuid", inner: ["parent-uuid"] } }
 				const uploadedFile = { uuid: "file-1", parent: { tag: "Uuid", inner: ["dir-1"] } }
 
-				mockUploadDirRecursively.mockImplementationOnce(
-					async (_path: string, callbacks: any) => {
-						callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 1024n)
-					}
-				)
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 1024n)
+				})
 
 				const result = await transfers.upload({
 					localFileOrDir: dir,
@@ -987,7 +986,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("dir upload failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; upload: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; upload: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "uploadDirectory")
 
 				expect(entry).toBeDefined()
@@ -1180,7 +1183,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("download failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; download: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; download: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "downloadFile")
 
 				expect(entry).toBeDefined()
@@ -1277,7 +1284,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("dir download failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; download: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; download: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "downloadDirectory")
 
 				expect(entry).toBeDefined()
@@ -1389,11 +1400,13 @@ describe("Transfers", () => {
 			const parent = makeParentDir("parent-uuid")
 
 			// uploadFile hangs until the abort signal fires.
-			mockUploadFile.mockImplementation((_opts: unknown, _path: string, _cb: unknown, _future: unknown, opts: { signal: AbortSignal }) => {
-				return new Promise<never>((_resolve, reject) => {
-					opts.signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true })
-				})
-			})
+			mockUploadFile.mockImplementation(
+				(_opts: unknown, _path: string, _cb: unknown, _future: unknown, opts: { signal: AbortSignal }) => {
+					return new Promise<never>((_resolve, reject) => {
+						opts.signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true })
+					})
+				}
+			)
 
 			const uploadPromise = transfers.upload({
 				localFileOrDir: file,

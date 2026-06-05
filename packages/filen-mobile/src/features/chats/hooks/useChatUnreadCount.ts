@@ -17,7 +17,8 @@ export function useChatUnreadCount(chat: Chat): number {
 		chatMessagesQuery.status === "success"
 			? chatMessagesQuery.data.filter(
 					message =>
-						chat.lastFocus !== undefined && chat.lastFocus !== null &&
+						chat.lastFocus !== undefined &&
+						chat.lastFocus !== null &&
 						chat.lastMessage &&
 						!chat.muted &&
 						message.sentTimestamp > chat.lastFocus &&

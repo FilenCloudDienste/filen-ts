@@ -18,11 +18,7 @@ const MAX_REDIRECTS = 5
  * or non-HTTPS host because we validate the Location header before following.
  * Returns the final Response on success, or null if any hop is invalid/fails.
  */
-async function fetchManual(
-	startUrl: string,
-	method: "HEAD" | "GET",
-	signal: AbortSignal
-): Promise<Response | null> {
+async function fetchManual(startUrl: string, method: "HEAD" | "GET", signal: AbortSignal): Promise<Response | null> {
 	let currentUrl = startUrl
 
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {

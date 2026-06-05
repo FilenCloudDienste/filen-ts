@@ -175,7 +175,15 @@ function buildSliderTapGesture(sv: SliderSharedValues, trackWidth: number, seekT
 	})
 }
 
-export const AudioSlider = ({ currentTime, duration, onSeek }: { currentTime: number; duration: number; onSeek: (seconds: number) => void }) => {
+export const AudioSlider = ({
+	currentTime,
+	duration,
+	onSeek
+}: {
+	currentTime: number
+	duration: number
+	onSeek: (seconds: number) => void
+}) => {
 	const [trackWidth, setTrackWidth] = useState<number>(0)
 	const isSeeking = useSharedValue<boolean>(false)
 	const seekProgress = useSharedValue<number>(0)
@@ -328,11 +336,7 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{
-								Paths.parse(
-									item.type === "drive" ? driveItemDisplayName(item.data) : item.data.name
-								).name
-							}
+							{Paths.parse(item.type === "drive" ? driveItemDisplayName(item.data) : item.data.name).name}
 						</Text>
 					</Fragment>
 				)}

@@ -50,82 +50,79 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		// React ref/state — so mutating it is unrestricted.
 		let inflight: AbortController | null = null
 
-		const debounced = debounce(
-			async (value: string, pathType: DrivePath["type"], selectOptions: DrivePath["selectOptions"]) => {
-				// Cancel any in-flight global search before starting (or skipping) a new
-				// one so a stale SDK result for a previous query/directory cannot land
-				// after navigation and pollute this screen's item list.
-				inflight?.abort()
-				inflight = null
+		const debounced = debounce(async (value: string, pathType: DrivePath["type"], selectOptions: DrivePath["selectOptions"]) => {
+			// Cancel any in-flight global search before starting (or skipping) a new
+			// one so a stale SDK result for a previous query/directory cannot land
+			// after navigation and pollute this screen's item list.
+			inflight?.abort()
+			inflight = null
 
-				if (pathType !== "drive" || selectOptions) {
-					setGlobalSearchResult([])
-					setQueryingGlobalSearch(false)
-
-					return
-				}
-
-				const normalized = value.trim().toLowerCase()
-
-				if (normalized.length === 0) {
-					setGlobalSearchResult([])
-					setQueryingGlobalSearch(false)
-
-					return
-				}
-
-				// Global search hits the SDK (findItemMatchesForName) — offline this
-				// would throw a network error and produce a banner storm. Clear search
-				// state silently; local-filter results (which stay applied via the
-				// itemsSorted derivation in Drive) still narrow the visible list.
-				if (!onlineManager.isOnline()) {
-					setGlobalSearchResult([])
-					setQueryingGlobalSearch(false)
-
-					return
-				}
-
-				const abortController = new AbortController()
-
-				inflight = abortController
-
-				setQueryingGlobalSearch(true)
+			if (pathType !== "drive" || selectOptions) {
 				setGlobalSearchResult([])
-
-				const result = await run(async defer => {
-					defer(() => {
-						setQueryingGlobalSearch(false)
-					})
-
-					return await drive.findItemMatchesForName({
-						name: normalized,
-						signal: abortController.signal
-					})
-				})
-
-				// A newer search (or a navigation/unmount) aborted this request — drop
-				// its result so it cannot overwrite the current view's state.
-				if (abortController.signal.aborted) {
-					return
-				}
-
-				inflight = null
-
 				setQueryingGlobalSearch(false)
 
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
+				return
+			}
 
-					setGlobalSearchResult([])
+			const normalized = value.trim().toLowerCase()
 
-					return
-				}
+			if (normalized.length === 0) {
+				setGlobalSearchResult([])
+				setQueryingGlobalSearch(false)
 
-				setGlobalSearchResult(result.data.map(({ item }) => item))
-			},
-			1000
-		)
+				return
+			}
+
+			// Global search hits the SDK (findItemMatchesForName) — offline this
+			// would throw a network error and produce a banner storm. Clear search
+			// state silently; local-filter results (which stay applied via the
+			// itemsSorted derivation in Drive) still narrow the visible list.
+			if (!onlineManager.isOnline()) {
+				setGlobalSearchResult([])
+				setQueryingGlobalSearch(false)
+
+				return
+			}
+
+			const abortController = new AbortController()
+
+			inflight = abortController
+
+			setQueryingGlobalSearch(true)
+			setGlobalSearchResult([])
+
+			const result = await run(async defer => {
+				defer(() => {
+					setQueryingGlobalSearch(false)
+				})
+
+				return await drive.findItemMatchesForName({
+					name: normalized,
+					signal: abortController.signal
+				})
+			})
+
+			// A newer search (or a navigation/unmount) aborted this request — drop
+			// its result so it cannot overwrite the current view's state.
+			if (abortController.signal.aborted) {
+				return
+			}
+
+			inflight = null
+
+			setQueryingGlobalSearch(false)
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+
+				setGlobalSearchResult([])
+
+				return
+			}
+
+			setGlobalSearchResult(result.data.map(({ item }) => item))
+		}, 1000)
 
 		return {
 			run: debounced,

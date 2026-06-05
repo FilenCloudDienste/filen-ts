@@ -1441,9 +1441,7 @@ describe("Thumbnails", () => {
 
 			const item = makeFileItem("move-fail-img-uuid", "photo.jpg")
 
-			await expect(thumbnails.generate({ item })).rejects.toThrow(
-				"Failed to move thumbnail to output path: EACCES permission denied"
-			)
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Failed to move thumbnail to output path: EACCES permission denied")
 		})
 
 		it("video: throws wrapped error and cleans up when move fails", async () => {

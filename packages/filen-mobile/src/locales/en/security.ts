@@ -96,8 +96,7 @@ export const security = {
 	thirty_minutes: "30 minutes",
 	// one_hour lives in common.ts.
 	/** Empty-state message shown when the device has no biometric hardware or is not enrolled */
-	biometric_not_supported:
-		"Biometric authentication is not supported on this device or no biometric method is enrolled.",
+	biometric_not_supported: "Biometric authentication is not supported on this device or no biometric method is enrolled.",
 
 	// ── Export master keys ─────────────────────────────────────────────────────
 	/** Export-master-keys row and dialog — title */

@@ -1,8 +1,4 @@
-import {
-	ManagedAbortController,
-	type ManagedAbortSignal,
-	PauseSignal as SdkPauseSignal
-} from "@filen/sdk-rs"
+import { ManagedAbortController, type ManagedAbortSignal, PauseSignal as SdkPauseSignal } from "@filen/sdk-rs"
 
 export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
 	const abortController = new ManagedAbortController()

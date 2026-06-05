@@ -1,10 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const {
-	mockGetSdkClients,
-	mockListFileVersions,
-	cacheFileUuidToNormalFile
-} = vi.hoisted(() => {
+const { mockGetSdkClients, mockListFileVersions, cacheFileUuidToNormalFile } = vi.hoisted(() => {
 	const cacheFileUuidToNormalFile = new Map<string, unknown>()
 	const mockListFileVersions = vi.fn()
 
@@ -80,7 +76,10 @@ describe("fetchData — cache miss early return", () => {
 
 	it("calls listFileVersions and forwards its result when cache entry exists", async () => {
 		const fakeFile = { uuid: "file-with-versions", size: 100n, region: "us-east", bucket: "b", chunks: 1n, timestamp: 0n, meta: {} }
-		const fakeVersions = [{ id: 1n, timestamp: 1000n }, { id: 2n, timestamp: 2000n }]
+		const fakeVersions = [
+			{ id: 1n, timestamp: 1000n },
+			{ id: 2n, timestamp: 2000n }
+		]
 
 		cacheFileUuidToNormalFile.set("file-with-versions", fakeFile)
 		mockListFileVersions.mockResolvedValue(fakeVersions)

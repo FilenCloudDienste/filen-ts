@@ -164,11 +164,13 @@ describe("useTransfersStore", () => {
 		})
 
 		it("mixed transfer types: count and progress aggregate correctly", () => {
-			useTransfersStore.getState().setTransfers([
-				makeUploadFileTransfer("uf", 1000, 500),
-				makeDownloadFileTransfer("df", 1000, 250),
-				makeUploadDirectoryTransfer("ud", 1000, 750)
-			])
+			useTransfersStore
+				.getState()
+				.setTransfers([
+					makeUploadFileTransfer("uf", 1000, 500),
+					makeDownloadFileTransfer("df", 1000, 250),
+					makeUploadDirectoryTransfer("ud", 1000, 750)
+				])
 
 			const stats = useTransfersStore.getState().stats
 
@@ -257,10 +259,9 @@ describe("useTransfersStore", () => {
 
 		it("mixed paused/active transfers: speed reflects the active subset, not zero", () => {
 			// Two transfers, both initially active
-			useTransfersStore.getState().setTransfers([
-				makeUploadFileTransfer("active", 100000, 0),
-				makeUploadFileTransfer("paused", 100000, 0)
-			])
+			useTransfersStore
+				.getState()
+				.setTransfers([makeUploadFileTransfer("active", 100000, 0), makeUploadFileTransfer("paused", 100000, 0)])
 
 			// Make active progress and advance past throttle on each step
 			for (let i = 1; i <= 10; i++) {
@@ -279,10 +280,7 @@ describe("useTransfersStore", () => {
 		})
 
 		it("does not blip negative or spike when a transfer completes and is removed", () => {
-			useTransfersStore.getState().setTransfers([
-				makeUploadFileTransfer("a", 1000, 0),
-				makeUploadFileTransfer("b", 1000, 0)
-			])
+			useTransfersStore.getState().setTransfers([makeUploadFileTransfer("a", 1000, 0), makeUploadFileTransfer("b", 1000, 0)])
 
 			// Both transfers progress for 2 seconds.
 			for (let i = 1; i <= 20; i++) {

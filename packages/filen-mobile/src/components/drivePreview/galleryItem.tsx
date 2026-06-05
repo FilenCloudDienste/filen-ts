@@ -34,9 +34,7 @@ const GalleryItem = ({
 	const dimensions = useWindowDimensions()
 	const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
-	const previewType = getPreviewType(
-		info.item.type === "drive" ? (info.item.data.data.decryptedMeta?.name ?? "") : info.item.data.name
-	)
+	const previewType = getPreviewType(info.item.type === "drive" ? (info.item.data.data.decryptedMeta?.name ?? "") : info.item.data.name)
 
 	const fileUrlQuery = useFileUrlQuery(
 		info.item.type === "drive"
@@ -77,9 +75,7 @@ const GalleryItem = ({
 						size={48}
 						color="#9ca3af"
 					/>
-					<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">
-						{t("unavailable_offline")}
-					</Text>
+					<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("unavailable_offline")}</Text>
 				</View>
 			</View>
 		)

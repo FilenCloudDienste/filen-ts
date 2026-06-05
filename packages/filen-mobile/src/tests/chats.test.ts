@@ -506,9 +506,7 @@ describe("chats.disableMessageEmbed", () => {
 
 		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledTimes(1)
 		// Params should use the message.chat uuid
-		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledWith(
-			expect.objectContaining({ params: { uuid: "chat-1" } })
-		)
+		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledWith(expect.objectContaining({ params: { uuid: "chat-1" } }))
 	})
 
 	it("chatMessagesQueryUpdate updater sets inflightId to empty string on the updated message", async () => {
@@ -1301,9 +1299,7 @@ describe("chats.refetchChatsAndMessages", () => {
 		await chats.refetchChatsAndMessages()
 
 		// Find the call for chat1's messages
-		const msgCall = mockChatMessagesQueryUpdate.mock.calls.find(
-			c => c[0]?.params?.uuid === "rf-3"
-		)
+		const msgCall = mockChatMessagesQueryUpdate.mock.calls.find(c => c[0]?.params?.uuid === "rf-3")
 
 		expect(msgCall).toBeDefined()
 

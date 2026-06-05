@@ -1,4 +1,12 @@
-import { type UserEvent, type UserEventKind, type FileMeta, type DirMeta, FileMeta_Tags, DirMeta_Tags, UserEventKind_Tags } from "@filen/sdk-rs"
+import {
+	type UserEvent,
+	type UserEventKind,
+	type FileMeta,
+	type DirMeta,
+	FileMeta_Tags,
+	DirMeta_Tags,
+	UserEventKind_Tags
+} from "@filen/sdk-rs"
 import { simpleDate } from "@/lib/time"
 import i18n from "@/lib/i18n"
 import { type TFunction } from "i18next"

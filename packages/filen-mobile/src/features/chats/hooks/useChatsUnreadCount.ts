@@ -40,7 +40,8 @@ export function useChatsUnreadCount() {
 
 			count += messages.filter(
 				message =>
-					chat.lastFocus !== undefined && chat.lastFocus !== null &&
+					chat.lastFocus !== undefined &&
+					chat.lastFocus !== null &&
 					chat.lastMessage &&
 					!chat.muted &&
 					message.sentTimestamp > chat.lastFocus &&

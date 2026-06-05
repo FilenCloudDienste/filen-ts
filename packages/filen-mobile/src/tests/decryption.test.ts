@@ -286,11 +286,7 @@ describe("chatDisplayName", () => {
 		expect(
 			chatDisplayName(
 				chat("c1", false, {
-					participants: [
-						participant(ME, "me@x.com"),
-						participant(OTHER_A, "a@x.com", "Ann"),
-						participant(OTHER_B, "b@x.com")
-					]
+					participants: [participant(ME, "me@x.com"), participant(OTHER_A, "a@x.com", "Ann"), participant(OTHER_B, "b@x.com")]
 				}),
 				ME
 			)
@@ -312,11 +308,7 @@ describe("chatDisplayName", () => {
 		expect(
 			chatDisplayName(
 				chat("c1", false, {
-					participants: [
-						participant(ME, "me@x.com"),
-						participant(OTHER_B, "b@x.com"),
-						participant(OTHER_A, "a@x.com", "Ann")
-					]
+					participants: [participant(ME, "me@x.com"), participant(OTHER_B, "b@x.com"), participant(OTHER_A, "a@x.com", "Ann")]
 				}),
 				ME
 			)
@@ -335,11 +327,6 @@ describe("chatDisplayName", () => {
 	})
 
 	it("returns empty string when participants array is completely empty", () => {
-		expect(
-			chatDisplayName(
-				chat("c1", false, { participants: [] }),
-				ME
-			)
-		).toBe("")
+		expect(chatDisplayName(chat("c1", false, { participants: [] }), ME)).toBe("")
 	})
 })

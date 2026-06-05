@@ -9,13 +9,7 @@ import { type DeferFn } from "@filen/utils"
 // via expo-image-manipulator. Returns the on-disk File ready to upload as the account avatar.
 // `defer` (from the caller's runWithLoading/run) registers temp-file cleanup so it always runs.
 // Throws localized errors: avatar_upload_failed / avatar_not_an_image / avatar_unsupported_format.
-export async function prepareAvatarFileForUpload({
-	asset,
-	defer
-}: {
-	asset: ImagePickerAsset
-	defer: DeferFn
-}): Promise<FileSystem.File> {
+export async function prepareAvatarFileForUpload({ asset, defer }: { asset: ImagePickerAsset; defer: DeferFn }): Promise<FileSystem.File> {
 	const originalFile = new FileSystem.File(asset.uri)
 
 	defer(() => {
@@ -28,12 +22,7 @@ export async function prepareAvatarFileForUpload({
 		throw new Error(i18n.t("avatar_upload_failed"))
 	}
 
-	if (
-		!asset.mimeType ||
-		!asset.mimeType.toLowerCase().startsWith("image/") ||
-		!asset.fileSize ||
-		!asset.fileName
-	) {
+	if (!asset.mimeType || !asset.mimeType.toLowerCase().startsWith("image/") || !asset.fileSize || !asset.fileName) {
 		throw new Error(i18n.t("avatar_not_an_image"))
 	}
 
@@ -41,11 +30,7 @@ export async function prepareAvatarFileForUpload({
 	let fileToUpload = originalFile
 
 	if (mimeType !== "image/jpeg" && mimeType !== "image/png") {
-		if (
-			!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(
-				FileSystem.Paths.extname(asset.fileName).toLowerCase()
-			)
-		) {
+		if (!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(asset.fileName).toLowerCase())) {
 			throw new Error(i18n.t("avatar_unsupported_format"))
 		}
 

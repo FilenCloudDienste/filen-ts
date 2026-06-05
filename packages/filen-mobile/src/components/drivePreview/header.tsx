@@ -111,11 +111,7 @@ const GalleryHeader = ({
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{currentItem
-							? currentItem.type === "drive"
-								? driveItemDisplayName(currentItem.data)
-								: currentItem.data.name
-							: ""}
+						{currentItem ? (currentItem.type === "drive" ? driveItemDisplayName(currentItem.data) : currentItem.data.name) : ""}
 					</Text>
 					{currentItem && !drivePath?.selectOptions ? (
 						<Fragment>

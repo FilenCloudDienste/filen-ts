@@ -19,8 +19,7 @@ export const misc = {
 	/** Dialog title shown when the account has used more storage than its plan allows */
 	storage_exceeded_title: "Storage limit reached",
 	/** Dialog message shown when storage is over the limit; tells the user to free up space or upgrade */
-	storage_exceeded_message:
-		"You've reached your storage limit. Delete some files or upgrade your plan to keep uploading.",
+	storage_exceeded_message: "You've reached your storage limit. Delete some files or upgrade your plan to keep uploading.",
 
 	// ── Biometric / PIN unlock overlay (biometric.tsx) ────────────────────────
 	/** Biometric prompt title and lock-overlay heading: asks the user to authenticate */

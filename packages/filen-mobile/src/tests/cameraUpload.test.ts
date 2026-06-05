@@ -24,8 +24,20 @@ vi.mock("expo-media-library", async () => {
 	const next = await import("@/tests/mocks/expoMediaLibrary")
 
 	return {
-		getPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true })),
-		requestPermissionsAsync: vi.fn(async () => ({ granted: true, status: "granted", accessPrivileges: "all", expires: "never", canAskAgain: true })),
+		getPermissionsAsync: vi.fn(async () => ({
+			granted: true,
+			status: "granted",
+			accessPrivileges: "all",
+			expires: "never",
+			canAskAgain: true
+		})),
+		requestPermissionsAsync: vi.fn(async () => ({
+			granted: true,
+			status: "granted",
+			accessPrivileges: "all",
+			expires: "never",
+			canAskAgain: true
+		})),
 		getAlbumsAsync: vi.fn(async () => {
 			return Array.from(next.ml.albums.values()).map(stored => ({
 				id: stored.id,
@@ -52,7 +64,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	fastLocaleCompare: (a: string, b: string) => a.localeCompare(b)
 }))
 
@@ -104,7 +116,6 @@ vi.mock("@/lib/i18n", () => ({
 		t: (key: string) => key
 	}
 }))
-
 
 vi.mock("@/lib/utils", () => ({
 	unwrapSdkError: vi.fn().mockReturnValue(null),
@@ -363,7 +374,6 @@ describe("modifyAssetPathOnCollision", () => {
 			expect(result).toMatch(/\.mov$/)
 		})
 	})
-
 })
 
 describe("iteration uniqueness", () => {
@@ -1552,7 +1562,6 @@ describe("re-entrancy and failure tracking", () => {
 		await cameraUpload.sync()
 
 		expect(mockSetSyncing).not.toHaveBeenCalled()
-
 		;(cameraUpload as any).syncing = false
 	})
 

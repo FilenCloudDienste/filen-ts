@@ -806,7 +806,10 @@ describe("FileCache", () => {
 
 			fs.set(goodDir, "dir")
 			fs.set(`${goodDir}/${goodUuid}.txt`, new Uint8Array([1]))
-			fs.set(`${goodDir}/${goodUuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...goodItem, cachedAt: expiredTime }))))
+			fs.set(
+				`${goodDir}/${goodUuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize({ ...goodItem, cachedAt: expiredTime })))
+			)
 
 			const corruptUuid = "corrupt-uuid"
 			const corruptDir = `${BASE_DIR}/${corruptUuid}`
@@ -858,7 +861,10 @@ describe("FileCache", () => {
 
 			fs.set(dir, "dir")
 			fs.set(`${dir}/${uuid}.txt`, new Uint8Array([1]))
-			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: exactBoundaryTime }))))
+			fs.set(
+				`${dir}/${uuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: exactBoundaryTime })))
+			)
 
 			await cache.gc(age)
 

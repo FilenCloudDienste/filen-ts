@@ -51,7 +51,7 @@ vi.mock("react-native", async () => {
 })
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	createExecutableTimeout: (...args: unknown[]) => mockCreateExecutableTimeout(...args)
 }))
 
@@ -304,10 +304,7 @@ describe("Sync (Notes)", () => {
 				})
 
 				// flushToDisk must not propagate the error
-				expect(consoleSpy).toHaveBeenCalledWith(
-					"Error flushing note sync to disk:",
-					expect.any(Error)
-				)
+				expect(consoleSpy).toHaveBeenCalledWith("Error flushing note sync to disk:", expect.any(Error))
 			} finally {
 				consoleSpy.mockRestore()
 			}
@@ -322,9 +319,7 @@ describe("Sync (Notes)", () => {
 				"note-2": [{ timestamp: 1000, content: "will-succeed", note: mockNote("note-2") }]
 			}
 
-			mockNotesSetContent
-				.mockRejectedValueOnce(new Error("upload failed"))
-				.mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
+			mockNotesSetContent.mockRejectedValueOnce(new Error("upload failed")).mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
 
 			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
 				id: null,
@@ -412,9 +407,7 @@ describe("Sync (Notes)", () => {
 				"note-2": [{ timestamp: 1000, content: "will-succeed", note: mockNote("note-2") }]
 			}
 
-			mockNotesSetContent
-				.mockRejectedValueOnce(new Error("upload failed"))
-				.mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
+			mockNotesSetContent.mockRejectedValueOnce(new Error("upload failed")).mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
 
 			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
 				id: null,

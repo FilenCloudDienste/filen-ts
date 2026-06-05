@@ -134,8 +134,7 @@ vi.mock("@/constants", () => {
 	const EXPO_AUDIO_SUPPORTED_EXTENSIONS = new Set([".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac"])
 	const FILE_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/d/"
 	const DIRECTORY_PUBLIC_LINK_URL_PREFIX = "https://app.filen.io/#/f/"
-	const URL_REGEX =
-		/\b(?:https?:\/\/|www\.)[^\s<>"'`]+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+\.[a-z]{2,}(?:\/[^\s<>"'`]*)?/gi
+	const URL_REGEX = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+\.[a-z]{2,}(?:\/[^\s<>"'`]*)?/gi
 	const TRAILING_PUNCT = /[.,;:!?'"]+$/
 	const PRIVATE_HOST = [
 		/^localhost$/i,
@@ -212,7 +211,7 @@ describe("sanitizeFileName", () => {
 	})
 
 	it("replaces illegal characters with default replacement '_'", () => {
-		const result = sanitizeFileName("a/b:c<d>e\"f\\g|h?i*j")
+		const result = sanitizeFileName('a/b:c<d>e"f\\g|h?i*j')
 		// All illegal chars replaced with _
 		expect(result).not.toMatch(/[/:?<>"\\|*]/)
 		expect(result).toBe("a_b_c_d_e_f_g_h_i_j")
@@ -813,7 +812,9 @@ describe("PauseSignal", () => {
 	})
 
 	it("listener that throws does not prevent subsequent listeners from being called", () => {
-		const throwing = () => { throw new Error("boom") }
+		const throwing = () => {
+			throw new Error("boom")
+		}
 		const spy = vi.fn()
 		ps.addEventListener("pause", throwing)
 		ps.addEventListener("pause", spy)

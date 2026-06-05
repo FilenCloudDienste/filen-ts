@@ -90,10 +90,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 	const loading = history
 		? false
-		: noteContentQuery.isFetching ||
-			noteContentQuery.isPending ||
-			noteContentQuery.isError ||
-			typeof initialValue !== "string"
+		: noteContentQuery.isFetching || noteContentQuery.isPending || noteContentQuery.isError || typeof initialValue !== "string"
 
 	const hasWriteAccess = (() => {
 		if (!stringifiedClient || history) {

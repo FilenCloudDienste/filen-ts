@@ -1,10 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const {
-	mockGetSdkClients,
-	mockGetDirSize,
-	cacheDirectoryUuidToAnyNormalDir
-} = vi.hoisted(() => {
+const { mockGetSdkClients, mockGetDirSize, cacheDirectoryUuidToAnyNormalDir } = vi.hoisted(() => {
 	const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
 	const mockGetDirSize = vi.fn()
 

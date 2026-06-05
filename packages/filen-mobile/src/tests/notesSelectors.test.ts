@@ -188,10 +188,7 @@ describe("aggregateNoteSelectionFlags", () => {
 	})
 
 	it("combination: mixed favorited / pinned / owned", () => {
-		const notes = [
-			note({ favorite: true }),
-			note({ pinned: true, ownerId: SOMEONE_ELSE, participants: [participant(ME, false)] })
-		]
+		const notes = [note({ favorite: true }), note({ pinned: true, ownerId: SOMEONE_ELSE, participants: [participant(ME, false)] })]
 
 		const flags = aggregateNoteSelectionFlags(notes, ME)
 

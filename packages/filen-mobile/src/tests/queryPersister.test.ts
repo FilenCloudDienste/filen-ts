@@ -91,10 +91,16 @@ vi.mock("expo-router", () => ({
 }))
 
 import { serialize, deserialize } from "@/lib/serializer"
-import { QueryPersisterKv, QUERY_CLIENT_PERSISTER_PREFIX, QUERY_CLIENT_CACHE_TIME, shouldPersistQuery, restoreQueries, queryClientPersisterKv } from "@/queries/client"
+import {
+	QueryPersisterKv,
+	QUERY_CLIENT_PERSISTER_PREFIX,
+	QUERY_CLIENT_CACHE_TIME,
+	shouldPersistQuery,
+	restoreQueries,
+	queryClientPersisterKv
+} from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 import queryClient from "@/queries/client"
-
 
 /**
  * In-memory KV store that simulates sqlite.kvAsync behavior.
@@ -935,13 +941,7 @@ describe("restoreQueries()", () => {
 		vi.useRealTimers()
 	})
 
-	function makePersistedQuery(opts: {
-		key: string
-		queryKey: unknown[]
-		status?: string
-		dataUpdatedAt?: number
-		data?: unknown
-	}): void {
+	function makePersistedQuery(opts: { key: string; queryKey: unknown[]; status?: string; dataUpdatedAt?: number; data?: unknown }): void {
 		const { key, queryKey, status = "success", dataUpdatedAt = Date.now(), data = "payload" } = opts
 
 		seedKvStore(key, {
@@ -1024,10 +1024,6 @@ describe("restoreQueries()", () => {
 
 		// Only the valid entry was passed to setQueryData
 		expect(queryClient.setQueryData).toHaveBeenCalledTimes(1)
-		expect(queryClient.setQueryData).toHaveBeenCalledWith(
-			["useDriveItemsQuery", "ok"],
-			"payload",
-			expect.any(Object)
-		)
+		expect(queryClient.setQueryData).toHaveBeenCalledWith(["useDriveItemsQuery", "ok"], "payload", expect.any(Object))
 	})
 })

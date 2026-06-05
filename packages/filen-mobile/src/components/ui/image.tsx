@@ -16,7 +16,9 @@ export const Image = (props: React.ComponentProps<typeof ExpoImageNative> & Reac
 
 const UniwindImageBackground = withUniwind(ExpoImageBackground) as React.FC<React.ComponentProps<typeof ExpoImageBackground>>
 
-export const ImageBackground = (props: React.ComponentProps<typeof ExpoImageBackground> & React.RefAttributes<typeof ExpoImageBackground>) => {
+export const ImageBackground = (
+	props: React.ComponentProps<typeof ExpoImageBackground> & React.RefAttributes<typeof ExpoImageBackground>
+) => {
 	return (
 		<UniwindImageBackground
 			{...props}

@@ -47,7 +47,6 @@ import {
 	OFFLINE_INDEX_FILE
 } from "@/lib/storageRoots"
 
-
 export type FileOrDirectoryOfflineMeta = {
 	item: DriveItem
 	parent: OfflineParent
@@ -253,9 +252,7 @@ export class Offline {
 			// Treat as corrupt so the directory is re-downloaded rather than silently
 			// returning an entries-less meta that breaks listDirectories and clearAll.
 			if (
-				(meta.item.type === "directory" ||
-					meta.item.type === "sharedDirectory" ||
-					meta.item.type === "sharedRootDirectory") &&
+				(meta.item.type === "directory" || meta.item.type === "sharedDirectory" || meta.item.type === "sharedRootDirectory") &&
 				(meta.entries === undefined || meta.entries === null)
 			) {
 				throw new Error("Directory meta is missing entries — treating as corrupt")

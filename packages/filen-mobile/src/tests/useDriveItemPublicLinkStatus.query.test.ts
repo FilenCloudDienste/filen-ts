@@ -1,11 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const {
-	mockGetSdkClients,
-	mockGetFileLinkStatus,
-	mockGetDirLinkStatus,
-	cacheUuidToAnyDriveItem
-} = vi.hoisted(() => {
+const { mockGetSdkClients, mockGetFileLinkStatus, mockGetDirLinkStatus, cacheUuidToAnyDriveItem } = vi.hoisted(() => {
 	const cacheUuidToAnyDriveItem = new Map<string, unknown>()
 	const mockGetFileLinkStatus = vi.fn()
 	const mockGetDirLinkStatus = vi.fn()

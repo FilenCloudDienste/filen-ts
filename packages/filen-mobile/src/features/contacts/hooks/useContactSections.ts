@@ -5,13 +5,7 @@ import { type ContactListItemWithHeader } from "@/features/contacts/store/useCon
 import { type SelectOptions } from "@/features/contacts/contactsSelect"
 import { buildContactSections, filterContactSections } from "@/features/contacts/utils"
 
-export function useContactSections({
-	searchQuery,
-	selectOptions
-}: {
-	searchQuery: string
-	selectOptions: SelectOptions | null
-}): {
+export function useContactSections({ searchQuery, selectOptions }: { searchQuery: string; selectOptions: SelectOptions | null }): {
 	items: ContactListItemWithHeader[]
 	contactsQuery: ReturnType<typeof useContactsQuery>
 	contactRequestsQuery: ReturnType<typeof useContactRequestsQuery>

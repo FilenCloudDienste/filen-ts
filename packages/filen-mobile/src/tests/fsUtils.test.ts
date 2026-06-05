@@ -3,7 +3,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("react-native", () => ({
-	Platform: { OS: "android", select: <T,>(specifics: { ios?: T; default: T }) => specifics.default }
+	Platform: { OS: "android", select: <T>(specifics: { ios?: T; default: T }) => specifics.default }
 }))
 
 vi.mock("@/constants", () => ({
@@ -255,8 +255,8 @@ describe("sumLocalDirectoryFileBytes", () => {
 	it("sums sizes of all files in a flat directory", () => {
 		const ROOT = "file:///document/sum-flat"
 		fs.set(ROOT, "dir")
-		fs.set(`${ROOT}/a.bin`, new Uint8Array([1, 2, 3]))   // 3 bytes
-		fs.set(`${ROOT}/b.bin`, new Uint8Array([4, 5]))       // 2 bytes
+		fs.set(`${ROOT}/a.bin`, new Uint8Array([1, 2, 3])) // 3 bytes
+		fs.set(`${ROOT}/b.bin`, new Uint8Array([4, 5])) // 2 bytes
 
 		expect(sumLocalDirectoryFileBytes(asDir(ROOT))).toBe(5)
 	})
@@ -265,8 +265,8 @@ describe("sumLocalDirectoryFileBytes", () => {
 		const ROOT = "file:///document/sum-nested"
 		fs.set(ROOT, "dir")
 		fs.set(`${ROOT}/sub`, "dir")
-		fs.set(`${ROOT}/top.bin`, new Uint8Array([1, 2]))           // 2 bytes
-		fs.set(`${ROOT}/sub/inner.bin`, new Uint8Array([3, 4, 5]))  // 3 bytes
+		fs.set(`${ROOT}/top.bin`, new Uint8Array([1, 2])) // 2 bytes
+		fs.set(`${ROOT}/sub/inner.bin`, new Uint8Array([3, 4, 5])) // 3 bytes
 
 		expect(sumLocalDirectoryFileBytes(asDir(ROOT))).toBe(5)
 	})
@@ -283,7 +283,7 @@ describe("sumLocalDirectoryFileBytes", () => {
 	it("handles a zero-byte file without adding to the total", () => {
 		const ROOT = "file:///document/sum-zerobyte"
 		fs.set(ROOT, "dir")
-		fs.set(`${ROOT}/empty.bin`, new Uint8Array([]))        // 0 bytes
+		fs.set(`${ROOT}/empty.bin`, new Uint8Array([])) // 0 bytes
 		fs.set(`${ROOT}/data.bin`, new Uint8Array([1, 2, 3])) // 3 bytes
 
 		expect(sumLocalDirectoryFileBytes(asDir(ROOT))).toBe(3)

@@ -57,7 +57,18 @@ export type DownloadParams = {
 export async function uploadCore(
 	globalAbortController: AbortController,
 	globalPauseSignal: PauseSignal,
-	{ localFileOrDir, parent, hideProgress, awaitExternalCompletionBeforeMarkingAsFinished, pauseSignal, signal, name, created, modified, mime }: UploadParams
+	{
+		localFileOrDir,
+		parent,
+		hideProgress,
+		awaitExternalCompletionBeforeMarkingAsFinished,
+		pauseSignal,
+		signal,
+		name,
+		created,
+		modified,
+		mime
+	}: UploadParams
 ): Promise<{
 	files: File[]
 	directories: Dir[]
@@ -174,19 +185,13 @@ export async function uploadCore(
 
 			if (!hideProgress) {
 				defer(() => {
-					const aborted =
-						transferAbortController.signal.aborted ||
-						globalAbortController.signal.aborted ||
-						signal?.aborted
+					const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
 
 					if (!succeededUploadDirectory && !aborted) {
 						return
 					}
 
-					;(awaitExternalCompletionBeforeMarkingAsFinished
-						? awaitExternalCompletionBeforeMarkingAsFinished()
-						: Promise.resolve()
-					)
+					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
 						.then(() => {
 							useTransfersStore
 								.getState()
@@ -515,10 +520,7 @@ export async function uploadCore(
 
 		if (!hideProgress) {
 			defer(() => {
-				const aborted =
-					transferAbortController.signal.aborted ||
-					globalAbortController.signal.aborted ||
-					signal?.aborted
+				const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
 
 				if (!succeededUploadFile && !aborted) {
 					return
@@ -791,19 +793,13 @@ export async function downloadCore(
 
 			if (!hideProgress) {
 				defer(() => {
-					const aborted =
-						transferAbortController.signal.aborted ||
-						globalAbortController.signal.aborted ||
-						signal?.aborted
+					const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
 
 					if (!succeededDownloadDirectory && !aborted) {
 						return
 					}
 
-					;(awaitExternalCompletionBeforeMarkingAsFinished
-						? awaitExternalCompletionBeforeMarkingAsFinished()
-						: Promise.resolve()
-					)
+					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
 						.then(() => {
 							useTransfersStore
 								.getState()
@@ -1125,10 +1121,7 @@ export async function downloadCore(
 
 		if (!hideProgress) {
 			defer(() => {
-				const aborted =
-					transferAbortController.signal.aborted ||
-					globalAbortController.signal.aborted ||
-					signal?.aborted
+				const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
 
 				if (!succeededDownloadFile && !aborted) {
 					return

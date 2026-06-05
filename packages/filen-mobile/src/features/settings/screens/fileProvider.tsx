@@ -15,7 +15,9 @@ import fileProvider, { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features
 import { type Biometric } from "@/features/settings/screens/biometric"
 import Text from "@/components/ui/text"
 import useDeviceDiskSpace from "@/hooks/useDeviceDiskSpace"
-import useFileProviderCacheBudgetQuery, { invalidateFileProviderCacheBudgetQuery } from "@/features/settings/queries/useFileProviderCacheBudget.query"
+import useFileProviderCacheBudgetQuery, {
+	invalidateFileProviderCacheBudgetQuery
+} from "@/features/settings/queries/useFileProviderCacheBudget.query"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
 

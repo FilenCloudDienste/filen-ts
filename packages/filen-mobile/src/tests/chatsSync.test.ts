@@ -383,10 +383,7 @@ describe("Sync (Chats)", () => {
 			chatsState.inflightMessages = {
 				"chat-1": {
 					chat: mockChat("chat-1"),
-					messages: [
-						mockMessage("msg-1", "will-fail", 1000),
-						mockMessage("msg-2", "will-succeed", 2000)
-					]
+					messages: [mockMessage("msg-1", "will-fail", 1000), mockMessage("msg-2", "will-succeed", 2000)]
 				}
 			}
 
@@ -398,7 +395,9 @@ describe("Sync (Chats)", () => {
 			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-1")).toBe(true)
 
 			// Succeeded message was removed
-			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-2")).toBe(false)
+			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-2")).toBe(
+				false
+			)
 
 			// Error was stored
 			expect(chatsState.inflightErrors["msg-1"]).toBeInstanceOf(Error)
@@ -502,7 +501,9 @@ describe("Sync (Chats)", () => {
 
 			expect(mockSendMessage).not.toHaveBeenCalled()
 			// Skipped message is NOT cleaned up from the store (the continue skips the success cleanup block)
-			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-null")).toBe(true)
+			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-null")).toBe(
+				true
+			)
 		})
 
 		it("skips messages with empty-string content and leaves them in store", async () => {
@@ -521,7 +522,9 @@ describe("Sync (Chats)", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(mockSendMessage).not.toHaveBeenCalled()
-			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-empty")).toBe(true)
+			expect(chatsState.inflightMessages["chat-1"]!.messages.some((m: { inflightId: string }) => m.inflightId === "msg-empty")).toBe(
+				true
+			)
 		})
 
 		it("flushes final state to disk after sync", async () => {
@@ -639,10 +642,7 @@ describe("Sync (Chats)", () => {
 			chatsState.inflightMessages = {
 				"chat-1": {
 					chat: mockChat("chat-1"),
-					messages: [
-						mockMessage("msg-1", "first", 1000),
-						mockMessage("msg-2", "second", 2000)
-					]
+					messages: [mockMessage("msg-1", "first", 1000), mockMessage("msg-2", "second", 2000)]
 				}
 			}
 

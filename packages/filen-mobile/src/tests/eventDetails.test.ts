@@ -183,14 +183,7 @@ describe("buildEventDetails", () => {
 
 		const rows = buildEventDetails(event, echo)
 
-		expect(rows.map(r => r.title)).toEqual([
-			"event_type",
-			"timestamp",
-			"ip",
-			"user_agent",
-			"name",
-			"old_name"
-		])
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "name", "old_name"])
 		expect(rows.find(r => r.title === "name")?.value).toBe("new.txt")
 		expect(rows.find(r => r.title === "old_name")?.value).toBe("old.txt")
 	})

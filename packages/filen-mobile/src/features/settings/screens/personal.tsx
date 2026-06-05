@@ -41,15 +41,7 @@ function Personal() {
 
 	const personalData = personal
 
-	const makeFieldButton = ({
-		field,
-		title,
-		message
-	}: {
-		field: StringFieldKey
-		title: string
-		message: string
-	}): Button => {
+	const makeFieldButton = ({ field, title, message }: { field: StringFieldKey; title: string; message: string }): Button => {
 		return {
 			title,
 			subTitle: personalData[field] ?? t("not_set"),

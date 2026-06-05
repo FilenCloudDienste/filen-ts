@@ -1,8 +1,4 @@
-import {
-	URL_REGEX,
-	TRAILING_PUNCT,
-	PRIVATE_HOST
-} from "@/constants"
+import { URL_REGEX, TRAILING_PUNCT, PRIVATE_HOST } from "@/constants"
 
 export function trimUnbalanced(s: string, open: string, close: string): string {
 	while (s.endsWith(close)) {

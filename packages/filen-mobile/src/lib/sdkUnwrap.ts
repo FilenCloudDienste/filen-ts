@@ -24,10 +24,7 @@ import {
 	FileMeta,
 	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
-import {
-	FILE_PUBLIC_LINK_URL_PREFIX,
-	DIRECTORY_PUBLIC_LINK_URL_PREFIX
-} from "@/constants"
+import { FILE_PUBLIC_LINK_URL_PREFIX, DIRECTORY_PUBLIC_LINK_URL_PREFIX } from "@/constants"
 import type { DriveItem, Prettify } from "@/types"
 import cache from "@/lib/cache"
 import type { DrivePath } from "@/hooks/useDrivePath"

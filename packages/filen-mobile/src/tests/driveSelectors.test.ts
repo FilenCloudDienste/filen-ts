@@ -135,9 +135,7 @@ describe("aggregateDriveSelectionFlags", () => {
 		// plain file only
 		expect(aggregateDriveSelectionFlags([file("a"), file("b")]).everyFile).toBe(true)
 		// mix of all three file variants
-		expect(
-			aggregateDriveSelectionFlags([file("a"), sharedFile("b"), sharedRootFile("c")]).everyFile
-		).toBe(true)
+		expect(aggregateDriveSelectionFlags([file("a"), sharedFile("b"), sharedRootFile("c")]).everyFile).toBe(true)
 		// sharedFile alone
 		expect(aggregateDriveSelectionFlags([sharedFile("a"), sharedFile("b")]).everyFile).toBe(true)
 		// sharedRootFile alone
@@ -158,9 +156,7 @@ describe("aggregateDriveSelectionFlags", () => {
 		// plain directory only
 		expect(aggregateDriveSelectionFlags([dir("a"), dir("b")]).everyDirectory).toBe(true)
 		// mix of all three dir variants
-		expect(
-			aggregateDriveSelectionFlags([dir("a"), sharedDirectory("b"), sharedRootDir("c")]).everyDirectory
-		).toBe(true)
+		expect(aggregateDriveSelectionFlags([dir("a"), sharedDirectory("b"), sharedRootDir("c")]).everyDirectory).toBe(true)
 		// sharedDirectory alone
 		expect(aggregateDriveSelectionFlags([sharedDirectory("a"), sharedDirectory("b")]).everyDirectory).toBe(true)
 		// sharedRootDirectory alone
@@ -184,76 +180,54 @@ describe("aggregateDriveSelectionFlags", () => {
 	// -------------------------------------------------------------------------
 
 	it("everyImageOrVideoFile false when selection includes any directory", () => {
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), dir("b")]).everyImageOrVideoFile
-		).toBe(false)
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), dir("b")]).everyImageOrVideoFile).toBe(false)
 	})
 
 	it("everyImageOrVideoFile false when any file lacks decryptedMeta", () => {
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b")]).everyImageOrVideoFile
-		).toBe(false)
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b")]).everyImageOrVideoFile).toBe(false)
 	})
 
 	it("everyImageOrVideoFile false when any file has a non-image/video extension", () => {
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "doc.pdf")])
-				.everyImageOrVideoFile
-		).toBe(false)
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "doc.pdf")]).everyImageOrVideoFile).toBe(false)
 	})
 
 	it("everyImageOrVideoFile false when filename has no extension", () => {
 		// A file named 'README' has no dot — ext resolves to '' which is not in either set.
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "README")]).everyImageOrVideoFile
-		).toBe(false)
+		expect(aggregateDriveSelectionFlags([file("a", false, "README")]).everyImageOrVideoFile).toBe(false)
 	})
 
 	it("everyImageOrVideoFile false when filename is only a dot (no real ext)", () => {
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, ".")]).everyImageOrVideoFile
-		).toBe(false)
+		expect(aggregateDriveSelectionFlags([file("a", false, ".")]).everyImageOrVideoFile).toBe(false)
 	})
 
 	it("everyImageOrVideoFile true for all-image selection (type: file)", () => {
 		expect(
-			aggregateDriveSelectionFlags([
-				file("a", false, "photo.jpg"),
-				file("b", false, "graphic.png"),
-				file("c", false, "still.heic")
-			]).everyImageOrVideoFile
+			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "graphic.png"), file("c", false, "still.heic")])
+				.everyImageOrVideoFile
 		).toBe(true)
 	})
 
 	it("everyImageOrVideoFile true for mixed image + video selection (type: file)", () => {
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "clip.mp4")])
-				.everyImageOrVideoFile
-		).toBe(true)
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), file("b", false, "clip.mp4")]).everyImageOrVideoFile).toBe(true)
 	})
 
 	it("everyImageOrVideoFile true when extension is uppercase (case-insensitive match)", () => {
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "PHOTO.JPG"), file("b", false, "graphic.PNG")])
-				.everyImageOrVideoFile
-		).toBe(true)
+		expect(aggregateDriveSelectionFlags([file("a", false, "PHOTO.JPG"), file("b", false, "graphic.PNG")]).everyImageOrVideoFile).toBe(
+			true
+		)
 	})
 
 	it("everyImageOrVideoFile true when sharedRootFile carries an image extension", () => {
 		const sharedImg = sharedRootFile("s1", "shared.jpg")
 
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), sharedImg]).everyImageOrVideoFile
-		).toBe(true)
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), sharedImg]).everyImageOrVideoFile).toBe(true)
 	})
 
 	it("everyImageOrVideoFile true when sharedFile (non-root) carries an image extension", () => {
 		// sharedFile is one of the three FILE_TYPES variants — it must participate in the image/video check.
 		const sharedImg = sharedFile("s2", false, "shared.png")
 
-		expect(
-			aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), sharedImg]).everyImageOrVideoFile
-		).toBe(true)
+		expect(aggregateDriveSelectionFlags([file("a", false, "photo.jpg"), sharedImg]).everyImageOrVideoFile).toBe(true)
 	})
 
 	it("everyImageOrVideoFile false when sharedFile (non-root) has a non-image extension", () => {
@@ -498,7 +472,11 @@ describe("isDriveItemDisabled", () => {
 describe("isDriveItemNavigateOnly", () => {
 	it("false when the row is not disabled", () => {
 		expect(
-			isDriveItemNavigateOnly({ item: dir("a"), drivePath: drivePath("drive", { selectOptions: selectOptions({ directories: false }) }), disabled: false })
+			isDriveItemNavigateOnly({
+				item: dir("a"),
+				drivePath: drivePath("drive", { selectOptions: selectOptions({ directories: false }) }),
+				disabled: false
+			})
 		).toBe(false)
 	})
 
@@ -610,9 +588,7 @@ describe("resolveDriveNavigationTarget", () => {
 	it("routes /linked directories to /linkedDir/[uuid] with serialized linked payload", () => {
 		const linked = { uuid: "root", key: "k", rootName: "Root" }
 
-		expect(
-			resolveDriveNavigationTarget({ item: dir("a"), drivePath: drivePath("linked", { linked }) })
-		).toEqual({
+		expect(resolveDriveNavigationTarget({ item: dir("a"), drivePath: drivePath("linked", { linked }) })).toEqual({
 			pathname: "/linkedDir/[uuid]",
 			params: { uuid: "a", linked: `serialized:${JSON.stringify(linked)}` }
 		})

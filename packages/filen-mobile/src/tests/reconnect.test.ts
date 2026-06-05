@@ -1,27 +1,26 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const {
-	mockIsOnline,
-	capturedSubscribers,
-	mockCameraUploadSync,
-	mockOfflineSync,
-	mockNotesExecuteNow,
-	mockChatsSyncNow
-} = vi.hoisted(() => {
-	let _online = false
+const { mockIsOnline, capturedSubscribers, mockCameraUploadSync, mockOfflineSync, mockNotesExecuteNow, mockChatsSyncNow } = vi.hoisted(
+	() => {
+		let _online = false
 
-	return {
-		mockIsOnline: {
-			set online(v: boolean) { _online = v },
-			get online() { return _online }
-		},
-		capturedSubscribers: [] as ((isOnline: boolean) => void)[],
-		mockCameraUploadSync: vi.fn().mockResolvedValue(undefined),
-		mockOfflineSync: vi.fn().mockResolvedValue(undefined),
-		mockNotesExecuteNow: vi.fn(),
-		mockChatsSyncNow: vi.fn()
+		return {
+			mockIsOnline: {
+				set online(v: boolean) {
+					_online = v
+				},
+				get online() {
+					return _online
+				}
+			},
+			capturedSubscribers: [] as ((isOnline: boolean) => void)[],
+			mockCameraUploadSync: vi.fn().mockResolvedValue(undefined),
+			mockOfflineSync: vi.fn().mockResolvedValue(undefined),
+			mockNotesExecuteNow: vi.fn(),
+			mockChatsSyncNow: vi.fn()
+		}
 	}
-})
+)
 
 vi.mock("@tanstack/react-query", () => ({
 	onlineManager: {
@@ -42,7 +41,9 @@ vi.mock("@/features/notes/components/sync", () => ({ sync: { executeNow: () => m
 vi.mock("@/features/chats/components/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
 
 function fireOnlineEvent(isOnline: boolean) {
-	for (const sub of capturedSubscribers) { sub(isOnline) }
+	for (const sub of capturedSubscribers) {
+		sub(isOnline)
+	}
 }
 
 beforeEach(() => {
