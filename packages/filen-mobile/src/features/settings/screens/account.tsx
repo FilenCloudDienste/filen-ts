@@ -21,7 +21,7 @@ import * as ImagePicker from "expo-image-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import * as FileSystem from "expo-file-system"
 import { newTmpFile } from "@/lib/tmp"
-import * as Sharing from "expo-sharing"
+import { shareTmpFile } from "@/lib/share"
 import * as Linking from "expo-linking"
 import * as ImageManipulator from "expo-image-manipulator"
 import { serialize } from "@/lib/serializer"
@@ -445,20 +445,14 @@ function Account() {
 											return
 										}
 
-										const shareResult = await run(async defer => {
-											defer(() => {
+										const shareResult = await shareTmpFile({
+											uri: result.data.uri,
+											name: result.data.name,
+											cleanup: () => {
 												if (result.data.exists) {
 													result.data.delete()
 												}
-											})
-
-											// Small delay to ensure file is fully written before sharing
-											await new Promise<void>(resolve => setTimeout(resolve, 100))
-
-											await Sharing.shareAsync(result.data.uri, {
-												mimeType: "text/plain",
-												dialogTitle: result.data.name
-											})
+											}
 										})
 
 										if (!shareResult.success) {

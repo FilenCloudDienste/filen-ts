@@ -14,7 +14,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import auth from "@/lib/auth"
 import { newTmpFile } from "@/lib/tmp"
-import * as Sharing from "expo-sharing"
+import { shareTmpFile } from "@/lib/share"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 
@@ -276,20 +276,14 @@ function Security() {
 											return
 										}
 
-										const shareResult = await run(async defer => {
-											defer(() => {
+										const shareResult = await shareTmpFile({
+											uri: exportResult.data.uri,
+											name: exportResult.data.name,
+											cleanup: () => {
 												if (exportResult.data.exists) {
 													exportResult.data.delete()
 												}
-											})
-
-											// Small delay to ensure file is fully written before sharing
-											await new Promise<void>(resolve => setTimeout(resolve, 100))
-
-											await Sharing.shareAsync(exportResult.data.uri, {
-												mimeType: "text/plain",
-												dialogTitle: exportResult.data.name
-											})
+											}
 										})
 
 										if (!shareResult.success) {

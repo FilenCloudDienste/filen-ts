@@ -19,7 +19,7 @@ import offline from "@/features/offline/offline"
 import { resolveMimeType } from "@/lib/utils"
 import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import { getPreviewType } from "@/lib/previewType"
-import * as Sharing from "expo-sharing"
+import { shareTmpFile } from "@/lib/share"
 import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
 import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/features/contacts/contactsSelect"
@@ -430,24 +430,19 @@ export function createMenuButtons({
 					return
 				}
 
-				const shareResult = await run(async defer => {
-					if (!result.data) {
-						return
-					}
+				if (!result.data) {
+					return
+				}
 
-					defer(() => {
+				const shareResult = await shareTmpFile({
+					uri: result.data.uri,
+					name: result.data.name,
+					mimeType: resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: result.data.name }),
+					cleanup: () => {
 						if (result.data && result.data.parentDirectory.exists) {
 							result.data.parentDirectory.delete()
 						}
-					})
-
-					// Small delay to ensure file is fully written before sharing
-					await new Promise<void>(resolve => setTimeout(resolve, 100))
-
-					await Sharing.shareAsync(result.data.uri, {
-						mimeType: resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: result.data.name }),
-						dialogTitle: result.data.name
-					})
+					}
 				})
 
 				if (!shareResult.success) {
