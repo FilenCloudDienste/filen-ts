@@ -50,48 +50,29 @@ import {
 	removeShare
 } from "@/features/drive/driveShare"
 
-class Drive {
-	public favorite = favorite
+const drive = {
+	favorite,
+	shareWithFilenUser,
+	rename,
+	deletePermanently,
+	trash,
+	setDirColor,
+	restoreFileVersion,
+	emptyTrash,
+	deleteVersion,
+	restore,
+	removeShare,
+	removeDirLink,
+	removeFileLink,
+	createDirectory,
+	move,
+	findItemMatchesForName,
+	updateTimestamps,
+	enablePublicLink,
+	disablePublicLink,
+	updatePublicLink,
 
-	public shareWithFilenUser = shareWithFilenUser
-
-	public rename = rename
-
-	public deletePermanently = deletePermanently
-
-	public trash = trash
-
-	public setDirColor = setDirColor
-
-	public restoreFileVersion = restoreFileVersion
-
-	public emptyTrash = emptyTrash
-
-	public deleteVersion = deleteVersion
-
-	public restore = restore
-
-	public removeShare = removeShare
-
-	public removeDirLink = removeDirLink
-
-	public removeFileLink = removeFileLink
-
-	public createDirectory = createDirectory
-
-	public move = move
-
-	public findItemMatchesForName = findItemMatchesForName
-
-	public updateTimestamps = updateTimestamps
-
-	public enablePublicLink = enablePublicLink
-
-	public disablePublicLink = disablePublicLink
-
-	public updatePublicLink = updatePublicLink
-
-	public async openLinkedDirectory({
+	async openLinkedDirectory({
 		linkUuid,
 		linkKey,
 		root,
@@ -193,9 +174,9 @@ class Drive {
 				} satisfies Linked)
 			}
 		})
-	}
+	},
 
-	public async openLinkedFile({
+	async openLinkedFile({
 		linkUuid,
 		fileKey,
 		password,
@@ -301,14 +282,14 @@ class Drive {
 				)
 			}
 		})
-	}
+	},
 
 	// The drive root uuid is stable for the lifetime of an authenticated session.
 	// Cache it after the first resolve so repeated callers (header bulk-move,
 	// per-item move) don't each round-trip through `getSdkClients()`.
-	private cachedRootUuid: string | null = null
+	cachedRootUuid: null as string | null,
 
-	public async getRootUuid(): Promise<string> {
+	async getRootUuid(): Promise<string> {
 		if (this.cachedRootUuid) {
 			return this.cachedRootUuid
 		}
@@ -321,7 +302,5 @@ class Drive {
 		return rootUuid
 	}
 }
-
-const drive = new Drive()
 
 export default drive
