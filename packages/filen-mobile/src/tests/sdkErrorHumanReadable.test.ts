@@ -80,7 +80,7 @@ vi.mock("@/lib/i18n", () => ({
 	}
 }))
 
-import { unwrappedSdkErrorToHumanReadable, unwrapSdkError, isNetworkClassError } from "@/lib/utils"
+import { unwrappedSdkErrorToHumanReadable, unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 
 function makeError(kind: string, message: string) {
 	return {

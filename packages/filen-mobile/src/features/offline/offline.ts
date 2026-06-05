@@ -30,11 +30,11 @@ import {
 	unwrapAnyDirUuid,
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
-	unwrapSdkError,
 	unwrapParentUuid,
 	normalizeModificationTimestampForComparison,
 	extractPathInsideUuidDirectory
 } from "@/lib/utils"
+import { unwrapSdkError } from "@/lib/sdkErrors"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { newTmpFile } from "@/lib/tmp"

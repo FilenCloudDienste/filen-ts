@@ -169,7 +169,10 @@ vi.mock("@/lib/utils", () => ({
 			inner: unwrapped.dir
 		}
 	})),
-	unwrapParentUuid: vi.fn(() => null),
+	unwrapParentUuid: vi.fn(() => null)
+}))
+
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: vi.fn(() => null)
 }))
 
@@ -2476,7 +2479,7 @@ describe("Offline", () => {
 			} as any)
 
 			// Make unwrapSdkError return an error with kind() === FolderNotFound
-			const { unwrapSdkError } = await import("@/lib/utils")
+			const { unwrapSdkError } = await import("@/lib/sdkErrors")
 
 			vi.mocked(unwrapSdkError).mockReturnValueOnce({
 				kind: () => "FolderNotFound"
@@ -4847,7 +4850,7 @@ describe("Offline", () => {
 			} as any)
 
 			// Make unwrapSdkError return an error with kind() === FolderNotFound
-			const { unwrapSdkError } = await import("@/lib/utils")
+			const { unwrapSdkError } = await import("@/lib/sdkErrors")
 
 			vi.mocked(unwrapSdkError).mockReturnValueOnce({
 				kind: () => "FolderNotFound"
