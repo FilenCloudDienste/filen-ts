@@ -225,6 +225,52 @@ class Cache {
 	private clearGeneration = 0
 
 	/**
+	 * Drains (snapshots and clears) the three dirty sets and builds the full
+	 * DELETE/INSERT command list synchronously, without any await or chunking.
+	 * Used by the sync flush path (persistNow). persistAsync keeps its own
+	 * chunked path to preserve the setImmediate yield and generation guard.
+	 */
+	private drainAndBuild(): [string, (string | Uint8Array)[]][] {
+		const commands: [string, (string | Uint8Array)[]][] = []
+
+		const clears = new Set(this.dirtyClears)
+		const deletes = new Map(this.dirtyDeletes)
+		const upserts = new Map(this.dirtyUpserts)
+
+		this.dirtyClears.clear()
+		this.dirtyDeletes.clear()
+		this.dirtyUpserts.clear()
+
+		for (const mapKey of clears) {
+			commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
+		}
+
+		for (const [mapKey, entryKeys] of deletes) {
+			for (const entryKey of entryKeys) {
+				commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
+			}
+		}
+
+		for (const entry of this.registry) {
+			const upsertKeys = upserts.get(entry.key)
+
+			if (!upsertKeys) {
+				continue
+			}
+
+			for (const entryKey of upsertKeys) {
+				const value = entry.map.get(entryKey)
+
+				if (value !== undefined) {
+					commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [entry.key + ":" + entryKey, serialize(value)]])
+				}
+			}
+		}
+
+		return commands
+	}
+
+	/**
 	 * Synchronous persist — used by flushNow() when the app backgrounds.
 	 * Serializes all dirty entries in one go without yielding.
 	 */
@@ -234,7 +280,7 @@ class Cache {
 		}
 
 		const now = performance.now()
-		const commands = this.buildCommands()
+		const commands = this.drainAndBuild()
 
 		if (commands.length === 0) {
 			return
@@ -346,45 +392,6 @@ class Cache {
 				this.persistDirty()
 			}
 		}
-	}
-
-	/**
-	 * Build SQL commands from dirty sets (used by the sync persistNow path).
-	 */
-	private buildCommands(): [string, (string | Uint8Array)[]][] {
-		const commands: [string, (string | Uint8Array)[]][] = []
-
-		for (const mapKey of this.dirtyClears) {
-			commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
-		}
-
-		for (const [mapKey, entryKeys] of this.dirtyDeletes) {
-			for (const entryKey of entryKeys) {
-				commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
-			}
-		}
-
-		for (const entry of this.registry) {
-			const upsertKeys = this.dirtyUpserts.get(entry.key)
-
-			if (!upsertKeys) {
-				continue
-			}
-
-			for (const entryKey of upsertKeys) {
-				const value = entry.map.get(entryKey)
-
-				if (value !== undefined) {
-					commands.push(["INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [entry.key + ":" + entryKey, serialize(value)]])
-				}
-			}
-		}
-
-		this.dirtyClears.clear()
-		this.dirtyDeletes.clear()
-		this.dirtyUpserts.clear()
-
-		return commands
 	}
 
 	private persistDirty = debounce(
