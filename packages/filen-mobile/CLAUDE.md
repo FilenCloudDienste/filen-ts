@@ -420,7 +420,7 @@ const url = getFileUrl(anyFile) // → http://localhost:{port}/...
 ## Key Architectural Patterns
 
 - **Feature-based layout** — each product domain lives under `src/features/<feature>/` (screens/components/hooks/queries/store + its lib singleton(s) + socketHandlers). Routes are thin re-exports; `src/components|lib|stores|queries|hooks` are shared/infra only.
-- **Singleton factories** for all feature/infra services (auth, drive, chats, notes, contacts, transfers, audio, fileCache, etc.) — exported as instance, never instantiated by callers
+- **Module singletons** for feature/infra services — each exported as a single ready-to-use value, never instantiated by callers. Shape follows state: services holding real mutable runtime state (auth, chats, audio, offline, transfers, cameraUpload, cache, secureStore, sqlite, fileCache, thumbnails, QueryPersisterKv, …) are **class singletons** (`class X {} export default new X()` — the constructor is also the per-test isolation seam); stateless namespaces (alerts, prompts, queryUpdater, actionSheet, sandboxCache, contacts, notes, drive, setup, sorters, …) are **plain objects / module functions** (no class). New code: prefer a plain object / free functions unless the service holds mutable runtime state, in which case use a class singleton.
 - **SDK delegation** — no crypto/API/networking reimplementation in JS; everything routes through `@filen/sdk-rs`
 - **Silent infrastructure** — `src/lib/*` and feature `<feature>.ts` singletons expose state, never fire banners/toasts. UX belongs in UI components.
 - **Optimistic updates** via query updaters for instant UI feedback
