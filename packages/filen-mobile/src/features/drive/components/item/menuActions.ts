@@ -417,7 +417,6 @@ export function createMenuButtons({
 			destructive: true,
 			onPress: confirmedDriveAction({
 				item,
-				t,
 				promptTitle: t("remove_offline_item"),
 				promptMessage: t("confirm_remove_offline"),
 				promptOkText: t("remove_offline"),
@@ -437,7 +436,6 @@ export function createMenuButtons({
 			// TODO: if we are in a preview, close the preview after removing the share
 			onPress: confirmedDriveAction({
 				item,
-				t,
 				promptTitle: t("remove_share_item"),
 				promptMessage: t("confirm_remove_share"),
 				promptOkText: t("remove_share"),
@@ -461,7 +459,6 @@ export function createMenuButtons({
 			// TODO: if we are in a preview, close the preview after stopping sharing the item
 			onPress: confirmedDriveAction({
 				item,
-				t,
 				promptTitle: t("stop_sharing_item"),
 				promptMessage: t("confirm_stop_sharing"),
 				promptOkText: t("stop_sharing"),
@@ -481,7 +478,6 @@ export function createMenuButtons({
 			// TODO: if we are in a preview, close the preview after
 			onPress: confirmedDriveAction({
 				item,
-				t,
 				promptTitle: t("disable_public_link"),
 				promptMessage: t("confirm_disable_public_link"),
 				promptOkText: t("disable"),
@@ -504,7 +500,6 @@ export function createMenuButtons({
 			// destructive (no `destructive: true` on the prompt) — preserved via promptDestructive: false.
 			onPress: confirmedDriveAction({
 				item,
-				t,
 				promptTitle: t("trash_item"),
 				promptMessage: t("confirm_trash"),
 				promptOkText: t("trash"),
@@ -547,7 +542,6 @@ export function createMenuButtons({
 			destructive: true,
 			onPress: confirmedDriveAction({
 				item,
-				t,
 				promptTitle: t("delete_permanently_item"),
 				promptMessage: t("confirm_delete_permanently"),
 				promptOkText: t("delete_permanently"),
