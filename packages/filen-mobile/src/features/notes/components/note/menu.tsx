@@ -264,18 +264,7 @@ export function createMenuButtons({
 		buttons.push({
 			id: "type",
 			title: t("type"),
-			icon:
-				note.noteType === NoteType.Text
-					? "text"
-					: note.noteType === NoteType.Checklist
-						? "checklist"
-						: note.noteType === NoteType.Code
-							? "code"
-							: note.noteType === NoteType.Rich
-								? "richtext"
-								: note.noteType === NoteType.Md
-									? "markdown"
-									: undefined,
+			icon: noteTypeToIcon(note.noteType),
 			subButtons: NOTE_TYPE_OPTIONS.map(
 				({ type, typeString }) =>
 					({

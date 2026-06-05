@@ -65,6 +65,63 @@ export type OfflineResult = {
 
 export type Result = NormalResult | SharedRootResult | SharedResult | OfflineResult | LinkedResult | undefined
 
+async function fetchSharedDir(
+	pathType: "sharedIn" | "sharedOut",
+	params: UseDriveItemsQueryParams,
+	authedSdkClient: Awaited<ReturnType<typeof auth.getSdkClients>>["authedSdkClient"],
+	signal: { signal: AbortSignal } | undefined
+): Promise<SharedResult | SharedRootResult> {
+	const parent = (() => {
+		if (!params.path.uuid || params.path.uuid.length === 0) {
+			return undefined
+		}
+
+		const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(params.path.uuid)
+
+		if (cachedDir) {
+			return cachedDir
+		}
+
+		return undefined
+	})()
+
+	if (!parent) {
+		const result =
+			pathType === "sharedIn"
+				? await authedSdkClient.listInSharedRoot(signal)
+				: await authedSdkClient.listOutShared(undefined, signal)
+
+		return {
+			...result,
+			type: "sharedRoot"
+		}
+	}
+
+	const result: SharedResult = {
+		dirs: [],
+		files: [],
+		type: "shared"
+	}
+
+	const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
+
+	for (const resultDir of dirs) {
+		result.dirs.push({
+			...resultDir,
+			sharingRole: parent.shareInfo
+		})
+	}
+
+	for (const resultFile of files) {
+		result.files.push({
+			...resultFile,
+			sharingRole: parent.shareInfo
+		})
+	}
+
+	return result
+}
+
 export async function fetchData(
 	params: UseDriveItemsQueryParams & {
 		signal?: AbortSignal
@@ -185,101 +242,11 @@ export async function fetchData(
 			}
 
 			case "sharedIn": {
-				const parent = (() => {
-					if (!params.path.uuid || params.path.uuid.length === 0) {
-						return undefined
-					}
-
-					const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(params.path.uuid)
-
-					if (cachedDir) {
-						return cachedDir
-					}
-
-					return undefined
-				})()
-
-				if (!parent) {
-					const result = await authedSdkClient.listInSharedRoot(signal)
-
-					return {
-						...result,
-						type: "sharedRoot"
-					}
-				}
-
-				const result: Result = {
-					dirs: [],
-					files: [],
-					type: "shared"
-				}
-
-				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
-
-				for (const resultDir of dirs) {
-					result.dirs.push({
-						...resultDir,
-						sharingRole: parent.shareInfo
-					})
-				}
-
-				for (const resultFile of files) {
-					result.files.push({
-						...resultFile,
-						sharingRole: parent.shareInfo
-					})
-				}
-
-				return result
+				return fetchSharedDir("sharedIn", params, authedSdkClient, signal)
 			}
 
 			case "sharedOut": {
-				const parent = (() => {
-					if (!params.path.uuid || params.path.uuid.length === 0) {
-						return undefined
-					}
-
-					const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(params.path.uuid)
-
-					if (cachedDir) {
-						return cachedDir
-					}
-
-					return undefined
-				})()
-
-				if (!parent) {
-					const result = await authedSdkClient.listOutShared(undefined, signal)
-
-					return {
-						...result,
-						type: "sharedRoot"
-					} satisfies Result
-				}
-
-				const result: Result = {
-					dirs: [],
-					files: [],
-					type: "shared"
-				}
-
-				const { dirs, files } = await authedSdkClient.listSharedDir(parent.dir, parent.shareInfo, signal)
-
-				for (const resultDir of dirs) {
-					result.dirs.push({
-						...resultDir,
-						sharingRole: parent.shareInfo
-					})
-				}
-
-				for (const resultFile of files) {
-					result.files.push({
-						...resultFile,
-						sharingRole: parent.shareInfo
-					})
-				}
-
-				return result
+				return fetchSharedDir("sharedOut", params, authedSdkClient, signal)
 			}
 
 			case "trash": {
@@ -724,7 +691,7 @@ export function driveItemsQueryUpdateGlobal({
 					path: {
 						type: pathType,
 						uuid: parentUuid
-					} as DrivePath
+					}
 				},
 				updater
 			})
@@ -735,7 +702,7 @@ export function driveItemsQueryUpdateGlobal({
 				path: {
 					type: pathType,
 					uuid: null
-				} as DrivePath
+				}
 			},
 			updater
 		})

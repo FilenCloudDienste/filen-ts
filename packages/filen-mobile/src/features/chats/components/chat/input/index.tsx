@@ -59,6 +59,43 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
 
+	const insertLinksIntoInput = (links: string[]) => {
+		const replacedMessage =
+			chatInputValue.trim().length === 0
+				? `${links.join("\n")} `
+				: `${chatInputValue} ${links.join("\n")}`
+
+		if (replacedMessage.length === 0) {
+			return
+		}
+
+		setChatInputValue(replacedMessage)
+
+		useChatsStore.getState().setInputSelection({
+			start: replacedMessage.length,
+			end: replacedMessage.length
+		})
+	}
+
+	const uploadAssetsAndInsert = async (assets: Parameters<typeof chats.uploadAssetsAndGenerateLinks>[0]) => {
+		const result = await runWithLoading(async () => {
+			return await chats.uploadAssetsAndGenerateLinks(assets)
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+
+		if (result.data.length === 0) {
+			return
+		}
+
+		insertLinksIntoInput(result.data)
+	}
+
 	const onChangeText = (text: string) => {
 		setChatInputValue(text)
 
@@ -361,36 +398,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 									} satisfies Parameters<typeof chats.uploadAssetsAndGenerateLinks>[0][number]
 								})
 
-								const result = await runWithLoading(async () => {
-									return await chats.uploadAssetsAndGenerateLinks(assets)
-								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
-
-								if (result.data.length === 0) {
-									return
-								}
-
-								const replacedMessage =
-									chatInputValue.trim().length === 0
-										? `${result.data.join("\n")} `
-										: `${chatInputValue} ${result.data.join("\n")}`
-
-								if (replacedMessage.length === 0) {
-									return
-								}
-
-								setChatInputValue(replacedMessage)
-
-								useChatsStore.getState().setInputSelection({
-									start: replacedMessage.length,
-									end: replacedMessage.length
-								})
+								await uploadAssetsAndInsert(assets)
 							}
 						},
 						{
@@ -451,36 +459,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 									} satisfies Parameters<typeof chats.uploadAssetsAndGenerateLinks>[0][number]
 								})
 
-								const result = await runWithLoading(async () => {
-									return await chats.uploadAssetsAndGenerateLinks(assets)
-								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
-
-								if (result.data.length === 0) {
-									return
-								}
-
-								const replacedMessage =
-									chatInputValue.trim().length === 0
-										? `${result.data.join("\n")} `
-										: `${chatInputValue} ${result.data.join("\n")}`
-
-								if (replacedMessage.length === 0) {
-									return
-								}
-
-								setChatInputValue(replacedMessage)
-
-								useChatsStore.getState().setInputSelection({
-									start: replacedMessage.length,
-									end: replacedMessage.length
-								})
+								await uploadAssetsAndInsert(assets)
 							}
 						},
 						{
@@ -510,36 +489,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 								const assets = documentPickerResult.data.assets
 
-								const result = await runWithLoading(async () => {
-									return await chats.uploadAssetsAndGenerateLinks(assets)
-								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-
-									return
-								}
-
-								if (result.data.length === 0) {
-									return
-								}
-
-								const replacedMessage =
-									chatInputValue.trim().length === 0
-										? `${result.data.join("\n")} `
-										: `${chatInputValue} ${result.data.join("\n")}`
-
-								if (replacedMessage.length === 0) {
-									return
-								}
-
-								setChatInputValue(replacedMessage)
-
-								useChatsStore.getState().setInputSelection({
-									start: replacedMessage.length,
-									end: replacedMessage.length
-								})
+								await uploadAssetsAndInsert(assets)
 							}
 						},
 						{
@@ -601,21 +551,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 									return
 								}
 
-								const replacedMessage =
-									chatInputValue.trim().length === 0
-										? `${validLinks.join("\n")} `
-										: `${chatInputValue} ${validLinks.join("\n")}`
-
-								if (replacedMessage.length === 0) {
-									return
-								}
-
-								setChatInputValue(replacedMessage)
-
-								useChatsStore.getState().setInputSelection({
-									start: replacedMessage.length,
-									end: replacedMessage.length
-								})
+								insertLinksIntoInput(validLinks)
 							}
 						}
 					]}

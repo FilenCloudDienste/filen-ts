@@ -141,7 +141,15 @@ export function useDriveUpload({ parent, t }: { parent: AnyNormalDir | null; t: 
 		reportTransferResults(transferResult.data)
 	}
 
-	const uploadPhotosOrVideos = async (): Promise<void> => {
+	// Shared body for library-picker and camera-capture flows. The only
+	// differences between uploadPhotosOrVideos and takePhotoOrVideo are the
+	// ImagePicker launcher used and whether created/modified timestamps are
+	// injected (camera captures should record the current time; library assets
+	// already carry their own metadata via the OS).
+	const uploadFromPicker = async (
+		launcher: () => Promise<ImagePicker.ImagePickerResult>,
+		addTimestamps: boolean
+	): Promise<void> => {
 		if (!parent) {
 			return
 		}
@@ -151,94 +159,7 @@ export function useDriveUpload({ parent, t }: { parent: AnyNormalDir | null; t: 
 		}
 
 		const imagePickerResult = await run(async () => {
-			return await ImagePicker.launchImageLibraryAsync({
-				mediaTypes: ["images", "videos"],
-				exif: false,
-				base64: false,
-				quality: 1,
-				allowsMultipleSelection: true,
-				presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-				shouldDownloadFromNetwork: true
-			})
-		})
-
-		if (!imagePickerResult.success) {
-			console.error(imagePickerResult.error)
-			alerts.error(imagePickerResult.error)
-
-			return
-		}
-
-		if (imagePickerResult.data.canceled) {
-			return
-		}
-
-		const assets = imagePickerResult.data.assets
-
-		const transferResult = await run(async () => {
-			return await Promise.allSettled(
-				assets.map(async asset => {
-					return await run(
-						async defer => {
-							const assetFile = new FileSystem.File(asset.uri)
-
-							defer(() => {
-								if (assetFile.exists) {
-									assetFile.delete()
-								}
-							})
-
-							if (!assetFile.exists) {
-								throw new Error("Asset file does not exist")
-							}
-
-							const extname = FileSystem.Paths.extname(asset.uri)
-							const fileName = asset.fileName ?? `${randomUUID()}${extname}`
-
-							return await transfers.upload({
-								localFileOrDir: assetFile,
-								parent,
-								name: fileName,
-								mime: asset.mimeType
-							})
-						},
-						{
-							throw: true
-						}
-					)
-				})
-			)
-		})
-
-		if (!transferResult.success) {
-			console.error(transferResult.error)
-			alerts.error(transferResult.error)
-
-			return
-		}
-
-		reportTransferResults(transferResult.data)
-	}
-
-	const takePhotoOrVideo = async (): Promise<void> => {
-		if (!parent) {
-			return
-		}
-
-		if (!(await requireMediaPermissions())) {
-			return
-		}
-
-		const imagePickerResult = await run(async () => {
-			return await ImagePicker.launchCameraAsync({
-				mediaTypes: ["images", "videos"],
-				exif: false,
-				base64: false,
-				quality: 1,
-				allowsMultipleSelection: true,
-				presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-				shouldDownloadFromNetwork: true
-			})
+			return await launcher()
 		})
 
 		if (!imagePickerResult.success) {
@@ -279,8 +200,7 @@ export function useDriveUpload({ parent, t }: { parent: AnyNormalDir | null; t: 
 								parent,
 								name: fileName,
 								mime: asset.mimeType,
-								modified: Date.now(),
-								created: Date.now()
+								...(addTimestamps ? { created: Date.now(), modified: Date.now() } : {})
 							})
 						},
 						{
@@ -299,6 +219,38 @@ export function useDriveUpload({ parent, t }: { parent: AnyNormalDir | null; t: 
 		}
 
 		reportTransferResults(transferResult.data)
+	}
+
+	const uploadPhotosOrVideos = (): Promise<void> => {
+		return uploadFromPicker(
+			() =>
+				ImagePicker.launchImageLibraryAsync({
+					mediaTypes: ["images", "videos"],
+					exif: false,
+					base64: false,
+					quality: 1,
+					allowsMultipleSelection: true,
+					presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+					shouldDownloadFromNetwork: true
+				}),
+			false
+		)
+	}
+
+	const takePhotoOrVideo = (): Promise<void> => {
+		return uploadFromPicker(
+			() =>
+				ImagePicker.launchCameraAsync({
+					mediaTypes: ["images", "videos"],
+					exif: false,
+					base64: false,
+					quality: 1,
+					allowsMultipleSelection: true,
+					presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+					shouldDownloadFromNetwork: true
+				}),
+			true
+		)
 	}
 
 	const scanDocument = async (): Promise<void> => {

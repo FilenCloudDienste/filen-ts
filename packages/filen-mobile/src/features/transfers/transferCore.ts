@@ -16,7 +16,7 @@ import {
 	AnyFile,
 	type SharedFile
 } from "@filen/sdk-rs"
-import useTransfersStore from "@/features/transfers/store/useTransfers.store"
+import useTransfersStore, { type Transfer } from "@/features/transfers/store/useTransfers.store"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { wrapAbortSignalForSdk, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
@@ -28,6 +28,82 @@ import drive from "@/features/drive/drive"
 import thumbnails from "@/lib/thumbnails"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { randomUUID } from "expo-crypto"
+
+// Registers pause/resume event listeners on both the per-transfer and global PauseSignals,
+// and queues their removal via defer() so the `run` cleanup block tears them down automatically.
+function registerPauseListeners(
+	id: string,
+	type: Transfer["type"],
+	transferPauseSignal: PauseSignal,
+	globalPauseSignal: PauseSignal,
+	defer: (fn: () => void) => void
+): void {
+	const onPause = () => {
+		useTransfersStore.getState().setTransfers(prev =>
+			prev.map(t =>
+				t.id === id && t.type === type
+					? {
+							...t,
+							paused: true
+						}
+					: t
+			)
+		)
+	}
+
+	const onResume = () => {
+		useTransfersStore.getState().setTransfers(prev =>
+			prev.map(t =>
+				t.id === id && t.type === type
+					? {
+							...t,
+							paused: false
+						}
+					: t
+			)
+		)
+	}
+
+	transferPauseSignal.addEventListener("pause", onPause)
+	transferPauseSignal.addEventListener("resume", onResume)
+
+	globalPauseSignal.addEventListener("pause", onPause)
+	globalPauseSignal.addEventListener("resume", onResume)
+
+	defer(() => {
+		transferPauseSignal.removeEventListener("pause", onPause)
+		transferPauseSignal.removeEventListener("resume", onResume)
+
+		globalPauseSignal.removeEventListener("pause", onPause)
+		globalPauseSignal.removeEventListener("resume", onResume)
+	})
+}
+
+// Registers a deferred cleanup that removes the transfer entry from the store once the
+// transfer either succeeds or is aborted. The `succeeded` and `aborted` arguments are
+// getter functions so they capture the latest value at cleanup time, not at registration time.
+function registerCompletionCleanup(args: {
+	id: string
+	type: Transfer["type"]
+	succeeded: () => boolean
+	aborted: () => boolean
+	awaitExternal?: () => Promise<void>
+	defer: (fn: () => void) => void
+}): void {
+	const { id, type, succeeded, aborted, awaitExternal, defer } = args
+
+	defer(() => {
+		if (!succeeded() && !aborted()) {
+			return
+		}
+
+		;(awaitExternal ? awaitExternal() : Promise.resolve())
+			.then(() => {
+				useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === type)))
+			})
+			.catch(console.error)
+	})
+}
 
 export type UploadParams = {
 	localFileOrDir: FileSystem.File | FileSystem.Directory
@@ -140,64 +216,20 @@ export async function uploadCore(
 					}
 				])
 
-				const transferPauseSignalOnPause = () => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "uploadDirectory"
-								? {
-										...t,
-										paused: true
-									}
-								: t
-						)
-					)
-				}
-
-				const transferPauseSignalOnResume = () => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "uploadDirectory"
-								? {
-										...t,
-										paused: false
-									}
-								: t
-						)
-					)
-				}
-
-				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-				globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-				globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-				defer(() => {
-					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-
-					globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-					globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-				})
+				registerPauseListeners(id, "uploadDirectory", transferPauseSignal, globalPauseSignal, defer)
 			}
 
 			let succeededUploadDirectory = false
 
 			if (!hideProgress) {
-				defer(() => {
-					const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
-
-					if (!succeededUploadDirectory && !aborted) {
-						return
-					}
-
-					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-						.then(() => {
-							useTransfersStore
-								.getState()
-								.setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "uploadDirectory")))
-						})
-						.catch(console.error)
+				registerCompletionCleanup({
+					id,
+					type: "uploadDirectory",
+					succeeded: () => succeededUploadDirectory,
+					aborted: () =>
+						transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+					defer
 				})
 			}
 
@@ -475,62 +507,20 @@ export async function uploadCore(
 				}
 			])
 
-			const transferPauseSignalOnPause = () => {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "uploadFile"
-							? {
-									...t,
-									paused: true
-								}
-							: t
-					)
-				)
-			}
-
-			const transferPauseSignalOnResume = () => {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "uploadFile"
-							? {
-									...t,
-									paused: false
-								}
-							: t
-					)
-				)
-			}
-
-			transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-			transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-			globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-			globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-			defer(() => {
-				transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-				transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-
-				globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-				globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-			})
+			registerPauseListeners(id, "uploadFile", transferPauseSignal, globalPauseSignal, defer)
 		}
 
 		let succeededUploadFile = false
 
 		if (!hideProgress) {
-			defer(() => {
-				const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
-
-				if (!succeededUploadFile && !aborted) {
-					return
-				}
-
-				;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-					.then(() => {
-						useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "uploadFile")))
-					})
-					.catch(console.error)
+			registerCompletionCleanup({
+				id,
+				type: "uploadFile",
+				succeeded: () => succeededUploadFile,
+				aborted: () =>
+					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				defer
 			})
 		}
 
@@ -748,64 +738,20 @@ export async function downloadCore(
 					}
 				])
 
-				const transferPauseSignalOnPause = () => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "downloadDirectory"
-								? {
-										...t,
-										paused: true
-									}
-								: t
-						)
-					)
-				}
-
-				const transferPauseSignalOnResume = () => {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "downloadDirectory"
-								? {
-										...t,
-										paused: false
-									}
-								: t
-						)
-					)
-				}
-
-				transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-				transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-				globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-				globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-				defer(() => {
-					transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-					transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-
-					globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-					globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-				})
+				registerPauseListeners(id, "downloadDirectory", transferPauseSignal, globalPauseSignal, defer)
 			}
 
 			let succeededDownloadDirectory = false
 
 			if (!hideProgress) {
-				defer(() => {
-					const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
-
-					if (!succeededDownloadDirectory && !aborted) {
-						return
-					}
-
-					;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-						.then(() => {
-							useTransfersStore
-								.getState()
-								.setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "downloadDirectory")))
-						})
-						.catch(console.error)
+				registerCompletionCleanup({
+					id,
+					type: "downloadDirectory",
+					succeeded: () => succeededDownloadDirectory,
+					aborted: () =>
+						transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+					defer
 				})
 			}
 
@@ -1076,62 +1022,20 @@ export async function downloadCore(
 				}
 			])
 
-			const transferPauseSignalOnPause = () => {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "downloadFile"
-							? {
-									...t,
-									paused: true
-								}
-							: t
-					)
-				)
-			}
-
-			const transferPauseSignalOnResume = () => {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "downloadFile"
-							? {
-									...t,
-									paused: false
-								}
-							: t
-					)
-				)
-			}
-
-			transferPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-			transferPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-			globalPauseSignal.addEventListener("pause", transferPauseSignalOnPause)
-			globalPauseSignal.addEventListener("resume", transferPauseSignalOnResume)
-
-			defer(() => {
-				transferPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-				transferPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-
-				globalPauseSignal.removeEventListener("pause", transferPauseSignalOnPause)
-				globalPauseSignal.removeEventListener("resume", transferPauseSignalOnResume)
-			})
+			registerPauseListeners(id, "downloadFile", transferPauseSignal, globalPauseSignal, defer)
 		}
 
 		let succeededDownloadFile = false
 
 		if (!hideProgress) {
-			defer(() => {
-				const aborted = transferAbortController.signal.aborted || globalAbortController.signal.aborted || signal?.aborted
-
-				if (!succeededDownloadFile && !aborted) {
-					return
-				}
-
-				;(awaitExternalCompletionBeforeMarkingAsFinished ? awaitExternalCompletionBeforeMarkingAsFinished() : Promise.resolve())
-					.then(() => {
-						useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === "downloadFile")))
-					})
-					.catch(console.error)
+			registerCompletionCleanup({
+				id,
+				type: "downloadFile",
+				succeeded: () => succeededDownloadFile,
+				aborted: () =>
+					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				defer
 			})
 		}
 
