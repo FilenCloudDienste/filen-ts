@@ -2,7 +2,7 @@ import { open, type DB } from "@op-engineering/op-sqlite"
 import { Semaphore, run } from "@filen/utils"
 import { AppState } from "react-native"
 import { serialize, deserialize } from "@/lib/serializer"
-import { normalizeFilePathForSdk } from "@/lib/utils"
+import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
 
 // Critical: When changing anything related to the on-disk database file format, bump SQLITE_VERSION in storageRoots.ts to invalidate old databases and prevent potential issues from stale or incompatible data.

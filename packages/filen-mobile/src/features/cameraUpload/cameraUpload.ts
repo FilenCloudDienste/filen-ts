@@ -3,11 +3,10 @@ import * as MediaLibraryLegacy from "expo-media-library"
 import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
 import {
-	normalizeFilePathForSdk,
 	unwrapFileMeta,
-	normalizeFilePathForExpo,
 	normalizeModificationTimestampForComparison
 } from "@/lib/utils"
+import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"

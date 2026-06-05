@@ -64,7 +64,7 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: vi.fn()
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (p: string) =>
 		p
 			.trim()
@@ -80,7 +80,10 @@ vi.mock("@/lib/utils", () => ({
 		}
 
 		return absolutePath.slice(idx + anchor.length - 1)
-	},
+	}
+}))
+
+vi.mock("@/lib/utils", () => ({
 	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000),
 	unwrapFileMeta: vi.fn((file: unknown) => {
 		const f = file as any

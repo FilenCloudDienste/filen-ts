@@ -3,7 +3,7 @@ import { validate as validateUuid } from "uuid"
 import type { DriveItem } from "@/types"
 import { deserialize } from "@/lib/serializer"
 import { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
-import type { PreviewType } from "@/lib/utils"
+import type { PreviewType } from "@/lib/previewType"
 
 export const DRIVE_PATH_TYPES = [
 	"drive",

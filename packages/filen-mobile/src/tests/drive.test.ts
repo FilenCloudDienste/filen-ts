@@ -189,10 +189,13 @@ vi.mock("@/lib/utils", () => ({
 	unwrapParentUuid: mockUnwrapParentUuid,
 	unwrappedDirIntoDriveItem: mockUnwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem: mockUnwrappedFileIntoDriveItem,
-	normalizeFilePathForSdk: mockNormalizeFilePathForSdk,
 	unwrapDirMeta: mockUnwrapDirMeta,
 	unwrapFileMeta: mockUnwrapFileMeta,
 	unwrapSdkError: vi.fn().mockReturnValue(null)
+}))
+
+vi.mock("@/lib/paths", () => ({
+	normalizeFilePathForSdk: mockNormalizeFilePathForSdk
 }))
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({

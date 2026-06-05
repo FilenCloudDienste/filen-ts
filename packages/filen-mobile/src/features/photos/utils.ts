@@ -1,5 +1,5 @@
 import { type DriveItem, type DriveItemFileExtracted } from "@/types"
-import { type PreviewType } from "@/lib/utils"
+import { type PreviewType } from "@/lib/previewType"
 
 /**
  * Pure predicate deciding whether a drive item should appear in the photos grid.

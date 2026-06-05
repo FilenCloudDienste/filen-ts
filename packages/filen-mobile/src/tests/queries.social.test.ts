@@ -151,9 +151,14 @@ function getPreviewTypeInline(name: string): string {
 	}
 }
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/previewType", () => ({
+	getPreviewType: getPreviewTypeInline
+}))
+
+vi.mock("@/lib/linkParser", () => ({
 	safeParseUrl: safeParseUrlInline,
-	getPreviewType: getPreviewTypeInline,
 	extractLinks: vi.fn()
 }))
 

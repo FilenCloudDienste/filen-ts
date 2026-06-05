@@ -18,12 +18,11 @@ import {
 } from "@filen/sdk-rs"
 import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import {
-	normalizeFilePathForSdk,
-	normalizeFilePathForExpo,
 	unwrapDirMeta,
 	unwrapFileMeta,
 	unwrapParentUuid
 } from "@/lib/utils"
+import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { wrapAbortSignalForSdk, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"

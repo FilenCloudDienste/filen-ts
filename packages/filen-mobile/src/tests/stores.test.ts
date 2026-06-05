@@ -14,7 +14,9 @@ vi.mock("expo-router", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", async () => {
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/previewType", async () => {
 	const actual = await import("@/tests/mocks/expoFileSystem")
 
 	return {
