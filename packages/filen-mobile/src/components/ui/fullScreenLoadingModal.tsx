@@ -1,4 +1,4 @@
-import { useState, useEffect, memo } from "react"
+import { useState, useEffect } from "react"
 import { Modal, ActivityIndicator, Platform, type NativeSyntheticEvent } from "react-native"
 import { run, type DeferFn, type Result, type Options, runEffect } from "@filen/utils"
 import { FullWindowOverlay } from "react-native-screens"
@@ -6,7 +6,7 @@ import { FadeIn, FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
 import events from "@/lib/events"
 
-const FullScreenLoadingModalParent = memo(({ children, visible }: { children: React.ReactNode; visible: boolean }) => {
+const FullScreenLoadingModalParent = ({ children, visible }: { children: React.ReactNode; visible: boolean }) => {
 	const onRequestClose = (e: NativeSyntheticEvent<unknown>) => {
 		e.preventDefault()
 		e.stopPropagation()
@@ -34,9 +34,9 @@ const FullScreenLoadingModalParent = memo(({ children, visible }: { children: Re
 			</Modal>
 		)
 	})
-})
+}
 
-export const FullScreenLoadingModal = memo(() => {
+export const FullScreenLoadingModal = () => {
 	const [count, setCount] = useState<number>(0)
 
 	useEffect(() => {
@@ -85,7 +85,7 @@ export const FullScreenLoadingModal = memo(() => {
 			</AnimatedView>
 		</FullScreenLoadingModalParent>
 	)
-})
+}
 
 export function forceHide(): void {
 	events.emit("forceHideFullScreenLoadingModal")

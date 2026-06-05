@@ -1,7 +1,6 @@
 import Text from "@/components/ui/text"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
-import { memo } from "react"
 import { useResolveClassNames } from "uniwind"
 import { formatBytes } from "@filen/utils"
 import useDirectorySizeQuery from "@/features/drive/queries/useDirectorySize.query"
@@ -12,7 +11,7 @@ import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
 
-export const Information = memo(({ item, linked }: { item: DriveItem; linked?: boolean }) => {
+export const Information = ({ item, linked }: { item: DriveItem; linked?: boolean }) => {
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const { t } = useTranslation()
@@ -327,4 +326,4 @@ export const Information = memo(({ item, linked }: { item: DriveItem; linked?: b
 			))}
 		</View>
 	)
-})
+}

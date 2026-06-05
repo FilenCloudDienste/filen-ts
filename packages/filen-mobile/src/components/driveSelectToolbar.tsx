@@ -1,4 +1,4 @@
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { CrossGlassContainerView } from "@/components/ui/view"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 import { useResolveClassNames } from "uniwind"
@@ -21,7 +21,7 @@ import events from "@/lib/events"
 import { useNavigation } from "expo-router"
 import { useTranslation } from "react-i18next"
 
-const DriveSelectToolbar = memo(() => {
+const DriveSelectToolbar = () => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const drivePath = useDrivePath()
@@ -257,6 +257,6 @@ const DriveSelectToolbar = memo(() => {
 			)}
 		</Fragment>
 	)
-})
+}
 
 export default DriveSelectToolbar

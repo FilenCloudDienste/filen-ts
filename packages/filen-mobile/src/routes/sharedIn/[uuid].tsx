@@ -1,8 +1,7 @@
-import { memo } from "react"
 import Drive from "@/features/drive/components"
 
-const SharedIn = memo(() => {
+const SharedIn = () => {
 	return <Drive />
-})
+}
 
 export default SharedIn

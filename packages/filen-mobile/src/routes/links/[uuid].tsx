@@ -1,8 +1,7 @@
-import { memo } from "react"
 import Drive from "@/features/drive/components"
 
-const Links = memo(() => {
+const Links = () => {
 	return <Drive />
-})
+}
 
 export default Links

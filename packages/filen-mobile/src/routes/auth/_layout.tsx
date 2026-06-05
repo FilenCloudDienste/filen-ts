@@ -1,10 +1,9 @@
 import { Stack, Redirect } from "expo-router"
-import { memo } from "react"
 import { useIsAuthed, useStringifiedClient } from "@/lib/auth"
 import { useStartScreen, buildStartScreenHref } from "@/features/settings/startScreen"
 import View from "@/components/ui/view"
 
-const AuthLayout = memo(() => {
+const AuthLayout = () => {
 	const isAuthed = useIsAuthed()
 	const stringifiedClient = useStringifiedClient()
 	const [startScreen] = useStartScreen()
@@ -18,6 +17,6 @@ const AuthLayout = memo(() => {
 			<Stack />
 		</View>
 	)
-})
+}
 
 export default AuthLayout

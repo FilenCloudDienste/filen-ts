@@ -2,11 +2,10 @@ import * as Burnt from "burnt"
 import { Notifier, NotifierComponents } from "react-native-notifier"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { memo } from "react"
 import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
 import i18n from "@/lib/i18n"
 
-const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }) => {
+const NotifierErrorContainer = ({ children }: { children: React.ReactNode }) => {
 	const insets = useSafeAreaInsets()
 
 	return (
@@ -19,7 +18,7 @@ const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }
 			{children}
 		</View>
 	)
-})
+}
 
 // Plain object namespace (no instance state) — toast/error-banner helpers. Kept as a
 // single exported object so the ~73 `alerts.error(...)` / `alerts.normal(...)` call sites

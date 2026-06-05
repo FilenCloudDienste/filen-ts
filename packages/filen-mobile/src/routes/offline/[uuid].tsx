@@ -1,8 +1,7 @@
-import { memo } from "react"
 import Drive from "@/features/drive/components"
 
-const Offline = memo(() => {
+const Offline = () => {
 	return <Drive />
-})
+}
 
 export default Offline

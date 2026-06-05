@@ -1,11 +1,10 @@
-import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import useDirectorySizeQuery from "@/features/drive/queries/useDirectorySize.query"
 import { formatBytes } from "@filen/utils"
 import type { DrivePath } from "@/hooks/useDrivePath"
 
-const Size = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath }) => {
+const Size = ({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; drivePath: DrivePath }) => {
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
 			uuid: info.item.data.uuid,
@@ -36,6 +35,6 @@ const Size = memo(({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; d
 	}
 
 	return ` • ${formatBytes(directorySizeQuery.data.size)}`
-})
+}
 
 export default Size

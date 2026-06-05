@@ -1,4 +1,3 @@
-import { memo } from "react"
 import View from "@/components/ui/view"
 import DocxPreview from "@/components/docxPreview"
 import { useShallow } from "zustand/shallow"
@@ -8,7 +7,7 @@ import useFileBase64Query from "@/queries/useFileBase64.query"
 import { ActivityIndicator } from "react-native"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 
-const PreviewDocx = memo(({ item }: { item: GalleryItemTagged }) => {
+const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 
@@ -49,6 +48,6 @@ const PreviewDocx = memo(({ item }: { item: GalleryItemTagged }) => {
 			/>
 		</View>
 	)
-})
+}
 
 export default PreviewDocx

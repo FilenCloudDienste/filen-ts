@@ -1,4 +1,4 @@
-import { memo, useRef } from "react"
+import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
@@ -14,7 +14,7 @@ import { useRecyclingState } from "@shopify/flash-list"
 import Button from "@/components/ui/button"
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 
-const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
+const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const [password, setPassword] = useRecyclingState<string | null>(null, [item.type === "drive" ? item.data.data.uuid : item.data.url])
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
@@ -151,6 +151,6 @@ const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
 			)}
 		</View>
 	)
-})
+}
 
 export default PreviewPdf

@@ -1,5 +1,4 @@
 import { type Chat as TChat } from "@/types"
-import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import { useSecureStore } from "@/lib/secureStore"
@@ -14,128 +13,126 @@ import events from "@/lib/events"
 import { useTranslation } from "react-i18next"
 import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
 
-export const Menu = memo(
-	({
-		chat,
-		info,
-		children,
-		className,
-		isAnchoredToRight
-	}: {
-		chat: TChat
-		info: ListRenderItemInfo<ChatMessageWithInflightId>
-		children: React.ReactNode
-		className?: string
-		isAnchoredToRight?: boolean
-	}) => {
-		const { t } = useTranslation()
-		const [, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
-		const [, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
-		const stringifiedClient = useStringifiedClient()
-		const [, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
+export const Menu = ({
+	chat,
+	info,
+	children,
+	className,
+	isAnchoredToRight
+}: {
+	chat: TChat
+	info: ListRenderItemInfo<ChatMessageWithInflightId>
+	children: React.ReactNode
+	className?: string
+	isAnchoredToRight?: boolean
+}) => {
+	const { t } = useTranslation()
+	const [, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
+	const [, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
+	const stringifiedClient = useStringifiedClient()
+	const [, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
 
-		const isOwner = info.item.inner.senderId === stringifiedClient?.userId
+	const isOwner = info.item.inner.senderId === stringifiedClient?.userId
 
-		const deleteButton = {
-			id: "delete",
-			title: t("delete"),
-			icon: "delete" as const,
-			destructive: true,
-			requiresOnline: true,
-			// Message deletes never pop a route, so no dismissPathnamePrefix.
-			onPress: confirmedChatAction({
-				promptTitle: t("delete_message"),
-				promptMessage: t("delete_message_confirmation"),
-				promptOkText: t("delete"),
-				action: () =>
-					chats.deleteMessage({
-						chat,
-						message: info.item
-					})
-			})
-		} satisfies MenuButton
+	const deleteButton = {
+		id: "delete",
+		title: t("delete"),
+		icon: "delete" as const,
+		destructive: true,
+		requiresOnline: true,
+		// Message deletes never pop a route, so no dismissPathnamePrefix.
+		onPress: confirmedChatAction({
+			promptTitle: t("delete_message"),
+			promptMessage: t("delete_message_confirmation"),
+			promptOkText: t("delete"),
+			action: () =>
+				chats.deleteMessage({
+					chat,
+					message: info.item
+				})
+		})
+	} satisfies MenuButton
 
-		const buttons = info.item.undecryptable
-			? (isOwner ? [deleteButton] : ([] as MenuButton[]))
-			: ([
-					{
-						id: "reply",
-						title: t("reply"),
-						icon: "reply" as const,
-						onPress: () => {
-							setChatReplyTo(info.item)
+	const buttons = info.item.undecryptable
+		? (isOwner ? [deleteButton] : ([] as MenuButton[]))
+		: ([
+				{
+					id: "reply",
+					title: t("reply"),
+					icon: "reply" as const,
+					onPress: () => {
+						setChatReplyTo(info.item)
 
-							events.emit("focusChatInput", {
-								chatUuid: chat.uuid
-							})
-						}
-					},
-					{
-						id: "copy",
-						title: t("copy"),
-						icon: "copy" as const,
-						onPress: async () => {
-							const result = await run(async () => {
-								if (!info.item.inner.message) {
-									return
-								}
-
-								return await Clipboard.setStringAsync(info.item.inner.message)
-							})
-
-							if (!result.success) {
-								console.error(result.error)
-								alerts.error(result.error)
-
+						events.emit("focusChatInput", {
+							chatUuid: chat.uuid
+						})
+					}
+				},
+				{
+					id: "copy",
+					title: t("copy"),
+					icon: "copy" as const,
+					onPress: async () => {
+						const result = await run(async () => {
+							if (!info.item.inner.message) {
 								return
 							}
 
-							alerts.normal(t("copied_to_clipboard"))
+							return await Clipboard.setStringAsync(info.item.inner.message)
+						})
+
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
+
+							return
 						}
-					},
-					...(isOwner
-						? [
-								{
-									id: "edit",
-									title: t("edit"),
-									icon: "edit" as const,
-									requiresOnline: true,
-									onPress: () => {
-										if (!info.item.inner.message) {
-											return
-										}
 
-										setChatEditMessage(info.item)
-										setChatInputValue(info.item.inner.message)
-
-										useChatsStore.getState().setInputSelection({
-											start: 0,
-											end: 0
-										})
-
-										events.emit("focusChatInput", {
-											chatUuid: chat.uuid
-										})
+						alerts.normal(t("copied_to_clipboard"))
+					}
+				},
+				...(isOwner
+					? [
+							{
+								id: "edit",
+								title: t("edit"),
+								icon: "edit" as const,
+								requiresOnline: true,
+								onPress: () => {
+									if (!info.item.inner.message) {
+										return
 									}
-								},
-								deleteButton
-							]
-						: [])
-				] satisfies MenuButton[])
 
-		return (
-			<MenuComponent
-				type="context"
-				title={simpleDate(Number(info.item.sentTimestamp))}
-				buttons={buttons}
-				disabled={buttons.length === 0}
-				className={className}
-				isAnchoredToRight={isAnchoredToRight}
-			>
-				{children}
-			</MenuComponent>
-		)
-	}
-)
+									setChatEditMessage(info.item)
+									setChatInputValue(info.item.inner.message)
+
+									useChatsStore.getState().setInputSelection({
+										start: 0,
+										end: 0
+									})
+
+									events.emit("focusChatInput", {
+										chatUuid: chat.uuid
+									})
+								}
+							},
+							deleteButton
+						]
+					: [])
+			] satisfies MenuButton[])
+
+	return (
+		<MenuComponent
+			type="context"
+			title={simpleDate(Number(info.item.sentTimestamp))}
+			buttons={buttons}
+			disabled={buttons.length === 0}
+			className={className}
+			isAnchoredToRight={isAnchoredToRight}
+		>
+			{children}
+		</MenuComponent>
+	)
+}
 
 export default Menu

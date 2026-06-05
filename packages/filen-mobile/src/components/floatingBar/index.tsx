@@ -1,4 +1,4 @@
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
@@ -10,7 +10,7 @@ import TransfersSlot from "@/components/floatingBar/transfersSlot"
 import Separator from "@/components/floatingBar/separator"
 import useAppStore from "@/stores/useApp.store"
 
-const FloatingBar = memo(() => {
+const FloatingBar = () => {
 	const insets = useSafeAreaInsets()
 	const offset = useFloatingBarOffset()
 	const { queueItem } = useAudio()
@@ -62,6 +62,6 @@ const FloatingBar = memo(() => {
 			</CrossGlassContainerView>
 		</View>
 	)
-})
+}
 
 export default FloatingBar

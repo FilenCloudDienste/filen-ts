@@ -7,7 +7,7 @@ import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
 import { DirectoryIcon, unwrapDirColor, directoryColorToHex } from "@/components/itemIcons"
 import Header from "@/components/ui/header"
-import { Fragment, useState, memo } from "react"
+import { Fragment, useState } from "react"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
 import { DirColor } from "@filen/sdk-rs"
@@ -22,7 +22,7 @@ import useIsOnline from "@/hooks/useIsOnline"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
 
-const ChangeDirectoryColor = memo(() => {
+const ChangeDirectoryColor = () => {
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
@@ -179,6 +179,6 @@ const ChangeDirectoryColor = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default ChangeDirectoryColor

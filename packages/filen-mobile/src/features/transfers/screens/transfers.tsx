@@ -1,4 +1,4 @@
-import { memo, Fragment } from "react"
+import { Fragment } from "react"
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -24,7 +24,7 @@ import { run } from "@filen/utils"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 
-const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderItemInfo<TTransfer> }) => {
+const Transfer = ({ info: { item: transfer, target } }: { info: ListRenderItemInfo<TTransfer> }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -154,9 +154,9 @@ const Transfer = memo(({ info: { item: transfer, target } }: { info: ListRenderI
 			</View>
 		</View>
 	)
-})
+}
 
-const Transfers = memo(() => {
+const Transfers = () => {
 	const { t } = useTranslation()
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 	const insets = useSafeAreaInsets()
@@ -308,6 +308,6 @@ const Transfers = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default Transfers

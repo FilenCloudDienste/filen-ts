@@ -1,5 +1,5 @@
 import Drive from "@/features/drive/components"
-import { Fragment, useEffect, memo, useCallback } from "react"
+import { Fragment, useEffect, useCallback } from "react"
 import DriveSelectToolbar from "@/components/driveSelectToolbar"
 import auth, { useSdkClients } from "@/lib/auth"
 import events from "@/lib/events"
@@ -68,7 +68,7 @@ export async function selectDriveItems(options: Omit<SelectOptions, "intention" 
 	})
 }
 
-const DriveSelectListener = memo(() => {
+const DriveSelectListener = () => {
 	const drivePath = useDrivePath()
 	const { authedSdkClient } = useSdkClients()
 
@@ -98,9 +98,9 @@ const DriveSelectListener = memo(() => {
 	)
 
 	return null
-})
+}
 
-const DriveSelect = memo(() => {
+const DriveSelect = () => {
 	return (
 		<Fragment>
 			<Drive />
@@ -108,6 +108,6 @@ const DriveSelect = memo(() => {
 			<DriveSelectListener />
 		</Fragment>
 	)
-})
+}
 
 export default DriveSelect

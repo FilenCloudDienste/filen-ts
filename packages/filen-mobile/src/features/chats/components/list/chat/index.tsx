@@ -1,5 +1,4 @@
 import Text from "@/components/ui/text"
-import { memo } from "react"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
@@ -21,7 +20,7 @@ import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 
-const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
+const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()
 	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
@@ -156,6 +155,6 @@ const Chat = memo(({ info }: { info: ListRenderItemInfo<TChat> }) => {
 			</Menu>
 		</View>
 	)
-})
+}
 
 export default Chat

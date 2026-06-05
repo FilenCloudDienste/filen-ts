@@ -6,7 +6,7 @@ import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
 import Header from "@/components/ui/header"
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
@@ -19,7 +19,7 @@ import { createMenuButtons } from "@/features/drive/components/item/menuActions"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 
-const LinkedFile = memo(() => {
+const LinkedFile = () => {
 	const { t } = useTranslation()
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
@@ -140,6 +140,6 @@ const LinkedFile = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default LinkedFile

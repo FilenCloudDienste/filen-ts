@@ -1,5 +1,5 @@
 import { Stack } from "expo-router"
-import { memo, Fragment } from "react"
+import { Fragment } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { Platform, ActivityIndicator } from "react-native"
@@ -15,7 +15,7 @@ import alerts from "@/lib/alerts"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
 import { useTranslation } from "react-i18next"
 
-const Toolbar = memo(() => {
+const Toolbar = () => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -274,15 +274,15 @@ const Toolbar = memo(() => {
 			</CrossGlassContainerView>
 		</View>
 	)
-})
+}
 
-const Layout = memo(() => {
+const Layout = () => {
 	return (
 		<Fragment>
 			<Stack />
 			<Toolbar />
 		</Fragment>
 	)
-})
+}
 
 export default Layout

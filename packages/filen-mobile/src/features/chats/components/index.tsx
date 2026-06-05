@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useState } from "react"
+import { Fragment, useCallback, useState } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { Platform } from "react-native"
@@ -18,7 +18,7 @@ import { runBulk } from "@/lib/bulkOps"
 import { aggregateChatSelectionFlags, chatHasUnread } from "@/features/chats/chatSelectors"
 import { useTranslation } from "react-i18next"
 
-const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
+const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const { t } = useTranslation()
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
@@ -252,9 +252,9 @@ const Header = memo(({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.
 			}}
 		/>
 	)
-})
+}
 
-export const Chats = memo(() => {
+export const Chats = () => {
 	const [searchQuery, setSearchQuery] = useState<string>("")
 
 	useFocusEffect(
@@ -275,6 +275,6 @@ export const Chats = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default Chats

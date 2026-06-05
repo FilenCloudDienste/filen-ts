@@ -8,12 +8,11 @@ import Chat from "@/features/chats/components/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { contactDisplayName } from "@/lib/utils"
 import { chatDisplayName } from "@/lib/decryption"
-import { memo } from "react"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 
-const List = memo(({ searchQuery }: { searchQuery: string }) => {
+const List = ({ searchQuery }: { searchQuery: string }) => {
 	const { t } = useTranslation()
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
@@ -116,6 +115,6 @@ const List = memo(({ searchQuery }: { searchQuery: string }) => {
 			emptyComponent={emptyComponent}
 		/>
 	)
-})
+}
 
 export default List

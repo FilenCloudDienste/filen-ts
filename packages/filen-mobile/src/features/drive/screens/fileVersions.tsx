@@ -8,7 +8,7 @@ import View, { CrossGlassContainerView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"
-import { Fragment, memo, useCallback } from "react"
+import { Fragment, useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { run, formatBytes, cn } from "@filen/utils"
@@ -32,7 +32,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 
-const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem }) => {
+const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const isSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.some(v => v.uuid === version.uuid)))
@@ -189,9 +189,9 @@ const Version = memo(({ version, item }: { version: FileVersion; item: DriveItem
 			</View>
 		</View>
 	)
-})
+}
 
-const FileVersions = memo(() => {
+const FileVersions = () => {
 	const { t } = useTranslation()
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
@@ -450,6 +450,6 @@ const FileVersions = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default FileVersions

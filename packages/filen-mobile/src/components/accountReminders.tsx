@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AppState, type AppStateStatus } from "react-native"
 import { useTranslation } from "react-i18next"
 import { router, usePathname } from "expo-router"
@@ -8,7 +8,7 @@ import useAppStore from "@/stores/useApp.store"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 
-const AccountReminders = memo(() => {
+const AccountReminders = () => {
 	const { t } = useTranslation()
 	const accountQuery = useAccountQuery()
 	const pathname = usePathname()
@@ -91,6 +91,6 @@ const AccountReminders = memo(() => {
 	}, [pathname, biometricUnlocked, appState, accountQuery.status, accountQuery.isFetching, accountQuery.data, t])
 
 	return null
-})
+}
 
 export default AccountReminders

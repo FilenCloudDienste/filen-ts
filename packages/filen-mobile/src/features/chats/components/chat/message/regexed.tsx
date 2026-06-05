@@ -1,4 +1,4 @@
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import regexifyString from "regexify-string"
 import { Text } from "@/components/ui/text"
 import View from "@/components/ui/view"
@@ -34,7 +34,7 @@ export const customEmojisListRecord: Record<string, string> = Object.fromEntries
 	customEmojis.map(emoji => [emoji.id, emoji.skins[0] ? emoji.skins[0].src : ""])
 )
 
-const Mention = memo(({ name, participant, inflight }: { name: string; participant?: ChatParticipant; inflight?: boolean }) => {
+const Mention = ({ name, participant, inflight }: { name: string; participant?: ChatParticipant; inflight?: boolean }) => {
 	const onPress = () => {
 		if (!participant) {
 			return
@@ -52,9 +52,9 @@ const Mention = memo(({ name, participant, inflight }: { name: string; participa
 			<Text className={cn("text-sm", inflight ? "text-muted-foreground" : "text-foreground")}>@{name}</Text>
 		</PressableScale>
 	)
-})
+}
 
-const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean }) => {
+const CodeBlock = ({ match, fromSelf }: { match: string; fromSelf: boolean }) => {
 	const code = (() => {
 		let code = match.split("```").join("").trim()
 
@@ -84,9 +84,9 @@ const CodeBlock = memo(({ match, fromSelf }: { match: string; fromSelf: boolean 
 			</Text>
 		</View>
 	)
-})
+}
 
-export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
+export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: boolean; inflight?: boolean }) => {
 	const { t } = useTranslation()
 	const [openLinkTrustedDomains, setOpenLinkTrustedDomains] = useSecureStore<Record<string, boolean>>("openLinkTrustedDomains", {})
 
@@ -176,9 +176,9 @@ export const Link = memo(({ match, fromSelf, inflight }: { match: string; fromSe
 			</Text>
 		</PressableScale>
 	)
-})
+}
 
-const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMessageWithInflightId; fromSelf: boolean }) => {
+const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessageWithInflightId; fromSelf: boolean }) => {
 	const { t } = useTranslation()
 	const isInflight = useChatsStore(
 		useShallow(state => state.inflightMessages[chat.uuid]?.messages.some(m => m.inflightId === message.inflightId))
@@ -314,6 +314,6 @@ const Regexed = memo(({ chat, message, fromSelf }: { chat: Chat; message: ChatMe
 			})}
 		</View>
 	)
-})
+}
 
 export default Regexed

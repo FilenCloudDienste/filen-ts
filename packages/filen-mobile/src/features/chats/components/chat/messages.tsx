@@ -1,4 +1,4 @@
-import { useRef, useState, memo } from "react"
+import { useRef, useState } from "react"
 import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -20,7 +20,7 @@ import alerts from "@/lib/alerts"
 import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 
-const Messages = memo(({ chat }: { chat: TChat }) => {
+const Messages = ({ chat }: { chat: TChat }) => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const keyboardAnimation = useReanimatedKeyboardAnimation()
@@ -214,6 +214,6 @@ const Messages = memo(({ chat }: { chat: TChat }) => {
 			/>
 		</View>
 	)
-})
+}
 
 export default Messages

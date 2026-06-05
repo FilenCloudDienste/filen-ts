@@ -1,4 +1,3 @@
-import { memo } from "react"
 import { useShallow } from "zustand/shallow"
 import { router } from "expo-router"
 import { ActivityIndicator } from "react-native"
@@ -11,7 +10,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import { useResolveClassNames } from "uniwind"
 import AnimatedProgressBar from "@/components/floatingBar/animatedProgressBar"
 
-const TransfersSlot = memo(() => {
+const TransfersSlot = () => {
 	const { t } = useTranslation()
 	const transfersActive = useTransfersStore(useShallow(state => state.transfers.length > 0))
 	const { count, speed } = useTransfersStore(
@@ -61,6 +60,6 @@ const TransfersSlot = memo(() => {
 			<AnimatedProgressBar />
 		</PressableScale>
 	)
-})
+}
 
 export default TransfersSlot

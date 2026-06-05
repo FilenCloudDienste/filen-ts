@@ -8,7 +8,7 @@ import View from "@/components/ui/view"
 import { DirectoryIcon } from "@/components/itemIcons"
 import { DirColor } from "@filen/sdk-rs"
 import Header from "@/components/ui/header"
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
 import { driveItemDisplayName } from "@/lib/decryption"
@@ -18,7 +18,7 @@ import DismissStack from "@/components/dismissStack"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import { useTranslation } from "react-i18next"
 
-const DriveItemInfo = memo(() => {
+const DriveItemInfo = () => {
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
@@ -121,6 +121,6 @@ const DriveItemInfo = memo(() => {
 			</SafeAreaView>
 		</Fragment>
 	)
-})
+}
 
 export default DriveItemInfo

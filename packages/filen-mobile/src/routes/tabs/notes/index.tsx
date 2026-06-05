@@ -1,8 +1,7 @@
 import NotesComponent from "@/features/notes/components"
-import { memo } from "react"
 
-const Notes = memo(() => {
+const Notes = () => {
 	return <NotesComponent />
-})
+}
 
 export default Notes
