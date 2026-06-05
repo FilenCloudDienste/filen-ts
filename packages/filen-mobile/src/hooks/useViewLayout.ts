@@ -1,5 +1,5 @@
 import type { View, LayoutChangeEvent } from "react-native"
-import { useState, useCallback } from "react"
+import { useState } from "react"
 
 export default function useViewLayout(ref: React.RefObject<View | null>) {
 	const [layout, setLayout] = useState<{
@@ -14,32 +14,29 @@ export default function useViewLayout(ref: React.RefObject<View | null>) {
 		y: 0
 	})
 
-	const onLayout = useCallback(
-		(e?: LayoutChangeEvent) => {
-			if (e) {
-				const { layout } = e.nativeEvent
+	const onLayout = (e?: LayoutChangeEvent) => {
+		if (e) {
+			const { layout } = e.nativeEvent
 
-				setLayout({
-					width: layout.width,
-					height: layout.height,
-					x: layout.x,
-					y: layout.y
-				})
-
-				return
-			}
-
-			ref?.current?.measureInWindow?.((x, y, width, height) => {
-				setLayout({
-					width,
-					height,
-					x,
-					y
-				})
+			setLayout({
+				width: layout.width,
+				height: layout.height,
+				x: layout.x,
+				y: layout.y
 			})
-		},
-		[ref]
-	)
+
+			return
+		}
+
+		ref?.current?.measureInWindow?.((x, y, width, height) => {
+			setLayout({
+				width,
+				height,
+				x,
+				y
+			})
+		})
+	}
 
 	return {
 		layout,

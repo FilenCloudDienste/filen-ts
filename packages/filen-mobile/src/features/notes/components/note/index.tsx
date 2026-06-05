@@ -52,7 +52,7 @@ const Note = ({
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
-	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[itemUuid] ?? []).length > 0))
+	const isInflight = useNotesStore(useShallow(state => (state.inflightContent[itemUuid]?.length ?? 0) > 0))
 	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.uuid === itemUuid)))
