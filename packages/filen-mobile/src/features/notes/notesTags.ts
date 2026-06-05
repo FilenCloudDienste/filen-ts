@@ -1,22 +1,8 @@
 import auth from "@/lib/auth"
-import { type Note as SdkNote, type NoteTag as SdkNoteTag } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
+import { wrapSdkNote, wrapSdkNoteTag } from "@/features/notes/utils"
 import { notesTagsQueryUpdate } from "@/features/notes/queries/useNotesTags.query"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
-
-function wrapSdkNote(sdk: SdkNote): Note {
-	return {
-		...sdk,
-		undecryptable: sdk.encryptionKey === undefined
-	}
-}
-
-function wrapSdkNoteTag(sdk: SdkNoteTag): NoteTag {
-	return {
-		...sdk,
-		undecryptable: sdk.name === undefined
-	}
-}
 
 export async function addTag({ note, tag, signal }: { note: Note; tag: NoteTag; signal?: AbortSignal }) {
 	if (note.tags.find(t => t.uuid === tag.uuid)) {
