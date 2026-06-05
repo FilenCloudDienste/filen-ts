@@ -24,7 +24,17 @@ export type CollisionParams = {
  * Only creationTime is used because modificationTime can change when a
  * file is edited, which would produce different paths across syncs.
  *
- * Returns null when all iterations are exhausted or the path is invalid.
+ * There are exactly TWO iterations (0 and 1), and that is the maximum
+ * possible here: the only deterministic inputs available are the asset's
+ * name and creationTime, so iteration 0 (creationTime) and iteration 1
+ * (hash of name+creationTime) exhaust the distinct suffixes derivable
+ * from that fixed input. A third strategy would have to reuse the same
+ * data and could not produce a new path — so callers should treat 2 as
+ * the hard cap, NOT extend the switch. If two assets genuinely share the
+ * same name AND creationTime they are indistinguishable and collapse to
+ * the same slot by design (deterministic dedup across syncs).
+ *
+ * Returns null for iteration >= 2 (exhausted) or when the path is invalid.
  */
 export function modifyAssetPathOnCollision({ iteration, path, asset }: CollisionParams): string | null {
 	const ext = FileSystem.Paths.extname(asset.name)
