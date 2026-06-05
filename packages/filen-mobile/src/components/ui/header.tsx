@@ -178,9 +178,7 @@ export const Header = ({
 	title:
 		| string
 		| React.ReactNode
-		| React.ReactElement
-		| React.JSX.Element
-		| ((props: { children: string; tintColor?: string | undefined }) => React.ReactNode | React.ReactElement | React.JSX.Element)
+		| ((props: { children: string; tintColor?: string | undefined }) => React.ReactNode)
 	shown?: boolean
 	largeTitle?: boolean
 	backVisible?: boolean

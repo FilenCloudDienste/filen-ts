@@ -15,8 +15,8 @@ export const Typing = ({ chat }: { chat: TChat }) => {
 	const users = typing
 		.map(t => t.senderId)
 		.map(senderId => chat.participants.find(p => p.userId === senderId))
-		.filter(Boolean)
-		.map(participant => contactDisplayName(participant!))
+		.filter((p): p is NonNullable<typeof p> => p !== undefined)
+		.map(participant => contactDisplayName(participant))
 
 	if (users.length === 0) {
 		return null

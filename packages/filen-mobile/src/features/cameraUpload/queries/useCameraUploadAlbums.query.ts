@@ -20,16 +20,16 @@ export async function fetchData(_signal?: AbortSignal) {
 }
 
 export function useCameraUploadAlbumsQuery(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
+	options?: Omit<UseQueryOptions<Awaited<ReturnType<typeof fetchData>>, Error>, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
+	const query = useQuery<Awaited<ReturnType<typeof fetchData>>, Error>({
 		...DEFAULT_QUERY_OPTIONS,
 		...options,
 		queryKey: [BASE_QUERY_KEY],
 		queryFn: ({ signal }) => fetchData(signal)
 	})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
+	return query
 }
 
 export function cameraUploadAlbumsQueryUpdate({

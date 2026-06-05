@@ -39,6 +39,7 @@ import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
 import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
+import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 import {
 	OFFLINE_VERSION,
 	OFFLINE_DIRECTORY,
@@ -252,7 +253,7 @@ export class Offline {
 			// Treat as corrupt so the directory is re-downloaded rather than silently
 			// returning an entries-less meta that breaks listDirectories and clearAll.
 			if (
-				(meta.item.type === "directory" || meta.item.type === "sharedDirectory" || meta.item.type === "sharedRootDirectory") &&
+				isDirectoryItem(meta.item) &&
 				(meta.entries === undefined || meta.entries === null)
 			) {
 				throw new Error("Directory meta is missing entries — treating as corrupt")
@@ -483,7 +484,7 @@ export class Offline {
 
 		const uuid = item.data.uuid
 
-		if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+		if (isFileItem(item)) {
 			if (!this.indexCache.files[uuid]) {
 				return false
 			}
@@ -755,10 +756,7 @@ export class Offline {
 								return
 							}
 
-							if (
-								!item.data.decryptedMeta ||
-								(item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")
-							) {
+							if (!item.data.decryptedMeta || !isFileItem(item)) {
 								return
 							}
 
@@ -1130,9 +1128,7 @@ export class Offline {
 									remoteFile &&
 									localFile &&
 									localFile.item.data.decryptedMeta &&
-									(localFile.item.type === "file" ||
-										localFile.item.type === "sharedFile" ||
-										localFile.item.type === "sharedRootFile")
+									isFileItem(localFile.item)
 								) {
 									const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
 
@@ -1247,7 +1243,7 @@ export class Offline {
 
 						const meta = readResult.data
 
-						if (meta.item.type !== "file" && meta.item.type !== "sharedFile" && meta.item.type !== "sharedRootFile") {
+						if (!isFileItem(meta.item)) {
 							return
 						}
 
@@ -1279,7 +1275,7 @@ export class Offline {
 		signal?: AbortSignal
 	}): Promise<void> {
 		const result = await run(async defer => {
-			if (file.type !== "file" && file.type !== "sharedFile" && file.type !== "sharedRootFile") {
+			if (!isFileItem(file)) {
 				throw new Error("Item not of type file")
 			}
 
@@ -1333,10 +1329,10 @@ export class Offline {
 			})
 
 			const innerResult = await run(async defer => {
-				let resolveCompletion!: () => void
+				let resolveCompletion: (() => void) | undefined
 
 				defer(() => {
-					resolveCompletion()
+					resolveCompletion?.()
 				})
 
 				const completionPromise = new Promise<void>(resolve => {
@@ -1396,7 +1392,7 @@ export class Offline {
 		signal?: AbortSignal
 	}): Promise<void> {
 		const result = await run(async defer => {
-			if (directory.type !== "directory" && directory.type !== "sharedDirectory" && directory.type !== "sharedRootDirectory") {
+			if (!isDirectoryItem(directory)) {
 				throw new Error("Item not of type directory")
 			}
 
@@ -1452,10 +1448,10 @@ export class Offline {
 			}
 
 			const innerResult = await run(async defer => {
-				let resolveCompletion!: () => void
+				let resolveCompletion: (() => void) | undefined
 
 				defer(() => {
-					resolveCompletion()
+					resolveCompletion?.()
 				})
 
 				const completionPromise = new Promise<void>(resolve => {
@@ -1570,13 +1566,6 @@ export class Offline {
 
 				throw innerResult.error
 			}
-
-			return {
-				directory,
-				parent,
-				dataDirectory,
-				metaFile
-			}
 		})
 
 		if (!result.success) {
@@ -1589,7 +1578,7 @@ export class Offline {
 	private findParentAnyDirWithContext(pathToItem: Record<string, DriveItem>, dirname: string): OfflineParent | null {
 		const item = pathToItem[dirname]
 
-		if (!item || (item.type !== "directory" && item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory")) {
+		if (!item || !isDirectoryItem(item)) {
 			return null
 		}
 
@@ -1668,11 +1657,7 @@ export class Offline {
 						return
 					}
 
-					if (
-						meta.item.type !== "directory" &&
-						meta.item.type !== "sharedDirectory" &&
-						meta.item.type !== "sharedRootDirectory"
-					) {
+					if (!isDirectoryItem(meta.item)) {
 						return
 					}
 
@@ -1733,12 +1718,7 @@ export class Offline {
 		for (const path in directoryMeta.entries) {
 			const entryMeta = directoryMeta.entries[path]
 
-			if (
-				!entryMeta ||
-				(entryMeta.item.type !== "directory" &&
-					entryMeta.item.type !== "sharedDirectory" &&
-					entryMeta.item.type !== "sharedRootDirectory")
-			) {
+			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 				continue
 			}
 
@@ -1847,11 +1827,7 @@ export class Offline {
 					return
 				}
 
-				if (
-					directoryMeta.item.type !== "directory" &&
-					directoryMeta.item.type !== "sharedDirectory" &&
-					directoryMeta.item.type !== "sharedRootDirectory"
-				) {
+				if (!isDirectoryItem(directoryMeta.item)) {
 					return
 				}
 
@@ -1873,12 +1849,7 @@ export class Offline {
 				for (const path in directoryMeta.entries) {
 					const entryMeta = directoryMeta.entries[path]
 
-					if (
-						!entryMeta ||
-						(entryMeta.item.type !== "directory" &&
-							entryMeta.item.type !== "sharedDirectory" &&
-							entryMeta.item.type !== "sharedRootDirectory")
-					) {
+					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 						continue
 					}
 
@@ -1977,10 +1948,7 @@ export class Offline {
 				const index = await this.readIndex()
 				const fileEntry = index.files[item.data.uuid]
 
-				if (
-					!fileEntry ||
-					(fileEntry.item.type !== "file" && fileEntry.item.type !== "sharedFile" && fileEntry.item.type !== "sharedRootFile")
-				) {
+				if (!fileEntry || !isFileItem(fileEntry.item)) {
 					return {
 						size: 0,
 						files: 0,
@@ -2030,12 +1998,7 @@ export class Offline {
 				for (const path in directoryMeta.entries) {
 					const entryMeta = directoryMeta.entries[path]
 
-					if (
-						!entryMeta ||
-						(entryMeta.item.type !== "directory" &&
-							entryMeta.item.type !== "sharedDirectory" &&
-							entryMeta.item.type !== "sharedRootDirectory")
-					) {
+					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 						continue
 					}
 
@@ -2216,7 +2179,7 @@ export class Offline {
 
 			let didDelete = false
 
-			if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+			if (isFileItem(item)) {
 				const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid))
 
 				if (parentDirectory.exists) {
@@ -2228,11 +2191,7 @@ export class Offline {
 				const { directories: topLevelDirectories } = await this.listDirectories()
 
 				for (const { item: directoryItem } of topLevelDirectories) {
-					if (
-						directoryItem.type !== "directory" &&
-						directoryItem.type !== "sharedDirectory" &&
-						directoryItem.type !== "sharedRootDirectory"
-					) {
+					if (!isDirectoryItem(directoryItem)) {
 						continue
 					}
 
@@ -2321,7 +2280,7 @@ export class Offline {
 			return cachedLocalFile
 		}
 
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+		if (!isFileItem(item)) {
 			return null
 		}
 
@@ -2330,10 +2289,7 @@ export class Offline {
 		const index = await this.readIndex()
 		const fileEntry = index.files[item.data.uuid]
 
-		if (
-			fileEntry &&
-			(fileEntry.item.type === "file" || fileEntry.item.type === "sharedFile" || fileEntry.item.type === "sharedRootFile")
-		) {
+		if (fileEntry && isFileItem(fileEntry.item)) {
 			const file = new FileSystem.File(
 				FileSystem.Paths.join(FILES_DIRECTORY.uri, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
 			)
@@ -2366,10 +2322,7 @@ export class Offline {
 		for (const path in directoryMeta.entries) {
 			const entryMeta = directoryMeta.entries[path]
 
-			if (
-				!entryMeta ||
-				(entryMeta.item.type !== "file" && entryMeta.item.type !== "sharedFile" && entryMeta.item.type !== "sharedRootFile")
-			) {
+			if (!entryMeta || !isFileItem(entryMeta.item)) {
 				continue
 			}
 
@@ -2394,7 +2347,7 @@ export class Offline {
 			return cachedLocalDir
 		}
 
-		if (item.type !== "directory" && item.type !== "sharedDirectory" && item.type !== "sharedRootDirectory") {
+		if (!isDirectoryItem(item)) {
 			return null
 		}
 
@@ -2428,12 +2381,7 @@ export class Offline {
 		for (const path in directoryMeta.entries) {
 			const entryMeta = directoryMeta.entries[path]
 
-			if (
-				!entryMeta ||
-				(entryMeta.item.type !== "directory" &&
-					entryMeta.item.type !== "sharedDirectory" &&
-					entryMeta.item.type !== "sharedRootDirectory")
-			) {
+			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 				continue
 			}
 

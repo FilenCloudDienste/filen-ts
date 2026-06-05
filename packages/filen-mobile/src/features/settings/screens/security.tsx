@@ -186,15 +186,15 @@ function Security() {
 										}
 
 										const changePasswordResult = await runWithLoading(async () => {
-											await (
-												await auth.getSdkClients()
-											).authedSdkClient.changePassword({
+											const { authedSdkClient } = await auth.getSdkClients()
+
+											await authedSdkClient.changePassword({
 												currentPassword,
 												newPassword
 											})
 
 											await auth.saveStringifiedClientToSecureStorage(
-												await (await auth.getSdkClients()).authedSdkClient.toStringified()
+												await authedSdkClient.toStringified()
 											)
 										})
 

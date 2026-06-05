@@ -93,12 +93,14 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 					items: selectedItems,
 					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
 					op: async item => {
-						if (!item.data.decryptedMeta) {
+						const meta = item.data.decryptedMeta
+
+						if (!meta) {
 							return
 						}
 
 						const saveResult = await run(async defer => {
-							const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta!.name))
+							const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, meta.name))
 
 							defer(() => {
 								if (destination.parentDirectory.exists) {

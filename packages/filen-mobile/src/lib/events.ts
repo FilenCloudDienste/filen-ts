@@ -8,8 +8,7 @@ import type { QueueItem, PlaylistWithItems } from "@/features/audio/audio"
 export type Events = {
 	secureStoreChange: {
 		key: string
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		value: any
+		value: unknown
 	}
 	secureStoreRemove: {
 		key: string

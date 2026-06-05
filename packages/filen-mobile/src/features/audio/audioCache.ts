@@ -27,7 +27,15 @@ export const VERSION = AUDIO_CACHE_VERSION
 export const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
 
 function parseMetadata(raw: string): Metadata {
-	return deserialize(raw) as Metadata
+	const result = deserialize<unknown>(raw)
+
+	return typeof result === "object" && result !== null && typeof (result as { cachedAt?: unknown }).cachedAt === "number"
+		? (result as Metadata)
+		: null
+}
+
+function hasMetadata(m: Metadata): m is NonNullable<Metadata> {
+	return m !== null && Object.keys(m).length > 0
 }
 
 export class AudioCache {
@@ -100,7 +108,7 @@ export class AudioCache {
 
 			const metadataContent = parseMetadata(await metadata.text())
 
-			if (Object.keys(metadataContent ?? {}).length === 0) {
+			if (!hasMetadata(metadataContent)) {
 				return false
 			}
 
@@ -168,7 +176,7 @@ export class AudioCache {
 				try {
 					const metadata = parseMetadata(await metadataFile.text())
 
-					if (Object.keys(metadata ?? {}).length > 0) {
+					if (hasMetadata(metadata)) {
 						return {
 							audio,
 							metadata
@@ -262,7 +270,7 @@ export class AudioCache {
 					} else {
 						metadata = parseMetadata(await metadataFile.text())
 
-						if (Object.keys(metadata ?? {}).length === 0) {
+						if (!hasMetadata(metadata)) {
 							metadata = null
 						}
 					}
@@ -360,7 +368,7 @@ export class AudioCache {
 
 						pictureUri = metadata?.pictureUri ?? null
 
-						return Object.keys(metadata ?? {}).length === 0 || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
+						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
 					})
 
 					if (parseResult.success) {
@@ -395,7 +403,7 @@ export class AudioCache {
 
 						pictureUri = metadata?.pictureUri ?? null
 
-						return Object.keys(metadata ?? {}).length === 0 || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
+						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
 					})
 
 					if (recheck.success && !recheck.data) {

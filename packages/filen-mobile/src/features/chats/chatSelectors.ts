@@ -69,8 +69,7 @@ export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigi
 	let includesUnread = false
 	let includesUndecryptable = false
 
-	for (let i = 0; i < chats.length; i++) {
-		const c = chats[i]!
+	for (const c of chats) {
 
 		if (c.muted) {
 			includesMuted = true

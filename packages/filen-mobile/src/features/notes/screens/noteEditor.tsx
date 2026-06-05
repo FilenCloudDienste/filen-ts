@@ -199,12 +199,12 @@ const Note = () => {
 
 	const note =
 		notesWithContentQuery.status === "success"
-			? (notesWithContentQuery.data.find(n => n.uuid === uuid) as TNote)
-			: (null as unknown as TNote)
+			? (notesWithContentQuery.data.find(n => n.uuid === uuid) ?? null)
+			: null
 
 	const history = deserializeRouteParam<NoteHistory>(historySerialized)
 
-	if (!(note as TNote | undefined)) {
+	if (!note) {
 		return <DismissStack />
 	}
 
