@@ -41,7 +41,7 @@ Native: Three git submodules at packages/filen-mobile/, integrated via custom Ex
 | `chats` | Send/edit/delete messages, typing indicators, mark read, create/leave/delete chats, in-flight message sync, unread counts. Lib: `chats.ts` (Semaphore-protected refetch). Socket: `handleChatEvent`. |
 | `contacts` | Requests (accept/deny/cancel/send), block/unblock, delete; programmatic contact selection. Lib: `contacts.ts`, `contactsSelect.ts`. |
 | `audio` | Audio playback / playlist queue management with loop modes (track/list/off); metadata + cover art cache; playlists screens. Lib: `audio.ts` (singleton). |
-| `cameraUpload` | Auto media sync, EXIF dates, dedup via xxHash32 (6-iteration collision resolution), same-title album disambiguation, sanitization of `/` in titles/ids, compression, error surface, album picker. Lib: `cameraUpload.ts`. |
+| `cameraUpload` | Auto media sync, EXIF dates, dedup via xxHash32 (2-iteration collision resolution — append creationTime, then hash(name+creationTime)), same-title album disambiguation, sanitization of `/` in titles/ids, compression, error surface, album picker. Lib: `cameraUpload.ts`. |
 | `transfers` | Upload/download with progress, pause/resume, abort, error tracking, duplicate prevention via active ID sets; floating + full-list UI; Android foreground service. Lib: `transfers.ts`, `foregroundService.ts`. |
 | `offline` | Offline file cache: store, sync, list, index management (FileOrDirectoryOfflineMeta). Lib: `offline.ts`. |
 | `events` | Account activity log + event detail. |
