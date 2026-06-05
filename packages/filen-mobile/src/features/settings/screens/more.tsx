@@ -1,8 +1,8 @@
 import { Fragment } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
-import View from "@/components/ui/view"
-import { ScrollView, Platform, ActivityIndicator } from "react-native"
+import View, { GestureHandlerScrollView } from "@/components/ui/view"
+import { Platform, ActivityIndicator } from "react-native"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
@@ -36,7 +36,7 @@ function More() {
 				transparent={Platform.OS === "ios"}
 			/>
 			<SafeAreaView edges={["left", "right"]}>
-				<ScrollView
+				<GestureHandlerScrollView
 					contentContainerClassName="px-4 gap-4 pb-40"
 					contentInsetAdjustmentBehavior="automatic"
 				>
@@ -232,7 +232,7 @@ function More() {
 							}
 						]}
 					/>
-				</ScrollView>
+				</GestureHandlerScrollView>
 			</SafeAreaView>
 		</Fragment>
 	)
