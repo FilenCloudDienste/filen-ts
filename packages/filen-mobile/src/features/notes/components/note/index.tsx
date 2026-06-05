@@ -38,7 +38,24 @@ export type DataItem = Item & {
 
 export type ListItem = SectionHeader | DataItem
 
-const Note = ({
+const NoteSectionHeader = ({ item }: { item: SectionHeader }) => {
+	const textForeground = useResolveClassNames("text-foreground")
+
+	return (
+		<View className="w-full h-auto px-4 py-4 pb-2 flex-row items-center gap-2">
+			{item.icon && (
+				<Ionicons
+					name={item.icon}
+					size={18}
+					color={textForeground.color}
+				/>
+			)}
+			<Text className="text-lg">{item.title}</Text>
+		</View>
+	)
+}
+
+const NoteRow = ({
 	info,
 	menuOrigin,
 	nextNote,
@@ -98,18 +115,7 @@ const Note = ({
 	const roundedCn = cn(isFirstInSection && "rounded-t-4xl", isLastInSection && "rounded-b-4xl")
 
 	if (info.item.type === "header") {
-		return (
-			<View className="w-full h-auto px-4 py-4 pb-2 flex-row items-center gap-2">
-				{info.item.icon && (
-					<Ionicons
-						name={info.item.icon}
-						size={18}
-						color={textForeground.color}
-					/>
-				)}
-				<Text className="text-lg">{info.item.title}</Text>
-			</View>
-		)
+		return null
 	}
 
 	return (
@@ -271,6 +277,29 @@ const Note = ({
 				</PressableScale>
 			</Menu>
 		</View>
+	)
+}
+
+const Note = ({
+	info,
+	menuOrigin,
+	nextNote,
+	prevNote
+}: {
+	info: ListRenderItemInfo<ListItem>
+	menuOrigin?: NoteMenuOrigin
+	nextNote?: ListItem
+	prevNote?: ListItem
+}) => {
+	return info.item.type === "header" ? (
+		<NoteSectionHeader item={info.item} />
+	) : (
+		<NoteRow
+			info={info}
+			menuOrigin={menuOrigin}
+			nextNote={nextNote}
+			prevNote={prevNote}
+		/>
 	)
 }
 
