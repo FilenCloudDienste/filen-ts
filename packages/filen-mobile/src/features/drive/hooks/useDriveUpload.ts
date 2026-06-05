@@ -146,10 +146,7 @@ export function useDriveUpload({ parent, t }: { parent: AnyNormalDir | null; t: 
 	// ImagePicker launcher used and whether created/modified timestamps are
 	// injected (camera captures should record the current time; library assets
 	// already carry their own metadata via the OS).
-	const uploadFromPicker = async (
-		launcher: () => Promise<ImagePicker.ImagePickerResult>,
-		addTimestamps: boolean
-	): Promise<void> => {
+	const uploadFromPicker = async (launcher: () => Promise<ImagePicker.ImagePickerResult>, addTimestamps: boolean): Promise<void> => {
 		if (!parent) {
 			return
 		}

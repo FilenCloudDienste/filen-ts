@@ -200,7 +200,9 @@ export class Audio {
 			for (let i = indices.length - 1; i > 0; i--) {
 				const j = Math.floor(Math.random() * (i + 1))
 
-				const tmp = indices[i] ?? 0; indices[i] = indices[j] ?? 0; indices[j] = tmp
+				const tmp = indices[i] ?? 0
+				indices[i] = indices[j] ?? 0
+				indices[j] = tmp
 			}
 
 			return indices
@@ -211,7 +213,9 @@ export class Audio {
 		for (let i = others.length - 1; i > 0; i--) {
 			const j = Math.floor(Math.random() * (i + 1))
 
-			const tmp = others[i] ?? 0; others[i] = others[j] ?? 0; others[j] = tmp
+			const tmp = others[i] ?? 0
+			others[i] = others[j] ?? 0
+			others[j] = tmp
 		}
 
 		return [firstIdx, ...others]

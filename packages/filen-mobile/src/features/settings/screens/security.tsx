@@ -193,9 +193,7 @@ function Security() {
 												newPassword
 											})
 
-											await auth.saveStringifiedClientToSecureStorage(
-												await authedSdkClient.toStringified()
-											)
+											await auth.saveStringifiedClientToSecureStorage(await authedSdkClient.toStringified())
 										})
 
 										if (!changePasswordResult.success) {

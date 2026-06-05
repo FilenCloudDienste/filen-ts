@@ -175,10 +175,7 @@ export const Header = ({
 	rightItems,
 	backgroundColor
 }: {
-	title:
-		| string
-		| React.ReactNode
-		| ((props: { children: string; tintColor?: string | undefined }) => React.ReactNode)
+	title: string | React.ReactNode | ((props: { children: string; tintColor?: string | undefined }) => React.ReactNode)
 	shown?: boolean
 	largeTitle?: boolean
 	backVisible?: boolean

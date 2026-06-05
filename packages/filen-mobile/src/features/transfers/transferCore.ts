@@ -517,8 +517,7 @@ export async function uploadCore(
 				id,
 				type: "uploadFile",
 				succeeded: () => succeededUploadFile,
-				aborted: () =>
-					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
 				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
 				defer
 			})
@@ -1032,8 +1031,7 @@ export async function downloadCore(
 				id,
 				type: "downloadFile",
 				succeeded: () => succeededDownloadFile,
-				aborted: () =>
-					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
 				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
 				defer
 			})
