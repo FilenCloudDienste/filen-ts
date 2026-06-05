@@ -7,7 +7,7 @@ export type DriveStore = {
 	setSelectedItems: (fn: DriveItem[] | ((prev: DriveItem[]) => DriveItem[])) => void
 	toggleSelectedItem: (item: DriveItem) => void
 	clearSelectedItems: () => void
-	selectAllItems: (items: DriveItem[]) => void
+	selectAllItems: <T extends DriveItem>(items: T[]) => void
 }
 
 const driveItemId = (i: DriveItem) => i.data.uuid
@@ -27,7 +27,7 @@ export const useDriveStore = create<DriveStore>(set => ({
 	clearSelectedItems() {
 		set({ selectedItems: [] })
 	},
-	selectAllItems(items) {
+	selectAllItems<T extends DriveItem>(items: T[]) {
 		set({ selectedItems: items })
 	}
 }))

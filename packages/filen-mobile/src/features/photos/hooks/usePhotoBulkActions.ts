@@ -4,7 +4,7 @@ import { useShallow } from "zustand/shallow"
 import * as FileSystem from "expo-file-system"
 import * as MediaLibrary from "expo-media-library"
 import { type MenuButton } from "@/components/ui/menu"
-import { type DriveItem, type DriveItemFileExtracted } from "@/types"
+import { type DriveItemFileExtracted } from "@/types"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { aggregateDriveSelectionFlags } from "@/features/drive/driveSelectors"
@@ -42,7 +42,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 				return
 			}
 
-			useDriveStore.getState().selectAllItems(items as unknown as DriveItem[])
+			useDriveStore.getState().selectAllItems(items)
 		}
 	})
 

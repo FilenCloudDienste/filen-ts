@@ -474,7 +474,7 @@ function getSecureStoreFlushMutex(key: string): Semaphore {
 }
 
 export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => T)) => void] {
-	const [state, setState] = useState<T>(() => cache.secureStore.get(key) ?? initialValue)
+	const [state, setState] = useState<T>(() => (cache.secureStore.get(key) as T | undefined) ?? initialValue)
 	const lastValueRef = useRef<T>(state)
 	const flushMutexRef = useRef<Semaphore>(getSecureStoreFlushMutex(key))
 	const isLocalUpdateRef = useRef<boolean>(false)
