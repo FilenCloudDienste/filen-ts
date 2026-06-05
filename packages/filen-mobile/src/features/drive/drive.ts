@@ -1,10 +1,5 @@
 import auth from "@/lib/auth"
 import {
-	CreatedTime,
-	DirColor,
-	SharedRootItem,
-	NonRootNormalItem,
-	NonRootNormalItem_Tags,
 	ErrorKind,
 	AnyLinkedDir,
 	type LinkedRootDir,
@@ -12,23 +7,13 @@ import {
 	type File,
 	FileMeta,
 	ParentUuid,
-	MaybeEncryptedUniffi_Tags,
-	type Contact
+	MaybeEncryptedUniffi_Tags
 } from "@filen/sdk-rs"
-import type { DriveItem } from "@/types"
 import {
-	unwrapDirMeta,
 	unwrapFileMeta,
-	unwrapParentUuid,
-	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
 	unwrapSdkError
 } from "@/lib/utils"
-import {
-	driveItemsQueryUpdateGlobal,
-	driveItemsQueryUpdate
-} from "@/features/drive/queries/useDriveItems.query"
-import cache from "@/lib/cache"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { run } from "@filen/utils"
@@ -57,200 +42,29 @@ import {
 	move,
 	findItemMatchesForName
 } from "@/features/drive/driveDirectory"
+import {
+	favorite,
+	rename,
+	setDirColor,
+	updateTimestamps
+} from "@/features/drive/driveMetadata"
+import {
+	shareWithFilenUser,
+	removeShare
+} from "@/features/drive/driveShare"
 
 class Drive {
-	public async favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
+	public favorite = favorite
 
-		if (item.data.favorited === favorited) {
-			return item
-		}
+	public shareWithFilenUser = shareWithFilenUser
 
-		const { authedSdkClient } = await auth.getSdkClients()
-		const modifiedItem = await authedSdkClient.setFavorite(
-			item.type === "directory" ? new NonRootNormalItem.Dir(item.data) : new NonRootNormalItem.File(item.data),
-			favorited,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		if (modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
-			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem.inner[0]))
-		} else {
-			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem.inner[0]))
-		}
-
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		// Sync persistent caches — `favorited` flag changed on the raw Dir/File.
-		if (item.type === "directory" && modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
-			cache.cacheNewNormalDir(modifiedItem.inner[0], item)
-		} else if (item.type === "file" && modifiedItem.tag === NonRootNormalItem_Tags.File) {
-			cache.cacheNewFile(modifiedItem.inner[0], item)
-		}
-
-		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-		if (unwrappedParentUuid) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-			})
-		}
-
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "favorites",
-					uuid: null
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
-
-		return item
-	}
-
-	/**
-	 * Share a single owned file or directory with another Filen user. Dispatches
-	 * to the right SDK call based on the item type. Re-encrypts directory
-	 * contents under the recipient's public key (the SDK handles the heavy
-	 * lifting; we pass a `undefined` progress callback for now). Throws on
-	 * error so callers can wrap in `run()` / `runBulk` for UI feedback.
-	 */
-	public async shareWithFilenUser({ item, contact, signal }: { item: DriveItem; contact: Contact; signal?: AbortSignal }) {
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type for share")
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		if (item.type === "directory") {
-			await authedSdkClient.shareDir(item.data, contact, undefined, signal ? { signal } : undefined)
-
-			return
-		}
-
-		await authedSdkClient.shareFile(item.data, contact, signal ? { signal } : undefined)
-	}
-
-	public async rename({ item, newName, signal }: { item: DriveItem; newName: string; signal?: AbortSignal }) {
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		if (item.data.decryptedMeta?.name === newName || newName.trim().length === 0) {
-			return item
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		const modifiedItem =
-			item.type === "directory"
-				? await authedSdkClient.updateDirMetadata(
-						item.data,
-						{
-							name: newName,
-							created: undefined
-						},
-						signal
-							? {
-									signal
-								}
-							: undefined
-					)
-				: await authedSdkClient.updateFileMetadata(
-						item.data,
-						{
-							name: newName,
-							mime: undefined,
-							lastModified: undefined,
-							created: CreatedTime.Keep.new()
-						},
-						signal
-							? {
-									signal
-								}
-							: undefined
-					)
-
-		// Ugly but works for now, until we have a better way
-		if (!("region" in modifiedItem)) {
-			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
-		} else {
-			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
-		}
-
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		// Sync persistent caches — name (decryptedMeta) changed on the raw Dir/File.
-		if (item.type === "file" && "region" in modifiedItem) {
-			cache.cacheNewFile(modifiedItem, item)
-		} else if (item.type === "directory" && !("region" in modifiedItem)) {
-			cache.cacheNewNormalDir(modifiedItem, item)
-		}
-
-		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-		if (unwrappedParentUuid) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-			})
-		}
-
-		return item
-	}
+	public rename = rename
 
 	public deletePermanently = deletePermanently
 
 	public trash = trash
 
-	public async setDirColor({ item, color, signal }: { item: DriveItem; color: DirColor; signal?: AbortSignal }) {
-		if (item.type !== "directory") {
-			throw new Error("Invalid item type")
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-		const modifiedDir = await authedSdkClient.setDirColor(
-			item.data,
-			color,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedDir))
-
-		if (item.type !== "directory") {
-			throw new Error("Invalid item type")
-		}
-
-		// Sync persistent caches — `color` changed on the raw Dir.
-		cache.cacheNewNormalDir(modifiedDir, item)
-
-		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-		if (unwrappedParentUuid) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-			})
-		}
-
-		return item
-	}
+	public setDirColor = setDirColor
 
 	public restoreFileVersion = restoreFileVersion
 
@@ -260,67 +74,7 @@ class Drive {
 
 	public restore = restore
 
-	public async removeShare({ item, signal, parentUuid }: { item: DriveItem; signal?: AbortSignal; parentUuid?: string }) {
-		if (item.type !== "sharedRootDirectory" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
-			throw new Error("Invalid item type")
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		await authedSdkClient.removeSharedItem(
-			item.type === "sharedRootDirectory" ? new SharedRootItem.Dir(item.data) : new SharedRootItem.File(item.data),
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		// Item leaves the user's sharedIn/sharedOut view entirely — forget caches.
-		cache.forgetItem(item.data.uuid)
-
-		if (parentUuid) {
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "sharedOut",
-						uuid: parentUuid
-					}
-				},
-				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-			})
-
-			driveItemsQueryUpdate({
-				params: {
-					path: {
-						type: "sharedIn",
-						uuid: parentUuid
-					}
-				},
-				updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-			})
-		}
-
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "sharedOut",
-					uuid: null
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
-
-		driveItemsQueryUpdate({
-			params: {
-				path: {
-					type: "sharedIn",
-					uuid: null
-				}
-			},
-			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
-		})
-	}
+	public removeShare = removeShare
 
 	public removeDirLink = removeDirLink
 
@@ -332,81 +86,7 @@ class Drive {
 
 	public findItemMatchesForName = findItemMatchesForName
 
-	public async updateTimestamps({
-		item,
-		created,
-		modified,
-		signal
-	}: {
-		item: DriveItem
-		created?: number
-		modified?: number
-		signal?: AbortSignal
-	}) {
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		const modifiedItem =
-			item.type === "directory"
-				? await authedSdkClient.updateDirMetadata(
-						item.data,
-						{
-							name: undefined,
-							created: created !== undefined ? BigInt(created) : undefined
-						},
-						signal
-							? {
-									signal
-								}
-							: undefined
-					)
-				: await authedSdkClient.updateFileMetadata(
-						item.data,
-						{
-							name: undefined,
-							mime: undefined,
-							lastModified: modified !== undefined ? BigInt(modified) : undefined,
-							created: created !== undefined ? CreatedTime.Set.new(BigInt(created)) : CreatedTime.Keep.new()
-						},
-						signal
-							? {
-									signal
-								}
-							: undefined
-					)
-
-		// Ugly but works for now, until we have a better way
-		if (!("region" in modifiedItem)) {
-			item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
-		} else {
-			item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
-		}
-
-		if (item.type !== "directory" && item.type !== "file") {
-			throw new Error("Invalid item type")
-		}
-
-		// Sync persistent caches — timestamps changed on the raw Dir/File.
-		if (item.type === "file" && "region" in modifiedItem) {
-			cache.cacheNewFile(modifiedItem, item)
-		} else if (item.type === "directory" && !("region" in modifiedItem)) {
-			cache.cacheNewNormalDir(modifiedItem, item)
-		}
-
-		const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-		if (unwrappedParentUuid) {
-			driveItemsQueryUpdateGlobal({
-				parentUuid: unwrappedParentUuid,
-				updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-			})
-		}
-
-		return item
-	}
+	public updateTimestamps = updateTimestamps
 
 	public enablePublicLink = enablePublicLink
 
