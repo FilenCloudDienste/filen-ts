@@ -1,14 +1,27 @@
 import auth from "@/lib/auth"
-import { NoteType, type Contact, type Note as SdkNote, type NoteTag as SdkNoteTag } from "@filen/sdk-rs"
-import { type Note, type NoteTag, type NoteParticipant, type NoteHistory } from "@/types"
+import { NoteType, type Note as SdkNote } from "@filen/sdk-rs"
+import { type Note, type NoteTag, type NoteHistory } from "@/types"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { createNotePreviewFromContentText } from "@filen/utils"
-import { notesTagsQueryUpdate } from "@/features/notes/queries/useNotesTags.query"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
 import JSZip from "jszip"
 import { sanitizeFileName } from "@/lib/utils"
 import { newTmpFile } from "@/lib/tmp"
 import * as FileSystem from "expo-file-system"
+import {
+	addTag,
+	removeTag,
+	createTag,
+	renameTag,
+	deleteTag,
+	favoriteTag
+} from "@/features/notes/notesTags"
+import {
+	leave,
+	removeParticipant,
+	addParticipant,
+	setParticipantPermission
+} from "@/features/notes/notesParticipants"
 
 function wrapSdkNote(sdk: SdkNote): Note {
 	return {
@@ -17,14 +30,27 @@ function wrapSdkNote(sdk: SdkNote): Note {
 	}
 }
 
-function wrapSdkNoteTag(sdk: SdkNoteTag): NoteTag {
-	return {
-		...sdk,
-		undecryptable: sdk.name === undefined
-	}
-}
-
 class Notes {
+	public addTag = addTag
+
+	public removeTag = removeTag
+
+	public createTag = createTag
+
+	public renameTag = renameTag
+
+	public deleteTag = deleteTag
+
+	public favoriteTag = favoriteTag
+
+	public leave = leave
+
+	public removeParticipant = removeParticipant
+
+	public addParticipant = addParticipant
+
+	public setParticipantPermission = setParticipantPermission
+
 	public async getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
@@ -518,73 +544,6 @@ class Notes {
 		return note
 	}
 
-	public async addTag({ note, tag, signal }: { note: Note; tag: NoteTag; signal?: AbortSignal }) {
-		if (note.tags.find(t => t.uuid === tag.uuid)) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-		const { note: modifiedNoteSdk } = await authedSdkClient.addTagToNote(
-			note,
-			tag,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		const modifiedNote = wrapSdkNote(modifiedNoteSdk)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === modifiedNote.uuid
-						? {
-								...modifiedNote,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return modifiedNote
-	}
-
-	public async removeTag({ note, tag, signal }: { note: Note; tag: NoteTag; signal?: AbortSignal }) {
-		if (!note.tags.find(t => t.uuid === tag.uuid)) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.removeTagFromNote(
-				note,
-				tag,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
 	public async createWithOptionalTag({
 		title,
 		type,
@@ -679,258 +638,6 @@ class Notes {
 		})
 
 		return note
-	}
-
-	public async createTag({ name, signal }: { name: string; signal?: AbortSignal }) {
-		const { authedSdkClient } = await auth.getSdkClients()
-		const tag = wrapSdkNoteTag(
-			await authedSdkClient.createNoteTag(
-				name,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesTagsQueryUpdate({
-			updater: prev => [...prev.filter(t => t.uuid !== tag.uuid), tag]
-		})
-
-		return tag
-	}
-
-	public async renameTag({ tag, newName, signal }: { tag: NoteTag; newName: string; signal?: AbortSignal }) {
-		if (newName === tag.name || newName.trim().length === 0) {
-			return tag
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		tag = wrapSdkNoteTag(
-			await authedSdkClient.renameNoteTag(
-				tag,
-				newName,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesTagsQueryUpdate({
-			updater: prev => prev.map(t => (t.uuid === tag.uuid ? tag : t))
-		})
-
-		return tag
-	}
-
-	public async deleteTag({ tag, signal }: { tag: NoteTag; signal?: AbortSignal }) {
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		await authedSdkClient.deleteNoteTag(
-			tag,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		notesTagsQueryUpdate({
-			updater: prev => prev.filter(t => t.uuid !== tag.uuid)
-		})
-	}
-
-	public async favoriteTag({ tag, signal, favorite }: { tag: NoteTag; signal?: AbortSignal; favorite: boolean }) {
-		if (tag.favorite === favorite) {
-			return tag
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		tag = wrapSdkNoteTag(
-			await authedSdkClient.setNoteTagFavorited(
-				tag,
-				favorite,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesTagsQueryUpdate({
-			updater: prev => prev.map(t => (t.uuid === tag.uuid ? tag : t))
-		})
-
-		return tag
-	}
-
-	public async leave({ note, signal }: { note: Note; signal?: AbortSignal }) {
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.removeNoteParticipant(
-				note,
-				(await authedSdkClient.toStringified()).userId,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
-		setTimeout(() => {
-			notesWithContentQueryUpdate({
-				updater: prev => prev.filter(n => n.uuid !== note.uuid)
-			})
-
-			noteContentQueryUpdate({
-				params: {
-					uuid: note.uuid
-				},
-				updater: () => undefined
-			})
-		}, 3000)
-
-		return note
-	}
-
-	public async removeParticipant({ note, signal, participantUserId }: { note: Note; signal?: AbortSignal; participantUserId: bigint }) {
-		if (!note.participants.find(p => p.userId === participantUserId)) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.removeNoteParticipant(
-				note,
-				participantUserId,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async addParticipant({
-		note,
-		signal,
-		permissionsWrite,
-		contact
-	}: {
-		note: Note
-		signal?: AbortSignal
-		permissionsWrite: boolean
-		contact: Contact
-	}) {
-		if (note.participants.find(p => p.userId === contact.userId)) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		note = wrapSdkNote(
-			await authedSdkClient.addNoteParticipant(
-				note,
-				contact,
-				permissionsWrite,
-				signal
-					? {
-							signal
-						}
-					: undefined
-			)
-		)
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								...note,
-								content: n.content
-							}
-						: n
-				)
-		})
-
-		return note
-	}
-
-	public async setParticipantPermission({
-		note,
-		signal,
-		participant,
-		permissionsWrite
-	}: {
-		note: Note
-		signal?: AbortSignal
-		participant: NoteParticipant
-		permissionsWrite: boolean
-	}) {
-		if (participant.permissionsWrite === permissionsWrite) {
-			return note
-		}
-
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		participant = await authedSdkClient.setNoteParticipantPermission(
-			note.uuid,
-			participant,
-			permissionsWrite,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		const updatedNote: Note = {
-			...note,
-			participants: note.participants.map(p => (p.userId === participant.userId ? participant : p))
-		}
-
-		notesWithContentQueryUpdate({
-			updater: prev =>
-				prev.map(n =>
-					n.uuid === note.uuid
-						? {
-								// Patch onto the LIVE cache entry `n`, not the closure-captured render-time
-								// `note`: under bulk concurrency (Promise.all) every call would otherwise
-								// rebuild participants from the same stale base array and the last write
-								// would revert all the others until the next refetch.
-								...n,
-								participants: n.participants.map(p => (p.userId === participant.userId ? participant : p))
-							}
-						: n
-				)
-		})
-
-		return updatedNote
 	}
 }
 
