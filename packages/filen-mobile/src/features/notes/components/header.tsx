@@ -17,7 +17,7 @@ import notesLib from "@/features/notes/notes"
 import { useSecureStore } from "@/lib/secureStore"
 import type { MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
-import * as Sharing from "expo-sharing"
+import { shareTmpFile } from "@/lib/share"
 import * as DocumentPicker from "expo-document-picker"
 import * as FileSystem from "expo-file-system"
 import { runBulk } from "@/lib/bulkOps"
@@ -448,18 +448,12 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 
 							useNotesStore.getState().clearSelectedNotes()
 
-							const result = await run(async defer => {
-								defer(() => {
+							const result = await shareTmpFile({
+								uri: exportResult.data.file.uri,
+								name: exportResult.data.file.name,
+								cleanup: () => {
 									exportResult.data.cleanup()
-								})
-
-								// Small delay to ensure file is fully written before sharing
-								await new Promise<void>(resolve => setTimeout(resolve, 100))
-
-								await Sharing.shareAsync(exportResult.data.file.uri, {
-									mimeType: "text/plain",
-									dialogTitle: exportResult.data.file.name
-								})
+								}
 							})
 
 							if (!result.success) {

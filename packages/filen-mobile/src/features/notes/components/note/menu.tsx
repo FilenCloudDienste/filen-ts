@@ -15,7 +15,7 @@ import { confirmedAction } from "@/lib/confirmedAction"
 import { router } from "expo-router"
 import { Platform } from "react-native"
 import useAppStore from "@/stores/useApp.store"
-import * as Sharing from "expo-sharing"
+import { shareTmpFile } from "@/lib/share"
 import { serialize } from "@/lib/serializer"
 import { t } from "@/lib/i18n"
 
@@ -443,18 +443,12 @@ export function createMenuButtons({
 				return
 			}
 
-			const result = await run(async defer => {
-				defer(() => {
+			const result = await shareTmpFile({
+				uri: exportResult.data.file.uri,
+				name: exportResult.data.file.name,
+				cleanup: () => {
 					exportResult.data.cleanup()
-				})
-
-				// Small delay to ensure file is fully written before sharing
-				await new Promise<void>(resolve => setTimeout(resolve, 100))
-
-				await Sharing.shareAsync(exportResult.data.file.uri, {
-					mimeType: "text/plain",
-					dialogTitle: exportResult.data.file.name
-				})
+				}
 			})
 
 			if (!result.success) {
