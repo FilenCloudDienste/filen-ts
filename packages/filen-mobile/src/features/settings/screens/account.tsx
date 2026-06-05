@@ -19,17 +19,14 @@ import alerts from "@/lib/alerts"
 import auth from "@/lib/auth"
 import * as ImagePicker from "expo-image-picker"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
-import * as FileSystem from "expo-file-system"
 import { newTmpFile } from "@/lib/tmp"
 import { shareTmpFile } from "@/lib/share"
 import * as Linking from "expo-linking"
-import * as ImageManipulator from "expo-image-manipulator"
 import { serialize } from "@/lib/serializer"
-import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
-import i18n from "@/lib/i18n"
 import { convertBigInts } from "@/lib/utils"
+import { prepareAvatarFileForUpload } from "@/features/settings/avatarUpload"
 
 function Account() {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -158,68 +155,8 @@ function Account() {
 								}
 
 								const result = await runWithLoading(async defer => {
-									const originalFile = new FileSystem.File(asset.uri)
-
-									defer(() => {
-										if (originalFile.exists) {
-											originalFile.delete()
-										}
-									})
-
-									if (!originalFile.exists) {
-										throw new Error(i18n.t("avatar_upload_failed"))
-									}
-
-									if (
-										!asset.mimeType ||
-										!asset.mimeType.toLowerCase().startsWith("image/") ||
-										!asset.fileSize ||
-										!asset.fileName
-									) {
-										throw new Error(i18n.t("avatar_not_an_image"))
-									}
-
-									const mimeType = asset.mimeType?.toLowerCase()
-									let fileToUpload = originalFile
-
-									if (mimeType !== "image/jpeg" && mimeType !== "image/png") {
-										if (
-											!EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(
-												FileSystem.Paths.extname(asset.fileName).toLowerCase()
-											)
-										) {
-											throw new Error(i18n.t("avatar_unsupported_format"))
-										}
-
-										// Hold the Context in a local binding across the await. expo-image-manipulator's
-										// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
-										// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
-										// the native task would be cancelled and renderAsync would reject with
-										// JobCancellationException.
-										const context = ImageManipulator.ImageManipulator.manipulate(asset.uri)
-										const manipulated = await context.renderAsync()
-										const saved = await manipulated.saveAsync({
-											format: ImageManipulator.SaveFormat.JPEG,
-											base64: false
-										})
-
-										const convertedFile = new FileSystem.File(saved.uri)
-
-										defer(() => {
-											if (convertedFile.exists) {
-												convertedFile.delete()
-											}
-										})
-
-										if (!convertedFile.exists) {
-											throw new Error(i18n.t("avatar_upload_failed"))
-										}
-
-										fileToUpload = convertedFile
-									}
-
+									const fileToUpload = await prepareAvatarFileForUpload({ asset, defer })
 									const { authedSdkClient } = await auth.getSdkClients()
-
 									await authedSdkClient.uploadAvatar(await fileToUpload.arrayBuffer())
 									await accountQuery.refetch()
 								})
