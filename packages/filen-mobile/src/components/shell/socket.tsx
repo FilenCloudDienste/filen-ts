@@ -4,7 +4,6 @@ import {
 	SocketEvent_Tags,
 	ListenerHandle,
 	GeneralEvent_Tags,
-	ContactEvent_Tags,
 	type SocketEvent
 } from "@filen/sdk-rs"
 import { useEffect, useRef, memo, useCallback } from "react"
@@ -18,7 +17,7 @@ import chats from "@/features/chats/chats"
 import { handleNoteEvent } from "@/features/notes/socketHandlers"
 import { handleChatEvent, chatTypingTimeoutsRef } from "@/features/chats/socketHandlers"
 import { handleDriveEvent } from "@/features/drive/socketHandlers"
-import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useContactRequests.query"
+import { handleContactEvent } from "@/features/contacts/socketHandlers"
 
 async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }) {
 	try {
@@ -98,37 +97,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 			}
 
 			case SocketEvent_Tags.Contact: {
-				const [eventInner] = event.inner
-
-				switch (eventInner.inner.tag) {
-					case ContactEvent_Tags.ContactRequestReceived: {
-						const [inner] = eventInner.inner.inner
-
-						contactRequestsQueryUpdate({
-							updater: prev => ({
-								...prev,
-								incoming: [
-									...prev.incoming.filter(r => r.uuid !== inner.uuid),
-									{
-										uuid: inner.uuid,
-										userId: inner.senderId,
-										email: inner.senderEmail,
-										avatar: inner.senderAvatar,
-										nickName: inner.senderNickName
-									}
-								]
-							})
-						})
-
-						break
-					}
-
-					default: {
-						console.error(eventInner)
-
-						throw new Error("Unhandled contact event")
-					}
-				}
+				await handleContactEvent({ event })
 
 				break
 			}
