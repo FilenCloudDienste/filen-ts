@@ -4,9 +4,7 @@ import { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment } from "react"
 import { useNavigation } from "expo-router"
 import { run } from "@filen/utils"
-import { useResolveClassNames } from "uniwind"
-import Header from "@/components/ui/header"
-import { Platform } from "react-native"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
@@ -20,8 +18,6 @@ import { changeAppLanguage, hasTranslations } from "@/lib/i18n"
 import { useThemeSetting, THEME_SETTINGS, changeAppTheme, type ThemeSetting } from "@/lib/theme"
 
 function Appearance() {
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const navigation = useNavigation()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
@@ -182,35 +178,11 @@ function Appearance() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("appearance")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={() => {
-					if (Platform.OS === "android") {
-						return null
-					}
-
-					return [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					]
+				icon="close"
+				onDismiss={() => {
+					navigation.getParent()?.goBack()
 				}}
 			/>
 			<SafeAreaView
