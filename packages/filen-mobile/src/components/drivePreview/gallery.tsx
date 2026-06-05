@@ -80,6 +80,10 @@ export type GalleryItemTagged =
 			data: External
 	  }
 
+export function galleryItemKey(item: GalleryItemTagged): string {
+	return item.type === "drive" ? item.data.data.uuid : item.data.url
+}
+
 function buildDismissGesture(
 	sv: DismissSharedValues,
 	screenHeight: number,
@@ -351,7 +355,7 @@ const Gallery = () => {
 				>
 					<FlashList<GalleryItemTagged>
 						data={items}
-						keyExtractor={item => (item.type === "drive" ? item.data.data.uuid : item.data.url)}
+						keyExtractor={item => galleryItemKey(item)}
 						renderItem={info => {
 							return (
 								<GalleryItem

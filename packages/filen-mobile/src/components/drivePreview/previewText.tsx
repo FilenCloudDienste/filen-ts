@@ -17,7 +17,7 @@ import alerts from "@/lib/alerts"
 import { newTmpFile } from "@/lib/tmp"
 import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
-import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import type { DriveItemFileExtracted } from "@/types"
 
 const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: GalleryItemTagged }) => {
@@ -27,13 +27,9 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const drivePath = useDrivePreviewStore(useShallow(state => state.drivePath))
 	const insets = useSafeAreaInsets()
-	const [editedText, setEditedText] = useRecyclingState<string | null>(null, [
-		item.type === "drive" ? item.data.data.uuid : item.data.url
-	])
+	const [editedText, setEditedText] = useRecyclingState<string | null>(null, [galleryItemKey(item)])
 	const textPrimary = useResolveClassNames("text-primary")
-	const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [
-		item.type === "drive" ? item.data.data.uuid : item.data.url
-	])
+	const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [galleryItemKey(item)])
 
 	const parent =
 		item.type === "drive" && drivePath

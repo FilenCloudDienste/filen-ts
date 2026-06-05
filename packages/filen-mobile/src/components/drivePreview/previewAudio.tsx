@@ -14,7 +14,7 @@ import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDeri
 import { runOnJS } from "react-native-worklets"
 import { Paths } from "expo-file-system"
 import { type Metadata } from "@/features/audio/audioCache"
-import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio"
 import audio from "@/features/audio/audio"
@@ -302,7 +302,7 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 			<Picture
 				blurhash={metadata?.pictureBlurhash ?? undefined}
 				pictureUri={metadata?.pictureUri ?? undefined}
-				id={item.type === "drive" ? item.data.data.uuid : item.data.url}
+				id={galleryItemKey(item)}
 			/>
 			<View className="flex-col mt-6 bg-transparent w-full px-4 items-center gap-1">
 				{metadata?.title && metadata?.artist ? (
