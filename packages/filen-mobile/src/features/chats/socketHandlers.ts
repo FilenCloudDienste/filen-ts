@@ -2,6 +2,7 @@ import { ChatEvent_Tags, ChatTypingType, MaybeEncryptedUniffi_Tags, SocketEvent_
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
 import { chatsQueryGet, chatsQueryUpdate } from "@/features/chats/queries/useChats.query"
+import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
 
 export type ChatSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Chat }>
@@ -64,9 +65,8 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 						updater: prev => [
 							...prev.filter(m => m.inner.uuid !== inner.msg.inner.uuid),
 							{
-								...inner.msg,
-								inflightId: "", // Placeholder, actual inflightId is only needed for send sync
-								undecryptable: inner.msg.inner.message === undefined
+								...wrapMessage(inner.msg),
+								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
 							}
 						]
 					})
@@ -214,13 +214,7 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 			const [inner] = eventInner.inner.inner
 
 			chatsQueryUpdate({
-				updater: prev => [
-					...(prev ?? []).filter(c => c.uuid !== inner.chat.uuid),
-					{
-						...inner.chat,
-						undecryptable: inner.chat.key === undefined
-					}
-				]
+				updater: prev => [...(prev ?? []).filter(c => c.uuid !== inner.chat.uuid), wrapChat(inner.chat)]
 			})
 
 			break

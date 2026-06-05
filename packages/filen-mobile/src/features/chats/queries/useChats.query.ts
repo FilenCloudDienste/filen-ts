@@ -3,6 +3,7 @@ import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { type Chat } from "@/types"
+import { wrapChat } from "@/features/chats/chatsWrap"
 
 export const BASE_QUERY_KEY = "useChatsQuery"
 
@@ -17,10 +18,7 @@ export async function fetchData(params?: { signal?: AbortSignal }): Promise<Chat
 					}
 				: undefined
 		)
-	).map(chat => ({
-		...chat,
-		undecryptable: chat.key === undefined
-	}))
+	).map(wrapChat)
 
 	for (const chat of chats) {
 		cache.chatUuidToChat.set(chat.uuid, chat)
