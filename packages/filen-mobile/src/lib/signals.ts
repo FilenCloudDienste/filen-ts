@@ -1,5 +1,7 @@
 import { ManagedAbortController, type ManagedAbortSignal, PauseSignal as SdkPauseSignal } from "@filen/sdk-rs"
 
+export const toSignalOpts = (signal?: AbortSignal): { signal: AbortSignal } | undefined => (signal ? { signal } : undefined)
+
 export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
 	const abortController = new ManagedAbortController()
 
