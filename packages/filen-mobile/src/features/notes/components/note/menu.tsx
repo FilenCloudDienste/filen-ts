@@ -93,6 +93,22 @@ function confirmedNoteAction({
 	})
 }
 
+// Maps a note's SDK NoteType to its menu icon. Shared by the notes header (create/convert
+// submenus) and the single-note menu, so the 5-way mapping lives in one place.
+export function noteTypeToIcon(type: NoteType): "text" | "checklist" | "code" | "richtext" | "markdown" | undefined {
+	return type === NoteType.Text
+		? "text"
+		: type === NoteType.Checklist
+			? "checklist"
+			: type === NoteType.Code
+				? "code"
+				: type === NoteType.Rich
+					? "richtext"
+					: type === NoteType.Md
+						? "markdown"
+						: undefined
+}
+
 export function createMenuButtons({
 	note,
 	isSelected = false,
@@ -268,18 +284,7 @@ export function createMenuButtons({
 						checked: note.noteType === type,
 						disabled: note.noteType === type,
 						requiresOnline: true,
-						icon:
-							type === NoteType.Text
-								? "text"
-								: type === NoteType.Checklist
-									? "checklist"
-									: type === NoteType.Code
-										? "code"
-										: type === NoteType.Rich
-											? "richtext"
-											: type === NoteType.Md
-												? "markdown"
-												: undefined,
+						icon: noteTypeToIcon(type),
 						keepMenuOpenOnPress: Platform.OS === "android",
 						onPress: async () => {
 							const result = await runWithLoading(async () => {
