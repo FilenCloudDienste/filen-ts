@@ -160,12 +160,12 @@ export const ActionSheetProvider = memo(({ children }: { children: React.ReactNo
 	)
 })
 
-class ActionSheet {
-	public async show(options: ShowActionSheetOptions) {
+// Thin façade over the actionSheet event channel (no instance state). The provider above
+// listens for "showActionSheet" and renders the native sheet.
+export const actionSheet = {
+	async show(options: ShowActionSheetOptions) {
 		events.emit("showActionSheet", options)
 	}
 }
-
-export const actionSheet = new ActionSheet()
 
 export default ActionSheetProvider

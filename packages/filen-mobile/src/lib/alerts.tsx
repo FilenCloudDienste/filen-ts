@@ -21,8 +21,11 @@ const NotifierErrorContainer = memo(({ children }: { children: React.ReactNode }
 	)
 })
 
-export class Alerts {
-	public error(message: unknown): void {
+// Plain object namespace (no instance state) — toast/error-banner helpers. Kept as a
+// single exported object so the ~73 `alerts.error(...)` / `alerts.normal(...)` call sites
+// stay unchanged; the former `class Alerts` added no value (zero fields, zero `this`).
+export const alerts = {
+	error(message: unknown): void {
 		const unwrappedSdkError = unwrapSdkError(message)
 		const description = unwrappedSdkError
 			? unwrappedSdkErrorToHumanReadable(unwrappedSdkError)
@@ -45,9 +48,8 @@ export class Alerts {
 				zIndex: 1000
 			}
 		})
-	}
-
-	public normal(title: string): void {
+	},
+	normal(title: string): void {
 		Burnt.toast({
 			title,
 			duration: 3,
@@ -58,7 +60,5 @@ export class Alerts {
 		})
 	}
 }
-
-export const alerts = new Alerts()
 
 export default alerts
