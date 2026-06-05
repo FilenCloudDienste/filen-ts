@@ -426,12 +426,13 @@ export const queryClient = new QueryClient({
 	}
 })
 
-export class QueryUpdater {
-	public get<T>(queryKey: unknown[]): T | undefined {
+// Plain object namespace (no instance state) — get/set delegate to the module-level
+// queryClient. Former `class QueryUpdater` added no value (zero fields, zero `this`).
+export const queryUpdater = {
+	get<T>(queryKey: unknown[]): T | undefined {
 		return queryClient.getQueryData<T>(queryKey)
-	}
-
-	public set<T>(queryKey: unknown[], updater: T | ((prev?: T) => T), dataUpdatedAt?: number): void {
+	},
+	set<T>(queryKey: unknown[], updater: T | ((prev?: T) => T), dataUpdatedAt?: number): void {
 		queryClient.setQueryData(
 			queryKey,
 			(oldData: T | undefined) => {
@@ -451,7 +452,5 @@ export class QueryUpdater {
 		})
 	}
 }
-
-export const queryUpdater = new QueryUpdater()
 
 export default queryClient

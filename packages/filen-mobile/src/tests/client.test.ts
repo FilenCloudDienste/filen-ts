@@ -88,7 +88,7 @@ vi.mock("@tanstack/query-persist-client-core", () => ({
 
 import { type PersistedQuery } from "@tanstack/query-persist-client-core"
 import { ErrorKind } from "@filen/sdk-rs"
-import { shouldPersistQuery, DEFAULT_QUERY_OPTIONS, QueryUpdater, QUERY_CLIENT_CACHE_TIME, restoreQueries } from "@/queries/client"
+import { shouldPersistQuery, DEFAULT_QUERY_OPTIONS, queryUpdater, QUERY_CLIENT_CACHE_TIME, restoreQueries } from "@/queries/client"
 import { type PlaylistWithItems } from "@/features/audio/audio"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -533,7 +533,7 @@ describe("QueryUpdater.set", () => {
 			capturedUpdater = updaterFn
 		})
 
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		updater.set<string>(["testKey"], "hello")
 
 		expect(capturedUpdater).toBeDefined()
@@ -551,7 +551,7 @@ describe("QueryUpdater.set", () => {
 		})
 
 		const fn = vi.fn((prev?: string) => (prev ?? "") + "-new")
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		updater.set<string>(["testKey"], fn)
 
 		expect(capturedUpdater).toBeDefined()
@@ -570,7 +570,7 @@ describe("QueryUpdater.set", () => {
 		})
 
 		const fn = vi.fn((prev?: string) => prev ?? "default")
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		updater.set<string>(["testKey"], fn)
 
 		expect(capturedUpdater).toBeDefined()
@@ -580,7 +580,7 @@ describe("QueryUpdater.set", () => {
 	})
 
 	it("uses the provided dataUpdatedAt timestamp when given", () => {
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		const fixedTimestamp = 1234567890
 
 		updater.set<string>(["testKey"], "value", fixedTimestamp)
@@ -594,7 +594,7 @@ describe("QueryUpdater.set", () => {
 
 	it("falls back to Date.now() when dataUpdatedAt is undefined", () => {
 		const before = Date.now()
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 
 		updater.set<string>(["testKey"], "value")
 
@@ -607,7 +607,7 @@ describe("QueryUpdater.set", () => {
 	})
 
 	it("calls queryClientPersister.persistQueryByKey after setting data", async () => {
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 
 		updater.set<string>(["testKey"], "value")
 

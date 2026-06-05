@@ -13,12 +13,12 @@ import { TMP_DIR_NAME } from "@/lib/tmp"
 //
 // Other libraries (expo, react-native, third parties) may also write here; clearing wipes their
 // caches too. That's intentional — the user explicitly opts in via the Advanced settings modal.
-export class SandboxCache {
-	private get directory(): FileSystem.Directory {
+export const sandboxCache = {
+	get directory(): FileSystem.Directory {
 		return FileSystem.Paths.cache
-	}
+	},
 
-	public async clear(): Promise<void> {
+	async clear(): Promise<void> {
 		const directory = this.directory
 
 		if (!directory.exists) {
@@ -48,9 +48,9 @@ export class SandboxCache {
 				})
 			})
 		)
-	}
+	},
 
-	public size(): number {
+	size(): number {
 		const directory = this.directory
 
 		if (!directory.exists) {
@@ -74,7 +74,5 @@ export class SandboxCache {
 		return total
 	}
 }
-
-const sandboxCache = new SandboxCache()
 
 export default sandboxCache

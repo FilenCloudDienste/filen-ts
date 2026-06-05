@@ -46,15 +46,16 @@ export type InputPromptOptions = {
 	destructive?: boolean
 }
 
-class Prompts {
-	private readonly mutex: Semaphore = new Semaphore(1)
+// Serializes native dialogs (one at a time) so concurrent callers do not stack alerts.
+const promptsMutex = new Semaphore(1)
 
-	public async alert(options?: AlertPromptOptions): Promise<AlertPromptResult> {
+const prompts = {
+	async alert(options?: AlertPromptOptions): Promise<AlertPromptResult> {
 		const result = await run(async defer => {
-			await this.mutex.acquire()
+			await promptsMutex.acquire()
 
 			defer(() => {
-				this.mutex.release()
+				promptsMutex.release()
 			})
 
 			return await new Promise<AlertPromptResult>(resolve => {
@@ -102,14 +103,14 @@ class Prompts {
 		}
 
 		return result.data
-	}
+	},
 
-	public async info(options?: AlertPromptOptions): Promise<void> {
+	async info(options?: AlertPromptOptions): Promise<void> {
 		const result = await run(async defer => {
-			await this.mutex.acquire()
+			await promptsMutex.acquire()
 
 			defer(() => {
-				this.mutex.release()
+				promptsMutex.release()
 			})
 
 			return await new Promise<void>(resolve => {
@@ -138,14 +139,14 @@ class Prompts {
 		if (!result.success) {
 			throw result.error
 		}
-	}
+	},
 
-	public async input(options?: InputPromptOptions): Promise<InputPromptResult> {
+	async input(options?: InputPromptOptions): Promise<InputPromptResult> {
 		const result = await run(async defer => {
-			await this.mutex.acquire()
+			await promptsMutex.acquire()
 
 			defer(() => {
-				this.mutex.release()
+				promptsMutex.release()
 			})
 
 			return await new Promise<InputPromptResult>(resolve => {
@@ -228,7 +229,5 @@ class Prompts {
 		return result.data
 	}
 }
-
-const prompts = new Prompts()
 
 export default prompts
