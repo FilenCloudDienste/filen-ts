@@ -24,7 +24,7 @@ import { runBulk } from "@/lib/bulkOps"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { serialize } from "@/lib/serializer"
 import { useTranslation } from "react-i18next"
-import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS } from "@/features/notes/components/note/menu"
+import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
 
 export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const { t } = useTranslation()
@@ -205,18 +205,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 							({
 								id: `type_${typeString}`,
 								title: t(NOTE_TYPE_LABEL_KEY[typeString]),
-								icon:
-									type === NoteType.Text
-										? "text"
-										: type === NoteType.Checklist
-											? "checklist"
-											: type === NoteType.Code
-												? "code"
-												: type === NoteType.Rich
-													? "richtext"
-													: type === NoteType.Md
-														? "markdown"
-														: undefined,
+								icon: noteTypeToIcon(type),
 								keepMenuOpenOnPress: Platform.OS === "android",
 								onPress: () => {
 									run(async defer => {
@@ -357,18 +346,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 									({
 										id: `type_${typeString}`,
 										title: t(NOTE_TYPE_LABEL_KEY[typeString]),
-										icon:
-											type === NoteType.Text
-												? "text"
-												: type === NoteType.Checklist
-													? "checklist"
-													: type === NoteType.Code
-														? "code"
-														: type === NoteType.Rich
-															? "richtext"
-															: type === NoteType.Md
-																? "markdown"
-																: undefined,
+										icon: noteTypeToIcon(type),
 										keepMenuOpenOnPress: Platform.OS === "android",
 										requiresOnline: true,
 										onPress: async () => {
