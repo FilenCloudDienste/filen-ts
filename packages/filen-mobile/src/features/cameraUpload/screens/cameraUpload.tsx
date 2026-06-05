@@ -1,7 +1,8 @@
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
-import View, { GestureHandlerScrollView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import { Fragment, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
@@ -13,7 +14,6 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
 import { Platform, ActivityIndicator } from "react-native"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { AnyNormalDir_Tags } from "@filen/sdk-rs"
@@ -31,7 +31,6 @@ const CameraUpload = () => {
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
-	const insets = useSafeAreaInsets()
 	const isOnline = useIsOnline()
 
 	const mediaPermissions = useMediaPermissions({
@@ -111,15 +110,7 @@ const CameraUpload = () => {
 						/>
 					</View>
 				) : mediaPermissions.granted ? (
-					<GestureHandlerScrollView
-						className="bg-transparent flex-1"
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName="px-4 gap-4"
-						showsHorizontalScrollIndicator={false}
-						contentContainerStyle={{
-							paddingBottom: insets.bottom
-						}}
-					>
+					<SettingsScrollView>
 						<Group
 							className="bg-background-tertiary"
 							buttons={[
@@ -263,7 +254,7 @@ const CameraUpload = () => {
 								/>
 							</Fragment>
 						)}
-					</GestureHandlerScrollView>
+					</SettingsScrollView>
 				) : (
 					<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
 						<Ionicons

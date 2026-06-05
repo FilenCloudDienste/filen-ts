@@ -73,8 +73,12 @@ const NoteRow = ({
 	const isInflight = useNotesInflightStore(useShallow(state => (state.inflightContent[itemUuid]?.length ?? 0) > 0))
 	const isActive = useNotesStore(useShallow(state => state.activeNote?.uuid === itemUuid))
 	const stringifiedClient = useStringifiedClient()
-	const isSelected = useNotesStore(useShallow(state => state.selectedNotes.some(n => n.uuid === itemUuid)))
-	const areNotesSelected = useNotesStore(useShallow(state => state.selectedNotes.length > 0))
+	const { isSelected, areNotesSelected } = useNotesStore(
+		useShallow(state => ({
+			isSelected: state.selectedNotes.some(n => n.uuid === itemUuid),
+			areNotesSelected: state.selectedNotes.length > 0
+		}))
+	)
 
 	const onPress = () => {
 		if (info.item.type === "header") {

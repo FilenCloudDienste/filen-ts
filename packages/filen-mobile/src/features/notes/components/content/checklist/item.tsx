@@ -9,6 +9,10 @@ import useChecklistStore from "@/features/notes/store/useChecklist.store"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 
+function normalizeItemContent(content: string): string {
+	return content.replace(/\r?\n/g, "")
+}
+
 const Item = ({
 	id,
 	onContentChange,
@@ -30,10 +34,6 @@ const Item = ({
 	const bgBackground = useResolveClassNames("bg-background")
 	const textPrimary = useResolveClassNames("text-primary")
 	const item = useChecklistStore(useShallow(state => state.parsed.find(i => i.id === id)))
-
-	const normalizeItemContent = (content: string) => {
-		return content.replace(/\r?\n/g, "")
-	}
 
 	const [value, setValue] = useState<string>(() => normalizeItemContent(item?.content ?? ""))
 

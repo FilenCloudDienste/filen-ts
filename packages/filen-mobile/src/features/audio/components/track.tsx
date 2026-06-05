@@ -228,8 +228,12 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 	const { t } = useTranslation()
 	const drag = useReorderableDrag()
 	const isCurrent = useIsCurrentTrack(track.item.data.uuid)
-	const isSelected = usePlaylistTracksStore(useShallow(state => state.selectedTracks.some(t => t.uuid === track.uuid)))
-	const areTracksSelected = usePlaylistTracksStore(useShallow(state => state.selectedTracks.length > 0))
+	const { isSelected, areTracksSelected } = usePlaylistTracksStore(
+		useShallow(state => ({
+			isSelected: state.selectedTracks.some(st => st.uuid === track.uuid),
+			areTracksSelected: state.selectedTracks.length > 0
+		}))
+	)
 
 	const audioMetadataQuery = useAudioMetadataQuery({
 		type: "drive",

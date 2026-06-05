@@ -42,7 +42,8 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 	})
 
 	const liveNotes = notesQuery.status === "success" ? notesQuery.data : []
-	const selectedNotesLive = selectedNotes.map(sel => liveNotes.find(live => live.uuid === sel.uuid) ?? sel)
+	const liveByUuid = new Map(liveNotes.map(note => [note.uuid, note]))
+	const selectedNotesLive = selectedNotes.map(sel => liveByUuid.get(sel.uuid) ?? sel)
 	const noteFlags = aggregateNoteSelectionFlags(selectedNotesLive, stringifiedClient?.userId)
 
 	const tag = (() => {

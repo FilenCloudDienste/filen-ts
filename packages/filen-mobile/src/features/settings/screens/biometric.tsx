@@ -13,6 +13,26 @@ import { useTranslation } from "react-i18next"
 import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import { disableBiometric, enableBiometric } from "@/features/settings/biometricButtons"
+import { type TFunction } from "i18next"
+
+function getLockAfterLabel(lockAfter: number, t: TFunction): string {
+	switch (lockAfter) {
+		case 0:
+			return t("immediately")
+		case 60:
+			return t("one_minute")
+		case 60 * 5:
+			return t("five_minutes")
+		case 60 * 15:
+			return t("fifteen_minutes")
+		case 60 * 30:
+			return t("thirty_minutes")
+		case 60 * 60:
+			return t("one_hour")
+		default:
+			return t("lock_app_after_description")
+	}
+}
 
 export type Biometric =
 	| {
@@ -110,20 +130,7 @@ function BiometricComponent() {
 										{
 											icon: "time-outline",
 											title: t("lock_app_after"),
-											subTitle:
-												biometric.lockAfter === 0
-													? t("immediately")
-													: biometric.lockAfter === 60
-														? t("one_minute")
-														: biometric.lockAfter === 60 * 5
-															? t("five_minutes")
-															: biometric.lockAfter === 60 * 15
-																? t("fifteen_minutes")
-																: biometric.lockAfter === 60 * 30
-																	? t("thirty_minutes")
-																	: biometric.lockAfter === 60 * 60
-																		? t("one_hour")
-																		: t("lock_app_after_description"),
+											subTitle: getLockAfterLabel(biometric.lockAfter, t),
 											onPress: () => {
 												actionSheet.show({
 													buttons: [
