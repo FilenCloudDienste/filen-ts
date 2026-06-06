@@ -148,7 +148,7 @@ vi.mock("react-native-quick-crypto", async () => {
 })
 
 import { Buffer } from "node:buffer"
-import { type DriveItemFileExtracted } from "@/types"
+import { type DriveItem, type DriveItemFileExtracted } from "@/types"
 import audioCache from "@/features/audio/audioCache"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -2414,6 +2414,302 @@ describe("Audio", () => {
 			expect(mockSdkClient.deleteFilePermanently).not.toHaveBeenCalled()
 			// Query updater must still be called to remove it from the UI state.
 			expect(playlistsQueryUpdate).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// handleTrackEnd gen-guard race for loopMode='track' (finding #63)
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("handleTrackEnd gen-guard race — loopMode='track'", () => {
+		it("does not double-load when skipTo races while loopMode='track' and handleTrackEnd is suspended", async () => {
+			// Scenario: handleTrackEnd fires (loopMode='track'), suspends at getLoopMode await.
+			// While suspended, user calls skipTo(1) which bumps loadGeneration.
+			// When handleTrackEnd resumes, the gen guard (gen !== loadGeneration) must fire
+			// before the track-loop loadAndPlay, so replace is called exactly once (by skipTo).
+			const { default: secureStore } = await import("@/lib/secureStore")
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+
+			// Store loopMode='track' so handleTrackEnd takes the track-loop branch
+			await audio.setLoopMode("track")
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			expect(statusListener).toBeDefined()
+
+			// Suspend secureStore.get so handleTrackEnd hangs after didJustFinish
+			let releaseSecureStoreGet: () => void = () => {}
+			const hangPromise = new Promise<void>(resolve => {
+				releaseSecureStoreGet = resolve
+			})
+
+			let firstGetCall = true
+
+			vi.mocked(secureStore.get).mockImplementation(async (key: string) => {
+				if (key === audio.loopModeKey && firstGetCall) {
+					firstGetCall = false
+					await hangPromise
+
+					return "track" as unknown as never
+				}
+
+				return secureStoreMap.get(key) as never
+			})
+
+			playlist.replace.mockClear()
+
+			// Step 1: track ends — fires handleTrackEnd, which hangs at getLoopMode()
+			statusListener!({ didJustFinish: true, remoteAction: undefined })
+
+			// Let handleTrackEnd reach its first await
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// Step 2: user skips to track 1 while handleTrackEnd is suspended.
+			// skipTo bumps loadGeneration so the gen guard inside handleTrackEnd fires.
+			await audio.skipTo(1)
+
+			expect(audio.getPosition()).toBe(1)
+
+			// Step 3: release getLoopMode so handleTrackEnd continues
+			releaseSecureStoreGet()
+
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			// Position must still be 1 — handleTrackEnd bailed at the gen guard
+			// and did NOT reset position to 0 via the track-loop loadAndPlay.
+			expect(audio.getPosition()).toBe(1)
+
+			// replace called exactly once (by skipTo), not twice
+			expect(playlist.replace.mock.calls.length).toBe(1)
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// addFilesToPlaylist filtering guards (finding #60)
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("addFilesToPlaylist", () => {
+		function setupPlaylistsDirForSave() {
+			mockSdkClient.listDir.mockImplementation(async () => ({
+				dirs: [
+					{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } },
+					{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }
+				],
+				files: []
+			}))
+			mockSdkClient.uploadFileFromBytes.mockReset().mockResolvedValue(undefined)
+		}
+
+		function makePlaylist(extraUuids: string[] = []) {
+			return {
+				uuid: "pl-test",
+				name: "Test Playlist",
+				created: Date.now(),
+				updated: Date.now(),
+				files: extraUuids.map(uuid => ({
+					uuid,
+					name: "existing.mp3",
+					mime: "audio/mpeg",
+					size: 100,
+					bucket: "b",
+					key: "k",
+					version: 2,
+					chunks: 1,
+					region: "r",
+					playlist: "pl-test"
+				}))
+			}
+		}
+
+		function makeDriveItem(
+			uuid: string,
+			opts: {
+				type?: "file" | "sharedFile" | "sharedRootFile" | "directory"
+				undecryptable?: boolean
+				decryptedMeta?: Record<string, unknown> | null
+			} = {}
+		) {
+			const {
+				type: itemType = "file",
+				undecryptable = false,
+				decryptedMeta = { name: "track.mp3", size: 100n, modified: 1000, created: 900, mime: "audio/mpeg" }
+			} = opts
+
+			return {
+				type: "driveItem" as const,
+				data: {
+					type: itemType,
+					data: {
+						uuid,
+						undecryptable,
+						decryptedMeta,
+						size: 100n,
+						bucket: "b",
+						key: "k",
+						version: 2,
+						chunks: 1,
+						region: "r"
+					}
+				}
+			} as unknown as { type: "driveItem"; data: DriveItem }
+		}
+
+		it("returns 0 and does not call savePlaylist when all items are already in the playlist", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			const playlist = makePlaylist(["dup-1", "dup-2"])
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("dup-1"), makeDriveItem("dup-2")]
+			})
+
+			expect(result).toBe(0)
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+		})
+
+		it("returns 0 and does not call savePlaylist when all items are undecryptable", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			const playlist = makePlaylist()
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("bad-1", { undecryptable: true }), makeDriveItem("bad-2", { undecryptable: true })]
+			})
+
+			expect(result).toBe(0)
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+		})
+
+		it("returns 0 and does not call savePlaylist when all items have null decryptedMeta", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			const playlist = makePlaylist()
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("null-1", { decryptedMeta: null }), makeDriveItem("null-2", { decryptedMeta: null })]
+			})
+
+			expect(result).toBe(0)
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+		})
+
+		it("skips 'root' type items entirely", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			const playlist = makePlaylist()
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [{ type: "root" as const, data: {} as never }]
+			})
+
+			expect(result).toBe(0)
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+		})
+
+		it("skips directory-type driveItems (only file/sharedFile/sharedRootFile pass)", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			const playlist = makePlaylist()
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("dir-1", { type: "directory" })]
+			})
+
+			expect(result).toBe(0)
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+		})
+
+		it("returns correct count and calls savePlaylist when valid new items are added", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			vi.mocked(playlistsQueryUpdate).mockClear()
+
+			const playlist = makePlaylist()
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("new-1"), makeDriveItem("new-2")]
+			})
+
+			expect(result).toBe(2)
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
+		})
+
+		it("only adds valid items from a mixed valid/invalid batch", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			const playlist = makePlaylist(["already-in"])
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [
+					makeDriveItem("already-in"),
+					makeDriveItem("undecryptable", { undecryptable: true }),
+					makeDriveItem("no-meta", { decryptedMeta: null }),
+					{ type: "root" as const, data: {} as never },
+					makeDriveItem("valid-1"),
+					makeDriveItem("valid-2")
+				]
+			})
+
+			expect(result).toBe(2)
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
+		})
+
+		it("includes the valid items in the saved playlist payload", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			vi.mocked(playlistsQueryUpdate).mockClear()
+
+			const playlist = makePlaylist()
+
+			await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("save-me")]
+			})
+
+			// The updater passed to playlistsQueryUpdate should include the new file
+			const updaterArg = vi.mocked(playlistsQueryUpdate).mock.calls[0]?.[0] as unknown as {
+				updater: (prev: { uuid: string; files: { uuid: string }[] }[]) => { uuid: string; files: { uuid: string }[] }[]
+			}
+
+			const updatedList = updaterArg.updater([])
+			const savedPlaylist = updatedList[0]
+
+			expect(savedPlaylist).toBeDefined()
+			expect(savedPlaylist!.files.some(f => f.uuid === "save-me")).toBe(true)
+		})
+
+		it("sharedFile type passes the filter and is added", async () => {
+			const { audio } = await createAudio()
+			setupPlaylistsDirForSave()
+
+			const playlist = makePlaylist()
+
+			const result = await audio.addFilesToPlaylist({
+				playlist,
+				items: [makeDriveItem("shared-1", { type: "sharedFile" })]
+			})
+
+			expect(result).toBe(1)
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
 		})
 	})
 
