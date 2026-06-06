@@ -250,13 +250,15 @@ describe("handleNoteEvent — notes socket handler", () => {
 			expect(result[0]).toMatchObject({ uuid: "uuid-1", archive: true })
 		})
 
-		it("does NOT add a phantom 'archived' key", async () => {
+		it("patches only archive: true and preserves the exact shape (no phantom keys)", async () => {
 			await handleNoteEvent({ event: makeArchivedEvent("uuid-1") })
 
 			const updater = capturedUpdaters[0]!
 			const result = updater([{ uuid: "uuid-1", archive: false, trash: false }]) as Array<Record<string, unknown>>
 
-			expect("archived" in result[0]!).toBe(false)
+			// The source field is `archive` (not `archived`); an exact-shape match both pins the
+			// flipped value and proves no spurious/misspelled key was introduced.
+			expect(result[0]).toEqual({ uuid: "uuid-1", archive: true, trash: false })
 		})
 
 		it("leaves non-matching notes unchanged", async () => {
@@ -286,14 +288,15 @@ describe("handleNoteEvent — notes socket handler", () => {
 			expect(result[0]).toMatchObject({ uuid: "uuid-1", archive: false, trash: false })
 		})
 
-		it("does NOT add phantom 'archived' or 'trashed' keys", async () => {
+		it("clears both archive and trash and preserves the exact shape (no phantom keys)", async () => {
 			await handleNoteEvent({ event: makeRestoredEvent("uuid-1") })
 
 			const updater = capturedUpdaters[0]!
 			const result = updater([{ uuid: "uuid-1", archive: true, trash: true }]) as Array<Record<string, unknown>>
 
-			expect("archived" in result[0]!).toBe(false)
-			expect("trashed" in result[0]!).toBe(false)
+			// Source fields are `archive`/`trash` (not `archived`/`trashed`); exact-shape match pins
+			// both cleared values and proves no spurious/misspelled key was introduced.
+			expect(result[0]).toEqual({ uuid: "uuid-1", archive: false, trash: false })
 		})
 
 		it("leaves non-matching notes unchanged", async () => {

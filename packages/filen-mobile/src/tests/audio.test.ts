@@ -2777,6 +2777,68 @@ describe("Audio", () => {
 			expect(decoded.files).toEqual([])
 		})
 
+		it("strips the runtime-only `item` field (with its bigint size) before serializing", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDirForSave()
+
+			// addFilesToPlaylist appends files carrying the runtime-only `item`
+			// (DriveItemFileExtracted) whose bigint `size` would make JSON.stringify throw
+			// ("cannot serialize BigInt") if it reached the serializer un-stripped.
+			const playlist = {
+				uuid: "pl-strip",
+				name: "Strip Playlist",
+				created: 1700000000000,
+				updated: 1700000000000,
+				files: [
+					{
+						uuid: "file-1",
+						name: "song.mp3",
+						mime: "audio/mpeg",
+						size: 100,
+						bucket: "bucket-1",
+						key: "key-1",
+						version: 2,
+						chunks: 1,
+						region: "region-1",
+						playlist: "pl-strip",
+						item: { type: "file", data: { uuid: "file-1", size: 100n } }
+					}
+				]
+			}
+
+			let capturedJson: string | null = null
+			const origStringify = JSON.stringify
+
+			vi.spyOn(JSON, "stringify").mockImplementation((...args: Parameters<typeof JSON.stringify>): string => {
+				const result = origStringify(...args)
+
+				if (typeof args[0] === "object" && args[0] !== null && (args[0] as { uuid?: string }).uuid === "pl-strip") {
+					capturedJson = result
+				}
+
+				return result
+			})
+
+			try {
+				// Must NOT throw despite the bigint inside `item`.
+				await audio.savePlaylist({
+					playlist: playlist as unknown as Parameters<typeof audio.savePlaylist>[0]["playlist"]
+				})
+			} finally {
+				vi.mocked(JSON.stringify).mockRestore()
+			}
+
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
+			expect(capturedJson).not.toBeNull()
+
+			const decoded = JSON.parse(capturedJson!)
+
+			expect(decoded.files).toHaveLength(1)
+			expect("item" in decoded.files[0]).toBe(false)
+			expect(decoded.files[0].uuid).toBe("file-1")
+		})
+
 		it("uploads with the correct filename (uuid.json)", async () => {
 			const { audio } = await createAudio()
 
