@@ -176,7 +176,7 @@ export async function generateVideo(
 				outputFile.delete()
 			}
 
-			savedFile.move(outputFile)
+			savedFile.moveSync(outputFile)
 		} catch (error) {
 			try {
 				if (savedFile.exists) {

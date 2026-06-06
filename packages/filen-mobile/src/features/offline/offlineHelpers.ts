@@ -20,7 +20,7 @@ export function atomicWrite(file: FileSystem.File, data: string | Uint8Array): F
 			file.delete()
 		}
 
-		tmp.move(file)
+		tmp.moveSync(file)
 
 		return file
 	} catch (e) {

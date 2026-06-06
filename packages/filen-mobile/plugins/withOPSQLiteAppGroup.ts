@@ -1,12 +1,10 @@
-import configPlugins from "@expo/config-plugins"
-
-const { withInfoPlist } = configPlugins
+import { withInfoPlist, type ConfigPlugin } from "@expo/config-plugins"
 
 type OPSQLiteAppGroupOptions = {
 	appGroupId: string
 }
 
-const withOPSQLiteAppGroup: configPlugins.ConfigPlugin<OPSQLiteAppGroupOptions> = (config, { appGroupId }) => {
+const withOPSQLiteAppGroup: ConfigPlugin<OPSQLiteAppGroupOptions> = (config, { appGroupId }) => {
 	return withInfoPlist(config, config => {
 		config.modResults["OPSQLite_AppGroup"] = appGroupId
 

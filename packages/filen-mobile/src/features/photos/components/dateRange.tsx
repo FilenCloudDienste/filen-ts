@@ -4,7 +4,7 @@ import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
 import { simpleDateNoTime } from "@/lib/time"
-import { useHeaderHeight } from "@react-navigation/elements"
+import { useHeaderHeight } from "expo-router/react-navigation"
 
 export const DateRange = () => {
 	const visibleDateRange = usePhotosStore(useShallow(state => state.visibleDateRange))

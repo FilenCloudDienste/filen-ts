@@ -1,8 +1,8 @@
 diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
-index f32f2d0..fbf31b0 100644
+index 196a5d5..9787caa 100644
 --- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
 +++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
-@@ -75,6 +75,8 @@ class AudioControlsService : MediaSessionService() {
+@@ -90,6 +90,8 @@ class AudioControlsService : MediaSessionService() {
  
          ACTION_SEEK_FORWARD -> currentPlayerRef.seekTo(currentPlayerRef.currentPosition + SEEK_INTERVAL_MS)
          ACTION_SEEK_BACKWARD -> currentPlayerRef.seekTo(currentPlayerRef.currentPosition - SEEK_INTERVAL_MS)
@@ -11,7 +11,7 @@ index f32f2d0..fbf31b0 100644
        }
      }
  
-@@ -191,6 +193,16 @@ class AudioControlsService : MediaSessionService() {
+@@ -240,6 +242,16 @@ class AudioControlsService : MediaSessionService() {
      val session = mediaSession ?: return
      val mediaButtons = mutableListOf<CommandButton>()
  
@@ -28,7 +28,7 @@ index f32f2d0..fbf31b0 100644
      // Add seek backward button if enabled
      if (currentOptions?.showSeekBackward == true) {
        mediaButtons.add(
-@@ -225,6 +237,16 @@ class AudioControlsService : MediaSessionService() {
+@@ -274,10 +286,28 @@ class AudioControlsService : MediaSessionService() {
        )
      }
  
@@ -45,18 +45,6 @@ index f32f2d0..fbf31b0 100644
      session.setCustomLayout(mediaButtons)
      session.setMediaButtonPreferences(mediaButtons)
    }
-@@ -299,7 +321,7 @@ class AudioControlsService : MediaSessionService() {
-       appContext?.mainQueue?.launch {
-         val context = appContext?.reactContext ?: return@launch
-         val session = MediaSession.Builder(context, player.ref)
--          .setCallback(AudioMediaSessionCallback())
-+          .setCallback(AudioMediaSessionCallback(this@AudioControlsService))
-           .build()
- 
-         // Replace the basic media session with a session connected to our playback service.
-@@ -388,6 +410,14 @@ class AudioControlsService : MediaSessionService() {
-     clearSessionInternal()
-   }
  
 +  fun dispatchRemoteAction(action: String) {
 +    val player = currentPlayer ?: return
@@ -66,10 +54,28 @@ index f32f2d0..fbf31b0 100644
 +    }
 +  }
 +
-   private fun loadArtworkFromUrl(url: URL, callback: (Bitmap?) -> Unit) {
-     if (url != currentArtworkUrl) {
-       currentArtworkUrl = url
-@@ -463,6 +493,8 @@ class AudioControlsService : MediaSessionService() {
+   private fun postOrStartForegroundNotification(startInForeground: Boolean) {
+     if (startInForeground) {
+       postOrStartForegroundNotificationNow(startInForeground = true)
+@@ -371,7 +401,7 @@ class AudioControlsService : MediaSessionService() {
+           updateMetadata(metadata)
+         }
+         val session = MediaSession.Builder(context, sessionPlayer)
+-          .setCallback(AudioMediaSessionCallback())
++          .setCallback(AudioMediaSessionCallback(this@AudioControlsService))
+           .build()
+ 
+         // Replace the basic media session with a session connected to our playback service.
+@@ -452,7 +482,7 @@ class AudioControlsService : MediaSessionService() {
+           updateMetadata(metadata)
+         }
+         val session = MediaSession.Builder(context, sessionPlayer)
+-          .setCallback(AudioMediaSessionCallback())
++          .setCallback(AudioMediaSessionCallback(this@AudioControlsService))
+           .build()
+ 
+         player.mediaSession.release()
+@@ -558,6 +588,8 @@ class AudioControlsService : MediaSessionService() {
  
      const val ACTION_SEEK_FORWARD = "expo.modules.audio.action.SEEK_FORWARD"
      const val ACTION_SEEK_BACKWARD = "expo.modules.audio.action.SEEK_BACKWARD"
@@ -116,10 +122,10 @@ index 839aaef..ad40c3e 100644
      return super.onCustomCommand(session, controller, command, args)
    }
 diff --git a/node_modules/expo-audio/build/AudioModule.types.d.ts b/node_modules/expo-audio/build/AudioModule.types.d.ts
-index 93b6901..8be3801 100644
+index f3ae4ee..2a8550a 100644
 --- a/node_modules/expo-audio/build/AudioModule.types.d.ts
 +++ b/node_modules/expo-audio/build/AudioModule.types.d.ts
-@@ -219,6 +219,10 @@ export type AudioEvents = {
+@@ -222,6 +222,10 @@ export type AudioEvents = {
      playbackStatusUpdate(status: AudioStatus): void;
      /** Fired when audio sampling is enabled and new sample data is available. */
      audioSampleUpdate(data: AudioSample): void;
@@ -131,18 +137,18 @@ index 93b6901..8be3801 100644
  export declare class AudioRecorder extends SharedObject<RecordingEvents> {
      /**
 diff --git a/node_modules/expo-audio/ios/MediaController.swift b/node_modules/expo-audio/ios/MediaController.swift
-index b13872f..286da1a 100644
+index e977f57..e358ac2 100644
 --- a/node_modules/expo-audio/ios/MediaController.swift
 +++ b/node_modules/expo-audio/ios/MediaController.swift
-@@ -11,6 +11,7 @@ class MediaController {
- 
-   private var currentArtworkUrl: URL?
-   private var cachedArtwork: MPMediaItemArtwork?
+@@ -14,6 +14,7 @@ class MediaController {
+   private var artworkLoadToken: UUID?
+   private var currentArtworkItemIdentifier: ObjectIdentifier?
+   private var isLiveStream = false
 +  private var remoteCommandsRegistered = false
  
    func setActivePlayer(_ player: AudioPlayer?, options: LockScreenOptions? = nil) {
-     if let previous = activePlayer, previous.id != player?.id {
-@@ -130,6 +131,29 @@ class MediaController {
+     performOnMain {
+@@ -232,6 +233,29 @@ class MediaController {
    }
  
    private func enableRemoteCommands(options: LockScreenOptions?) {
@@ -151,7 +157,7 @@ index b13872f..286da1a 100644
 +    remoteCommandCenter.playCommand.isEnabled = true
 +    remoteCommandCenter.pauseCommand.isEnabled = true
 +    remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
-+    remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
++    remoteCommandCenter.changePlaybackPositionCommand.isEnabled = !isLiveStream
 +    remoteCommandCenter.skipForwardCommand.isEnabled = options?.showSeekForward ?? false
 +    remoteCommandCenter.skipBackwardCommand.isEnabled = options?.showSeekBackward ?? false
 +    remoteCommandCenter.nextTrackCommand.isEnabled = true
@@ -172,21 +178,22 @@ index b13872f..286da1a 100644
      remoteCommandCenter.playCommand.addTarget { [weak self] _ in
        guard let player = self?.activePlayer else {
          return .commandFailed
-@@ -201,12 +225,21 @@ class MediaController {
+@@ -303,12 +327,23 @@ class MediaController {
        return .success
      }
  
 -    remoteCommandCenter.playCommand.isEnabled = true
 -    remoteCommandCenter.pauseCommand.isEnabled = true
 -    remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
--    remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
+-    remoteCommandCenter.changePlaybackPositionCommand.isEnabled = !isLiveStream
 -    remoteCommandCenter.skipForwardCommand.isEnabled = options?.showSeekForward ?? false
 -    remoteCommandCenter.skipBackwardCommand.isEnabled = options?.showSeekBackward ?? false
 +    remoteCommandCenter.nextTrackCommand.addTarget { [weak self] _ in
 +      guard let player = self?.activePlayer else {
 +        return .commandFailed
 +      }
-+      player.emit(event: "remoteNextTrack", arguments: [:])
++
++      player.emit(event: "remoteNextTrack", payload: [:])
 +      return .success
 +    }
 +
@@ -194,13 +201,14 @@ index b13872f..286da1a 100644
 +      guard let player = self?.activePlayer else {
 +        return .commandFailed
 +      }
-+      player.emit(event: "remotePreviousTrack", arguments: [:])
++
++      player.emit(event: "remotePreviousTrack", payload: [:])
 +      return .success
 +    }
    }
  
    private func disableRemoteCommands() {
-@@ -216,6 +249,8 @@ class MediaController {
+@@ -318,6 +353,8 @@ class MediaController {
      remoteCommandCenter.changePlaybackPositionCommand.isEnabled = false
      remoteCommandCenter.skipForwardCommand.isEnabled = false
      remoteCommandCenter.skipBackwardCommand.isEnabled = false
@@ -209,7 +217,7 @@ index b13872f..286da1a 100644
  
      // Remove event targets
      remoteCommandCenter.playCommand.removeTarget(self)
-@@ -224,5 +259,7 @@ class MediaController {
+@@ -326,5 +363,7 @@ class MediaController {
      remoteCommandCenter.changePlaybackPositionCommand.removeTarget(self)
      remoteCommandCenter.skipForwardCommand.removeTarget(self)
      remoteCommandCenter.skipBackwardCommand.removeTarget(self)
@@ -218,10 +226,10 @@ index b13872f..286da1a 100644
    }
  }
 diff --git a/node_modules/expo-audio/src/AudioModule.types.ts b/node_modules/expo-audio/src/AudioModule.types.ts
-index f5b3dee..e96f771 100644
+index 7e75371..d91567e 100644
 --- a/node_modules/expo-audio/src/AudioModule.types.ts
 +++ b/node_modules/expo-audio/src/AudioModule.types.ts
-@@ -277,6 +277,10 @@ export type AudioEvents = {
+@@ -280,6 +280,10 @@ export type AudioEvents = {
    playbackStatusUpdate(status: AudioStatus): void;
    /** Fired when audio sampling is enabled and new sample data is available. */
    audioSampleUpdate(data: AudioSample): void;

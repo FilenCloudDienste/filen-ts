@@ -911,7 +911,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(false)
 		}))
 
-		vi.doMock("expo-media-library", () => ({
+		vi.doMock("expo-media-library/legacy", () => ({
 			getAlbumsAsync: vi.fn().mockResolvedValue([{ id: "album-1", title: "Camera Roll" }])
 		}))
 
@@ -931,7 +931,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true)
 		}))
 
-		vi.doMock("expo-media-library", () => ({
+		vi.doMock("expo-media-library/legacy", () => ({
 			getAlbumsAsync: vi.fn().mockResolvedValue(mockAlbums)
 		}))
 
@@ -948,7 +948,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true)
 		}))
 
-		vi.doMock("expo-media-library", () => ({
+		vi.doMock("expo-media-library/legacy", () => ({
 			getAlbumsAsync: mockGetAlbumsAsync
 		}))
 
@@ -965,7 +965,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			hasAllNeededMediaPermissions: mockHasPermissions
 		}))
 
-		vi.doMock("expo-media-library", () => ({
+		vi.doMock("expo-media-library/legacy", () => ({
 			getAlbumsAsync: vi.fn().mockResolvedValue([])
 		}))
 

@@ -20,7 +20,7 @@ vi.mock("expo-battery", () => ({
 	isLowPowerModeEnabledAsync: vi.fn(async () => false)
 }))
 
-vi.mock("expo-media-library", async () => {
+vi.mock("expo-media-library/legacy", async () => {
 	const next = await import("@/tests/mocks/expoMediaLibrary")
 
 	return {
@@ -164,7 +164,7 @@ import { modifyAssetPathOnCollision, type CollisionParams } from "@/features/cam
 import secureStore from "@/lib/secureStore"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
-import { getPermissionsAsync } from "expo-media-library"
+import { getPermissionsAsync } from "expo-media-library/legacy"
 import auth from "@/lib/auth"
 import transfers from "@/features/transfers/transfers"
 import { unwrapFileMeta } from "@/lib/sdkUnwrap"
@@ -1515,7 +1515,7 @@ describe("same-title album disambiguation", () => {
 	it("getAlbumsAsync failure aborts the sync loudly (no silent drop of selected albums)", async () => {
 		// Per the project's silent-failure discipline: if we can't enumerate the
 		// device catalogue, we can't safely disambiguate. Fail the whole sync.
-		const { getAlbumsAsync } = await import("expo-media-library")
+		const { getAlbumsAsync } = await import("expo-media-library/legacy")
 
 		vi.mocked(getAlbumsAsync).mockRejectedValueOnce(new Error("permission denied"))
 

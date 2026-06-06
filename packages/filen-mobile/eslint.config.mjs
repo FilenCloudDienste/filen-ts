@@ -2,7 +2,6 @@ import js from "@eslint/js"
 import { FlatCompat } from "@eslint/eslintrc"
 import reactHooks from "eslint-plugin-react-hooks"
 import tseslint from "typescript-eslint"
-import reactCompiler from "eslint-plugin-react-compiler"
 import importPlugin from "eslint-plugin-import"
 
 const compat = new FlatCompat()
@@ -63,7 +62,6 @@ export default [
 		},
 		plugins: {
 			"react-hooks": reactHooks,
-			"react-compiler": reactCompiler,
 			import: importPlugin
 		},
 		rules: {
@@ -76,7 +74,6 @@ export default [
 			"react/react-in-jsx-scope": "off",
 			"react/prop-types": "off",
 			"react/display-name": "off",
-			"react-compiler/react-compiler": "error",
 			"react-hooks/preserve-manual-memoization": "error",
 			"@typescript-eslint/no-unused-vars": [
 				"error",

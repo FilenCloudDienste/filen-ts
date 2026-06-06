@@ -189,7 +189,7 @@ function IncomingShare() {
 						tmpFile.delete()
 					}
 
-					file.copy(tmpFile)
+					file.copySync(tmpFile)
 
 					return {
 						name: payload.originalName,

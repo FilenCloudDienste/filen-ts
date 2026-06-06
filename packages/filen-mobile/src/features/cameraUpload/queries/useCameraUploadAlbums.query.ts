@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
-import * as MediaLibraryLegacy from "expo-media-library"
+import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 
 export const BASE_QUERY_KEY = "useCameraUploadAlbumsQuery"

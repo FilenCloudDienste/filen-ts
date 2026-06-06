@@ -1,8 +1,6 @@
-import configPlugins from "@expo/config-plugins"
+import { withAndroidManifest, withDangerousMod, type ConfigPlugin } from "@expo/config-plugins"
 import fs from "node:fs"
 import path from "node:path"
-
-const { withAndroidManifest, withDangerousMod } = configPlugins
 
 type AndroidLocaleConfigOptions = {
 	locales: string[]
@@ -30,7 +28,7 @@ ${locales.map(l => `	<locale android:name="${l}"/>`).join("\n")}
  * With this plugin, Android 13+ devices can show the app in the system
  * per-app language settings.
  */
-const withAndroidLocaleConfig: configPlugins.ConfigPlugin<AndroidLocaleConfigOptions> = (config, options) => {
+const withAndroidLocaleConfig: ConfigPlugin<AndroidLocaleConfigOptions> = (config, options) => {
 	const locales = options.locales && options.locales.length > 0 ? options.locales : ["en"]
 
 	// 1) Add android:localeConfig attribute to <application>

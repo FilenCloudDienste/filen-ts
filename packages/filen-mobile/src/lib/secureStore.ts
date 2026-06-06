@@ -263,7 +263,7 @@ class SecureStore {
 
 			// Stage the new payload in the SAME directory as the destination so the final
 			// move is an atomic intra-volume rename (not a cross-volume copy, which would
-			// widen the crash window). expo-file-system's File.move() has no overwrite
+			// widen the crash window). expo-file-system's File.moveSync() has no overwrite
 			// option, so the destination must be absent before the move — but we never let
 			// it reach a state with zero copies: the old file is moved ASIDE to a backup
 			// first, and on any failure during the swap the backup is restored.
@@ -281,14 +281,14 @@ class SecureStore {
 				// Move the existing store aside to the backup before clearing the destination.
 				// Use a fresh handle so the shared this.secureStoreFile.uri is never mutated by move().
 				if (this.secureStoreFile.exists) {
-					new FileSystem.File(destinationUri).move(new FileSystem.File(backupUri))
+					new FileSystem.File(destinationUri).moveSync(new FileSystem.File(backupUri))
 
 					backedUp = true
 				}
 
 				// Promote the staged payload into place. Use a fresh destination handle so the
 				// shared this.secureStoreFile instance keeps its identity.
-				tmpFile.move(new FileSystem.File(destinationUri))
+				tmpFile.moveSync(new FileSystem.File(destinationUri))
 
 				// The new payload is now the live store. move() has mutated tmpFile.uri to the
 				// destination, so from here the catch block must NOT delete tmpFile.
@@ -318,7 +318,7 @@ class SecureStore {
 
 					if (backupFile.exists) {
 						try {
-							backupFile.move(new FileSystem.File(destinationUri))
+							backupFile.moveSync(new FileSystem.File(destinationUri))
 						} catch {
 							// Best-effort restore; the backup is preserved below for manual recovery.
 						}

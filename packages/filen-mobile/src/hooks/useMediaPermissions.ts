@@ -1,4 +1,4 @@
-import * as MediaLibraryLegacy from "expo-media-library"
+import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import * as ImagePicker from "expo-image-picker"
 import useMediaPermissionsQuery from "@/queries/useMediaPermissions.query"
 import { run } from "@filen/utils"
