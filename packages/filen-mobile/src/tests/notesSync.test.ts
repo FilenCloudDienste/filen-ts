@@ -51,13 +51,13 @@ vi.mock("react-native", async () => {
 })
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	createExecutableTimeout: (...args: unknown[]) => mockCreateExecutableTimeout(...args)
 }))
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
-vi.mock("@/stores/useNotes.store", () => {
+vi.mock("@/features/notes/store/useNotesInflight.store", () => {
 	const mockSetInflightContent = vi.fn((fn: unknown) => {
 		if (typeof fn === "function") {
 			notesState.inflightContent = fn(notesState.inflightContent)
@@ -76,24 +76,24 @@ vi.mock("@/stores/useNotes.store", () => {
 	}
 })
 
-vi.mock("@/lib/notes", () => ({
+vi.mock("@/features/notes/notes", () => ({
 	default: {
 		setContent: mockNotesSetContent
 	}
 }))
 
-vi.mock("@/queries/useNotesWithContent.query", () => ({
+vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 	fetchData: mockFetchNotesWithContent
 }))
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-import { Sync, SyncHost } from "@/components/notes/sync"
+import { Sync, SyncHost } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
 import React from "react"
-import type { InflightContent } from "@/stores/useNotes.store"
+import type { InflightContent } from "@/features/notes/store/useNotes.store"
 
 const KV_KEY = "inflightNoteContent"
 
@@ -304,10 +304,7 @@ describe("Sync (Notes)", () => {
 				})
 
 				// flushToDisk must not propagate the error
-				expect(consoleSpy).toHaveBeenCalledWith(
-					"Error flushing note sync to disk:",
-					expect.any(Error)
-				)
+				expect(consoleSpy).toHaveBeenCalledWith("Error flushing note sync to disk:", expect.any(Error))
 			} finally {
 				consoleSpy.mockRestore()
 			}
@@ -322,9 +319,7 @@ describe("Sync (Notes)", () => {
 				"note-2": [{ timestamp: 1000, content: "will-succeed", note: mockNote("note-2") }]
 			}
 
-			mockNotesSetContent
-				.mockRejectedValueOnce(new Error("upload failed"))
-				.mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
+			mockNotesSetContent.mockRejectedValueOnce(new Error("upload failed")).mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
 
 			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
 				id: null,
@@ -412,9 +407,7 @@ describe("Sync (Notes)", () => {
 				"note-2": [{ timestamp: 1000, content: "will-succeed", note: mockNote("note-2") }]
 			}
 
-			mockNotesSetContent
-				.mockRejectedValueOnce(new Error("upload failed"))
-				.mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
+			mockNotesSetContent.mockRejectedValueOnce(new Error("upload failed")).mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
 
 			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
 				id: null,

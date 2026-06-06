@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { View } from "react-native"
 import { useTranslation } from "react-i18next"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -12,7 +12,7 @@ import { useIsAuthed } from "@/lib/auth"
 
 type Status = "online" | "offline" | "back-online"
 
-const Banner = memo(({ status }: { status: Exclude<Status, "online"> }) => {
+const Banner = ({ status }: { status: Exclude<Status, "online"> }) => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const isOffline = status === "offline"
@@ -34,27 +34,30 @@ const Banner = memo(({ status }: { status: Exclude<Status, "online"> }) => {
 			</View>
 		</Animated.View>
 	)
-})
+}
 
-const OfflineBanner = memo(() => {
+const OfflineBanner = () => {
 	const isOnline = useIsOnline()
 	const isActive = useIsAppActive()
 	const isAuthed = useIsAuthed()
 	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
 	const [status, setStatus] = useState<Status>(isOnline ? "online" : "offline")
 
-	// Effect A: isOnline drives status transitions into "offline" / "back-online".
-	// Depends only on isOnline so the cleanup-cancels-timeout trap that bit the
-	// previous draft (single effect with both [isOnline, status]) can't happen.
-	useEffect(() => {
+	// isOnline drives status transitions into "offline" / "back-online". Done as a
+	// during-render adjustment (the React-recommended pattern over a setState-in-
+	// effect) so the new status commits in the same render pass with no intermediate
+	// paint. The isOnline !== prevIsOnline guard makes it fire once per change.
+	const [prevIsOnline, setPrevIsOnline] = useState(isOnline)
+
+	if (isOnline !== prevIsOnline) {
+		setPrevIsOnline(isOnline)
+
 		if (!isOnline) {
 			setStatus("offline")
-
-			return
+		} else {
+			setStatus(prev => (prev === "offline" ? "back-online" : prev))
 		}
-
-		setStatus(prev => (prev === "offline" ? "back-online" : prev))
-	}, [isOnline])
+	}
 
 	// Effect B: when status reaches "back-online", schedule the transition to "online".
 	// Cleanup clears the timeout if isOnline flips back to false before 2s elapses.
@@ -96,6 +99,6 @@ const OfflineBanner = memo(() => {
 	// (drivePreview) cover it — acceptable because the user is already past
 	// the connectivity-aware list at that point.
 	return <Banner status={status} />
-})
+}
 
 export default OfflineBanner

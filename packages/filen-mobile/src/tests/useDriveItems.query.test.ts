@@ -39,7 +39,14 @@ const {
 				listLinkedItems: vi.fn().mockResolvedValue({ dirs: [], files: [] }),
 				listLinkedDir: vi.fn().mockResolvedValue({ dirs: [], files: [] }),
 				getDirPublicLinkInfo: vi.fn().mockResolvedValue({
-					link: { linkUuid: "l-uuid", linkKey: "key", linkKeyVersion: 1, salt: "salt", enableDownload: true, password: undefined },
+					link: {
+						linkUuid: "l-uuid",
+						linkKey: "key",
+						linkKeyVersion: 1,
+						salt: "salt",
+						enableDownload: true,
+						password: undefined
+					},
 					root: { inner: { uuid: "root-u" }, linkedTag: true }
 				})
 			}
@@ -99,7 +106,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		listFiles: mockOfflineListFiles,
 		listDirectories: mockOfflineListDirectories
@@ -112,15 +119,17 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/lib/cameraUpload", () => ({
+vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	default: {
 		getConfig: mockCameraUploadGetConfig
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapDirMeta: vi.fn().mockImplementation((dir: unknown) => ({
-		uuid: (dir as Record<string, unknown>)?.["uuid"] as string ?? "dir-uuid",
+		uuid: ((dir as Record<string, unknown>)?.["uuid"] as string) ?? "dir-uuid",
 		meta: { name: "Dir" },
 		shared: false,
 		linked: false,
@@ -128,7 +137,7 @@ vi.mock("@/lib/utils", () => ({
 		dir
 	})),
 	unwrapFileMeta: vi.fn().mockImplementation((file: unknown) => ({
-		file: { uuid: (file as Record<string, unknown>)?.["uuid"] as string ?? "file-uuid", ...(file as object) },
+		file: { uuid: ((file as Record<string, unknown>)?.["uuid"] as string) ?? "file-uuid", ...(file as object) },
 		meta: { name: "File" },
 		shared: false,
 		linked: false,
@@ -137,7 +146,7 @@ vi.mock("@/lib/utils", () => ({
 	unwrappedDirIntoDriveItem: vi.fn().mockImplementation((unwrapped: unknown) => ({
 		type: "directory",
 		data: {
-			uuid: (unwrapped as Record<string, unknown>)?.["uuid"] as string ?? "dir-uuid",
+			uuid: ((unwrapped as Record<string, unknown>)?.["uuid"] as string) ?? "dir-uuid",
 			size: 0n,
 			undecryptable: false,
 			decryptedMeta: null
@@ -149,13 +158,16 @@ vi.mock("@/lib/utils", () => ({
 		return {
 			type: "file",
 			data: {
-				uuid: file?.["uuid"] as string ?? "file-uuid",
+				uuid: (file?.["uuid"] as string) ?? "file-uuid",
 				size: 0n,
 				undecryptable: false,
 				decryptedMeta: null
 			}
 		}
-	}),
+	})
+}))
+
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: vi.fn().mockReturnValue(null)
 }))
 
@@ -246,8 +258,14 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-import { driveItemsQueryUpdateForNormalParent, fetchData, driveItemsQueryGet, BASE_QUERY_KEY } from "@/queries/useDriveItems.query"
-import { unwrapDirMeta, unwrapFileMeta, unwrapSdkError, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/utils"
+import {
+	driveItemsQueryUpdateForNormalParent,
+	fetchData,
+	driveItemsQueryGet,
+	BASE_QUERY_KEY
+} from "@/features/drive/queries/useDriveItems.query"
+import { unwrapDirMeta, unwrapFileMeta, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/sdkUnwrap"
+import { unwrapSdkError } from "@/lib/sdkErrors"
 import { type DriveItem } from "@/types"
 
 beforeEach(() => {
@@ -282,21 +300,27 @@ beforeEach(() => {
 	})
 	mockCacheRootUuid.value = null
 	vi.mocked(unwrapSdkError).mockReturnValue(null)
-	vi.mocked(unwrapDirMeta).mockImplementation((dir: unknown) => ({
-		uuid: (dir as Record<string, unknown>)?.["uuid"] as string ?? "dir-uuid",
-		meta: { name: "Dir" },
-		shared: false,
-		linked: false,
-		root: false,
-		dir
-	} as unknown as UnwrapDirMetaResult))
-	vi.mocked(unwrapFileMeta).mockImplementation((file: unknown) => ({
-		file: { uuid: (file as Record<string, unknown>)?.["uuid"] as string ?? "file-uuid", ...(file as object) },
-		meta: { name: "File" },
-		shared: false,
-		linked: false,
-		root: false
-	} as unknown as UnwrapFileMetaResult))
+	vi.mocked(unwrapDirMeta).mockImplementation(
+		(dir: unknown) =>
+			({
+				uuid: ((dir as Record<string, unknown>)?.["uuid"] as string) ?? "dir-uuid",
+				meta: { name: "Dir" },
+				shared: false,
+				linked: false,
+				root: false,
+				dir
+			}) as unknown as UnwrapDirMetaResult
+	)
+	vi.mocked(unwrapFileMeta).mockImplementation(
+		(file: unknown) =>
+			({
+				file: { uuid: ((file as Record<string, unknown>)?.["uuid"] as string) ?? "file-uuid", ...(file as object) },
+				meta: { name: "File" },
+				shared: false,
+				linked: false,
+				root: false
+			}) as unknown as UnwrapFileMetaResult
+	)
 	cacheDirectoryUuidToAnyDirWithContext.clear()
 	cacheDirectoryUuidToAnyNormalDir.clear()
 	cacheDirectoryUuidToAnySharedDirWithContext.clear()
@@ -371,9 +395,7 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 
 		driveItemsQueryUpdateForNormalParent({ parentUuid: "other-uuid", updater: [] })
 
-		const calls = mockQueryUpdaterSet.mock.calls.filter(
-			c => (c[0] as unknown[])[0] === BASE_QUERY_KEY
-		)
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 
 		expect(calls).toHaveLength(1)
 	})
@@ -383,9 +405,7 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 
 		driveItemsQueryUpdateForNormalParent({ parentUuid: "root-uuid-abc", updater: [] })
 
-		const calls = mockQueryUpdaterSet.mock.calls.filter(
-			c => (c[0] as unknown[])[0] === BASE_QUERY_KEY
-		)
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 
 		expect(calls).toHaveLength(2)
 
@@ -401,9 +421,7 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 
 		driveItemsQueryUpdateForNormalParent({ parentUuid: "some-parent", updater: [] })
 
-		const calls = mockQueryUpdaterSet.mock.calls.filter(
-			c => (c[0] as unknown[])[0] === BASE_QUERY_KEY
-		)
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 
 		expect(calls).toHaveLength(1)
 	})
@@ -413,11 +431,12 @@ describe("driveItemsQueryUpdateForNormalParent", () => {
 
 		const updater = (prev: unknown[]) => [...prev, { id: 1 }]
 
-		driveItemsQueryUpdateForNormalParent({ parentUuid: "root-uuid-xyz", updater: updater as unknown as (prev: DriveItem[]) => DriveItem[] })
+		driveItemsQueryUpdateForNormalParent({
+			parentUuid: "root-uuid-xyz",
+			updater: updater as unknown as (prev: DriveItem[]) => DriveItem[]
+		})
 
-		const calls = mockQueryUpdaterSet.mock.calls.filter(
-			c => (c[0] as unknown[])[0] === BASE_QUERY_KEY
-		)
+		const calls = mockQueryUpdaterSet.mock.calls.filter(c => (c[0] as unknown[])[0] === BASE_QUERY_KEY)
 
 		expect(calls).toHaveLength(2)
 
@@ -508,9 +527,7 @@ describe("fetchData — offline branch", () => {
 			{ item: { type: "directory", data: { uuid: "dir-a", size: 0n, undecryptable: false, decryptedMeta: null } } },
 			{ item: { type: "directory", data: { uuid: "dir-b", size: 0n, undecryptable: false, decryptedMeta: null } } }
 		]
-		const files = [
-			{ item: { type: "file", data: { uuid: "file-a", size: 0n, undecryptable: false, decryptedMeta: null } } }
-		]
+		const files = [{ item: { type: "file", data: { uuid: "file-a", size: 0n, undecryptable: false, decryptedMeta: null } } }]
 
 		mockOfflineListDirectories.mockResolvedValue({ directories: dirs, files: [] })
 		mockOfflineListFiles.mockResolvedValue(files)
@@ -518,6 +535,54 @@ describe("fetchData — offline branch", () => {
 		const result = await fetchData({ path: { type: "offline", uuid: "" } })
 
 		expect(result).toHaveLength(3)
+	})
+
+	it("falls back to null parent when uuid is non-empty but absent from cache — calls listFiles and listDirectories(undefined)", async () => {
+		// uuid is non-empty but NOT present in cacheDirectoryUuidToAnyDirWithContext
+		// the if(cachedDir) branch is false, so the IIFE returns null just as for uuid=""
+		const fileItem = { type: "file", data: { uuid: "f-miss", size: 0n, undecryptable: false, decryptedMeta: null } }
+		const dirItem = { type: "directory", data: { uuid: "d-miss", size: 0n, undecryptable: false, decryptedMeta: null } }
+
+		mockOfflineListFiles.mockResolvedValue([{ item: fileItem }])
+		mockOfflineListDirectories.mockResolvedValue({ directories: [{ item: dirItem }], files: [] })
+
+		// ensure no cache entry exists for this uuid
+		expect(cacheDirectoryUuidToAnyDirWithContext.has("non-existent-uuid")).toBe(false)
+
+		const result = await fetchData({ path: { type: "offline", uuid: "non-existent-uuid" } })
+
+		// parent resolves to null → listFiles() called (no args), listDirectories(undefined)
+		expect(mockOfflineListFiles).toHaveBeenCalledWith()
+		expect(mockOfflineListDirectories).toHaveBeenCalledWith(undefined)
+
+		// both dirs and files from null-parent path are returned
+		expect(result).toHaveLength(2)
+		expect(result.some(i => (i as typeof dirItem).data.uuid === "d-miss")).toBe(true)
+		expect(result.some(i => (i as typeof fileItem).data.uuid === "f-miss")).toBe(true)
+	})
+
+	it("cache-miss path is distinct from cache-hit path: listFiles not called when uuid is in cache", async () => {
+		const fakeContext = { tag: "Normal" }
+
+		cacheDirectoryUuidToAnyDirWithContext.set("cached-uuid", fakeContext)
+
+		// With uuid in cache — listFiles must NOT be called
+		await fetchData({ path: { type: "offline", uuid: "cached-uuid" } })
+
+		expect(mockOfflineListFiles).not.toHaveBeenCalled()
+
+		// Reset for the cache-miss check
+		mockOfflineListFiles.mockClear()
+		mockOfflineListDirectories.mockClear()
+		mockOfflineListFiles.mockResolvedValue([])
+		mockOfflineListDirectories.mockResolvedValue({ directories: [], files: [] })
+
+		// Same uuid but removed from cache — listFiles IS called
+		cacheDirectoryUuidToAnyDirWithContext.delete("cached-uuid")
+		await fetchData({ path: { type: "offline", uuid: "cached-uuid" } })
+
+		expect(mockOfflineListFiles).toHaveBeenCalledWith()
+		expect(mockOfflineListDirectories).toHaveBeenCalledWith(undefined)
 	})
 })
 
@@ -701,7 +766,14 @@ describe("fetchData — linked WrongPassword error handling", () => {
 		mockGetSdkClients.mockResolvedValue({
 			authedSdkClient: {
 				getDirPublicLinkInfo: vi.fn().mockResolvedValue({
-					link: { linkUuid: "l-uuid", linkKey: "key", linkKeyVersion: 1, salt: "salt", enableDownload: true, password: undefined },
+					link: {
+						linkUuid: "l-uuid",
+						linkKey: "key",
+						linkKeyVersion: 1,
+						salt: "salt",
+						enableDownload: true,
+						password: undefined
+					},
 					root: { inner: { uuid: "root-u" }, linkedTag: true }
 				}),
 				listLinkedDir: vi.fn().mockRejectedValue(wrongPasswordError)
@@ -730,7 +802,14 @@ describe("fetchData — linked WrongPassword error handling", () => {
 		mockGetSdkClients.mockResolvedValue({
 			authedSdkClient: {
 				getDirPublicLinkInfo: vi.fn().mockResolvedValue({
-					link: { linkUuid: "l-uuid", linkKey: "key", linkKeyVersion: 1, salt: "salt", enableDownload: true, password: undefined },
+					link: {
+						linkUuid: "l-uuid",
+						linkKey: "key",
+						linkKeyVersion: 1,
+						salt: "salt",
+						enableDownload: true,
+						password: undefined
+					},
 					root: { inner: { uuid: "root-u" }, linkedTag: true }
 				}),
 				listLinkedDir: vi.fn().mockRejectedValue(networkError)
@@ -756,7 +835,14 @@ describe("fetchData — linked WrongPassword error handling", () => {
 		mockGetSdkClients.mockResolvedValue({
 			authedSdkClient: {
 				getDirPublicLinkInfo: vi.fn().mockResolvedValue({
-					link: { linkUuid: "l-uuid", linkKey: "key", linkKeyVersion: 1, salt: "salt", enableDownload: true, password: undefined },
+					link: {
+						linkUuid: "l-uuid",
+						linkKey: "key",
+						linkKeyVersion: 1,
+						salt: "salt",
+						enableDownload: true,
+						password: undefined
+					},
 					root: { inner: { uuid: "root-u" }, linkedTag: true }
 				}),
 				listLinkedDir: vi.fn().mockRejectedValue(rawError)
@@ -782,7 +868,14 @@ describe("fetchData — linked WrongPassword error handling", () => {
 		mockGetSdkClients.mockResolvedValue({
 			authedSdkClient: {
 				getDirPublicLinkInfo: vi.fn().mockResolvedValue({
-					link: { linkUuid: "l-uuid", linkKey: "key", linkKeyVersion: 1, salt: "salt", enableDownload: true, password: undefined },
+					link: {
+						linkUuid: "l-uuid",
+						linkKey: "key",
+						linkKeyVersion: 1,
+						salt: "salt",
+						enableDownload: true,
+						password: undefined
+					},
 					root: { inner: { uuid: "root-u" }, linkedTag: true }
 				}),
 				listLinkedDir: vi.fn().mockResolvedValue({ dirs: [], files: [fileItem] })
@@ -839,9 +932,7 @@ describe("fetchData — sharedIn/sharedOut sharingRole propagation", () => {
 		await fetchData({ path: { type: "sharedIn", uuid: "shared-dir-parent" } })
 
 		// unwrapDirMeta must be called with the dir that has sharingRole spread in
-		expect(vi.mocked(unwrapDirMeta)).toHaveBeenCalledWith(
-			expect.objectContaining({ uuid: "inner-dir-1", sharingRole: shareInfo })
-		)
+		expect(vi.mocked(unwrapDirMeta)).toHaveBeenCalledWith(expect.objectContaining({ uuid: "inner-dir-1", sharingRole: shareInfo }))
 	})
 
 	it("propagates sharingRole from parent.shareInfo to each file in sharedIn result", async () => {
@@ -863,9 +954,7 @@ describe("fetchData — sharedIn/sharedOut sharingRole propagation", () => {
 
 		await fetchData({ path: { type: "sharedIn", uuid: "shared-file-parent" } })
 
-		expect(vi.mocked(unwrapFileMeta)).toHaveBeenCalledWith(
-			expect.objectContaining({ uuid: "inner-file-1", sharingRole: shareInfo })
-		)
+		expect(vi.mocked(unwrapFileMeta)).toHaveBeenCalledWith(expect.objectContaining({ uuid: "inner-file-1", sharingRole: shareInfo }))
 	})
 
 	it("calls listInSharedRoot when parent is undefined (empty uuid)", async () => {
@@ -896,14 +985,17 @@ describe("fetchData — sharedIn/sharedOut sharingRole propagation", () => {
 			}
 		})
 
-		vi.mocked(unwrapDirMeta).mockImplementation((dir: unknown) => ({
-			uuid: "inner-sharedout-dir",
-			meta: { name: "SharedOutDir" },
-			shared: true,
-			linked: false,
-			root: false,
-			dir
-		} as unknown as UnwrapDirMetaResult))
+		vi.mocked(unwrapDirMeta).mockImplementation(
+			(dir: unknown) =>
+				({
+					uuid: "inner-sharedout-dir",
+					meta: { name: "SharedOutDir" },
+					shared: true,
+					linked: false,
+					root: false,
+					dir
+				}) as unknown as UnwrapDirMetaResult
+		)
 
 		await fetchData({ path: { type: "sharedOut", uuid: "sharedout-parent" } })
 

@@ -1,4 +1,4 @@
-import { unwrapSdkError } from "@/lib/utils"
+import { unwrapSdkError } from "@/lib/sdkErrors"
 
 const originalConsoleError = global.console.error
 

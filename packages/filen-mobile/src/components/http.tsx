@@ -2,14 +2,14 @@ import { useSdkClients } from "@/lib/auth"
 import type { JsClientInterface, HttpProviderHandle, AnyFile } from "@filen/sdk-rs"
 import { type AppStateStatus, AppState } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
-import { useEffect, useRef, memo, useCallback } from "react"
+import { useEffect, useRef, useCallback } from "react"
 import { runEffect, run, Semaphore } from "@filen/utils"
 import useHttpStore from "@/stores/useHttp.store"
 import alerts from "@/lib/alerts"
 
 const mutex = new Semaphore(1)
 
-const InnerHttp = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
+const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	const httpHandleRef = useRef<HttpProviderHandle | null>(null)
 
 	const onAppStateChange = useCallback(
@@ -95,9 +95,9 @@ const InnerHttp = memo(({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	})
 
 	return null
-})
+}
 
-const Http = memo(() => {
+const Http = () => {
 	const { authedSdkClient } = useSdkClients()
 
 	if (!authedSdkClient) {
@@ -105,6 +105,6 @@ const Http = memo(() => {
 	}
 
 	return <InnerHttp sdkClient={authedSdkClient} />
-})
+}
 
 export default Http

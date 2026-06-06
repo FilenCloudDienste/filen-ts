@@ -59,7 +59,7 @@ vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))
 
-vi.mock("@/lib/transfers", () => ({
+vi.mock("@/features/transfers/transfers", () => ({
 	default: {
 		cancelAll: vi.fn(() => {
 			callLog.push("transfers.cancelAll")
@@ -67,7 +67,7 @@ vi.mock("@/lib/transfers", () => ({
 	}
 }))
 
-vi.mock("@/lib/cameraUpload", () => ({
+vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	default: {
 		cancel: vi.fn(() => {
 			callLog.push("cameraUpload.cancel")
@@ -75,7 +75,7 @@ vi.mock("@/lib/cameraUpload", () => ({
 	}
 }))
 
-vi.mock("@/components/chats/sync", () => ({
+vi.mock("@/features/chats/components/sync", () => ({
 	sync: {
 		cancel: vi.fn(() => {
 			callLog.push("chatsSync.cancel")
@@ -84,7 +84,7 @@ vi.mock("@/components/chats/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
-vi.mock("@/components/notes/sync", () => ({
+vi.mock("@/features/notes/components/sync", () => ({
 	sync: {
 		cancel: vi.fn(() => {
 			callLog.push("notesSync.cancel")
@@ -93,7 +93,7 @@ vi.mock("@/components/notes/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		cancel: vi.fn(() => {
 			callLog.push("offline.cancel")
@@ -101,13 +101,13 @@ vi.mock("@/lib/offline", () => ({
 	}
 }))
 
-vi.mock("@/lib/backgroundTask", () => ({
+vi.mock("@/features/cameraUpload/backgroundTask", () => ({
 	unregisterBackgroundSync: vi.fn(async () => {
 		callLog.push("unregisterBackgroundSync")
 	})
 }))
 
-vi.mock("@/lib/fileProvider", () => ({
+vi.mock("@/features/settings/fileProvider", () => ({
 	default: {
 		disable: vi.fn(async () => {
 			callLog.push("fileProvider.disable")
@@ -123,7 +123,7 @@ vi.mock("@/lib/sqlite", () => ({
 	}
 }))
 
-vi.mock("@/lib/audio", () => ({
+vi.mock("@/features/audio/audio", () => ({
 	default: {
 		stop: vi.fn(async () => {
 			callLog.push("audio.stop")
@@ -277,7 +277,7 @@ describe("auth.logout", () => {
 	})
 
 	it("continues even when audio.stop throws", async () => {
-		const audio = await import("@/lib/audio")
+		const audio = await import("@/features/audio/audio")
 
 		vi.mocked(audio.default.stop).mockRejectedValueOnce(new Error("audio session busy"))
 
@@ -298,7 +298,7 @@ describe("auth.logout", () => {
 	})
 
 	it("continues even when unregisterBackgroundSync throws", async () => {
-		const bg = await import("@/lib/backgroundTask")
+		const bg = await import("@/features/cameraUpload/backgroundTask")
 
 		vi.mocked(bg.unregisterBackgroundSync).mockRejectedValueOnce(new Error("task manager unavailable"))
 
@@ -319,7 +319,7 @@ describe("auth.logout", () => {
 	})
 
 	it("continues even when fileProvider.disable throws", async () => {
-		const fp = await import("@/lib/fileProvider")
+		const fp = await import("@/features/settings/fileProvider")
 
 		vi.mocked(fp.default.disable).mockRejectedValueOnce(new Error("provider unavailable"))
 
@@ -567,7 +567,9 @@ describe("auth.login", () => {
 		vi.mocked(secureStore.default.set).mockResolvedValueOnce(undefined)
 		mockLogin.mockResolvedValue(null)
 
-		await expect(auth.login({ email: "u@v.w", password: "pass", twoFactorCode: "" })).rejects.toThrow("Login failed, authed client is null")
+		await expect(auth.login({ email: "u@v.w", password: "pass", twoFactorCode: "" })).rejects.toThrow(
+			"Login failed, authed client is null"
+		)
 	})
 
 	it("resolves getSdkClients() waiters after login succeeds", async () => {

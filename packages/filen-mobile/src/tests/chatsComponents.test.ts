@@ -13,7 +13,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 vi.mock("@filen/utils", async () => ({
-	...await import("@/tests/mocks/filenUtils"),
+	...(await import("@/tests/mocks/filenUtils")),
 	parseNumbersFromString(s: unknown) {
 		const digits = (s as string).replace(/\D/g, "")
 		const n = parseInt(digits, 10)
@@ -102,7 +102,7 @@ vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 vi.mock("@/lib/prompts", () => ({
 	default: { alert: vi.fn(), input: vi.fn() }
 }))
-vi.mock("@/lib/chats", () => ({
+vi.mock("@/features/chats/chats", () => ({
 	default: {
 		mute: vi.fn(),
 		delete: vi.fn(),
@@ -123,8 +123,8 @@ vi.mock("@/lib/events", () => ({
 		emit: vi.fn()
 	}
 }))
-vi.mock("@/lib/transfers", () => ({ default: { upload: vi.fn() } }))
-vi.mock("@/lib/drive", () => ({
+vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
+vi.mock("@/features/drive/drive", () => ({
 	default: {
 		enablePublicLink: vi.fn(),
 		openLinkedDirectory: vi.fn(),
@@ -146,23 +146,12 @@ vi.mock("@/lib/decryption", () => ({
 	cannotDecryptPlaceholder: (uuid: string) => `cannot_decrypt_${uuid}`
 }))
 
-// @/lib/utils — needed only for the contactDisplayName + safeParseUrl + extractLinks helpers
+// @/lib/utils — needed only for the contactDisplayName helper
 vi.mock("@/lib/utils", () => ({
-	contactDisplayName: (p: { nickName?: string; email: string }) => p.nickName && p.nickName.length > 0 ? p.nickName : p.email,
-	safeParseUrl: (url: string) => {
-		try {
-			const u = new URL(url)
-			if (u.protocol !== "https:") return null
-			if (u.hostname === "localhost") return null
-			return u
-		} catch {
-			return null
-		}
-	},
-	extractLinks: (text: string) => {
-		const matches = [...text.matchAll(/https?:\/\/[^\s]+/g)]
-		return matches.map(m => ({ url: m[0], start: m.index ?? 0, end: (m.index ?? 0) + m[0].length }))
-	},
+	contactDisplayName: (p: { nickName?: string; email: string }) => (p.nickName && p.nickName.length > 0 ? p.nickName : p.email)
+}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapFileMeta: vi.fn(),
 	unwrappedFileIntoDriveItem: vi.fn(),
 	makeDriveItemPublicLink: vi.fn(),
@@ -177,7 +166,7 @@ vi.mock("@/lib/cache", () => ({
 }))
 
 // ── Stores ────────────────────────────────────────────────────────────────────
-vi.mock("@/stores/useChats.store", () => ({
+vi.mock("@/features/chats/store/useChats.store", () => ({
 	default: vi.fn(() => ({})),
 	useChatsStore: vi.fn(() => ({}))
 }))
@@ -195,11 +184,11 @@ vi.mock("@/stores/useHttp.store", () => ({
 }))
 
 // ── Queries ───────────────────────────────────────────────────────────────────
-vi.mock("@/queries/useChatMessages.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryUpdate: vi.fn(),
 	default: vi.fn(() => ({ status: "pending" }))
 }))
-vi.mock("@/queries/useChatMessageLinks.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessageLinks.query", () => ({
 	default: vi.fn(() => ({ status: "pending" }))
 }))
 vi.mock("@/queries/useAccount.query", () => ({
@@ -212,14 +201,14 @@ vi.mock("@/hooks/useViewLayout", () => ({
 }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: vi.fn(() => true) }))
 vi.mock("@/hooks/useEffectOnce", () => ({ default: vi.fn() }))
-vi.mock("@/hooks/useChatUnreadCount", () => ({ default: vi.fn(() => 0) }))
+vi.mock("@/features/chats/hooks/useChatUnreadCount", () => ({ default: vi.fn(() => 0) }))
 vi.mock("@/hooks/useMediaPermissions", () => ({
 	default: vi.fn(() => ({ loading: false, granted: true })),
 	hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true)
 }))
 
 // ── Other component deps ──────────────────────────────────────────────────────
-vi.mock("@/components/chats/sync", () => ({
+vi.mock("@/features/chats/components/sync", () => ({
 	sync: { flushToDisk: vi.fn(), syncNow: vi.fn() }
 }))
 vi.mock("@/components/ui/virtualList", () => ({ default: () => null }))
@@ -228,9 +217,9 @@ vi.mock("@/components/itemIcons", () => ({
 	FileIcon: () => null,
 	DirectoryIcon: () => null
 }))
-// NOTE: do NOT mock @/components/chats/chat/message/regexed — we test its exports directly.
-vi.mock("@/components/chats/chat/message/menu", () => ({ default: () => null }))
-vi.mock("@/routes/driveSelect/[uuid]", () => ({ selectDriveItems: vi.fn() }))
+// NOTE: do NOT mock @/features/chats/components/chat/message/regexed — we test its exports directly.
+vi.mock("@/features/chats/components/chat/message/menu", () => ({ default: () => null }))
+vi.mock("@/features/drive/screens/driveSelect", () => ({ selectDriveItems: vi.fn() }))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn(x => JSON.stringify(x)) }))
 
 // ─── Actual imports ───────────────────────────────────────────────────────────
@@ -241,9 +230,9 @@ import {
 	EMOJI_REGEX_WITH_SKIN_TONES,
 	LINE_BREAK_REGEX,
 	customEmojisSet
-} from "@/components/chats/chat/message/regexed"
+} from "@/features/chats/components/chat/message/regexed"
 
-import { createMenuButtons } from "@/components/chats/list/chat/menu"
+import { createMenuButtons } from "@/features/chats/components/list/chat/menu"
 import type { Chat } from "@/types"
 
 // ─── Factory helpers ──────────────────────────────────────────────────────────

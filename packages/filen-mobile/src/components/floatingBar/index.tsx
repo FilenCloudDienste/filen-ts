@@ -1,19 +1,19 @@
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
-import { useAudio } from "@/lib/audio"
-import useTransfersStore from "@/stores/useTransfers.store"
+import { useAudioQueue } from "@/features/audio/audio"
+import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import useFloatingBarOffset from "@/hooks/useFloatingBarOffset"
 import AudioSlot from "@/components/floatingBar/audioSlot"
 import TransfersSlot from "@/components/floatingBar/transfersSlot"
 import Separator from "@/components/floatingBar/separator"
 import useAppStore from "@/stores/useApp.store"
 
-const FloatingBar = memo(() => {
+const FloatingBar = () => {
 	const insets = useSafeAreaInsets()
 	const offset = useFloatingBarOffset()
-	const { queueItem } = useAudio()
+	const { queueItem } = useAudioQueue()
 	const transfersActive = useTransfersStore(useShallow(state => state.transfers.length > 0))
 	// FloatingBar is mounted at the root _layout as a sibling of <Stack/>, not
 	// inside any specific route. The "pathname tracks focused URL not mount
@@ -62,6 +62,6 @@ const FloatingBar = memo(() => {
 			</CrossGlassContainerView>
 		</View>
 	)
-})
+}
 
 export default FloatingBar

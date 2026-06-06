@@ -2,7 +2,7 @@ import "react-native-reanimated"
 import "@/queries/onlineStatus"
 
 import StyleProvider from "@/providers/style.provider"
-import { useState, Fragment, memo } from "react"
+import { useState, Fragment } from "react"
 import { Stack } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import View from "@/components/ui/view"
@@ -21,18 +21,18 @@ import { KeyboardProvider } from "react-native-keyboard-controller"
 import { PressablesConfig } from "pressto"
 import * as Haptics from "expo-haptics"
 import FullScreenLoadingModal from "@/components/ui/fullScreenLoadingModal"
-import NotesSync from "@/components/notes/sync"
-import ChatsSync from "@/components/chats/sync"
+import NotesSync from "@/features/notes/components/sync"
+import ChatsSync from "@/features/chats/components/sync"
 import ActionSheetProvider from "@/providers/actionSheet.provider"
-import Socket from "@/components/socket"
+import Socket from "@/components/shell/socket"
 import Pathname from "@/components/pathname"
 import { Platform } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Http from "@/components/http"
-import CameraUploadSync from "@/components/cameraUpload/sync"
-import IncomingShareHandler from "@/components/incomingShareHandler"
+import CameraUploadSync from "@/features/cameraUpload/sync"
+import IncomingShareHandler from "@/features/incomingShare/incomingShareHandler"
 import FloatingBar from "@/components/floatingBar"
-import ForegroundService from "@/components/foregroundService"
+import ForegroundService from "@/features/transfers/components/foregroundService"
 import Biometric from "@/components/biometric"
 import PrivacyCover from "@/components/privacyCover"
 import AccountReminders from "@/components/accountReminders"
@@ -45,7 +45,7 @@ SplashScreen.setOptions({
 
 SplashScreen.preventAutoHideAsync().catch(console.error)
 
-const RootLayout = memo(() => {
+const RootLayout = () => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const [isSetupDone, setIsSetupDone] = useState<boolean>(false)
@@ -324,6 +324,6 @@ const RootLayout = memo(() => {
 			</KeyboardProvider>
 		</StyleProvider>
 	)
-})
+}
 
 export default RootLayout

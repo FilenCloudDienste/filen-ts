@@ -4,28 +4,30 @@ import cache from "@/lib/cache"
 import { run, Semaphore } from "@filen/utils"
 import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import alerts from "@/lib/alerts"
-import foregroundService from "@/lib/foregroundService"
+import foregroundService from "@/features/transfers/foregroundService"
 import { sweepTmpDir } from "@/lib/tmp"
 import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
 import { startReconnectListener } from "@/lib/reconnect"
 import fileCache from "@/lib/fileCache"
-import audioCache from "@/lib/audioCache"
+import audioCache from "@/features/audio/audioCache"
 import { initI18n } from "@/lib/i18n"
 import { initTheme } from "@/lib/theme"
 
-class Setup {
-	private readonly mutex: Semaphore = new Semaphore(1)
+// Serializes setup() so a concurrent invocation (e.g. background task overlapping the
+// foreground launch) can't run the init flow twice. No other instance state -> plain object.
+const setupMutex = new Semaphore(1)
 
-	public async setup(options?: { background?: boolean }): Promise<{
+const setup = {
+	async setup(options?: { background?: boolean }): Promise<{
 		isAuthed: boolean
 	}> {
 		const result = await run(async defer => {
-			await this.mutex.acquire()
+			await setupMutex.acquire()
 
 			defer(() => {
-				this.mutex.release()
+				setupMutex.release()
 			})
 
 			const now = performance.now()
@@ -99,7 +101,5 @@ class Setup {
 		}
 	}
 }
-
-const setup = new Setup()
 
 export default setup

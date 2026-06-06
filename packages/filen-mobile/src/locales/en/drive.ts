@@ -15,8 +15,9 @@
 // "Filen" is a brand name and must NOT be translated. The literal string "Filen" in
 // copyToMediaStore `parentFolder` is intentionally left as a code constant, not a key.
 //
-// Sort keys also live here because buildSortMenuButton is defined in drive/index.tsx
-// (the sort.ts file currently covers notes-grouping labels only).
+// Sort keys also live here because buildSortMenuButton is defined in
+// drive/components/headerMenuBuilders.ts (the sort.ts file currently covers
+// notes-grouping labels only).
 export const drive = {
 	// ── Public-link password prompts (src/lib/drive.ts openLinkedDirectory / openLinkedFile) ──
 	// password_required lives in common.ts.
@@ -25,7 +26,7 @@ export const drive = {
 	/** Public-link password prompt — dialog message asking for a protected file link's password */
 	enter_public_link_file_password: "Enter the password for this file link",
 
-	// ── Sort menu (buildSortMenuButton in drive/index.tsx) ────────────────────
+	// ── Sort menu (buildSortMenuButton in drive/components/headerMenuBuilders.ts) ──
 	/** Sort menu top-level button title */
 	sort_by: "Sort by",
 	/** Sort submenu group: sort by name */

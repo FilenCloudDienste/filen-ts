@@ -1,7 +1,6 @@
 import { Stack } from "expo-router"
-import { memo } from "react"
 
-const Layout = memo(() => {
+const Layout = () => {
 	return (
 		<Stack
 			screenOptions={{
@@ -12,6 +11,6 @@ const Layout = memo(() => {
 			}}
 		/>
 	)
-})
+}
 
 export default Layout

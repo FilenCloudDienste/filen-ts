@@ -5,13 +5,16 @@ All server communication, encryption, and auth handled by Rust SDK (`@filen/sdk-
 
 ## Architecture
 
+Feature-based layout: `src/features/<feature>/` owns each product domain end-to-end.
+`src/routes/` (expo-router) is thin, `src/components/` is shared-only, `src/lib|stores|queries|hooks/` are infra/shared-only.
+
 ```
 Entry:  src/entry.ts → expo-router
 Setup:  src/global.ts (crypto polyfill, Buffer, NetInfo, console replacement)
         src/lib/setup.ts (auth check → SDK init → SQLite → restore query cache)
 
-State:  Zustand stores (src/stores/)     → UI-only state (selections, input focus, etc.)
-        TanStack Query (src/queries/)     → server data, persisted to SQLite via msgpackr
+State:  Zustand stores (per feature store/ + shared src/stores/)  → UI-only state (selections, input focus, etc.)
+        TanStack Query (per feature queries/ + shared src/queries/) → server data, persisted to SQLite via msgpackr
         Secure Store (src/lib/secureStore.ts) → encrypted secrets (expo-secure-store + MMKV fallback)
         Events (src/lib/events.ts)        → transient cross-component events (EventEmitter3)
 
@@ -21,6 +24,50 @@ SDK:    src/lib/auth.ts manages JsClientInterface (authed) + UnauthJsClientInter
 Native: Three git submodules at packages/filen-mobile/, integrated via custom Expo plugins —
         see "Submodules" section below.
 ```
+
+## Features (src/features/)
+
+14 features, each owning its domain. A feature contains (as needed):
+`screens/` (screen bodies) · `components/` · `hooks/` · `queries/` (per-file `useX.query.ts`) ·
+`store/` (per-file `useX.store.ts`) · `<feature>.ts` (the feature's lib singleton(s) — silent, no UI) ·
+`socketHandlers.ts` (the feature's slice of socket events) · `utils.ts` (pure helpers) ·
+`constants.ts` · `types.ts`.
+
+| Feature | Owns |
+|-|-|
+| `drive` | File/dir browser, ops (favorite, rename, move, delete, trash, restore, share, search, setDirColor, createDirectory, updateTimestamps), context variants (favorites/recents/trash/links/sharedIn/sharedOut/offline), select/move/copy, item info, versions, color picker, linked file. Lib: `drive.ts`, `driveDownload.ts`; also `driveSortPreference.ts`, `driveSelectors.ts`. Socket: `handleDriveEvent`. |
+| `photos` | Photo grid timeline (5 per row, creationDesc sort), photo bulk actions. |
+| `notes` | CRUD, content editing, tags, participants, history, export (single .txt / bulk .zip via JSZip), in-flight content sync. Lib: `notes.ts`, `notesSelectors.ts`. Socket: `handleNoteEvent`. |
+| `chats` | Send/edit/delete messages, typing indicators, mark read, create/leave/delete chats, in-flight message sync, unread counts. Lib: `chats.ts` (Semaphore-protected refetch). Socket: `handleChatEvent`. |
+| `contacts` | Requests (accept/deny/cancel/send), block/unblock, delete; programmatic contact selection. Lib: `contacts.ts`, `contactsSelect.ts`. |
+| `audio` | Audio playback / playlist queue management with loop modes (track/list/off); metadata + cover art cache; playlists screens. Lib: `audio.ts` (singleton). |
+| `cameraUpload` | Auto media sync, EXIF dates, dedup via xxHash32 (2-iteration collision resolution — append creationTime, then hash(name+creationTime)), same-title album disambiguation, sanitization of `/` in titles/ids, compression, error surface, album picker. Lib: `cameraUpload.ts`. |
+| `transfers` | Upload/download with progress, pause/resume, abort, error tracking, duplicate prevention via active ID sets; floating + full-list UI; Android foreground service. Lib: `transfers.ts`, `foregroundService.ts`. |
+| `offline` | Offline file cache: store, sync, list, index management (FileOrDirectoryOfflineMeta). Lib: `offline.ts`. |
+| `events` | Account activity log + event detail. |
+| `publicLink` | Public link preview screen. |
+| `incomingShare` | OS share-sheet target + incoming-intent handler. |
+| `settings` | More tab + account, security (+ biometric/twoFactor), fileProvider (File/Documents Provider toggle), appearance, advanced, fileProvider bridge. Lib: `fileProvider.ts`, `startScreen.ts`. |
+| `auth` | Login + register screens. (The SDK client lifecycle lives in `src/lib/auth.ts` — infra, not this feature.) |
+
+Note: `socketHandlers.ts` exists for `drive`/`chats`/`notes`/`contacts`
+(`handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`/`handleContactEvent`); the shell
+`socket.tsx` dispatcher delegates to each.
+
+## Conventions
+
+- **Per-file hooks**: query/store hooks keep their `useX.query.ts` / `useX.store.ts` naming, relocated into the owning feature's `queries/` / `store/` — NOT consolidated into one file.
+- **No barrels**: `index.tsx` may be a folder's main component, but there are NO barrel `index.ts` re-export aggregators. Import the specific module directly.
+- **Screen entry**: a feature screen entry is `screen.tsx` (single-screen features) or `screens/<name>.tsx`.
+- **Cross-feature imports** use full `@/features/...` paths. Relative imports are forbidden repo-wide (ESLint).
+- **Silent feature libs**: a feature's `<feature>.ts` singleton(s) expose state and never fire alerts/toasts — UI owns UX.
+
+### ESLint guardrails (eslint.config.mjs)
+
+- **Selector-required store hooks**: a bare `useXStore()` (zero args) is an error — must pass a selector (`useXStore(s => s.foo)` or `useShallow(...)`). Project-wide.
+- **No feature barrels**: `export * from ...` is banned inside `src/features/`.
+- **Thin routes**: files under `src/routes/` may not import `@/features/*/store` or `@/features/*/queries` (logic belongs in the feature's screen/hook). `_layout.tsx` and `+native-intent.ts` are exempt.
+- **No relative imports** (existing rule) enforces the `@/features/...` cross-feature import style.
 
 ## Submodules
 
@@ -34,11 +81,17 @@ Three git submodules live directly under `packages/filen-mobile/` (pinned SHAs i
 
 Building the native cache requires **cargo-ndk pinned to 3.5.4** (see README — 4.x has bbqsrc/cargo-ndk#181 which breaks the heif-decoder ABI propagation).
 
-`src/lib/fileProvider.ts` is the TS bridge that writes `auth.json` to the shared location both extensions read from (iOS app group container; Android `filesDir`). Mirrored boolean state lives in secureStore under `FILE_PROVIDER_ENABLED_SECURE_STORE_KEY` for fast reactive UI reads.
+`src/features/settings/fileProvider.ts` is the TS bridge that writes `auth.json` to the shared location both extensions read from (iOS app group container; Android `filesDir`). Mirrored boolean state lives in secureStore under `FILE_PROVIDER_ENABLED_SECURE_STORE_KEY` for fast reactive UI reads.
 
 `auth.json`'s SDK config (`masterKeys`, `publicKey`, `apiKey`, `privateKey`, etc.) is populated from `authedSdkClient.toSdkConfig()` since SDK 0.4.21 exposes the full shape. The extensions should now resolve `queryRoots()` against a fully-authenticated SDK — pending end-to-end verification on real devices (iOS Files app / Android Documents picker).
 
 ## Navigation (expo-router)
+
+`src/routes/` mirrors the URL tree but is THIN: each screen route is a one-line
+`export { default } from "@/features/<feature>/screens/<name>"`, or a tiny wrapper that renders
+a feature component. The drive context-variant routes (favorites/recents/trash/links/sharedIn/
+sharedOut/offline/linkedDir) render `<Drive />` from `@/features/drive`. Only `_layout.tsx` files
+(providers + Stack registration) and `+native-intent.ts` (deep-link handling) hold real logic.
 
 5 tabs: drive (`tabs/drive/[uuid]`), photos, notes, chats, more
 
@@ -51,46 +104,35 @@ Modal routes (top-level under `routes/`): `note/[uuid]`, `chat/[uuid]`, `transfe
 `linkedDir/[uuid]`, `incomingShare`, `chatParticipants`, `noteParticipants`, `noteHistory`, `register`.
 
 ```
-routes/
-├── _layout.tsx              root Stack + all modal screens
-├── index.tsx                redirect → auth or drive based on auth state
-├── transfers.tsx            pageSheet modal
-├── auth/                    login flow
-│   ├── _layout.tsx          redirects to drive if already authed
-│   └── login.tsx
-├── register/                registration flow
+routes/                       ← thin re-exports / wrappers into src/features/
+├── _layout.tsx               root Stack + all modal screens (real logic)
+├── +native-intent.ts         deep-link handling (real logic)
+├── index.tsx                 redirect → auth or drive based on auth state
 ├── tabs/
-│   ├── _layout.tsx          NativeTabs (expo-router/unstable-native-tabs)
-│   ├── drive/[uuid].tsx     folder browser (renders <Drive />)
-│   ├── photos/index.tsx     photo grid (5 per row, creationDesc sort)
-│   ├── notes/index.tsx      note list (renders <Notes />)
-│   ├── chats/index.tsx      chat list (renders <Chats />)
-│   └── more/index.tsx       settings menu with links to modal routes
-├── account/                 account info + master keys export
-├── security/                index + biometric + twoFactor sub-screens
-├── fileProvider/            File / Documents Provider toggle (with biometric mutex)
-├── appearance/              theme + display settings
-├── advanced/                advanced settings (cache, debug toggles)
-├── events/                  activity log (+ eventInfo for details)
-├── playlists/               music playlist list + [uuid] detail
-├── selectPlaylists/         add-to-playlist modal
-├── cameraUpload/            index + albums picker (+ cameraUploadErrors)
-├── publicLink/              public link preview
-├── linkedFile/, linkedDir/  linked-item viewers
-├── incomingShare/           system share-sheet target
-├── chatParticipants/, noteParticipants/, noteHistory/
-├── fileVersions/            file version history
-├── chat/[uuid].tsx          conversation view with messages + input
-├── note/[uuid].tsx          note editor (markdown/richtext/code/checklist)
-├── drivePreview/            full-screen gallery (images/video/audio/text/pdf/docx)
-├── driveItemInfo/           file/folder metadata sheet
-├── changeDirectoryColor/    folder color picker (reanimated-color-picker)
-├── contacts/                contact management + selection modal
-├── driveSelect/[uuid].tsx   item selection for move/copy + DriveSelectToolbar
-├── trash/, recents/, favorites/[uuid].tsx, links/[uuid].tsx,
-├── sharedIn/[uuid].tsx, sharedOut/[uuid].tsx, offline/[uuid].tsx
-│                            ↑ all reuse <Drive /> in different contexts
-└── notesTags/               tag management (renders <Notes />)
+│   ├── _layout.tsx           NativeTabs (expo-router/unstable-native-tabs)
+│   ├── drive/[uuid].tsx      folder browser  → <Drive /> (features/drive)
+│   ├── photos/index.tsx      photo grid       → features/photos screen
+│   ├── notes/index.tsx       note list        → features/notes screen
+│   ├── chats/index.tsx       chat list        → features/chats screen
+│   └── more/index.tsx        settings menu    → features/settings screen
+├── auth/, register/          → features/auth screens
+├── note/[uuid], chat/[uuid]  → features/notes, features/chats editors
+├── drivePreview/             → features/drive (full-screen gallery)
+├── driveItemInfo, driveSelect/[uuid], changeDirectoryColor, fileVersions, linkedFile, linkedDir/[uuid]
+│                             → features/drive screens / wrappers
+├── trash, recents, favorites/[uuid], links/[uuid],
+├── sharedIn/[uuid], sharedOut/[uuid], offline/[uuid]
+│                             ↑ all render <Drive /> in different contexts
+├── notesTags, noteParticipants, noteHistory   → features/notes
+├── chatParticipants          → features/chats
+├── contacts                  → features/contacts
+├── transfers                 → features/transfers
+├── playlists/, selectPlaylists  → features/audio
+├── cameraUpload/             → features/cameraUpload
+├── events/                   → features/events
+├── publicLink/               → features/publicLink
+├── incomingShare/            → features/incomingShare
+└── account, security/, fileProvider/, appearance, advanced  → features/settings
 ```
 
 Route params are packed with msgpackr + base64 (DriveItem, DrivePath, SelectOptions).
@@ -99,63 +141,73 @@ Programmatic selection: `selectDriveItems(options)`, `selectContacts(options)` �
 ## Key Directories
 
 ```
-src/routes/         expo-router screens (see Navigation above)
-src/components/     UI components (drive/, chats/, notes/, textEditor/, ui/, itemIcons/, drivePreview/, floatingBar/, cameraUpload/, docxPreview/)
-src/stores/         Zustand stores (one per feature domain)
-src/queries/        TanStack Query hooks + client setup
-src/lib/            Core logic modules (see below)
+src/features/       feature-based product domains (see Features above) — owns screens/components/hooks/queries/store/lib per feature
+src/routes/         expo-router tree — thin re-exports into src/features/ (see Navigation above)
+src/components/      SHARED, feature-agnostic UI only (see below)
+src/stores/         shared/shell-only Zustand stores
+src/queries/        shared/infra-only TanStack Query hooks + client setup
+src/lib/            infra-only logic modules (see below)
 src/lib/polyfills/  DOMException, Buffer, console, crypto polyfills loaded in global.ts
-src/hooks/          Custom hooks
+src/hooks/          shared cross-feature custom hooks
 src/providers/      Style provider (Tailwind/Uniwind theme), ActionSheet provider
 src/assets/         Custom emojis (CDN-backed), app icons, splash images
 src/tests/          Vitest tests + mocks for native modules
 ```
 
-## Lib Modules (src/lib/)
+## Shared Components (src/components/)
+
+Feature-agnostic only. Feature-specific UI moved into `src/features/<feature>/components/`.
+
+| Dir / file | Purpose |
+|-|-|
+| `ui/` | Base primitives (View, Text, Image, Header, Menu, VirtualList, ZoomableView, Button, Checkbox, …) + `settingsGroup`. See "UI Base" below. |
+| `textEditor/` | CodeMirror (markdown/code) + Quill (richtext) editors via WebView. Shared by notes. |
+| `drivePreview/` | Pinch-to-dismiss gallery + per-type renderers (image/video/audio/pdf/docx/text). |
+| `itemIcons/` | `FileIcon` (40+ extension mappings) + `DirectoryIcon` (colored SVG, DirColor enum). |
+| `floatingBar/` | Bottom bar above tabs: `index` + `audioSlot` + `transfersSlot` + `animatedProgressBar` + `separator`. |
+| `participants/` | Shared `participantRow` / `participantList` used by both notes and chats. |
+| `docxPreview/` | WebView-based `.docx` renderer. |
+| `shell/` | App-shell background/overlay components (subscribe to one concern, render no rows). `socket.tsx` keeps the WebSocket connection lifecycle + a dispatcher delegating to per-feature `socketHandlers.ts`. Shell also holds http, biometric, privacyCover, offlineBanner, accountReminders, pathname, dismissStack, cannotDecryptScreen. (foregroundService moved to features/transfers; incomingShareHandler moved to features/incomingShare.) |
+
+## Lib Modules (src/lib/) — infra only
+
+Feature-specific libs (drive/notes/chats/contacts/audio/cameraUpload/offline/transfers/fileProvider/startScreen)
+all MOVED into their features. What remains is infrastructure shared across features:
 
 | Module | Purpose |
 |-|-|
-| `auth.ts` | SDK client init, login/logout, `useIsAuthed()` / `useSdkClients()` / `useStringifiedClient()` hooks. Calls `fileProvider.disable()` + cleanup on logout. |
-| `drive.ts` | File ops: favorite, rename, move, delete, trash, restore, share, search, setDirColor, createDirectory, updateTimestamps |
-| `transfers.ts` | Upload/download with progress, pause/resume, abort, error tracking, duplicate prevention via active ID sets |
-| `offline.ts` | Offline file cache: store, sync, list, index management (FileOrDirectoryOfflineMeta) |
-| `chats.ts` | Send/edit/delete messages, typing indicators, mark read, create/leave/delete chats, Semaphore-protected refetch |
-| `notes.ts` | CRUD, content editing, tags, participants, history, export (single .txt / bulk .zip via JSZip) |
-| `contacts.ts` | Requests (accept/deny/cancel/send), block/unblock, delete |
-| `cameraUpload.ts` | Auto media sync, EXIF dates, dedup via xxHash32 (6-iteration collision resolution), same-title album disambiguation (sort all device albums by id, suffix later siblings with `(albumId)`), sanitization of `/` in titles/ids, compression |
-| `thumbnails.ts` | Thumbnail generation: images (ImageManipulator resize) + videos (HTTP provider → expo-video), Semaphore(3) concurrency, max 3 failures per item |
-| `cache.ts` | PersistentMap<V> (extends Map with debounced SQLite persistence): uuid→DriveItem, uuid→dir/note/chat, availableThumbnails, **rootUuid** |
-| `secureStore.ts` | Encrypted KV (expo-secure-store + MMKV fallback), AES-256-GCM encryption, event-driven cache invalidation. Exports `useSecureStore<T>(key, initialValue)` hook. |
-| `sqlite.ts` | SQLite KV for query persistence, WAL mode, 32MB mmap, 8MB cache, app group directory (iOS) |
-| `msgpack.ts` | Custom msgpackr with UniffiEnum extension (type 0x75), BigInt support, Symbol preservation |
-| `serializer.ts` | Shared msgpackr serializer setup (UniffiEnum, BigInt, TypedArray) used by sqlite/cache/route params |
-| `utils.ts` | SDK type unwrapping, path normalization (SDK/Expo/BlobUtil), sanitizeFileName, getPreviewType, PauseSignal, composite signals |
-| `sort.ts` | ItemSorter (name/size/mime/date, dirs-first, numeric-aware) + NotesSorter (pinned/archived/time-bucketed groups) |
-| `driveSortPreference.ts` | Per-directory + global sort preference persistence (secureStore-backed) |
-| `time.ts` | Fast date/time formatting (Hermes-optimized, no Intl.DateTimeFormat), locale-aware YMD/MDY/DMY |
-| `events.ts` | Typed EventEmitter (secureStore, actionSheet, driveSelect, contactsSelect, chatConversationDeleted, noteContentEdited, etc.) |
-| `prompts.ts` | Native alert/input dialogs (@blazejkustra/react-native-alert) |
-| `alerts.tsx` | Toast notifications (Burnt) and error banners (Notifier) with FilenSdkError unwrapping |
-| `setup.ts` | App init: auth check → SDK → SecureStore → SQLite → restore queries → restore cache (Semaphore-protected) |
-| `fileProvider.ts` | iOS/Android document provider bridge: writes `auth.json` (full SDK config from `authedSdkClient.toSdkConfig()`) to the iOS app group container / Android `filesDir`. Mirrors `providerEnabled` to secureStore under `FILE_PROVIDER_ENABLED_SECURE_STORE_KEY` for reactive UI. |
-| `reconnect.ts` | Online-transition handler — on offline→online flip, kicks `cameraUpload.sync()`, `offline.sync()`, `notesSync.executeNow()`, `chatsSync.syncNow()` |
-| `memo.ts` | Custom memo/useCallback/useMemo with deep equality (react-fast-compare) in prod, standard React in dev |
-| `exif.ts` | EXIF date parsing (DateTimeOriginal/Digitized/DateTime + SubSec + Offset) + orientation from raw bytes (JPEG/TIFF/HEIC/WebP) |
-| `tmp.ts` | Transient staging directory (filen-tmp/) for in-flight uploads, exports, and decode targets. `newTmpFile(name)`/`newTmpDir(name)`. |
-| `storageRoots.ts` | Single source of truth for on-disk storage paths + version constants. Anchors all cache/offline/tmp dirs. |
-| `audio.ts` | Audio playback / playlist queue management with loop modes (track/list/off). Singleton, drives playlists tab. |
-| `audioCache.ts` | Music metadata + cover art cache, version-tracked + persisted |
+| `auth.ts` | SDK client init, login/logout, `useIsAuthed()` / `useSdkClients()` / `useStringifiedClient()` hooks. Calls `fileProvider.disable()` + cleanup on logout. (Stays infra — the auth *feature* is just login/register screens.) |
+| `bulkOps.ts` | Shared bulk-operation helpers (multi-item ops). |
+| `decryption.ts` | Shared decryption helpers. |
+| `thumbnails.ts` | Thumbnail generation: images (ImageManipulator resize) + videos (HTTP provider → expo-video), Semaphore(3) concurrency, max 3 failures per item. |
+| `sort.ts` | ItemSorter (name/size/mime/date, dirs-first, numeric-aware) + NotesSorter (pinned/archived/time-bucketed groups). |
+| `cache.ts` | PersistentMap<V> (extends Map with debounced SQLite persistence): uuid→DriveItem, uuid→dir/note/chat, availableThumbnails, **rootUuid**. |
 | `fileCache.ts` | File download cache (dedup keyed by `type:data`) with metadata index. Replaces ad-hoc download paths. |
-| `sandboxCache.ts` | OS sandbox cache wrapper (excludes filen-tmp/) — keeps measurable distinction between user-cleanable cache and active in-flight files |
-| `fsUtils.ts` | File-system traversal (`walkLocalDirectory`) + cache size measurement helpers |
-| `clearBarrier.ts` | Synchronization primitive: many concurrent readers, exclusive clear() — used to safely wipe caches without racing in-flight reads |
-| `backgroundTask.ts` | Expo background task registration for camera upload sync |
-| `foregroundService.ts` | Android foreground service notifications for active transfers (notifee) |
-| `startScreen.ts` | Default-tab preference (drive/photos/notes/chats/more) read at boot |
+| `sandboxCache.ts` | OS sandbox cache wrapper (excludes filen-tmp/) — keeps measurable distinction between user-cleanable cache and active in-flight files. |
+| `clearBarrier.ts` | Synchronization primitive: many concurrent readers, exclusive clear() — used to safely wipe caches without racing in-flight reads. |
+| `fsUtils.ts` | File-system traversal (`walkLocalDirectory`) + cache size measurement helpers. |
+| `storageRoots.ts` | Single source of truth for on-disk storage paths + version constants. Anchors all cache/offline/tmp dirs. |
+| `tmp.ts` | Transient staging directory (filen-tmp/) for in-flight uploads, exports, and decode targets. `newTmpFile(name)`/`newTmpDir(name)`. |
+| `secureStore.ts` | Encrypted KV (expo-secure-store + MMKV fallback), AES-256-GCM encryption, event-driven cache invalidation. Exports `useSecureStore<T>(key, initialValue)` hook. |
+| `sqlite.ts` | SQLite KV for query persistence, WAL mode, 32MB mmap, 8MB cache, app group directory (iOS). |
+| `serializer.ts` | Shared msgpackr serializer setup (UniffiEnum, BigInt, TypedArray) used by sqlite/cache/route params. |
+| `utils.ts` | SDK type unwrapping, path normalization (SDK/Expo/BlobUtil), sanitizeFileName, getPreviewType, PauseSignal, composite signals. |
+| `exif.ts` | EXIF date parsing (DateTimeOriginal/Digitized/DateTime + SubSec + Offset) + orientation from raw bytes (JPEG/TIFF/HEIC/WebP). |
+| `time.ts` | Fast date/time formatting (Hermes-optimized, no Intl.DateTimeFormat), locale-aware YMD/MDY/DMY. |
+| `i18n.ts` / `language.ts` | Localization runtime + language preference (typed catalog under `src/locales/`). |
+| `theme.ts` | Theme tokens / theme preference. |
+| `events.ts` | Typed EventEmitter (secureStore, actionSheet, driveSelect, contactsSelect, chatConversationDeleted, noteContentEdited, etc.). |
+| `prompts.ts` | Native alert/input dialogs (@blazejkustra/react-native-alert). |
+| `alerts.tsx` | Toast notifications (Burnt) and error banners (Notifier) with FilenSdkError unwrapping. |
+| `reconnect.ts` | Online-transition handler — on offline→online flip, kicks `cameraUpload.sync()`, `offline.sync()`, `notesSync.executeNow()`, `chatsSync.syncNow()`. |
+| `setup.ts` | App init: auth check → SDK → SecureStore → SQLite → restore queries → restore cache (Semaphore-protected). |
 
 `src/lib/polyfills/` — DOMException, Buffer, console-replacement, crypto loaded in order from `src/global.ts`.
 
-## Hooks (src/hooks/)
+## Hooks (src/hooks/) — shared cross-feature
+
+Feature-specific hooks (useChatUnreadCount, useDriveUpload, useDriveSearch, usePhotoBulkActions, …)
+moved into their features. Shared ones:
 
 | Hook | Signature | Purpose |
 |-|-|-|
@@ -164,38 +216,34 @@ src/tests/          Vitest tests + mocks for native modules
 | `useIsAppActive` | `() => boolean` | AppState listener (active/background/inactive) |
 | `useViewLayout` | `(ref) => {layout, onLayout}` | Tracks View dimensions via onLayout/measureInWindow |
 | `useFloatingBarOffset` | `() => number` | Floating-bar offset above tabs (iOS 49pt + safe area, Android 80dp) |
-| `useChatUnreadCount` | `(chat) => number` | Unread messages for a single chat |
-| `useChatsUnreadCount` | `() => number` | Total unread across all chats, refetches on app resume |
+| `useDeviceDiskSpace` | `() => …` | Device free/total disk space |
 | `useMediaPermissions` | `({shouldRequest?}) => {loading, granted}` | Media library + image picker permissions w/ AppState refresh. Module also exports `hasAllNeededMediaPermissions()` |
 | `useEffectOnce` | `(effect) => void` | Runs effect callback once per component lifetime |
 | `useDomEvents/` | (subdir) | `useDomDomEvents` (WebView↔Native) + `useNativeDomEvents` (Native↔DOM for Expo DOM components) |
 
 Note: `useNetInfo` and `useHeaderHeight` were removed in favor of `useIsOnline` (which routes through onlineManager) and inline `@react-navigation/elements` reads respectively.
 
-## Stores (src/stores/)
+## Stores (src/stores/) — shared/shell only
+
+Feature stores moved into `src/features/<feature>/store/`. What remains is shared/shell state:
 
 | Store | Key State |
 |-|-|
 | `useApp` | `pathname`, `biometricUnlocked: boolean \| null` |
-| `useDrive` | `selectedItems: DriveItem[]` |
-| `useDriveSelect` | `selectedItems: DriveItem[]` (for move/copy modal) |
-| `useDrivePreview` | `currentItem`, `items`, `headerHeight`, `drivePath`, scroll index (gallery state) |
-| `useTransfers` | `transfers[]` (progress, speed, errors, abort/pause controls) + stats (aggregated metrics with interval timer) |
-| `useChats` | inputViewLayout, inputSelection, suggestionsVisible, inputFocused, typing, inflightMessages, inflightErrors, selectedChats |
-| `useNotes` | inflightContent, activeNote, activeTag, selectedNotes, selectedTags |
-| `useContacts` | `selectedContacts: ContactListItem[]` |
-| `useOffline` | `syncing: boolean` |
-| `useCameraUpload` | `syncing`, `errors[]` |
-| `usePhotos` | visible date range for the photo timeline |
-| `usePlaylists` | selected playlists array |
-| `useIncomingShare` | processing flag for incoming OS share intents |
 | `useSocket` | `state: "connected" \| "disconnected" \| "reconnecting"` |
 | `useHttp` | `port: number \| null`, `getFileUrl: (file: AnyFile) => string` (subscribeWithSelector middleware) |
-| `useChecklist` | parsed: Checklist, inputRefs, initialIds, ids |
-| `useRichtext` | formats: QuillFormats |
-| `useTextEditor` | ready: boolean |
+| `useDrivePreview` | `currentItem`, `items`, `headerHeight`, `drivePath`, scroll index (gallery state) |
+| `useRichtext` | formats: QuillFormats (state of the shared `components/textEditor`) |
+| `useTextEditor` | ready: boolean (state of the shared `components/textEditor`) |
 
-## Queries (src/queries/)
+(`useFileVersions` → `features/drive/store/`, `useChecklist` → `features/notes/store/` — relocated to their owning feature.)
+
+`createSelectionSlice` — shared Zustand slice factory for `selectedItems` (composed by per-feature selection stores).
+
+## Queries (src/queries/) — shared/infra only
+
+Feature queries (drive items, chats, notes, contacts, events, audio metadata, …) moved into
+`src/features/<feature>/queries/`. The file-access queries stayed shared (used by drive/photos/chats/preview).
 
 All use `BASE_QUERY_KEY` prefix, `fetchData` pattern, SQLite persistence via msgpackr.
 Default: refetchOnMount/Reconnect/Focus: "always", staleTime: 0, gcTime: 365 days, networkMode: "always".
@@ -203,36 +251,17 @@ Eternal variant: staleTime/gcTime: Infinity, no refetch (for unchanging data).
 
 | Query | Params | Returns |
 |-|-|-|
-| `useDriveItemsQuery` | path: {type, uuid} | DriveItem[] (8 path types: drive/favorites/recents/sharedIn/sharedOut/trash/links/offline) |
-| `useDirectorySizeQuery` | {uuid, type} | {size, files, dirs} |
-| `useDriveItemVersionsQuery` | {uuid} | FileVersion[] |
-| `useDriveItemStoredOfflineQuery` | {uuid, type} | boolean |
-| `useDriveItemPublicLinkStatusQuery` | {uuid, type} | public-link status for a drive item |
 | `useFileUrlQuery` | {item} | HTTP URL via Http provider (use this for serving file bytes to webview/players) |
 | `useFileUriQuery` | {item} | Local file URI (cached or freshly downloaded) |
 | `useFileTextQuery` | {item} | UTF-8 text body |
 | `useFileBase64Query` | {item} | base64 string body |
-| `useChatsQuery` | — | Chat[] |
-| `useChatMessagesQuery` | {uuid} | ChatMessageWithInflightId[] |
-| `useChatsUnreadQuery` | — | BigInt (total unread) |
-| `useChatMessageLinksQuery` | {message} | URLs extracted from a message body |
-| `useNotesWithContentQuery` | — | (Note & {content})[] |
-| `useNoteContentQuery` | {uuid} | string |
-| `useNoteHistoryQuery` | {uuid} | NoteHistory[] |
-| `useNotesTagsQuery` | — | NoteTag[] |
-| `useContactsQuery` | — | {contacts, blocked} |
-| `useContactRequestsQuery` | — | {incoming, outgoing} |
 | `useAccountQuery` | — | account / user info (incl. `didExportMasterKeys`) |
-| `useEventsQuery` | — | account event log (activity stream) |
-| `useAudioMetadataQuery` | {file} | title/artist/album/duration/picture extracted from audio |
-| `useCacheSizesQuery` | — | aggregated sizes: thumbnails, fileCache, audioCache, sandbox, offline |
-| `useCameraUploadAlbumsQuery` | — | device albums via `MediaLibrary.getAlbumsAsync({includeSmartAlbums: true})` |
 | `useLocalAuthenticationQuery` | — | `{hasHardware, isEnrolled}` device biometric capability |
 | `useMediaPermissionsQuery` | — | media library permission status |
-| `usePlaylistsQuery` | — | audio playlist list + metadata |
 
 `client.ts` exports: `QueryUpdater` class (get/set cache), `queryUpdater` singleton, and `useDefaultQueryParams`.
 `onlineStatus.ts` adapts NetInfo → TanStack `onlineManager`.
+`fileSource.ts` — shared resolver feeding the file-access queries.
 Uncached queries: `["drivePreviewTextContent"]`.
 
 ## Types (src/types.ts)
@@ -260,9 +289,10 @@ DriveItemDirectoryExtracted = all dir/root types
 - `VirtualList` — FlashList wrapper with search bar, pull-to-refresh, grid mode, header height caching
 - `ZoomableView` — pinch/pan/double-tap zoom with worklet-driven gestures, pinch-to-dismiss
 - `FullScreenLoadingModal` — event-driven overlay, `runWithLoading(fn)` utility
+- `settingsGroup` — grouped settings rows scaffold (used by features/settings)
 - `SafeAreaView`, `AnimatedView`, `Button`, `Checkbox`, `ListEmpty`, `Avatar`, `Measure`
 
-### Drive (`components/drive/`)
+### Drive (`features/drive/components/`)
 - Main `Drive` component: item list with sorting/selection, search (local + debounced global)
 - `Item`: thumbnail + metadata row + context menu + selection checkbox + offline/favorite badges
 - `Thumbnail`: lazy generation via thumbnails lib, retry logic (max 3), abort on background
@@ -274,14 +304,14 @@ DriveItemDirectoryExtracted = all dir/root types
 - `FileIcon`: 40+ extension-to-icon mappings
 - `DirectoryIcon`: colored SVG generation with DirColor enum, `directoryColorToHex()`, `shadeColor()`
 
-### Chats (`components/chats/`)
+### Chats (`features/chats/components/`)
 - Chat list with search, selection, create/leave/delete/mute actions
 - Message bubbles with grouping (same author < 1 min), edited badges, context menus
 - `Regexed`: regex-parsed message content (links, @mentions, custom emojis, embeds)
 - Input with @mention autocomplete, custom emoji picker, file sharing
 - `ChatSync`: persists/restores in-flight messages via SQLite
 
-### Notes (`components/notes/`)
+### Notes (`features/notes/components/`)
 - Note list with tag filtering, grouped by pinned/favorited/time-bucket/archived/trashed
 - Content editors delegate to TextEditor (markdown/richtext/code) or Checklist component
 - Tag management with rename/delete/favorite
@@ -297,8 +327,8 @@ DriveItemDirectoryExtracted = all dir/root types
 - `gallery` + `galleryItem` + `header` — pinch-to-dismiss image/video/audio gallery
 - `previewAudio` / `previewVideo` / `previewImage` / `previewPdf` / `previewDocx` / `previewText` — per-type renderers
 
-### Camera Upload (`components/cameraUpload/`)
-- Sync status surface, error list
+### Participants (`components/participants/`)
+- `participantRow` / `participantList` — shared participant UI used by both notes and chats
 
 ### Docx Preview (`components/docxPreview/`)
 - WebView-based renderer for `.docx`
@@ -306,28 +336,28 @@ DriveItemDirectoryExtracted = all dir/root types
 ### Floating Bar (`components/floatingBar/`)
 - `index` + `audioSlot` + `transfersSlot` + `animatedProgressBar` + `separator` — bottom bar above tabs showing active transfers and audio playback
 
-### Background / Root-layout components
+### Shell components (`components/shell/`)
 Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never render their own UI rows.
-- `socket.tsx` — WebSocket event listener → syncs chat/note/contact events to queries/stores
+- `socket.tsx` — WebSocket connection lifecycle + dispatcher → delegates per-feature events to `handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`/`handleContactEvent`
 - `http.tsx` — HTTP provider lifecycle (start on foreground, stop on background) for file serving
-- `notes/sync.tsx`, `chats/sync.tsx` — in-flight content persistence + retry on AppState change
 - `pathname.tsx` — syncs router pathname to `useApp` store
 - `biometric.tsx` — full-screen lock overlay (`BiometricInner` + `Locked` countdown)
 - `privacyCover.tsx` — app-switcher screenshot redactor
 - `offlineBanner.tsx` — global offline indicator (single source of truth via `useIsOnline`)
 - `accountReminders.tsx` — reminder badges (e.g. master keys not exported)
-- `foregroundService.tsx` — Android foreground service for active transfers (notifee)
-- `incomingShareHandler.tsx` — handles OS share-sheet incoming items
+- `cannotDecryptScreen.tsx` — fallback when decryption fails
 - `dismissStack.tsx` — utility component for closing nested modal stacks
 
-### Transfers (`components/transfers.tsx`)
+(Feature-owned background components: `foregroundService` → features/transfers (Android FGS for active transfers, notifee); `incomingShareHandler` → features/incomingShare (OS share-sheet items); notes/chats in-flight `sync` → their features.)
+
+### Transfers (`features/transfers/components/`)
 - Floating progress indicator: active count, speed (bps), progress bar
 - Full transfers list in modal route
 
 ## Config
 
 - **TypeScript**: strict (all flags), path aliases `@/` and `#/` → `src/`, `@/modules/` → `modules/`
-- **ESLint**: flat config (v9), react-compiler: error, no relative imports (enforced), TanStack Query plugin, exhaustive-deps with `useMemoDeep`/`useCallbackDeep`. Submodule trees (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and `plugins/` are ignored.
+- **ESLint**: flat config (v9), react-compiler: error, no relative imports (enforced), TanStack Query plugin, exhaustive-deps with `useMemoDeep`/`useCallbackDeep`. Feature-architecture guardrails: selector-required store hooks, no `export *` barrels in `src/features/`, thin-route import restrictions (see "ESLint guardrails" above). Submodule trees (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and `plugins/` are ignored.
 - **Styling**: Tailwind CSS v4 + Uniwind, global.css with dark theme (OLED black #000000), iOS system color palette
 - **Metro**: crypto/stream/path polyfills, Uniwind CSS + TS type generation
 - **Babel**: babel-preset-expo + react-native-worklets/plugin
@@ -382,16 +412,17 @@ const url = getFileUrl(anyFile) // → http://localhost:{port}/...
 
 ## Import Rules
 
-- **Always use `@/` aliases** — relative imports are forbidden by ESLint
+- **Always use `@/` aliases** — relative imports are forbidden by ESLint. Cross-feature imports use full `@/features/...` paths.
 - **Inline type imports**: `import { type Foo, Bar } from "..."` (not `import type`)
 - **No trailing commas**, **no semicolons**, **double quotes**, **tabs**
 - **No non-null assertion `!`** — handle null explicitly or use explicit `as Type` when the type is known to be non-null
 
 ## Key Architectural Patterns
 
-- **Singleton factories** for all lib services (auth, drive, chats, notes, contacts, transfers, audio, fileCache, etc.) — exported as instance, never instantiated by callers
+- **Feature-based layout** — each product domain lives under `src/features/<feature>/` (screens/components/hooks/queries/store + its lib singleton(s) + socketHandlers). Routes are thin re-exports; `src/components|lib|stores|queries|hooks` are shared/infra only.
+- **Module singletons** for feature/infra services — each exported as a single ready-to-use value, never instantiated by callers. Shape follows state: services holding real mutable runtime state (auth, chats, audio, offline, transfers, cameraUpload, cache, secureStore, sqlite, fileCache, thumbnails, QueryPersisterKv, …) are **class singletons** (`class X {} export default new X()` — the constructor is also the per-test isolation seam); stateless namespaces (alerts, prompts, queryUpdater, actionSheet, sandboxCache, contacts, notes, drive, setup, sorters, …) are **plain objects / module functions** (no class). New code: prefer a plain object / free functions unless the service holds mutable runtime state, in which case use a class singleton.
 - **SDK delegation** — no crypto/API/networking reimplementation in JS; everything routes through `@filen/sdk-rs`
-- **Silent infrastructure** — `src/lib/*` modules expose state, never fire banners/toasts. UX belongs in UI components.
+- **Silent infrastructure** — `src/lib/*` and feature `<feature>.ts` singletons expose state, never fire banners/toasts. UX belongs in UI components.
 - **Optimistic updates** via query updaters for instant UI feedback
 - **Concurrency control** via Semaphores + composite abort/pause signals
 - **Event-driven cache invalidation** via typed EventEmitter
@@ -402,3 +433,5 @@ const url = getFileUrl(anyFile) // → http://localhost:{port}/...
 - **Reconnect handler** (`src/lib/reconnect.ts`) — kicks deferred sync of camera upload, offline cache, notes, chats on every offline→online transition
 - **Root overlay coordination** — Biometric/PrivacyCover lock paint; any new global side-effect must gate on `useAppStore.biometricUnlocked === true` AND `AppState === "active"` before firing
 - **Storage roots** — `src/lib/storageRoots.ts` is the only place that constructs cache/offline/tmp paths. Reference its constants; don't compute paths inline.
+- **Per-feature socket handlers** — the shell `socket.tsx` owns the connection lifecycle + dispatcher; per-feature `socketHandlers.ts` own their slice of events.
+```

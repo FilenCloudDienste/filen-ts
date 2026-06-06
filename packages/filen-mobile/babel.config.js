@@ -3,9 +3,6 @@ module.exports = function (api) {
 
 	return {
 		presets: ["babel-preset-expo"],
-		plugins: [
-			"react-native-worklets/plugin",
-			...(process.env.NODE_ENV === "production" ? ["transform-remove-console"] : [])
-		]
+		plugins: ["react-native-worklets/plugin", ...(process.env.NODE_ENV === "production" ? ["transform-remove-console"] : [])]
 	}
 }

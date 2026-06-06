@@ -1,0 +1,219 @@
+import { useRef, useState } from "react"
+import { type Chat as TChat } from "@/types"
+import View from "@/components/ui/view"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
+import useChatMessagesQuery from "@/features/chats/queries/useChatMessages.query"
+import VirtualList, { type ListRef } from "@/components/ui/virtualList"
+import ListEmpty from "@/components/ui/listEmpty"
+import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller"
+import { AnimatedView } from "@/components/ui/animated"
+import { interpolate, useAnimatedStyle } from "react-native-reanimated"
+import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import { useShallow } from "zustand/shallow"
+import Message from "@/features/chats/components/chat/message"
+import { ActivityIndicator, type View as TView } from "react-native"
+import { useResolveClassNames } from "uniwind"
+import { run } from "@filen/utils"
+import chats from "@/features/chats/chats"
+import useViewLayout from "@/hooks/useViewLayout"
+import alerts from "@/lib/alerts"
+import { onlineManager } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
+
+const Messages = ({ chat }: { chat: TChat }) => {
+	const { t } = useTranslation()
+	const insets = useSafeAreaInsets()
+	const keyboardAnimation = useReanimatedKeyboardAnimation()
+	const inputViewLayout = useChatsStore(useShallow(state => state.inputViewLayout))
+	const listRef = useRef<ListRef<ChatMessageWithInflightId>>(null)
+	const [fetchedMessages, setFetchedMessages] = useState<ChatMessageWithInflightId[]>([])
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const [isFetchingMore, setIsFetchingMore] = useState<boolean>(false)
+	const isFetchingMoreRef = useRef<boolean>(false)
+	const hasMoreRef = useRef<boolean>(true)
+	const viewRef = useRef<TView>(null)
+	const { onLayout, layout } = useViewLayout(viewRef)
+
+	const chatMessagesQuery = useChatMessagesQuery(
+		{
+			uuid: chat.uuid
+		},
+		{
+			enabled: !!chat
+		}
+	)
+
+	const messages = (() => {
+		if (chatMessagesQuery.status !== "success") {
+			return []
+		}
+
+		// Dedupe by message uuid before rendering: fetchedMessages (older paginated
+		// pages) can overlap chatMessagesQuery.data at the listBefore page boundary,
+		// and keyExtractor uses inner.uuid, so duplicate keys would corrupt FlashList.
+		const byUuid = new Map<string, ChatMessageWithInflightId>()
+
+		for (const message of chatMessagesQuery.data) {
+			byUuid.set(message.inner.uuid, message)
+		}
+
+		for (const message of fetchedMessages) {
+			if (!byUuid.has(message.inner.uuid)) {
+				byUuid.set(message.inner.uuid, message)
+			}
+		}
+
+		return [...byUuid.values()].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
+	})()
+
+	const headerStyle = useAnimatedStyle(() => {
+		const standardHeight = insets.bottom + inputViewLayout.height + 16
+
+		return {
+			height: interpolate(keyboardAnimation.progress.value, [0, 1], [standardHeight, standardHeight - 16]),
+			width: "100%",
+			backgroundColor: "transparent"
+		}
+	}, [insets.bottom, keyboardAnimation, inputViewLayout.height])
+
+	return (
+		<View
+			ref={viewRef}
+			onLayout={onLayout}
+			className="bg-transparent flex-1"
+			style={{
+				transform: [
+					{
+						scaleY: -1
+					}
+				]
+			}}
+		>
+			<VirtualList
+				ref={listRef}
+				className="flex-1"
+				contentInsetAdjustmentBehavior="automatic"
+				contentContainerClassName="android:pb-8"
+				keyExtractor={item => {
+					return item.inner.uuid
+				}}
+				data={messages}
+				renderItem={info => {
+					if (!chat) {
+						return null
+					}
+
+					return (
+						<Message
+							chat={chat}
+							info={info}
+							nextMessage={messages[info.index - 1]}
+							prevMessage={messages[info.index + 1]}
+							layout={layout}
+						/>
+					)
+				}}
+				onEndReachedThreshold={0.5}
+				loading={chatMessagesQuery.status !== "success"}
+				footerComponent={() => {
+					if (!isFetchingMore) {
+						return undefined
+					}
+
+					return (
+						<View className="w-full h-auto items-center justify-center pt-4">
+							<ActivityIndicator
+								size="small"
+								color={textMutedForeground.color}
+							/>
+						</View>
+					)
+				}}
+				onEndReached={async () => {
+					if (
+						isFetchingMoreRef.current ||
+						chatMessagesQuery.status !== "success" ||
+						messages.length === 0 ||
+						!hasMoreRef.current
+					) {
+						return
+					}
+
+					// Inverted list: onEndReached fires when the user scrolls UP
+					// to load older messages. chats.listBefore is an SDK call,
+					// so bail silently offline rather than triggering throwOnError
+					// + the spinner hang it implies.
+					if (!onlineManager.isOnline()) {
+						return
+					}
+
+					const result = await run(async defer => {
+						isFetchingMoreRef.current = true
+
+						setIsFetchingMore(true)
+
+						defer(() => {
+							isFetchingMoreRef.current = false
+
+							setIsFetchingMore(false)
+						})
+
+						const lastMessage = messages[messages.length - 1]
+
+						if (!lastMessage) {
+							return []
+						}
+
+						const moreMessages = await chats.listBefore({
+							chat,
+							before: lastMessage.sentTimestamp
+						})
+
+						return moreMessages.map(m => ({
+							...m,
+							inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+						})) satisfies ChatMessageWithInflightId[]
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					if (result.data.length === 0) {
+						hasMoreRef.current = false
+					}
+
+					setFetchedMessages(prev => [...prev, ...result.data])
+				}}
+				maintainVisibleContentPosition={{
+					disabled: true
+				}}
+				headerComponent={() => {
+					return <AnimatedView style={headerStyle} />
+				}}
+				emptyComponent={() => (
+					<View
+						className="flex-1"
+						style={{
+							transform: [
+								{
+									scaleY: -1
+								}
+							]
+						}}
+					>
+						<ListEmpty
+							icon="chatbubble-outline"
+							title={t("no_messages")}
+						/>
+					</View>
+				)}
+			/>
+		</View>
+	)
+}
+
+export default Messages

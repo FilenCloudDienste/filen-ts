@@ -7,6 +7,20 @@ import importPlugin from "eslint-plugin-import"
 
 const compat = new FlatCompat()
 
+// --- Feature-based architecture guardrails (added after the src/features/ migration) ---
+// Zustand hooks must always take a selector — a bare useXStore() subscribes to the whole
+// store and re-renders on every change.
+const ZUSTAND_SELECTOR_RULE = {
+	selector: "CallExpression[callee.name=/^use[A-Z][a-zA-Z]*Store$/][arguments.length=0]",
+	message:
+		"Zustand store hooks must be called with a selector — e.g. useXStore(s => s.foo) or useXStore(useShallow(...)); never a bare useXStore()."
+}
+// No barrel re-export aggregators inside features/ (hurt Metro tree-shaking + fast refresh).
+const NO_FEATURE_BARREL_RULE = {
+	selector: "ExportAllDeclaration",
+	message: "No barrel re-exports (export * from ...) inside src/features/ — import the specific module directly."
+}
+
 export default [
 	js.configs.recommended,
 	...compat.extends(
@@ -35,7 +49,6 @@ export default [
 			"tailwind.config.js",
 			"index.js",
 			"eslint.config.mjs",
-			"metro.config.js",
 			"plugins/**/*",
 			"scripts/**/*",
 			"src/uniwind-types.d.ts",
@@ -80,6 +93,7 @@ export default [
 					patterns: [".*"]
 				}
 			],
+			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE],
 			"react-hooks/exhaustive-deps": [
 				"warn",
 				{
@@ -94,6 +108,38 @@ export default [
 					project: "./tsconfig.json"
 				}
 			}
+		}
+	},
+	{
+		// No barrel re-exports inside features/ (in addition to the project-wide zustand rule).
+		files: ["src/features/**/*.ts", "src/features/**/*.tsx"],
+		rules: {
+			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE, NO_FEATURE_BARREL_RULE]
+		}
+	},
+	{
+		// Routes stay thin: a route only re-exports a feature screen or renders a feature
+		// component. It must not import feature stores/queries (that's logic — it belongs in
+		// the feature's screen/hook). _layout.tsx (providers/registration) and +native-intent
+		// (deep-link handling) are exempt.
+		files: ["src/routes/**/*.ts", "src/routes/**/*.tsx"],
+		ignores: ["src/routes/**/_layout.tsx", "src/routes/+native-intent.ts"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: [".*"]
+						},
+						{
+							group: ["@/features/*/store", "@/features/*/store/*", "@/features/*/queries", "@/features/*/queries/*"],
+							message:
+								"Routes must stay thin — no feature store/query imports. Move logic into the feature's screen/hook; the route should only re-export or render a feature screen/component."
+						}
+					]
+				}
+			]
 		}
 	},
 	{

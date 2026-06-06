@@ -1,4 +1,4 @@
-import { useRef, useState, Fragment, memo } from "react"
+import { useRef, useState, Fragment } from "react"
 import { withUniwind, useResolveClassNames } from "uniwind"
 import { type View as RNView, RefreshControl, ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
@@ -31,23 +31,75 @@ export type VirtualListExtraProps = {
 	headerComponent?: () => React.ReactNode
 }
 
-const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) => {
+/**
+ * Pure helper that resolves the number of columns for a VirtualList.
+ * Exported for unit-testing only.
+ *
+ * Rules (in priority order):
+ *  1. If an explicit `itemsPerRow` prop is provided (truthy), use it.
+ *  2. If grid mode is off OR itemWidth is absent, return 1.
+ *  3. Otherwise compute Math.round(Math.max(1, Math.round(layoutWidth / itemWidth))).
+ *     The inner Math.max(1, …) clamps to ≥1, protecting against layoutWidth=0.
+ */
+export function resolveItemsPerRow({
+	itemsPerRow,
+	grid,
+	itemWidth,
+	layoutWidth
+}: {
+	itemsPerRow?: number
+	grid?: boolean
+	itemWidth?: number
+	layoutWidth: number
+}): number {
+	if (itemsPerRow) {
+		return itemsPerRow
+	}
+
+	if (!grid || !itemWidth) {
+		return 1
+	}
+
+	return Math.round(Math.max(1, Math.round(layoutWidth / itemWidth)))
+}
+
+/**
+ * Validates required VirtualList props; throws with a descriptive message
+ * when a required constraint is violated.
+ * Exported for unit-testing only.
+ */
+export function validateVirtualListProps({
+	keyExtractor,
+	grid,
+	itemWidth,
+	itemHeight
+}: {
+	keyExtractor?: unknown
+	grid?: boolean
+	itemWidth?: number
+	itemHeight?: number
+}): void {
+	if (!keyExtractor) {
+		throw new Error("VirtualList requires a keyExtractor prop")
+	}
+
+	if (grid && (typeof itemWidth !== "number" || typeof itemHeight !== "number")) {
+		throw new Error("VirtualList in grid mode requires itemWidth and itemHeight props")
+	}
+}
+
+const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps) => {
 	const viewRef = useRef<RNView>(null)
 	const { layout, onLayout } = useViewLayout(viewRef)
 	const [refreshing, setRefreshing] = useState<boolean>(false)
 	const textForeground = useResolveClassNames("text-foreground")
 
-	const itemsPerRow = (() => {
-		if (props.itemsPerRow) {
-			return props.itemsPerRow
-		}
-
-		if (!props.grid || !props.itemWidth) {
-			return 1
-		}
-
-		return Math.round(Math.max(1, Math.round(layout.width / props.itemWidth)))
-	})()
+	const itemsPerRow = resolveItemsPerRow({
+		itemsPerRow: props.itemsPerRow,
+		grid: props.grid,
+		itemWidth: props.itemWidth,
+		layoutWidth: layout.width
+	})
 
 	const onRefresh = async () => {
 		if (!props.onRefresh) {
@@ -105,13 +157,12 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 		return null
 	})()
 
-	if (!props.keyExtractor) {
-		throw new Error("VirtualList requires a keyExtractor prop")
-	}
-
-	if (props.grid && (typeof props.itemWidth !== "number" || typeof props.itemHeight !== "number")) {
-		throw new Error("VirtualList in grid mode requires itemWidth and itemHeight props")
-	}
+	validateVirtualListProps({
+		keyExtractor: props.keyExtractor,
+		grid: props.grid,
+		itemWidth: props.itemWidth,
+		itemHeight: props.itemHeight
+	})
 
 	return (
 		<Fragment>
@@ -159,7 +210,7 @@ const VirtualListInner = memo(<T,>(props: FlashListProps<T> & React.RefAttribute
 	displayName?: string
 }
 
-const VirtualList = memo(withUniwind(VirtualListInner) as typeof VirtualListInner) as (<T>(
+const VirtualList = withUniwind(VirtualListInner) as typeof VirtualListInner as (<T>(
 	props: FlashListProps<T> & React.RefAttributes<ListRef<T>> & VirtualListExtraProps
 ) => React.JSX.Element) & {
 	displayName?: string

@@ -1,10 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const {
-	mockGetSdkClients,
-	mockGetDirSize,
-	cacheDirectoryUuidToAnyNormalDir
-} = vi.hoisted(() => {
+const { mockGetSdkClients, mockGetDirSize, cacheDirectoryUuidToAnyNormalDir } = vi.hoisted(() => {
 	const cacheDirectoryUuidToAnyNormalDir = new Map<string, unknown>()
 	const mockGetDirSize = vi.fn()
 
@@ -52,13 +48,15 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/features/offline/offline", () => ({
 	default: {
 		itemSize: vi.fn().mockResolvedValue({ size: 0, files: 0, dirs: 0 })
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrapDirMeta: vi.fn().mockImplementation((dir: unknown) => ({
 		uuid: (dir as Record<string, unknown>)?.["uuid"] ?? "dir-uuid",
 		meta: { name: "Dir" },
@@ -119,7 +117,7 @@ vi.mock("@filen/sdk-rs", () => {
 	}
 })
 
-import { fetchData } from "@/queries/useDirectorySize.query"
+import { fetchData } from "@/features/drive/queries/useDirectorySize.query"
 
 beforeEach(() => {
 	mockGetSdkClients.mockReset()

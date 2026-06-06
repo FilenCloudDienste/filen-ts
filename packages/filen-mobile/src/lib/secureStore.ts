@@ -11,7 +11,7 @@ import events from "@/lib/events"
 import { Buffer } from "react-native-quick-crypto"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import isEqual from "react-fast-compare"
-import { normalizeFilePathForSdk } from "@/lib/utils"
+import { normalizeFilePathForSdk } from "@/lib/paths"
 import useEffectOnce from "@/hooks/useEffectOnce"
 
 export const VERSION = 1
@@ -474,7 +474,7 @@ function getSecureStoreFlushMutex(key: string): Semaphore {
 }
 
 export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => T)) => void] {
-	const [state, setState] = useState<T>(() => cache.secureStore.get(key) ?? initialValue)
+	const [state, setState] = useState<T>(() => (cache.secureStore.get(key) as T | undefined) ?? initialValue)
 	const lastValueRef = useRef<T>(state)
 	const flushMutexRef = useRef<Semaphore>(getSecureStoreFlushMutex(key))
 	const isLocalUpdateRef = useRef<boolean>(false)
@@ -516,7 +516,6 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	const set = useCallback(
 		(fn: T | ((prev: T) => T)): void => {
 			isLocalUpdateRef.current = true
-
 			;(async () => {
 				const result = await run(async defer => {
 					await flushMutexRef.current.acquire()
@@ -554,7 +553,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		const { cleanup } = runEffect(defer => {
 			const secureStoreChangeSubscription = events.subscribe("secureStoreChange", payload => {
 				if (payload.key === key && !isLocalUpdateRef.current) {
-					setStateChecked(payload.value)
+					setStateChecked(payload.value as T)
 				}
 			})
 

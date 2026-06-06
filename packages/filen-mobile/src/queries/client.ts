@@ -5,7 +5,7 @@ import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
 import { debounce } from "es-toolkit/function"
-import { unwrapSdkError, isNetworkClassError } from "@/lib/utils"
+import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
 import auth from "@/lib/auth"
@@ -426,12 +426,13 @@ export const queryClient = new QueryClient({
 	}
 })
 
-export class QueryUpdater {
-	public get<T>(queryKey: unknown[]): T | undefined {
+// Plain object namespace (no instance state) — get/set delegate to the module-level
+// queryClient. Former `class QueryUpdater` added no value (zero fields, zero `this`).
+export const queryUpdater = {
+	get<T>(queryKey: unknown[]): T | undefined {
 		return queryClient.getQueryData<T>(queryKey)
-	}
-
-	public set<T>(queryKey: unknown[], updater: T | ((prev?: T) => T), dataUpdatedAt?: number): void {
+	},
+	set<T>(queryKey: unknown[], updater: T | ((prev?: T) => T), dataUpdatedAt?: number): void {
 		queryClient.setQueryData(
 			queryKey,
 			(oldData: T | undefined) => {
@@ -451,7 +452,5 @@ export class QueryUpdater {
 		})
 	}
 }
-
-export const queryUpdater = new QueryUpdater()
 
 export default queryClient

@@ -8,9 +8,9 @@ vi.mock("@/lib/i18n", () => ({
 }))
 
 // @filen/sdk-rs mock: ErrorKind values match the actual WASM string literals from sdk-rs.d.ts.
-// The switch in utils.ts references ErrorKind.X — our mock must supply matching string values.
+// The switch in sdkErrors.ts references ErrorKind.X — our mock must supply matching string values.
 // NOTE: the SDK type exposes ErrorKind as string literals: "IO" (not "Io"), and "HeifError" is
-// absent from the published union type — the utils.ts switch references ErrorKind.HeifError and
+// absent from the published union type — the sdkErrors.ts switch references ErrorKind.HeifError and
 // ErrorKind.Io, but those names are resolved through this mock, so we match what the switch uses.
 vi.mock("@filen/sdk-rs", () => {
 	// Values must equal what the switch compares against at runtime.
@@ -59,7 +59,6 @@ vi.mock("@filen/sdk-rs", () => {
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-// expo-file-system is pulled in transitively by utils.ts via storageRoots / fsUtils
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("@/lib/cache", () => ({ default: { rootUuid: null } }))
@@ -82,8 +81,8 @@ import { security } from "@/locales/en/security"
 import { settings } from "@/locales/en/settings"
 import { transfers } from "@/locales/en/transfers"
 
-// Imported real; mocks only cover its boundaries (i18n, expo-file-system, @filen/sdk-rs)
-import { unwrappedSdkErrorToHumanReadable } from "@/lib/utils"
+// Imported real; mocks only cover its boundaries (i18n, @filen/sdk-rs)
+import { unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -1,10 +1,9 @@
 import { ExpoImage } from "@/components/ui/image"
-import { memo } from "react"
 import { Paths } from "expo-file-system"
 import { isValidHexColor, cn } from "@filen/utils"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 
 const FILE_ICONS = {
 	dmg: require("@/components/itemIcons/svg/iso.svg"),
@@ -27,196 +26,194 @@ const FILE_ICONS = {
 	other: require("@/components/itemIcons/svg/other.svg")
 }
 
-export const FileIcon = memo(
-	({ name, width, height, className }: { name: string; width?: number; height?: number; className?: string }) => {
-		const source = (() => {
-			const previewType = getPreviewType(name)
+export const FileIcon = ({ name, width, height, className }: { name: string; width?: number; height?: number; className?: string }) => {
+	const source = (() => {
+		const previewType = getPreviewType(name)
 
-			switch (previewType) {
-				case "audio": {
-					return FILE_ICONS.audio
-				}
-
-				case "video": {
-					return FILE_ICONS.video
-				}
-
-				case "image": {
-					return FILE_ICONS.image
-				}
-
-				case "pdf": {
-					return FILE_ICONS.pdf
-				}
-
-				case "text": {
-					return FILE_ICONS.txt
-				}
-
-				case "docx": {
-					return FILE_ICONS.doc
-				}
+		switch (previewType) {
+			case "audio": {
+				return FILE_ICONS.audio
 			}
 
-			const extname = Paths.extname(name.trim().toLowerCase())
-
-			switch (extname) {
-				case ".dmg":
-				case ".iso": {
-					return FILE_ICONS.iso
-				}
-
-				case ".cad": {
-					return FILE_ICONS.cad
-				}
-
-				case ".psd": {
-					return FILE_ICONS.psd
-				}
-
-				case ".apk": {
-					return FILE_ICONS.apk
-				}
-
-				case ".ipa": {
-					return FILE_ICONS.ipa
-				}
-
-				case ".txt": {
-					return FILE_ICONS.txt
-				}
-
-				case ".pdf": {
-					return FILE_ICONS.pdf
-				}
-
-				case ".gif":
-				case ".png":
-				case ".jpg":
-				case ".jpeg":
-				case ".heic":
-				case ".webp":
-				case ".tiff":
-				case ".bmp":
-				case ".jfif":
-				case ".jpe":
-				case ".svg": {
-					return FILE_ICONS.image
-				}
-
-				case ".pkg":
-				case ".rar":
-				case ".tar":
-				case ".zip":
-				case ".7zip": {
-					return FILE_ICONS.archive
-				}
-
-				case ".wmv":
-				case ".mov":
-				case ".avi":
-				case ".mkv":
-				case ".webm":
-				case ".mp4": {
-					return FILE_ICONS.video
-				}
-
-				case ".mp3": {
-					return FILE_ICONS.audio
-				}
-
-				case ".js":
-				case ".cjs":
-				case ".mjs":
-				case ".jsx":
-				case ".tsx":
-				case ".ts":
-				case ".cpp":
-				case ".c":
-				case ".php":
-				case ".htm":
-				case ".html5":
-				case ".html":
-				case ".css":
-				case ".css3":
-				case ".sass":
-				case ".xml":
-				case ".json":
-				case ".sql":
-				case ".java":
-				case ".kt":
-				case ".swift":
-				case ".py3":
-				case ".py":
-				case ".cmake":
-				case ".cs":
-				case ".dart":
-				case ".dockerfile":
-				case ".go":
-				case ".less":
-				case ".yaml":
-				case ".vue":
-				case ".svelte":
-				case ".vbs":
-				case ".toml":
-				case ".cobol":
-				case ".h":
-				case ".conf":
-				case ".sh":
-				case ".rs":
-				case ".rb":
-				case ".ps1":
-				case ".bat":
-				case ".ps":
-				case ".protobuf":
-				case ".ahk":
-				case ".litcoffee":
-				case ".coffee":
-				case ".proto": {
-					return FILE_ICONS.code
-				}
-
-				case ".jar":
-				case ".exe":
-				case ".bin": {
-					return FILE_ICONS.exe
-				}
-
-				case ".doc":
-				case ".docx": {
-					return FILE_ICONS.doc
-				}
-
-				case ".ppt":
-				case ".pptx": {
-					return FILE_ICONS.ppt
-				}
-
-				case ".xls":
-				case ".xlsx": {
-					return FILE_ICONS.xls
-				}
-
-				default: {
-					return FILE_ICONS.other
-				}
+			case "video": {
+				return FILE_ICONS.video
 			}
-		})()
 
-		return (
-			<ExpoImage
-				className={cn("shrink-0 bg-transparent", className, "rounded-none")}
-				source={source}
-				style={{
-					width: width ?? 32,
-					height: height ?? 32
-				}}
-				contentFit="contain"
-				cachePolicy="disk"
-			/>
-		)
-	}
-)
+			case "image": {
+				return FILE_ICONS.image
+			}
+
+			case "pdf": {
+				return FILE_ICONS.pdf
+			}
+
+			case "text": {
+				return FILE_ICONS.txt
+			}
+
+			case "docx": {
+				return FILE_ICONS.doc
+			}
+		}
+
+		const extname = Paths.extname(name.trim().toLowerCase())
+
+		switch (extname) {
+			case ".dmg":
+			case ".iso": {
+				return FILE_ICONS.iso
+			}
+
+			case ".cad": {
+				return FILE_ICONS.cad
+			}
+
+			case ".psd": {
+				return FILE_ICONS.psd
+			}
+
+			case ".apk": {
+				return FILE_ICONS.apk
+			}
+
+			case ".ipa": {
+				return FILE_ICONS.ipa
+			}
+
+			case ".txt": {
+				return FILE_ICONS.txt
+			}
+
+			case ".pdf": {
+				return FILE_ICONS.pdf
+			}
+
+			case ".gif":
+			case ".png":
+			case ".jpg":
+			case ".jpeg":
+			case ".heic":
+			case ".webp":
+			case ".tiff":
+			case ".bmp":
+			case ".jfif":
+			case ".jpe":
+			case ".svg": {
+				return FILE_ICONS.image
+			}
+
+			case ".pkg":
+			case ".rar":
+			case ".tar":
+			case ".zip":
+			case ".7zip": {
+				return FILE_ICONS.archive
+			}
+
+			case ".wmv":
+			case ".mov":
+			case ".avi":
+			case ".mkv":
+			case ".webm":
+			case ".mp4": {
+				return FILE_ICONS.video
+			}
+
+			case ".mp3": {
+				return FILE_ICONS.audio
+			}
+
+			case ".js":
+			case ".cjs":
+			case ".mjs":
+			case ".jsx":
+			case ".tsx":
+			case ".ts":
+			case ".cpp":
+			case ".c":
+			case ".php":
+			case ".htm":
+			case ".html5":
+			case ".html":
+			case ".css":
+			case ".css3":
+			case ".sass":
+			case ".xml":
+			case ".json":
+			case ".sql":
+			case ".java":
+			case ".kt":
+			case ".swift":
+			case ".py3":
+			case ".py":
+			case ".cmake":
+			case ".cs":
+			case ".dart":
+			case ".dockerfile":
+			case ".go":
+			case ".less":
+			case ".yaml":
+			case ".vue":
+			case ".svelte":
+			case ".vbs":
+			case ".toml":
+			case ".cobol":
+			case ".h":
+			case ".conf":
+			case ".sh":
+			case ".rs":
+			case ".rb":
+			case ".ps1":
+			case ".bat":
+			case ".ps":
+			case ".protobuf":
+			case ".ahk":
+			case ".litcoffee":
+			case ".coffee":
+			case ".proto": {
+				return FILE_ICONS.code
+			}
+
+			case ".jar":
+			case ".exe":
+			case ".bin": {
+				return FILE_ICONS.exe
+			}
+
+			case ".doc":
+			case ".docx": {
+				return FILE_ICONS.doc
+			}
+
+			case ".ppt":
+			case ".pptx": {
+				return FILE_ICONS.ppt
+			}
+
+			case ".xls":
+			case ".xlsx": {
+				return FILE_ICONS.xls
+			}
+
+			default: {
+				return FILE_ICONS.other
+			}
+		}
+	})()
+
+	return (
+		<ExpoImage
+			className={cn("shrink-0 bg-transparent", className, "rounded-none")}
+			source={source}
+			style={{
+				width: width ?? 32,
+				height: height ?? 32
+			}}
+			contentFit="contain"
+			cachePolicy="disk"
+		/>
+	)
+}
 
 export function shadeColor(color: string, decimal: number): string {
 	const base = color.startsWith("#") ? 1 : 0
@@ -356,25 +353,33 @@ export const directorySvg = memoize(
 	}
 )
 
-export const DirectoryIcon = memo(
-	({ color, width, height, className }: { color?: DirColor; width?: number; height?: number; className?: string }) => {
-		return (
-			<ExpoImage
-				className={cn("shrink-0 bg-transparent", className, "rounded-none")}
-				source={{
-					uri: directorySvg({
-						color: unwrapDirColor(color),
-						width,
-						height
-					})
-				}}
-				style={{
-					width: width ?? 32,
-					height: height ?? 32
-				}}
-				contentFit="contain"
-				cachePolicy="disk"
-			/>
-		)
-	}
-)
+export const DirectoryIcon = ({
+	color,
+	width,
+	height,
+	className
+}: {
+	color?: DirColor
+	width?: number
+	height?: number
+	className?: string
+}) => {
+	return (
+		<ExpoImage
+			className={cn("shrink-0 bg-transparent", className, "rounded-none")}
+			source={{
+				uri: directorySvg({
+					color: unwrapDirColor(color),
+					width,
+					height
+				})
+			}}
+			style={{
+				width: width ?? 32,
+				height: height ?? 32
+			}}
+			contentFit="contain"
+			cachePolicy="disk"
+		/>
+	)
+}

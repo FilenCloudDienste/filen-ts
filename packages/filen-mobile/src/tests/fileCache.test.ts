@@ -38,8 +38,9 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({
-	wrapAbortSignalForSdk: vi.fn(s => s),
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (p: string) =>
 		p
 			.trim()
@@ -48,7 +49,11 @@ vi.mock("@/lib/utils", () => ({
 			.replace(/\/$/, "")
 }))
 
-vi.mock("@/lib/offline", () => ({
+vi.mock("@/lib/signals", () => ({
+	wrapAbortSignalForSdk: vi.fn(s => s)
+}))
+
+vi.mock("@/features/offline/offline", () => ({
 	VERSION: 1,
 	default: {
 		getLocalFile: vi.fn().mockResolvedValue(null)
@@ -57,7 +62,7 @@ vi.mock("@/lib/offline", () => ({
 
 // fsUtils (imported by fileCache.ts) now pulls VERSION from sibling lib modules.
 // Mock them with just the VERSION export so their full transitive deps don't load.
-vi.mock("@/lib/audioCache", () => ({ VERSION: 1 }))
+vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
 vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
 vi.mock("react-fast-compare", () => ({
@@ -70,9 +75,9 @@ import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import { type DriveItem, type CacheItem } from "@/types"
 import auth from "@/lib/auth"
-import { wrapAbortSignalForSdk } from "@/lib/utils"
+import { wrapAbortSignalForSdk } from "@/lib/signals"
 import { type Metadata } from "@/lib/fileCache"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
 
 const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
@@ -801,7 +806,10 @@ describe("FileCache", () => {
 
 			fs.set(goodDir, "dir")
 			fs.set(`${goodDir}/${goodUuid}.txt`, new Uint8Array([1]))
-			fs.set(`${goodDir}/${goodUuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...goodItem, cachedAt: expiredTime }))))
+			fs.set(
+				`${goodDir}/${goodUuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize({ ...goodItem, cachedAt: expiredTime })))
+			)
 
 			const corruptUuid = "corrupt-uuid"
 			const corruptDir = `${BASE_DIR}/${corruptUuid}`
@@ -853,7 +861,10 @@ describe("FileCache", () => {
 
 			fs.set(dir, "dir")
 			fs.set(`${dir}/${uuid}.txt`, new Uint8Array([1]))
-			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: exactBoundaryTime }))))
+			fs.set(
+				`${dir}/${uuid}.filenmeta`,
+				new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: exactBoundaryTime })))
+			)
 
 			await cache.gc(age)
 

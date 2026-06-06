@@ -4,13 +4,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mock factories — must be declared before any vi.mock() calls
 // ---------------------------------------------------------------------------
 
-const {
-	mockGetSdkClients,
-	mockAuthedSdkClient,
-	mockChatUuidToChat,
-	mockNoteUuidToNote,
-	mockParseFilenPublicLink
-} = vi.hoisted(() => {
+const { mockGetSdkClients, mockAuthedSdkClient, mockChatUuidToChat, mockNoteUuidToNote, mockParseFilenPublicLink } = vi.hoisted(() => {
 	const mockAuthedSdkClient = {
 		getDirPublicLinkInfo: vi.fn(),
 		getLinkedFile: vi.fn(),
@@ -84,46 +78,15 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 // ---------------------------------------------------------------------------
-// @/lib/utils — provide pure re-implementations of safeParseUrl and
-// getPreviewType so they exercise real logic without dragging in
-// expo-localization (__DEV__ not defined in Vitest node env).
+// getPreviewType is re-implemented inline (below) only to avoid dragging in
+// expo-localization (__DEV__ not defined in Vitest node env). safeParseUrl, by
+// contrast, runs the REAL implementation via the @/lib/linkParser mock, so the
+// SSRF blocklist (the full fc00::/7 ULA range etc.) is exercised faithfully and
+// can never drift from @/constants PRIVATE_HOST.
 // ---------------------------------------------------------------------------
-const PRIVATE_HOST_REGEXES = [
-	/^localhost$/i,
-	/\.local$/i,
-	/^127\./,
-	/^10\./,
-	/^192\.168\./,
-	/^172\.(1[6-9]|2\d|3[01])\./,
-	/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
-	/^169\.254\./,
-	/^0\.0\.0\.0$/,
-	/^::1$/,
-	/^fc00:/i,
-	/^fe80:/i
-]
-
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico"])
 const VIDEO_EXTS = new Set([".mp4", ".mov", ".m4v", ".3gp"])
 const AUDIO_EXTS = new Set([".mp3", ".m4a", ".aac", ".wav", ".aiff", ".caf", ".flac", ".alac"])
-
-function safeParseUrlInline(raw: string): URL | null {
-	try {
-		const u = new URL(raw.trim())
-
-		if (u.protocol !== "https:") return null
-		if (u.username || u.password) return null
-
-		// Strip IPv6 brackets so regexes match bare addresses (e.g. [::1] → ::1)
-		const hostname = u.hostname.replace(/^\[|\]$/g, "")
-
-		if (PRIVATE_HOST_REGEXES.some(p => p.test(hostname))) return null
-
-		return u
-	} catch {
-		return null
-	}
-}
 
 function getExtname(name: string): string {
 	const trimmed = name.trim().toLowerCase()
@@ -151,32 +114,36 @@ function getPreviewTypeInline(name: string): string {
 	}
 }
 
-vi.mock("@/lib/utils", () => ({
-	safeParseUrl: safeParseUrlInline,
-	getPreviewType: getPreviewTypeInline,
-	extractLinks: vi.fn()
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/previewType", () => ({
+	getPreviewType: getPreviewTypeInline
 }))
+
+vi.mock("@/lib/linkParser", async () => {
+	const actual = await vi.importActual<typeof import("@/lib/linkParser")>("@/lib/linkParser")
+
+	return {
+		safeParseUrl: actual.safeParseUrl,
+		extractLinks: vi.fn()
+	}
+})
 
 // ---------------------------------------------------------------------------
 // Imports under test (placed AFTER all vi.mock() calls)
 // ---------------------------------------------------------------------------
 
-import { probeMedia, fetchData as fetchChatMessageLinks } from "@/queries/useChatMessageLinks.query"
-import { fetchData as fetchChatMessages } from "@/queries/useChatMessages.query"
-import { fetchData as fetchNotesWithContent } from "@/queries/useNotesWithContent.query"
-import { fetchData as fetchNotesTags } from "@/queries/useNotesTags.query"
-import { fetchData as fetchChats } from "@/queries/useChats.query"
+import { probeMedia, fetchData as fetchChatMessageLinks } from "@/features/chats/queries/useChatMessageLinks.query"
+import { fetchData as fetchChatMessages } from "@/features/chats/queries/useChatMessages.query"
+import { fetchData as fetchNotesWithContent } from "@/features/notes/queries/useNotesWithContent.query"
+import { fetchData as fetchNotesTags } from "@/features/notes/queries/useNotesTags.query"
+import { fetchData as fetchChats } from "@/features/chats/queries/useChats.query"
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal Response-like object
 // ---------------------------------------------------------------------------
 
-function makeResponse(opts: {
-	url?: string
-	ok?: boolean
-	contentType?: string | null
-	contentLength?: string | null
-}): Response {
+function makeResponse(opts: { url?: string; ok?: boolean; contentType?: string | null; contentLength?: string | null }): Response {
 	const headers = new Map<string, string>()
 
 	if (opts.contentType !== undefined && opts.contentType !== null) {
@@ -280,9 +247,7 @@ describe("probeMedia", () => {
 		// Must be blocked
 		expect(result.success).toBe(false)
 		// Must NOT have fetched the internal host — fetch called at most once (HEAD) + maybe GET, never for the internal IP
-		const internalCalls = fetchMock.mock.calls.filter(
-			(args: unknown[]) => typeof args[0] === "string" && args[0].includes("192.168")
-		)
+		const internalCalls = fetchMock.mock.calls.filter((args: unknown[]) => typeof args[0] === "string" && args[0].includes("192.168"))
 
 		expect(internalCalls).toHaveLength(0)
 	})
@@ -1194,5 +1159,180 @@ describe("fetchData (useChats)", () => {
 
 		expect(mockChatUuidToChat.has("c-a")).toBe(true)
 		expect(mockChatUuidToChat.has("c-b")).toBe(true)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// safeParseUrl — real implementation (finding #174)
+//
+// @/lib/linkParser is mocked above to feed the useChatMessageLinks tests,
+// so we reach the real safeParseUrl via vi.importActual.  These tests lock
+// in the SSRF-filtering contract that the inline copy in the mock tries to
+// approximate but could silently diverge from.
+// ---------------------------------------------------------------------------
+
+describe("safeParseUrl (real implementation — SSRF guard)", () => {
+	type LinkParser = { safeParseUrl: (raw: string) => URL | null }
+
+	async function realSafeParseUrl(raw: string): Promise<URL | null> {
+		const mod = await vi.importActual<LinkParser>("@/lib/linkParser")
+
+		return mod.safeParseUrl(raw)
+	}
+
+	it("returns a URL object for a valid public HTTPS URL", async () => {
+		const result = await realSafeParseUrl("https://example.com/path?q=1")
+
+		expect(result).not.toBeNull()
+		expect(result?.href).toBe("https://example.com/path?q=1")
+	})
+
+	it("returns null for an HTTP (non-HTTPS) URL", async () => {
+		const result = await realSafeParseUrl("http://example.com/img.jpg")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for an ftp:// URL", async () => {
+		const result = await realSafeParseUrl("ftp://files.example.com/file.txt")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a URL with embedded credentials (user:pass@host)", async () => {
+		const result = await realSafeParseUrl("https://user:password@example.com/")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a URL with a username but no password", async () => {
+		const result = await realSafeParseUrl("https://user@example.com/secret")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for localhost", async () => {
+		const result = await realSafeParseUrl("https://localhost/api")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for 127.0.0.1 (loopback)", async () => {
+		const result = await realSafeParseUrl("https://127.0.0.1/secret")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 10.x.x.x private IPv4 address", async () => {
+		const result = await realSafeParseUrl("https://10.0.0.1/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 192.168.x.x private IPv4 address", async () => {
+		const result = await realSafeParseUrl("https://192.168.1.100/admin")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 172.16.x.x private IPv4 address (RFC 1918 range start)", async () => {
+		const result = await realSafeParseUrl("https://172.16.0.1/private")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 172.31.x.x private IPv4 address (RFC 1918 range end)", async () => {
+		const result = await realSafeParseUrl("https://172.31.255.254/private")
+
+		expect(result).toBeNull()
+	})
+
+	it("allows a 172.15.x.x address (just below the RFC 1918 block)", async () => {
+		const result = await realSafeParseUrl("https://172.15.0.1/public")
+
+		// 172.15 is NOT in the 172.16-172.31 block — must be allowed
+		expect(result).not.toBeNull()
+	})
+
+	it("allows a 172.32.x.x address (just above the RFC 1918 block)", async () => {
+		const result = await realSafeParseUrl("https://172.32.0.1/cdn")
+
+		// 172.32 is NOT in the 172.16-172.31 block — must be allowed
+		expect(result).not.toBeNull()
+	})
+
+	it("returns null for a link-local IPv4 address (169.254.x.x)", async () => {
+		const result = await realSafeParseUrl("https://169.254.169.254/latest/meta-data")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for the IPv4 unspecified address 0.0.0.0", async () => {
+		const result = await realSafeParseUrl("https://0.0.0.0/")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for the IPv6 loopback ::1", async () => {
+		const result = await realSafeParseUrl("https://[::1]/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a .local mDNS hostname", async () => {
+		const result = await realSafeParseUrl("https://myserver.local/share")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for an unparseable string", async () => {
+		const result = await realSafeParseUrl("not a url at all!!")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for an empty string", async () => {
+		const result = await realSafeParseUrl("")
+
+		expect(result).toBeNull()
+	})
+
+	it("trims leading/trailing whitespace before parsing", async () => {
+		const result = await realSafeParseUrl("  https://example.com/path  ")
+
+		expect(result).not.toBeNull()
+		expect(result?.hostname).toBe("example.com")
+	})
+
+	it("returns the parsed URL with normalized href (preserves path and query)", async () => {
+		const result = await realSafeParseUrl("https://cdn.example.com/images/photo.jpg?v=3")
+
+		expect(result).not.toBeNull()
+		expect(result?.pathname).toBe("/images/photo.jpg")
+		expect(result?.search).toBe("?v=3")
+	})
+
+	it("returns null for 100.64.x.x (CGNAT / shared address space — RFC 6598)", async () => {
+		const result = await realSafeParseUrl("https://100.64.0.1/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for 100.127.x.x (upper bound of CGNAT range)", async () => {
+		const result = await realSafeParseUrl("https://100.127.255.254/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("allows 100.63.x.x (just below the CGNAT block)", async () => {
+		const result = await realSafeParseUrl("https://100.63.0.1/public")
+
+		expect(result).not.toBeNull()
+	})
+
+	it("allows 100.128.x.x (just above the CGNAT block)", async () => {
+		const result = await realSafeParseUrl("https://100.128.0.1/public")
+
+		expect(result).not.toBeNull()
 	})
 })

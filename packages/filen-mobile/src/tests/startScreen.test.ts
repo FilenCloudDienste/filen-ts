@@ -7,7 +7,7 @@ vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))
 
-import { buildStartScreenHref } from "@/lib/startScreen"
+import { buildStartScreenHref } from "@/features/settings/startScreen"
 
 const ANY_UUID = "ffffffff-0000-0000-0000-000000000001"
 

@@ -1,5 +1,5 @@
 import events from "@/lib/events"
-import { useEffect, useRef, memo } from "react"
+import { useEffect, useRef } from "react"
 import { runEffect } from "@filen/utils"
 import { ActionSheetProvider as ExpoActionSheetProvider, useActionSheet } from "@expo/react-native-action-sheet"
 import { useResolveClassNames, useUniwind } from "uniwind"
@@ -18,7 +18,7 @@ export type ShowActionSheetOptions = {
 	userInterfaceStyle?: "light" | "dark"
 }
 
-const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode }) => {
+const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) => {
 	const { showActionSheetWithOptions } = useActionSheet()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -150,22 +150,22 @@ const ActionSheetProviderInner = memo(({ children }: { children: React.ReactNode
 	])
 
 	return children
-})
+}
 
-export const ActionSheetProvider = memo(({ children }: { children: React.ReactNode }) => {
+export const ActionSheetProvider = ({ children }: { children: React.ReactNode }) => {
 	return (
 		<ExpoActionSheetProvider>
 			<ActionSheetProviderInner>{children}</ActionSheetProviderInner>
 		</ExpoActionSheetProvider>
 	)
-})
+}
 
-class ActionSheet {
-	public async show(options: ShowActionSheetOptions) {
+// Thin façade over the actionSheet event channel (no instance state). The provider above
+// listens for "showActionSheet" and renders the native sheet.
+export const actionSheet = {
+	async show(options: ShowActionSheetOptions) {
 		events.emit("showActionSheet", options)
 	}
 }
-
-export const actionSheet = new ActionSheet()
 
 export default ActionSheetProvider

@@ -1,7 +1,6 @@
-import { memo } from "react"
 import Dom from "@/components/docxPreview/dom"
 
-const DocxPreview = memo(({ base64, paddingTop, paddingBottom }: { base64: string; paddingTop?: number; paddingBottom?: number }) => {
+const DocxPreview = ({ base64, paddingTop, paddingBottom }: { base64: string; paddingTop?: number; paddingBottom?: number }) => {
 	return (
 		<Dom
 			base64={base64}
@@ -13,6 +12,6 @@ const DocxPreview = memo(({ base64, paddingTop, paddingBottom }: { base64: strin
 			}}
 		/>
 	)
-})
+}
 
 export default DocxPreview

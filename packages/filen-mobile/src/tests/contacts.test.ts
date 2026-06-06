@@ -11,22 +11,22 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/queries/useContacts.query", () => ({
+vi.mock("@/features/contacts/queries/useContacts.query", () => ({
 	contactsQueryUpdate: vi.fn((opts: { updater: (prev: unknown) => unknown }) => {
 		contactsQueryUpdates.push(opts)
 	})
 }))
 
-vi.mock("@/queries/useContactRequests.query", () => ({
+vi.mock("@/features/contacts/queries/useContactRequests.query", () => ({
 	contactRequestsQueryUpdate: vi.fn((opts: { updater: (prev: unknown) => unknown }) => {
 		contactRequestsQueryUpdates.push(opts)
 	})
 }))
 
 import auth from "@/lib/auth"
-import contacts from "@/lib/contacts"
-import { contactsQueryUpdate } from "@/queries/useContacts.query"
-import { contactRequestsQueryUpdate } from "@/queries/useContactRequests.query"
+import contacts from "@/features/contacts/contacts"
+import { contactsQueryUpdate } from "@/features/contacts/queries/useContacts.query"
+import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useContactRequests.query"
 
 function makeContact(overrides?: {
 	uuid?: string
@@ -343,9 +343,7 @@ describe("contacts.acceptRequest", () => {
 		const contactUpdate = vi.mocked(contactsQueryUpdate).mock.calls[0]![0]
 		const staleContacts = [makeContact({ email: "stale@example.com", uuid: "uuid-stale" })]
 		const contactPrev = { contacts: staleContacts, blocked: [] }
-		const contactNext = (
-			contactUpdate as unknown as { updater: (p: typeof contactPrev) => typeof contactPrev }
-		).updater(contactPrev)
+		const contactNext = (contactUpdate as unknown as { updater: (p: typeof contactPrev) => typeof contactPrev }).updater(contactPrev)
 
 		// contacts is fully replaced with the fresh list fetched from the SDK
 		expect(contactNext.contacts).toHaveLength(2)
@@ -381,6 +379,36 @@ describe("contacts.acceptRequest", () => {
 
 		expect(acceptContactRequest).toHaveBeenCalledWith("req-sig", { signal: controller.signal })
 		expect(getContacts).toHaveBeenCalledWith({ signal: controller.signal })
+	})
+
+	it("propagates getContacts error after acceptContactRequest succeeds — incoming already filtered, contacts not updated", async () => {
+		const networkError = new Error("network failure")
+		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
+		const getContacts = vi.fn().mockRejectedValue(networkError)
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: { acceptContactRequest, getContacts }
+		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
+
+		await expect(contacts.acceptRequest({ uuid: "req-partial-fail" })).rejects.toThrow("network failure")
+
+		// acceptContactRequest succeeded
+		expect(acceptContactRequest).toHaveBeenCalledWith("req-partial-fail", undefined)
+
+		// contactRequestsQueryUpdate was called (incoming was already filtered before getContacts threw)
+		expect(contactRequestsQueryUpdate).toHaveBeenCalledOnce()
+		const reqUpdate = vi.mocked(contactRequestsQueryUpdate).mock.calls[0]?.[0]
+		const reqPrev = {
+			incoming: [{ uuid: "req-partial-fail" }, { uuid: "req-other" }],
+			outgoing: [] as Array<{ uuid: string }>
+		}
+		const reqNext = (reqUpdate as unknown as { updater: (p: typeof reqPrev) => typeof reqPrev }).updater(reqPrev)
+		// the accepted request uuid was removed from incoming
+		expect(reqNext.incoming).toHaveLength(1)
+		expect(reqNext.incoming[0]!.uuid).toBe("req-other")
+
+		// contactsQueryUpdate was NOT called because getContacts threw before it could run
+		expect(contactsQueryUpdate).not.toHaveBeenCalled()
 	})
 })
 

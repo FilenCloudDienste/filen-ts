@@ -1,4 +1,4 @@
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import View, { GestureHandlerScrollView, CrossGlassContainerView } from "@/components/ui/view"
 import { useResolveClassNames } from "uniwind"
@@ -6,9 +6,8 @@ import { PressableOpacity } from "@/components/ui/pressables"
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import useRichtextStore from "@/stores/useRichtext.store"
-import { useShallow } from "zustand/shallow"
 import type { TextEditorEvents } from "@/components/textEditor"
-import type { QuillFormats } from "@/components/textEditor/richText/dom"
+import type { QuillFormats, HeaderLevel } from "@/components/textEditor/richText/dom"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import Text from "@/components/ui/text"
 import prompts from "@/lib/prompts"
@@ -23,9 +22,9 @@ import { Platform } from "react-native"
 const ICON_SIZE = 16
 const BUTTON_CLASS = "flex-row items-center justify-center shrink-0 size-8"
 
-const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event: TextEditorEvents) => void }) => {
+const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event: TextEditorEvents) => void }) => {
 	const { t } = useTranslation()
-	const formats = useRichtextStore(useShallow(state => state.formats))
+	const active = useRichtextStore(state => state.formats[type])
 	const textForeground = useResolveClassNames("text-foreground")
 	const textPrimary = useResolveClassNames("text-primary")
 
@@ -33,72 +32,14 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 		switch (type) {
 			case "header": {
 				return [
-					{
-						id: "header-1",
-						title: "1",
+					...Array.from({ length: 6 }, (_, i) => ({
+						id: `header-${i + 1}`,
+						title: String(i + 1),
 						icon: "headerH" as const,
 						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 1
-							})
+							dispatch({ type: "quillToggleHeader", data: (i + 1) as HeaderLevel })
 						}
-					},
-					{
-						id: "header-2",
-						title: "2",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 2
-							})
-						}
-					},
-					{
-						id: "header-3",
-						title: "3",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 3
-							})
-						}
-					},
-					{
-						id: "header-4",
-						title: "4",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 4
-							})
-						}
-					},
-					{
-						id: "header-5",
-						title: "5",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 5
-							})
-						}
-					},
-					{
-						id: "header-6",
-						title: "6",
-						icon: "headerH" as const,
-						onPress: () => {
-							dispatch({
-								type: "quillToggleHeader",
-								data: 6
-							})
-						}
-					},
+					})),
 					{
 						id: "header-normal",
 						title: t("normal"),
@@ -113,7 +54,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 			}
 
 			case "link": {
-				if (!formats.link) {
+				if (!active) {
 					return []
 				}
 
@@ -123,11 +64,11 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 						title: t("open"),
 						icon: "openExternal" as const,
 						onPress: () => {
-							if (type !== "link" || !formats.link) {
+							if (type !== "link" || !active) {
 								return
 							}
 
-							Linking.openURL(formats.link).catch(console.error)
+							Linking.openURL(active as string).catch(console.error)
 						}
 					},
 					{
@@ -135,7 +76,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 						title: t("edit"),
 						icon: "edit" as const,
 						onPress: () => {
-							if (type !== "link" || !formats.link) {
+							if (type !== "link" || !active) {
 								return
 							}
 
@@ -144,7 +85,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 									title: t("edit_link"),
 									message: t("enter_url"),
 									placeholder: t("url_placeholder"),
-									defaultValue: formats.link,
+									defaultValue: active as string,
 									okText: t("save"),
 									cancelText: t("cancel")
 								})
@@ -165,7 +106,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 						title: t("remove"),
 						icon: "minus" as const,
 						onPress: () => {
-							if (type !== "link" || !formats.link) {
+							if (type !== "link" || !active) {
 								return
 							}
 
@@ -212,7 +153,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 							})
 						}
 					},
-					...(formats.list
+					...(active
 						? [
 								{
 									id: "remove",
@@ -262,7 +203,7 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 			}
 
 			case "link": {
-				if (formats.link) {
+				if (active) {
 					break
 				}
 
@@ -324,27 +265,27 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 						<FontAwesome6
 							name="heading"
 							size={ICON_SIZE}
-							color={formats[type] ? (textPrimary.color as string) : (textForeground.color as string)}
+							color={active ? (textPrimary.color as string) : (textForeground.color as string)}
 						/>
-						{formats[type] && (
+						{active && (
 							<View className="flex-row items-center justify-center absolute rounded-full size-4 -mt-4 -mr-4 overflow-hidden bg-background-secondary border border-border">
-								<Text className="text-foreground text-xs">{formats[type]}</Text>
+								<Text className="text-foreground text-xs">{active}</Text>
 							</View>
 						)}
 					</Fragment>
 				) : type === "list" ? (
 					<FontAwesome6
 						name={
-							formats[type] === "ordered"
+							active === "ordered"
 								? "list-ol"
-								: formats[type] === "bullet"
+								: active === "bullet"
 									? "list-ul"
-									: formats[type] === "checked" || formats[type] === "unchecked"
+									: active === "checked" || active === "unchecked"
 										? "list-check"
 										: "list"
 						}
 						size={ICON_SIZE}
-						color={formats[type] ? (textPrimary.color as string) : (textForeground.color as string)}
+						color={active ? (textPrimary.color as string) : (textForeground.color as string)}
 					/>
 				) : (
 					<FontAwesome6
@@ -364,19 +305,19 @@ const Button = memo(({ type, dispatch }: { type: keyof QuillFormats; dispatch: (
 													: "question"
 						}
 						size={ICON_SIZE}
-						color={formats[type] ? (textPrimary.color as string) : (textForeground.color as string)}
+						color={active ? (textPrimary.color as string) : (textForeground.color as string)}
 					/>
 				)}
 			</PressableOpacity>
 		</Menu>
 	)
-})
+}
 
 // Compact horizontal strip rendered inside the navigation header's title slot
 // while the user is typing in a rich-text note. Scrolls horizontally as a
 // safety net on narrow phones — the natural width (~250pt) fits inside the
 // iOS title slot (~300pt usable) on every modern iPhone without scrolling.
-export const RichTextHeaderToolbar = memo(({ dispatch }: { dispatch: (event: TextEditorEvents) => void }) => {
+export const RichTextHeaderToolbar = ({ dispatch }: { dispatch: (event: TextEditorEvents) => void }) => {
 	return (
 		<View className="items-center flex-row justify-center bg-transparent flex-1 w-full">
 			<CrossGlassContainerView className={cn("h-11 overflow-hidden w-[85%]", Platform.OS === "android" && "h-10")}>
@@ -423,6 +364,6 @@ export const RichTextHeaderToolbar = memo(({ dispatch }: { dispatch: (event: Tex
 			</CrossGlassContainerView>
 		</View>
 	)
-})
+}
 
 export default RichTextHeaderToolbar

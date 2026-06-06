@@ -9,9 +9,8 @@ import { useSecureStore } from "@/lib/secureStore"
 import { PressableScale } from "@/components/ui/pressables"
 import { useShallow } from "zustand/shallow"
 import useTextEditorStore from "@/stores/useTextEditor.store"
-import { memo } from "react"
 
-const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
+const MarkdownPreviewButton = ({ id }: { id: string }) => {
 	const keyboardState = useKeyboardState()
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
@@ -62,6 +61,6 @@ const MarkdownPreviewButton = memo(({ id }: { id: string }) => {
 			</PressableScale>
 		</AnimatedView>
 	)
-})
+}
 
 export default MarkdownPreviewButton

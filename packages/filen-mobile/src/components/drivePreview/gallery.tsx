@@ -1,10 +1,10 @@
-import { useState, useEffect, memo } from "react"
+import { useState, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { router } from "expo-router"
 import { type DriveItemFileExtracted } from "@/types"
-import { getPreviewType } from "@/lib/utils"
+import { getPreviewType } from "@/lib/previewType"
 import { useWindowDimensions } from "react-native"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
 import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring } from "react-native-reanimated"
@@ -79,6 +79,10 @@ export type GalleryItemTagged =
 			type: "external"
 			data: External
 	  }
+
+export function galleryItemKey(item: GalleryItemTagged): string {
+	return item.type === "drive" ? item.data.data.uuid : item.data.url
+}
 
 function buildDismissGesture(
 	sv: DismissSharedValues,
@@ -174,7 +178,7 @@ function changeZoom(zoomScale: SharedValue<number>, newZoom: number) {
 	zoomScale.value = newZoom
 }
 
-const Gallery = memo(() => {
+const Gallery = () => {
 	const { t } = useTranslation()
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
@@ -351,7 +355,7 @@ const Gallery = memo(() => {
 				>
 					<FlashList<GalleryItemTagged>
 						data={items}
-						keyExtractor={item => (item.type === "drive" ? item.data.data.uuid : item.data.url)}
+						keyExtractor={item => galleryItemKey(item)}
 						renderItem={info => {
 							return (
 								<GalleryItem
@@ -403,6 +407,6 @@ const Gallery = memo(() => {
 			</GestureDetector>
 		</View>
 	)
-})
+}
 
 export default Gallery

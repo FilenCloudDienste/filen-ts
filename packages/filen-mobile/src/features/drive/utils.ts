@@ -1,0 +1,185 @@
+import { type TFunction } from "i18next"
+import Ionicons from "@expo/vector-icons/Ionicons"
+import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
+import cache from "@/lib/cache"
+import { driveItemDisplayName } from "@/lib/decryption"
+
+type IoniconName = React.ComponentProps<typeof Ionicons>["name"]
+
+// Empty-state icon per drive variant. Variants without a bespoke icon
+// (drive / photos / linked) fall back to the generic open-folder glyph —
+// matching the original chained-ternary default.
+export const DRIVE_EMPTY_STATE_ICON: Record<DrivePathType, IoniconName> = {
+	trash: "trash-outline",
+	favorites: "heart-outline",
+	recents: "time-outline",
+	sharedIn: "people-outline",
+	sharedOut: "people-outline",
+	links: "link-outline",
+	offline: "cloud-offline-outline",
+	drive: "folder-open-outline",
+	photos: "folder-open-outline",
+	linked: "folder-open-outline"
+}
+
+type DriveEmptyStateTitleKey =
+	| "trash_is_empty"
+	| "no_favorites"
+	| "no_recents"
+	| "no_shared_in_items"
+	| "no_shared_out_items"
+	| "no_links"
+	| "no_offline_items"
+	| "folder_is_empty"
+
+// Empty-state title key per drive variant. The original used `t(...)` inline in
+// two chained ternaries; the lookup table keeps those keys in one place while the
+// caller still resolves the translation.
+export const DRIVE_EMPTY_STATE_TITLE_KEY: Record<DrivePathType, DriveEmptyStateTitleKey> = {
+	trash: "trash_is_empty",
+	favorites: "no_favorites",
+	recents: "no_recents",
+	sharedIn: "no_shared_in_items",
+	sharedOut: "no_shared_out_items",
+	links: "no_links",
+	offline: "no_offline_items",
+	drive: "folder_is_empty",
+	photos: "folder_is_empty",
+	linked: "folder_is_empty"
+}
+
+export function getDriveEmptyStateIcon(type: DrivePathType | null): IoniconName {
+	if (type === null) {
+		return DRIVE_EMPTY_STATE_ICON.drive
+	}
+
+	return DRIVE_EMPTY_STATE_ICON[type]
+}
+
+export function getDriveEmptyStateTitleKey(type: DrivePathType | null): DriveEmptyStateTitleKey {
+	if (type === null) {
+		return DRIVE_EMPTY_STATE_TITLE_KEY.drive
+	}
+
+	return DRIVE_EMPTY_STATE_TITLE_KEY[type]
+}
+
+/**
+ * Resolves the breadcrumb/header title for a Drive screen. Mirrors the original
+ * inline derivation:
+ *   - bulk-selection (non-picker) → "N selected"
+ *   - picker (`selectOptions`)    → destination / select-item(s) phrasing
+ *   - otherwise                   → cached decrypted directory name, falling
+ *     back to the undecryptable placeholder, then the localized variant default.
+ */
+export function resolveDriveHeaderTitle({
+	drivePath,
+	selectedCount,
+	stringifiedClientRootUuid,
+	t
+}: {
+	drivePath: DrivePath
+	selectedCount: number
+	stringifiedClientRootUuid: string | null
+	t: TFunction
+}): string {
+	// In bulk-selection mode, swap the directory name out for the count —
+	// matches Notes / Tracks / Contacts / Participants / Versions.
+	// Picker mode (drivePath.selectOptions) keeps its own destination title.
+	if (selectedCount > 0 && !drivePath.selectOptions) {
+		return t("selected", { count: selectedCount })
+	}
+
+	if (drivePath.selectOptions) {
+		switch (drivePath.selectOptions.intention) {
+			case "move": {
+				return t("select_destination")
+			}
+
+			case "select": {
+				return drivePath.selectOptions.directories && drivePath.selectOptions.files
+					? drivePath.selectOptions.type === "single"
+						? t("select_item")
+						: t("select_items")
+					: drivePath.selectOptions.directories
+						? drivePath.selectOptions.type === "single"
+							? t("select_directory")
+							: t("select_directories")
+						: drivePath.selectOptions.type === "single"
+							? t("select_file")
+							: t("select_files")
+			}
+		}
+	}
+
+	// Resolve the breadcrumb title for the current directory. Prefers the
+	// cached decrypted name; falls back to the cached DriveItem's display
+	// name (which yields `cannot_decrypt_<uuid>` for undecryptable
+	// directories) before the localized default.
+	const resolveBreadcrumb = (fallback: string): string => {
+		const uuid = drivePath.uuid ?? ""
+		const cachedName = cache.directoryUuidToName.get(uuid)
+
+		if (cachedName) {
+			return cachedName
+		}
+
+		const cachedItem = cache.uuidToAnyDriveItem.get(uuid)
+
+		if (cachedItem && cachedItem.data.undecryptable) {
+			return driveItemDisplayName(cachedItem)
+		}
+
+		return fallback
+	}
+
+	switch (drivePath.type) {
+		case "drive": {
+			if (stringifiedClientRootUuid && (drivePath.uuid ?? "") === stringifiedClientRootUuid) {
+				return t("drive")
+			}
+
+			return resolveBreadcrumb(t("drive"))
+		}
+
+		case "offline": {
+			return resolveBreadcrumb(t("offline"))
+		}
+
+		case "sharedIn": {
+			return resolveBreadcrumb(t("shared_with_me"))
+		}
+
+		case "sharedOut": {
+			return resolveBreadcrumb(t("shared_with_others"))
+		}
+
+		case "links": {
+			return resolveBreadcrumb(t("links"))
+		}
+
+		case "favorites": {
+			return resolveBreadcrumb(t("favorites"))
+		}
+
+		case "linked": {
+			if (drivePath.linked && drivePath.linked.rootName) {
+				return drivePath.linked.rootName
+			}
+
+			return resolveBreadcrumb(t("linked"))
+		}
+
+		case "trash": {
+			return t("trash")
+		}
+
+		case "recents": {
+			return t("recents")
+		}
+
+		default: {
+			return ""
+		}
+	}
+}

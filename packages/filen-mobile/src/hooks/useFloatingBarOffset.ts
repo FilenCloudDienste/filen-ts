@@ -25,10 +25,12 @@ const FLOATING_BAR_GAP = 8
 export function useFloatingBarOffset(): number {
 	const insets = useSafeAreaInsets()
 
-	return Platform.select({
-		ios: insets.bottom + IOS_TAB_BAR_HEIGHT + FLOATING_BAR_GAP,
-		default: insets.bottom + ANDROID_TAB_BAR_HEIGHT + FLOATING_BAR_GAP
-	}) ?? FLOATING_BAR_GAP
+	return (
+		Platform.select({
+			ios: insets.bottom + IOS_TAB_BAR_HEIGHT + FLOATING_BAR_GAP,
+			default: insets.bottom + ANDROID_TAB_BAR_HEIGHT + FLOATING_BAR_GAP
+		}) ?? FLOATING_BAR_GAP
+	)
 }
 
 export default useFloatingBarOffset

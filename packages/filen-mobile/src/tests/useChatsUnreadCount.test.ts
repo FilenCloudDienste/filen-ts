@@ -17,7 +17,7 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
-vi.mock("@/queries/useChats.query", () => ({
+vi.mock("@/features/chats/queries/useChats.query", () => ({
 	default: (_options: unknown) => ({
 		status: mocks.chatsQueryStatus,
 		data: mocks.chatsQueryData
@@ -25,13 +25,13 @@ vi.mock("@/queries/useChats.query", () => ({
 	fetchData: vi.fn().mockResolvedValue([])
 }))
 
-vi.mock("@/queries/useChatMessages.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryGet: (params: { uuid: string }) => mocks.chatMessagesMap.get(params.uuid) ?? null,
 	default: vi.fn(),
 	fetchData: vi.fn().mockResolvedValue([])
 }))
 
-vi.mock("@/lib/chats", () => ({
+vi.mock("@/features/chats/chats", () => ({
 	default: {
 		refetchChatsAndMessages: () => mocks.refetchChatsAndMessages()
 	}
@@ -50,7 +50,7 @@ vi.mock("@/hooks/useEffectOnce", () => ({
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { renderHook } from "@testing-library/react"
-import { useChatsUnreadCount } from "@/hooks/useChatsUnreadCount"
+import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import type { Chat, ChatMessage } from "@/types"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

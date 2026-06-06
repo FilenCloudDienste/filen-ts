@@ -161,6 +161,15 @@ describe("hasAllNeededMediaPermissions", () => {
 		expect(result).toBe(false)
 	})
 
+	it("returns false when camera.expires!='never' with all other conditions passing", async () => {
+		// All four other conditions hold; only the 5th (cameraPermissions.expires==='never') fails
+		mockCameraPermissions.expires = "2030-01-01"
+
+		const result = await hasAllNeededMediaPermissions()
+
+		expect(result).toBe(false)
+	})
+
 	it("returns false when shouldRequest=false and permissions not already fully granted", async () => {
 		mockMediaLibraryPermissions.granted = false
 

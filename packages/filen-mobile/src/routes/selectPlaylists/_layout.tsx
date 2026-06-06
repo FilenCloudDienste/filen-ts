@@ -1,12 +1,12 @@
 import { Stack, useLocalSearchParams, useNavigation } from "expo-router"
-import { memo, Fragment } from "react"
+import { Fragment } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import { deserialize } from "@/lib/serializer"
-import type { SelectOptions } from "@/routes/playlists"
+import type { SelectOptions } from "@/features/audio/playlistsSelect"
 import { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useShallow } from "zustand/shallow"
-import usePlaylistsStore from "@/stores/usePlaylists.store"
+import usePlaylistsStore from "@/features/audio/store/usePlaylists.store"
 import Text from "@/components/ui/text"
 import { cn } from "@filen/utils"
 import events from "@/lib/events"
@@ -79,13 +79,13 @@ function Toolbar() {
 	)
 }
 
-const Layout = memo(() => {
+const Layout = () => {
 	return (
 		<Fragment>
 			<Stack />
 			<Toolbar />
 		</Fragment>
 	)
-})
+}
 
 export default Layout

@@ -1,8 +1,7 @@
-import { memo } from "react"
-import DriveComponent from "@/components/drive"
+import DriveComponent from "@/features/drive/components"
 
-const Drive = memo(() => {
+const Drive = () => {
 	return <DriveComponent />
-})
+}
 
 export default Drive

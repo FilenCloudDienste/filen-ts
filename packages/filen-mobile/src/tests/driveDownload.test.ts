@@ -30,7 +30,7 @@ vi.mock("react-native-blob-util", () => ({
 	}
 }))
 
-vi.mock("@/lib/transfers", () => ({
+vi.mock("@/features/transfers/transfers", () => ({
 	default: {
 		download: mockTransfersDownload
 	}
@@ -38,7 +38,7 @@ vi.mock("@/lib/transfers", () => ({
 
 // Provide only the functions that driveDownload.ts actually imports from utils.
 // listLocalDirectoryRecursive uses the real expo-file-system mock internally so we
-// implement it faithfully; normalizeFilePathForBlobUtil is a trivial wrapper.
+// implement it faithfully.
 vi.mock("@/lib/utils", async () => {
 	const { File, Directory } = await import("@/tests/mocks/expoFileSystem")
 
@@ -71,6 +71,13 @@ vi.mock("@/lib/utils", async () => {
 		return entries
 	}
 
+	return {
+		listLocalDirectoryRecursive: walkDir
+	}
+})
+
+// normalizeFilePathForBlobUtil is a trivial wrapper around normalizeFilePathForSdk.
+vi.mock("@/lib/paths", () => {
 	function normalizeFilePathForSdk(filePath: string): string {
 		const cleaned = filePath
 			.trim()
@@ -104,7 +111,6 @@ vi.mock("@/lib/utils", async () => {
 	}
 
 	return {
-		listLocalDirectoryRecursive: walkDir,
 		normalizeFilePathForBlobUtil,
 		normalizeFilePathForSdk
 	}
@@ -123,7 +129,7 @@ vi.mock("@/lib/tmp", () => ({
 
 import * as FileSystem from "expo-file-system"
 import { fs } from "@/tests/mocks/expoFileSystem"
-import { downloadDriveItemToDevice } from "@/lib/driveDownload"
+import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import type { DriveItem } from "@/types"
 
 // ------------------------------------------------------------------
@@ -140,12 +146,7 @@ type DecryptedMeta = {
 	created: number
 }
 
-function makeFileItem(overrides: {
-	name?: string
-	mime?: string
-	uuid?: string
-	decryptedMeta?: DecryptedMeta | null
-}): DriveItem {
+function makeFileItem(overrides: { name?: string; mime?: string; uuid?: string; decryptedMeta?: DecryptedMeta | null }): DriveItem {
 	const name = overrides.name ?? "testfile.txt"
 	const uuid = overrides.uuid ?? "test-file-uuid"
 
@@ -171,11 +172,7 @@ function makeFileItem(overrides: {
 	} as unknown as DriveItem
 }
 
-function makeDirItem(overrides: {
-	name?: string
-	uuid?: string
-	decryptedMeta?: DecryptedMeta | null
-}): DriveItem {
+function makeDirItem(overrides: { name?: string; uuid?: string; decryptedMeta?: DecryptedMeta | null }): DriveItem {
 	const name = overrides.name ?? "testdir"
 	const uuid = overrides.uuid ?? "test-dir-uuid"
 

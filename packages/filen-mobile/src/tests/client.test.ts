@@ -34,7 +34,9 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: mockUnwrapSdkError,
 	isNetworkClassError: mockIsNetworkClassError
 }))
@@ -86,8 +88,8 @@ vi.mock("@tanstack/query-persist-client-core", () => ({
 
 import { type PersistedQuery } from "@tanstack/query-persist-client-core"
 import { ErrorKind } from "@filen/sdk-rs"
-import { shouldPersistQuery, DEFAULT_QUERY_OPTIONS, QueryUpdater, QUERY_CLIENT_CACHE_TIME, restoreQueries } from "@/queries/client"
-import { type PlaylistWithItems } from "@/lib/audio"
+import { shouldPersistQuery, DEFAULT_QUERY_OPTIONS, queryUpdater, QUERY_CLIENT_CACHE_TIME, restoreQueries } from "@/queries/client"
+import { type PlaylistWithItems } from "@/features/audio/audio"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -392,11 +394,9 @@ describe("restoreQueries", () => {
 
 		await restoreQueries()
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			freshQuery.queryKey,
-			freshQuery.state.data,
-			{ updatedAt: freshQuery.state.dataUpdatedAt }
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith(freshQuery.queryKey, freshQuery.state.data, {
+			updatedAt: freshQuery.state.dataUpdatedAt
+		})
 		expect(removeSpy).not.toHaveBeenCalled()
 	})
 
@@ -505,11 +505,9 @@ describe("restoreQueries", () => {
 
 		await restoreQueries()
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			goodQuery.queryKey,
-			goodQuery.state.data,
-			{ updatedAt: goodQuery.state.dataUpdatedAt }
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith(goodQuery.queryKey, goodQuery.state.data, {
+			updatedAt: goodQuery.state.dataUpdatedAt
+		})
 	})
 })
 
@@ -531,7 +529,7 @@ describe("QueryUpdater.set", () => {
 			capturedUpdater = updaterFn
 		})
 
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		updater.set<string>(["testKey"], "hello")
 
 		expect(capturedUpdater).toBeDefined()
@@ -549,7 +547,7 @@ describe("QueryUpdater.set", () => {
 		})
 
 		const fn = vi.fn((prev?: string) => (prev ?? "") + "-new")
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		updater.set<string>(["testKey"], fn)
 
 		expect(capturedUpdater).toBeDefined()
@@ -568,7 +566,7 @@ describe("QueryUpdater.set", () => {
 		})
 
 		const fn = vi.fn((prev?: string) => prev ?? "default")
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		updater.set<string>(["testKey"], fn)
 
 		expect(capturedUpdater).toBeDefined()
@@ -578,21 +576,17 @@ describe("QueryUpdater.set", () => {
 	})
 
 	it("uses the provided dataUpdatedAt timestamp when given", () => {
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 		const fixedTimestamp = 1234567890
 
 		updater.set<string>(["testKey"], "value", fixedTimestamp)
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			["testKey"],
-			expect.any(Function),
-			{ updatedAt: fixedTimestamp }
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith(["testKey"], expect.any(Function), { updatedAt: fixedTimestamp })
 	})
 
 	it("falls back to Date.now() when dataUpdatedAt is undefined", () => {
 		const before = Date.now()
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 
 		updater.set<string>(["testKey"], "value")
 
@@ -605,7 +599,7 @@ describe("QueryUpdater.set", () => {
 	})
 
 	it("calls queryClientPersister.persistQueryByKey after setting data", async () => {
-		const updater = new QueryUpdater()
+		const updater = queryUpdater
 
 		updater.set<string>(["testKey"], "value")
 
@@ -634,7 +628,7 @@ describe("playlistsQueryUpdate", () => {
 		vi.resetModules()
 
 		// Re-import audio mock so usePlaylists.query can load without crashing
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
@@ -645,7 +639,7 @@ describe("playlistsQueryUpdate", () => {
 			capturedInnerUpdater = updaterFn
 		})
 
-		const { playlistsQueryUpdate } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
 		const fn = vi.fn((prev: unknown[]) => [...prev, "item"])
 
 		playlistsQueryUpdate({ updater: fn as unknown as (prev: PlaylistWithItems[]) => PlaylistWithItems[] })
@@ -659,7 +653,7 @@ describe("playlistsQueryUpdate", () => {
 	it("passes existing prev array to the function updater unchanged", async () => {
 		vi.resetModules()
 
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
@@ -670,7 +664,7 @@ describe("playlistsQueryUpdate", () => {
 			capturedInnerUpdater = updaterFn
 		})
 
-		const { playlistsQueryUpdate } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
 		const existing = [{ id: "pl-1" }]
 		const fn = vi.fn((prev: unknown[]) => prev)
 
@@ -684,7 +678,7 @@ describe("playlistsQueryUpdate", () => {
 	it("replaces the cache directly when a plain value updater is provided", async () => {
 		vi.resetModules()
 
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
@@ -695,7 +689,7 @@ describe("playlistsQueryUpdate", () => {
 			capturedInnerUpdater = updaterFn
 		})
 
-		const { playlistsQueryUpdate } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
 		const replacement = [{ id: "pl-2" }]
 
 		playlistsQueryUpdate({ updater: replacement as unknown as PlaylistWithItems[] })
@@ -709,21 +703,17 @@ describe("playlistsQueryUpdate", () => {
 	it("uses the correct BASE_QUERY_KEY", async () => {
 		vi.resetModules()
 
-		vi.doMock("@/lib/audio", () => ({
+		vi.doMock("@/features/audio/audio", () => ({
 			default: {
 				getPlaylists: vi.fn().mockResolvedValue([])
 			}
 		}))
 
-		const { playlistsQueryUpdate, BASE_QUERY_KEY } = await import("@/queries/usePlaylists.query")
+		const { playlistsQueryUpdate, BASE_QUERY_KEY } = await import("@/features/audio/queries/usePlaylists.query")
 
 		playlistsQueryUpdate({ updater: [] })
 
-		expect(mockSetQueryData).toHaveBeenCalledWith(
-			[BASE_QUERY_KEY],
-			expect.any(Function),
-			expect.any(Object)
-		)
+		expect(mockSetQueryData).toHaveBeenCalledWith([BASE_QUERY_KEY], expect.any(Function), expect.any(Object))
 	})
 })
 
@@ -758,7 +748,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		// Cancel the debounce so it doesn't fire on its own
 		// Access the private debounce via the prototype path
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; persistNow: () => void }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			persistNow: () => void
+		}
 		kvAny.persistDirty.cancel()
 
 		// Verify dirty set is populated before the flush
@@ -772,7 +767,9 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 		expect(kvAny.dirtyUpserts.size).toBe(0)
 
 		// Let the rejected promise settle
-		await new Promise<void>(resolve => { setTimeout(resolve, 10) })
+		await new Promise<void>(resolve => {
+			setTimeout(resolve, 10)
+		})
 
 		// After the catch block, dirty keys must be restored for retry
 		expect(kvAny.dirtyUpserts.has("keyA")).toBe(true)
@@ -799,7 +796,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		kv.setItem("keyX", "valueX")
 
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; persistNow: () => void }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			persistNow: () => void
+		}
 		kvAny.persistDirty.cancel()
 
 		kvAny.persistNow()
@@ -808,7 +810,9 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 		// — this puts keyX in dirtyDeletes, so it should NOT be re-added to dirtyUpserts
 		kvAny.dirtyDeletes.add("keyX")
 
-		await new Promise<void>(resolve => { setTimeout(resolve, 10) })
+		await new Promise<void>(resolve => {
+			setTimeout(resolve, 10)
+		})
 
 		// keyX moved to dirtyDeletes — it must not be double-restored into dirtyUpserts
 		expect(kvAny.dirtyUpserts.has("keyX")).toBe(false)
@@ -835,7 +839,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		kv.setItem("keyC", "valueC")
 
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; runPersistAsync: () => Promise<void> }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			runPersistAsync: () => Promise<void>
+		}
 		kvAny.persistDirty.cancel()
 
 		// Run the async persist path directly and await it
@@ -865,7 +874,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 
 		kv.setItem("keyD", "valueD")
 
-		const kvAny = kv as unknown as { persistDirty: { cancel: () => void }; dirtyUpserts: Set<string>; dirtyDeletes: Set<string>; runPersistAsync: () => Promise<void> }
+		const kvAny = kv as unknown as {
+			persistDirty: { cancel: () => void }
+			dirtyUpserts: Set<string>
+			dirtyDeletes: Set<string>
+			runPersistAsync: () => Promise<void>
+		}
 		kvAny.persistDirty.cancel()
 
 		// Start the async persist
@@ -898,7 +912,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: vi.fn().mockResolvedValue([{ id: "album-1", title: "Camera Roll" }])
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		const result = await fetchData()
 
 		expect(result).toEqual([])
@@ -918,7 +932,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: vi.fn().mockResolvedValue(mockAlbums)
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		const result = await fetchData()
 
 		expect(result).toEqual(mockAlbums)
@@ -935,7 +949,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: mockGetAlbumsAsync
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		await fetchData()
 
 		expect(mockGetAlbumsAsync).toHaveBeenCalledWith({ includeSmartAlbums: true })
@@ -952,7 +966,7 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 			getAlbumsAsync: vi.fn().mockResolvedValue([])
 		}))
 
-		const { fetchData } = await import("@/queries/useCameraUploadAlbums.query")
+		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		await fetchData()
 
 		expect(mockHasPermissions).toHaveBeenCalledWith({ shouldRequest: true })

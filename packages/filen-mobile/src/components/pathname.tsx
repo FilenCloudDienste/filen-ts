@@ -1,8 +1,8 @@
 import useAppStore from "@/stores/useApp.store"
-import { useEffect, memo } from "react"
+import { useEffect } from "react"
 import { usePathname } from "expo-router"
 
-export const Pathname = memo(() => {
+export const Pathname = () => {
 	const pathname = usePathname()
 
 	useEffect(() => {
@@ -10,6 +10,6 @@ export const Pathname = memo(() => {
 	}, [pathname])
 
 	return null
-})
+}
 
 export default Pathname

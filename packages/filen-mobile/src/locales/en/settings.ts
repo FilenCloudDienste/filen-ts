@@ -7,7 +7,7 @@
 //  - used_of interpolates {{used}} and {{max}} (already-formatted byte strings).
 //  - offline_files_count / offline_dirs_count are ICU plural pairs ({{count}}).
 // Event-kind labels (file_uploaded, directory_renamed, …) are resolved from a typed map in
-// src/routes/events/index.tsx with the module-level i18n.t because eventKindToReadable() is a
+// src/features/events/eventDetails.ts with the module-level i18n.t because eventKindToReadable() is a
 // plain (non-React) function and cannot use the useTranslation() hook.
 export const settings = {
 	// ── More tab (top-level settings menu) ────────────────────────────────────
@@ -33,8 +33,7 @@ export const settings = {
 	/** Android-only feature name: integration with the system document picker (Documents Provider) */
 	documents_provider: "Documents Provider",
 	/** iOS File Provider — description shown under the toggle explaining the integration */
-	file_provider_description:
-		"Access your Filen files directly from the Files app. Files are streamed on demand and cached locally.",
+	file_provider_description: "Access your Filen files directly from the Files app. Files are streamed on demand and cached locally.",
 	/** Android Documents Provider — description shown under the toggle explaining the integration */
 	documents_provider_description:
 		"Access your Filen files directly from the system document picker. Files are streamed on demand and cached locally.",
@@ -88,8 +87,7 @@ export const settings = {
 	/** Confirm dialog title before opening the Filen web app in a browser */
 	open_web_app: "Open web app",
 	/** Confirm dialog message before opening the web app to change additional settings */
-	open_web_app_to_change_more_settings_do_you_want_to_open_it:
-		"Open the Filen web app to change more settings. Do you want to open it?",
+	open_web_app_to_change_more_settings_do_you_want_to_open_it: "Open the Filen web app to change more settings. Do you want to open it?",
 	/** Account screen — row title toggling file versioning */
 	file_versioning: "File versioning",
 	/** Account screen — subtitle for the file versioning toggle */
@@ -117,8 +115,7 @@ export const settings = {
 	delete_all_files_and_directories_description_non_reversible:
 		"This permanently deletes all of your files and directories. This cannot be undone.",
 	/** Danger zone — second confirm message for deleting all files and directories */
-	delete_all_files_and_directories_description_are_you_sure:
-		"Are you sure you want to delete all of your files and directories?",
+	delete_all_files_and_directories_description_are_you_sure: "Are you sure you want to delete all of your files and directories?",
 	/** Danger zone — row title to request account deletion */
 	request_account_deletion: "Request account deletion",
 	/** Danger zone — subtitle for the account-deletion row */
@@ -138,8 +135,7 @@ export const settings = {
 	account_deletion_requested_follow_instructions_sent_to_email:
 		"Account deletion requested. Please follow the instructions we sent to your email.",
 	/** Confirm dialog message before logging out: local data will be wiped */
-	logout_confirm_wipes_local_data:
-		"Logging out will wipe all locally stored data from this device. Are you sure you want to log out?",
+	logout_confirm_wipes_local_data: "Logging out will wipe all locally stored data from this device. Are you sure you want to log out?",
 
 	// ── Personal information sub-screen ───────────────────────────────────────
 	/** Personal info — placeholder shown for a field that has no value yet */
@@ -217,8 +213,7 @@ export const settings = {
 	/** Advanced — subtitle for the clear-all-disk-caches row */
 	clear_all_disk_caches_description: "Clears thumbnails, previews, music metadata, and the temporary cache",
 	/** Advanced — confirm message before clearing all disk caches */
-	clear_all_disk_caches_confirmation:
-		"This clears all disk caches. Cached data will be regenerated or re-downloaded as needed.",
+	clear_all_disk_caches_confirmation: "This clears all disk caches. Cached data will be regenerated or re-downloaded as needed.",
 	/** Toast after all disk caches were cleared */
 	all_disk_caches_cleared: "All disk caches cleared",
 	/** Advanced — row title: remove all files saved for offline access */

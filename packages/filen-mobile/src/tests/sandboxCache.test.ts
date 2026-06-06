@@ -8,19 +8,21 @@ vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 
 // fsUtils (imported by sandboxCache.ts) now pulls VERSION from sibling lib
 // modules. Mock them so their full transitive deps (SDK, auth, etc.) don't load.
-vi.mock("@/lib/offline", () => ({ VERSION: 1 }))
+vi.mock("@/features/offline/offline", () => ({ VERSION: 1 }))
 vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/audioCache", () => ({ VERSION: 1 }))
+vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
 vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
 import { fs } from "@/tests/mocks/expoFileSystem"
 
 const CACHE_DIR = "file:///cache"
 
-async function createSandboxCache(): Promise<InstanceType<typeof import("@/lib/sandboxCache").SandboxCache>> {
+async function createSandboxCache(): Promise<typeof import("@/lib/sandboxCache").sandboxCache> {
 	const mod = await import("@/lib/sandboxCache")
 
-	return new (mod.SandboxCache as new () => InstanceType<typeof mod.SandboxCache>)()
+	// sandboxCache is now a stateless plain-object namespace; fresh re-import per test still
+	// picks up the per-test filesystem mock.
+	return mod.sandboxCache
 }
 
 beforeEach(() => {
@@ -214,15 +216,15 @@ describe("SandboxCache", () => {
 	})
 
 	describe("default export singleton", () => {
-		it("exports a pre-constructed SandboxCache instance as the default export", async () => {
+		it("exports the sandboxCache namespace object as the default export", async () => {
 			const mod = await import("@/lib/sandboxCache")
 
-			// The default export is the module-level singleton — not a class, but an instance
+			// The default export is the module-level plain-object namespace (no class).
 			expect(mod.default).toBeDefined()
 			expect(typeof mod.default.clear).toBe("function")
 			expect(typeof mod.default.size).toBe("function")
-			// It is an instance of the exported SandboxCache class
-			expect(mod.default).toBeInstanceOf(mod.SandboxCache)
+			// Default export is the same object as the named `sandboxCache` export.
+			expect(mod.default).toBe(mod.sandboxCache)
 		})
 
 		it("singleton size() and clear() work identically to a fresh instance", async () => {

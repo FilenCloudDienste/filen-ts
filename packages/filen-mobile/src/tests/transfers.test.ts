@@ -2,6 +2,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const {
 	MockPauseSignal,
+	createdPauseSignalInstances,
 	mockUploadFile,
 	mockUploadDirRecursively,
 	mockDownloadFileToPath,
@@ -49,9 +50,18 @@ const {
 
 	const mockDriveItemsQueryUpdate = vi.fn()
 
+	// Tracks every MockPauseSignal instance created via `new PauseSignal()` in the source.
+	// Plain array — not a vi.fn() — so vi.clearAllMocks() does not clear it.
+	const createdPauseSignalInstances: InstanceType<typeof MockPauseSignal>[] = []
+
 	class MockPauseSignal {
 		private _paused = false
 		private _listeners = new Map<string, Set<() => void>>()
+
+		constructor() {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			createdPauseSignalInstances.push(this as any)
+		}
 
 		pause() {
 			this._paused = true
@@ -126,6 +136,7 @@ const {
 
 	return {
 		MockPauseSignal,
+		createdPauseSignalInstances,
 		mockUploadFile,
 		mockUploadDirRecursively,
 		mockDownloadFileToPath,
@@ -146,7 +157,6 @@ const {
 })
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
-
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
@@ -235,7 +245,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/stores/useTransfers.store", () => ({
+vi.mock("@/features/transfers/store/useTransfers.store", () => ({
 	default: {
 		getState: () => ({
 			setTransfers: mockSetTransfers,
@@ -244,7 +254,7 @@ vi.mock("@/stores/useTransfers.store", () => ({
 	}
 }))
 
-vi.mock("@/queries/useDriveItems.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdate
 }))
@@ -274,7 +284,7 @@ vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("@/lib/drive", () => ({
+vi.mock("@/features/drive/drive", () => ({
 	default: {
 		createDirectory: vi.fn().mockResolvedValue({ data: { uuid: "dir-uuid" } })
 	}
@@ -287,19 +297,28 @@ vi.mock("@/lib/thumbnails", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
-	normalizeFilePathForExpo: vi.fn((path: string) => path),
-	unwrapDirMeta: mockUnwrapDirMeta,
-	unwrapFileMeta: mockUnwrapFileMeta,
-	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,
-	PauseSignal: MockPauseSignal,
-	createCompositePauseSignal: mockCreateCompositePauseSignal,
-	createCompositeAbortSignal: mockCreateCompositeAbortSignal,
-	unwrapParentUuid: mockUnwrapParentUuid,
 	listLocalDirectoryRecursive: vi.fn(() => [])
 }))
 
-import transfers from "@/lib/transfers"
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapDirMeta: mockUnwrapDirMeta,
+	unwrapFileMeta: mockUnwrapFileMeta,
+	unwrapParentUuid: mockUnwrapParentUuid
+}))
+
+vi.mock("@/lib/paths", () => ({
+	normalizeFilePathForSdk: vi.fn((path: string) => path.replace("file://", "")),
+	normalizeFilePathForExpo: vi.fn((path: string) => path)
+}))
+
+vi.mock("@/lib/signals", () => ({
+	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,
+	PauseSignal: MockPauseSignal,
+	createCompositePauseSignal: mockCreateCompositePauseSignal,
+	createCompositeAbortSignal: mockCreateCompositeAbortSignal
+}))
+
+import transfers from "@/features/transfers/transfers"
 import cache from "@/lib/cache"
 import { fs, File as MockFile, Directory as MockDir } from "@/tests/mocks/expoFileSystem"
 import type * as FileSystem from "expo-file-system"
@@ -632,7 +651,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("network failure")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; upload: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; upload: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "uploadFile")
 
 				expect(entry).toBeDefined()
@@ -700,16 +723,18 @@ describe("Transfers", () => {
 					}
 				})
 
-				mockUploadFile.mockImplementationOnce(async (_opts: unknown, _path: string, callbacks: { onUpdate: (n: bigint) => void }) => {
-					// Fire the onUpdate callback — this calls setTransfers with a map-updater
-					// that increments bytesTransferred on the matching in-flight transfer.
-					callbacks.onUpdate(512n)
+				mockUploadFile.mockImplementationOnce(
+					async (_opts: unknown, _path: string, callbacks: { onUpdate: (n: bigint) => void }) => {
+						// Fire the onUpdate callback — this calls setTransfers with a map-updater
+						// that increments bytesTransferred on the matching in-flight transfer.
+						callbacks.onUpdate(512n)
 
-					return {
-						uuid: "uploaded-file-uuid",
-						parent: { tag: "Uuid", inner: ["parent-uuid"] }
+						return {
+							uuid: "uploaded-file-uuid",
+							parent: { tag: "Uuid", inner: ["parent-uuid"] }
+						}
 					}
-				})
+				)
 
 				await transfers.upload({
 					localFileOrDir: file,
@@ -784,7 +809,7 @@ describe("Transfers", () => {
 				fs.set(dir.uri, "dir")
 				const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
 
-				const { default: drive } = await import("@/lib/drive")
+				const { default: drive } = await import("@/features/drive/drive")
 
 				await transfers.upload({
 					localFileOrDir: dir,
@@ -840,11 +865,9 @@ describe("Transfers", () => {
 					meta: { name: "file.txt" }
 				})
 
-				mockUploadDirRecursively.mockImplementationOnce(
-					async (_path: string, callbacks: any) => {
-						callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 512n)
-					}
-				)
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 512n)
+				})
 
 				await transfers.upload({
 					localFileOrDir: dir,
@@ -877,11 +900,9 @@ describe("Transfers", () => {
 					meta: { name: "shared-dir" }
 				})
 
-				mockUploadDirRecursively.mockImplementationOnce(
-					async (_path: string, callbacks: any) => {
-						callbacks.onUploadUpdate([uploadedDir], [], 0n)
-					}
-				)
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadUpdate([uploadedDir], [], 0n)
+				})
 
 				await transfers.upload({
 					localFileOrDir: dir,
@@ -900,11 +921,9 @@ describe("Transfers", () => {
 				const uploadedDir = { uuid: "dir-1", parent: { tag: "Uuid", inner: ["parent-uuid"] } }
 				const uploadedFile = { uuid: "file-1", parent: { tag: "Uuid", inner: ["dir-1"] } }
 
-				mockUploadDirRecursively.mockImplementationOnce(
-					async (_path: string, callbacks: any) => {
-						callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 1024n)
-					}
-				)
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadUpdate([uploadedDir], [uploadedFile], 1024n)
+				})
 
 				const result = await transfers.upload({
 					localFileOrDir: dir,
@@ -978,7 +997,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("dir upload failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; upload: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; upload: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "uploadDirectory")
 
 				expect(entry).toBeDefined()
@@ -1171,7 +1194,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("download failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; download: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; download: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "downloadFile")
 
 				expect(entry).toBeDefined()
@@ -1268,7 +1295,11 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("dir download failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{ id: string; type: string; errors: { unknown: Error[]; download: unknown[] } }>
+				const finalTransfers = mockTransfersState.transfers as Array<{
+					id: string
+					type: string
+					errors: { unknown: Error[]; download: unknown[] }
+				}>
 				const entry = finalTransfers.find(t => t.type === "downloadDirectory")
 
 				expect(entry).toBeDefined()
@@ -1328,48 +1359,62 @@ describe("Transfers", () => {
 	})
 
 	describe("pauseAll and resumeAll", () => {
-		it("pauseAll flips globalPauseSignal to paused state and resumeAll restores it", () => {
-			// The in-module globalPauseSignal is a PauseSignal. We verify observable state
-			// through a transfer that registers listeners on the global signal.
-			const pauseStates: boolean[] = []
+		it("pauseAll sets globalPauseSignal to paused and resumeAll clears it", () => {
+			// After beforeEach, cancelAll() has created a fresh MockPauseSignal. It is the last
+			// entry in createdPauseSignalInstances (the tracker is a plain array, not a vi.fn(),
+			// so vi.clearAllMocks() does not reset it).
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
 
-			// Attach a listener via a fresh MockPauseSignal that wraps the composite — but we
-			// can observe the effect more directly by checking that pause()/resume() calls
-			// propagate through to the MockPauseSignal constructor. The simplest sound check
-			// is to verify that calling pauseAll does NOT throw and that calling it twice then
-			// resumeAll does NOT throw (the methods exist and are exercisable).
-			expect(() => {
-				transfers.pauseAll()
-				transfers.pauseAll()
-				transfers.resumeAll()
-			}).not.toThrow()
+			expect(globalSignal).toBeDefined()
 
-			// Also verify that a transfer registered during the paused state sees the pause event.
-			// We do this by starting a transfer whose lifecycle overlaps with pauseAll:
-			// The internal globalPauseSignal.pause() call should fire on the composite pause signal
-			// which in turn notifies any registered listeners.
-			const compositePauseReceived: string[] = []
+			// Initially not paused.
+			expect(globalSignal?.isPaused()).toBe(false)
 
-			mockCreateCompositePauseSignal.mockImplementationOnce((...signals: unknown[]) => {
-				const ps = new MockPauseSignal()
-				// Attach to the second signal (globalPauseSignal stand-in) to detect propagation.
-				const gps = signals[0] as InstanceType<typeof MockPauseSignal>
+			transfers.pauseAll()
 
-				gps.addEventListener("pause", () => compositePauseReceived.push("paused"))
-				gps.addEventListener("resume", () => compositePauseReceived.push("resumed"))
+			// After pauseAll the signal must report paused.
+			expect(globalSignal?.isPaused()).toBe(true)
 
-				return Object.assign(ps, { dispose: vi.fn() })
-			})
+			transfers.resumeAll()
+
+			// After resumeAll it must be unpaused again.
+			expect(globalSignal?.isPaused()).toBe(false)
+		})
+
+		it("pauseAll is idempotent — calling it twice leaves the signal paused, not erroring", () => {
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+
+			transfers.pauseAll()
+			transfers.pauseAll() // second call must not throw and must leave it paused
+
+			expect(globalSignal?.isPaused()).toBe(true)
+
+			// Clean up for subsequent tests.
+			transfers.resumeAll()
+		})
+
+		it("resumeAll is idempotent — calling it while not paused does not throw", () => {
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+
+			// Already not paused; calling resumeAll must not throw.
+			expect(() => transfers.resumeAll()).not.toThrow()
+
+			expect(globalSignal?.isPaused()).toBe(false)
+		})
+
+		it("pause and resume events propagate to registered listeners on the global signal", () => {
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+
+			const received: string[] = []
+
+			globalSignal?.addEventListener("pause", () => received.push("paused"))
+			globalSignal?.addEventListener("resume", () => received.push("resumed"))
 
 			transfers.pauseAll()
 			transfers.resumeAll()
 
-			// The globalPauseSignal was replaced by cancelAll() in beforeEach but its listeners
-			// were cleared. After the mockImplementationOnce above fires for the next transfer,
-			// the event would propagate. Because pauseAll/resumeAll directly call
-			// globalPauseSignal.pause()/resume(), if there are no listeners the arrays stay empty
-			// — that is fine; the key invariant is no throw.
-			expect(pauseStates.length).toBe(0) // no throw, no listeners yet means empty (expected)
+			// Both events must have fired exactly once in order.
+			expect(received).toEqual(["paused", "resumed"])
 		})
 	})
 
@@ -1380,11 +1425,13 @@ describe("Transfers", () => {
 			const parent = makeParentDir("parent-uuid")
 
 			// uploadFile hangs until the abort signal fires.
-			mockUploadFile.mockImplementation((_opts: unknown, _path: string, _cb: unknown, _future: unknown, opts: { signal: AbortSignal }) => {
-				return new Promise<never>((_resolve, reject) => {
-					opts.signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true })
-				})
-			})
+			mockUploadFile.mockImplementation(
+				(_opts: unknown, _path: string, _cb: unknown, _future: unknown, opts: { signal: AbortSignal }) => {
+					return new Promise<never>((_resolve, reject) => {
+						opts.signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true })
+					})
+				}
+			)
 
 			const uploadPromise = transfers.upload({
 				localFileOrDir: file,
