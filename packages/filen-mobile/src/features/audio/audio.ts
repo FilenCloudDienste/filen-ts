@@ -987,7 +987,15 @@ export class Audio {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const playlistsDir = await this.getPlaylistsDirectory(signal)
 
-		await authedSdkClient.uploadFileFromBytes(Buffer.from(JSON.stringify(playlist), "utf-8").buffer, {
+		// Strip runtime-only `item` fields from playlist files and serialize any
+		// residual BigInt values as numbers so JSON.stringify doesn't throw when
+		// addFilesToPlaylist appends files that carry the DriveItemFileExtracted shape.
+		const playlistToSerialize = {
+			...playlist,
+			files: playlist.files.map(({ item: _item, ...rest }: PlaylistFile & { item?: unknown }) => rest)
+		}
+
+		await authedSdkClient.uploadFileFromBytes(Buffer.from(JSON.stringify(playlistToSerialize), "utf-8").buffer, {
 			fileBuilderParams: {
 				parent: new AnyNormalDir.Dir(playlistsDir),
 				name: `${playlist.uuid}.json`,
