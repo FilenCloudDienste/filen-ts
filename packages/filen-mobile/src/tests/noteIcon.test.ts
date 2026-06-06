@@ -29,7 +29,7 @@ vi.mock("react", () => ({
 	memo: (c: unknown) => c
 }))
 
-import { NoteTypeExtended } from "@/components/notes/note/icon"
+import { NoteTypeExtended } from "@/features/notes/components/note/icon"
 import { NoteType } from "@filen/sdk-rs"
 
 // The ICON_PROPS map and selection IIFE inside the Icon component body are not exported

@@ -11,7 +11,9 @@ vi.mock("quill", () => ({
 import { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
 import type { Colors } from "@/components/textEditor"
 
-function makeColors(overrides: Partial<{ foreground: string; muted: string; primary: string; primaryBg: string; secondaryBg: string }> = {}): Colors {
+function makeColors(
+	overrides: Partial<{ foreground: string; muted: string; primary: string; primaryBg: string; secondaryBg: string }> = {}
+): Colors {
 	return {
 		text: {
 			foreground: overrides.foreground ?? "#111111",

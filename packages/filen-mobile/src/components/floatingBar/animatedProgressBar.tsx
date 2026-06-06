@@ -1,7 +1,7 @@
-import { memo, useEffect } from "react"
+import { useEffect } from "react"
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated"
 import { useResolveClassNames } from "uniwind"
-import useTransfersStore from "@/stores/useTransfers.store"
+import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import View from "@/components/ui/view"
 import { useShallow } from "zustand/shallow"
 
@@ -12,7 +12,7 @@ const TIMING_CONFIG = {
 	easing: Easing.linear
 }
 
-const AnimatedProgressBar = memo(() => {
+const AnimatedProgressBar = () => {
 	const initialProgress = useTransfersStore(useShallow(state => state.stats.progress))
 	const progress = useSharedValue(initialProgress)
 	const textBlue500 = useResolveClassNames("text-blue-500")
@@ -61,6 +61,6 @@ const AnimatedProgressBar = memo(() => {
 			/>
 		</View>
 	)
-})
+}
 
 export default AnimatedProgressBar

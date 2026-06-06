@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import { Buffer } from "react-native-quick-crypto"
 import { type FileSource, resolveFile } from "@/queries/fileSource"
@@ -38,37 +38,6 @@ export function useFileBase64Query(
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
-}
-
-export function fileBase64QueryUpdate({
-	updater,
-	params,
-	dataUpdatedAt
-}: {
-	params: Parameters<typeof fetchData>[0]
-} & {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-	dataUpdatedAt?: number
-}): void {
-	const sortedParams = sortParams(params)
-
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
-		[BASE_QUERY_KEY, sortedParams],
-		prev => {
-			const currentData = prev ?? ("" satisfies Awaited<ReturnType<typeof fetchData>>)
-
-			return typeof updater === "function" ? updater(currentData) : updater
-		},
-		dataUpdatedAt
-	)
-}
-
-export function fileBase64QueryGet(params: UseFileBase64QueryParams) {
-	const sortedParams = sortParams(params)
-
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams])
 }
 
 export default useFileBase64Query

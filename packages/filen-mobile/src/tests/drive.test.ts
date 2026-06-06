@@ -186,27 +186,33 @@ vi.mock("@/lib/cache", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	unwrapParentUuid: mockUnwrapParentUuid,
-	unwrappedDirIntoDriveItem: mockUnwrappedDirIntoDriveItem,
-	unwrappedFileIntoDriveItem: mockUnwrappedFileIntoDriveItem,
-	normalizeFilePathForSdk: mockNormalizeFilePathForSdk,
-	unwrapDirMeta: mockUnwrapDirMeta,
-	unwrapFileMeta: mockUnwrapFileMeta,
 	unwrapSdkError: vi.fn().mockReturnValue(null)
 }))
 
-vi.mock("@/queries/useDriveItems.query", () => ({
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapParentUuid: mockUnwrapParentUuid,
+	unwrappedDirIntoDriveItem: mockUnwrappedDirIntoDriveItem,
+	unwrappedFileIntoDriveItem: mockUnwrappedFileIntoDriveItem,
+	unwrapDirMeta: mockUnwrapDirMeta,
+	unwrapFileMeta: mockUnwrapFileMeta
+}))
+
+vi.mock("@/lib/paths", () => ({
+	normalizeFilePathForSdk: mockNormalizeFilePathForSdk
+}))
+
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateGlobal: mockDriveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryGet: mockDriveItemsQueryGet
 }))
 
-vi.mock("@/queries/useDriveItemVersions.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItemVersions.query", () => ({
 	driveItemVersionsQueryUpdate: vi.fn()
 }))
 
-vi.mock("@/queries/useDriveItemPublicLinkStatus.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItemPublicLinkStatus.query", () => ({
 	driveItemPublicLinkStatusQueryUpdate: vi.fn()
 }))
 
@@ -220,17 +226,19 @@ vi.mock("expo-router", () => ({ router: { push: vi.fn(), back: vi.fn() } }))
 vi.mock("@filen/sdk-rs", () => mockSdkModule)
 
 // --- import real unit under test AFTER all vi.mock calls ----------------------
-import drive from "@/lib/drive"
+import drive from "@/features/drive/drive"
 import type { DriveItem } from "@/types"
 
 // --- factory helpers ----------------------------------------------------------
 
-function makeDirItem(overrides: Partial<{
-	uuid: string
-	name: string
-	favorited: boolean
-	parentUuid: string | null
-}> = {}): DriveItem {
+function makeDirItem(
+	overrides: Partial<{
+		uuid: string
+		name: string
+		favorited: boolean
+		parentUuid: string | null
+	}> = {}
+): DriveItem {
 	return {
 		type: "directory",
 		data: {
@@ -249,12 +257,14 @@ function makeDirItem(overrides: Partial<{
 	}
 }
 
-function makeFileItem(overrides: Partial<{
-	uuid: string
-	name: string
-	favorited: boolean
-	parentUuid: string | null
-}> = {}): DriveItem {
+function makeFileItem(
+	overrides: Partial<{
+		uuid: string
+		name: string
+		favorited: boolean
+		parentUuid: string | null
+	}> = {}
+): DriveItem {
 	return {
 		type: "file",
 		data: {
@@ -373,11 +383,7 @@ describe("drive.rename", () => {
 
 		await drive.rename({ item, newName: "NewName" })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: "NewName", created: undefined },
-			undefined
-		)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: "NewName", created: undefined }, undefined)
 	})
 
 	it("calls SDK updateFileMetadata when newName differs (file)", async () => {
@@ -416,11 +422,7 @@ describe("drive.rename", () => {
 
 		await drive.rename({ item, newName: "FreshName" })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: "FreshName", created: undefined },
-			undefined
-		)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: "FreshName", created: undefined }, undefined)
 	})
 
 	it("throws 'Invalid item type' for sharedRootDirectory", async () => {
@@ -468,11 +470,7 @@ describe("drive.favorite", () => {
 
 		await drive.favorite({ item, favorited: true })
 
-		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(
-			expect.objectContaining({ tag: "File" }),
-			true,
-			undefined
-		)
+		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(expect.objectContaining({ tag: "File" }), true, undefined)
 	})
 
 	it("calls SDK setFavorite when toggling true→false (directory)", async () => {
@@ -483,11 +481,7 @@ describe("drive.favorite", () => {
 
 		await drive.favorite({ item, favorited: false })
 
-		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(
-			expect.objectContaining({ tag: "Dir" }),
-			false,
-			undefined
-		)
+		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(expect.objectContaining({ tag: "Dir" }), false, undefined)
 	})
 
 	it("favorites query updater removes item by uuid (filter predicate)", async () => {
@@ -499,9 +493,7 @@ describe("drive.favorite", () => {
 		await drive.favorite({ item, favorited: true })
 
 		// driveItemsQueryUpdate is called for favorites with a filter predicate
-		const updateCall = mockDriveItemsQueryUpdate.mock.calls.find(
-			call => call[0]?.params?.path?.type === "favorites"
-		)
+		const updateCall = mockDriveItemsQueryUpdate.mock.calls.find(call => call[0]?.params?.path?.type === "favorites")
 
 		expect(updateCall).toBeDefined()
 
@@ -565,11 +557,7 @@ describe("drive.updateTimestamps", () => {
 
 		await drive.updateTimestamps({ item, created: 0 })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: undefined, created: BigInt(0) },
-			undefined
-		)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: undefined, created: BigInt(0) }, undefined)
 	})
 
 	it("sends BigInt(0) for modified=0 on a file (BUGFIX: epoch-0 not falsy)", async () => {
@@ -626,11 +614,7 @@ describe("drive.updateTimestamps", () => {
 
 		await drive.updateTimestamps({ item })
 
-		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(
-			item.data,
-			{ name: undefined, created: undefined },
-			undefined
-		)
+		expect(mockAuthedSdkClient.updateDirMetadata).toHaveBeenCalledWith(item.data, { name: undefined, created: undefined }, undefined)
 	})
 
 	it("uses CreatedTime.Keep when both created and modified are undefined (file)", async () => {
@@ -691,9 +675,7 @@ describe("drive.move", () => {
 
 		await drive.move({ item, newParent: newParentDir as any })
 
-		const oldParentUpdate = mockDriveItemsQueryUpdateForNormalParent.mock.calls.find(
-			call => call[0]?.parentUuid === "old-parent-uuid"
-		)
+		const oldParentUpdate = mockDriveItemsQueryUpdateForNormalParent.mock.calls.find(call => call[0]?.parentUuid === "old-parent-uuid")
 
 		expect(oldParentUpdate).toBeDefined()
 
@@ -712,9 +694,7 @@ describe("drive.move", () => {
 		const other = makeDirItem({ uuid: "dir-other-0001", name: "notes.txt" })
 		const newParentDir = new MockAnyNormalDirDir({ uuid: "new-parent-uuid" })
 
-		mockUnwrapParentUuid
-			.mockReturnValueOnce("old-parent-uuid")
-			.mockReturnValueOnce("new-parent-uuid")
+		mockUnwrapParentUuid.mockReturnValueOnce("old-parent-uuid").mockReturnValueOnce("new-parent-uuid")
 
 		const movedData = { ...item.data }
 		mockAuthedSdkClient.moveDir.mockResolvedValue({ ...item.data })
@@ -722,9 +702,7 @@ describe("drive.move", () => {
 
 		await drive.move({ item, newParent: newParentDir as any })
 
-		const destUpdate = mockDriveItemsQueryUpdateForNormalParent.mock.calls.find(
-			call => call[0]?.parentUuid === "new-parent-uuid"
-		)
+		const destUpdate = mockDriveItemsQueryUpdateForNormalParent.mock.calls.find(call => call[0]?.parentUuid === "new-parent-uuid")
 
 		expect(destUpdate).toBeDefined()
 
@@ -744,9 +722,7 @@ describe("drive.move", () => {
 		const existing = makeDirItem({ uuid: "dir-existing-0001", name: "notes" })
 		const newParentDir = new MockAnyNormalDirDir({ uuid: "new-parent-uuid" })
 
-		mockUnwrapParentUuid
-			.mockReturnValueOnce("old-parent-uuid")
-			.mockReturnValueOnce("new-parent-uuid")
+		mockUnwrapParentUuid.mockReturnValueOnce("old-parent-uuid").mockReturnValueOnce("new-parent-uuid")
 
 		const movedData = { ...item.data }
 		mockAuthedSdkClient.moveDir.mockResolvedValue({ ...item.data })
@@ -754,9 +730,7 @@ describe("drive.move", () => {
 
 		await drive.move({ item, newParent: newParentDir as any })
 
-		const destUpdate = mockDriveItemsQueryUpdateForNormalParent.mock.calls.find(
-			call => call[0]?.parentUuid === "new-parent-uuid"
-		)
+		const destUpdate = mockDriveItemsQueryUpdateForNormalParent.mock.calls.find(call => call[0]?.parentUuid === "new-parent-uuid")
 
 		const updater = destUpdate![0].updater as (prev: DriveItem[]) => DriveItem[]
 		const after = updater([existing])
@@ -803,9 +777,7 @@ describe("drive.restore", () => {
 
 		await drive.restore({ item })
 
-		const trashUpdate = mockDriveItemsQueryUpdate.mock.calls.find(
-			call => call[0]?.params?.path?.type === "trash"
-		)
+		const trashUpdate = mockDriveItemsQueryUpdate.mock.calls.find(call => call[0]?.params?.path?.type === "trash")
 
 		expect(trashUpdate).toBeDefined()
 
@@ -906,9 +878,7 @@ describe("drive.trash", () => {
 
 		await drive.trash({ item })
 
-		const recentsUpdate = mockDriveItemsQueryUpdate.mock.calls.find(
-			call => call[0]?.params?.path?.type === "recents"
-		)
+		const recentsUpdate = mockDriveItemsQueryUpdate.mock.calls.find(call => call[0]?.params?.path?.type === "recents")
 
 		expect(recentsUpdate).toBeUndefined()
 	})
@@ -923,9 +893,7 @@ describe("drive.trash", () => {
 
 		await drive.trash({ item })
 
-		const trashUpdate = mockDriveItemsQueryUpdate.mock.calls.find(
-			call => call[0]?.params?.path?.type === "trash"
-		)
+		const trashUpdate = mockDriveItemsQueryUpdate.mock.calls.find(call => call[0]?.params?.path?.type === "trash")
 
 		expect(trashUpdate).toBeDefined()
 
@@ -991,9 +959,7 @@ describe("drive.findItemMatchesForName", () => {
 	})
 
 	it("normalizes paths in results via normalizeFilePathForSdk", async () => {
-		const sdkResults = [
-			{ item: { tag: "File", inner: [{ uuid: "file-0001", region: "us-east-1" }] }, path: "file:///foo/bar" }
-		]
+		const sdkResults = [{ item: { tag: "File", inner: [{ uuid: "file-0001", region: "us-east-1" }] }, path: "file:///foo/bar" }]
 
 		mockAuthedSdkClient.findItemMatchesForName.mockResolvedValue(sdkResults)
 		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-0001" } } as any)
@@ -1029,11 +995,7 @@ describe("drive.createDirectory", () => {
 
 		await drive.createDirectory({ parent: "root", name: "NewDir" })
 
-		expect(mockAuthedSdkClient.createDir).toHaveBeenCalledWith(
-			expect.objectContaining({ tag: "Root" }),
-			"NewDir",
-			undefined
-		)
+		expect(mockAuthedSdkClient.createDir).toHaveBeenCalledWith(expect.objectContaining({ tag: "Root" }), "NewDir", undefined)
 	})
 
 	it("uses AnyNormalDir.Root when parent uuid matches root uuid", async () => {
@@ -1047,20 +1009,14 @@ describe("drive.createDirectory", () => {
 
 		await drive.createDirectory({ parent: rootDir, name: "AnotherDir" })
 
-		expect(mockAuthedSdkClient.createDir).toHaveBeenCalledWith(
-			expect.objectContaining({ tag: "Root" }),
-			"AnotherDir",
-			undefined
-		)
+		expect(mockAuthedSdkClient.createDir).toHaveBeenCalledWith(expect.objectContaining({ tag: "Root" }), "AnotherDir", undefined)
 	})
 
 	it("throws 'Parent not found in cache' when parent uuid is not in cache and not root", async () => {
 		const unknownParent = makeDirItem({ uuid: "unknown-dir-uuid" })
 		// directoryUuidToAnyNormalDir is empty
 
-		await expect(drive.createDirectory({ parent: unknownParent, name: "Child" })).rejects.toThrow(
-			"Parent not found in cache"
-		)
+		await expect(drive.createDirectory({ parent: unknownParent, name: "Child" })).rejects.toThrow("Parent not found in cache")
 	})
 
 	it("post-create updater removes uuid-match and name-match before appending (dedup)", async () => {
@@ -1098,9 +1054,7 @@ describe("drive.createDirectory", () => {
 	it("throws 'Invalid parent type' for sharedRootDirectory parent", async () => {
 		const invalidParent = makeSharedRootDirItem()
 
-		await expect(drive.createDirectory({ parent: invalidParent, name: "Child" })).rejects.toThrow(
-			"Invalid parent type"
-		)
+		await expect(drive.createDirectory({ parent: invalidParent, name: "Child" })).rejects.toThrow("Invalid parent type")
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
 	})
 })
@@ -1232,9 +1186,7 @@ describe("drive.emptyTrash", () => {
 
 		await drive.emptyTrash({})
 
-		const trashUpdate = mockDriveItemsQueryUpdate.mock.calls.find(
-			call => call[0]?.params?.path?.type === "trash"
-		)
+		const trashUpdate = mockDriveItemsQueryUpdate.mock.calls.find(call => call[0]?.params?.path?.type === "trash")
 
 		expect(trashUpdate).toBeDefined()
 
@@ -1329,5 +1281,74 @@ describe("drive.removeShare", () => {
 
 		// With parentUuid: 2 calls for parentUuid + 2 calls for root (null) = 4
 		expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(4)
+	})
+})
+
+// ============================================================================
+// Drive.getRootUuid
+// ============================================================================
+
+describe("drive.getRootUuid", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		drive.cachedRootUuid = null
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: mockAuthedSdkClient })
+		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-0001" })
+	})
+
+	it("first call invokes getSdkClients and returns the uuid from root()", async () => {
+		const result = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(1)
+		expect(mockAuthedSdkClient.root).toHaveBeenCalledTimes(1)
+		expect(result).toBe("root-uuid-0001")
+	})
+
+	it("second call returns cached uuid without calling getSdkClients again", async () => {
+		await drive.getRootUuid()
+		vi.clearAllMocks()
+
+		const result = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+		expect(mockAuthedSdkClient.root).not.toHaveBeenCalled()
+		expect(result).toBe("root-uuid-0001")
+	})
+
+	it("after cachedRootUuid reset to null, next call re-fetches from SDK", async () => {
+		await drive.getRootUuid()
+		drive.cachedRootUuid = null
+		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-fresh" })
+
+		const result = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
+		expect(result).toBe("root-uuid-fresh")
+	})
+
+	it("stores the fetched uuid in cachedRootUuid after first call", async () => {
+		expect(drive.cachedRootUuid).toBeNull()
+
+		await drive.getRootUuid()
+
+		expect(drive.cachedRootUuid).toBe("root-uuid-0001")
+	})
+
+	it("FALSY-GUARD REGRESSION: empty-string uuid causes re-fetch on every call (truthy guard bug)", async () => {
+		// root() returns an empty string uuid (edge case)
+		mockAuthedSdkClient.root.mockReturnValue({ uuid: "" })
+
+		const result1 = await drive.getRootUuid()
+
+		// First call: getSdkClients called once, returns ""
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(1)
+		expect(result1).toBe("")
+
+		// Because `if (this.cachedRootUuid)` is falsy for "", the cache is NOT respected
+		// and getSdkClients is called again on the second call — documents the truthy guard bug
+		const result2 = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
+		expect(result2).toBe("")
 	})
 })

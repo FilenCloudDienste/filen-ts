@@ -1,4 +1,4 @@
-import { memo, useRef } from "react"
+import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
@@ -12,17 +12,15 @@ import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRecyclingState } from "@shopify/flash-list"
 import Button from "@/components/ui/button"
-import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 
-const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
+const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
-	const [password, setPassword] = useRecyclingState<string | null>(null, [item.type === "drive" ? item.data.data.uuid : item.data.url])
+	const [password, setPassword] = useRecyclingState<string | null>(null, [galleryItemKey(item)])
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 	const onErrorWorkingRef = useRef<boolean>(false)
-	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [
-		item.type === "drive" ? item.data.data.uuid : item.data.url
-	])
+	const [didCancelPasswordPrompt, setDidCancelPasswordPrompt] = useRecyclingState<boolean>(false, [galleryItemKey(item)])
 
 	const query = useFileUriQuery(
 		item.type === "external"
@@ -151,6 +149,6 @@ const PreviewPdf = memo(({ item }: { item: GalleryItemTagged }) => {
 			)}
 		</View>
 	)
-})
+}
 
 export default PreviewPdf

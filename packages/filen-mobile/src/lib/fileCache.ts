@@ -5,10 +5,11 @@ import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
 import isEqual from "react-fast-compare"
 import auth from "@/lib/auth"
-import { wrapAbortSignalForSdk, normalizeFilePathForSdk } from "@/lib/utils"
+import { normalizeFilePathForSdk } from "@/lib/paths"
+import { wrapAbortSignalForSdk } from "@/lib/signals"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
 import { FILE_CACHE_VERSION, FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 
@@ -30,6 +31,8 @@ export type Metadata = (
 
 // Critical: When changing anything related to storage index/store/persistence format, bump FILE_CACHE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = FILE_CACHE_VERSION
+
+const DEFAULT_GC_AGE_MS = 24 * 60 * 60 * 1000
 export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
 
 export class FileCache {
@@ -355,7 +358,7 @@ export class FileCache {
 
 					const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-					if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? 86400 * 1000)) {
+					if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? DEFAULT_GC_AGE_MS)) {
 						return uuid
 					}
 
@@ -398,7 +401,7 @@ export class FileCache {
 						const recheck = await run(async () => {
 							const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-							return !metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? 86400 * 1000)
+							return !metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? DEFAULT_GC_AGE_MS)
 						})
 
 						if (recheck.success && !recheck.data) {

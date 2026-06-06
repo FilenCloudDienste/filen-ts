@@ -41,8 +41,7 @@ function encodeBinaryView(this: ArrayBufferView): {
 	k: string
 	d: string
 } {
-	const bytes =
-		this instanceof Uint8Array ? this : new Uint8Array(this.buffer, this.byteOffset, this.byteLength)
+	const bytes = this instanceof Uint8Array ? this : new Uint8Array(this.buffer, this.byteOffset, this.byteLength)
 
 	return {
 		__bin: 1,
@@ -174,4 +173,16 @@ export function deserialize<T>(input: string | ArrayBuffer | Uint8Array): T {
 	const json = typeof input === "string" ? input : new TextDecoder().decode(input)
 
 	return JSON.parse(json, reviver) as T
+}
+
+export function deserializeRouteParam<T>(serialized: string | undefined | null): T | null {
+	if (!serialized) {
+		return null
+	}
+
+	try {
+		return deserialize(serialized) as T
+	} catch {
+		return null
+	}
 }

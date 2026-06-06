@@ -1,8 +1,7 @@
-import { memo } from "react"
-import Drive from "@/components/drive"
+import Drive from "@/features/drive/components"
 
-const LinkedDir = memo(() => {
+const LinkedDir = () => {
 	return <Drive />
-})
+}
 
 export default LinkedDir

@@ -1,5 +1,6 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
-import { getPreviewType, unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/utils"
+import { unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/sdkUnwrap"
+import { getPreviewType } from "@/lib/previewType"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
@@ -7,33 +8,28 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { ActivityIndicator } from "react-native"
 import useFileTextQuery from "@/queries/useFileText.query"
-import { memo } from "react"
 import { useTranslation } from "react-i18next"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import transfers from "@/lib/transfers"
+import transfers from "@/features/transfers/transfers"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { newTmpFile } from "@/lib/tmp"
 import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
-import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import type { DriveItemFileExtracted } from "@/types"
 
-const PreviewTextInner = memo(({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: GalleryItemTagged }) => {
+const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const drivePath = useDrivePreviewStore(useShallow(state => state.drivePath))
 	const insets = useSafeAreaInsets()
-	const [editedText, setEditedText] = useRecyclingState<string | null>(null, [
-		item.type === "drive" ? item.data.data.uuid : item.data.url
-	])
+	const [editedText, setEditedText] = useRecyclingState<string | null>(null, [galleryItemKey(item)])
 	const textPrimary = useResolveClassNames("text-primary")
-	const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [
-		item.type === "drive" ? item.data.data.uuid : item.data.url
-	])
+	const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [galleryItemKey(item)])
 
 	const parent =
 		item.type === "drive" && drivePath
@@ -166,9 +162,9 @@ const PreviewTextInner = memo(({ previewType, text, item }: { previewType: "text
 			/>
 		</View>
 	)
-})
+}
 
-const PreviewText = memo(({ item }: { item: GalleryItemTagged }) => {
+const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 
@@ -217,6 +213,6 @@ const PreviewText = memo(({ item }: { item: GalleryItemTagged }) => {
 			item={item}
 		/>
 	)
-})
+}
 
 export default PreviewText

@@ -1,6 +1,6 @@
 import { Redirect } from "expo-router"
 import { useIsAuthed, useStringifiedClient } from "@/lib/auth"
-import { useStartScreen, buildStartScreenHref } from "@/lib/startScreen"
+import { useStartScreen, buildStartScreenHref } from "@/features/settings/startScreen"
 
 export default function Index() {
 	const isAuthed = useIsAuthed()

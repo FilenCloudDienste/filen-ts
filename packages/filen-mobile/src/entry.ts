@@ -1,4 +1,4 @@
 import "@/global"
-import "@/lib/backgroundTask"
+import "@/features/cameraUpload/backgroundTask"
 
 import "expo-router/entry"

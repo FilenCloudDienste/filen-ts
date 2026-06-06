@@ -1,8 +1,7 @@
-import ChatsComponent from "@/components/chats"
-import { memo } from "react"
+import ChatsComponent from "@/features/chats/components"
 
-const Chats = memo(() => {
+const Chats = () => {
 	return <ChatsComponent />
-})
+}
 
 export default Chats

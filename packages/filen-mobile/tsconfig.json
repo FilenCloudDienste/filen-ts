@@ -8,7 +8,6 @@
 		"paths": {
 			"@/modules/*": ["./modules/*"],
 			"@/*": ["./src/*"],
-			"#/*": ["./src/*"],
 			"react-native-ios-context-menu": ["./node_modules/react-native-ios-context-menu/src/index.tsx"],
 			"react-native-ios-utilities": ["./node_modules/react-native-ios-utilities/src/index.ts"]
 		},

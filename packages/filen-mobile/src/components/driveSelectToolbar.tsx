@@ -1,4 +1,4 @@
-import { Fragment, memo } from "react"
+import { Fragment } from "react"
 import { CrossGlassContainerView } from "@/components/ui/view"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 import { useResolveClassNames } from "uniwind"
@@ -10,18 +10,18 @@ import { run, cn } from "@filen/utils"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
-import drive from "@/lib/drive"
+import drive from "@/features/drive/drive"
 import cache from "@/lib/cache"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import { useSdkClients } from "@/lib/auth"
-import { unwrapParentUuid } from "@/lib/utils"
-import useDriveSelectStore from "@/stores/useDriveSelect.store"
+import { unwrapParentUuid } from "@/lib/sdkUnwrap"
+import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
 import { useNavigation } from "expo-router"
 import { useTranslation } from "react-i18next"
 
-const DriveSelectToolbar = memo(() => {
+const DriveSelectToolbar = () => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const drivePath = useDrivePath()
@@ -257,6 +257,6 @@ const DriveSelectToolbar = memo(() => {
 			)}
 		</Fragment>
 	)
-})
+}
 
 export default DriveSelectToolbar

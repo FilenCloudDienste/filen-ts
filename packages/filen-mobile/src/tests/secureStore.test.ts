@@ -44,7 +44,9 @@ vi.mock("@/lib/events", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))
 
@@ -357,7 +359,6 @@ describe("SecureStore", () => {
 
 			expect(result).toBeNull()
 		})
-
 	})
 
 	describe("multiple set/get operations", () => {

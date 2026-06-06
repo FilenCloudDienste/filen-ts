@@ -8,15 +8,15 @@ import {
 } from "@filen/sdk-rs"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { useEffect, useState } from "react"
-import transfers from "@/lib/transfers"
-import cameraUpload from "@/lib/cameraUpload"
-import { unregisterBackgroundSync } from "@/lib/backgroundTask"
-import fileProvider from "@/lib/fileProvider"
+import transfers from "@/features/transfers/transfers"
+import cameraUpload from "@/features/cameraUpload/cameraUpload"
+import { unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
+import fileProvider from "@/features/settings/fileProvider"
 import sqlite from "@/lib/sqlite"
-import audio from "@/lib/audio"
-import offline from "@/lib/offline"
-import { sync as chatsSync } from "@/components/chats/sync"
-import { sync as notesSync } from "@/components/notes/sync"
+import audio from "@/features/audio/audio"
+import offline from "@/features/offline/offline"
+import { sync as chatsSync } from "@/features/chats/components/sync"
+import { sync as notesSync } from "@/features/notes/components/sync"
 import { reloadAppAsync } from "expo"
 
 class Auth {
@@ -89,10 +89,6 @@ class Auth {
 			authedClient: this.authedClient,
 			unauthedClient: this.unauthedClient
 		}
-	}
-
-	public async getStringifiedAuthedClientFromSecureStorage(): Promise<StringifiedClient | null> {
-		return await secureStore.get<StringifiedClient>(this.stringifiedClientStorageKey)
 	}
 
 	public async getSdkClients(): Promise<{

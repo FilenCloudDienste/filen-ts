@@ -1,15 +1,15 @@
 import { Stack } from "expo-router"
-import { memo, Fragment } from "react"
+import { Fragment } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import useOfflineStore from "@/stores/useOffline.store"
+import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { useShallow } from "zustand/shallow"
 import { Platform, ActivityIndicator } from "react-native"
 import Text from "@/components/ui/text"
 import { useResolveClassNames } from "uniwind"
 import { useTranslation } from "react-i18next"
 
-const Indicator = memo(() => {
+const Indicator = () => {
 	const insets = useSafeAreaInsets()
 	const syncing = useOfflineStore(useShallow(state => state.syncing))
 	const textForeground = useResolveClassNames("text-foreground")
@@ -47,15 +47,15 @@ const Indicator = memo(() => {
 			</CrossGlassContainerView>
 		</View>
 	)
-})
+}
 
-const Layout = memo(() => {
+const Layout = () => {
 	return (
 		<Fragment>
 			<Stack />
 			<Indicator />
 		</Fragment>
 	)
-})
+}
 
 export default Layout

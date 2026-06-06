@@ -1,8 +1,8 @@
 import { onlineManager } from "@tanstack/react-query"
-import offline from "@/lib/offline"
-import { sync as notesSync } from "@/components/notes/sync"
-import { sync as chatsSync } from "@/components/chats/sync"
-import cameraUpload from "@/lib/cameraUpload"
+import offline from "@/features/offline/offline"
+import { sync as notesSync } from "@/features/notes/components/sync"
+import { sync as chatsSync } from "@/features/chats/components/sync"
+import cameraUpload from "@/features/cameraUpload/cameraUpload"
 
 let started = false
 

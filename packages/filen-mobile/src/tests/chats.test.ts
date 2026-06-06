@@ -54,13 +54,13 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/queries/useChats.query", () => ({
+vi.mock("@/features/chats/queries/useChats.query", () => ({
 	chatsQueryUpdate: mockChatsQueryUpdate,
 	chatsQueryGet: mockChatsQueryGet,
 	fetchData: mockChatsQueryFetch
 }))
 
-vi.mock("@/queries/useChatMessages.query", () => ({
+vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 	chatMessagesQueryUpdate: mockChatMessagesQueryUpdate,
 	fetchData: mockChatMessagesQueryFetch
 }))
@@ -82,10 +82,23 @@ vi.mock("@filen/sdk-rs", () => ({
 	DirMeta_Tags: { Decoded: "Decoded" }
 }))
 
-import chats from "@/lib/chats"
+// chats.ts now pulls in the upload-and-link helper deps. They're only exercised by the
+// uploadAssetsAndGenerateLinks path (not covered here) — mock them so the module loads.
+vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+vi.mock("@/features/transfers/transfers", () => ({ default: { upload: vi.fn() } }))
+vi.mock("@/features/drive/drive", () => ({ default: { enablePublicLink: vi.fn() } }))
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapFileMeta: vi.fn(),
+	unwrappedFileIntoDriveItem: vi.fn(),
+	makeDriveItemPublicLink: vi.fn()
+}))
+
+import chats from "@/features/chats/chats"
 import type { Chat } from "@/types"
 import type { ChatParticipant, Contact } from "@filen/sdk-rs"
-import type { ChatMessageWithInflightId } from "@/stores/useChats.store"
+import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 
 function makeChat(overrides: Partial<Chat> = {}): Chat {
 	return {
@@ -493,9 +506,7 @@ describe("chats.disableMessageEmbed", () => {
 
 		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledTimes(1)
 		// Params should use the message.chat uuid
-		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledWith(
-			expect.objectContaining({ params: { uuid: "chat-1" } })
-		)
+		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledWith(expect.objectContaining({ params: { uuid: "chat-1" } }))
 	})
 
 	it("chatMessagesQueryUpdate updater sets inflightId to empty string on the updated message", async () => {
@@ -1288,9 +1299,7 @@ describe("chats.refetchChatsAndMessages", () => {
 		await chats.refetchChatsAndMessages()
 
 		// Find the call for chat1's messages
-		const msgCall = mockChatMessagesQueryUpdate.mock.calls.find(
-			c => c[0]?.params?.uuid === "rf-3"
-		)
+		const msgCall = mockChatMessagesQueryUpdate.mock.calls.find(c => c[0]?.params?.uuid === "rf-3")
 
 		expect(msgCall).toBeDefined()
 

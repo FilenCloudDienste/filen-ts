@@ -6,7 +6,7 @@ vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("@/lib/transfers", () => ({
+vi.mock("@/features/transfers/transfers", () => ({
 	default: {
 		download: vi.fn().mockResolvedValue({
 			files: [],
@@ -39,7 +39,7 @@ vi.mock("@/lib/cache", () => ({
 // Mock them with just the VERSION export so their full transitive deps
 // (expo-image via thumbnails, etc.) don't load in this test.
 vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/audioCache", () => ({ VERSION: 1 }))
+vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
 vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
 vi.mock("@/lib/events", () => ({
@@ -48,7 +48,7 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
-vi.mock("@/stores/useOffline.store", () => ({
+vi.mock("@/features/offline/store/useOffline.store", () => ({
 	default: {
 		getState: vi.fn().mockReturnValue({
 			setSyncing: vi.fn()
@@ -56,15 +56,15 @@ vi.mock("@/stores/useOffline.store", () => ({
 	}
 }))
 
-vi.mock("@/queries/useDriveItemStoredOffline.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItemStoredOffline.query", () => ({
 	driveItemStoredOfflineQueryUpdate: vi.fn()
 }))
 
-vi.mock("@/queries/useDriveItems.query", () => ({
+vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: vi.fn()
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (p: string) =>
 		p
 			.trim()
@@ -80,96 +80,90 @@ vi.mock("@/lib/utils", () => ({
 		}
 
 		return absolutePath.slice(idx + anchor.length - 1)
-	},
-	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000),
+	}
+}))
+
+vi.mock("@/lib/utils", () => ({
+	normalizeModificationTimestampForComparison: (timestamp: number) => Math.floor(timestamp / 1000)
+}))
+
+// Minimal stubs for @/lib/sdkUnwrap. These only handle the concrete shapes
+// that offline.ts exercises at test time (SDK objects with tag:"Decoded" from
+// mocked listDir/listSharedDir results). They do NOT re-implement the real
+// tag-switching logic — see finding #166. Each stub reads exactly the fields
+// that offline.ts reads from the return value, nothing more.
+vi.mock("@/lib/sdkUnwrap", () => ({
+	// offline.ts reads: result.meta (null check), result.meta.name, result.meta.modified,
+	// result.file.uuid. Shape: { file, meta: DecryptedFileMeta | null, undecryptable }.
 	unwrapFileMeta: vi.fn((file: unknown) => {
 		const f = file as any
+		const decoded = f?.meta?.tag === "Decoded" ? (f.meta.inner?.[0] ?? null) : null
 
-		if (f && typeof f === "object" && "meta" in f && f.meta && typeof f.meta === "object" && f.meta.tag === "Decoded") {
-			return { file, meta: f.meta.inner[0] }
+		return {
+			file: f,
+			meta: decoded ?? null,
+			undecryptable: decoded === null,
+			shared: false,
+			root: false
 		}
-
-		return { file, meta: { name: "test.txt", size: 100n, modified: 1000, created: 900 } }
 	}),
+	// offline.ts reads: result (uuid string | null).
+	// Normal.Dir path: dir.inner[0].inner[0].uuid
 	unwrapAnyDirUuid: vi.fn((dir: any) => {
-		if (!dir || typeof dir !== "object" || !("tag" in dir)) {
+		if (!dir || typeof dir !== "object") {
 			return null
 		}
 
-		if (dir.tag === "Normal" || dir.tag === "Shared" || dir.tag === "Linked") {
-			const innerDir = dir.inner?.[0]
-
-			if (!innerDir) {
-				return null
-			}
-
-			// Normal: inner[0] is AnyNormalDir { tag, inner: [Dir] }
-			if (dir.tag === "Normal") {
-				return innerDir.inner?.[0]?.uuid ?? null
-			}
-
-			// Shared/Linked: inner[0] has .dir which is AnySharedDir/AnyLinkedDir
-			return innerDir.dir?.inner?.[0]?.inner?.uuid ?? innerDir.dir?.inner?.[0]?.uuid ?? null
-		}
-
-		return null
+		// Normal Dir / Root: inner[0] is AnyNormalDir, inner[0].inner[0] is the Dir/Root object
+		return dir.inner?.[0]?.inner?.[0]?.uuid ?? null
 	}),
+	// offline.ts reads: result.meta (null check), result.meta.name, result.uuid.
+	// Shape: { dir, uuid, meta: DecryptedDirMeta | null, undecryptable }.
 	unwrapDirMeta: vi.fn((dir: unknown) => {
-		const extractMeta = (d: any) => {
-			if (d && typeof d === "object" && "meta" in d && d.meta && typeof d.meta === "object" && d.meta.tag === "Decoded") {
-				return d.meta.inner[0]
-			}
+		const d = dir as any
+		const decoded = d?.meta?.tag === "Decoded" ? (d.meta.inner?.[0] ?? null) : null
 
-			return { name: "test-dir" }
+		return {
+			dir: d,
+			uuid: d?.uuid ?? "unknown",
+			meta: decoded ?? null,
+			undecryptable: decoded === null,
+			shared: false
 		}
-
-		if (typeof dir === "object" && dir !== null) {
-			// Direct Dir object with uuid property
-			if ("uuid" in dir) {
-				return { dir, uuid: (dir as { uuid: string }).uuid, meta: extractMeta(dir) }
-			}
-
-			// AnyNormalDir.Dir/Root wrapper with inner[0].uuid
-			if ("inner" in dir) {
-				const inner = (dir as { inner: unknown[] }).inner[0]
-
-				if (typeof inner === "object" && inner !== null && "uuid" in inner) {
-					return { dir, uuid: (inner as { uuid: string }).uuid, meta: extractMeta(inner) }
-				}
-			}
-		}
-
-		return { dir, uuid: "unknown", meta: { name: "test-dir" } }
 	}),
+	// offline.ts reads: result.type, result.data.uuid, result.data.decryptedMeta.
+	// Mirrors the real unwrappedFileIntoDriveItem return shape (type:"file").
 	unwrappedFileIntoDriveItem: vi.fn(
-		(unwrapped: { file: { uuid?: string }; meta: { name: string; size: bigint; modified: number; created: number } }) => ({
+		(unwrapped: { file: { uuid?: string }; meta: { name: string; size?: bigint; modified?: number; created?: number } | null }) => ({
 			type: "file" as const,
 			data: {
 				uuid: unwrapped.file?.uuid ?? "file-uuid",
-				decryptedMeta: {
-					name: unwrapped.meta?.name ?? "test.txt",
-					size: unwrapped.meta?.size ?? 100n,
-					modified: unwrapped.meta?.modified ?? 1000,
-					created: unwrapped.meta?.created ?? 900
-				},
-				inner: unwrapped.file
+				decryptedMeta: unwrapped.meta
+					? {
+							name: unwrapped.meta.name,
+							size: unwrapped.meta.size ?? 100n,
+							modified: unwrapped.meta.modified ?? 1000,
+							created: unwrapped.meta.created ?? 900
+						}
+					: null,
+				undecryptable: unwrapped.meta === null
 			}
 		})
 	),
-	unwrappedDirIntoDriveItem: vi.fn((unwrapped: { dir: { uuid?: string }; uuid: string; meta: { name: string } }) => ({
+	// offline.ts reads: result.type, result.data.uuid, result.data.decryptedMeta.
+	// Mirrors the real unwrappedDirIntoDriveItem return shape (type:"directory").
+	unwrappedDirIntoDriveItem: vi.fn((unwrapped: { dir: { uuid?: string }; uuid: string; meta: { name: string } | null }) => ({
 		type: "directory" as const,
 		data: {
 			uuid: unwrapped.uuid ?? unwrapped.dir?.uuid ?? "dir-uuid",
-			decryptedMeta: {
-				name: unwrapped.meta?.name ?? "test-dir",
-				size: 0n,
-				modified: 1000,
-				created: 900
-			},
-			inner: unwrapped.dir
+			decryptedMeta: unwrapped.meta ? { name: unwrapped.meta.name, size: 0n, modified: 1000, created: 900 } : null,
+			undecryptable: unwrapped.meta === null
 		}
 	})),
-	unwrapParentUuid: vi.fn(() => null),
+	unwrapParentUuid: vi.fn(() => null)
+}))
+
+vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: vi.fn(() => null)
 }))
 
@@ -260,22 +254,30 @@ vi.mock("uuid", () => ({
 	validate: (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 }))
 
-import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta } from "@/lib/offline"
+import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta } from "@/features/offline/offline"
 import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
-import { AnyDirWithContext, AnyNormalDir, AnySharedDir, AnySharedDirWithContext, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
-import transfers from "@/lib/transfers"
-import { driveItemStoredOfflineQueryUpdate } from "@/queries/useDriveItemStoredOffline.query"
-import { driveItemsQueryUpdate } from "@/queries/useDriveItems.query"
+import {
+	AnyDirWithContext,
+	AnyNormalDir,
+	AnySharedDir,
+	AnySharedDirWithContext,
+	SharingRole_Tags,
+	NonRootDir_Tags,
+	type Dir
+} from "@filen/sdk-rs"
+import transfers from "@/features/transfers/transfers"
+import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
-import useOfflineStore from "@/stores/useOffline.store"
+import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
 
 type OfflineInstance = any
 
-import { VERSION as OFFLINE_VERSION } from "@/lib/offline"
+import { VERSION as OFFLINE_VERSION } from "@/features/offline/offline"
 
 const BASE_DIR_URI = `file:///shared/group.io.filen.app/offline/v${OFFLINE_VERSION}`
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
@@ -387,7 +389,7 @@ function writeDirectoryMeta(uuid: string, meta: DirectoryOfflineMeta): void {
 }
 
 async function createOffline(): Promise<OfflineInstance> {
-	const mod = await import("@/lib/offline")
+	const mod = await import("@/features/offline/offline")
 
 	return new (mod.Offline as new () => OfflineInstance)()
 }
@@ -1764,10 +1766,7 @@ describe("Offline", () => {
 			const noEntriesMeta = { item: dirItem, parent }
 
 			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
-			fs.set(
-				`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`,
-				new Uint8Array(new TextEncoder().encode(serialize(noEntriesMeta)))
-			)
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize(noEntriesMeta))))
 
 			const offline = await createOffline()
 			const result = await offline.listDirectories()
@@ -2476,7 +2475,7 @@ describe("Offline", () => {
 			} as any)
 
 			// Make unwrapSdkError return an error with kind() === FolderNotFound
-			const { unwrapSdkError } = await import("@/lib/utils")
+			const { unwrapSdkError } = await import("@/lib/sdkErrors")
 
 			vi.mocked(unwrapSdkError).mockReturnValueOnce({
 				kind: () => "FolderNotFound"
@@ -3812,7 +3811,7 @@ describe("Offline", () => {
 			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
 				authedSdkClient: {
 					listDir: vi.fn().mockImplementation((dir: { inner: unknown[] }) => {
-						const uuid = ((dir as any).inner ?? [(dir as any)])[0]?.uuid ?? (dir as any).uuid
+						const uuid = ((dir as any).inner ?? [dir as any])[0]?.uuid ?? (dir as any).uuid
 
 						if (uuid === parent1Uuid) {
 							return listDirParent1()
@@ -3963,7 +3962,7 @@ describe("Offline", () => {
 				shareInfo: { tag: SharingRole_Tags.Receiver }
 			} as any)
 
-			const { unwrapParentUuid } = await import("@/lib/utils")
+			const { unwrapParentUuid } = await import("@/lib/sdkUnwrap")
 
 			vi.mocked(unwrapParentUuid).mockReturnValueOnce(grandparentUuid)
 
@@ -4072,7 +4071,7 @@ describe("Offline", () => {
 				shareInfo: { tag: SharingRole_Tags.Receiver }
 			} as any)
 
-			const { unwrapParentUuid } = await import("@/lib/utils")
+			const { unwrapParentUuid } = await import("@/lib/sdkUnwrap")
 
 			vi.mocked(unwrapParentUuid).mockReset()
 			vi.mocked(unwrapParentUuid).mockImplementation(() => sharedParentUuid)
@@ -4847,7 +4846,7 @@ describe("Offline", () => {
 			} as any)
 
 			// Make unwrapSdkError return an error with kind() === FolderNotFound
-			const { unwrapSdkError } = await import("@/lib/utils")
+			const { unwrapSdkError } = await import("@/lib/sdkErrors")
 
 			vi.mocked(unwrapSdkError).mockReturnValueOnce({
 				kind: () => "FolderNotFound"
@@ -5727,6 +5726,162 @@ describe("Offline", () => {
 		})
 	})
 
+	// Tests for finding #166: verify that the @/lib/sdkUnwrap mock stubs return the
+	// same shape that offline.ts relies on. Each assertion targets only the fields
+	// that offline.ts actually reads — not the full real API — so the tests protect
+	// against drift without re-implementing the real tag-switching logic.
+	describe("sdkUnwrap mock contract alignment (finding #166)", () => {
+		it("unwrapFileMeta: Decoded tag yields non-null meta with correct fields", async () => {
+			const { unwrapFileMeta } = await import("@/lib/sdkUnwrap")
+			const input = {
+				uuid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				meta: { tag: "Decoded", inner: [{ name: "report.pdf", size: 500n, modified: 2000, created: 1000 }] }
+			}
+
+			const result = vi.mocked(unwrapFileMeta)(input as any)
+
+			// offline.ts checks result.meta !== null before using name / modified
+			expect(result.meta).not.toBeNull()
+			expect(result.meta?.name).toBe("report.pdf")
+			expect(result.meta?.modified).toBe(2000)
+			// offline.ts reads result.file.uuid for UUID-based map lookups
+			expect(result.file).toBe(input)
+			expect((result.file as unknown as typeof input).uuid).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+		})
+
+		it("unwrapFileMeta: non-Decoded tag yields null meta (undecryptable path)", async () => {
+			const { unwrapFileMeta } = await import("@/lib/sdkUnwrap")
+			const input = {
+				uuid: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				meta: { tag: "Encrypted", inner: ["ciphertext"] }
+			}
+
+			const result = vi.mocked(unwrapFileMeta)(input as any)
+
+			// offline.ts guards: if (!unwrapped.meta) { continue }
+			expect(result.meta).toBeNull()
+			expect(result.undecryptable).toBe(true)
+		})
+
+		it("unwrapDirMeta: Decoded tag yields non-null meta with name and uuid", async () => {
+			const { unwrapDirMeta } = await import("@/lib/sdkUnwrap")
+			const input = {
+				uuid: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+				meta: { tag: "Decoded", inner: [{ name: "ProjectDir" }] }
+			}
+
+			const result = vi.mocked(unwrapDirMeta)(input as any)
+
+			// offline.ts reads result.meta?.name and result.uuid
+			expect(result.meta).not.toBeNull()
+			expect(result.meta?.name).toBe("ProjectDir")
+			expect(result.uuid).toBe("cccccccc-cccc-cccc-cccc-cccccccccccc")
+		})
+
+		it("unwrapDirMeta: non-Decoded tag yields null meta", async () => {
+			const { unwrapDirMeta } = await import("@/lib/sdkUnwrap")
+			const input = {
+				uuid: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				meta: { tag: "Encrypted", inner: ["blob"] }
+			}
+
+			const result = vi.mocked(unwrapDirMeta)(input as any)
+
+			// offline.ts guards: if (!unwrapped.meta) { continue }
+			expect(result.meta).toBeNull()
+			expect(result.undecryptable).toBe(true)
+			// uuid is still returned even for undecryptable dirs
+			expect(result.uuid).toBe("dddddddd-dddd-dddd-dddd-dddddddddddd")
+		})
+
+		it("unwrappedFileIntoDriveItem: produces type:'file' DriveItem with correct uuid and decryptedMeta", async () => {
+			const { unwrapFileMeta, unwrappedFileIntoDriveItem } = await import("@/lib/sdkUnwrap")
+			const sdkFile = {
+				uuid: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+				meta: { tag: "Decoded", inner: [{ name: "data.csv", size: 1024n, modified: 3000, created: 2000 }] }
+			}
+
+			const unwrapped = vi.mocked(unwrapFileMeta)(sdkFile as any)
+			const driveItem = vi.mocked(unwrappedFileIntoDriveItem)(unwrapped as any)
+
+			// offline.ts uses driveItem.type and driveItem.data.uuid / driveItem.data.decryptedMeta
+			expect(driveItem.type).toBe("file")
+			expect(driveItem.data.uuid).toBe("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+			expect(driveItem.data.decryptedMeta?.name).toBe("data.csv")
+		})
+
+		it("unwrappedFileIntoDriveItem: null meta yields null decryptedMeta (undecryptable file)", async () => {
+			const { unwrappedFileIntoDriveItem } = await import("@/lib/sdkUnwrap")
+			const unwrapped = {
+				file: { uuid: "ffffffff-ffff-ffff-ffff-ffffffffffff" },
+				meta: null,
+				undecryptable: true,
+				shared: false,
+				root: false
+			}
+
+			const driveItem = vi.mocked(unwrappedFileIntoDriveItem)(unwrapped as any)
+
+			expect(driveItem.type).toBe("file")
+			expect(driveItem.data.decryptedMeta).toBeNull()
+			expect(driveItem.data.undecryptable).toBe(true)
+		})
+
+		it("unwrappedDirIntoDriveItem: produces type:'directory' DriveItem with correct uuid and name", async () => {
+			const { unwrapDirMeta, unwrappedDirIntoDriveItem } = await import("@/lib/sdkUnwrap")
+			const sdkDir = {
+				uuid: "11111111-2222-3333-4444-555555555555",
+				meta: { tag: "Decoded", inner: [{ name: "Archive" }] }
+			}
+
+			const unwrapped = vi.mocked(unwrapDirMeta)(sdkDir as any)
+			const driveItem = vi.mocked(unwrappedDirIntoDriveItem)(unwrapped as any)
+
+			expect(driveItem.type).toBe("directory")
+			expect(driveItem.data.uuid).toBe("11111111-2222-3333-4444-555555555555")
+			expect(driveItem.data.decryptedMeta?.name).toBe("Archive")
+		})
+
+		it("unwrappedDirIntoDriveItem: null meta yields null decryptedMeta (undecryptable dir)", async () => {
+			const { unwrappedDirIntoDriveItem } = await import("@/lib/sdkUnwrap")
+			const unwrapped = {
+				dir: { uuid: "aaaabbbb-cccc-dddd-eeee-ffffaaaabbbb" },
+				uuid: "aaaabbbb-cccc-dddd-eeee-ffffaaaabbbb",
+				meta: null,
+				undecryptable: true,
+				shared: false
+			}
+
+			const driveItem = vi.mocked(unwrappedDirIntoDriveItem)(unwrapped as any)
+
+			expect(driveItem.type).toBe("directory")
+			expect(driveItem.data.decryptedMeta).toBeNull()
+			expect(driveItem.data.undecryptable).toBe(true)
+		})
+
+		it("unwrapAnyDirUuid: Normal.Dir path extracts uuid from inner[0].inner[0].uuid", async () => {
+			const { unwrapAnyDirUuid } = await import("@/lib/sdkUnwrap")
+			// Matches the shape produced by makeParent(): AnyDirWithContext.Normal(AnyNormalDir.Dir({uuid}))
+			// tag: "Normal", inner: [AnyNormalDir.Dir], inner[0].inner: [Dir { uuid }]
+			const normalDir = {
+				tag: "Normal",
+				inner: [{ tag: "Dir", inner: [{ uuid: "99999999-8888-7777-6666-555555555555" }] }]
+			}
+
+			const uuid = vi.mocked(unwrapAnyDirUuid)(normalDir as any)
+
+			// offline.ts uses this uuid to resolve parents during sync
+			expect(uuid).toBe("99999999-8888-7777-6666-555555555555")
+		})
+
+		it("unwrapAnyDirUuid: null/undefined input returns null (not a uuid)", async () => {
+			const { unwrapAnyDirUuid } = await import("@/lib/sdkUnwrap")
+
+			expect(vi.mocked(unwrapAnyDirUuid)(null as any)).toBeNull()
+			expect(vi.mocked(unwrapAnyDirUuid)(undefined as any)).toBeNull()
+		})
+	})
+
 	describe("sync offline-guard branch", () => {
 		it("exits without listing remote when onlineManager reports offline", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
@@ -5840,7 +5995,9 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await expect(offline.storeFile({ file: fileItem, parent, signal: controller.signal })).rejects.toThrow("The operation was aborted")
+			await expect(offline.storeFile({ file: fileItem, parent, signal: controller.signal })).rejects.toThrow(
+				"The operation was aborted"
+			)
 
 			// The aborted download must have triggered cleanup — no partial directory left.
 			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)

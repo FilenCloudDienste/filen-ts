@@ -1,11 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const {
-	mockGetSdkClients,
-	mockGetFileLinkStatus,
-	mockGetDirLinkStatus,
-	cacheUuidToAnyDriveItem
-} = vi.hoisted(() => {
+const { mockGetSdkClients, mockGetFileLinkStatus, mockGetDirLinkStatus, cacheUuidToAnyDriveItem } = vi.hoisted(() => {
 	const cacheUuidToAnyDriveItem = new Map<string, unknown>()
 	const mockGetFileLinkStatus = vi.fn()
 	const mockGetDirLinkStatus = vi.fn()
@@ -59,7 +54,7 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import { fetchData } from "@/queries/useDriveItemPublicLinkStatus.query"
+import { fetchData } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 
 beforeEach(() => {
 	mockGetSdkClients.mockReset()

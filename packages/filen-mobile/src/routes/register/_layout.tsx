@@ -1,8 +1,7 @@
 import { Stack } from "expo-router"
-import { memo } from "react"
 
-const RegisterLayout = memo(() => {
+const RegisterLayout = () => {
 	return <Stack />
-})
+}
 
 export default RegisterLayout

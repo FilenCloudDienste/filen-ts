@@ -3,33 +3,32 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 // ─── Hoisted mock state ───────────────────────────────────────────────────────
 // vi.mock factories are hoisted to the top of the file by Vitest, so any variable
 // they reference must be created via vi.hoisted (which also runs before vi.mock).
-const { mockTaskManager, mockBackgroundTask, mockRemoveListener, mockSetup, mockCameraUpload, capturedTaskCallback } =
-	vi.hoisted(() => {
-		const mockRemoveListener = vi.fn()
-		const capturedTaskCallback: { fn: ((data: unknown) => Promise<unknown>) | null } = { fn: null }
+const { mockTaskManager, mockBackgroundTask, mockRemoveListener, mockSetup, mockCameraUpload, capturedTaskCallback } = vi.hoisted(() => {
+	const mockRemoveListener = vi.fn()
+	const capturedTaskCallback: { fn: ((data: unknown) => Promise<unknown>) | null } = { fn: null }
 
-		const mockTaskManager = {
-			defineTask: vi.fn((_name: string, fn: (data: unknown) => Promise<unknown>) => {
-				capturedTaskCallback.fn = fn
-			}),
-			isTaskRegisteredAsync: vi.fn().mockResolvedValue(false)
-		}
+	const mockTaskManager = {
+		defineTask: vi.fn((_name: string, fn: (data: unknown) => Promise<unknown>) => {
+			capturedTaskCallback.fn = fn
+		}),
+		isTaskRegisteredAsync: vi.fn().mockResolvedValue(false)
+	}
 
-		const mockBackgroundTask = {
-			BackgroundTaskStatus: { Restricted: 1, Available: 2 },
-			BackgroundTaskResult: { Success: 1, Failed: 2 },
-			getStatusAsync: vi.fn().mockResolvedValue(2),
-			registerTaskAsync: vi.fn().mockResolvedValue(undefined),
-			unregisterTaskAsync: vi.fn().mockResolvedValue(undefined),
-			addExpirationListener: vi.fn().mockReturnValue({ remove: mockRemoveListener })
-		}
+	const mockBackgroundTask = {
+		BackgroundTaskStatus: { Restricted: 1, Available: 2 },
+		BackgroundTaskResult: { Success: 1, Failed: 2 },
+		getStatusAsync: vi.fn().mockResolvedValue(2),
+		registerTaskAsync: vi.fn().mockResolvedValue(undefined),
+		unregisterTaskAsync: vi.fn().mockResolvedValue(undefined),
+		addExpirationListener: vi.fn().mockReturnValue({ remove: mockRemoveListener })
+	}
 
-		const mockSetup = { setup: vi.fn().mockResolvedValue({ isAuthed: false }) }
+	const mockSetup = { setup: vi.fn().mockResolvedValue({ isAuthed: false }) }
 
-		const mockCameraUpload = { cancel: vi.fn(), sync: vi.fn().mockResolvedValue(undefined) }
+	const mockCameraUpload = { cancel: vi.fn(), sync: vi.fn().mockResolvedValue(undefined) }
 
-		return { mockTaskManager, mockBackgroundTask, mockRemoveListener, mockSetup, mockCameraUpload, capturedTaskCallback }
-	})
+	return { mockTaskManager, mockBackgroundTask, mockRemoveListener, mockSetup, mockCameraUpload, capturedTaskCallback }
+})
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
@@ -43,12 +42,12 @@ vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@/lib/setup", () => ({ default: mockSetup }))
 
-vi.mock("@/lib/cameraUpload", () => ({ default: mockCameraUpload }))
+vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: mockCameraUpload }))
 
 // ─── Static import of module under test ──────────────────────────────────────
 // Must be a static import so the module-level defineTask call is intercepted by
 // mockTaskManager.defineTask, which captures the callback into capturedTaskCallback.
-import { registerBackgroundSync, unregisterBackgroundSync } from "@/lib/backgroundTask"
+import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
 import { Platform } from "react-native"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -86,10 +85,7 @@ describe("registerBackgroundSync", () => {
 
 		await registerBackgroundSync()
 
-		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith(
-			"filen-camera-upload-sync",
-			{ minimumInterval: 15 }
-		)
+		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith("filen-camera-upload-sync", { minimumInterval: 15 })
 	})
 
 	it("skips registration when status is Restricted", async () => {
@@ -114,10 +110,7 @@ describe("registerBackgroundSync", () => {
 		await expect(registerBackgroundSync()).resolves.toBeUndefined()
 		// Ensures the code reached registerTaskAsync before the rejection — without this
 		// assertion the test would pass even if status-check early-returned silently.
-		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith(
-			"filen-camera-upload-sync",
-			{ minimumInterval: 15 }
-		)
+		expect(mockBackgroundTask.registerTaskAsync).toHaveBeenCalledWith("filen-camera-upload-sync", { minimumInterval: 15 })
 	})
 
 	it("calls registerTaskAsync on every invocation (no idempotency guard)", async () => {

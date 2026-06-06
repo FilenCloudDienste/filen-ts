@@ -612,7 +612,12 @@ describe("notesSorter", () => {
 
 		it("tag filter respects tagged+pinned note: pinned note with matching tag is included", () => {
 			const matchingTag = makeTag("tag-abc", "work")
-			const taggedAndPinned = makeNote({ uuid: "pinned-tagged", editedTimestamp: BigInt(Date.now()), pinned: true, tags: [matchingTag] })
+			const taggedAndPinned = makeNote({
+				uuid: "pinned-tagged",
+				editedTimestamp: BigInt(Date.now()),
+				pinned: true,
+				tags: [matchingTag]
+			})
 			const pinnedOnly = makeNote({ uuid: "pinned-only", editedTimestamp: BigInt(Date.now()), pinned: true, tags: [] })
 
 			// Tag filter applied before grouping: pinnedOnly excluded, taggedAndPinned included
@@ -658,27 +663,44 @@ describe("notesSorter", () => {
 			expect(header7d).toBeUndefined()
 		})
 
-		it("places a note between 2 and 12 months ago into the previousMonth2 bucket (header-month2)", () => {
-			// twoMonthsAgo < editedTimestamp < oneMonthAgo lands in previousMonth1.
-			// oneYearAgo < editedTimestamp < twoMonthsAgo lands in previousMonth2.
-			// Use ~90 days ago to ensure we land in previousMonth2.
-			const ninetyDaysAgo = BigInt(Date.now() - 90 * 24 * 60 * 60 * 1000)
-			const note = makeNote({ uuid: "old-2", editedTimestamp: ninetyDaysAgo })
+		it("places a note ~90 days ago (older than two months) into a calendar-year bucket, not a month bucket", () => {
+			// New scheme: a single month bucket covers [twoMonthsAgo, 30 days ago). Anything older
+			// than twoMonthsAgo falls into a calendar-year bucket — there is no second month bucket.
+			const ninetyDaysAgoMs = Date.now() - 90 * 24 * 60 * 60 * 1000
+			const note = makeNote({ uuid: "old-2", editedTimestamp: BigInt(ninetyDaysAgoMs) })
 
 			const result = notesSorter.group({ notes: [note] })
-			const month2Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month2") as
+
+			// It lands in the year bucket for its own calendar year, labelled with that year.
+			const expectedYear = new Date(ninetyDaysAgoMs).getFullYear()
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
 				| { title?: string }
 				| undefined
 
-			expect(month2Header).toBeDefined()
-			// Title must be a locale month name, not a tbd_ key
-			expect(month2Header?.title).not.toContain("tbd_")
-			expect(month2Header?.title).not.toContain("month_")
-			// The title is a long month name from Intl
-			const nowDate = new Date()
-			const twoMonthsAgo = new Date(nowDate.getFullYear(), nowDate.getMonth() - 2, nowDate.getDate())
-			const expectedTitle = new Intl.DateTimeFormat("en-US", { month: "long" }).format(twoMonthsAgo)
-			expect(month2Header?.title).toBe(expectedTitle)
+			expect(yearHeader).toBeDefined()
+			expect(yearHeader?.title).toBe(String(expectedYear))
+
+			// And NOT in a month bucket.
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month")
+			expect(monthHeader).toBeUndefined()
+		})
+
+		it("uses a single month bucket then calendar-year buckets (no duplicate month header)", () => {
+			const nowMs = Date.now()
+			const fortyFiveDaysAgoMs = nowMs - 45 * 24 * 60 * 60 * 1000 // inside the single month bucket
+			const oneHundredFiftyDaysAgoMs = nowMs - 150 * 24 * 60 * 60 * 1000 // older than two months → year bucket
+			const recentish = makeNote({ uuid: "month-note", editedTimestamp: BigInt(fortyFiveDaysAgoMs) })
+			const older = makeNote({ uuid: "year-note", editedTimestamp: BigInt(oneHundredFiftyDaysAgoMs) })
+
+			const result = notesSorter.group({ notes: [recentish, older] })
+
+			// Exactly one month header — the old code emitted two identically-labelled month headers.
+			const monthHeaders = result.filter(item => item.type === "header" && "id" in item && item.id === "header-month")
+			expect(monthHeaders).toHaveLength(1)
+
+			const olderYear = new Date(oneHundredFiftyDaysAgoMs).getFullYear()
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${olderYear}`)
+			expect(yearHeader).toBeDefined()
 		})
 
 		it("places a note older than one year into a year bucket (header-YEAR)", () => {
@@ -689,18 +711,16 @@ describe("notesSorter", () => {
 
 			const result = notesSorter.group({ notes: [note] })
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
-			const yearHeader = result.find(
-				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
-			) as { title?: string } | undefined
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
+				| { title?: string }
+				| undefined
 
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe(String(expectedYear))
 
-			// Should NOT appear in any monthly bucket
-			const month1Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1")
-			const month2Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month2")
-			expect(month1Header).toBeUndefined()
-			expect(month2Header).toBeUndefined()
+			// Should NOT appear in the (single) month bucket
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month")
+			expect(monthHeader).toBeUndefined()
 		})
 
 		it("year bucket header contains the correct note", () => {
@@ -710,9 +730,7 @@ describe("notesSorter", () => {
 
 			const result = notesSorter.group({ notes: [note] })
 			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
-			const yearHeaderIdx = result.findIndex(
-				item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`
-			)
+			const yearHeaderIdx = result.findIndex(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`)
 
 			expect(yearHeaderIdx).toBeGreaterThanOrEqual(0)
 			expect(result[yearHeaderIdx + 1]?.type).toBe("note")
@@ -756,12 +774,12 @@ describe("notesSorter", () => {
 
 		it("renders month-bucket headers with a real Intl month name (not a tbd_month_ key)", () => {
 			const now = new Date()
-			// ~45 days ago lands in the previousMonth1 bucket (between 30 days and two months ago).
+			// ~45 days ago lands in the single month bucket (between 30 days and two months ago).
 			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "old-1", editedTimestamp: fortyFiveDaysAgo })
 
 			const result = notesSorter.group({ notes: [note] })
-			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1") as
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
 
@@ -778,18 +796,18 @@ describe("notesSorter", () => {
 			expect(monthHeader?.title).toBe(expectedMonth)
 		})
 
-		it("previousMonth1 header label matches twoMonthsAgo, not oneMonthAgo (bug #20 regression)", () => {
+		it("month bucket header label matches twoMonthsAgo, not oneMonthAgo (bug #20 regression)", () => {
 			const now = new Date()
-			// 45 days ago is inside previousMonth1 (editedTimestamp >= twoMonthsAgo, < thirtyDaysAgo extended bucket)
+			// 45 days ago is inside the single month bucket (editedTimestamp >= twoMonthsAgo, < thirtyDaysAgo)
 			const fortyFiveDaysAgo = BigInt(now.getTime() - 45 * 24 * 60 * 60 * 1000)
 			const note = makeNote({ uuid: "bug20-note", editedTimestamp: fortyFiveDaysAgo })
 
 			const result = notesSorter.group({ notes: [note] })
-			const month1Header = result.find(item => item.type === "header" && "id" in item && item.id === "header-month1") as
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
 				| { title?: string }
 				| undefined
 
-			expect(month1Header).toBeDefined()
+			expect(monthHeader).toBeDefined()
 
 			const twoMonthsAgoLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(
 				new Date(now.getFullYear(), now.getMonth() - 2, now.getDate())
@@ -799,10 +817,10 @@ describe("notesSorter", () => {
 			)
 
 			// After the fix, the label is twoMonthsAgo, not oneMonthAgo
-			expect(month1Header?.title).toBe(twoMonthsAgoLabel)
+			expect(monthHeader?.title).toBe(twoMonthsAgoLabel)
 			// Only verify the two labels differ when the months are actually different (they may coincide in rare edge-date cases)
 			if (twoMonthsAgoLabel !== oneMonthAgoLabel) {
-				expect(month1Header?.title).not.toBe(oneMonthAgoLabel)
+				expect(monthHeader?.title).not.toBe(oneMonthAgoLabel)
 			}
 		})
 
@@ -830,6 +848,123 @@ describe("notesSorter", () => {
 
 			expect(yearHeader).toBeDefined()
 			expect(yearHeader?.title).toBe("0")
+		})
+
+		// Finding #4: sortDesc editedTimestamp ?? createdTimestamp fallback (coverage gap)
+		// Lines 395 and 417 of sort.ts use `?? createdTimestamp` but makeNote() always provides
+		// editedTimestamp, so the fallback was never exercised.
+
+		it("note with editedTimestamp undefined uses createdTimestamp for bucket placement", () => {
+			// A note whose editedTimestamp is undefined (e.g. fresh SDK note before first edit)
+			// must fall back to createdTimestamp when computing the bucket threshold at line 395.
+			const nowTs = BigInt(Date.now())
+			const noteWithoutEdited = {
+				...makeNote({ uuid: "no-edited", editedTimestamp: nowTs }),
+				editedTimestamp: undefined as unknown as bigint,
+				createdTimestamp: nowTs
+			}
+
+			const result = notesSorter.group({ notes: [noteWithoutEdited] })
+			// With createdTimestamp === now it must land in the 'today' bucket
+			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
+
+			expect(todayHeader).toBeDefined()
+			const noteItems = result.filter(item => item.type === "note")
+			expect(noteItems).toHaveLength(1)
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("no-edited")
+		})
+
+		it("two notes with editedTimestamp undefined are sorted descending by createdTimestamp within the bucket", () => {
+			// sortDesc at line 416-418 uses ?? createdTimestamp; when both have editedTimestamp undefined
+			// the order must follow createdTimestamp descending (most-recent first).
+			const nowMs = Date.now()
+			const olderTs = BigInt(nowMs - 60_000) // 1 minute ago — still today
+			const newerTs = BigInt(nowMs - 1_000) // 1 second ago — still today
+
+			const olderNote = {
+				...makeNote({ uuid: "older-no-edited", editedTimestamp: newerTs }),
+				editedTimestamp: undefined as unknown as bigint,
+				createdTimestamp: olderTs
+			}
+			const newerNote = {
+				...makeNote({ uuid: "newer-no-edited", editedTimestamp: olderTs }),
+				editedTimestamp: undefined as unknown as bigint,
+				createdTimestamp: newerTs
+			}
+
+			const result = notesSorter.group({ notes: [olderNote, newerNote] })
+			const noteItems = result.filter(item => item.type === "note")
+
+			expect(noteItems).toHaveLength(2)
+			// newer createdTimestamp sorts first (descending)
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("newer-no-edited")
+			expect((noteItems[1] as { uuid?: string }).uuid).toBe("older-no-edited")
+		})
+
+		it("note with editedTimestamp 0n sorts before notes with larger editedTimestamps within bucket", () => {
+			// 0n ?? createdTimestamp evaluates to 0n (not nullish), so Number(0n) === 0.
+			// A note with editedTimestamp=0n falls into the oldest bucket (year bucket for year 1970
+			// or earlier depending on the epoch), and within that bucket it sorts before notes with
+			// positive editedTimestamps.
+			// Two notes in the same year bucket: one with 0n, one with a small positive timestamp
+			// that also resolves to year 1970.
+			const ts1970later = BigInt(1_000_000) // still year 1970
+
+			const noteZero = makeNote({ uuid: "ts-zero", editedTimestamp: 0n })
+			const notePositive = makeNote({ uuid: "ts-positive", editedTimestamp: ts1970later })
+
+			const result = notesSorter.group({ notes: [noteZero, notePositive] })
+			const noteItems = result.filter(item => item.type === "note")
+
+			expect(noteItems).toHaveLength(2)
+			// sortDesc: larger editedTimestamp first; ts1970later > 0n, so notePositive comes first
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("ts-positive")
+			expect((noteItems[1] as { uuid?: string }).uuid).toBe("ts-zero")
+		})
+
+		it("note with editedTimestamp 0n lands in the correct year bucket (year 1970)", () => {
+			// 0n is epoch (1970-01-01); new Date(0).getFullYear() === 1970.
+			// The note must land in a year bucket for 1970, not be dropped.
+			const noteZero = makeNote({ uuid: "epoch-note", editedTimestamp: 0n })
+
+			const result = notesSorter.group({ notes: [noteZero] })
+			const noteItems = result.filter(item => item.type === "note")
+
+			expect(noteItems).toHaveLength(1)
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("epoch-note")
+
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-1970") as
+				| { title?: string }
+				| undefined
+
+			expect(yearHeader).toBeDefined()
+			expect(yearHeader?.title).toBe("1970")
+		})
+
+		it("note with editedTimestamp undefined mixed with normal note preserves correct grouping", () => {
+			// When a undefined-editedTimestamp note and a normal note both fall in today's bucket,
+			// the normal note's editedTimestamp and the no-edited note's createdTimestamp drive ordering.
+			const nowMs = Date.now()
+			const normalTs = BigInt(nowMs - 2_000) // 2 seconds ago
+			const noEditedTs = BigInt(nowMs - 500) // 0.5 seconds ago — more recent
+
+			const normalNote = makeNote({ uuid: "normal", editedTimestamp: normalTs })
+			const noEditedNote = {
+				...makeNote({ uuid: "no-edit", editedTimestamp: normalTs }),
+				editedTimestamp: undefined as unknown as bigint,
+				createdTimestamp: noEditedTs
+			}
+
+			const result = notesSorter.group({ notes: [normalNote, noEditedNote] })
+			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
+
+			expect(todayHeader).toBeDefined()
+			const noteItems = result.filter(item => item.type === "note")
+			expect(noteItems).toHaveLength(2)
+			// noEditedNote.createdTimestamp (nowMs-500) > normalNote.editedTimestamp (nowMs-2000)
+			// sortDesc: larger value first → noEditedNote is first
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("no-edit")
+			expect((noteItems[1] as { uuid?: string }).uuid).toBe("normal")
 		})
 	})
 })

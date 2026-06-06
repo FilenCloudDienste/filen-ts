@@ -3,7 +3,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("react-native", () => ({
-	Platform: { OS: "android", select: <T,>(specifics: { ios?: T; default: T }) => specifics.default }
+	Platform: { OS: "android", select: <T>(specifics: { ios?: T; default: T }) => specifics.default }
 }))
 
 vi.mock("@/constants", () => ({
@@ -205,30 +205,51 @@ describe("walkLocalDirectory", () => {
 		expect(visited).toContain(`${ROOT}/good.txt`)
 	})
 
-	it("cycle-detection: does not infinitely recurse if a directory URI is seen twice", () => {
-		// The visited-Set guard prevents re-entering a directory with the same URI.
-		// We simulate this by pre-populating a deeply-nested path and verifying the
-		// traversal terminates rather than hanging.
+	it("cycle-detection: visited-Set guard fires and prevents infinite recursion when a child's list() returns an already-visited directory", () => {
+		// The visited-Set guard (fsUtils.ts line 21: if (visited.has(dir.uri)) return)
+		// must be exercised within a SINGLE traversal call.
+		// We construct a real cycle: ROOT.list() returns [childDir], and
+		// childDir.list() returns [rootDir] (pointing back to ROOT's URI).
+		// Without the guard this would recurse infinitely.
 		const ROOT = "file:///document/walk-cycle"
 		fs.set(ROOT, "dir")
 		fs.set(`${ROOT}/child`, "dir")
-		fs.set(`${ROOT}/child/file.txt`, new Uint8Array([7]))
+		fs.set(`${ROOT}/child/leaf.txt`, new Uint8Array([1, 2, 3]))
 
-		// Walk the same root twice — second pass must hit visited guard immediately
-		let visitCount = 0
-		walkLocalDirectory(asDir(ROOT), () => {
-			visitCount++
-		})
-		const firstCount = visitCount
+		const rootDir = new Directory(ROOT)
+		const childDir = new Directory(`${ROOT}/child`)
 
-		visitCount = 0
-		walkLocalDirectory(asDir(ROOT), () => {
-			visitCount++
-		})
+		// Make childDir.list() return rootDir — the cycle back to the already-visited root
+		vi.spyOn(childDir, "list").mockReturnValue([rootDir as unknown as ReturnType<typeof childDir.list>[0]])
 
-		// Both walks must visit the same number of entries (the visited set is local)
-		expect(visitCount).toBe(firstCount)
-		expect(visitCount).toBeGreaterThan(0)
+		// Inject our instrumented childDir into rootDir.list()
+		vi.spyOn(rootDir, "list").mockReturnValue([childDir as unknown as ReturnType<typeof rootDir.list>[0]])
+
+		const visited: string[] = []
+
+		// This must terminate (not hang) — the guard at visited.has(dir.uri) must fire
+		// when traverse is called a second time with rootDir (whose URI was already added).
+		expect(() => {
+			walkLocalDirectory(rootDir as unknown as Parameters<typeof walkLocalDirectory>[0], entry => {
+				visited.push(entry.uri)
+			})
+		}).not.toThrow()
+
+		// childDir was visited as an entry of rootDir
+		expect(visited).toContain(`${ROOT}/child`)
+
+		// rootDir itself is visited as an entry of childDir (the cycle back).
+		// The traversal DOES visit it once via the visitor callback (as an entry),
+		// then on the recursive traverse(rootDir) call the guard fires (visited.has),
+		// terminating the cycle.  The key invariant is that rootDir.uri is visited
+		// exactly once as an entry — not infinitely.
+		expect(visited).toContain(ROOT)
+
+		// Exactly 2 entries visited (childDir + rootDir-as-entry-of-child),
+		// not 4 or infinity — the guard prevented re-entry.
+		expect(visited).toHaveLength(2)
+
+		vi.restoreAllMocks()
 	})
 })
 
@@ -255,8 +276,8 @@ describe("sumLocalDirectoryFileBytes", () => {
 	it("sums sizes of all files in a flat directory", () => {
 		const ROOT = "file:///document/sum-flat"
 		fs.set(ROOT, "dir")
-		fs.set(`${ROOT}/a.bin`, new Uint8Array([1, 2, 3]))   // 3 bytes
-		fs.set(`${ROOT}/b.bin`, new Uint8Array([4, 5]))       // 2 bytes
+		fs.set(`${ROOT}/a.bin`, new Uint8Array([1, 2, 3])) // 3 bytes
+		fs.set(`${ROOT}/b.bin`, new Uint8Array([4, 5])) // 2 bytes
 
 		expect(sumLocalDirectoryFileBytes(asDir(ROOT))).toBe(5)
 	})
@@ -265,8 +286,8 @@ describe("sumLocalDirectoryFileBytes", () => {
 		const ROOT = "file:///document/sum-nested"
 		fs.set(ROOT, "dir")
 		fs.set(`${ROOT}/sub`, "dir")
-		fs.set(`${ROOT}/top.bin`, new Uint8Array([1, 2]))           // 2 bytes
-		fs.set(`${ROOT}/sub/inner.bin`, new Uint8Array([3, 4, 5]))  // 3 bytes
+		fs.set(`${ROOT}/top.bin`, new Uint8Array([1, 2])) // 2 bytes
+		fs.set(`${ROOT}/sub/inner.bin`, new Uint8Array([3, 4, 5])) // 3 bytes
 
 		expect(sumLocalDirectoryFileBytes(asDir(ROOT))).toBe(5)
 	})
@@ -283,7 +304,7 @@ describe("sumLocalDirectoryFileBytes", () => {
 	it("handles a zero-byte file without adding to the total", () => {
 		const ROOT = "file:///document/sum-zerobyte"
 		fs.set(ROOT, "dir")
-		fs.set(`${ROOT}/empty.bin`, new Uint8Array([]))        // 0 bytes
+		fs.set(`${ROOT}/empty.bin`, new Uint8Array([])) // 0 bytes
 		fs.set(`${ROOT}/data.bin`, new Uint8Array([1, 2, 3])) // 3 bytes
 
 		expect(sumLocalDirectoryFileBytes(asDir(ROOT))).toBe(3)

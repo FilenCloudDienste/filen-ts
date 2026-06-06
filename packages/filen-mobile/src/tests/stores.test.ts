@@ -14,60 +14,45 @@ vi.mock("expo-router", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", async () => {
-	const actual = await import("@/tests/mocks/expoFileSystem")
+vi.mock("@/lib/utils", () => ({}))
+
+// Use the real implementation so the mock cannot silently drift from production behaviour.
+// @/constants is extended below to supply the extension Sets that the real getPreviewType reads.
+vi.mock("@/lib/previewType", async () => vi.importActual("@/lib/previewType"))
+
+// Extend the shared constants mock with the extension Sets that @/lib/previewType requires.
+// Values are derived from the iOS Platform.select arm (Platform.OS = 'ios' in the RN mock).
+vi.mock("@/constants", async () => {
+	const base = await import("@/tests/mocks/constants")
 
 	return {
-		getPreviewType(name: string): string {
-			const ext = actual.Paths.extname(name.trim().toLowerCase())
-
-			// image
-			if ([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic", ".heif", ".webp", ".avif"].includes(ext)) {
-				return "image"
-			}
-
-			// video
-			if ([".mp4", ".mov", ".m4v", ".3gp", ".webm", ".mkv"].includes(ext)) {
-				return "video"
-			}
-
-			// audio
-			if ([".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"].includes(ext)) {
-				return "audio"
-			}
-
-			switch (ext) {
-				case ".pdf":
-					return "pdf"
-				case ".txt":
-					return "text"
-				case ".docx":
-					return "docx"
-				case ".js":
-				case ".ts":
-				case ".tsx":
-				case ".py":
-				case ".rs":
-				case ".json":
-					return "code"
-				default:
-					return "unknown"
-			}
-		}
+		...base,
+		EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set([
+			".jpg",
+			".jpeg",
+			".png",
+			".gif",
+			".webp",
+			".avif",
+			".heic",
+			".heif",
+			".svg",
+			".ico",
+			".icns"
+		]),
+		EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".aac", ".wav", ".aiff", ".caf", ".flac", ".alac"])
 	}
 })
-
-vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@filen/sdk-rs", () => ({}))
 
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
-import { useCameraUploadStore } from "@/stores/useCameraUpload.store"
-import { useContactsStore } from "@/stores/useContacts.store"
+import { useCameraUploadStore } from "@/features/cameraUpload/store/useCameraUpload.store"
+import { useContactsStore } from "@/features/contacts/store/useContacts.store"
 import { useHttpStore } from "@/stores/useHttp.store"
 import { useAppStore } from "@/stores/useApp.store"
 import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
-import type { ContactListItem } from "@/stores/useContacts.store"
+import type { ContactListItem } from "@/features/contacts/store/useContacts.store"
 import type { AnyFile } from "@filen/sdk-rs"
 
 // ---------------------------------------------------------------------------
@@ -286,11 +271,11 @@ describe("useDrivePreviewStore.open", () => {
 		// The mock constants set includes: .jpg, .jpeg, .png, .heic, .webp
 		// .gif is NOT in the mock EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS
 		const items: GalleryItemTagged[] = [
-			makeDriveGalleryItem("img1", "photo.jpg"),       // image + supported ext → included
-			makeDriveGalleryItem("img2", "photo.gif"),       // image but NOT in manipulator set → excluded
-			makeDriveGalleryItem("vid1", "clip.mp4"),        // video → included
-			makeDriveGalleryItem("aud1", "track.mp3"),       // audio → excluded
-			makeDriveGalleryItem("doc1", "readme.txt")       // text → excluded
+			makeDriveGalleryItem("img1", "photo.jpg"), // image + supported ext → included
+			makeDriveGalleryItem("img2", "photo.gif"), // image but NOT in manipulator set → excluded
+			makeDriveGalleryItem("vid1", "clip.mp4"), // video → included
+			makeDriveGalleryItem("aud1", "track.mp3"), // audio → excluded
+			makeDriveGalleryItem("doc1", "readme.txt") // text → excluded
 		]
 
 		useDrivePreviewStore.getState().open({
@@ -311,12 +296,12 @@ describe("useDrivePreviewStore.open", () => {
 
 	it("for a general drive path, audio files are included but docx/pdf/code files are excluded", () => {
 		const items: GalleryItemTagged[] = [
-			makeDriveGalleryItem("img1", "photo.jpg"),     // image → included
-			makeDriveGalleryItem("vid1", "clip.mp4"),      // video → included
-			makeDriveGalleryItem("aud1", "track.mp3"),     // audio → included
-			makeDriveGalleryItem("pdf1", "doc.pdf"),       // pdf → excluded
-			makeDriveGalleryItem("code1", "main.ts"),      // code → excluded
-			makeDriveGalleryItem("docx1", "report.docx")   // docx → excluded
+			makeDriveGalleryItem("img1", "photo.jpg"), // image → included
+			makeDriveGalleryItem("vid1", "clip.mp4"), // video → included
+			makeDriveGalleryItem("aud1", "track.mp3"), // audio → included
+			makeDriveGalleryItem("pdf1", "doc.pdf"), // pdf → excluded
+			makeDriveGalleryItem("code1", "main.ts"), // code → excluded
+			makeDriveGalleryItem("docx1", "report.docx") // docx → excluded
 		]
 
 		useDrivePreviewStore.getState().open({
@@ -366,10 +351,7 @@ describe("useDrivePreviewStore.open", () => {
 		useDrivePreviewStore.setState({ currentIndex: null, currentItem: null })
 
 		// Second open with different items
-		const itemsSecond = [
-			makeDriveGalleryItem("img2", "second.jpg"),
-			makeDriveGalleryItem("img3", "third.jpg")
-		]
+		const itemsSecond = [makeDriveGalleryItem("img2", "second.jpg"), makeDriveGalleryItem("img3", "third.jpg")]
 
 		useDrivePreviewStore.getState().open({
 			items: itemsSecond,
@@ -416,10 +398,7 @@ describe("useDrivePreviewStore.open", () => {
 		const stateAfterFirst = { ...useDrivePreviewStore.getState() }
 
 		// Try to call open again with different items (should be a no-op)
-		const newItems: GalleryItemTagged[] = [
-			makeDriveGalleryItem("img2", "other.jpg"),
-			makeDriveGalleryItem("img3", "third.jpg")
-		]
+		const newItems: GalleryItemTagged[] = [makeDriveGalleryItem("img2", "other.jpg"), makeDriveGalleryItem("img3", "third.jpg")]
 
 		useDrivePreviewStore.getState().open({ items: newItems, initialItem: makeInitialDriveItem("img2", "other.jpg") })
 
@@ -592,6 +571,43 @@ describe("useHttpStore.setGetFileUrl", () => {
 		useHttpStore.getState().setPort(prev => (prev ?? 0) + 1)
 
 		expect(useHttpStore.getState().port).toBe(3001)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// useAppStore — setPathname (plain string + functional-updater branches)
+// ---------------------------------------------------------------------------
+
+describe("useAppStore.setPathname", () => {
+	beforeEach(() => {
+		resetAppStore()
+	})
+
+	it("setPathname with a plain string replaces pathname directly", () => {
+		useAppStore.getState().setPathname("/foo")
+
+		expect(useAppStore.getState().pathname).toBe("/foo")
+	})
+
+	it("setPathname with a functional updater receives the current pathname and applies the result", () => {
+		useAppStore.getState().setPathname("/base")
+		useAppStore.getState().setPathname(prev => prev + "/bar")
+
+		expect(useAppStore.getState().pathname).toBe("/base/bar")
+	})
+
+	it("functional updater identity function is a no-op", () => {
+		useAppStore.getState().setPathname("/existing")
+		useAppStore.getState().setPathname(prev => prev)
+
+		expect(useAppStore.getState().pathname).toBe("/existing")
+	})
+
+	it("plain string overwrite after functional update works correctly", () => {
+		useAppStore.getState().setPathname(prev => prev + "/child")
+		useAppStore.getState().setPathname("/reset")
+
+		expect(useAppStore.getState().pathname).toBe("/reset")
 	})
 })
 

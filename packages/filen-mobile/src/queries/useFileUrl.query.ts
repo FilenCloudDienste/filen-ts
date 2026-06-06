@@ -1,13 +1,13 @@
 import { useQuery, onlineManager, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import { AnyFile } from "@filen/sdk-rs"
 import cache from "@/lib/cache"
 import useHttpStore from "@/stores/useHttp.store"
-import { normalizeFilePathForExpo } from "@/lib/utils"
+import { normalizeFilePathForExpo } from "@/lib/paths"
 import type { DriveItemFileExtracted } from "@/types"
 import type { FileSource } from "@/queries/fileSource"
-import offline from "@/lib/offline"
+import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
 
 export const BASE_QUERY_KEY = "useFileUrlQuery"
@@ -113,37 +113,6 @@ export function useFileUrlQuery(
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
-}
-
-export function fileUrlQueryUpdate({
-	updater,
-	params,
-	dataUpdatedAt
-}: {
-	params: Parameters<typeof fetchData>[0]
-} & {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-	dataUpdatedAt?: number
-}): void {
-	const sortedParams = sortParams(params)
-
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
-		[BASE_QUERY_KEY, sortedParams],
-		prev => {
-			const currentData = prev ?? (null satisfies Awaited<ReturnType<typeof fetchData>>)
-
-			return typeof updater === "function" ? updater(currentData) : updater
-		},
-		dataUpdatedAt
-	)
-}
-
-export function fileUrlQueryGet(params: UseFileUrlQueryParams): Awaited<ReturnType<typeof fetchData>> | undefined {
-	const sortedParams = sortParams(params)
-
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams])
 }
 
 export default useFileUrlQuery

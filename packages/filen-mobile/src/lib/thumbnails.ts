@@ -1,21 +1,15 @@
 import * as FileSystem from "expo-file-system"
-import * as ImageManipulator from "expo-image-manipulator"
-import { type VideoThumbnail, createVideoPlayer } from "expo-video"
 import type { DriveItem } from "@/types"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
-import { normalizeFilePathForExpo, normalizeFilePathForSdk, wrapAbortSignalForSdk } from "@/lib/utils"
+import { normalizeFilePathForExpo } from "@/lib/paths"
 import { run, Semaphore } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
-import auth from "@/lib/auth"
-import useHttpStore from "@/stores/useHttp.store"
 import { Platform } from "react-native"
-import { randomUUID } from "expo-crypto"
 import cache from "@/lib/cache"
-import offline from "@/lib/offline"
-import fileCache from "@/lib/fileCache"
 import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
-import { onlineManager } from "@tanstack/react-query"
+import { abortError, OfflineAbortError, getPath, ensureDirectory, driveItemToAnyFile, getExtension } from "@/lib/thumbnailsHelpers"
+import { generateImage } from "@/lib/thumbnailsImage"
+import { generateVideo } from "@/lib/thumbnailsVideo"
 
 export type ThumbnailParams = {
 	item: DriveItem
@@ -39,28 +33,6 @@ export const MAX_FAILURES = 3
 export const VERSION = THUMBNAILS_VERSION
 export const DIRECTORY = THUMBNAILS_DIRECTORY
 
-function abortError(signal?: AbortSignal): Error {
-	const reason = signal?.reason
-
-	if (reason instanceof Error) {
-		return reason
-	}
-
-	if (typeof reason !== "undefined" && reason !== null) {
-		return new Error(String(reason))
-	}
-
-	return new Error("Aborted")
-}
-
-class OfflineAbortError extends Error {
-	public constructor() {
-		super("Offline")
-
-		this.name = "OfflineAbortError"
-	}
-}
-
 class Thumbnails {
 	private readonly pending = new Map<string, Promise<string>>()
 	private readonly failures = new Map<string, number>()
@@ -68,478 +40,11 @@ class Thumbnails {
 	private readonly clearBarrier = new ClearBarrier()
 
 	public constructor() {
-		this.ensureDirectory()
-	}
-
-	private getPath(item: DriveItem): string {
-		return FileSystem.Paths.join(DIRECTORY.uri, `${item.data.uuid}.webp`)
-	}
-
-	private ensureDirectory(): void {
-		if (!DIRECTORY.exists) {
-			DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
-	}
-
-	private driveItemToAnyFile(item: DriveItem): AnyFile | null {
-		switch (item.type) {
-			case "file": {
-				return new AnyFile.File(item.data)
-			}
-
-			case "sharedFile":
-			case "sharedRootFile": {
-				return new AnyFile.Shared(item.data)
-			}
-
-			default: {
-				return null
-			}
-		}
-	}
-
-	private getExtension(item: DriveItem): string | null {
-		switch (item.type) {
-			case "file":
-			case "sharedFile":
-			case "sharedRootFile": {
-				const name = item.data.decryptedMeta?.name
-
-				if (!name) {
-					return null
-				}
-
-				return FileSystem.Paths.extname(name).toLowerCase().trim()
-			}
-
-			default: {
-				return null
-			}
-		}
-	}
-
-	private waitForHttpProvider(signal?: AbortSignal): Promise<(file: AnyFile) => string> {
-		const state = useHttpStore.getState()
-
-		if (state.port !== null && state.getFileUrl) {
-			return Promise.resolve(state.getFileUrl)
-		}
-
-		return new Promise<(file: AnyFile) => string>((resolve, reject) => {
-			if (signal?.aborted) {
-				reject(abortError(signal))
-
-				return
-			}
-
-			let timeoutId: ReturnType<typeof setTimeout> | null = null
-
-			const cleanup = () => {
-				unsubscribe()
-
-				signal?.removeEventListener("abort", onAbort)
-
-				if (timeoutId !== null) {
-					clearTimeout(timeoutId)
-
-					timeoutId = null
-				}
-			}
-
-			const unsubscribe = useHttpStore.subscribe(
-				s => ({
-					port: s.port,
-					getFileUrl: s.getFileUrl
-				}),
-				({ port, getFileUrl }) => {
-					if (port !== null && getFileUrl) {
-						cleanup()
-
-						resolve(getFileUrl)
-					}
-				}
-			)
-
-			const onAbort = () => {
-				cleanup()
-
-				reject(abortError(signal))
-			}
-
-			signal?.addEventListener("abort", onAbort, {
-				once: true
-			})
-
-			timeoutId = setTimeout(() => {
-				cleanup()
-
-				reject(new Error("HTTP provider unavailable after 30s"))
-			}, 30_000)
-		})
-	}
-
-	private async generateImage(
-		params: {
-			outputPath: string
-			width: number
-			quality: number
-			signal?: AbortSignal
-		} & (
-			| {
-					localSourcePath: string
-			  }
-			| {
-					file: AnyFile
-					item: DriveItem
-			  }
-		)
-	): Promise<void> {
-		const result = await run(async defer => {
-			let sourcePath: string
-
-			if ("localSourcePath" in params) {
-				sourcePath = params.localSourcePath
-			} else {
-				const offlineFile = await offline.getLocalFile(params.item)
-
-				if (offlineFile?.exists) {
-					sourcePath = normalizeFilePathForExpo(offlineFile.uri)
-				} else if (
-					await fileCache.has({
-						type: "drive",
-						data: params.item
-					})
-				) {
-					const cachedFile = await fileCache.get({
-						item: {
-							type: "drive",
-							data: params.item
-						},
-						signal: params.signal
-					})
-
-					sourcePath = normalizeFilePathForExpo(cachedFile.uri)
-				} else {
-					// Source is in neither offline-store nor file-cache; without network
-					// we can't fetch it. Throw an abort-flavoured error so the catch
-					// block (line ~671) treats it as aborted, NOT as a real failure —
-					// otherwise the 3-strike `failures` map would permanently skip the
-					// item even after we come back online.
-					if (!onlineManager.isOnline()) {
-						throw new OfflineAbortError()
-					}
-
-					const { authedSdkClient } = await auth.getSdkClients()
-					const tempDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORY.uri, `thumb_tmp_${randomUUID()}`))
-
-					defer(() => {
-						if (tempDir.exists) {
-							tempDir.delete()
-						}
-					})
-
-					if (!tempDir.exists) {
-						tempDir.create({
-							idempotent: true,
-							intermediates: true
-						})
-					}
-
-					const ext = this.getExtension(params.item)
-
-					if (!ext) {
-						throw new Error("File has no extension")
-					}
-
-					const tempPath = FileSystem.Paths.join(tempDir.uri, `source${ext}`)
-					const wrappedSignal = params.signal ? wrapAbortSignalForSdk(params.signal) : undefined
-
-					await authedSdkClient.downloadFileToPath(
-						params.file,
-						normalizeFilePathForSdk(tempPath),
-						undefined,
-						ManagedFuture.new({
-							pauseSignal: undefined,
-							abortSignal: wrappedSignal
-						}),
-						params.signal
-							? {
-									signal: params.signal
-								}
-							: undefined
-					)
-
-					if (params.signal?.aborted) {
-						throw abortError(params.signal)
-					}
-
-					sourcePath = tempPath
-				}
-			}
-
-			// Hold the Context in a local binding across the await. expo-image-manipulator's
-			// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
-			// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
-			// the native task would be cancelled and renderAsync would reject with
-			// JobCancellationException.
-			const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(sourcePath)).resize({
-				width: params.width
-			})
-
-			let manipulated: ImageManipulator.ImageRef | null = null
-
-			try {
-				manipulated = await context.renderAsync()
-			} catch (error) {
-				if (params.signal?.aborted) {
-					throw abortError(params.signal)
-				}
-
-				throw error
-			}
-
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
-
-			let saved: ImageManipulator.ImageResult | null = null
-
-			try {
-				saved = await manipulated.saveAsync({
-					compress: params.quality,
-					format: ImageManipulator.SaveFormat.WEBP,
-					base64: false
-				})
-			} catch (error) {
-				if (params.signal?.aborted) {
-					throw abortError(params.signal)
-				}
-
-				throw error
-			}
-
-			const savedFile = new FileSystem.File(saved.uri)
-			const outputFile = new FileSystem.File(params.outputPath)
-
-			try {
-				if (outputFile.exists) {
-					outputFile.delete()
-				}
-
-				savedFile.move(outputFile)
-			} catch (error) {
-				try {
-					if (savedFile.exists) {
-						savedFile.delete()
-					}
-				} catch {
-					// Best-effort cleanup of the orphaned manipulated file
-				}
-
-				const message = error instanceof Error ? error.message : String(error)
-
-				throw new Error(`Failed to move thumbnail to output path: ${message}`)
-			}
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
-	}
-
-	private async generateVideo(
-		params: {
-			outputPath: string
-			width: number
-			quality: number
-			timestamp: number
-			signal?: AbortSignal
-		} & (
-			| {
-					localSourcePath: string
-			  }
-			| {
-					file: AnyFile
-					item: DriveItem
-			  }
-		)
-	): Promise<void> {
-		const result = await run(async defer => {
-			let url: string
-
-			if ("localSourcePath" in params) {
-				url = normalizeFilePathForExpo(params.localSourcePath)
-			} else {
-				const offlineFile = await offline.getLocalFile(params.item)
-
-				if (offlineFile?.exists) {
-					url = normalizeFilePathForExpo(offlineFile.uri)
-				} else {
-					// Video thumbnails stream via the local HTTP provider, which
-					// internally streams from Filen servers via the SDK. Offline
-					// would stall. Throw abort-flavoured so the failures map isn't
-					// poisoned (see generateImage for the same reasoning).
-					if (!onlineManager.isOnline()) {
-						throw new OfflineAbortError()
-					}
-
-					const getFileUrl = await this.waitForHttpProvider(params.signal)
-
-					url = getFileUrl(params.file)
-				}
-			}
-
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
-
-			const player = createVideoPlayer(url)
-
-			// The defer below releases the player on every exit path including abort.
-			// Do NOT register a separate onAbort handler that also calls release() — that would double-release a native SharedObject.
-			defer(() => {
-				player.release()
-			})
-
-			if (player.status !== "readyToPlay") {
-				await new Promise<void>((resolve, reject) => {
-					if (params.signal?.aborted) {
-						reject(abortError(params.signal))
-
-						return
-					}
-
-					const cleanup = () => {
-						subscription.remove()
-
-						params.signal?.removeEventListener("abort", onAbort)
-					}
-
-					const subscription = player.addListener("statusChange", ({ status, error }) => {
-						if (status === "readyToPlay") {
-							cleanup()
-
-							resolve()
-						} else if (status === "error") {
-							cleanup()
-
-							reject(new Error(error?.message ?? "Video player failed to load"))
-						}
-					})
-
-					const onAbort = () => {
-						cleanup()
-
-						reject(abortError(params.signal))
-					}
-
-					params.signal?.addEventListener("abort", onAbort, {
-						once: true
-					})
-				})
-			}
-
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
-
-			let thumbnails: VideoThumbnail[]
-
-			try {
-				thumbnails = await player.generateThumbnailsAsync([params.timestamp], {
-					maxWidth: params.width,
-					maxHeight: params.width
-				})
-			} catch (error) {
-				if (params.signal?.aborted) {
-					throw abortError(params.signal)
-				}
-
-				const message = error instanceof Error ? error.message : String(error)
-
-				throw new Error(`Video thumbnail extraction failed at ${params.timestamp}s: ${message}`)
-			}
-
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
-
-			const thumbnail = thumbnails[0] as VideoThumbnail | undefined
-
-			if (!thumbnail) {
-				throw new Error("No thumbnail generated")
-			}
-
-			// See generateImage: hold Context across renderAsync to prevent Hermes GC from
-			// cancelling the underlying coroutine task via sharedObjectDidRelease.
-			const context = ImageManipulator.ImageManipulator.manipulate(thumbnail)
-
-			let manipulated: ImageManipulator.ImageRef | null = null
-
-			try {
-				manipulated = await context.renderAsync()
-			} catch (error) {
-				if (params.signal?.aborted) {
-					throw abortError(params.signal)
-				}
-
-				throw error
-			}
-
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
-
-			let saved: ImageManipulator.ImageResult | null = null
-
-			try {
-				saved = await manipulated.saveAsync({
-					compress: params.quality,
-					format: ImageManipulator.SaveFormat.WEBP,
-					base64: false
-				})
-			} catch (error) {
-				if (params.signal?.aborted) {
-					throw abortError(params.signal)
-				}
-
-				throw error
-			}
-
-			const savedFile = new FileSystem.File(saved.uri)
-			const outputFile = new FileSystem.File(params.outputPath)
-
-			try {
-				if (outputFile.exists) {
-					outputFile.delete()
-				}
-
-				savedFile.move(outputFile)
-			} catch (error) {
-				try {
-					if (savedFile.exists) {
-						savedFile.delete()
-					}
-				} catch {
-					// Best-effort cleanup of the orphaned manipulated file
-				}
-
-				const message = error instanceof Error ? error.message : String(error)
-
-				throw new Error(`Failed to move thumbnail to output path: ${message}`)
-			}
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
+		ensureDirectory()
 	}
 
 	public canGenerate(item: DriveItem): boolean {
-		const ext = this.getExtension(item)
+		const ext = getExtension(item)
 
 		if (!ext) {
 			return false
@@ -564,7 +69,7 @@ class Thumbnails {
 			}
 
 			const uuid = params.item.data.uuid
-			const ext = this.getExtension(params.item)
+			const ext = getExtension(params.item)
 
 			if (!ext) {
 				throw new Error("File has no extension")
@@ -581,7 +86,7 @@ class Thumbnails {
 				throw new Error("Max thumbnail generation failures reached")
 			}
 
-			const outputPath = this.getPath(params.item)
+			const outputPath = getPath(params.item)
 			const outputFile = new FileSystem.File(outputPath)
 
 			if (outputFile.exists) {
@@ -661,16 +166,16 @@ class Thumbnails {
 
 		try {
 			const result = await run(async () => {
-				this.ensureDirectory()
+				ensureDirectory()
 
-				const file = this.driveItemToAnyFile(params.item)
+				const file = driveItemToAnyFile(params.item)
 
 				if (!file) {
 					throw new Error("Unsupported item type")
 				}
 
 				if (params.isImage) {
-					await this.generateImage({
+					await generateImage({
 						file,
 						item: params.item,
 						outputPath: params.outputPath,
@@ -679,7 +184,7 @@ class Thumbnails {
 						signal: params.signal
 					})
 				} else if (params.isVideo) {
-					await this.generateVideo({
+					await generateVideo({
 						file,
 						item: params.item,
 						outputPath: params.outputPath,
@@ -804,10 +309,10 @@ class Thumbnails {
 			await this.semaphore.acquire()
 
 			try {
-				this.ensureDirectory()
+				ensureDirectory()
 
 				if (isImage) {
-					await this.generateImage({
+					await generateImage({
 						localSourcePath: params.localPath,
 						outputPath,
 						width,
@@ -815,7 +320,7 @@ class Thumbnails {
 						signal: params.signal
 					})
 				} else {
-					await this.generateVideo({
+					await generateVideo({
 						localSourcePath: params.localPath,
 						outputPath,
 						width,
@@ -879,7 +384,7 @@ class Thumbnails {
 				exists: true
 				path: string
 		  } {
-		const file = new FileSystem.File(this.getPath(item))
+		const file = new FileSystem.File(getPath(item))
 
 		if (!file.exists) {
 			return {
@@ -894,7 +399,7 @@ class Thumbnails {
 	}
 
 	public remove(item: DriveItem): void {
-		const file = new FileSystem.File(this.getPath(item))
+		const file = new FileSystem.File(getPath(item))
 
 		if (file.exists) {
 			file.delete()

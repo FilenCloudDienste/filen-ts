@@ -1,8 +1,7 @@
-import { memo } from "react"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
 
-const Separator = memo(() => {
+const Separator = () => {
 	return (
 		<AnimatedView
 			className="w-px self-stretch bg-border opacity-50"
@@ -10,6 +9,6 @@ const Separator = memo(() => {
 			exiting={FadeOut.duration(120)}
 		/>
 	)
-})
+}
 
 export default Separator

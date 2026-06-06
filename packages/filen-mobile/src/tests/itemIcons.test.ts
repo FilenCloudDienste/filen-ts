@@ -62,8 +62,8 @@ vi.mock("@/components/ui/image", () => ({
 // es-toolkit/function memoize — use the real one (it's a pure JS function, safe in node)
 // No mock needed.
 
-// @/lib/utils — mock getPreviewType so we control it per-test without needing real expo-file-system
-vi.mock("@/lib/utils", () => ({
+// @/lib/previewType — mock getPreviewType so we control it per-test without needing real expo-file-system
+vi.mock("@/lib/previewType", () => ({
 	getPreviewType: mockGetPreviewType
 }))
 

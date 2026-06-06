@@ -123,7 +123,9 @@ vi.mock("@op-engineering/op-sqlite", () => ({
 	open
 }))
 
-vi.mock("@/lib/utils", () => ({
+vi.mock("@/lib/utils", () => ({}))
+
+vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
 }))
 

@@ -1,4 +1,3 @@
-import { memo } from "react"
 import Gallery from "@/components/drivePreview/gallery"
 import DismissStack from "@/components/dismissStack"
 import { useShallow } from "zustand/shallow"
@@ -9,7 +8,7 @@ export type External = {
 	url: string
 }
 
-const DrivePreview = memo(() => {
+const DrivePreview = () => {
 	const currentItem = useDrivePreviewStore(useShallow(state => state.currentItem))
 
 	if (!currentItem) {
@@ -17,6 +16,6 @@ const DrivePreview = memo(() => {
 	}
 
 	return <Gallery />
-})
+}
 
 export default DrivePreview

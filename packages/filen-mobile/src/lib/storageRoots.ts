@@ -40,6 +40,4 @@ export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 
 export const SQLITE_VERSION = 1
 export const SQLITE_DB_FILE_NAME = "sqlite.db"
-export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(
-	FileSystem.Paths.join(BASE_DIRECTORY_URI, "sqlite", `v${SQLITE_VERSION}`)
-)
+export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "sqlite", `v${SQLITE_VERSION}`))
