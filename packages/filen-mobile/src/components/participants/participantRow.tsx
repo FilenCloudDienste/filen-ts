@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useTranslation } from "react-i18next"
+import { type TFunction } from "i18next"
 
 export type ParticipantPermission = "read" | "write"
 
@@ -36,6 +37,68 @@ export type ParticipantRowProps = {
 	ownerActions?: ParticipantOwnerActions
 }
 
+export type BuildParticipantMenuButtonsParams = {
+	ownerActions: ParticipantOwnerActions | undefined
+	permission: ParticipantPermission | undefined
+	isSelected: boolean
+	t: TFunction
+}
+
+export function buildParticipantMenuButtons(params: BuildParticipantMenuButtonsParams): MenuButton[] {
+	const { ownerActions, permission, isSelected, t } = params
+
+	if (!ownerActions) {
+		return []
+	}
+
+	const buttons: MenuButton[] = [
+		{
+			id: "select",
+			title: isSelected ? t("deselect") : t("select"),
+			icon: "select",
+			checked: isSelected,
+			onPress: () => {
+				ownerActions.onToggleSelect()
+			}
+		}
+	]
+
+	if (ownerActions.onSetPermission && ownerActions.permissionLabels) {
+		const setPermission = ownerActions.onSetPermission
+		const labels = ownerActions.permissionLabels
+
+		buttons.push({
+			id: "permissions",
+			title: labels.title,
+			icon: permission === "write" ? "edit" : "eye",
+			subButtons: [
+				{
+					id: "read",
+					title: labels.read,
+					icon: "eye",
+					checked: permission === "read",
+					requiresOnline: true,
+					onPress: () => {
+						void setPermission("read")
+					}
+				},
+				{
+					id: "write",
+					title: labels.write,
+					icon: "edit",
+					checked: permission === "write",
+					requiresOnline: true,
+					onPress: () => {
+						void setPermission("write")
+					}
+				}
+			]
+		})
+	}
+
+	return [...buttons, ...ownerActions.menuActions]
+}
+
 export const ParticipantRow = (props: ParticipantRowProps) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -44,58 +107,12 @@ export const ParticipantRow = (props: ParticipantRowProps) => {
 	const isSelected = ownerActions?.isSelected ?? false
 	const showCheckbox = ownerActions && ownerActions.areOthersSelected
 
-	const menuButtons: MenuButton[] = (() => {
-		if (!ownerActions) {
-			return []
-		}
-
-		const buttons: MenuButton[] = [
-			{
-				id: "select",
-				title: isSelected ? t("deselect") : t("select"),
-				icon: "select",
-				checked: isSelected,
-				onPress: () => {
-					ownerActions.onToggleSelect()
-				}
-			}
-		]
-
-		if (ownerActions.onSetPermission && ownerActions.permissionLabels) {
-			const setPermission = ownerActions.onSetPermission
-			const labels = ownerActions.permissionLabels
-
-			buttons.push({
-				id: "permissions",
-				title: labels.title,
-				icon: props.permission === "write" ? "edit" : "eye",
-				subButtons: [
-					{
-						id: "read",
-						title: labels.read,
-						icon: "eye",
-						checked: props.permission === "read",
-						requiresOnline: true,
-						onPress: () => {
-							void setPermission("read")
-						}
-					},
-					{
-						id: "write",
-						title: labels.write,
-						icon: "edit",
-						checked: props.permission === "write",
-						requiresOnline: true,
-						onPress: () => {
-							void setPermission("write")
-						}
-					}
-				]
-			})
-		}
-
-		return [...buttons, ...ownerActions.menuActions]
-	})()
+	const menuButtons: MenuButton[] = buildParticipantMenuButtons({
+		ownerActions,
+		permission: props.permission,
+		isSelected,
+		t
+	})
 
 	return (
 		<View className={cn("flex-row items-center px-4 bg-transparent", isSelected && "bg-background-tertiary")}>
