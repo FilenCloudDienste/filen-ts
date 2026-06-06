@@ -154,13 +154,63 @@ describe("prepareAvatarFileForUpload", () => {
 		).rejects.toThrow("avatar_upload_failed")
 	})
 
-	it("registers temp-file cleanup via defer", async () => {
+	it("registers temp-file cleanup via defer and the callback deletes the original file", async () => {
 		fs.set("file:///pick/img.jpg", new Uint8Array([1]))
 
 		const deferred: Array<() => void> = []
 
 		await prepareAvatarFileForUpload({ asset: makeAsset(), defer: fn => deferred.push(fn) })
 
+		// At least one cleanup should have been registered
 		expect(deferred.length).toBeGreaterThanOrEqual(1)
+
+		// The original file is still present before cleanup runs
+		expect(fs.has("file:///pick/img.jpg")).toBe(true)
+
+		// Invoke all deferred cleanups (as run() would do on exit)
+		for (const fn of deferred) {
+			fn()
+		}
+
+		// The original file must have been deleted by the cleanup callback
+		expect(fs.has("file:///pick/img.jpg")).toBe(false)
+	})
+
+	it("registers converted-file cleanup via defer and the callback deletes the converted file", async () => {
+		const originalUri = "file:///pick/img.heic"
+		const convertedUri = "file:///tmp/converted.jpg"
+
+		fs.set(originalUri, new Uint8Array([1]))
+		fs.set(convertedUri, new Uint8Array([2]))
+
+		const { ImageManipulator } = await import("expo-image-manipulator")
+		const saveAsync = vi.fn(async () => ({ uri: convertedUri }))
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce({
+			renderAsync: vi.fn(async () => ({ saveAsync }))
+		} as unknown as ReturnType<typeof ImageManipulator.manipulate>)
+
+		const deferred: Array<() => void> = []
+
+		await prepareAvatarFileForUpload({
+			asset: makeAsset({ uri: originalUri, mimeType: "image/heic", fileName: "img.heic" }),
+			defer: fn => deferred.push(fn)
+		})
+
+		// Two cleanups should be registered: one for originalFile, one for convertedFile
+		expect(deferred.length).toBe(2)
+
+		// Both files exist before cleanup
+		expect(fs.has(originalUri)).toBe(true)
+		expect(fs.has(convertedUri)).toBe(true)
+
+		// Invoke all deferred cleanups
+		for (const fn of deferred) {
+			fn()
+		}
+
+		// Both files must have been removed by their respective cleanup callbacks
+		expect(fs.has(originalUri)).toBe(false)
+		expect(fs.has(convertedUri)).toBe(false)
 	})
 })

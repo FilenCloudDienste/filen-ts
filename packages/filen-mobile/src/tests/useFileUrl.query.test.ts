@@ -248,7 +248,7 @@ describe("fetchData (useFileUrl.query)", () => {
 			expect(result).toBe(cachedUri)
 		})
 
-		it("falls through to offline check when fileCache.has is true but file does not exist on disk", async () => {
+		it("falls through to offline check when fileCache.has is true but file does not exist on disk, then returns HTTP URL", async () => {
 			const item = makeFileItem("stale-uuid")
 			mockCacheMap.set("stale-uuid", item)
 
@@ -264,8 +264,8 @@ describe("fetchData (useFileUrl.query)", () => {
 			const result = await fetchData(params)
 
 			expect(mockOfflineGetLocalFile).toHaveBeenCalled()
-			// no local file and online, but getFileUrl → expect HTTP URL
-			expect(result).not.toBeNull()
+			// no local file and online → falls through to HTTP provider
+			expect(result).toBe(`http://localhost:8080/file/${item.data.uuid}`)
 		})
 	})
 
@@ -344,7 +344,7 @@ describe("fetchData (useFileUrl.query)", () => {
 			expect(result).toBe(`http://localhost:8080/file/${item.data.uuid}`)
 		})
 
-		it("calls getFileUrl with AnyFile.Shared instance for item.type === 'sharedFile'", async () => {
+		it("calls getFileUrl with AnyFile.Shared instance for item.type === 'sharedFile' and returns the URL", async () => {
 			const item = makeSharedFileItem("sf-http-uuid")
 			mockCacheMap.set("sf-http-uuid", item)
 
@@ -360,10 +360,10 @@ describe("fetchData (useFileUrl.query)", () => {
 
 			expect(calledArg.tag).toBe("Shared")
 			expect(calledArg.inner[0]).toBe(item.data)
-			expect(result).not.toBeNull()
+			expect(result).toBe(`http://localhost:8080/file/${item.data.uuid}`)
 		})
 
-		it("calls getFileUrl with AnyFile.Shared instance for item.type === 'sharedRootFile'", async () => {
+		it("calls getFileUrl with AnyFile.Shared instance for item.type === 'sharedRootFile' and returns the URL", async () => {
 			const item = makeSharedRootFileItem("srf-http-uuid")
 			mockCacheMap.set("srf-http-uuid", item)
 
@@ -379,7 +379,7 @@ describe("fetchData (useFileUrl.query)", () => {
 
 			expect(calledArg.tag).toBe("Shared")
 			expect(calledArg.inner[0]).toBe(item.data)
-			expect(result).not.toBeNull()
+			expect(result).toBe(`http://localhost:8080/file/${item.data.uuid}`)
 		})
 
 		it("returns null when getFileUrl throws (error-catch path in getFileUrlForItem)", async () => {

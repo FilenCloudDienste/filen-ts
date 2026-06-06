@@ -890,8 +890,10 @@ describe("fetchData — linked WrongPassword error handling", () => {
 			}
 		})
 
-		expect(Array.isArray(result)).toBe(true)
 		expect(result).toHaveLength(1)
+		// Assert the concrete item identity — the mocked unwrappedFileIntoDriveItem propagates
+		// the uuid from unwrapFileMeta's file.uuid, which originates from fileItem.uuid.
+		expect((result[0] as { type: string; data: { uuid: string } }).data.uuid).toBe("linked-file-1")
 	})
 
 	it("returns empty array without calling SDK when linked is undefined", async () => {

@@ -125,32 +125,29 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 		expect(result).toBe(`${en.error_generic}: (weird)`)
 	})
 
-	it("translates a representative spread of mapped kinds", () => {
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.FolderNotFound, "x"))).toBe(`${en.directory_not_found}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.MaxStorageReached, "x"))).toBe(
-			`${en.max_remote_storage_reached}: (x)`
-		)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Unauthenticated, "x"))).toBe(`${en.unauthenticated}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Walk, "x"))).toBe(`${en.fs_directory_walk_error}: (x)`)
-	})
-
-	it("translates the remaining 13 named arms individually", () => {
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.BadRecoveryKey, "x"))).toBe(`${en.bad_recovery_key}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Cancelled, "x"))).toBe(`${en.operation_cancelled}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.ChunkTooLarge, "x"))).toBe(`${en.chunk_too_large}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Conversion, "x"))).toBe(`${en.conversion_error}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.FileChangedDuringSync, "x"))).toBe(
-			`${en.file_changed_during_sync}: (x)`
-		)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.HeifError, "x"))).toBe(`${en.heif_error}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.ImageError, "x"))).toBe(`${en.image_error}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.InsufficientMemory, "x"))).toBe(`${en.insufficient_memory}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Internal, "x"))).toBe(`${en.internal_error}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.InvalidName, "x"))).toBe(`${en.invalid_name}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.InvalidState, "x"))).toBe(`${en.invalid_state}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.InvalidType, "x"))).toBe(`${en.invalid_type}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Io, "x"))).toBe(`${en.fs_io_error}: (x)`)
-		expect(unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Server, "x"))).toBe(`${en.server_error}: (x)`)
+	// Each arm of the switch gets its own row so a single broken mapping produces an individually
+	// identified failure rather than stopping the whole block at the first failed expect().
+	it.each([
+		[ErrorKindMock.BadRecoveryKey, en.bad_recovery_key],
+		[ErrorKindMock.Cancelled, en.operation_cancelled],
+		[ErrorKindMock.ChunkTooLarge, en.chunk_too_large],
+		[ErrorKindMock.Conversion, en.conversion_error],
+		[ErrorKindMock.FileChangedDuringSync, en.file_changed_during_sync],
+		[ErrorKindMock.FolderNotFound, en.directory_not_found],
+		[ErrorKindMock.HeifError, en.heif_error],
+		[ErrorKindMock.ImageError, en.image_error],
+		[ErrorKindMock.InsufficientMemory, en.insufficient_memory],
+		[ErrorKindMock.Internal, en.internal_error],
+		[ErrorKindMock.InvalidName, en.invalid_name],
+		[ErrorKindMock.InvalidState, en.invalid_state],
+		[ErrorKindMock.InvalidType, en.invalid_type],
+		[ErrorKindMock.Io, en.fs_io_error],
+		[ErrorKindMock.MaxStorageReached, en.max_remote_storage_reached],
+		[ErrorKindMock.Server, en.server_error],
+		[ErrorKindMock.Unauthenticated, en.unauthenticated],
+		[ErrorKindMock.Walk, en.fs_directory_walk_error]
+	])("maps ErrorKind.%s to its translated copy", (kind, expectedCopy) => {
+		expect(unwrappedSdkErrorToHumanReadable(makeError(kind, "x"))).toBe(`${expectedCopy}: (x)`)
 	})
 })
 

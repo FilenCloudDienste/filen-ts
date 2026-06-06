@@ -734,6 +734,50 @@ describe("Sync (Notes)", () => {
 			unmount()
 		})
 
+		it("calls executeNow when AppState transitions to background", async () => {
+			// sync.tsx:221 fires executeNow for BOTH 'background' and 'active'.
+			// A regression that narrows the condition to === 'active' only would
+			// be undetected without this branch.
+			const appStateEmitter = AppState as unknown as { _emit: (type: string, state: string) => void }
+
+			const { unmount } = render(React.createElement(SyncHost))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "bg-content", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			// Simulate the app moving to the background (e.g. user pressing home).
+			appStateEmitter._emit("change", "background")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalled()
+
+			unmount()
+		})
+
+		it("does not call executeNow for unhandled AppState transitions (e.g. inactive)", async () => {
+			// Only 'active' and 'background' are handled; other states (e.g. 'inactive')
+			// must not trigger a sync.
+			const appStateEmitter = AppState as unknown as { _emit: (type: string, state: string) => void }
+
+			const { unmount } = render(React.createElement(SyncHost))
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "inactive-content", note: mockNote("note-1") }]
+			}
+
+			appStateEmitter._emit("change", "inactive")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).not.toHaveBeenCalled()
+
+			unmount()
+		})
+
 		it("removes AppState listener on unmount", () => {
 			const removeListenerSpy = vi.fn()
 

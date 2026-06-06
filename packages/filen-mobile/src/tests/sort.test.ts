@@ -1,4 +1,4 @@
-import { vi, describe, it, expect } from "vitest"
+import { vi, describe, it, expect, beforeAll, afterAll } from "vitest"
 
 // sort.ts now resolves the fixed group-header labels via the module i18n and derives month
 // names from Intl using `intlLanguage`. Mock both so the pure sorter tests don't drag in
@@ -13,7 +13,7 @@ vi.mock("@/lib/time", () => ({
 	intlLanguage: "en-US"
 }))
 
-import { itemSorter, notesSorter } from "@/lib/sort"
+import { itemSorter, notesSorter, type SortByType } from "@/lib/sort"
 import { type DriveItem, type Note, type NoteTag } from "@/types"
 
 function makeItem(
@@ -966,5 +966,140 @@ describe("notesSorter", () => {
 			expect((noteItems[0] as { uuid?: string }).uuid).toBe("no-edit")
 			expect((noteItems[1] as { uuid?: string }).uuid).toBe("normal")
 		})
+	})
+
+	// Finding #185: bucket tests rely on uncontrolled Date.now() — fix with vi.useFakeTimers().
+	// All assertions below freeze time so group()'s internal Date.now() and the test's own
+	// timestamp computations always agree, eliminating the midnight/month-rollover boundary race.
+	describe("group (frozen time)", () => {
+		// Fixed anchor: a mid-month Wednesday so no midnight/month-edge ambiguity.
+		const FROZEN_NOW = new Date("2025-06-15T12:00:00.000Z").getTime()
+
+		beforeAll(() => {
+			vi.useFakeTimers()
+			vi.setSystemTime(FROZEN_NOW)
+		})
+
+		afterAll(() => {
+			vi.useRealTimers()
+		})
+
+		it("note edited <24 h ago lands in today bucket", () => {
+			const ts = BigInt(FROZEN_NOW - 2 * 60 * 60 * 1000) // 2 h ago
+			const note = makeNote({ uuid: "today-note", editedTimestamp: ts })
+
+			const result = notesSorter.group({ notes: [note] })
+			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
+
+			expect(todayHeader).toBeDefined()
+			const noteItems = result.filter(item => item.type === "note")
+			expect(noteItems).toHaveLength(1)
+			expect((noteItems[0] as { uuid?: string }).uuid).toBe("today-note")
+		})
+
+		it("note edited 3 days ago lands in last-7-days bucket", () => {
+			const ts = BigInt(FROZEN_NOW - 3 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "7d-note", editedTimestamp: ts })
+
+			const result = notesSorter.group({ notes: [note] })
+			const header7d = result.find(item => item.type === "header" && "id" in item && item.id === "header-7days")
+
+			expect(header7d).toBeDefined()
+			const todayHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-today")
+			expect(todayHeader).toBeUndefined()
+		})
+
+		it("note edited 15 days ago lands in last-30-days bucket", () => {
+			const ts = BigInt(FROZEN_NOW - 15 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "30d-note", editedTimestamp: ts })
+
+			const result = notesSorter.group({ notes: [note] })
+			const header30d = result.find(item => item.type === "header" && "id" in item && item.id === "header-30days")
+
+			expect(header30d).toBeDefined()
+			const header7d = result.find(item => item.type === "header" && "id" in item && item.id === "header-7days")
+			expect(header7d).toBeUndefined()
+		})
+
+		it("note edited ~45 days ago lands in the single month bucket", () => {
+			const ts = BigInt(FROZEN_NOW - 45 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "month-note", editedTimestamp: ts })
+
+			const result = notesSorter.group({ notes: [note] })
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
+				| { title?: string }
+				| undefined
+
+			expect(monthHeader).toBeDefined()
+			// No 30-days header
+			const header30d = result.find(item => item.type === "header" && "id" in item && item.id === "header-30days")
+			expect(header30d).toBeUndefined()
+		})
+
+		it("month-bucket header title equals the Intl name of two-months-ago (frozen clock)", () => {
+			const ts = BigInt(FROZEN_NOW - 45 * 24 * 60 * 60 * 1000)
+			const note = makeNote({ uuid: "month-label", editedTimestamp: ts })
+
+			const result = notesSorter.group({ notes: [note] })
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month") as
+				| { title?: string }
+				| undefined
+
+			expect(monthHeader).toBeDefined()
+
+			// Two months before June 2025 = April 2025
+			const frozenDate = new Date(FROZEN_NOW)
+			const twoMonthsAgoDate = new Date(frozenDate.getFullYear(), frozenDate.getMonth() - 2, frozenDate.getDate())
+			const expectedLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(twoMonthsAgoDate)
+
+			expect(monthHeader?.title).toBe(expectedLabel)
+		})
+
+		it("note edited 2 years ago lands in the correct year bucket (frozen clock)", () => {
+			const twoYearsAgoMs = FROZEN_NOW - 2 * 365 * 24 * 60 * 60 * 1000
+			const ts = BigInt(twoYearsAgoMs)
+			const note = makeNote({ uuid: "old-year-note", editedTimestamp: ts })
+
+			const result = notesSorter.group({ notes: [note] })
+			const expectedYear = new Date(twoYearsAgoMs).getFullYear()
+			const yearHeader = result.find(item => item.type === "header" && "id" in item && item.id === `header-${expectedYear}`) as
+				| { title?: string }
+				| undefined
+
+			expect(yearHeader).toBeDefined()
+			expect(yearHeader?.title).toBe(String(expectedYear))
+
+			// Must NOT be in the month bucket
+			const monthHeader = result.find(item => item.type === "header" && "id" in item && item.id === "header-month")
+			expect(monthHeader).toBeUndefined()
+		})
+	})
+})
+
+describe("itemSorter — unknown SortByType fallback", () => {
+	// Finding #8: Line 273 of sort.ts: `sortMap[type] ?? sortMap['nameAsc']`.
+	// A stale persisted preference that no longer exists in SortByType must fall back to
+	// nameAsc silently (no throw, alphabetical result).
+	it("unknown SortByType falls back to nameAsc without throwing", () => {
+		const a = makeItem("file", "alpha.txt")
+		const b = makeItem("file", "beta.txt")
+		const c = makeItem("file", "gamma.txt")
+
+		const result = itemSorter.sortItems([c, a, b], "invalidSortKey" as unknown as SortByType)
+
+		expect(result).toHaveLength(3)
+		// Verify result matches nameAsc alphabetical order
+		expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["alpha.txt", "beta.txt", "gamma.txt"])
+	})
+
+	it("unknown SortByType result matches explicit nameAsc result", () => {
+		const items = [makeItem("file", "zebra.txt"), makeItem("file", "apple.txt"), makeItem("file", "mango.txt")]
+
+		const fallbackResult = itemSorter.sortItems(items, "unknownKey" as unknown as SortByType)
+		const nameAscResult = itemSorter.sortItems(items, "nameAsc")
+
+		expect(fallbackResult.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(
+			nameAscResult.map((i: DriveItem) => i.data.decryptedMeta?.name)
+		)
 	})
 })

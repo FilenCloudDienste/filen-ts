@@ -98,6 +98,63 @@ describe("buildContactSections", () => {
 		expect(emails).toEqual(["amy@example.com", "mike@example.com", "zoe@example.com"])
 	})
 
+	it("sorts incoming requests within the section by email", () => {
+		const items = buildContactSections({
+			data: {
+				...emptyData,
+				incoming: [
+					{ uuid: "i1", email: "zoe@example.com" },
+					{ uuid: "i2", email: "amy@example.com" },
+					{ uuid: "i3", email: "mike@example.com" }
+				] as never
+			},
+			headerTitles,
+			selectOptions: null
+		})
+
+		const emails = items.filter(i => i.type === "incomingRequest").map(i => (i.type === "incomingRequest" ? i.data.email : ""))
+
+		expect(emails).toEqual(["amy@example.com", "mike@example.com", "zoe@example.com"])
+	})
+
+	it("sorts outgoing requests within the section by email", () => {
+		const items = buildContactSections({
+			data: {
+				...emptyData,
+				outgoing: [
+					{ uuid: "o1", email: "zoe@example.com" },
+					{ uuid: "o2", email: "amy@example.com" },
+					{ uuid: "o3", email: "mike@example.com" }
+				] as never
+			},
+			headerTitles,
+			selectOptions: null
+		})
+
+		const emails = items.filter(i => i.type === "outgoingRequest").map(i => (i.type === "outgoingRequest" ? i.data.email : ""))
+
+		expect(emails).toEqual(["amy@example.com", "mike@example.com", "zoe@example.com"])
+	})
+
+	it("sorts blocked entries within the section by email", () => {
+		const items = buildContactSections({
+			data: {
+				...emptyData,
+				blocked: [
+					{ uuid: "bl1", email: "zoe@example.com" },
+					{ uuid: "bl2", email: "amy@example.com" },
+					{ uuid: "bl3", email: "mike@example.com" }
+				] as never
+			},
+			headerTitles,
+			selectOptions: null
+		})
+
+		const emails = items.filter(i => i.type === "blocked").map(i => (i.type === "blocked" ? i.data.email : ""))
+
+		expect(emails).toEqual(["amy@example.com", "mike@example.com", "zoe@example.com"])
+	})
+
 	it("in picker mode keeps only the contacts section and its header", () => {
 		const selectOptions: SelectOptions = {
 			id: "pick-1",

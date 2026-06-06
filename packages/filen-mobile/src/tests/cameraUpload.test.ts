@@ -873,6 +873,11 @@ describe("sync flow", () => {
 		await cameraUpload.sync()
 
 		expect(mockSetErrors).toHaveBeenCalled()
+		// Tighten: verify the updater function actually appends an Error to the list
+		const updater = vi.mocked(mockSetErrors).mock.calls[0]?.[0] as (prev: unknown[]) => unknown[]
+		const result = updater([])
+		expect(result).toHaveLength(1)
+		expect((result[0] as any).error).toBeInstanceOf(Error)
 	})
 
 	it("maxUploads caps the number of deltas processed", async () => {

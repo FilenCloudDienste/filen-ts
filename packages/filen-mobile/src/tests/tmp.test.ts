@@ -109,10 +109,14 @@ describe("sweepTmpDir", () => {
 		}
 
 		// Even though delete threw, ensured must have been reset to false so that
-		// the next newTmpFile() call will trigger ensure() and recreate the dir.
+		// ensure() ran and actually recreated the directory on disk — not just
+		// constructed a URI. Assert directory.exists===true, not just the path prefix.
 		const file = newTmpFile("recovery.bin")
+		const tmpPath = file.uri.replace(/\/[^/]+$/, "")
+		const tmpDir = new Directory(tmpPath)
 
 		expect(file.uri).toContain(TMP_DIR_NAME)
+		expect(tmpDir.exists).toBe(true)
 	})
 })
 

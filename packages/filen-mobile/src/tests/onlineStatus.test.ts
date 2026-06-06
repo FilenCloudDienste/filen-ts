@@ -1,4 +1,4 @@
-import { vi, describe, it, expect } from "vitest"
+import { vi, describe, it, expect, beforeEach } from "vitest"
 
 // onlineStatus.ts does not export computeOnline directly.
 // We test the logic by:
@@ -8,16 +8,38 @@ import { vi, describe, it, expect } from "vitest"
 //   4. Asserting what value onlineManager.setOnline receives.
 //
 // This exercises every branch of computeOnline without requiring the function to be exported.
+//
+// Additionally, the AppState 'change' -> NetInfo.refresh() branch is exercised by
+// capturing the AppState handler via the hoisted mock and simulating transitions.
 
-const { mockSetOnline, mockSetEventListener, capturedListeners } = vi.hoisted(() => {
+const { mockSetOnline, mockSetEventListener, capturedListeners, mockAppState, mockNetInfoRefresh } = vi.hoisted(() => {
 	const mockSetOnline = vi.fn()
 	const capturedListeners: ((state: object) => void)[] = []
+	const mockNetInfoRefresh = vi.fn().mockResolvedValue(undefined)
 
 	const mockSetEventListener = vi.fn((factory: (setOnline: (online: boolean) => void) => () => void) => {
 		factory(mockSetOnline)
 	})
 
-	return { mockSetOnline, mockSetEventListener, capturedListeners }
+	// AppState mock that captures all 'change' handlers registered at module init time
+	const capturedChangeHandlers: ((nextState: string) => void)[] = []
+	const mockAppState = {
+		addEventListener: vi.fn((type: string, handler: (nextState: string) => void) => {
+			if (type === "change") {
+				capturedChangeHandlers.push(handler)
+			}
+
+			return { remove: () => {} }
+		}),
+		emit: (nextState: string) => {
+			for (const h of capturedChangeHandlers) {
+				h(nextState)
+			}
+		},
+		_capturedChangeHandlers: capturedChangeHandlers
+	}
+
+	return { mockSetOnline, mockSetEventListener, capturedListeners, mockAppState, mockNetInfoRefresh }
 })
 
 vi.mock("@react-native-community/netinfo", () => ({
@@ -27,7 +49,7 @@ vi.mock("@react-native-community/netinfo", () => ({
 
 			return () => {}
 		}),
-		refresh: vi.fn().mockResolvedValue(undefined)
+		refresh: mockNetInfoRefresh
 	}
 }))
 
@@ -38,7 +60,15 @@ vi.mock("@tanstack/react-query", () => ({
 	}
 }))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+vi.mock("react-native", () => ({
+	AppState: mockAppState,
+	Platform: {
+		OS: "ios",
+		select<T>(specifics: { ios?: T; android?: T; default?: T }): T | undefined {
+			return specifics["ios"] ?? specifics["default"]
+		}
+	}
+}))
 
 // Import the module — this triggers two top-level side-effects:
 //   1. onlineManager.setEventListener(factory) — our mock calls factory(mockSetOnline),
@@ -112,5 +142,58 @@ describe("onlineStatus computeOnline (via NetInfo listener)", () => {
 		simulateNetInfo({ isConnected: null, isInternetReachable: null })
 
 		expect(mockSetOnline).toHaveBeenCalledWith(true)
+	})
+})
+
+// ─── AppState 'change' -> NetInfo.refresh() branch tests (#169) ───────────────
+//
+// onlineStatus.ts registers AppState.addEventListener('change', handler) that
+// calls NetInfo.refresh() only when nextAppState === 'active'.
+// The handler was registered at module-import time; we emit via mockAppState.emit().
+
+describe("onlineStatus AppState 'change' handler", () => {
+	beforeEach(() => {
+		mockNetInfoRefresh.mockClear()
+	})
+
+	it("calls NetInfo.refresh() when nextAppState transitions to 'active'", async () => {
+		mockAppState.emit("active")
+
+		// refresh() is async — allow the microtask queue to drain so the
+		// .catch(console.error) handler runs without leaving an unhandled rejection
+		await Promise.resolve()
+
+		expect(mockNetInfoRefresh).toHaveBeenCalledTimes(1)
+	})
+
+	it("does NOT call NetInfo.refresh() when nextAppState is 'background'", async () => {
+		mockAppState.emit("background")
+
+		await Promise.resolve()
+
+		expect(mockNetInfoRefresh).not.toHaveBeenCalled()
+	})
+
+	it("does NOT call NetInfo.refresh() when nextAppState is 'inactive'", async () => {
+		mockAppState.emit("inactive")
+
+		await Promise.resolve()
+
+		expect(mockNetInfoRefresh).not.toHaveBeenCalled()
+	})
+
+	it("calls NetInfo.refresh() once per 'active' event — each transition triggers exactly one refresh", async () => {
+		mockAppState.emit("active")
+		mockAppState.emit("active")
+
+		await Promise.resolve()
+
+		expect(mockNetInfoRefresh).toHaveBeenCalledTimes(2)
+	})
+
+	it("AppState.addEventListener was called with 'change' during module init", () => {
+		// The module registers exactly one AppState 'change' listener at init time
+		expect(mockAppState.addEventListener).toHaveBeenCalledWith("change", expect.any(Function))
+		expect(mockAppState._capturedChangeHandlers).toHaveLength(1)
 	})
 })

@@ -327,6 +327,67 @@ describe("FileCache", () => {
 			expect(result).toBe(false)
 		})
 
+		it("returns false when metadata sidecar is zero bytes (skips deserialization entirely)", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("zerobyte-meta", "photo.jpg"))
+
+			// Write the actual file
+			writeFile("zerobyte-meta", "photo.jpg")
+
+			// Write a zero-byte sidecar (simulates an interrupted atomic write)
+			const dir = `${BASE_DIR}/zerobyte-meta`
+
+			fs.set(dir, "dir")
+			fs.set(`${dir}/zerobyte-meta.filenmeta`, new Uint8Array([]))
+
+			// Spy on deserialize to confirm it is NOT called for a zero-byte sidecar
+			const deserializeSpy = vi.spyOn(await import("@/lib/serializer"), "deserialize")
+
+			const result = await cache.has(item)
+
+			expect(result).toBe(false)
+			// The metadata.size === 0 guard must short-circuit before any deserialization
+			expect(deserializeSpy).not.toHaveBeenCalled()
+
+			deserializeSpy.mockRestore()
+		})
+
+		it("two independent false branches: zero-byte sidecar hits size===0 guard; serialize({}) hits Object.keys guard", async () => {
+			const cache = await createFileCache()
+
+			// Branch 1: zero-byte sidecar — metadata.size === 0 (line 137 in fileCache.ts)
+			const zeroItem = wrapDrive(makeFileItem("zero-branch", "img.png"))
+
+			writeFile("zero-branch", "img.png")
+
+			const zeroDir = `${BASE_DIR}/zero-branch`
+
+			fs.set(zeroDir, "dir")
+			fs.set(`${zeroDir}/zero-branch.filenmeta`, new Uint8Array([]))
+
+			const zeroResult = await cache.has(zeroItem)
+
+			expect(zeroResult).toBe(false)
+
+			// Branch 2: non-zero sidecar containing serialize({}) — hits Object.keys().length===0 check (line 143)
+			const emptyItem = wrapDrive(makeFileItem("empty-branch", "img.png"))
+			const emptyBytes = new Uint8Array(new TextEncoder().encode(serialize({})))
+
+			writeFile("empty-branch", "img.png")
+
+			const emptyDir = `${BASE_DIR}/empty-branch`
+
+			fs.set(emptyDir, "dir")
+			fs.set(`${emptyDir}/empty-branch.filenmeta`, emptyBytes)
+
+			// Confirm the bytes are genuinely non-zero so this test is meaningful
+			expect(emptyBytes.length).toBeGreaterThan(0)
+
+			const emptyResult = await cache.has(emptyItem)
+
+			expect(emptyResult).toBe(false)
+		})
+
 		it("returns false when metadata doesn't match item", async () => {
 			const cache = await createFileCache()
 			const item = wrapDrive(makeFileItem("mismatch-uuid", "v2.txt"))

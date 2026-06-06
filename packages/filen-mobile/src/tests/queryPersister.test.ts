@@ -982,8 +982,8 @@ describe("shouldPersistQuery()", () => {
 		expect(shouldPersistQuery(makeQuery(["useDriveItemsQuery"], "pending"))).toBe(false)
 	})
 
-	it("returns false when queryKey is empty", () => {
-		// Empty key: no elements to match, shouldNotPersist=false, but status check still applies
+	it("returns true when queryKey is empty (no UNCACHED match, status=success)", () => {
+		// Empty key: some() on [] returns false so shouldNotPersist=false, status=success → true
 		expect(shouldPersistQuery(makeQuery([]))).toBe(true)
 	})
 

@@ -10,7 +10,7 @@ export enum NoteTypeExtended {
 
 export type IconKey = NoteType | NoteTypeExtended
 
-const ICON_PROPS = {
+export const ICON_PROPS = {
 	[NoteType.Text]: {
 		name: "text-outline",
 		color: "#3b82f6"

@@ -108,11 +108,13 @@ describe("loadLanguage", () => {
 		expect(loadLanguage("file.unknownxyz123")).toBeNull()
 	})
 
-	it("returns a truthy object for a known extension '.ts'", () => {
+	it("returns an object with language/support/extension fields for a known extension '.ts'", () => {
 		const result = loadLanguage("index.ts")
 
 		expect(result).not.toBeNull()
-		expect(typeof result).toBe("object")
+		expect(result).toHaveProperty("language")
+		expect(result).toHaveProperty("support")
+		expect(result).toHaveProperty("extension")
 	})
 
 	it("delegates to parseExtension: works when passed a full filename 'index.ts'", () => {
@@ -128,9 +130,8 @@ describe("loadLanguage", () => {
 		expect(loadLanguage("Component.tsx")).not.toBeNull()
 	})
 
-	it("returns null when parseExtension returns '' (bare dot falls through)", () => {
-		// '.' -> parseExtension returns '.' -> ''.replace('.','') = '' -> '' not in langNames
-		// so returns null
+	it("returns null for a filename with no dot (parseExtension returns empty string)", () => {
+		// 'file' has no dot -> parseExtension returns '' -> !ext.includes('.') -> returns null
 		expect(loadLanguage("file")).toBeNull()
 	})
 

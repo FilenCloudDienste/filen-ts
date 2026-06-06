@@ -785,14 +785,14 @@ describe("chats.leave", () => {
 		expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 	})
 
-	it("invokes chatsQueryUpdate and chatMessagesQueryUpdate after 3-second timeout", async () => {
+	it("invokes chatsQueryUpdate and chatMessagesQueryUpdate after the deferred timeout", async () => {
 		const chat = makeChat({ uuid: "chat-leave3" })
 
 		mockSdkClient.leaveChat.mockResolvedValueOnce(undefined)
 
 		await chats.leave({ chat })
 
-		vi.advanceTimersByTime(3000)
+		vi.runAllTimers()
 
 		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
 		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledTimes(1)
@@ -806,7 +806,7 @@ describe("chats.leave", () => {
 
 		await chats.leave({ chat })
 
-		vi.advanceTimersByTime(3000)
+		vi.runAllTimers()
 
 		const updater = getLastChatsUpdater()
 		const updated = updater([chat, other])
@@ -850,14 +850,14 @@ describe("chats.delete", () => {
 		expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 	})
 
-	it("invokes both query updaters after 3-second timeout", async () => {
+	it("invokes both query updaters after the deferred timeout", async () => {
 		const chat = makeChat({ uuid: "chat-del3" })
 
 		mockSdkClient.deleteChat.mockResolvedValueOnce(undefined)
 
 		await chats.delete({ chat })
 
-		vi.advanceTimersByTime(3000)
+		vi.runAllTimers()
 
 		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
 		expect(mockChatMessagesQueryUpdate).toHaveBeenCalledTimes(1)
@@ -871,7 +871,7 @@ describe("chats.delete", () => {
 
 		await chats.delete({ chat })
 
-		vi.advanceTimersByTime(3000)
+		vi.runAllTimers()
 
 		const msgUpdater = getLastMessagesUpdater()
 		const updated = msgUpdater([msg])

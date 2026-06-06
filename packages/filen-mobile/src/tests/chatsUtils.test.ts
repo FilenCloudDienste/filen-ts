@@ -3,13 +3,15 @@ import { vi, describe, it, expect } from "vitest"
 // ─── Module boundary mocks (top-level, hoisted by Vitest) ───────────────────────
 
 // utils.ts imports AnyFile (runtime class) + MaybeEncryptedUniffi_Tags (runtime enum) from
-// @filen/sdk-rs. AnyFile.Linked just needs to capture its file arg so getFileUrl can be asserted.
+// @filen/sdk-rs. AnyFile.Linked mirrors the real SDK shape: inner is a frozen 1-tuple [LinkedFile]
+// (see sdk-rs generated/filen_sdk_rs.ts — constructor does `this.inner = Object.freeze([v0])`).
+// Keeping the tuple shape means a future SDK change to the accessor would surface here.
 vi.mock("@filen/sdk-rs", () => {
 	class Linked {
-		public readonly inner: unknown
+		public readonly inner: Readonly<[unknown]>
 
 		public constructor(file: unknown) {
-			this.inner = file
+			this.inner = Object.freeze([file]) as Readonly<[unknown]>
 		}
 	}
 
@@ -89,7 +91,8 @@ function internalDirectoryLink(): SuccessfulLink {
 	} as unknown as SuccessfulLink
 }
 
-const getFileUrl = vi.fn((file: unknown) => `http://localhost/serve/${(file as { inner: { uuid: string } }).inner.uuid}`)
+// Access inner[0] to match the real AnyFile.Linked tuple shape (inner: Readonly<[LinkedFile]>).
+const getFileUrl = vi.fn((file: unknown) => `http://localhost/serve/${(file as { inner: [{ uuid: string }] }).inner[0].uuid}`)
 
 // ─── resolveLinkMedia ────────────────────────────────────────────────────────────
 

@@ -19,6 +19,8 @@ vi.mock("@/lib/serializer", () => ({
 import {
 	aggregateDriveSelectionFlags,
 	EMPTY_DRIVE_FLAGS,
+	isFileItem,
+	isDirectoryItem,
 	isDriveItemDisabled,
 	isDriveItemNavigateOnly,
 	resolveDriveNavigationTarget
@@ -286,6 +288,72 @@ describe("aggregateDriveSelectionFlags", () => {
 		// DriveItemFileSharedNonRoot = File & SharedFile & ExtraData.
 		// File has a `favorited` boolean, so `"favorited" in it.data` is true.
 		expect(aggregateDriveSelectionFlags([sharedFile("a", true)]).includesFavorited).toBe(true)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// isFileItem / isDirectoryItem type guards (#37)
+// ---------------------------------------------------------------------------
+
+describe("isFileItem", () => {
+	it("returns true for type='file'", () => {
+		expect(isFileItem(file("a"))).toBe(true)
+	})
+
+	it("returns true for type='sharedFile'", () => {
+		expect(isFileItem(sharedFile("a"))).toBe(true)
+	})
+
+	it("returns true for type='sharedRootFile'", () => {
+		expect(isFileItem(sharedRootFile("a"))).toBe(true)
+	})
+
+	it("returns false for type='directory'", () => {
+		expect(isFileItem(dir("a"))).toBe(false)
+	})
+
+	it("returns false for type='sharedDirectory'", () => {
+		expect(isFileItem(sharedDirectory("a"))).toBe(false)
+	})
+
+	it("returns false for type='sharedRootDirectory'", () => {
+		expect(isFileItem(sharedRootDir("a"))).toBe(false)
+	})
+})
+
+describe("isDirectoryItem", () => {
+	it("returns true for type='directory'", () => {
+		expect(isDirectoryItem(dir("a"))).toBe(true)
+	})
+
+	it("returns true for type='sharedDirectory'", () => {
+		expect(isDirectoryItem(sharedDirectory("a"))).toBe(true)
+	})
+
+	it("returns true for type='sharedRootDirectory'", () => {
+		expect(isDirectoryItem(sharedRootDir("a"))).toBe(true)
+	})
+
+	it("returns false for type='file'", () => {
+		expect(isDirectoryItem(file("a"))).toBe(false)
+	})
+
+	it("returns false for type='sharedFile'", () => {
+		expect(isDirectoryItem(sharedFile("a"))).toBe(false)
+	})
+
+	it("returns false for type='sharedRootFile'", () => {
+		expect(isDirectoryItem(sharedRootFile("a"))).toBe(false)
+	})
+
+	it("isFileItem and isDirectoryItem are mutually exclusive across all 6 types", () => {
+		const all = [file("a"), sharedFile("b"), sharedRootFile("c"), dir("d"), sharedDirectory("e"), sharedRootDir("f")]
+
+		for (const item of all) {
+			expect(isFileItem(item) && isDirectoryItem(item)).toBe(false)
+			// every item is covered by exactly one guard
+			expect(isFileItem(item) || isDirectoryItem(item)).toBe(true)
+		}
 	})
 })
 
@@ -611,5 +679,32 @@ describe("resolveDriveNavigationTarget", () => {
 		const target = resolveDriveNavigationTarget({ item: dir("a"), drivePath: drivePath("drive", { selectOptions: opts }) })
 
 		expect(target?.pathname).toBe("/driveSelect/[uuid]")
+	})
+
+	// --- sharedRootDirectory coverage (#134) ---
+
+	it("routes sharedRootDirectory on sharedIn path to /sharedIn/[uuid]", () => {
+		expect(resolveDriveNavigationTarget({ item: sharedRootDir("r1"), drivePath: drivePath("sharedIn") })).toEqual({
+			pathname: "/sharedIn/[uuid]",
+			params: { uuid: "r1" }
+		})
+	})
+
+	it("routes sharedRootDirectory on sharedOut path to /sharedOut/[uuid]", () => {
+		expect(resolveDriveNavigationTarget({ item: sharedRootDir("r2"), drivePath: drivePath("sharedOut") })).toEqual({
+			pathname: "/sharedOut/[uuid]",
+			params: { uuid: "r2" }
+		})
+	})
+
+	it("routes sharedRootDirectory on plain drive path to /tabs/drive/[uuid]", () => {
+		expect(resolveDriveNavigationTarget({ item: sharedRootDir("r3"), drivePath: drivePath("drive") })).toEqual({
+			pathname: "/tabs/drive/[uuid]",
+			params: { uuid: "r3" }
+		})
+	})
+
+	it("returns null for sharedRootDirectory inside trash", () => {
+		expect(resolveDriveNavigationTarget({ item: sharedRootDir("r4"), drivePath: drivePath("trash") })).toBeNull()
 	})
 })
