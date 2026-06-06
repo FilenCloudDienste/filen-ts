@@ -28,11 +28,17 @@ vi.mock("@filen/sdk-rs", () => ({
 	AnyFile: {
 		File: class {
 			tag = "File"
-			constructor(public inner: unknown) {}
+			inner: unknown
+			constructor(v0: unknown) {
+				this.inner = Object.freeze([v0])
+			}
 		},
 		Shared: class {
 			tag = "Shared"
-			constructor(public inner: unknown) {}
+			inner: unknown
+			constructor(v0: unknown) {
+				this.inner = Object.freeze([v0])
+			}
 		}
 	},
 	ManagedFuture: { new: vi.fn(() => ({})) }
