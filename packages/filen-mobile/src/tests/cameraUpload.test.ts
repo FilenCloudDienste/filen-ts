@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, beforeAll } from "vitest"
 import pathModule from "path"
 
 // @ts-expect-error __DEV__ is a React Native global
@@ -173,10 +173,16 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
-// Capture constructor event handlers before beforeEach clears mocks
-const eventHandlers: Record<string, Function | undefined> = Object.fromEntries(
-	vi.mocked(events.subscribe).mock.calls.map(([event, handler]) => [event as string, handler as Function])
-)
+// #103 — capture constructor-registered handlers in beforeAll (after module
+// evaluation is complete) so the snapshot is not empty when mock-hoisting or
+// lazy-initialisation order changes.
+let eventHandlers: Record<string, Function | undefined> = {}
+
+beforeAll(() => {
+	eventHandlers = Object.fromEntries(
+		vi.mocked(events.subscribe).mock.calls.map(([event, handler]) => [event as string, handler as Function])
+	)
+})
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -2065,6 +2071,103 @@ describe("afterActivation boundary cases", () => {
 		})
 
 		setupAlbumWithAsset({ id: "before", filename: "before.jpg", creationTime: 4999 })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
+// ─── Falsy-bigint regression (#106) ──────────────────────────────────────────
+// cameraUpload.ts:524 used truthiness (`remoteFileMeta.meta?.modified &&`) which
+// short-circuits for 0n (Unix epoch), causing the local-newer comparison to be
+// skipped. The guards are now `!= null` so 0n is treated as a real timestamp.
+
+describe("falsy-bigint: modified=0n and modificationTime=0 are valid epoch timestamps", () => {
+	function setupLocalAsset(opts: { id?: string; filename?: string; creationTime?: number; modificationTime?: number }) {
+		const id = opts.id ?? "a1"
+		const uri = `file:///media/${id}`
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: [id] })
+		ml.addAsset({
+			id,
+			filename: opts.filename ?? "photo.jpg",
+			uri,
+			mediaType: MediaType.IMAGE,
+			creationTime: opts.creationTime ?? 1000,
+			modificationTime: opts.modificationTime ?? 2000
+		})
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+	}
+
+	function setupRemote(opts: { modified: bigint }) {
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-1" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: "photo.jpg", created: 0n, modified: opts.modified }
+		} as any)
+	}
+
+	it("remote modified=0n + local modificationTime=0 — files match, no upload (epoch equals epoch)", async () => {
+		// Both remote and local have epoch timestamps.
+		// 0n was previously falsy so comparison was skipped; the file appeared
+		// as a new-upload candidate. With != null guard, the comparison runs:
+		// normalise(Number(0n)) < normalise(0) → 0 < 0 → false → no upload.
+		setupLocalAsset({ modificationTime: 0 })
+		setupRemote({ modified: 0n })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("remote modified=0n + local modificationTime=5000 — local is newer, upload fires", async () => {
+		// Remote has epoch (0n). Local was modified at 5000ms.
+		// Old code: 0n is falsy → comparison skipped → no upload (wrong).
+		// New code: 0n != null → comparison runs: normalise(0) < normalise(5000) → true → upload.
+		setupLocalAsset({ modificationTime: 5000 })
+		setupRemote({ modified: 0n })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("remote modified=1000n + local modificationTime=0 — remote is newer, no upload", async () => {
+		// Remote is at 1000ms, local is at epoch 0.
+		// normalise(1000) < normalise(0) → false → no upload.
+		setupLocalAsset({ modificationTime: 0 })
+		setupRemote({ modified: 1000n })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("remote modified=null (meta.modified absent) + local modificationTime=5000 — no comparison, no upload", async () => {
+		// When modified is null (unknown), the guard correctly stops the comparison.
+		// The file is not treated as needing re-upload.
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-1" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: "photo.jpg", created: 0n, modified: null }
+		} as any)
+
+		setupLocalAsset({ modificationTime: 5000 })
 
 		await cameraUpload.sync()
 

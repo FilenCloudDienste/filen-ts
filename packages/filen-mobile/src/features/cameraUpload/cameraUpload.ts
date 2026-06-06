@@ -521,8 +521,8 @@ class CameraUpload {
 				(remoteFile &&
 					localFile &&
 					remoteFileMeta &&
-					remoteFileMeta.meta?.modified &&
-					localFile.info.modificationTime &&
+					remoteFileMeta.meta?.modified != null &&
+					localFile.info.modificationTime != null &&
 					normalizeModificationTimestampForComparison(Number(remoteFileMeta.meta.modified)) <
 						normalizeModificationTimestampForComparison(localFile.info.modificationTime))
 			) {
