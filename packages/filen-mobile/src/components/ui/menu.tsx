@@ -44,7 +44,7 @@ export type MenuButton = {
 // uses `"subButtons" in button` as the leaf-vs-submenu discriminator, so setting
 // `subButtons: undefined` on a leaf would route it through the submenu config and
 // break the native menu.
-function applyOfflineGate(button: MenuButton, hasInternet: boolean): MenuButton {
+export function applyOfflineGate(button: MenuButton, hasInternet: boolean): MenuButton {
 	const offlineDisabled = button.requiresOnline === true && !hasInternet
 
 	if (button.subButtons) {
@@ -61,7 +61,7 @@ function applyOfflineGate(button: MenuButton, hasInternet: boolean): MenuButton 
 	}
 }
 
-function findButtonById(buttons: MenuButton[], id: string): MenuButton | null {
+export function findButtonById(buttons: MenuButton[], id: string): MenuButton | null {
 	if (!buttons) {
 		return null
 	}
@@ -83,7 +83,7 @@ function findButtonById(buttons: MenuButton[], id: string): MenuButton | null {
 	return null
 }
 
-function checkIfButtonIdsAreUnique(buttons: MenuButton[]): boolean {
+export function checkIfButtonIdsAreUnique(buttons: MenuButton[]): boolean {
 	const ids = new Set<string>()
 
 	function checkButtons(buttonsToCheck: MenuButton[]): boolean {
@@ -109,7 +109,7 @@ function checkIfButtonIdsAreUnique(buttons: MenuButton[]): boolean {
 	return checkButtons(buttons)
 }
 
-function toReactNativeMenuActions({
+export function toReactNativeMenuActions({
 	buttons,
 	colors
 }: {
@@ -154,7 +154,7 @@ function toReactNativeMenuActions({
 	})
 }
 
-function iosMenuAttributesFromButton(button: MenuButton): MenuAttributes[] {
+export function iosMenuAttributesFromButton(button: MenuButton): MenuAttributes[] {
 	const attributes: MenuAttributes[] = []
 
 	if (button.destructive) {
@@ -176,7 +176,7 @@ function iosMenuAttributesFromButton(button: MenuButton): MenuAttributes[] {
 	return attributes
 }
 
-function toIosMenuSubMenuConfig(button: MenuButton): MenuElementConfig {
+export function toIosMenuSubMenuConfig(button: MenuButton): MenuElementConfig {
 	if (button.loading) {
 		return {
 			type: "deferred",
@@ -215,7 +215,7 @@ function toIosMenuSubMenuConfig(button: MenuButton): MenuElementConfig {
 	}
 }
 
-function toIosMenuElementConfig(button: MenuButton): MenuElementConfig {
+export function toIosMenuElementConfig(button: MenuButton): MenuElementConfig {
 	if (button.loading) {
 		return {
 			type: "deferred",

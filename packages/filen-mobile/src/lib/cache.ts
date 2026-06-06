@@ -103,7 +103,7 @@ type MapEntry = {
 	map: PersistentMap<unknown>
 }
 
-class Cache {
+export class Cache {
 	private readonly registry: MapEntry[] = []
 	private readonly dirtyUpserts = new Map<string, Set<string>>()
 	private readonly dirtyDeletes = new Map<string, Set<string>>()

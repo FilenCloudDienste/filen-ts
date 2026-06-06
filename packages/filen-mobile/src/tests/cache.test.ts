@@ -80,11 +80,9 @@ vi.mock("@filen/sdk-rs", () => {
 	}
 })
 
-import { PersistentMap, GLOBAL_PREFIX } from "@/lib/cache"
+import { Cache, PersistentMap, GLOBAL_PREFIX } from "@/lib/cache"
 import { serialize, deserialize } from "@/lib/serializer"
 import { type DriveItem } from "@/types"
-
-type Cache = any
 
 /**
  * In-memory KV store that simulates sqlite.kvAsync behavior.
@@ -236,10 +234,8 @@ function setupMockDb(): void {
 	})
 }
 
-async function createCache(): Promise<Cache> {
-	const mod = await import("@/lib/cache")
-
-	return new (mod.default.constructor as new () => Cache)()
+function createCache(): Cache {
+	return new Cache()
 }
 
 /**
@@ -540,7 +536,7 @@ describe("Cache", () => {
 
 	describe("constructor", () => {
 		it("maps are not ready before restore", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 			const { map } = getFirstMap(cache)
 
 			expect(map.ready).toBe(false)
@@ -548,7 +544,7 @@ describe("Cache", () => {
 		})
 
 		it("has at least one PersistentMap field", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 			const maps = getPersistentMaps(cache)
 
 			expect(maps.length).toBeGreaterThan(0)
@@ -557,17 +553,17 @@ describe("Cache", () => {
 
 	describe("restore", () => {
 		it("populates a map from per-key SQLite entries", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 			const { name } = getFirstMap(cache)
 
 			kvStore.set(kvKey(name, "key-1"), serialize("value-1"))
 			kvStore.set(kvKey(name, "key-2"), serialize("value-2"))
 
-			const cache2 = await createCache()
+			const cache2 = createCache()
 
 			await cache2.restore()
 
-			const restored = cache2[name] as PersistentMap<unknown>
+			const restored = (cache2 as unknown as Record<string, unknown>)[name] as PersistentMap<unknown>
 
 			expect(restored.get("key-1")).toBe("value-1")
 			expect(restored.get("key-2")).toBe("value-2")
@@ -575,7 +571,7 @@ describe("Cache", () => {
 		})
 
 		it("sets all maps to ready after restore", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -589,26 +585,26 @@ describe("Cache", () => {
 		})
 
 		it("restores all PersistentMap fields from separate SQLite keys", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 			const maps = getPersistentMaps(cache)
 
 			for (const [mapName] of maps) {
 				kvStore.set(kvKey(mapName, `${mapName}-key`), serialize(`${mapName}-value`))
 			}
 
-			const cache2 = await createCache()
+			const cache2 = createCache()
 
 			await cache2.restore()
 
 			for (const [mapName] of maps) {
-				const restored = cache2[mapName] as PersistentMap<unknown>
+				const restored = (cache2 as unknown as Record<string, unknown>)[mapName] as PersistentMap<unknown>
 
 				expect(restored.get(`${mapName}-key`)).toBe(`${mapName}-value`)
 			}
 		})
 
 		it("does nothing when SQLite keys do not exist", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -618,17 +614,17 @@ describe("Cache", () => {
 		})
 
 		it("only populates the map with matching prefix entries", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 			const maps = getPersistentMaps(cache)
 			const firstMap = maps[0] as [string, PersistentMap<unknown>]
 
 			kvStore.set(kvKey(firstMap[0], "k"), serialize("v"))
 
-			const cache2 = await createCache()
+			const cache2 = createCache()
 
 			await cache2.restore()
 
-			expect((cache2[firstMap[0]] as PersistentMap<unknown>).get("k")).toBe("v")
+			expect(((cache2 as unknown as Record<string, unknown>)[firstMap[0]] as PersistentMap<unknown>).get("k")).toBe("v")
 
 			for (const [mapName, map] of getPersistentMaps(cache2)) {
 				if (mapName !== firstMap[0]) {
@@ -638,7 +634,7 @@ describe("Cache", () => {
 		})
 
 		it("handles corrupted data for one map without affecting others", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 			const maps = getPersistentMaps(cache)
 			const firstMap = maps[0] as [string, PersistentMap<unknown>]
 			const secondMap = maps[1] as [string, PersistentMap<unknown>]
@@ -646,21 +642,23 @@ describe("Cache", () => {
 			kvStore.set(kvKey(firstMap[0], "corrupt"), "{invalid json!!")
 			kvStore.set(kvKey(secondMap[0], "good-key"), serialize("good-value"))
 
-			const cache2 = await createCache()
+			const cache2 = createCache()
 
 			await expect(cache2.restore()).resolves.toBeUndefined()
 
-			expect((cache2[firstMap[0]] as PersistentMap<unknown>).size).toBe(0)
-			expect((cache2[secondMap[0]] as PersistentMap<unknown>).get("good-key")).toBe("good-value")
+			expect(((cache2 as unknown as Record<string, unknown>)[firstMap[0]] as PersistentMap<unknown>).size).toBe(0)
+			expect(((cache2 as unknown as Record<string, unknown>)[secondMap[0]] as PersistentMap<unknown>).get("good-key")).toBe(
+				"good-value"
+			)
 		})
 
 		it("does not trigger onMutate during restore (no write-back cycle)", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 			const { name } = getFirstMap(cache)
 
 			kvStore.set(kvKey(name, "key-1"), serialize("value-1"))
 
-			const cache2 = await createCache()
+			const cache2 = createCache()
 
 			mockDb.executeBatch.mockClear()
 
@@ -670,13 +668,13 @@ describe("Cache", () => {
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
-			expect((cache2[name] as PersistentMap<unknown>).get("key-1")).toBe("value-1")
+			expect(((cache2 as unknown as Record<string, unknown>)[name] as PersistentMap<unknown>).get("key-1")).toBe("value-1")
 		})
 	})
 
 	describe("persist (via flush)", () => {
 		it("writes per-key entries to SQLite on flush", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -699,7 +697,7 @@ describe("Cache", () => {
 		})
 
 		it("persists entries from each map under its own prefix", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -722,7 +720,7 @@ describe("Cache", () => {
 		})
 
 		it("batches multiple mutations into a single write", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -744,7 +742,7 @@ describe("Cache", () => {
 		})
 
 		it("only persists changed entries, not the entire map", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -776,7 +774,7 @@ describe("Cache", () => {
 		})
 
 		it("persists data that survives a full restore round-trip", async () => {
-			const cache1 = await createCache()
+			const cache1 = createCache()
 
 			await cache1.restore()
 
@@ -788,17 +786,19 @@ describe("Cache", () => {
 			vi.advanceTimersByTime(2000)
 			await vi.advanceTimersToNextTimerAsync().catch(() => {})
 
-			const cache2 = await createCache()
+			const cache2 = createCache()
 
 			await cache2.restore()
 
-			expect((cache2[name] as PersistentMap<unknown>).get("round-trip-key")).toBe("round-trip-value")
+			expect(((cache2 as unknown as Record<string, unknown>)[name] as PersistentMap<unknown>).get("round-trip-key")).toBe(
+				"round-trip-value"
+			)
 		})
 	})
 
 	describe("clear", () => {
 		it("empties all PersistentMap instances", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -814,7 +814,7 @@ describe("Cache", () => {
 		})
 
 		it("removes per-key entries from SQLite", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -842,7 +842,7 @@ describe("Cache", () => {
 		})
 
 		it("does not throw synchronously when SQLite keys do not exist", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			// cache.clear() fires sqlite.kvAsync.removeByPrefix() as fire-and-forget promises.
 			// We verify the synchronous path doesn't throw; the async removal is fire-and-forget.
@@ -856,7 +856,7 @@ describe("Cache", () => {
 		})
 
 		it("also clears secureStore", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			cache.secureStore.set("secret-key", "secret-value")
 			cache.secureStore.set("another-key", "another-value")
@@ -869,7 +869,7 @@ describe("Cache", () => {
 		})
 
 		it("cancels any pending debounced persist", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -889,7 +889,7 @@ describe("Cache", () => {
 			// cache.clear() calls Map.prototype.clear.call(map) directly to bypass
 			// PersistentMap.clear(), which would invoke onMutate and enqueue dirty state.
 			// Verify: no executeBatch call is made after clear(), even with timer advancement.
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -918,15 +918,14 @@ describe("Cache", () => {
 
 	describe("auto-discovery", () => {
 		it("does not persist non-PersistentMap fields", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
 			const { map } = getFirstMap(cache)
 
 			map.set("key", "value")
-
-			cache._testField = "should not persist"
+			;(cache as unknown as { _testField?: string })._testField = "should not persist"
 
 			cache.flush()
 			vi.advanceTimersByTime(2000)
@@ -938,7 +937,7 @@ describe("Cache", () => {
 
 	describe("flushNow", () => {
 		it("synchronously persists dirty entries without waiting for the debounce timer", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -964,7 +963,7 @@ describe("Cache", () => {
 		})
 
 		it("cancels the pending debounce so the batch is not written twice", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -987,7 +986,7 @@ describe("Cache", () => {
 		})
 
 		it("does nothing when there are no dirty entries", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1003,7 +1002,7 @@ describe("Cache", () => {
 
 	describe("cacheNewFile", () => {
 		it("inserts file into uuidToAnyDriveItem and fileUuidToNormalFile", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1018,7 +1017,7 @@ describe("Cache", () => {
 		})
 
 		it("overwrites an existing file entry", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1036,7 +1035,7 @@ describe("Cache", () => {
 		})
 
 		it("persists both maps to SQLite after flush", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1057,7 +1056,7 @@ describe("Cache", () => {
 
 	describe("cacheNewNormalDir", () => {
 		it("inserts dir into uuidToAnyDriveItem, directoryUuidToAnyNormalDir, and directoryUuidToAnyDirWithContext", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1073,7 +1072,7 @@ describe("Cache", () => {
 		})
 
 		it("sets directoryUuidToName when decryptedMeta.name is present", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1087,7 +1086,7 @@ describe("Cache", () => {
 		})
 
 		it("does not set directoryUuidToName when decryptedMeta is null", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1101,7 +1100,7 @@ describe("Cache", () => {
 		})
 
 		it("constructs AnyNormalDir.Dir and AnyDirWithContext.Normal wrappers around the raw dir", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1126,7 +1125,7 @@ describe("Cache", () => {
 
 	describe("refreshCachedItem", () => {
 		it("updates uuidToAnyDriveItem for any drive item type", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1143,7 +1142,7 @@ describe("Cache", () => {
 		})
 
 		it("updates fileUuidToNormalFile when type is file and sdk file is provided", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1161,7 +1160,7 @@ describe("Cache", () => {
 		})
 
 		it("does not update fileUuidToNormalFile when no sdk file is passed", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1178,7 +1177,7 @@ describe("Cache", () => {
 		})
 
 		it("updates directoryUuidToName when type is directory and decryptedMeta.name is present", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1196,7 +1195,7 @@ describe("Cache", () => {
 		})
 
 		it("does not update directoryUuidToName when directory decryptedMeta is null", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1216,7 +1215,7 @@ describe("Cache", () => {
 		})
 
 		it("updates fileUuidToNormalFile when type is sharedFile", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1242,7 +1241,7 @@ describe("Cache", () => {
 
 	describe("forgetItem", () => {
 		it("removes uuid from all seven persistent per-uuid maps", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1271,7 +1270,7 @@ describe("Cache", () => {
 		})
 
 		it("removes directoryUuidToAnyLinkedDirWithMeta entry on forgetItem (regression: bug #12)", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1287,7 +1286,7 @@ describe("Cache", () => {
 		})
 
 		it("is a no-op for a uuid that was never cached", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1296,7 +1295,7 @@ describe("Cache", () => {
 		})
 
 		it("only removes the specific uuid, not other entries", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1315,7 +1314,7 @@ describe("Cache", () => {
 		})
 
 		it("persists the deletions to SQLite after flush", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1344,7 +1343,7 @@ describe("Cache", () => {
 
 	describe("AppState background flush", () => {
 		it("calls flushNow when AppState transitions to background", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1370,7 +1369,7 @@ describe("Cache", () => {
 		})
 
 		it("does not flush when AppState transitions to active (not background)", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1411,7 +1410,7 @@ describe("Cache", () => {
 			// We'll use the real executeBatch but track it
 			mockDb.executeBatch = vi.fn().mockImplementation(originalExecuteBatch)
 
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1460,7 +1459,7 @@ describe("Cache", () => {
 				expect(mockDb.executeBatch).not.toHaveBeenCalled()
 
 				// The map should be empty after clear()
-				expect(cache[name].has("stale-key")).toBe(false)
+				expect(((cache as unknown as Record<string, unknown>)[name] as PersistentMap<unknown>).has("stale-key")).toBe(false)
 			} finally {
 				sqliteMod.default.openDb = originalOpenDb
 			}
@@ -1469,7 +1468,7 @@ describe("Cache", () => {
 
 	describe("persistAsync concurrency dedup", () => {
 		it("does not run two concurrent persistAsync calls for the same dirty batch", async () => {
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
@@ -1496,7 +1495,7 @@ describe("Cache", () => {
 		it("re-triggers a second persist for mutations that arrive during an in-flight persist", async () => {
 			// The finally block of persistAsync calls persistDirty() if there are still dirty entries.
 			// This test verifies mutations that arrive while a persist is in-flight are not lost.
-			const cache = await createCache()
+			const cache = createCache()
 
 			await cache.restore()
 
