@@ -65,12 +65,6 @@ vi.mock("@/features/offline/offline", () => ({
 vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
 vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
-vi.mock("react-fast-compare", () => ({
-	default: (a: unknown, b: unknown) =>
-		JSON.stringify(a, (_k, v) => (typeof v === "bigint" ? `__bigint__${v.toString()}` : v)) ===
-		JSON.stringify(b, (_k, v) => (typeof v === "bigint" ? `__bigint__${v.toString()}` : v))
-}))
-
 import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import { type DriveItem, type CacheItem } from "@/types"
