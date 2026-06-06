@@ -221,7 +221,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			}
 		],
 		"@config-plugins/react-native-blob-util",
-		"expo-sqlite",
 		"expo-localization",
 		"expo-background-task",
 		"expo-secure-store",
@@ -251,7 +250,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				}
 			}
 		],
-		"expo-web-browser",
 		"expo-image",
 		[
 			"react-native-edge-to-edge",
