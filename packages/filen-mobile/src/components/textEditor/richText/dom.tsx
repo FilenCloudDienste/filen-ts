@@ -6,6 +6,7 @@ import { type DOMProps, useDOMImperativeHandle } from "expo/dom"
 import { useEffect, useRef, useCallback } from "react"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
+import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import Quill from "quill"
 import DOMPurify from "dompurify"
 import QuillThemeCustomizer, { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
@@ -284,7 +285,7 @@ const RichTextEditorDom = ({
 		}
 
 		if (initialValue) {
-			const sanitized = DOMPurify.sanitize(initialValue, {
+			const sanitized = DOMPurify.sanitize(decodeEditorInitialValue(initialValue), {
 				ALLOWED_TAGS: [
 					"p",
 					"strong",

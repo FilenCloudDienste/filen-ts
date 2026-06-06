@@ -13,6 +13,7 @@ import type { TextEditorType, Font, Colors, TextEditorEvents } from "@/component
 import { createTextThemes, parseExtension, loadLanguage } from "@/components/textEditor/codeMirror"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
+import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import MDEditor from "@uiw/react-md-editor"
 import rehypeSanitize from "rehype-sanitize"
@@ -74,7 +75,7 @@ const TextEditorDOM = ({
 	paddingBottom?: number
 }) => {
 	const didTypeRef = useRef<boolean>(false)
-	const [value, setValue] = useState<string>(initialValue ?? "")
+	const [value, setValue] = useState<string>(() => decodeEditorInitialValue(initialValue ?? ""))
 	const codeMirrorRef = useRef<ReactCodeMirrorRef>(null)
 
 	const onChange = (value: string) => {
