@@ -34,8 +34,6 @@ vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
 vi.mock("react-native-quick-crypto", async () => await import("@/tests/mocks/reactNativeQuickCrypto"))
 
-vi.mock("react-fast-compare", async () => await import("@/tests/mocks/reactFastCompare"))
-
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("@/lib/utils", () => ({}))

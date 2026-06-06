@@ -25,8 +25,6 @@ vi.mock("react-native-mmkv", async () => await import("@/tests/mocks/reactNative
 
 vi.mock("react-native-quick-crypto", async () => await import("@/tests/mocks/reactNativeQuickCrypto"))
 
-vi.mock("react-fast-compare", async () => await import("@/tests/mocks/reactFastCompare"))
-
 vi.mock("@/lib/cache", () => ({
 	default: {
 		secureStore: {
