@@ -1,0 +1,35 @@
+diff --git a/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift b/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
+index 09be306..5f0b4e6 100644
+--- a/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
++++ b/node_modules/react-native-ios-utilities/ios/Sources/Extensions+Helpers/RCTView+Helpers.swift
+@@ -25,15 +25,24 @@ public extension RCTView {
+     return rootView.recursivelyFindSubview(whereType: targetType);
+   };
+   
+-  var closestParentReactContentView: RCTRootContentView? {
+-    let targetType = RCTRootContentView.self;
++  var closestParentReactContentView: RCTView? {
++    // RCTRootContentView is a legacy (Paper) class that is not linked under the
++    // New Architecture in RN 0.85+. Resolve it dynamically so there is no
++    // compile-time symbol dependency; returns nil when unavailable (Fabric /
++    // bridgeless), which is correct for those runtimes.
++    guard let targetType = NSClassFromString("RCTRootContentView") else {
++      return nil;
++    };
+ 
+-    if let match = self.recursivelyFindParentView(whereType: targetType) {
+-      return match;
++    var currentView: UIView? = self.superview;
++    while let view = currentView {
++      if view.isKind(of: targetType) {
++        return view as? RCTView;
++      };
++      currentView = view.superview;
+     };
+ 
+-    guard let rootView = self.rootViewForCurrentWindow else { return nil };
+-    return rootView.recursivelyFindSubview(whereType: targetType);
++    return nil;
+   };
+   
+   var reactTouchHandlers: [RCTTouchHandler]? {
