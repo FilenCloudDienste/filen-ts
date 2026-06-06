@@ -16,50 +16,33 @@ vi.mock("expo-router", () => ({
 
 vi.mock("@/lib/utils", () => ({}))
 
-vi.mock("@/lib/previewType", async () => {
-	const actual = await import("@/tests/mocks/expoFileSystem")
+// Use the real implementation so the mock cannot silently drift from production behaviour.
+// @/constants is extended below to supply the extension Sets that the real getPreviewType reads.
+vi.mock("@/lib/previewType", async () => vi.importActual("@/lib/previewType"))
+
+// Extend the shared constants mock with the extension Sets that @/lib/previewType requires.
+// Values are derived from the iOS Platform.select arm (Platform.OS = 'ios' in the RN mock).
+vi.mock("@/constants", async () => {
+	const base = await import("@/tests/mocks/constants")
 
 	return {
-		getPreviewType(name: string): string {
-			const ext = actual.Paths.extname(name.trim().toLowerCase())
-
-			// image
-			if ([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic", ".heif", ".webp", ".avif"].includes(ext)) {
-				return "image"
-			}
-
-			// video
-			if ([".mp4", ".mov", ".m4v", ".3gp", ".webm", ".mkv"].includes(ext)) {
-				return "video"
-			}
-
-			// audio
-			if ([".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"].includes(ext)) {
-				return "audio"
-			}
-
-			switch (ext) {
-				case ".pdf":
-					return "pdf"
-				case ".txt":
-					return "text"
-				case ".docx":
-					return "docx"
-				case ".js":
-				case ".ts":
-				case ".tsx":
-				case ".py":
-				case ".rs":
-				case ".json":
-					return "code"
-				default:
-					return "unknown"
-			}
-		}
+		...base,
+		EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set([
+			".jpg",
+			".jpeg",
+			".png",
+			".gif",
+			".webp",
+			".avif",
+			".heic",
+			".heif",
+			".svg",
+			".ico",
+			".icns"
+		]),
+		EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".aac", ".wav", ".aiff", ".caf", ".flac", ".alac"])
 	}
 })
-
-vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@filen/sdk-rs", () => ({}))
 
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
@@ -588,6 +571,43 @@ describe("useHttpStore.setGetFileUrl", () => {
 		useHttpStore.getState().setPort(prev => (prev ?? 0) + 1)
 
 		expect(useHttpStore.getState().port).toBe(3001)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// useAppStore — setPathname (plain string + functional-updater branches)
+// ---------------------------------------------------------------------------
+
+describe("useAppStore.setPathname", () => {
+	beforeEach(() => {
+		resetAppStore()
+	})
+
+	it("setPathname with a plain string replaces pathname directly", () => {
+		useAppStore.getState().setPathname("/foo")
+
+		expect(useAppStore.getState().pathname).toBe("/foo")
+	})
+
+	it("setPathname with a functional updater receives the current pathname and applies the result", () => {
+		useAppStore.getState().setPathname("/base")
+		useAppStore.getState().setPathname(prev => prev + "/bar")
+
+		expect(useAppStore.getState().pathname).toBe("/base/bar")
+	})
+
+	it("functional updater identity function is a no-op", () => {
+		useAppStore.getState().setPathname("/existing")
+		useAppStore.getState().setPathname(prev => prev)
+
+		expect(useAppStore.getState().pathname).toBe("/existing")
+	})
+
+	it("plain string overwrite after functional update works correctly", () => {
+		useAppStore.getState().setPathname(prev => prev + "/child")
+		useAppStore.getState().setPathname("/reset")
+
+		expect(useAppStore.getState().pathname).toBe("/reset")
 	})
 })
 

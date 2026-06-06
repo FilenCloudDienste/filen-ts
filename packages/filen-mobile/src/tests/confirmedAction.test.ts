@@ -115,4 +115,49 @@ describe("confirmedAction", () => {
 		expect(mockAlertsError).toHaveBeenCalledTimes(1)
 		expect(mockBack).not.toHaveBeenCalled()
 	})
+
+	it("forwards destructive:true to prompts.alert by default", async () => {
+		mockAlert.mockResolvedValue({ cancelled: false })
+		const action = vi.fn().mockResolvedValue(undefined)
+
+		await confirmedAction({ ...PROMPT, action })()
+
+		expect(mockAlert).toHaveBeenCalledTimes(1)
+		const callArg = mockAlert.mock.calls[0]?.[0] as Record<string, unknown>
+		expect(callArg?.["destructive"]).toBe(true)
+	})
+
+	it("forwards destructive:false to prompts.alert when promptDestructive is false", async () => {
+		mockAlert.mockResolvedValue({ cancelled: false })
+		const action = vi.fn().mockResolvedValue(undefined)
+
+		await confirmedAction({ ...PROMPT, action, promptDestructive: false })()
+
+		expect(mockAlert).toHaveBeenCalledTimes(1)
+		const callArg = mockAlert.mock.calls[0]?.[0] as Record<string, unknown>
+		expect(callArg?.["destructive"]).toBe(false)
+	})
+
+	it("does not run the action when cancelled with promptDestructive:false", async () => {
+		mockAlert.mockResolvedValue({ cancelled: true })
+		const action = vi.fn().mockResolvedValue(undefined)
+
+		await confirmedAction({ ...PROMPT, action, promptDestructive: false })()
+
+		expect(action).not.toHaveBeenCalled()
+		expect(mockBack).not.toHaveBeenCalled()
+		const callArg = mockAlert.mock.calls[0]?.[0] as Record<string, unknown>
+		expect(callArg?.["destructive"]).toBe(false)
+	})
+
+	it("forwards destructive:true when promptDestructive is explicitly true", async () => {
+		mockAlert.mockResolvedValue({ cancelled: false })
+		const action = vi.fn().mockResolvedValue(undefined)
+
+		await confirmedAction({ ...PROMPT, action, promptDestructive: true })()
+
+		expect(mockAlert).toHaveBeenCalledTimes(1)
+		const callArg = mockAlert.mock.calls[0]?.[0] as Record<string, unknown>
+		expect(callArg?.["destructive"]).toBe(true)
+	})
 })

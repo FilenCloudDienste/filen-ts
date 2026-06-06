@@ -1283,3 +1283,72 @@ describe("drive.removeShare", () => {
 		expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(4)
 	})
 })
+
+// ============================================================================
+// Drive.getRootUuid
+// ============================================================================
+
+describe("drive.getRootUuid", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		drive.cachedRootUuid = null
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: mockAuthedSdkClient })
+		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-0001" })
+	})
+
+	it("first call invokes getSdkClients and returns the uuid from root()", async () => {
+		const result = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(1)
+		expect(mockAuthedSdkClient.root).toHaveBeenCalledTimes(1)
+		expect(result).toBe("root-uuid-0001")
+	})
+
+	it("second call returns cached uuid without calling getSdkClients again", async () => {
+		await drive.getRootUuid()
+		vi.clearAllMocks()
+
+		const result = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+		expect(mockAuthedSdkClient.root).not.toHaveBeenCalled()
+		expect(result).toBe("root-uuid-0001")
+	})
+
+	it("after cachedRootUuid reset to null, next call re-fetches from SDK", async () => {
+		await drive.getRootUuid()
+		drive.cachedRootUuid = null
+		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-fresh" })
+
+		const result = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
+		expect(result).toBe("root-uuid-fresh")
+	})
+
+	it("stores the fetched uuid in cachedRootUuid after first call", async () => {
+		expect(drive.cachedRootUuid).toBeNull()
+
+		await drive.getRootUuid()
+
+		expect(drive.cachedRootUuid).toBe("root-uuid-0001")
+	})
+
+	it("FALSY-GUARD REGRESSION: empty-string uuid causes re-fetch on every call (truthy guard bug)", async () => {
+		// root() returns an empty string uuid (edge case)
+		mockAuthedSdkClient.root.mockReturnValue({ uuid: "" })
+
+		const result1 = await drive.getRootUuid()
+
+		// First call: getSdkClients called once, returns ""
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(1)
+		expect(result1).toBe("")
+
+		// Because `if (this.cachedRootUuid)` is falsy for "", the cache is NOT respected
+		// and getSdkClients is called again on the second call — documents the truthy guard bug
+		const result2 = await drive.getRootUuid()
+
+		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
+		expect(result2).toBe("")
+	})
+})

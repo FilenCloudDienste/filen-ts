@@ -819,6 +819,80 @@ describe("QueryPersisterKv", () => {
 		})
 	})
 
+	describe("buildCommands() stale-upsert skip guard", () => {
+		it("skips INSERT for a dirty key whose buffer entry was deleted before flush", async () => {
+			const kv = new QueryPersisterKv()
+
+			// setItem adds 'k' to both buffer and dirtyUpserts
+			kv.setItem("ghost-key", "ghost-value")
+
+			// Directly delete 'ghost-key' from the internal buffer to simulate a
+			// setItem-then-immediate-removeItem race where the debounce fires after
+			// removeItem already cleared the buffer entry but left it in dirtyUpserts.
+			// buildCommands() line 304: `if (value !== undefined)` must skip this key.
+			const kvPrivate = kv as unknown as { buffer: Map<string, unknown> }
+
+			kvPrivate.buffer.delete("ghost-key")
+
+			// flushNow() calls persistNow() → buildCommands(): dirtyUpserts has 'ghost-key'
+			// but buffer.get('ghost-key') === undefined → guard fires → no INSERT produced
+			// → commands.length === 0 → executeBatch is NOT called
+			kv.flushNow()
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+
+		it("only emits INSERT commands for keys that still have a buffer value", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("keep-key", "keep-value")
+			kv.setItem("drop-key", "drop-value")
+
+			// Simulate 'drop-key' disappearing from the buffer before buildCommands runs
+			const kvPrivate = kv as unknown as { buffer: Map<string, unknown> }
+
+			kvPrivate.buffer.delete("drop-key")
+
+			kv.flushNow()
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			// executeBatch must be called with exactly one INSERT (for 'keep-key' only)
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+
+			const commands = mockDb.executeBatch.mock.calls[0]?.[0] as [string, unknown[]][]
+
+			expect(commands.length).toBe(1)
+			expect(commands[0]?.[0]).toMatch(/^INSERT OR REPLACE/)
+
+			// The INSERT must carry the prefix + 'keep-key', not 'drop-key'
+			const insertKey = commands[0]?.[1]?.[0] as string
+
+			expect(insertKey).toBe(`${QUERY_CLIENT_PERSISTER_PREFIX}:keep-key`)
+		})
+
+		it("does not emit any command when all dirty upserts are stale (buffer fully cleared)", async () => {
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("a", "1")
+			kv.setItem("b", "2")
+
+			const kvPrivate = kv as unknown as { buffer: Map<string, unknown> }
+
+			kvPrivate.buffer.delete("a")
+			kvPrivate.buffer.delete("b")
+
+			kv.flushNow()
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			// All upsert keys were stale → commands empty → executeBatch never called
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("round-trip", () => {
 		it("setItem → flush → new instance restore → getItem returns same value", async () => {
 			const kv1 = new QueryPersisterKv()

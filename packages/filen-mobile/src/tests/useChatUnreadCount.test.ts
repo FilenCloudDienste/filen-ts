@@ -30,6 +30,7 @@ vi.mock("@/lib/auth", () => ({
 
 import { renderHook } from "@testing-library/react"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
+import { isMessageUnread } from "@/features/chats/chatSelectors"
 import type { Chat, ChatMessage } from "@/types"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -211,5 +212,79 @@ describe("useChatUnreadCount", () => {
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
 		expect(result.current).toBe(2)
+	})
+})
+
+// ─── isMessageUnread — direct unit tests (#192) ──────────────────────────────
+
+describe("isMessageUnread", () => {
+	it("returns true when lastFocus=0n (falsy bigint) and sentTimestamp > 0n — 0n passes !== null/undefined guards", () => {
+		// The critical falsy-bigint edge: 0n is falsy in JS but is not null/undefined.
+		// A message sent after timestamp 0n from another user must be unread.
+		const chat = makeChat({ lastFocus: 0n })
+		const message = makeMessage({ sentTimestamp: 1n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(true)
+	})
+
+	it("returns false when lastFocus=null", () => {
+		const chat = makeChat({ lastFocus: null as unknown as bigint })
+		const message = makeMessage({ sentTimestamp: 1n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(false)
+	})
+
+	it("returns false when lastFocus=undefined", () => {
+		const chat = makeChat({ lastFocus: undefined as unknown as bigint })
+		const message = makeMessage({ sentTimestamp: 1n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(false)
+	})
+
+	it("returns true when userId=undefined and senderId is a bigint (999n !== undefined → true)", () => {
+		// When userId is undefined, senderId (999n) !== undefined evaluates to true,
+		// so the message IS considered unread. The caller (useChatUnreadCount) only
+		// passes undefined when stringifiedClient is null — in that case the hook
+		// returns 0 before calling isMessageUnread, so undefined never reaches it
+		// in the hook path. We test the raw predicate behavior here.
+		const chat = makeChat({ lastFocus: 0n })
+		const message = makeMessage({ sentTimestamp: 1n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, undefined)).toBe(true)
+	})
+
+	it("returns false when chat.muted=true even if timestamp > lastFocus and sender != self", () => {
+		const chat = makeChat({ lastFocus: 0n, muted: true })
+		const message = makeMessage({ sentTimestamp: 1n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(false)
+	})
+
+	it("returns false when chat.lastMessage is null/undefined", () => {
+		const chat = makeChat({ lastFocus: 0n, lastMessage: null as unknown as Chat["lastMessage"] })
+		const message = makeMessage({ sentTimestamp: 1n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(false)
+	})
+
+	it("returns false when sentTimestamp === lastFocus (boundary — strictly greater required)", () => {
+		const chat = makeChat({ lastFocus: 100n })
+		const message = makeMessage({ sentTimestamp: 100n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(false)
+	})
+
+	it("returns false when senderId === userId (own message)", () => {
+		const chat = makeChat({ lastFocus: 0n })
+		const message = makeMessage({ sentTimestamp: 1n, senderId: 1n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(false)
+	})
+
+	it("returns true when sentTimestamp > lastFocus and sender != userId with non-zero lastFocus", () => {
+		const chat = makeChat({ lastFocus: 100n })
+		const message = makeMessage({ sentTimestamp: 200n, senderId: 999n })
+
+		expect(isMessageUnread(message, chat, 1n)).toBe(true)
 	})
 })

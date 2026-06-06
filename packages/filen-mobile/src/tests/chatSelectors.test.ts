@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS, chatHasUnread } from "@/features/chats/chatSelectors"
+import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS, chatHasUnread, isMessageUnread } from "@/features/chats/chatSelectors"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import type { Chat, ChatMessage } from "@/types"
 
@@ -292,5 +292,134 @@ describe("aggregateChatSelectionFlags includesUndecryptable", () => {
 		const u2 = chat({ uuid: "c2", undecryptable: true })
 
 		expect(aggregateChatSelectionFlags([u1, u2], ME).includesUndecryptable).toBe(true)
+	})
+})
+
+describe("isMessageUnread", () => {
+	it("returns true when userId is undefined and all other conditions pass (senderId !== undefined is true)", () => {
+		// When userId is undefined, the condition `message.inner.senderId !== userId` evaluates
+		// to `200n !== undefined` which is true — so the function does NOT short-circuit on
+		// undefined userId. isMessageUnread has no explicit undefined guard for userId.
+		const msg = chatMessage(SOMEONE_ELSE, 200n)
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(isMessageUnread(msg, c, undefined)).toBe(true)
+	})
+
+	it("returns false when userId is undefined AND the message sender is also undefined", () => {
+		// senderId=undefined, userId=undefined → undefined !== undefined → false
+		const msg = { sentTimestamp: 200n, inner: { senderId: undefined }, undecryptable: false } as unknown as ChatMessage
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: msg
+		})
+
+		expect(isMessageUnread(msg, c, undefined)).toBe(false)
+	})
+
+	it("returns false when chat.lastFocus is null", () => {
+		const msg = chatMessage(SOMEONE_ELSE, 200n)
+		const c = chat({
+			lastFocus: null as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
+	})
+
+	it("returns false when chat.lastFocus is undefined", () => {
+		const msg = chatMessage(SOMEONE_ELSE, 200n)
+		const c = chat({
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+		// default chat() leaves lastFocus absent (undefined)
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
+	})
+
+	it("returns false when chat has no lastMessage", () => {
+		const msg = chatMessage(SOMEONE_ELSE, 200n)
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"]
+			// no lastMessage
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
+	})
+
+	it("returns false when chat is muted even if all other conditions pass", () => {
+		const msg = chatMessage(SOMEONE_ELSE, 200n)
+		const c = chat({
+			muted: true,
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: chatMessage(SOMEONE_ELSE, 200n)
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
+	})
+
+	it("returns false when sentTimestamp equals lastFocus (strict greater-than boundary)", () => {
+		const lastFocus = 200n as unknown as Chat["lastFocus"]
+		const msg = chatMessage(SOMEONE_ELSE, 200n)
+		const c = chat({
+			lastFocus,
+			lastMessage: msg
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
+	})
+
+	it("returns false when sentTimestamp is less than lastFocus", () => {
+		const msg = chatMessage(SOMEONE_ELSE, 100n)
+		const c = chat({
+			lastFocus: 300n as unknown as Chat["lastFocus"],
+			lastMessage: msg
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
+	})
+
+	it("returns false when the message sender is the current user", () => {
+		const msg = chatMessage(ME, 200n)
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: msg
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
+	})
+
+	it("returns true when sentTimestamp > lastFocus and sender is someone else", () => {
+		const msg = chatMessage(SOMEONE_ELSE, 200n)
+		const c = chat({
+			lastFocus: 100n as unknown as Chat["lastFocus"],
+			lastMessage: msg
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(true)
+	})
+
+	it("returns true when lastFocus is 0n (falsy but valid epoch) and sentTimestamp is 1n", () => {
+		// 0n passes the !== undefined && !== null guards — it is a valid timestamp.
+		// A naive falsy check would incorrectly treat 0n as absent and return false.
+		const msg = chatMessage(SOMEONE_ELSE, 1n)
+		const c = chat({
+			lastFocus: 0n as unknown as Chat["lastFocus"],
+			lastMessage: msg
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(true)
+	})
+
+	it("returns false when lastFocus is 0n and sentTimestamp is also 0n (equal, not greater)", () => {
+		const msg = chatMessage(SOMEONE_ELSE, 0n)
+		const c = chat({
+			lastFocus: 0n as unknown as Chat["lastFocus"],
+			lastMessage: msg
+		})
+
+		expect(isMessageUnread(msg, c, ME)).toBe(false)
 	})
 })

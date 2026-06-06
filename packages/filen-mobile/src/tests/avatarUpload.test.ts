@@ -73,6 +73,33 @@ describe("prepareAvatarFileForUpload", () => {
 		).rejects.toThrow("avatar_not_an_image")
 	})
 
+	// Findings #72 + #94 — falsy-value guard on fileSize and fileName
+	// Line 25: !asset.fileSize fires for 0 (falsy number); !asset.fileName fires for '' and undefined
+
+	it("throws avatar_not_an_image when fileSize is 0 (zero-byte file — falsy guard)", async () => {
+		fs.set("file:///pick/x", new Uint8Array([1]))
+
+		await expect(
+			prepareAvatarFileForUpload({ asset: makeAsset({ uri: "file:///pick/x", fileSize: 0 }), defer: noopDefer })
+		).rejects.toThrow("avatar_not_an_image")
+	})
+
+	it("throws avatar_not_an_image when fileName is empty string (falsy guard)", async () => {
+		fs.set("file:///pick/x", new Uint8Array([1]))
+
+		await expect(
+			prepareAvatarFileForUpload({ asset: makeAsset({ uri: "file:///pick/x", fileName: "" }), defer: noopDefer })
+		).rejects.toThrow("avatar_not_an_image")
+	})
+
+	it("throws avatar_not_an_image when fileName is undefined", async () => {
+		fs.set("file:///pick/x", new Uint8Array([1]))
+
+		await expect(
+			prepareAvatarFileForUpload({ asset: makeAsset({ uri: "file:///pick/x", fileName: undefined }), defer: noopDefer })
+		).rejects.toThrow("avatar_not_an_image")
+	})
+
 	it("throws avatar_unsupported_format for a non-jpeg/png with an unsupported extension", async () => {
 		fs.set("file:///pick/img.gif", new Uint8Array([1]))
 

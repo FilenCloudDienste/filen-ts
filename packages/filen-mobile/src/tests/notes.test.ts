@@ -1883,3 +1883,149 @@ describe("notes.setParticipantPermission", () => {
 		expect(p77).toBeDefined()
 	})
 })
+
+// ---------------------------------------------------------------------------
+// Tests: Notes.importFromFile — finding #48
+// ---------------------------------------------------------------------------
+
+describe("notes.importFromFile", () => {
+	beforeEach(() => {
+		mockGetSdkClients.mockReset()
+		mockNotesWithContentQueryUpdate.mockReset()
+		mockNoteContentQueryUpdate.mockReset()
+		fs.clear()
+	})
+
+	it("throws 'Import file not found or empty' when file does not exist", async () => {
+		// fs is empty → file.exists === false
+		await expect(
+			notes.importFromFile({
+				uri: "file:///document/missing.txt",
+				title: "My Note",
+				type: "text" as unknown as import("@filen/sdk-rs").NoteType
+			})
+		).rejects.toThrow("Import file not found or empty")
+
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+	})
+
+	it("throws 'Import file not found or empty' when file exists but size is 0", async () => {
+		// Write zero-byte file: create() writes new Uint8Array([]) which has length 0
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+		const f = new MockFile("file:///document/empty.txt")
+
+		f.create()
+
+		await expect(
+			notes.importFromFile({
+				uri: "file:///document/empty.txt",
+				title: "My Note",
+				type: "text" as unknown as import("@filen/sdk-rs").NoteType
+			})
+		).rejects.toThrow("Import file not found or empty")
+
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+	})
+
+	it("happy path: reads file text and calls create with correct args", async () => {
+		// Write a non-empty file
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+		const f = new MockFile("file:///document/import-me.txt")
+
+		f.write("hello imported content")
+
+		const sdkClient = makeMockSdkClient({
+			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported")),
+			setNoteType: vi
+				.fn()
+				.mockResolvedValue(makeSdkNote("note-uuid-imported", { noteType: "text" as unknown as import("@filen/sdk-rs").NoteType })),
+			setNoteContent: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-imported"))
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const result = await notes.importFromFile({
+			uri: "file:///document/import-me.txt",
+			title: "Imported Note",
+			type: "text" as unknown as import("@filen/sdk-rs").NoteType
+		})
+
+		// create() must have been called (which calls createNote internally)
+		expect(sdkClient.createNote).toHaveBeenCalledWith("Imported Note", undefined)
+		// The content 'hello imported content' must be stored via setNoteContent
+		expect(sdkClient.setNoteContent).toHaveBeenCalledWith(
+			expect.objectContaining({ uuid: "note-uuid-imported" }),
+			"hello imported content",
+			expect.anything(),
+			undefined
+		)
+		// Returned note should be the created note
+		expect(result.uuid).toBe("note-uuid-imported")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Tests: Notes.createWithOptionalTag — finding #49
+// ---------------------------------------------------------------------------
+
+describe("notes.createWithOptionalTag", () => {
+	beforeEach(() => {
+		mockGetSdkClients.mockReset()
+		mockNotesWithContentQueryUpdate.mockReset()
+		mockNoteContentQueryUpdate.mockReset()
+		fs.clear()
+	})
+
+	it("with tag=undefined: calls create once and does NOT call addTag, returns the created note", async () => {
+		const sdkClient = makeMockSdkClient({
+			createNote: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new")),
+			setNoteType: vi
+				.fn()
+				.mockResolvedValue(makeSdkNote("note-uuid-new", { noteType: "text" as unknown as import("@filen/sdk-rs").NoteType })),
+			setNoteContent: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new"))
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const addTagSpy = vi.spyOn(notes, "addTag")
+
+		const result = await notes.createWithOptionalTag({
+			title: "New Note",
+			type: "text" as unknown as import("@filen/sdk-rs").NoteType,
+			tag: undefined
+		})
+
+		expect(sdkClient.createNote).toHaveBeenCalledTimes(1)
+		expect(addTagSpy).not.toHaveBeenCalled()
+		expect(result.uuid).toBe("note-uuid-new")
+
+		addTagSpy.mockRestore()
+	})
+
+	it("with tag provided: calls addTag on the created note and returns addTag's result", async () => {
+		const tag = makeTag({ uuid: "tag-uuid-1" })
+		const createdNote = makeSdkNote("note-uuid-new")
+		const taggedNote = { ...makeSdkNote("note-uuid-new"), tags: [tag] }
+
+		const sdkClient = makeMockSdkClient({
+			createNote: vi.fn().mockResolvedValue(createdNote),
+			setNoteType: vi
+				.fn()
+				.mockResolvedValue(makeSdkNote("note-uuid-new", { noteType: "text" as unknown as import("@filen/sdk-rs").NoteType })),
+			setNoteContent: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-new")),
+			addTagToNote: vi.fn().mockResolvedValue({ note: { ...taggedNote, encryptionKey: "k" }, tag })
+		})
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const result = await notes.createWithOptionalTag({
+			title: "Tagged Note",
+			type: "text" as unknown as import("@filen/sdk-rs").NoteType,
+			tag
+		})
+
+		expect(sdkClient.createNote).toHaveBeenCalledTimes(1)
+		expect(sdkClient.addTagToNote).toHaveBeenCalledTimes(1)
+		// The note passed to addTag should be the one returned by create
+		expect(sdkClient.addTagToNote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "note-uuid-new" }), tag, undefined)
+		// The returned note should have the tag attached
+		expect(result.uuid).toBe("note-uuid-new")
+	})
+})

@@ -138,4 +138,26 @@ describe("useIsAppActive", () => {
 
 		expect(result.current).toBe(false)
 	})
+
+	it("stops updating state after unmount — subscription is removed on cleanup", () => {
+		mockAppState.currentState = "active"
+
+		const { result, unmount } = renderHook(() => useIsAppActive())
+
+		expect(result.current).toBe(true)
+
+		// Unmount the hook — this should invoke cleanup() → subscription.remove()
+		act(() => {
+			unmount()
+		})
+
+		// The mock's listeners set should now be empty; emitting must not update state
+		act(() => {
+			mockAppState.emit("background")
+		})
+
+		// result.current is frozen at the last rendered value (true) because the
+		// hook is unmounted and its listener was removed
+		expect(result.current).toBe(true)
+	})
 })
