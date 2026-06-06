@@ -250,8 +250,8 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-vi.mock("uuid", () => ({
-	validate: (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+vi.mock("@/lib/uuid", () => ({
+	validateUuid: (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 }))
 
 import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta } from "@/features/offline/offline"
