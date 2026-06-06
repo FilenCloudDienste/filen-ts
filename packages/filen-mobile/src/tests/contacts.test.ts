@@ -380,6 +380,36 @@ describe("contacts.acceptRequest", () => {
 		expect(acceptContactRequest).toHaveBeenCalledWith("req-sig", { signal: controller.signal })
 		expect(getContacts).toHaveBeenCalledWith({ signal: controller.signal })
 	})
+
+	it("propagates getContacts error after acceptContactRequest succeeds — incoming already filtered, contacts not updated", async () => {
+		const networkError = new Error("network failure")
+		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
+		const getContacts = vi.fn().mockRejectedValue(networkError)
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: { acceptContactRequest, getContacts }
+		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
+
+		await expect(contacts.acceptRequest({ uuid: "req-partial-fail" })).rejects.toThrow("network failure")
+
+		// acceptContactRequest succeeded
+		expect(acceptContactRequest).toHaveBeenCalledWith("req-partial-fail", undefined)
+
+		// contactRequestsQueryUpdate was called (incoming was already filtered before getContacts threw)
+		expect(contactRequestsQueryUpdate).toHaveBeenCalledOnce()
+		const reqUpdate = vi.mocked(contactRequestsQueryUpdate).mock.calls[0]?.[0]
+		const reqPrev = {
+			incoming: [{ uuid: "req-partial-fail" }, { uuid: "req-other" }],
+			outgoing: [] as Array<{ uuid: string }>
+		}
+		const reqNext = (reqUpdate as unknown as { updater: (p: typeof reqPrev) => typeof reqPrev }).updater(reqPrev)
+		// the accepted request uuid was removed from incoming
+		expect(reqNext.incoming).toHaveLength(1)
+		expect(reqNext.incoming[0]!.uuid).toBe("req-other")
+
+		// contactsQueryUpdate was NOT called because getContacts threw before it could run
+		expect(contactsQueryUpdate).not.toHaveBeenCalled()
+	})
 })
 
 describe("contacts.unblock", () => {

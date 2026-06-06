@@ -1,8 +1,14 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockQueryUpdaterSet } = vi.hoisted(() => ({
-	mockQueryUpdaterSet: vi.fn()
-}))
+const { mockQueryUpdaterSet, mockIsItemStored, cacheUuidToAnyDriveItem } = vi.hoisted(() => {
+	const cacheUuidToAnyDriveItem = new Map<string, unknown>()
+
+	return {
+		mockQueryUpdaterSet: vi.fn(),
+		mockIsItemStored: vi.fn().mockResolvedValue(false),
+		cacheUuidToAnyDriveItem
+	}
+})
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
@@ -28,19 +34,19 @@ vi.mock("@/queries/client", () => ({
 
 vi.mock("@/lib/cache", () => ({
 	default: {
-		uuidToAnyDriveItem: new Map()
+		uuidToAnyDriveItem: cacheUuidToAnyDriveItem
 	}
 }))
 
 vi.mock("@/features/offline/offline", () => ({
 	default: {
-		isItemStored: vi.fn().mockResolvedValue(false)
+		isItemStored: mockIsItemStored
 	}
 }))
 
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import { driveItemStoredOfflineQueryUpdate, BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import { driveItemStoredOfflineQueryUpdate, fetchData, BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItemStoredOffline.query"
 
 // normalizeTypeForKey is private but its effect is observable via the query key emitted
 // by driveItemStoredOfflineQueryUpdate. Two variants that should normalize to the same
@@ -60,6 +66,9 @@ function captureKeyFor(
 
 beforeEach(() => {
 	mockQueryUpdaterSet.mockClear()
+	mockIsItemStored.mockClear()
+	mockIsItemStored.mockResolvedValue(false)
+	cacheUuidToAnyDriveItem.clear()
 })
 
 describe("normalizeTypeForKey (via driveItemStoredOfflineQueryUpdate key)", () => {
@@ -133,5 +142,68 @@ describe("normalizeTypeForKey (via driveItemStoredOfflineQueryUpdate key)", () =
 		const keyDir = captureKeyFor("directory")
 
 		expect(keyFile).not.toEqual(keyDir)
+	})
+})
+
+describe("fetchData", () => {
+	const fakeDriveItem = { type: "file", uuid: "abc-123" }
+
+	it("returns false when the item is not in cache", async () => {
+		// cache is empty — no entry for the requested uuid
+		const result = await fetchData({ uuid: "abc-123", type: "file" })
+
+		expect(result).toBe(false)
+		expect(mockIsItemStored).not.toHaveBeenCalled()
+	})
+
+	it("returns true when item is in cache and isItemStored returns true", async () => {
+		cacheUuidToAnyDriveItem.set("abc-123", fakeDriveItem)
+		mockIsItemStored.mockResolvedValue(true)
+
+		const result = await fetchData({ uuid: "abc-123", type: "file" })
+
+		expect(result).toBe(true)
+		expect(mockIsItemStored).toHaveBeenCalledOnce()
+		expect(mockIsItemStored).toHaveBeenCalledWith(fakeDriveItem)
+	})
+
+	it("returns false when item is in cache but isItemStored returns false", async () => {
+		cacheUuidToAnyDriveItem.set("abc-123", fakeDriveItem)
+		mockIsItemStored.mockResolvedValue(false)
+
+		const result = await fetchData({ uuid: "abc-123", type: "file" })
+
+		expect(result).toBe(false)
+		expect(mockIsItemStored).toHaveBeenCalledOnce()
+		expect(mockIsItemStored).toHaveBeenCalledWith(fakeDriveItem)
+	})
+
+	it("propagates errors thrown by isItemStored", async () => {
+		const testError = new Error("storage check failed")
+		cacheUuidToAnyDriveItem.set("abc-123", fakeDriveItem)
+		mockIsItemStored.mockRejectedValue(testError)
+
+		await expect(fetchData({ uuid: "abc-123", type: "file" })).rejects.toThrow("storage check failed")
+	})
+
+	it("passes the correct item from cache to isItemStored (directory variant)", async () => {
+		const fakeDirItem = { type: "directory", uuid: "dir-456" }
+		cacheUuidToAnyDriveItem.set("dir-456", fakeDirItem)
+		mockIsItemStored.mockResolvedValue(true)
+
+		await fetchData({ uuid: "dir-456", type: "directory" })
+
+		expect(mockIsItemStored).toHaveBeenCalledWith(fakeDirItem)
+	})
+
+	it("uses uuid-based lookup regardless of the type variant (sharedFile normalizes to file in key but uuid lookup is direct)", async () => {
+		const sharedFileDriveItem = { type: "sharedFile", uuid: "sf-789" }
+		cacheUuidToAnyDriveItem.set("sf-789", sharedFileDriveItem)
+		mockIsItemStored.mockResolvedValue(true)
+
+		const result = await fetchData({ uuid: "sf-789", type: "sharedFile" })
+
+		expect(result).toBe(true)
+		expect(mockIsItemStored).toHaveBeenCalledWith(sharedFileDriveItem)
 	})
 })

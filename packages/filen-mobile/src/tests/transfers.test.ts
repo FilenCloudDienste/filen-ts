@@ -2,6 +2,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const {
 	MockPauseSignal,
+	createdPauseSignalInstances,
 	mockUploadFile,
 	mockUploadDirRecursively,
 	mockDownloadFileToPath,
@@ -49,9 +50,18 @@ const {
 
 	const mockDriveItemsQueryUpdate = vi.fn()
 
+	// Tracks every MockPauseSignal instance created via `new PauseSignal()` in the source.
+	// Plain array — not a vi.fn() — so vi.clearAllMocks() does not clear it.
+	const createdPauseSignalInstances: InstanceType<typeof MockPauseSignal>[] = []
+
 	class MockPauseSignal {
 		private _paused = false
 		private _listeners = new Map<string, Set<() => void>>()
+
+		constructor() {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			createdPauseSignalInstances.push(this as any)
+		}
 
 		pause() {
 			this._paused = true
@@ -126,6 +136,7 @@ const {
 
 	return {
 		MockPauseSignal,
+		createdPauseSignalInstances,
 		mockUploadFile,
 		mockUploadDirRecursively,
 		mockDownloadFileToPath,
@@ -1348,48 +1359,62 @@ describe("Transfers", () => {
 	})
 
 	describe("pauseAll and resumeAll", () => {
-		it("pauseAll flips globalPauseSignal to paused state and resumeAll restores it", () => {
-			// The in-module globalPauseSignal is a PauseSignal. We verify observable state
-			// through a transfer that registers listeners on the global signal.
-			const pauseStates: boolean[] = []
+		it("pauseAll sets globalPauseSignal to paused and resumeAll clears it", () => {
+			// After beforeEach, cancelAll() has created a fresh MockPauseSignal. It is the last
+			// entry in createdPauseSignalInstances (the tracker is a plain array, not a vi.fn(),
+			// so vi.clearAllMocks() does not reset it).
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
 
-			// Attach a listener via a fresh MockPauseSignal that wraps the composite — but we
-			// can observe the effect more directly by checking that pause()/resume() calls
-			// propagate through to the MockPauseSignal constructor. The simplest sound check
-			// is to verify that calling pauseAll does NOT throw and that calling it twice then
-			// resumeAll does NOT throw (the methods exist and are exercisable).
-			expect(() => {
-				transfers.pauseAll()
-				transfers.pauseAll()
-				transfers.resumeAll()
-			}).not.toThrow()
+			expect(globalSignal).toBeDefined()
 
-			// Also verify that a transfer registered during the paused state sees the pause event.
-			// We do this by starting a transfer whose lifecycle overlaps with pauseAll:
-			// The internal globalPauseSignal.pause() call should fire on the composite pause signal
-			// which in turn notifies any registered listeners.
-			const compositePauseReceived: string[] = []
+			// Initially not paused.
+			expect(globalSignal?.isPaused()).toBe(false)
 
-			mockCreateCompositePauseSignal.mockImplementationOnce((...signals: unknown[]) => {
-				const ps = new MockPauseSignal()
-				// Attach to the second signal (globalPauseSignal stand-in) to detect propagation.
-				const gps = signals[0] as InstanceType<typeof MockPauseSignal>
+			transfers.pauseAll()
 
-				gps.addEventListener("pause", () => compositePauseReceived.push("paused"))
-				gps.addEventListener("resume", () => compositePauseReceived.push("resumed"))
+			// After pauseAll the signal must report paused.
+			expect(globalSignal?.isPaused()).toBe(true)
 
-				return Object.assign(ps, { dispose: vi.fn() })
-			})
+			transfers.resumeAll()
+
+			// After resumeAll it must be unpaused again.
+			expect(globalSignal?.isPaused()).toBe(false)
+		})
+
+		it("pauseAll is idempotent — calling it twice leaves the signal paused, not erroring", () => {
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+
+			transfers.pauseAll()
+			transfers.pauseAll() // second call must not throw and must leave it paused
+
+			expect(globalSignal?.isPaused()).toBe(true)
+
+			// Clean up for subsequent tests.
+			transfers.resumeAll()
+		})
+
+		it("resumeAll is idempotent — calling it while not paused does not throw", () => {
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+
+			// Already not paused; calling resumeAll must not throw.
+			expect(() => transfers.resumeAll()).not.toThrow()
+
+			expect(globalSignal?.isPaused()).toBe(false)
+		})
+
+		it("pause and resume events propagate to registered listeners on the global signal", () => {
+			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+
+			const received: string[] = []
+
+			globalSignal?.addEventListener("pause", () => received.push("paused"))
+			globalSignal?.addEventListener("resume", () => received.push("resumed"))
 
 			transfers.pauseAll()
 			transfers.resumeAll()
 
-			// The globalPauseSignal was replaced by cancelAll() in beforeEach but its listeners
-			// were cleared. After the mockImplementationOnce above fires for the next transfer,
-			// the event would propagate. Because pauseAll/resumeAll directly call
-			// globalPauseSignal.pause()/resume(), if there are no listeners the arrays stay empty
-			// — that is fine; the key invariant is no throw.
-			expect(pauseStates.length).toBe(0) // no throw, no listeners yet means empty (expected)
+			// Both events must have fired exactly once in order.
+			expect(received).toEqual(["paused", "resumed"])
 		})
 	})
 

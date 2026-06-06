@@ -536,6 +536,54 @@ describe("fetchData — offline branch", () => {
 
 		expect(result).toHaveLength(3)
 	})
+
+	it("falls back to null parent when uuid is non-empty but absent from cache — calls listFiles and listDirectories(undefined)", async () => {
+		// uuid is non-empty but NOT present in cacheDirectoryUuidToAnyDirWithContext
+		// the if(cachedDir) branch is false, so the IIFE returns null just as for uuid=""
+		const fileItem = { type: "file", data: { uuid: "f-miss", size: 0n, undecryptable: false, decryptedMeta: null } }
+		const dirItem = { type: "directory", data: { uuid: "d-miss", size: 0n, undecryptable: false, decryptedMeta: null } }
+
+		mockOfflineListFiles.mockResolvedValue([{ item: fileItem }])
+		mockOfflineListDirectories.mockResolvedValue({ directories: [{ item: dirItem }], files: [] })
+
+		// ensure no cache entry exists for this uuid
+		expect(cacheDirectoryUuidToAnyDirWithContext.has("non-existent-uuid")).toBe(false)
+
+		const result = await fetchData({ path: { type: "offline", uuid: "non-existent-uuid" } })
+
+		// parent resolves to null → listFiles() called (no args), listDirectories(undefined)
+		expect(mockOfflineListFiles).toHaveBeenCalledWith()
+		expect(mockOfflineListDirectories).toHaveBeenCalledWith(undefined)
+
+		// both dirs and files from null-parent path are returned
+		expect(result).toHaveLength(2)
+		expect(result.some(i => (i as typeof dirItem).data.uuid === "d-miss")).toBe(true)
+		expect(result.some(i => (i as typeof fileItem).data.uuid === "f-miss")).toBe(true)
+	})
+
+	it("cache-miss path is distinct from cache-hit path: listFiles not called when uuid is in cache", async () => {
+		const fakeContext = { tag: "Normal" }
+
+		cacheDirectoryUuidToAnyDirWithContext.set("cached-uuid", fakeContext)
+
+		// With uuid in cache — listFiles must NOT be called
+		await fetchData({ path: { type: "offline", uuid: "cached-uuid" } })
+
+		expect(mockOfflineListFiles).not.toHaveBeenCalled()
+
+		// Reset for the cache-miss check
+		mockOfflineListFiles.mockClear()
+		mockOfflineListDirectories.mockClear()
+		mockOfflineListFiles.mockResolvedValue([])
+		mockOfflineListDirectories.mockResolvedValue({ directories: [], files: [] })
+
+		// Same uuid but removed from cache — listFiles IS called
+		cacheDirectoryUuidToAnyDirWithContext.delete("cached-uuid")
+		await fetchData({ path: { type: "offline", uuid: "cached-uuid" } })
+
+		expect(mockOfflineListFiles).toHaveBeenCalledWith()
+		expect(mockOfflineListDirectories).toHaveBeenCalledWith(undefined)
+	})
 })
 
 // ─── fetchData photos branch — dir filtering ───────────────────────────────

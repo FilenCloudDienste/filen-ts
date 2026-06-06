@@ -1188,3 +1188,178 @@ describe("fetchData (useChats)", () => {
 		expect(mockChatUuidToChat.has("c-b")).toBe(true)
 	})
 })
+
+// ---------------------------------------------------------------------------
+// safeParseUrl — real implementation (finding #174)
+//
+// @/lib/linkParser is mocked above to feed the useChatMessageLinks tests,
+// so we reach the real safeParseUrl via vi.importActual.  These tests lock
+// in the SSRF-filtering contract that the inline copy in the mock tries to
+// approximate but could silently diverge from.
+// ---------------------------------------------------------------------------
+
+describe("safeParseUrl (real implementation — SSRF guard)", () => {
+	type LinkParser = { safeParseUrl: (raw: string) => URL | null }
+
+	async function realSafeParseUrl(raw: string): Promise<URL | null> {
+		const mod = await vi.importActual<LinkParser>("@/lib/linkParser")
+
+		return mod.safeParseUrl(raw)
+	}
+
+	it("returns a URL object for a valid public HTTPS URL", async () => {
+		const result = await realSafeParseUrl("https://example.com/path?q=1")
+
+		expect(result).not.toBeNull()
+		expect(result?.href).toBe("https://example.com/path?q=1")
+	})
+
+	it("returns null for an HTTP (non-HTTPS) URL", async () => {
+		const result = await realSafeParseUrl("http://example.com/img.jpg")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for an ftp:// URL", async () => {
+		const result = await realSafeParseUrl("ftp://files.example.com/file.txt")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a URL with embedded credentials (user:pass@host)", async () => {
+		const result = await realSafeParseUrl("https://user:password@example.com/")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a URL with a username but no password", async () => {
+		const result = await realSafeParseUrl("https://user@example.com/secret")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for localhost", async () => {
+		const result = await realSafeParseUrl("https://localhost/api")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for 127.0.0.1 (loopback)", async () => {
+		const result = await realSafeParseUrl("https://127.0.0.1/secret")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 10.x.x.x private IPv4 address", async () => {
+		const result = await realSafeParseUrl("https://10.0.0.1/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 192.168.x.x private IPv4 address", async () => {
+		const result = await realSafeParseUrl("https://192.168.1.100/admin")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 172.16.x.x private IPv4 address (RFC 1918 range start)", async () => {
+		const result = await realSafeParseUrl("https://172.16.0.1/private")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a 172.31.x.x private IPv4 address (RFC 1918 range end)", async () => {
+		const result = await realSafeParseUrl("https://172.31.255.254/private")
+
+		expect(result).toBeNull()
+	})
+
+	it("allows a 172.15.x.x address (just below the RFC 1918 block)", async () => {
+		const result = await realSafeParseUrl("https://172.15.0.1/public")
+
+		// 172.15 is NOT in the 172.16-172.31 block — must be allowed
+		expect(result).not.toBeNull()
+	})
+
+	it("allows a 172.32.x.x address (just above the RFC 1918 block)", async () => {
+		const result = await realSafeParseUrl("https://172.32.0.1/cdn")
+
+		// 172.32 is NOT in the 172.16-172.31 block — must be allowed
+		expect(result).not.toBeNull()
+	})
+
+	it("returns null for a link-local IPv4 address (169.254.x.x)", async () => {
+		const result = await realSafeParseUrl("https://169.254.169.254/latest/meta-data")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for the IPv4 unspecified address 0.0.0.0", async () => {
+		const result = await realSafeParseUrl("https://0.0.0.0/")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for the IPv6 loopback ::1", async () => {
+		const result = await realSafeParseUrl("https://[::1]/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for a .local mDNS hostname", async () => {
+		const result = await realSafeParseUrl("https://myserver.local/share")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for an unparseable string", async () => {
+		const result = await realSafeParseUrl("not a url at all!!")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for an empty string", async () => {
+		const result = await realSafeParseUrl("")
+
+		expect(result).toBeNull()
+	})
+
+	it("trims leading/trailing whitespace before parsing", async () => {
+		const result = await realSafeParseUrl("  https://example.com/path  ")
+
+		expect(result).not.toBeNull()
+		expect(result?.hostname).toBe("example.com")
+	})
+
+	it("returns the parsed URL with normalized href (preserves path and query)", async () => {
+		const result = await realSafeParseUrl("https://cdn.example.com/images/photo.jpg?v=3")
+
+		expect(result).not.toBeNull()
+		expect(result?.pathname).toBe("/images/photo.jpg")
+		expect(result?.search).toBe("?v=3")
+	})
+
+	it("returns null for 100.64.x.x (CGNAT / shared address space — RFC 6598)", async () => {
+		const result = await realSafeParseUrl("https://100.64.0.1/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("returns null for 100.127.x.x (upper bound of CGNAT range)", async () => {
+		const result = await realSafeParseUrl("https://100.127.255.254/internal")
+
+		expect(result).toBeNull()
+	})
+
+	it("allows 100.63.x.x (just below the CGNAT block)", async () => {
+		const result = await realSafeParseUrl("https://100.63.0.1/public")
+
+		expect(result).not.toBeNull()
+	})
+
+	it("allows 100.128.x.x (just above the CGNAT block)", async () => {
+		const result = await realSafeParseUrl("https://100.128.0.1/public")
+
+		expect(result).not.toBeNull()
+	})
+})

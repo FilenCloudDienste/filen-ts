@@ -293,4 +293,79 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			expect(uuids).toContain("img1")
 		})
 	})
+
+	// -------------------------------------------------------------------------
+	// Finding #209 — re-entry guard: open() while already open must be a no-op
+	// -------------------------------------------------------------------------
+	describe("re-entry guard (currentIndex / currentItem !== null)", () => {
+		it("does not call router.push a second time when store is already open (guard via currentIndex)", () => {
+			const items: GalleryItemTagged[] = [makeDriveGalleryItem("img1", "photo.jpg")]
+			const initialItem = makeInitialDriveItem("img1", "photo.jpg")
+
+			// First open — should succeed and set currentIndex to a non-null value
+			useDrivePreviewStore.getState().open({ items, initialItem })
+
+			expect(mockRouterPush).toHaveBeenCalledTimes(1)
+
+			const stateAfterFirst = useDrivePreviewStore.getState()
+			expect(stateAfterFirst.currentIndex).toBe(0)
+			expect(stateAfterFirst.currentItem).not.toBeNull()
+
+			// Second open with a different item — guard must block it
+			const items2: GalleryItemTagged[] = [makeDriveGalleryItem("img2", "other.jpg")]
+			const initialItem2 = makeInitialDriveItem("img2", "other.jpg")
+
+			useDrivePreviewStore.getState().open({ items: items2, initialItem: initialItem2 })
+
+			// router.push must still have been called exactly once
+			expect(mockRouterPush).toHaveBeenCalledTimes(1)
+
+			// State must not have been overwritten — original items and index survive
+			const stateAfterSecond = useDrivePreviewStore.getState()
+			const uuids = stateAfterSecond.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+			expect(uuids).toContain("img1")
+			expect(uuids).not.toContain("img2")
+			expect(stateAfterSecond.currentIndex).toBe(0)
+		})
+
+		it("does not call router.push when only currentItem is non-null (guard via currentItem arm)", () => {
+			const items: GalleryItemTagged[] = [makeDriveGalleryItem("img1", "photo.jpg")]
+			const initialItem = makeInitialDriveItem("img1", "photo.jpg")
+
+			// Manually pre-set currentItem only (currentIndex stays null)
+			useDrivePreviewStore.setState({
+				currentItem: makeDriveGalleryItem("existing", "existing.jpg"),
+				currentIndex: null
+			})
+
+			useDrivePreviewStore.getState().open({ items, initialItem })
+
+			// Guard fires because currentItem !== null
+			expect(mockRouterPush).not.toHaveBeenCalled()
+
+			// Pre-set currentItem must not have been overwritten
+			const state = useDrivePreviewStore.getState()
+			const currentUuid = (state.currentItem as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid
+			expect(currentUuid).toBe("existing")
+		})
+
+		it("does not call router.push when only currentIndex is non-null (guard via currentIndex arm alone)", () => {
+			const items: GalleryItemTagged[] = [makeDriveGalleryItem("img1", "photo.jpg")]
+			const initialItem = makeInitialDriveItem("img1", "photo.jpg")
+
+			// Manually pre-set currentIndex only (currentItem stays null)
+			useDrivePreviewStore.setState({
+				currentIndex: 5,
+				currentItem: null
+			})
+
+			useDrivePreviewStore.getState().open({ items, initialItem })
+
+			// Guard fires because currentIndex !== null
+			expect(mockRouterPush).not.toHaveBeenCalled()
+
+			// currentIndex must remain the pre-set value, not the new call's value
+			expect(useDrivePreviewStore.getState().currentIndex).toBe(5)
+		})
+	})
 })

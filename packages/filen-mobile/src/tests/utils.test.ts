@@ -823,13 +823,23 @@ describe("PauseSignal", () => {
 		ps.dispose()
 	})
 
-	it("dispose() calls uniffiDestroy() on the underlying SDK signal and clears all listeners", () => {
-		const spy = vi.fn()
-		ps.addEventListener("pause", spy)
+	it("dispose() clears all listeners so that a subsequent pause does NOT fire them", () => {
+		const spyPause = vi.fn()
+		const spyResume = vi.fn()
+		ps.addEventListener("pause", spyPause)
+		ps.addEventListener("resume", spyResume)
 		ps.dispose()
-		// After dispose, pausing should NOT fire listeners (they were cleared)
-		// (we can't call pause after dispose in a meaningful way, but we verify no throw)
-		expect(() => {}).not.toThrow()
+		// The underlying mock signal is a no-op after uniffiDestroy, but pause() still toggles state.
+		// What matters is that the JS listener sets were cleared by dispose().
+		ps.pause()
+		expect(spyPause).not.toHaveBeenCalled()
+	})
+
+	it("dispose() calls uniffiDestroy() on the underlying SDK PauseSignal handle", () => {
+		const sdkSignal = ps.getSignal()
+		const destroySpy = vi.spyOn(sdkSignal, "uniffiDestroy")
+		ps.dispose()
+		expect(destroySpy).toHaveBeenCalledTimes(1)
 	})
 })
 

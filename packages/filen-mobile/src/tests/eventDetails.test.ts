@@ -227,4 +227,177 @@ describe("buildEventDetails", () => {
 		expect(rows.find(r => r.title === "name")?.value).toBe("doc.pdf")
 		expect(rows.find(r => r.title === "favorited")?.value).toBe("yes")
 	})
+
+	it("maps favorited boolean false to 'no' for ItemFavorite with value=false", () => {
+		const event = makeEvent("ItemFavorite", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			metadata: decodedFileMeta("doc.pdf"),
+			value: false
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.find(r => r.title === "favorited")?.value).toBe("no")
+	})
+
+	it("appends name + old_name rows from extractDirMetaName for FolderRenamed (uses oldName field, not oldMetadata)", () => {
+		const event = makeEvent("FolderRenamed", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			name: decodedDirMeta("NewDocs"),
+			oldName: decodedDirMeta("OldDocs")
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "name", "old_name"])
+		expect(rows.find(r => r.title === "name")?.value).toBe("NewDocs")
+		expect(rows.find(r => r.title === "old_name")?.value).toBe("OldDocs")
+		expect(rows.find(r => r.title === "event_type")?.value).toBe("directory_renamed")
+	})
+
+	it("appends name + old_name rows from extractDirMetaName for FolderMetadataChanged", () => {
+		const event = makeEvent("FolderMetadataChanged", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			name: decodedDirMeta("Dir"),
+			oldName: decodedDirMeta("OldDir")
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "name", "old_name"])
+		expect(rows.find(r => r.title === "name")?.value).toBe("Dir")
+		expect(rows.find(r => r.title === "old_name")?.value).toBe("OldDir")
+	})
+
+	it("appends name + receiver_email rows for FileShared", () => {
+		const event = makeEvent("FileShared", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			metadata: decodedFileMeta("report.pdf"),
+			receiverEmail: "alice@example.com"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "name", "receiver_email"])
+		expect(rows.find(r => r.title === "name")?.value).toBe("report.pdf")
+		expect(rows.find(r => r.title === "receiver_email")?.value).toBe("alice@example.com")
+	})
+
+	it("appends name + receiver_email rows for FolderShared", () => {
+		const event = makeEvent("FolderShared", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			name: decodedDirMeta("SharedDocs"),
+			receiverEmail: "bob@example.com"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "name", "receiver_email"])
+		expect(rows.find(r => r.title === "name")?.value).toBe("SharedDocs")
+		expect(rows.find(r => r.title === "receiver_email")?.value).toBe("bob@example.com")
+	})
+
+	it("appends link_uuid row for FolderLinkEdited", () => {
+		const event = makeEvent("FolderLinkEdited", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			linkUuid: "link-uuid-abc"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "link_uuid"])
+		expect(rows.find(r => r.title === "link_uuid")?.value).toBe("link-uuid-abc")
+		expect(rows.find(r => r.title === "event_type")?.value).toBe("directory_link_edited")
+	})
+
+	it("appends code row for CodeRedeemed", () => {
+		const event = makeEvent("CodeRedeemed", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			code: "PROMO2026"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "code"])
+		expect(rows.find(r => r.title === "code")?.value).toBe("PROMO2026")
+	})
+
+	it("appends email row for EmailChanged", () => {
+		const event = makeEvent("EmailChanged", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			email: "new@example.com"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "email"])
+		expect(rows.find(r => r.title === "email")?.value).toBe("new@example.com")
+	})
+
+	it("appends email + old_email + new_email rows (3 extra) for EmailChangeAttempt", () => {
+		const event = makeEvent("EmailChangeAttempt", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			email: "current@example.com",
+			oldEmail: "prev@example.com",
+			newEmail: "next@example.com"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "email", "old_email", "new_email"])
+		expect(rows.find(r => r.title === "email")?.value).toBe("current@example.com")
+		expect(rows.find(r => r.title === "old_email")?.value).toBe("prev@example.com")
+		expect(rows.find(r => r.title === "new_email")?.value).toBe("next@example.com")
+	})
+
+	it("appends count + sharer_email rows for RemovedSharedInItems, count as string", () => {
+		const event = makeEvent("RemovedSharedInItems", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			count: 42,
+			sharerEmail: "sharer@example.com"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "count", "sharer_email"])
+		expect(rows.find(r => r.title === "count")?.value).toBe("42")
+		expect(rows.find(r => r.title === "sharer_email")?.value).toBe("sharer@example.com")
+	})
+
+	it("appends count + receiver_email rows for RemovedSharedOutItems, count as string", () => {
+		const event = makeEvent("RemovedSharedOutItems", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			count: 7,
+			receiverEmail: "receiver@example.com"
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.map(r => r.title)).toEqual(["event_type", "timestamp", "ip", "user_agent", "count", "receiver_email"])
+		expect(rows.find(r => r.title === "count")?.value).toBe("7")
+		expect(rows.find(r => r.title === "receiver_email")?.value).toBe("receiver@example.com")
+	})
+
+	it("renders the encrypted fallback when dir metadata is not decoded (DirMeta non-Decoded tag)", () => {
+		const event = makeEvent("FolderTrash", {
+			ip: "1.1.1.1",
+			userAgent: "ua",
+			name: { tag: "Encrypted", inner: ["ciphertext"] }
+		})
+
+		const rows = buildEventDetails(event, echo)
+
+		expect(rows.find(r => r.title === "name")?.value).toBe("encrypted")
+	})
 })

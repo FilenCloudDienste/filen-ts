@@ -199,4 +199,62 @@ describe("useDriveSearch", () => {
 		expect(result.current.globalSearchResult.map(i => i.data.uuid)).toEqual(["u1", "u2"])
 		expect(result.current.queryingGlobalSearch).toBe(false)
 	})
+
+	// #212 — type='drive' WITH selectOptions (select-mode) suppresses global search
+	it("does not run the global search when type='drive' but selectOptions is defined (select-mode)", async () => {
+		vi.useFakeTimers()
+
+		const selectOptions = {
+			type: "single" as const,
+			files: true,
+			directories: false,
+			intention: "select" as const,
+			items: [],
+			id: "sel-1"
+		}
+
+		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath({ type: "drive", selectOptions }) }))
+
+		act(() => {
+			result.current.setSearchQuery("anything")
+		})
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1000)
+		})
+
+		// The effect guard (line 138 of useDriveSearch.ts) returns early when
+		// selectOptions is defined, so the debounced searcher is never invoked.
+		expect(mockFindItemMatchesForName).not.toHaveBeenCalled()
+		// State should remain at initial defaults.
+		expect(result.current.globalSearchResult).toEqual([])
+		expect(result.current.queryingGlobalSearch).toBe(false)
+	})
+
+	// #213 — SDK-error path: alerts.error called + globalSearchResult cleared + queryingGlobalSearch false
+	it("calls alerts.error and clears globalSearchResult when findItemMatchesForName rejects", async () => {
+		vi.useFakeTimers()
+
+		const sdkError = new Error("SDK network failure")
+
+		mockFindItemMatchesForName.mockRejectedValue(sdkError)
+
+		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath() }))
+
+		act(() => {
+			result.current.setSearchQuery("query")
+		})
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(1000)
+		})
+
+		// run() caught the rejection and returned { success: false, error }.
+		// The source (lines 115-122) must call alerts.error with the error and clear results.
+		expect(mockAlertError).toHaveBeenCalledTimes(1)
+		expect(mockAlertError).toHaveBeenCalledWith(sdkError)
+		expect(result.current.globalSearchResult).toEqual([])
+		// The defer in run() calls setQueryingGlobalSearch(false) on cleanup, so it must be false.
+		expect(result.current.queryingGlobalSearch).toBe(false)
+	})
 })

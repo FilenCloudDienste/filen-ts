@@ -397,7 +397,18 @@ describe("useDrivePath — selectOptions/linked deserialization", () => {
 		// Should not throw — returns without error (missing id/type means no-crash)
 		const { result } = renderHook(() => useDrivePath())
 
-		// The hook returns a result — doesn't crash even with partial selectOptions
-		expect(result.current).toBeDefined()
+		// isDriveSelectScreen=true and the partial selectOptions is truthy (not null), so the
+		// hook still returns type='drive' with the partial selectOptions attached.
+		// The missing fields come through as undefined — not stripped, not throwing.
+		expect(result.current.type).toBe("drive")
+		expect(result.current.uuid).toBe(VALID_UUID)
+		// The partial selectOptions object IS attached (truthy deserialization succeeded)
+		expect(result.current.selectOptions).toBeDefined()
+		// The missing required fields arrive as undefined — no silent default, no crash
+		expect(result.current.selectOptions?.id).toBeUndefined()
+		expect(result.current.selectOptions?.type).toBeUndefined()
+		// The fields that were supplied survive round-trip
+		expect(result.current.selectOptions?.files).toBe(true)
+		expect(result.current.selectOptions?.intention).toBe("move")
 	})
 })

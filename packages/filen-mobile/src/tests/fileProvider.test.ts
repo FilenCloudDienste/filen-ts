@@ -90,15 +90,16 @@ describe("fileProvider", () => {
 
 		it("preserves existing maxThumbnailFilesBudget and maxCacheFilesBudget on re-enable", async () => {
 			await fileProvider.enable()
+			// 256 MiB → thumbnails = floor(268435456 / 4) = 67108864, cache = 201326592
 			await fileProvider.setCacheBudget(256 * 1024 * 1024)
 
-			// Re-enable should preserve the budget fields
+			// Re-enable should preserve the exact budget values — not zero or overwrite them
 			await fileProvider.enable()
 
 			const data = JSON.parse(AUTH_FILE.textSync())
 
-			expect(data.maxCacheFilesBudget).toBeDefined()
-			expect(data.maxThumbnailFilesBudget).toBeDefined()
+			expect(data.maxThumbnailFilesBudget).toBe(67108864)
+			expect(data.maxCacheFilesBudget).toBe(201326592)
 		})
 
 		it("does not re-create auth.json when disable() races a slow getSdkClients()", async () => {
