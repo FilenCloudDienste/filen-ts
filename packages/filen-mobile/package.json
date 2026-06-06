@@ -109,6 +109,7 @@
     "expo-secure-store": "~56.0.4",
     "expo-sharing": "~56.0.16",
     "expo-splash-screen": "~56.0.10",
+    "expo-system-ui": "~56.0.5",
     "expo-task-manager": "~56.0.17",
     "expo-video": "~56.1.2",
     "i18next": "^25.10.10",
