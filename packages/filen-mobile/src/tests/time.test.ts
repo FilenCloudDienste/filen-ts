@@ -376,6 +376,216 @@ describe("time", () => {
 		})
 	})
 
+	// --- Item #7: YMD locale branches zh/ko/hu/fa/lt/mn ---
+	// Only ja-JP was previously tested. Each prefix is independently evaluated in the
+	// if-chain; a typo (e.g. "zh" → "zh-cn") would break zh-TW silently. hu (Hungarian)
+	// is in SUPPORTED_LANGUAGES and would otherwise fall through to DMY.
+
+	describe("zh-CN locale (24-hour, YMD, dash separator)", () => {
+		let simpleDate: typeof import("@/lib/time").simpleDate
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
+
+		beforeEach(async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "zh-CN" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			simpleDate = mod.simpleDate
+			simpleDateNoTime = mod.simpleDateNoTime
+			simpleDateNoDate = mod.simpleDateNoDate
+		})
+
+		it("formats as YMD with dash separator", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDate(d)
+
+			expect(result).toContain("2025-01-15")
+		})
+
+		it("simpleDateNoTime returns YMD date only", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+
+		it("24-hour time in time-only output", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoDate(d)
+
+			expect(result).toBe("14:30:45")
+		})
+
+		it("output is distinct from de-DE DMY format", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			// de-DE would be "15.01.2025"; zh-CN must be "2025-01-15"
+			expect(result).not.toBe("15.01.2025")
+			expect(result).toBe("2025-01-15")
+		})
+	})
+
+	describe("ko-KR locale (24-hour, YMD, dash separator)", () => {
+		let simpleDate: typeof import("@/lib/time").simpleDate
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+
+		beforeEach(async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "ko-KR" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			simpleDate = mod.simpleDate
+			simpleDateNoTime = mod.simpleDateNoTime
+		})
+
+		it("formats as YMD with dash separator", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDate(d)
+
+			expect(result).toContain("2025-01-15")
+		})
+
+		it("simpleDateNoTime returns YMD date only", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+
+		it("output is distinct from de-DE DMY format", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).not.toBe("15.01.2025")
+			expect(result).toBe("2025-01-15")
+		})
+	})
+
+	describe("hu-HU locale (24-hour, YMD, dash separator) — in SUPPORTED_LANGUAGES", () => {
+		// hu is in SUPPORTED_LANGUAGES; without the startsWith("hu") check it would
+		// silently fall through to DMY and display the wrong date order.
+		let simpleDate: typeof import("@/lib/time").simpleDate
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+		let simpleDateNoDate: typeof import("@/lib/time").simpleDateNoDate
+
+		beforeEach(async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "hu-HU" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			simpleDate = mod.simpleDate
+			simpleDateNoTime = mod.simpleDateNoTime
+			simpleDateNoDate = mod.simpleDateNoDate
+		})
+
+		it("formats as YMD with dash separator (not DMY)", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDate(d)
+
+			expect(result).toContain("2025-01-15")
+			// Explicitly guard against the DMY fallback that would occur if "hu" prefix were missing
+			expect(result).not.toContain("15/01/2025")
+			expect(result).not.toContain("15.01.2025")
+		})
+
+		it("simpleDateNoTime returns YMD date only", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+
+		it("24-hour time in time-only output", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoDate(d)
+
+			expect(result).toBe("14:30:45")
+		})
+	})
+
+	describe("fa-IR locale (24-hour, YMD, dash separator)", () => {
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+
+		beforeEach(async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "fa-IR" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			simpleDateNoTime = mod.simpleDateNoTime
+		})
+
+		it("formats as YMD with dash separator", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+	})
+
+	describe("lt-LT locale (24-hour, YMD, dash separator)", () => {
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+
+		beforeEach(async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "lt-LT" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			simpleDateNoTime = mod.simpleDateNoTime
+		})
+
+		it("formats as YMD with dash separator", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+	})
+
+	describe("mn-MN locale (24-hour, YMD, dash separator)", () => {
+		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+
+		beforeEach(async () => {
+			vi.resetModules()
+
+			vi.doMock("expo-localization", () => ({
+				getLocales: () => [{ languageTag: "mn-MN" }]
+			}))
+
+			const mod = await import("@/lib/time")
+
+			simpleDateNoTime = mod.simpleDateNoTime
+		})
+
+		it("formats as YMD with dash separator", () => {
+			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const result = simpleDateNoTime(d)
+
+			expect(result).toBe("2025-01-15")
+		})
+	})
+
 	describe("ja-JP locale (24-hour, YMD, dash separator)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime

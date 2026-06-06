@@ -295,6 +295,77 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 	})
 
 	// -------------------------------------------------------------------------
+	// Finding #210 — photos path: image file with unsupported extension is excluded
+	// -------------------------------------------------------------------------
+	// The photos filter (store lines 111-116) applies an extra allowlist gate:
+	// image-type files must also have an extension in EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.
+	// The mock set contains { .jpg .jpeg .png .heic .webp }; the getPreviewType mock
+	// classifies .avif/.bmp/.gif as "image".  Those extensions must be excluded from
+	// the photos gallery but must NOT be excluded from the regular drive gallery.
+	describe("photos path: unsupported image extension gate", () => {
+		it("excludes an image file whose extension is not in EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS from the photos gallery", () => {
+			const photosDrivePath = makeDrivePath("photos")
+			// .avif is classified as "image" by getPreviewType but is absent from the mock
+			// EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS set
+			const unsupportedItem = makeDriveGalleryItem("avif1", "photo.avif")
+			const supportedItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [unsupportedItem, supportedItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			// Unsupported extension must be filtered out of the photos gallery
+			expect(uuids).not.toContain("avif1")
+			// Supported extension must remain
+			expect(uuids).toContain("jpg1")
+		})
+
+		it("includes a .bmp image in the regular drive gallery even though it is excluded from photos", () => {
+			// For a regular 'drive' path the extra extension gate does not apply;
+			// .bmp is classified as "image" so it must appear in the drive gallery.
+			const bmpItem = makeDriveGalleryItem("bmp1", "photo.bmp")
+			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [bmpItem, jpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", makeDrivePath("drive"))
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			// .bmp is image/video/audio → included in the regular gallery
+			expect(uuids).toContain("bmp1")
+			expect(uuids).toContain("jpg1")
+		})
+
+		it("excludes a .bmp image from the photos gallery (same extension, different path type)", () => {
+			const photosDrivePath = makeDrivePath("photos")
+			const bmpItem = makeDriveGalleryItem("bmp1", "photo.bmp")
+			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [bmpItem, jpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			// .bmp is classified as "image" but is not in EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS
+			expect(uuids).not.toContain("bmp1")
+			expect(uuids).toContain("jpg1")
+		})
+	})
+
+	// -------------------------------------------------------------------------
 	// Finding #209 — re-entry guard: open() while already open must be a no-op
 	// -------------------------------------------------------------------------
 	describe("re-entry guard (currentIndex / currentItem !== null)", () => {

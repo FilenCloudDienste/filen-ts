@@ -861,6 +861,28 @@ describe("Offline", () => {
 			expect(size.dirs).toBe(0)
 		})
 
+		// Ref #167: a zero-byte file (size 0n) must count as one file while reporting size 0.
+		// Number(0n) === 0, which is falsy, but the aggregation is a sum — not a truthiness
+		// check — so the result is {size: 0, files: 1, dirs: 0}.
+		it("returns size 0 with files count 1 for a stored zero-byte file", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItemWithSize(uuid, "empty.bin", 0n)
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeIndex({
+				files: { [uuid]: { item: fileItem, parent } },
+				directories: {}
+			})
+
+			const offline = await createOffline()
+			const size = await offline.itemSize(fileItem)
+
+			// size is 0 (Number(0n) === 0) but the file IS counted
+			expect(size.size).toBe(0)
+			expect(size.files).toBe(1)
+			expect(size.dirs).toBe(0)
+		})
+
 		it("returns zero for a file not in the index", async () => {
 			writeIndex({ files: {}, directories: {} })
 

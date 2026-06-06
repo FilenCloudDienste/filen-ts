@@ -192,3 +192,57 @@ describe("fetchData — type dispatch (file vs directory vs other)", () => {
 		expect(mockGetFileLinkStatus).not.toHaveBeenCalled()
 	})
 })
+
+describe("fetchData — signal forwarding", () => {
+	it("forwards the signal to getFileLinkStatus as {signal} when a signal is provided for a 'file' item", async () => {
+		const fakeDriveItem = { type: "file", data: { uuid: "file-signal-uuid" } }
+		const fakeStatus = { enabled: true, uuid: "link-uuid" }
+		const controller = new AbortController()
+
+		cacheUuidToAnyDriveItem.set("file-signal-uuid", fakeDriveItem)
+		mockGetFileLinkStatus.mockResolvedValue(fakeStatus)
+
+		const result = await fetchData({ uuid: "file-signal-uuid", signal: controller.signal })
+
+		expect(mockGetFileLinkStatus).toHaveBeenCalledWith(fakeDriveItem.data, { signal: controller.signal })
+		expect(result).toEqual({ type: "file", status: fakeStatus })
+	})
+
+	it("forwards the signal to getDirLinkStatus as {signal} when a signal is provided for a 'directory' item", async () => {
+		const fakeDriveItem = { type: "directory", data: { uuid: "dir-signal-uuid" } }
+		const fakeStatus = { enabled: false, uuid: "dir-link-uuid" }
+		const controller = new AbortController()
+
+		cacheUuidToAnyDriveItem.set("dir-signal-uuid", fakeDriveItem)
+		mockGetDirLinkStatus.mockResolvedValue(fakeStatus)
+
+		const result = await fetchData({ uuid: "dir-signal-uuid", signal: controller.signal })
+
+		expect(mockGetDirLinkStatus).toHaveBeenCalledWith(fakeDriveItem.data, { signal: controller.signal })
+		expect(result).toEqual({ type: "directory", status: fakeStatus })
+	})
+
+	it("passes undefined (not {signal:undefined}) to getFileLinkStatus when no signal is provided", async () => {
+		const fakeDriveItem = { type: "file", data: { uuid: "file-nosig-uuid" } }
+		const fakeStatus = { enabled: true }
+
+		cacheUuidToAnyDriveItem.set("file-nosig-uuid", fakeDriveItem)
+		mockGetFileLinkStatus.mockResolvedValue(fakeStatus)
+
+		await fetchData({ uuid: "file-nosig-uuid" })
+
+		expect(mockGetFileLinkStatus).toHaveBeenCalledWith(fakeDriveItem.data, undefined)
+	})
+
+	it("passes undefined (not {signal:undefined}) to getDirLinkStatus when no signal is provided", async () => {
+		const fakeDriveItem = { type: "directory", data: { uuid: "dir-nosig-uuid" } }
+		const fakeStatus = { enabled: false }
+
+		cacheUuidToAnyDriveItem.set("dir-nosig-uuid", fakeDriveItem)
+		mockGetDirLinkStatus.mockResolvedValue(fakeStatus)
+
+		await fetchData({ uuid: "dir-nosig-uuid" })
+
+		expect(mockGetDirLinkStatus).toHaveBeenCalledWith(fakeDriveItem.data, undefined)
+	})
+})

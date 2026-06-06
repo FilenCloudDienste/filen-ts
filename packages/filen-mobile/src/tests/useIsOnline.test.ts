@@ -64,21 +64,24 @@ describe("useIsOnline", () => {
 		expect(result.current).toBe(true)
 	})
 
-	it("server snapshot always returns true (hardcoded SSR behaviour)", () => {
-		// The third arg to useSyncExternalStore is the server snapshot. It is
-		// hardcoded to () => true so that SSR/test environments where there is no
-		// real network always default to 'online'. We verify this by checking that
-		// even after calling setOnline(false), a fresh hook render that evaluates
-		// the snapshot still returns the value driven by the getSnapshot function,
-		// which mirrors onlineManager.isOnline(). The server snapshot itself is
-		// not directly callable, but we confirm the design intent: the hook always
-		// reflects onlineManager, and the server snapshot defaults to true.
+	it("stops tracking changes after unmount", () => {
+		// Verify that the onlineManager subscription is torn down when the hook
+		// unmounts: state changes after unmount must not update result.current.
 		onlineManager.setOnline(true)
 
-		const { result } = renderHook(() => useIsOnline())
+		const { result, unmount } = renderHook(() => useIsOnline())
 
-		// In a happy-dom (jsdom-like) environment, useSyncExternalStore uses the
-		// client snapshot, so this just confirms getSnapshot works correctly.
+		expect(result.current).toBe(true)
+
+		unmount()
+
+		// After unmount the listener is unsubscribed; setOnline calls are ignored.
+		act(() => {
+			onlineManager.setOnline(false)
+		})
+
+		// result.current is frozen at the last rendered value (true) since the
+		// hook no longer listens.
 		expect(result.current).toBe(true)
 	})
 })

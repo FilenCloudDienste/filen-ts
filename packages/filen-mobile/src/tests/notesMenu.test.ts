@@ -1,14 +1,15 @@
 import { vi, describe, it, expect } from "vitest"
 
-// NoteType is a numeric enum: Text=0, Md=1, Code=2, Rich=3, Checklist=4
-// The mock must expose the same numeric enum so === comparisons in createMenuButtons work.
+// NoteType is a plain string-union constant in @filen/sdk-rs: 'text'|'md'|'code'|'rich'|'checklist'.
+// The mock must use the same string values so === comparisons in createMenuButtons are internally
+// consistent and match the shape the real SDK exports (sdk-rs.d.ts:940).
 vi.mock("@filen/sdk-rs", () => {
 	const NoteType = {
-		Text: 0,
-		Md: 1,
-		Code: 2,
-		Rich: 3,
-		Checklist: 4
+		Text: "text",
+		Md: "md",
+		Code: "code",
+		Rich: "rich",
+		Checklist: "checklist"
 	}
 
 	return { NoteType }
@@ -125,7 +126,7 @@ vi.mock("@/components/ui/view", () => ({
 }))
 
 import { NoteType } from "@filen/sdk-rs"
-import { createMenuButtons, NOTE_TYPE_OPTIONS, NOTE_TYPE_LABEL_KEY, type NoteTypeString } from "@/features/notes/components/note/menu"
+import { createMenuButtons, NOTE_TYPE_OPTIONS, NOTE_TYPE_LABEL_KEY } from "@/features/notes/components/note/menu"
 import type { Note } from "@/types"
 
 function makeNote(overrides: Partial<Note> = {}): Note {
@@ -202,6 +203,22 @@ describe("createMenuButtons", () => {
 
 			expect(ids).not.toContain("select")
 			expect(ids).not.toContain("deselect")
+		})
+	})
+
+	describe("origin='search' select/deselect", () => {
+		it("select button is first in the list for origin='search'", () => {
+			const note = makeNote()
+			const buttons = createMenuButtons({ note, writeAccess: true, origin: "search", isOwner: true })
+
+			expect(buttons[0]?.id).toBe("select")
+		})
+
+		it("deselect button is first when note is already selected with origin='search'", () => {
+			const note = makeNote()
+			const buttons = createMenuButtons({ note, isSelected: true, writeAccess: true, origin: "search", isOwner: true })
+
+			expect(buttons[0]?.id).toBe("deselect")
 		})
 	})
 
@@ -307,11 +324,11 @@ describe("NOTE_TYPE_LABEL_KEY", () => {
 		expect(unique.size).toBe(keys.length)
 	})
 
-	it("all 5 NoteTypeString keys have entries", () => {
-		const noteTypeStrings: NoteTypeString[] = ["text", "checklist", "code", "rich", "md"]
-
-		for (const nts of noteTypeStrings) {
-			expect(NOTE_TYPE_LABEL_KEY[nts]).toBeTruthy()
-		}
+	it("each NoteTypeString maps to its exact i18n key", () => {
+		expect(NOTE_TYPE_LABEL_KEY["text"]).toBe("note_type_text")
+		expect(NOTE_TYPE_LABEL_KEY["md"]).toBe("note_type_markdown")
+		expect(NOTE_TYPE_LABEL_KEY["code"]).toBe("note_type_code")
+		expect(NOTE_TYPE_LABEL_KEY["rich"]).toBe("note_type_richtext")
+		expect(NOTE_TYPE_LABEL_KEY["checklist"]).toBe("note_type_checklist")
 	})
 })

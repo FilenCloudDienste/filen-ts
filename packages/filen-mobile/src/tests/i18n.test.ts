@@ -1,20 +1,24 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockSecureStoreGet, mockGetLocales, mockSetIntlLanguage, mockI18nInit, mockI18nChangeLanguage } = vi.hoisted(() => {
-	const mockI18nInit = vi.fn().mockResolvedValue(undefined)
-	const mockI18nChangeLanguage = vi.fn().mockResolvedValue(undefined)
-	return {
-		mockSecureStoreGet: vi.fn(),
-		mockGetLocales: vi.fn(),
-		mockSetIntlLanguage: vi.fn(),
-		mockI18nInit,
-		mockI18nChangeLanguage
+const { mockSecureStoreGet, mockSecureStoreSet, mockGetLocales, mockSetIntlLanguage, mockI18nInit, mockI18nChangeLanguage } = vi.hoisted(
+	() => {
+		const mockI18nInit = vi.fn().mockResolvedValue(undefined)
+		const mockI18nChangeLanguage = vi.fn().mockResolvedValue(undefined)
+		return {
+			mockSecureStoreGet: vi.fn(),
+			mockSecureStoreSet: vi.fn(),
+			mockGetLocales: vi.fn(),
+			mockSetIntlLanguage: vi.fn(),
+			mockI18nInit,
+			mockI18nChangeLanguage
+		}
 	}
-})
+)
 
 vi.mock("@/lib/secureStore", () => ({
 	default: {
-		get: mockSecureStoreGet
+		get: mockSecureStoreGet,
+		set: mockSecureStoreSet
 	}
 }))
 
@@ -239,18 +243,15 @@ describe("changeAppLanguage", () => {
 	})
 
 	it("does NOT write to secureStore (persistence is owned by setLanguage/useSecureStore)", async () => {
-		const secureStoreMock = (await import("@/lib/secureStore")).default as unknown as { set?: ReturnType<typeof vi.fn> }
 		// No languageTag available — getLocales returns [] via beforeEach — so the
 		// fallback bare code is used. This also exercises the no-tag fallback path.
 		mockGetLocales.mockReturnValue([])
 
 		await changeAppLanguage("fr")
 
-		// secureStore.set must not exist on the mock (we only mocked .get) — or if it
-		// does exist it must not have been called.
-		if (typeof secureStoreMock.set === "function") {
-			expect(secureStoreMock.set).not.toHaveBeenCalled()
-		}
+		// secureStore.set must never be called — changeAppLanguage must not double-persist
+		// the language (that is the caller's responsibility via setLanguage/useSecureStore).
+		expect(mockSecureStoreSet).not.toHaveBeenCalled()
 		// The important invariant: only the time module is notified (with the fallback
 		// bare code since no device tag is present), not the store.
 		expect(mockSetIntlLanguage).toHaveBeenCalledWith("fr")

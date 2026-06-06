@@ -572,7 +572,7 @@ describe("extractLinks", () => {
 		const links = extractLinks(text)
 		expect(links).toHaveLength(1)
 		const { start, end, url } = links[0]!
-		expect(text.slice(start, end)).toBe(url.replace("https://", "https://"))
+		expect(text.slice(start, end)).toBe(url)
 		// url starts with https:// so raw match starts at same position
 		expect(start).toBe(7) // "prefix " = 7 chars
 		expect(end).toBe(start + "https://test.io".length)

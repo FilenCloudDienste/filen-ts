@@ -766,10 +766,12 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 		// At this point dirtyUpserts should have been cleared by buildCommands()
 		expect(kvAny.dirtyUpserts.size).toBe(0)
 
-		// Let the rejected promise settle
-		await new Promise<void>(resolve => {
-			setTimeout(resolve, 10)
-		})
+		// openDb() resolves (1 tick) → executeBatch rejects (1 tick) → .catch fires (1 tick) → .finally fires (1 tick).
+		// Flush the microtask queue deterministically without a wall-clock setTimeout.
+		await Promise.resolve()
+		await Promise.resolve()
+		await Promise.resolve()
+		await Promise.resolve()
 
 		// After the catch block, dirty keys must be restored for retry
 		expect(kvAny.dirtyUpserts.has("keyA")).toBe(true)
@@ -810,9 +812,10 @@ describe("QueryPersisterKv dirty-set restoration on write failure", () => {
 		// — this puts keyX in dirtyDeletes, so it should NOT be re-added to dirtyUpserts
 		kvAny.dirtyDeletes.add("keyX")
 
-		await new Promise<void>(resolve => {
-			setTimeout(resolve, 10)
-		})
+		// Flush microtasks deterministically: openDb resolves (1) → executeBatch rejects (1) → .catch fires (1).
+		await Promise.resolve()
+		await Promise.resolve()
+		await Promise.resolve()
 
 		// keyX moved to dirtyDeletes — it must not be double-restored into dirtyUpserts
 		expect(kvAny.dirtyUpserts.has("keyX")).toBe(false)

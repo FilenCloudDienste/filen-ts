@@ -15,7 +15,8 @@ const {
 	mockFileCache,
 	mockAudioCache,
 	mockInitI18n,
-	mockInitTheme
+	mockInitTheme,
+	mockSemaphoreRelease
 } = vi.hoisted(() => {
 	const mockAuth = {
 		isAuthed: vi.fn(),
@@ -26,6 +27,8 @@ const {
 		rootUuid: null as string | null,
 		restore: vi.fn()
 	}
+
+	const mockSemaphoreRelease = vi.fn()
 
 	return {
 		mockAuth,
@@ -42,11 +45,45 @@ const {
 		mockFileCache: { gc: vi.fn() },
 		mockAudioCache: { gc: vi.fn() },
 		mockInitI18n: vi.fn(),
-		mockInitTheme: vi.fn()
+		mockInitTheme: vi.fn(),
+		mockSemaphoreRelease
 	}
 })
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+// Inline LIFO-correct run() mock that matches real @filen/utils behavior:
+// cleanups run in reverse registration order (LIFO) inside a finally block,
+// each individually try/caught. This is more faithful than the shared
+// filenUtils mock which iterates forward and only on success/catch.
+vi.mock("@filen/utils", () => {
+	class Semaphore {
+		async acquire(): Promise<void> {}
+		release(): void {
+			mockSemaphoreRelease()
+		}
+	}
+
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+	async function run(fn: (defer: (cleanup: () => void) => void) => Promise<any>): Promise<any> {
+		const cleanups: (() => void)[] = []
+		const defer = (cleanup: () => void) => {
+			cleanups.push(cleanup)
+		}
+		try {
+			const data = await fn(defer)
+			return { success: true, data, error: null }
+		} catch (error) {
+			return { success: false, data: null, error }
+		} finally {
+			for (let i = cleanups.length - 1; i >= 0; i--) {
+				try {
+					cleanups[i]?.()
+				} catch {}
+			}
+		}
+	}
+
+	return { Semaphore, run, default: run, createExecutableTimeout: vi.fn() }
+})
 vi.mock("@/lib/secureStore", () => ({ default: mockSecureStore }))
 vi.mock("@/lib/auth", () => ({ default: mockAuth }))
 vi.mock("@/lib/cache", () => ({ default: mockCache }))
@@ -167,6 +204,24 @@ describe("setup.setup", () => {
 		mockSqlite.init.mockRejectedValue(boom)
 
 		await expect(setup.setup()).rejects.toThrow("sqlite exploded")
+	})
+
+	// #184 — verify that the deferred mutex release fires unconditionally (in the
+	// finally block of run()), so the Semaphore is always returned even when the
+	// inner callback throws. Uses the inline LIFO-correct mock above.
+	it("releases the setup mutex (deferred cleanup) even when the inner callback rejects", async () => {
+		const boom = new Error("init failed")
+		mockSecureStore.init.mockRejectedValue(boom)
+
+		await expect(setup.setup()).rejects.toThrow("init failed")
+
+		expect(mockSemaphoreRelease).toHaveBeenCalledOnce()
+	})
+
+	it("releases the setup mutex (deferred cleanup) on a successful run", async () => {
+		await setup.setup()
+
+		expect(mockSemaphoreRelease).toHaveBeenCalledOnce()
 	})
 
 	it("calls foregroundService.init, fileCache.gc, and audioCache.gc when isAuthed and not background", async () => {

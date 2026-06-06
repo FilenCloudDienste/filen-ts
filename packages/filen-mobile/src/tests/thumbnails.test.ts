@@ -607,7 +607,11 @@ describe("Thumbnails", () => {
 			// Abort while waiting
 			controller.abort()
 
-			await expect(promise).rejects.toThrow()
+			// Must throw the abort-flavoured error specifically — not a network/timeout error.
+			// DOMException("This operation was aborted") is returned by abortError() when
+			// signal.reason instanceof Error (the default Node.js reason).
+			await expect(promise).rejects.toThrow("This operation was aborted")
+			await expect(promise).rejects.toBeInstanceOf(Error)
 			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
 			expect(mockHttpStoreSubscribers.size).toBe(0)
 		})
@@ -867,7 +871,11 @@ describe("Thumbnails", () => {
 			// Abort while waiting for readyToPlay — should not hang
 			controller.abort()
 
-			await expect(promise).rejects.toThrow()
+			// Must throw the abort-flavoured error specifically — not a network/codec error.
+			// DOMException("This operation was aborted") is returned by abortError() when
+			// signal.reason instanceof Error (the default Node.js reason).
+			await expect(promise).rejects.toThrow("This operation was aborted")
+			await expect(promise).rejects.toBeInstanceOf(Error)
 
 			// Should not have called generateThumbnailsAsync since we aborted before ready
 			expect(mockGenerateThumbnailsAsync).not.toHaveBeenCalled()

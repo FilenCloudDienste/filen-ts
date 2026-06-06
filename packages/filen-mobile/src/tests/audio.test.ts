@@ -1138,13 +1138,15 @@ describe("Audio", () => {
 			await audio.setShuffleEnabled(true)
 			await audio.next()
 
-			const after = audio.getPosition()
-
+			playlist.replace.mockClear()
 			playlist.currentTime = 0
 			await audio.previous()
 
+			// generateShuffleOrder(firstIdx=0) places 0 first, so going back to
+			// shufflePosition=0 always resolves to queue index 0.
 			expect(audio.getPosition()).toBe(0)
-			expect(audio.getPosition()).not.toBe(after)
+			// previous() must have called loadAndPlay, which replaces the track.
+			expect(playlist.replace).toHaveBeenCalledOnce()
 		})
 
 		it("wraps to end of shuffleOrder when loopMode is queue", async () => {

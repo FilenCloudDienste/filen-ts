@@ -80,8 +80,17 @@ vi.mock("@/lib/events", () => ({
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("@/lib/utils", () => ({
-	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/")
+// secureStore.ts imports normalizeFilePathForSdk from @/lib/paths (not @/lib/utils)
+vi.mock("@/lib/paths", () => ({
+	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/"),
+	normalizeFilePathForExpo: (path: string) => `file://${path.trim().replace(/^file:\/+/, "/")}`,
+	normalizeFilePathForBlobUtil: (path: string) => `file://${path.trim().replace(/^file:\/+/, "/")}`,
+	extractPathInsideUuidDirectory: (absolutePath: string, dirUuid: string) => {
+		const anchor = `/${dirUuid}/`
+		const idx = absolutePath.lastIndexOf(anchor)
+
+		return idx < 0 ? null : absolutePath.slice(idx + anchor.length - 1)
+	}
 }))
 
 import { renderHook, act, waitFor } from "@testing-library/react"

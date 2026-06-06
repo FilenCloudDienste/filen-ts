@@ -77,7 +77,7 @@ vi.mock("@/queries/useMediaPermissions.query", () => ({
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
-import { renderHook } from "@testing-library/react"
+import { renderHook, act } from "@testing-library/react"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 
@@ -230,6 +230,25 @@ describe("hasAllNeededMediaPermissions", () => {
 		expect(result).toBe(false)
 	})
 
+	// #20 — cameraRequest.granted=true but expires!='never' is the untested OR-branch
+	it("returns false when shouldRequest=true, mediaLibrary request succeeds, camera granted=true but expires!='never'", async () => {
+		// Initial check fails — trigger the request path
+		mockMediaLibraryPermissions.granted = false
+		mockMediaLibraryPermissions.canAskAgain = true
+		mockCameraPermissions.canAskAgain = true
+		// mediaLibrary request succeeds fully
+		mockMediaLibraryRequest.granted = true
+		mockMediaLibraryRequest.accessPrivileges = "all"
+		mockMediaLibraryRequest.expires = "never"
+		// camera granted=true but temporary (non-'never') expiry
+		mockCameraRequest.granted = true
+		mockCameraRequest.expires = "2099-12-31"
+
+		const result = await hasAllNeededMediaPermissions({ shouldRequest: true })
+
+		expect(result).toBe(false)
+	})
+
 	it("returns true when shouldRequest=true and both requests succeed with all conditions met", async () => {
 		// Initial check fails — need to request
 		mockMediaLibraryPermissions.granted = false
@@ -368,6 +387,50 @@ describe("useMediaPermissions — return shape derivation from query data", () =
 		expect(result.current.loading).toBe(false)
 		// success shape has requestPermissions
 		expect(typeof (result.current as { requestPermissions?: unknown }).requestPermissions).toBe("function")
+	})
+
+	// #221 — actually invoke the hook's requestPermissions wrapper instead of just checking typeof
+	it("requestPermissions returns true when permissions are fully granted and triggers refetch via defer", async () => {
+		// All permissions already granted — hasAllNeededMediaPermissions({shouldRequest:true}) returns true
+		setAllGranted()
+
+		const { result } = renderHook(() => useMediaPermissions())
+
+		const successResult = result.current as { requestPermissions: () => Promise<boolean> }
+		let returnValue: boolean | undefined
+
+		await act(async () => {
+			returnValue = await successResult.requestPermissions()
+		})
+
+		expect(returnValue).toBe(true)
+		// defer() registered in run() calls refetch after the async fn completes
+		expect(mockQueryData.refetch).toHaveBeenCalledTimes(1)
+	})
+
+	it("requestPermissions returns false when camera request returns granted=true but expires!='never'", async () => {
+		// Initial permissions don't fully pass (camera expires is not 'never')
+		mockMediaLibraryPermissions.granted = false
+		mockMediaLibraryPermissions.canAskAgain = true
+		mockCameraPermissions.canAskAgain = true
+		mockMediaLibraryRequest.granted = true
+		mockMediaLibraryRequest.accessPrivileges = "all"
+		mockMediaLibraryRequest.expires = "never"
+		mockCameraRequest.granted = true
+		mockCameraRequest.expires = "2099-12-31"
+
+		const { result } = renderHook(() => useMediaPermissions())
+
+		const successResult = result.current as { requestPermissions: () => Promise<boolean> }
+		let returnValue: boolean | undefined
+
+		await act(async () => {
+			returnValue = await successResult.requestPermissions()
+		})
+
+		expect(returnValue).toBe(false)
+		// refetch is still triggered via defer even when the result is false
+		expect(mockQueryData.refetch).toHaveBeenCalledTimes(1)
 	})
 
 	it("loading shape does not have requestPermissions field", () => {
