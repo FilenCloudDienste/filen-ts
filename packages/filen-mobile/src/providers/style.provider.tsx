@@ -3,7 +3,7 @@ import "@/global.css"
 import { useEffect } from "react"
 import * as NavigationBar from "expo-navigation-bar"
 import { Platform } from "react-native"
-import { ThemeProvider, DefaultTheme } from "@react-navigation/native"
+import { ThemeProvider, DefaultTheme } from "expo-router/react-navigation"
 import { useUniwind } from "uniwind"
 
 const StyleProvider = ({ children }: { children: React.ReactNode }) => {

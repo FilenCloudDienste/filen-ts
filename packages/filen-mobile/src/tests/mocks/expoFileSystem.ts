@@ -160,6 +160,14 @@ export class File {
 		this.uri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
 	}
 
+	copySync(destination: File | Directory): void {
+		this.copy(destination)
+	}
+
+	moveSync(destination: File | Directory): void {
+		this.move(destination)
+	}
+
 	rename(newName: string): void {
 		const dir = Paths.dirname(this.uri)
 		const newUri = Paths.join(dir, newName)
@@ -428,6 +436,14 @@ export class Directory {
 		this.delete()
 
 		this.uri = destination instanceof Directory ? Paths.join(destination.uri, this.name) : destination.uri
+	}
+
+	copySync(destination: Directory | File): void {
+		this.copy(destination)
+	}
+
+	moveSync(destination: Directory | File): void {
+		this.move(destination)
 	}
 
 	rename(newName: string): void {

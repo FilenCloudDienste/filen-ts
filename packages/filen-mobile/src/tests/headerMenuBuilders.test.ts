@@ -18,7 +18,7 @@ vi.mock("expo-file-system", () => ({
 	File: vi.fn(),
 	Paths: { join: vi.fn() }
 }))
-vi.mock("expo-media-library", () => ({ saveToLibraryAsync: vi.fn() }))
+vi.mock("expo-media-library/legacy", () => ({ saveToLibraryAsync: vi.fn() }))
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }))
 
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))

@@ -1,8 +1,4 @@
-import configPlugins from "@expo/config-plugins"
-
-const { withAndroidManifest } = configPlugins
-
-type ConfigPlugin = configPlugins.ConfigPlugin
+import { withAndroidManifest, type ConfigPlugin } from "@expo/config-plugins"
 
 const withAndroidLargeHeapAndHardwareAcceleration: ConfigPlugin = config => {
 	return withAndroidManifest(config, async config => {

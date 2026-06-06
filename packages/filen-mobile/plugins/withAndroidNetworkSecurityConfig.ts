@@ -1,10 +1,6 @@
-import configPlugins from "@expo/config-plugins"
+import { withAndroidManifest, withDangerousMod, AndroidConfig, type ConfigPlugin } from "@expo/config-plugins"
 import fs from "fs"
 import pathModule from "path"
-
-const { withAndroidManifest, withDangerousMod, AndroidConfig } = configPlugins
-
-type ConfigPlugin = configPlugins.ConfigPlugin
 
 const isDevelopment = process.env["APP_ENV"] === "development" || process.env["NODE_ENV"] === "development"
 
@@ -62,8 +58,8 @@ const networkSecurityConfigContent = `<?xml version="1.0" encoding="utf-8"?>
 </network-security-config>`
 
 function setNetworkSecurityConfig(
-	androidManifest: configPlugins.AndroidConfig.Manifest.AndroidManifest
-): configPlugins.AndroidConfig.Manifest.AndroidManifest {
+	androidManifest: AndroidConfig.Manifest.AndroidManifest
+): AndroidConfig.Manifest.AndroidManifest {
 	const application = AndroidConfig.Manifest.getMainApplicationOrThrow(androidManifest)
 
 	application.$["android:networkSecurityConfig"] = "@xml/network_security_config"

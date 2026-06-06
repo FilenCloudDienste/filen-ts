@@ -1,5 +1,6 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
+import { useAnimatedStyle } from "react-native-reanimated"
 import Text from "@/components/ui/text"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { PressableScale } from "@/components/ui/pressables"
@@ -27,9 +28,7 @@ const GalleryHeader = ({
 	animatedStyle,
 	goBack
 }: {
-	animatedStyle: {
-		opacity: number
-	}
+	animatedStyle: ReturnType<typeof useAnimatedStyle<{ opacity: number }>>
 	goBack: () => void
 }) => {
 	const { t } = useTranslation()

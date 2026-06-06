@@ -3,7 +3,7 @@ import { Stack } from "expo-router"
 import type { SearchBarProps } from "react-native-screens"
 import { View } from "@/components/ui/view"
 import { cn } from "@filen/utils"
-import { Platform, ActivityIndicator } from "react-native"
+import { Platform, ActivityIndicator, type ColorValue } from "react-native"
 import Menu from "@/components/ui/menu"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Text from "@/components/ui/text"
@@ -175,7 +175,7 @@ export const Header = ({
 	rightItems,
 	backgroundColor
 }: {
-	title: string | React.ReactNode | ((props: { children: string; tintColor?: string | undefined }) => React.ReactNode)
+	title: string | React.ReactNode | ((props: { children: string; tintColor?: ColorValue | undefined }) => React.ReactNode)
 	shown?: boolean
 	largeTitle?: boolean
 	backVisible?: boolean

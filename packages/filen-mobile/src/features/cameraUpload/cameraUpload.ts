@@ -1,5 +1,5 @@
 import * as MediaLibrary from "expo-media-library/next"
-import * as MediaLibraryLegacy from "expo-media-library"
+import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
@@ -185,18 +185,18 @@ class CameraUpload {
 			return file
 		}
 
-		manipulatedFile.copy(file)
+		manipulatedFile.copySync(file)
 
 		if (manipulatedFile.exists) {
 			manipulatedFile.delete()
 		}
 
 		// Correct the extension to .jpg since the content is now JPEG.
-		// File.move() updates the uri property in place.
+		// File.moveSync() updates the uri property in place.
 		if (extname !== ".jpg" && extname !== ".jpeg") {
 			const newFile = new FileSystem.File(file.uri.replace(/\.[^.]+$/, ".jpg"))
 
-			file.move(newFile)
+			file.moveSync(newFile)
 
 			return newFile
 		}
@@ -735,7 +735,7 @@ class CameraUpload {
 									tmpFile.delete()
 								}
 
-								assetFile.copy(tmpFile)
+								assetFile.copySync(tmpFile)
 
 								let uploadFile = tmpFile
 

@@ -123,7 +123,7 @@ vi.mock("expo-file-system", () => ({
 	}
 }))
 
-vi.mock("expo-media-library", () => ({
+vi.mock("expo-media-library/legacy", () => ({
 	saveToLibraryAsync: vi.fn()
 }))
 

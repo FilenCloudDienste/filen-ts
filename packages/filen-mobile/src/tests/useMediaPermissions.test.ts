@@ -46,7 +46,7 @@ vi.mock("react-native", () => ({
 	}
 }))
 
-vi.mock("expo-media-library", () => ({
+vi.mock("expo-media-library/legacy", () => ({
 	getPermissionsAsync: async () => ({ ...mockMediaLibraryPermissions }),
 	requestPermissionsAsync: async () => ({ ...mockMediaLibraryRequest })
 }))
