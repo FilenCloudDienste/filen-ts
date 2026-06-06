@@ -141,21 +141,18 @@ const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<Li
 		}
 
 		if (props.emptyComponent) {
-			return (
-				<View
-					className="flex-1 bg-transparent"
-					style={{
-						width: layout.width,
-						height: layout.height
-					}}
-				>
-					{props.emptyComponent()}
-				</View>
-			)
+			return <View className="flex-1 bg-transparent">{props.emptyComponent()}</View>
 		}
 
 		return null
 	})()
+
+	// When the list is empty, stretch the scroll content to fill the viewport so the
+	// emptyComponent's `flex-1` actually centers it. Without `flexGrow: 1` the content
+	// collapses to its intrinsic height and `contentInsetAdjustmentBehavior="automatic"`
+	// pushes it below the visual centre + makes the (otherwise empty) list scrollable.
+	// Populated lists keep the caller's contentContainerStyle untouched.
+	const isEmpty = !props.loading && (props.data?.length ?? 0) === 0
 
 	validateVirtualListProps({
 		keyExtractor: props.keyExtractor,
@@ -195,11 +192,12 @@ const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<Li
 					}}
 					showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 					showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
-					scrollEnabled={!props.loading && ((props.data ?? []).length > 0 || Boolean(props.onRefresh))}
+					scrollEnabled={!props.loading && !isEmpty && ((props.data ?? []).length > 0 || Boolean(props.onRefresh))}
 					ListEmptyComponent={emptyComponent}
 					ListFooterComponent={props.footerComponent}
 					ListHeaderComponent={props.headerComponent}
 					{...props}
+					contentContainerStyle={isEmpty ? [{ flexGrow: 1 }, props.contentContainerStyle] : props.contentContainerStyle}
 					refreshing={refreshing}
 					refreshControl={refreshControl}
 				/>
