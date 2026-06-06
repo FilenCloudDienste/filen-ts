@@ -1,6 +1,7 @@
 import { useRef, Fragment, useEffect } from "react"
 import TextEditorDOM from "@/components/textEditor/dom"
 import RichTextEditorDOM, { type QuillFormats, type HeaderLevel } from "@/components/textEditor/richText/dom"
+import { encodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import View, { KeyboardAvoidingView } from "@/components/ui/view"
 import { useNativeDomEvents, type DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import { Platform } from "react-native"
@@ -229,6 +230,8 @@ export const TextEditor = ({
 		}
 	}, [type, readOnly])
 
+	const encodedInitialValue = encodeEditorInitialValue(initialValue ?? "")
+
 	return (
 		<Fragment>
 			<KeyboardAvoidingView className="flex-1">
@@ -242,7 +245,7 @@ export const TextEditor = ({
 						onValueChange={onValueChange}
 						darkMode={theme === "dark"}
 						platform={Platform.OS}
-						initialValue={initialValue}
+						initialValue={encodedInitialValue}
 						placeholder={placeholder}
 						readOnly={readOnly}
 						autoFocus={autoFocus}
@@ -283,7 +286,7 @@ export const TextEditor = ({
 							onValueChange={onValueChange}
 							darkMode={theme === "dark"}
 							platform={Platform.OS}
-							initialValue={initialValue}
+							initialValue={encodedInitialValue}
 							placeholder={placeholder}
 							readOnly={readOnly}
 							markdownPreviewActive={markdownPreviewActive}
