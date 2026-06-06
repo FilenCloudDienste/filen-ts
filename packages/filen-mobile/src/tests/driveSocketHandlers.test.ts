@@ -719,15 +719,24 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
 			expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(2)
 
-			const recentsPath = mockDriveItemsQueryUpdate.mock.calls.find(
+			const recentsCall = mockDriveItemsQueryUpdate.mock.calls.find(
 				c => (c[0] as { params: { path: { type: string } } }).params.path.type === "recents"
-			)
-			const trashPath = mockDriveItemsQueryUpdate.mock.calls.find(
+			)?.[0] as { updater: (prev: Array<{ data: { uuid: string } }>) => unknown[] }
+			const trashCall = mockDriveItemsQueryUpdate.mock.calls.find(
 				c => (c[0] as { params: { path: { type: string } } }).params.path.type === "trash"
-			)
+			)?.[0] as { updater: (prev: Array<{ data: { uuid: string } }>) => unknown[] }
 
-			expect(recentsPath).toBeDefined()
-			expect(trashPath).toBeDefined()
+			expect(recentsCall).toBeDefined()
+			expect(trashCall).toBeDefined()
+
+			// Each updater deduplicates the existing entry by uuid then appends the trashed item.
+			const prev = [{ data: { uuid: "dir-trash" } }, { data: { uuid: "other" } }]
+			const recentsResult = recentsCall?.updater(prev) as typeof prev
+			expect(recentsResult).toHaveLength(2)
+			expect(recentsResult[recentsResult.length - 1]).toBe(trashedDriveItem)
+			const trashResult = trashCall?.updater(prev) as typeof prev
+			expect(trashResult).toHaveLength(2)
+			expect(trashResult[trashResult.length - 1]).toBe(trashedDriveItem)
 		})
 
 		it("no-op when folder is not in cache", async () => {
@@ -851,7 +860,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 		})
 
-		it("does NOT update parent when parentUuid is null", async () => {
+		it("does NOT update parent when parentUuid is null, but still removes from trash", async () => {
 			mockUnwrapParentUuid.mockReturnValue(null)
 			mockUnwrapDirMeta.mockReturnValue({ uuid: "dir-restore", meta: null })
 			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "dir-restore" } })
@@ -859,6 +868,18 @@ describe("handleDriveEvent — drive socket handler", () => {
 			await handleDriveEvent({ event: makeDirWithParentEvent(DriveEvent_Tags.FolderRestore, rawDir) })
 
 			expect(mockDriveItemsQueryUpdateForNormalParent).not.toHaveBeenCalled()
+
+			// The trash-removal update sits OUTSIDE the parentUuid guard, so it must still fire.
+			expect(mockDriveItemsQueryUpdate).toHaveBeenCalledOnce()
+			const trashCall = mockDriveItemsQueryUpdate.mock.calls[0]?.[0] as {
+				params: { path: { type: string } }
+				updater: (prev: Array<{ data: { uuid: string } }>) => unknown[]
+			}
+			expect(trashCall.params.path.type).toBe("trash")
+			const prev = [{ data: { uuid: "dir-restore" } }, { data: { uuid: "other" } }]
+			const result = trashCall.updater(prev) as typeof prev
+			expect(result).toHaveLength(1)
+			expect(result[0]?.data.uuid).toBe("other")
 		})
 	})
 

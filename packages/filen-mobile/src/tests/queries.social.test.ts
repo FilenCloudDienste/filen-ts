@@ -78,46 +78,15 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 // ---------------------------------------------------------------------------
-// @/lib/utils — provide pure re-implementations of safeParseUrl and
-// getPreviewType so they exercise real logic without dragging in
-// expo-localization (__DEV__ not defined in Vitest node env).
+// getPreviewType is re-implemented inline (below) only to avoid dragging in
+// expo-localization (__DEV__ not defined in Vitest node env). safeParseUrl, by
+// contrast, runs the REAL implementation via the @/lib/linkParser mock, so the
+// SSRF blocklist (the full fc00::/7 ULA range etc.) is exercised faithfully and
+// can never drift from @/constants PRIVATE_HOST.
 // ---------------------------------------------------------------------------
-const PRIVATE_HOST_REGEXES = [
-	/^localhost$/i,
-	/\.local$/i,
-	/^127\./,
-	/^10\./,
-	/^192\.168\./,
-	/^172\.(1[6-9]|2\d|3[01])\./,
-	/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
-	/^169\.254\./,
-	/^0\.0\.0\.0$/,
-	/^::1$/,
-	/^fc00:/i,
-	/^fe80:/i
-]
-
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico"])
 const VIDEO_EXTS = new Set([".mp4", ".mov", ".m4v", ".3gp"])
 const AUDIO_EXTS = new Set([".mp3", ".m4a", ".aac", ".wav", ".aiff", ".caf", ".flac", ".alac"])
-
-function safeParseUrlInline(raw: string): URL | null {
-	try {
-		const u = new URL(raw.trim())
-
-		if (u.protocol !== "https:") return null
-		if (u.username || u.password) return null
-
-		// Strip IPv6 brackets so regexes match bare addresses (e.g. [::1] → ::1)
-		const hostname = u.hostname.replace(/^\[|\]$/g, "")
-
-		if (PRIVATE_HOST_REGEXES.some(p => p.test(hostname))) return null
-
-		return u
-	} catch {
-		return null
-	}
-}
 
 function getExtname(name: string): string {
 	const trimmed = name.trim().toLowerCase()
@@ -151,10 +120,14 @@ vi.mock("@/lib/previewType", () => ({
 	getPreviewType: getPreviewTypeInline
 }))
 
-vi.mock("@/lib/linkParser", () => ({
-	safeParseUrl: safeParseUrlInline,
-	extractLinks: vi.fn()
-}))
+vi.mock("@/lib/linkParser", async () => {
+	const actual = await vi.importActual<typeof import("@/lib/linkParser")>("@/lib/linkParser")
+
+	return {
+		safeParseUrl: actual.safeParseUrl,
+		extractLinks: vi.fn()
+	}
+})
 
 // ---------------------------------------------------------------------------
 // Imports under test (placed AFTER all vi.mock() calls)
