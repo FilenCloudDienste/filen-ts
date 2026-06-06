@@ -64,24 +64,23 @@ describe("useIsOnline", () => {
 		expect(result.current).toBe(true)
 	})
 
-	it("stops tracking changes after unmount", () => {
-		// Verify that the onlineManager subscription is torn down when the hook
-		// unmounts: state changes after unmount must not update result.current.
-		onlineManager.setOnline(true)
+	it("unsubscribes from onlineManager on unmount", () => {
+		// Spy on onlineManager.subscribe to capture the unsubscribe fn that
+		// useSyncExternalStore stores as its cleanup, then assert it runs on unmount.
+		// (Asserting result.current after unmount can't detect a leaked subscription —
+		// the value is frozen at the last render whether or not the listener was torn down.)
+		const unsubscribe = vi.fn()
+		const subscribeSpy = vi.spyOn(onlineManager, "subscribe").mockReturnValue(unsubscribe)
 
-		const { result, unmount } = renderHook(() => useIsOnline())
+		const { unmount } = renderHook(() => useIsOnline())
 
-		expect(result.current).toBe(true)
+		expect(subscribeSpy).toHaveBeenCalled()
+		expect(unsubscribe).not.toHaveBeenCalled()
 
 		unmount()
 
-		// After unmount the listener is unsubscribed; setOnline calls are ignored.
-		act(() => {
-			onlineManager.setOnline(false)
-		})
+		expect(unsubscribe).toHaveBeenCalledTimes(1)
 
-		// result.current is frozen at the last rendered value (true) since the
-		// hook no longer listens.
-		expect(result.current).toBe(true)
+		subscribeSpy.mockRestore()
 	})
 })

@@ -108,9 +108,10 @@ describe("sweepTmpDir", () => {
 			Directory.prototype.delete = originalDelete
 		}
 
-		// Even though delete threw, ensured must have been reset to false so that
-		// ensure() ran and actually recreated the directory on disk — not just
-		// constructed a URI. Assert directory.exists===true, not just the path prefix.
+		// sweepTmpDir must swallow the delete() failure (asserted above via not.toThrow)
+		// and leave the tmp directory usable. delete() throws before removing the dir,
+		// so it is never deleted and ensure() correctly no-ops on it; assert the dir is
+		// still present so a subsequent newTmpFile() resolves into a real directory.
 		const file = newTmpFile("recovery.bin")
 		const tmpPath = file.uri.replace(/\/[^/]+$/, "")
 		const tmpDir = new Directory(tmpPath)
