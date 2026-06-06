@@ -24,13 +24,6 @@ vi.mock("expo-router", () => ({
 	})
 }))
 
-// uuid mock — real validate logic for UUID format checks
-vi.mock("uuid", async () => {
-	const actual = await import("uuid")
-
-	return { validate: actual.validate }
-})
-
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
 vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureStore"))

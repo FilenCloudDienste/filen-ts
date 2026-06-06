@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useNavigation } from "expo-router"
-import { validate as validateUuid } from "uuid"
+import { validateUuid } from "@/lib/uuid"
 import type { DriveItem } from "@/types"
 import { deserialize } from "@/lib/serializer"
 import { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
