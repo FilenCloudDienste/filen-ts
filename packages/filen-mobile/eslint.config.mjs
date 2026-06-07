@@ -92,7 +92,7 @@ export default [
 			],
 			"no-restricted-syntax": ["error", ZUSTAND_SELECTOR_RULE],
 			"react-hooks/exhaustive-deps": [
-				"warn",
+				"error",
 				{
 					additionalHooks: "(useMemoDeep|useCallbackDeep)"
 				}
