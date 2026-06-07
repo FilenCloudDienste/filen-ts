@@ -69,7 +69,7 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { renderHook } from "@testing-library/react"
-import useDrivePath from "@/hooks/useDrivePath"
+import useDrivePath, { isDrivePathType, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { serialize } from "@/lib/serializer"
 import type { SelectOptions, Linked } from "@/hooks/useDrivePath"
 
@@ -401,5 +401,27 @@ describe("useDrivePath — selectOptions/linked deserialization", () => {
 		// The fields that were supplied survive round-trip
 		expect(result.current.selectOptions?.files).toBe(true)
 		expect(result.current.selectOptions?.intention).toBe("move")
+	})
+})
+
+describe("isDrivePathType — route-param string validation", () => {
+	it.each(DRIVE_PATH_TYPES)("accepts the known variant '%s'", type => {
+		expect(isDrivePathType(type)).toBe(true)
+	})
+
+	it("rejects an unknown string", () => {
+		expect(isDrivePathType("nonsense")).toBe(false)
+	})
+
+	it("rejects an empty string", () => {
+		expect(isDrivePathType("")).toBe(false)
+	})
+
+	it("rejects null", () => {
+		expect(isDrivePathType(null)).toBe(false)
+	})
+
+	it("rejects undefined", () => {
+		expect(isDrivePathType(undefined)).toBe(false)
 	})
 })

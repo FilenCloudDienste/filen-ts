@@ -42,7 +42,8 @@ import {
 	DRIVE_EMPTY_STATE_TITLE_KEY,
 	resolveDriveHeaderTitle,
 	rawUploadTimestamp,
-	pickDisplayTimestamp
+	pickDisplayTimestamp,
+	directorySizeTypeForDrivePath
 } from "@/features/drive/utils"
 import type { DrivePath, SelectOptions, DrivePathType } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
@@ -679,5 +680,43 @@ describe("pickDisplayTimestamp", () => {
 
 	it("falls back when the meta value is 0n (the falsy-bigint case)", () => {
 		expect(pickDisplayTimestamp(0n, 9999)).toBe(9999)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// directorySizeTypeForDrivePath — DrivePath variant → size query mode
+// ---------------------------------------------------------------------------
+
+describe("directorySizeTypeForDrivePath", () => {
+	it("sharedIn → sharedIn", () => {
+		expect(directorySizeTypeForDrivePath("sharedIn")).toBe("sharedIn")
+	})
+
+	it("sharedOut → sharedOut", () => {
+		expect(directorySizeTypeForDrivePath("sharedOut")).toBe("sharedOut")
+	})
+
+	it("trash → trash", () => {
+		expect(directorySizeTypeForDrivePath("trash")).toBe("trash")
+	})
+
+	it("offline → offline (local index size, not remote)", () => {
+		expect(directorySizeTypeForDrivePath("offline")).toBe("offline")
+	})
+
+	it("linked → linked", () => {
+		expect(directorySizeTypeForDrivePath("linked")).toBe("linked")
+	})
+
+	it.each(["drive", "recents", "favorites", "links", "photos"] as const)("%s → normal", type => {
+		expect(directorySizeTypeForDrivePath(type)).toBe("normal")
+	})
+
+	it("null → normal", () => {
+		expect(directorySizeTypeForDrivePath(null)).toBe("normal")
+	})
+
+	it("undefined → normal", () => {
+		expect(directorySizeTypeForDrivePath(undefined)).toBe("normal")
 	})
 })
