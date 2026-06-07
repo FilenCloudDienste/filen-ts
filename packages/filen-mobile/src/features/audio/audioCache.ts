@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { Semaphore, run } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES } from "@/constants"
+import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
 import fileCache from "@/lib/fileCache"
 import { parseWebStream } from "music-metadata"
@@ -50,6 +50,11 @@ function audioFileTooLargeToParse(sizeBytes: number | null | undefined): boolean
 export class AudioCache {
 	private readonly mutexes = new Map<string, Semaphore>()
 	private readonly clearBarrier = new ClearBarrier()
+	// Global gate so concurrent metadata fetches across different items don't pile
+	// parseWebStream's JS-thread work on at once (Hermes is single-threaded — see
+	// AUDIO_METADATA_MAX_CONCURRENT_PARSES). The per-key mutex below only serializes
+	// the SAME item; this bounds parses across ALL items.
+	private readonly parseSemaphore = new Semaphore(AUDIO_METADATA_MAX_CONCURRENT_PARSES)
 
 	private ensureDirectory(): void {
 		if (!PARENT_DIRECTORY.exists) {
@@ -213,6 +218,14 @@ export class AudioCache {
 						if (!audioFile.exists) {
 							throw new Error("Audio file does not exist after download")
 						}
+
+						// Serialize parses across items so concurrent fetches don't pile parseWebStream's
+						// JS-thread work on at once. Held until get() returns (released by the deferred below).
+						await this.parseSemaphore.acquire()
+
+						defer(() => {
+							this.parseSemaphore.release()
+						})
 
 						const parsedMetadata = await parseWebStream(audioFile.stream(), {
 							mimeType: mime ? mime : undefined,
