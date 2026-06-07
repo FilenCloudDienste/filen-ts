@@ -40,7 +40,9 @@ import {
 	getDriveEmptyStateTitleKey,
 	DRIVE_EMPTY_STATE_ICON,
 	DRIVE_EMPTY_STATE_TITLE_KEY,
-	resolveDriveHeaderTitle
+	resolveDriveHeaderTitle,
+	rawUploadTimestamp,
+	pickDisplayTimestamp
 } from "@/features/drive/utils"
 import type { DrivePath, SelectOptions, DrivePathType } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
@@ -613,5 +615,69 @@ describe("resolveDriveHeaderTitle", () => {
 		// falls through to the fallback t("drive")
 		expect(mockDriveItemDisplayName).not.toHaveBeenCalled()
 		expect(result).toBe("drive")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// rawUploadTimestamp — per-shape timestamp normalization (item-info rows)
+// ---------------------------------------------------------------------------
+
+describe("rawUploadTimestamp", () => {
+	function makeItem(type: DriveItem["type"], data: Record<string, unknown>): DriveItem {
+		return { type, data } as unknown as DriveItem
+	}
+
+	it("file → Number(data.timestamp)", () => {
+		expect(rawUploadTimestamp(makeItem("file", { timestamp: 1700n }))).toBe(1700)
+	})
+
+	it("directory → Number(data.timestamp)", () => {
+		expect(rawUploadTimestamp(makeItem("directory", { timestamp: 1800 }))).toBe(1800)
+	})
+
+	it("sharedFile → Number(data.timestamp)", () => {
+		expect(rawUploadTimestamp(makeItem("sharedFile", { timestamp: 1900n }))).toBe(1900)
+	})
+
+	it("sharedRootFile → Number(data.timestamp)", () => {
+		expect(rawUploadTimestamp(makeItem("sharedRootFile", { timestamp: 2000n }))).toBe(2000)
+	})
+
+	it("sharedDirectory → Number(data.inner.timestamp)", () => {
+		expect(rawUploadTimestamp(makeItem("sharedDirectory", { inner: { timestamp: 2100n } }))).toBe(2100)
+	})
+
+	it("sharedRootDirectory → Number(data.inner.timestamp)", () => {
+		expect(rawUploadTimestamp(makeItem("sharedRootDirectory", { inner: { timestamp: 2200 } }))).toBe(2200)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// pickDisplayTimestamp — meta value vs upload-time fallback
+// ---------------------------------------------------------------------------
+
+describe("pickDisplayTimestamp", () => {
+	it("returns the meta value (number) when truthy", () => {
+		expect(pickDisplayTimestamp(1234, 9999)).toBe(1234)
+	})
+
+	it("returns the meta value (bigint, coerced) when truthy", () => {
+		expect(pickDisplayTimestamp(1234n, 9999)).toBe(1234)
+	})
+
+	it("falls back to the upload timestamp when the meta value is undefined", () => {
+		expect(pickDisplayTimestamp(undefined, 9999)).toBe(9999)
+	})
+
+	it("falls back to the upload timestamp when the meta value is null", () => {
+		expect(pickDisplayTimestamp(null, 9999)).toBe(9999)
+	})
+
+	it("falls back when the meta value is 0 (preserves the original truthiness fallback)", () => {
+		expect(pickDisplayTimestamp(0, 9999)).toBe(9999)
+	})
+
+	it("falls back when the meta value is 0n (the falsy-bigint case)", () => {
+		expect(pickDisplayTimestamp(0n, 9999)).toBe(9999)
 	})
 })

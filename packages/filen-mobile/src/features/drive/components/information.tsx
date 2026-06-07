@@ -11,6 +11,8 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
+import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
+import { rawUploadTimestamp, pickDisplayTimestamp } from "@/features/drive/utils"
 
 function OfflineStatusRow({ uuid, type }: { uuid: string; type: DriveItem["type"] }) {
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -51,18 +53,14 @@ function useDriveItemInfoRows(
 		}
 	)
 
-	// TODO: extract to function and clean up
 	return (
 		[
 			{
 				type: "type",
 				title: t("type"),
-				value:
-					item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
-						? t("directory")
-						: t("file")
+				value: isDirectoryItem(item) ? t("directory") : t("file")
 			},
-			...(item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+			...(isFileItem(item)
 				? [
 						{
 							type: "mime",
@@ -116,26 +114,18 @@ function useDriveItemInfoRows(
 				type: "size",
 				title: t("size"),
 				value: (() => {
-					switch (item.type) {
-						case "file":
-						case "sharedFile":
-						case "sharedRootFile": {
-							return formatBytes(Number(item.data.size))
-						}
-
-						case "directory":
-						case "sharedDirectory":
-						case "sharedRootDirectory": {
-							if (directorySizeQuery.status !== "success") {
-								return "..."
-							}
-
-							return formatBytes(directorySizeQuery.data.size)
-						}
+					if (isFileItem(item)) {
+						return formatBytes(Number(item.data.size))
 					}
+
+					if (directorySizeQuery.status !== "success") {
+						return "..."
+					}
+
+					return formatBytes(directorySizeQuery.data.size)
 				})()
 			},
-			...(item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+			...(isDirectoryItem(item)
 				? [
 						{
 							type: "files",
@@ -157,48 +147,7 @@ function useDriveItemInfoRows(
 						return null
 					}
 
-					switch (item.type) {
-						case "file": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-
-						case "sharedFile":
-						case "sharedRootFile": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-
-						case "directory": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-
-						case "sharedDirectory": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.inner.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-
-						case "sharedRootDirectory": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.inner.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-					}
+					return simpleDate(pickDisplayTimestamp(item.data.decryptedMeta.created, rawUploadTimestamp(item)))
 				})()
 			},
 			{
@@ -209,48 +158,12 @@ function useDriveItemInfoRows(
 						return null
 					}
 
-					switch (item.type) {
-						case "file": {
-							if (!item.data.decryptedMeta.modified) {
-								return simpleDate(Number(item.data.timestamp))
-							}
+					// Files carry a distinct `modified` timestamp; directory metas only have
+					// `created`, so the "modified" row mirrors `created` for directories
+					// (preserves the prior per-type behavior).
+					const metaTimestamp = isFileItem(item) ? item.data.decryptedMeta?.modified : item.data.decryptedMeta?.created
 
-							return simpleDate(Number(item.data.decryptedMeta.modified))
-						}
-
-						case "sharedFile":
-						case "sharedRootFile": {
-							if (!item.data.decryptedMeta.modified) {
-								return simpleDate(Number(item.data.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.modified))
-						}
-
-						case "directory": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-
-						case "sharedDirectory": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.inner.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-
-						case "sharedRootDirectory": {
-							if (!item.data.decryptedMeta.created) {
-								return simpleDate(Number(item.data.inner.timestamp))
-							}
-
-							return simpleDate(Number(item.data.decryptedMeta.created))
-						}
-					}
+					return simpleDate(pickDisplayTimestamp(metaTimestamp, rawUploadTimestamp(item)))
 				})()
 			},
 			{
@@ -261,22 +174,7 @@ function useDriveItemInfoRows(
 						return null
 					}
 
-					switch (item.type) {
-						case "file":
-						case "sharedFile":
-						case "sharedRootFile": {
-							return simpleDate(Number(item.data.timestamp))
-						}
-
-						case "directory": {
-							return simpleDate(Number(item.data.timestamp))
-						}
-
-						case "sharedRootDirectory":
-						case "sharedDirectory": {
-							return simpleDate(Number(item.data.inner.timestamp))
-						}
-					}
+					return simpleDate(rawUploadTimestamp(item))
 				})()
 			},
 			...(!linked
