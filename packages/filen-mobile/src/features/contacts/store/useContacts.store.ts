@@ -52,17 +52,29 @@ export const useContactsStore = create<ContactsStore>(set => ({
 	selectedContacts: [],
 	bulkMode: false,
 	setSelectedContacts(fn) {
-		set(state => ({
-			selectedContacts: typeof fn === "function" ? fn(state.selectedContacts) : fn
-		}))
+		set(state => {
+			const selectedContacts = typeof fn === "function" ? fn(state.selectedContacts) : fn
+
+			return {
+				selectedContacts,
+				// Auto-exit bulk mode once the last item is deselected, so selection-mode UI
+				// (row checkboxes / the bulk header) never lingers with nothing selected.
+				bulkMode: selectedContacts.length === 0 ? false : state.bulkMode
+			}
+		})
 	},
 	setBulkMode(next) {
 		set({ bulkMode: next })
 	},
 	toggleSelectedContact(item) {
-		set(state => ({
-			selectedContacts: toggleInArray(state.selectedContacts, item, contactItemId)
-		}))
+		set(state => {
+			const selectedContacts = toggleInArray(state.selectedContacts, item, contactItemId)
+
+			return {
+				selectedContacts,
+				bulkMode: selectedContacts.length === 0 ? false : state.bulkMode
+			}
+		})
 	},
 	clearSelectedContacts() {
 		set({ selectedContacts: [], bulkMode: false })
