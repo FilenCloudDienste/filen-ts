@@ -14,7 +14,7 @@ Setup:  src/global.ts (crypto polyfill, Buffer, NetInfo, console replacement)
         src/lib/setup.ts (auth check → SDK init → SQLite → restore query cache)
 
 State:  Zustand stores (per feature store/ + shared src/stores/)  → UI-only state (selections, input focus, etc.)
-        TanStack Query (per feature queries/ + shared src/queries/) → server data, persisted to SQLite via msgpackr
+        TanStack Query (per feature queries/ + shared src/queries/) → server data, persisted to SQLite via custom JSON serializer
         Secure Store (src/lib/secureStore.ts) → encrypted secrets (expo-secure-store + MMKV fallback)
         Events (src/lib/events.ts)        → transient cross-component events (EventEmitter3)
 
@@ -33,22 +33,22 @@ Native: Three git submodules at packages/filen-mobile/, integrated via custom Ex
 `socketHandlers.ts` (the feature's slice of socket events) · `utils.ts` (pure helpers) ·
 `constants.ts` · `types.ts`.
 
-| Feature | Owns |
-|-|-|
-| `drive` | File/dir browser, ops (favorite, rename, move, delete, trash, restore, share, search, setDirColor, createDirectory, updateTimestamps), context variants (favorites/recents/trash/links/sharedIn/sharedOut/offline), select/move/copy, item info, versions, color picker, linked file. Lib: `drive.ts`, `driveDownload.ts`; also `driveSortPreference.ts`, `driveSelectors.ts`. Socket: `handleDriveEvent`. |
-| `photos` | Photo grid timeline (5 per row, creationDesc sort), photo bulk actions. |
-| `notes` | CRUD, content editing, tags, participants, history, export (single .txt / bulk .zip via JSZip), in-flight content sync. Lib: `notes.ts`, `notesSelectors.ts`. Socket: `handleNoteEvent`. |
-| `chats` | Send/edit/delete messages, typing indicators, mark read, create/leave/delete chats, in-flight message sync, unread counts. Lib: `chats.ts` (Semaphore-protected refetch). Socket: `handleChatEvent`. |
-| `contacts` | Requests (accept/deny/cancel/send), block/unblock, delete; programmatic contact selection. Lib: `contacts.ts`, `contactsSelect.ts`. |
-| `audio` | Audio playback / playlist queue management with loop modes (track/list/off); metadata + cover art cache; playlists screens. Lib: `audio.ts` (singleton). |
-| `cameraUpload` | Auto media sync, EXIF dates, dedup via xxHash32 (2-iteration collision resolution — append creationTime, then hash(name+creationTime)), same-title album disambiguation, sanitization of `/` in titles/ids, compression, error surface, album picker. Lib: `cameraUpload.ts`. |
-| `transfers` | Upload/download with progress, pause/resume, abort, error tracking, duplicate prevention via active ID sets; floating + full-list UI; Android foreground service. Lib: `transfers.ts`, `foregroundService.ts`. |
-| `offline` | Offline file cache: store, sync, list, index management (FileOrDirectoryOfflineMeta). Lib: `offline.ts`. |
-| `events` | Account activity log + event detail. |
-| `publicLink` | Public link preview screen. |
-| `incomingShare` | OS share-sheet target + incoming-intent handler. |
-| `settings` | More tab + account, security (+ biometric/twoFactor), fileProvider (File/Documents Provider toggle), appearance, advanced, fileProvider bridge. Lib: `fileProvider.ts`, `startScreen.ts`. |
-| `auth` | Login + register screens. (The SDK client lifecycle lives in `src/lib/auth.ts` — infra, not this feature.) |
+| Feature         | Owns                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `drive`         | File/dir browser, ops (favorite, rename, move, delete, trash, restore, share, search, setDirColor, createDirectory, updateTimestamps), context variants (favorites/recents/trash/links/sharedIn/sharedOut/offline), select/move/copy, item info, versions, color picker, linked file. Lib: `drive.ts`, `driveDownload.ts`; also `driveSortPreference.ts`, `driveSelectors.ts`. Socket: `handleDriveEvent`. |
+| `photos`        | Photo grid timeline (5 per row, creationDesc sort), photo bulk actions.                                                                                                                                                                                                                                                                                                                                    |
+| `notes`         | CRUD, content editing, tags, participants, history, export (single .txt / bulk .zip via JSZip), in-flight content sync. Lib: `notes.ts`, `notesSelectors.ts`. Socket: `handleNoteEvent`.                                                                                                                                                                                                                   |
+| `chats`         | Send/edit/delete messages, typing indicators, mark read, create/leave/delete chats, in-flight message sync, unread counts. Lib: `chats.ts` (Semaphore-protected refetch). Socket: `handleChatEvent`.                                                                                                                                                                                                       |
+| `contacts`      | Requests (accept/deny/cancel/send), block/unblock, delete; programmatic contact selection. Lib: `contacts.ts`, `contactsSelect.ts`.                                                                                                                                                                                                                                                                        |
+| `audio`         | Audio playback / playlist queue management with loop modes (track/list/off); metadata + cover art cache; playlists screens. Lib: `audio.ts` (singleton).                                                                                                                                                                                                                                                   |
+| `cameraUpload`  | Auto media sync, EXIF dates, dedup via xxHash32 (2-iteration collision resolution — append creationTime, then hash(name+creationTime)), same-title album disambiguation, sanitization of `/` in titles/ids, compression, error surface, album picker. Lib: `cameraUpload.ts`.                                                                                                                              |
+| `transfers`     | Upload/download with progress, pause/resume, abort, error tracking, duplicate prevention via active ID sets; floating + full-list UI; Android foreground service. Lib: `transfers.ts`, `foregroundService.ts`.                                                                                                                                                                                             |
+| `offline`       | Offline file cache: store, sync, list, index management (FileOrDirectoryOfflineMeta). Lib: `offline.ts`.                                                                                                                                                                                                                                                                                                   |
+| `events`        | Account activity log + event detail.                                                                                                                                                                                                                                                                                                                                                                       |
+| `publicLink`    | Public link preview screen.                                                                                                                                                                                                                                                                                                                                                                                |
+| `incomingShare` | OS share-sheet target + incoming-intent handler.                                                                                                                                                                                                                                                                                                                                                           |
+| `settings`      | More tab + account, security (+ biometric/twoFactor), fileProvider (File/Documents Provider toggle), appearance, advanced, fileProvider bridge. Lib: `fileProvider.ts`, `startScreen.ts`.                                                                                                                                                                                                                  |
+| `auth`          | Login + register screens. (The SDK client lifecycle lives in `src/lib/auth.ts` — infra, not this feature.)                                                                                                                                                                                                                                                                                                 |
 
 Note: `socketHandlers.ts` exists for `drive`/`chats`/`notes`/`contacts`
 (`handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`/`handleContactEvent`); the shell
@@ -73,10 +73,10 @@ Note: `socketHandlers.ts` exists for `drive`/`chats`/`notes`/`contacts`
 
 Three git submodules live directly under `packages/filen-mobile/` (pinned SHAs in repo-root `.gitmodules`):
 
-| Submodule | Role |
-|-|-|
-| `filen-rs/` | Rust monorepo. Source of the npm-shipped `@filen/sdk-rs` AND of `filen-mobile-native-cache` — a separate crate the iOS File Provider Extension and Android Documents Provider build against. |
-| `filen-ios-file-provider/` | Swift source for the iOS File Provider Extension. `withFileProvider.ts` plugin copies these files into the prebuilt Xcode project + builds the Rust xcframework + wires up the extension target. |
+| Submodule                           | Role                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `filen-rs/`                         | Rust monorepo. Source of the npm-shipped `@filen/sdk-rs` AND of `filen-mobile-native-cache` — a separate crate the iOS File Provider Extension and Android Documents Provider build against.                                                                                                                                      |
+| `filen-ios-file-provider/`          | Swift source for the iOS File Provider Extension. `withFileProvider.ts` plugin copies these files into the prebuilt Xcode project + builds the Rust xcframework + wires up the extension target.                                                                                                                                  |
 | `filen-android-documents-provider/` | Kotlin source for the Android Documents Provider (`io.filen.app.FilenDocumentsProvider`). `withAndroidRustBuild.ts` plugin builds the `.so` files via cargo-ndk, generates uniffi Kotlin bindings, copies the Kotlin class into `app/src/main/java/io/filen/app/`, and injects the `<provider>` element into AndroidManifest.xml. |
 
 Building the native cache requires **cargo-ndk pinned to 3.5.4** (see README — 4.x has bbqsrc/cargo-ndk#181 which breaks the heif-decoder ABI propagation).
@@ -135,7 +135,7 @@ routes/                       ← thin re-exports / wrappers into src/features/
 └── account, security/, fileProvider/, appearance, advanced  → features/settings
 ```
 
-Route params are packed with msgpackr + base64 (DriveItem, DrivePath, SelectOptions).
+Route params are packed with JSON serializer (DriveItem, DrivePath, SelectOptions).
 Programmatic selection: `selectDriveItems(options)`, `selectContacts(options)` → event-driven.
 
 ## Key Directories
@@ -158,49 +158,49 @@ src/tests/          Vitest tests + mocks for native modules
 
 Feature-agnostic only. Feature-specific UI moved into `src/features/<feature>/components/`.
 
-| Dir / file | Purpose |
-|-|-|
-| `ui/` | Base primitives (View, Text, Image, Header, Menu, VirtualList, ZoomableView, Button, Checkbox, …) + `settingsGroup`. See "UI Base" below. |
-| `textEditor/` | CodeMirror (markdown/code) + Quill (richtext) editors via WebView. Shared by notes. |
-| `drivePreview/` | Pinch-to-dismiss gallery + per-type renderers (image/video/audio/pdf/docx/text). |
-| `itemIcons/` | `FileIcon` (40+ extension mappings) + `DirectoryIcon` (colored SVG, DirColor enum). |
-| `floatingBar/` | Bottom bar above tabs: `index` + `audioSlot` + `transfersSlot` + `animatedProgressBar` + `separator`. |
-| `participants/` | Shared `participantRow` / `participantList` used by both notes and chats. |
-| `docxPreview/` | WebView-based `.docx` renderer. |
-| `shell/` | App-shell background/overlay components (subscribe to one concern, render no rows). `socket.tsx` keeps the WebSocket connection lifecycle + a dispatcher delegating to per-feature `socketHandlers.ts`. Shell also holds http, biometric, privacyCover, offlineBanner, accountReminders, pathname, dismissStack, cannotDecryptScreen. (foregroundService moved to features/transfers; incomingShareHandler moved to features/incomingShare.) |
+| Dir / file      | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ui/`           | Base primitives (View, Text, Image, Header, Menu, VirtualList, ZoomableView, Button, Checkbox, …) + `settingsGroup`. See "UI Base" below.                                                                                                                                                                                                                                                                                                    |
+| `textEditor/`   | CodeMirror (markdown/code) + Quill (richtext) editors via WebView. Shared by notes.                                                                                                                                                                                                                                                                                                                                                          |
+| `drivePreview/` | Pinch-to-dismiss gallery + per-type renderers (image/video/audio/pdf/docx/text).                                                                                                                                                                                                                                                                                                                                                             |
+| `itemIcons/`    | `FileIcon` (40+ extension mappings) + `DirectoryIcon` (colored SVG, DirColor enum).                                                                                                                                                                                                                                                                                                                                                          |
+| `floatingBar/`  | Bottom bar above tabs: `index` + `audioSlot` + `transfersSlot` + `animatedProgressBar` + `separator`.                                                                                                                                                                                                                                                                                                                                        |
+| `participants/` | Shared `participantRow` / `participantList` used by both notes and chats.                                                                                                                                                                                                                                                                                                                                                                    |
+| `docxPreview/`  | WebView-based `.docx` renderer.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `shell/`        | App-shell background/overlay components (subscribe to one concern, render no rows). `socket.tsx` keeps the WebSocket connection lifecycle + a dispatcher delegating to per-feature `socketHandlers.ts`. Shell also holds http, biometric, privacyCover, offlineBanner, accountReminders, pathname, dismissStack, cannotDecryptScreen. (foregroundService moved to features/transfers; incomingShareHandler moved to features/incomingShare.) |
 
 ## Lib Modules (src/lib/) — infra only
 
 Feature-specific libs (drive/notes/chats/contacts/audio/cameraUpload/offline/transfers/fileProvider/startScreen)
 all MOVED into their features. What remains is infrastructure shared across features:
 
-| Module | Purpose |
-|-|-|
-| `auth.ts` | SDK client init, login/logout, `useIsAuthed()` / `useSdkClients()` / `useStringifiedClient()` hooks. Calls `fileProvider.disable()` + cleanup on logout. (Stays infra — the auth *feature* is just login/register screens.) |
-| `bulkOps.ts` | Shared bulk-operation helpers (multi-item ops). |
-| `decryption.ts` | Shared decryption helpers. |
-| `thumbnails.ts` | Thumbnail generation: images (ImageManipulator resize) + videos (HTTP provider → expo-video), Semaphore(3) concurrency, max 3 failures per item. |
-| `sort.ts` | ItemSorter (name/size/mime/date, dirs-first, numeric-aware) + NotesSorter (pinned/archived/time-bucketed groups). |
-| `cache.ts` | PersistentMap<V> (extends Map with debounced SQLite persistence): uuid→DriveItem, uuid→dir/note/chat, availableThumbnails, **rootUuid**. |
-| `fileCache.ts` | File download cache (dedup keyed by `type:data`) with metadata index. Replaces ad-hoc download paths. |
-| `sandboxCache.ts` | OS sandbox cache wrapper (excludes filen-tmp/) — keeps measurable distinction between user-cleanable cache and active in-flight files. |
-| `clearBarrier.ts` | Synchronization primitive: many concurrent readers, exclusive clear() — used to safely wipe caches without racing in-flight reads. |
-| `fsUtils.ts` | File-system traversal (`walkLocalDirectory`) + cache size measurement helpers. |
-| `storageRoots.ts` | Single source of truth for on-disk storage paths + version constants. Anchors all cache/offline/tmp dirs. |
-| `tmp.ts` | Transient staging directory (filen-tmp/) for in-flight uploads, exports, and decode targets. `newTmpFile(name)`/`newTmpDir(name)`. |
-| `secureStore.ts` | Encrypted KV (expo-secure-store + MMKV fallback), AES-256-GCM encryption, event-driven cache invalidation. Exports `useSecureStore<T>(key, initialValue)` hook. |
-| `sqlite.ts` | SQLite KV for query persistence, WAL mode, 32MB mmap, 8MB cache, app group directory (iOS). |
-| `serializer.ts` | Shared msgpackr serializer setup (UniffiEnum, BigInt, TypedArray) used by sqlite/cache/route params. |
-| `utils.ts` | SDK type unwrapping, path normalization (SDK/Expo/BlobUtil), sanitizeFileName, getPreviewType, PauseSignal, composite signals. |
-| `exif.ts` | EXIF date parsing (DateTimeOriginal/Digitized/DateTime + SubSec + Offset) + orientation from raw bytes (JPEG/TIFF/HEIC/WebP). |
-| `time.ts` | Fast date/time formatting (Hermes-optimized, no Intl.DateTimeFormat), locale-aware YMD/MDY/DMY. |
-| `i18n.ts` / `language.ts` | Localization runtime + language preference (typed catalog under `src/locales/`). |
-| `theme.ts` | Theme tokens / theme preference. |
-| `events.ts` | Typed EventEmitter (secureStore, actionSheet, driveSelect, contactsSelect, chatConversationDeleted, noteContentEdited, etc.). |
-| `prompts.ts` | Native alert/input dialogs (@blazejkustra/react-native-alert). |
-| `alerts.tsx` | Toast notifications (Burnt) and error banners (Notifier) with FilenSdkError unwrapping. |
-| `reconnect.ts` | Online-transition handler — on offline→online flip, kicks `cameraUpload.sync()`, `offline.sync()`, `notesSync.executeNow()`, `chatsSync.syncNow()`. |
-| `setup.ts` | App init: auth check → SDK → SecureStore → SQLite → restore queries → restore cache (Semaphore-protected). |
+| Module                    | Purpose                                                                                                                                                                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth.ts`                 | SDK client init, login/logout, `useIsAuthed()` / `useSdkClients()` / `useStringifiedClient()` hooks. Calls `fileProvider.disable()` + cleanup on logout. (Stays infra — the auth _feature_ is just login/register screens.) |
+| `bulkOps.ts`              | Shared bulk-operation helpers (multi-item ops).                                                                                                                                                                             |
+| `decryption.ts`           | Shared decryption helpers.                                                                                                                                                                                                  |
+| `thumbnails.ts`           | Thumbnail generation: images (ImageManipulator resize) + videos (HTTP provider → expo-video), Semaphore(3) concurrency, max 3 failures per item.                                                                            |
+| `sort.ts`                 | ItemSorter (name/size/mime/date, dirs-first, numeric-aware) + NotesSorter (pinned/archived/time-bucketed groups).                                                                                                           |
+| `cache.ts`                | PersistentMap<V> (extends Map with debounced SQLite persistence): uuid→DriveItem, uuid→dir/note/chat, availableThumbnails, **rootUuid**.                                                                                    |
+| `fileCache.ts`            | File download cache (dedup keyed by `type:data`) with metadata index. Replaces ad-hoc download paths.                                                                                                                       |
+| `sandboxCache.ts`         | OS sandbox cache wrapper (excludes filen-tmp/) — keeps measurable distinction between user-cleanable cache and active in-flight files.                                                                                      |
+| `clearBarrier.ts`         | Synchronization primitive: many concurrent readers, exclusive clear() — used to safely wipe caches without racing in-flight reads.                                                                                          |
+| `fsUtils.ts`              | File-system traversal (`walkLocalDirectory`) + cache size measurement helpers.                                                                                                                                              |
+| `storageRoots.ts`         | Single source of truth for on-disk storage paths + version constants. Anchors all cache/offline/tmp dirs.                                                                                                                   |
+| `tmp.ts`                  | Transient staging directory (filen-tmp/) for in-flight uploads, exports, and decode targets. `newTmpFile(name)`/`newTmpDir(name)`.                                                                                          |
+| `secureStore.ts`          | Encrypted KV (expo-secure-store + MMKV fallback), AES-256-GCM encryption, event-driven cache invalidation. Exports `useSecureStore<T>(key, initialValue)` hook.                                                             |
+| `sqlite.ts`               | SQLite KV for query persistence, WAL mode, 32MB mmap, 8MB cache, app group directory (iOS).                                                                                                                                 |
+| `serializer.ts`           | Shared JSON serializer setup (UniffiEnum, BigInt, TypedArray) used by sqlite/cache/route params.                                                                                                                            |
+| `utils.ts`                | SDK type unwrapping, path normalization (SDK/Expo/BlobUtil), sanitizeFileName, getPreviewType, PauseSignal, composite signals.                                                                                              |
+| `exif.ts`                 | EXIF date parsing (DateTimeOriginal/Digitized/DateTime + SubSec + Offset) + orientation from raw bytes (JPEG/TIFF/HEIC/WebP).                                                                                               |
+| `time.ts`                 | Fast date/time formatting (Hermes-optimized, no Intl.DateTimeFormat), locale-aware YMD/MDY/DMY.                                                                                                                             |
+| `i18n.ts` / `language.ts` | Localization runtime + language preference (typed catalog under `src/locales/`).                                                                                                                                            |
+| `theme.ts`                | Theme tokens / theme preference.                                                                                                                                                                                            |
+| `events.ts`               | Typed EventEmitter (secureStore, actionSheet, driveSelect, contactsSelect, chatConversationDeleted, noteContentEdited, etc.).                                                                                               |
+| `prompts.ts`              | Native alert/input dialogs (@blazejkustra/react-native-alert).                                                                                                                                                              |
+| `alerts.tsx`              | Toast notifications (Burnt) and error banners (Notifier) with FilenSdkError unwrapping.                                                                                                                                     |
+| `reconnect.ts`            | Online-transition handler — on offline→online flip, kicks `cameraUpload.sync()`, `offline.sync()`, `notesSync.executeNow()`, `chatsSync.syncNow()`.                                                                         |
+| `setup.ts`                | App init: auth check → SDK → SecureStore → SQLite → restore queries → restore cache (Semaphore-protected).                                                                                                                  |
 
 `src/lib/polyfills/` — DOMException, Buffer, console-replacement, crypto loaded in order from `src/global.ts`.
 
@@ -209,17 +209,17 @@ all MOVED into their features. What remains is infrastructure shared across feat
 Feature-specific hooks (useChatUnreadCount, useDriveUpload, useDriveSearch, usePhotoBulkActions, …)
 moved into their features. Shared ones:
 
-| Hook | Signature | Purpose |
-|-|-|-|
-| `useDrivePath` | `() => DrivePath` | Parses route + URL params → {type, uuid, selectOptions} |
-| `useIsOnline` | `() => boolean` | Reactive sync with TanStack `onlineManager` — single source of truth for online state |
-| `useIsAppActive` | `() => boolean` | AppState listener (active/background/inactive) |
-| `useViewLayout` | `(ref) => {layout, onLayout}` | Tracks View dimensions via onLayout/measureInWindow |
-| `useFloatingBarOffset` | `() => number` | Floating-bar offset above tabs (iOS 49pt + safe area, Android 80dp) |
-| `useDeviceDiskSpace` | `() => …` | Device free/total disk space |
-| `useMediaPermissions` | `({shouldRequest?}) => {loading, granted}` | Media library + image picker permissions w/ AppState refresh. Module also exports `hasAllNeededMediaPermissions()` |
-| `useEffectOnce` | `(effect) => void` | Runs effect callback once per component lifetime |
-| `useDomEvents/` | (subdir) | `useDomDomEvents` (WebView↔Native) + `useNativeDomEvents` (Native↔DOM for Expo DOM components) |
+| Hook                   | Signature                                  | Purpose                                                                                                            |
+| ---------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `useDrivePath`         | `() => DrivePath`                          | Parses route + URL params → {type, uuid, selectOptions}                                                            |
+| `useIsOnline`          | `() => boolean`                            | Reactive sync with TanStack `onlineManager` — single source of truth for online state                              |
+| `useIsAppActive`       | `() => boolean`                            | AppState listener (active/background/inactive)                                                                     |
+| `useViewLayout`        | `(ref) => {layout, onLayout}`              | Tracks View dimensions via onLayout/measureInWindow                                                                |
+| `useFloatingBarOffset` | `() => number`                             | Floating-bar offset above tabs (iOS 49pt + safe area, Android 80dp)                                                |
+| `useDeviceDiskSpace`   | `() => …`                                  | Device free/total disk space                                                                                       |
+| `useMediaPermissions`  | `({shouldRequest?}) => {loading, granted}` | Media library + image picker permissions w/ AppState refresh. Module also exports `hasAllNeededMediaPermissions()` |
+| `useEffectOnce`        | `(effect) => void`                         | Runs effect callback once per component lifetime                                                                   |
+| `useDomEvents/`        | (subdir)                                   | `useDomDomEvents` (WebView↔Native) + `useNativeDomEvents` (Native↔DOM for Expo DOM components)                     |
 
 Note: `useNetInfo` and `useHeaderHeight` were removed in favor of `useIsOnline` (which routes through onlineManager) and inline `@react-navigation/elements` reads respectively.
 
@@ -227,14 +227,14 @@ Note: `useNetInfo` and `useHeaderHeight` were removed in favor of `useIsOnline` 
 
 Feature stores moved into `src/features/<feature>/store/`. What remains is shared/shell state:
 
-| Store | Key State |
-|-|-|
-| `useApp` | `pathname`, `biometricUnlocked: boolean \| null` |
-| `useSocket` | `state: "connected" \| "disconnected" \| "reconnecting"` |
-| `useHttp` | `port: number \| null`, `getFileUrl: (file: AnyFile) => string` (subscribeWithSelector middleware) |
-| `useDrivePreview` | `currentItem`, `items`, `headerHeight`, `drivePath`, scroll index (gallery state) |
-| `useRichtext` | formats: QuillFormats (state of the shared `components/textEditor`) |
-| `useTextEditor` | ready: boolean (state of the shared `components/textEditor`) |
+| Store             | Key State                                                                                          |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `useApp`          | `pathname`, `biometricUnlocked: boolean \| null`                                                   |
+| `useSocket`       | `state: "connected" \| "disconnected" \| "reconnecting"`                                           |
+| `useHttp`         | `port: number \| null`, `getFileUrl: (file: AnyFile) => string` (subscribeWithSelector middleware) |
+| `useDrivePreview` | `currentItem`, `items`, `headerHeight`, `drivePath`, scroll index (gallery state)                  |
+| `useRichtext`     | formats: QuillFormats (state of the shared `components/textEditor`)                                |
+| `useTextEditor`   | ready: boolean (state of the shared `components/textEditor`)                                       |
 
 (`useFileVersions` → `features/drive/store/`, `useChecklist` → `features/notes/store/` — relocated to their owning feature.)
 
@@ -245,19 +245,19 @@ Feature stores moved into `src/features/<feature>/store/`. What remains is share
 Feature queries (drive items, chats, notes, contacts, events, audio metadata, …) moved into
 `src/features/<feature>/queries/`. The file-access queries stayed shared (used by drive/photos/chats/preview).
 
-All use `BASE_QUERY_KEY` prefix, `fetchData` pattern, SQLite persistence via msgpackr.
+All use `BASE_QUERY_KEY` prefix, `fetchData` pattern, SQLite persistence via custom JSON serializer.
 Default: refetchOnMount/Reconnect/Focus: "always", staleTime: 0, gcTime: 365 days, networkMode: "always".
 Eternal variant: staleTime/gcTime: Infinity, no refetch (for unchanging data).
 
-| Query | Params | Returns |
-|-|-|-|
-| `useFileUrlQuery` | {item} | HTTP URL via Http provider (use this for serving file bytes to webview/players) |
-| `useFileUriQuery` | {item} | Local file URI (cached or freshly downloaded) |
-| `useFileTextQuery` | {item} | UTF-8 text body |
-| `useFileBase64Query` | {item} | base64 string body |
-| `useAccountQuery` | — | account / user info (incl. `didExportMasterKeys`) |
-| `useLocalAuthenticationQuery` | — | `{hasHardware, isEnrolled}` device biometric capability |
-| `useMediaPermissionsQuery` | — | media library permission status |
+| Query                         | Params | Returns                                                                         |
+| ----------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `useFileUrlQuery`             | {item} | HTTP URL via Http provider (use this for serving file bytes to webview/players) |
+| `useFileUriQuery`             | {item} | Local file URI (cached or freshly downloaded)                                   |
+| `useFileTextQuery`            | {item} | UTF-8 text body                                                                 |
+| `useFileBase64Query`          | {item} | base64 string body                                                              |
+| `useAccountQuery`             | —      | account / user info (incl. `didExportMasterKeys`)                               |
+| `useLocalAuthenticationQuery` | —      | `{hasHardware, isEnrolled}` device biometric capability                         |
+| `useMediaPermissionsQuery`    | —      | media library permission status                                                 |
 
 `client.ts` exports: `QueryUpdater` class (get/set cache), `queryUpdater` singleton, and `useDefaultQueryParams`.
 `onlineStatus.ts` adapts NetInfo → TanStack `onlineManager`.
@@ -279,6 +279,7 @@ DriveItemDirectoryExtracted = all dir/root types
 ## Component Patterns
 
 ### UI Base (`components/ui/`)
+
 - `View` / `KeyboardAvoidingView` / `KeyboardAwareScrollView` / `KeyboardStickyView` — Uniwind-wrapped
 - `BlurView` / `LiquidGlassView` / `CrossGlassContainerView` — glassmorphism (expo-blur + expo-glass-effect)
 - `Text` — Uniwind + foreground color default (react-native-boost)
@@ -293,6 +294,7 @@ DriveItemDirectoryExtracted = all dir/root types
 - `SafeAreaView`, `AnimatedView`, `Button`, `Checkbox`, `ListEmpty`, `Avatar`, `Measure`
 
 ### Drive (`features/drive/components/`)
+
 - Main `Drive` component: item list with sorting/selection, search (local + debounced global)
 - `Item`: thumbnail + metadata row + context menu + selection checkbox + offline/favorite badges
 - `Thumbnail`: lazy generation via thumbnails lib, retry logic (max 3), abort on background
@@ -301,10 +303,12 @@ DriveItemDirectoryExtracted = all dir/root types
 - `DateComponent` + `Size`: formatted metadata subcomponents
 
 ### Item Icons (`components/itemIcons/`)
+
 - `FileIcon`: 40+ extension-to-icon mappings
 - `DirectoryIcon`: colored SVG generation with DirColor enum, `directoryColorToHex()`, `shadeColor()`
 
 ### Chats (`features/chats/components/`)
+
 - Chat list with search, selection, create/leave/delete/mute actions
 - Message bubbles with grouping (same author < 1 min), edited badges, context menus
 - `Regexed`: regex-parsed message content (links, @mentions, custom emojis, embeds)
@@ -312,32 +316,40 @@ DriveItemDirectoryExtracted = all dir/root types
 - `ChatSync`: persists/restores in-flight messages via SQLite
 
 ### Notes (`features/notes/components/`)
+
 - Note list with tag filtering, grouped by pinned/favorited/time-bucket/archived/trashed
 - Content editors delegate to TextEditor (markdown/richtext/code) or Checklist component
 - Tag management with rename/delete/favorite
 - `NotesSync`: persists/restores in-flight content edits via SQLite
 
 ### Text Editors (`components/textEditor/`)
+
 - `TextEditor`: wrapper selecting editor by note type
 - `TextEditorDOM` / `codeMirror.ts`: CodeMirror via WebView (markdown/code, 20+ language syntaxes)
 - `RichText/` subdir: Quill.js via WebView (bold/italic/underline/headers/lists/code/links)
 - `markdownPreviewButton.tsx`: format action buttons
 
 ### Drive Preview (`components/drivePreview/`)
+
 - `gallery` + `galleryItem` + `header` — pinch-to-dismiss image/video/audio gallery
 - `previewAudio` / `previewVideo` / `previewImage` / `previewPdf` / `previewDocx` / `previewText` — per-type renderers
 
 ### Participants (`components/participants/`)
+
 - `participantRow` / `participantList` — shared participant UI used by both notes and chats
 
 ### Docx Preview (`components/docxPreview/`)
+
 - WebView-based renderer for `.docx`
 
 ### Floating Bar (`components/floatingBar/`)
+
 - `index` + `audioSlot` + `transfersSlot` + `animatedProgressBar` + `separator` — bottom bar above tabs showing active transfers and audio playback
 
 ### Shell components (`components/shell/`)
+
 Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never render their own UI rows.
+
 - `socket.tsx` — WebSocket connection lifecycle + dispatcher → delegates per-feature events to `handleDriveEvent`/`handleChatEvent`/`handleNoteEvent`/`handleContactEvent`
 - `http.tsx` — HTTP provider lifecycle (start on foreground, stop on background) for file serving
 - `pathname.tsx` — syncs router pathname to `useApp` store
@@ -351,6 +363,7 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
 (Feature-owned background components: `foregroundService` → features/transfers (Android FGS for active transfers, notifee); `incomingShareHandler` → features/incomingShare (OS share-sheet items); notes/chats in-flight `sync` → their features.)
 
 ### Transfers (`features/transfers/components/`)
+
 - Floating progress indicator: active count, speed (bps), progress bar
 - Full transfers list in modal route
 
@@ -361,19 +374,19 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
 - **Styling**: Tailwind CSS v4 + Uniwind, global.css with dark theme (OLED black #000000), iOS system color palette
 - **Metro**: crypto/stream/path polyfills, Uniwind CSS + TS type generation
 - **Babel**: babel-preset-expo + react-native-worklets/plugin
-- **Testing**: Vitest (node env), path alias `@` → `./src`, react-native + expo-* modules mocked under `src/tests/mocks/`. Submodule trees excluded.
+- **Testing**: Vitest (node env), path alias `@` → `./src`, react-native + expo-\* modules mocked under `src/tests/mocks/`. Submodule trees excluded.
 - **iOS**: deployment target **26.0**, app group `group.io.filen.app`, iCloud, 26 localizations, UIBackgroundModes: audio/fetch/processing, Apple team `7YTW5D2K7P`
-- **Android**: min SDK **33**, target SDK **36**, compile SDK 36, build tools 36.0.0; 23 permissions (incl. MANAGE_DOCUMENTS for the documents provider, ACTION_OPEN_DOCUMENT/_TREE for incoming intents); Hermes; predictiveBackGestureEnabled: false; allowBackup: false
+- **Android**: min SDK **33**, target SDK **36**, compile SDK 36, build tools 36.0.0; 23 permissions (incl. MANAGE_DOCUMENTS for the documents provider, ACTION_OPEN_DOCUMENT/\_TREE for incoming intents); Hermes; predictiveBackGestureEnabled: false; allowBackup: false
 - **Stock Expo plugins** (in app.config.ts plugins array): expo-plugin-ios-static-libraries (op-sqlite), expo-build-properties, expo-router (typed routes + React compiler), expo-splash-screen, expo-video, expo-audio, expo-media-library, expo-document-picker, expo-image-picker, expo-local-authentication, expo-sqlite, expo-localization, expo-background-task, expo-secure-store, expo-navigation-bar, expo-asset, expo-sharing (with iOS app-group activation rules), expo-web-browser, expo-image, react-native-edge-to-edge, react-native-document-scanner-plugin, @config-plugins/react-native-blob-util
 - **Custom Expo plugins** (`packages/filen-mobile/plugins/`):
-  - `withOPSQLiteAppGroup.ts` — points op-sqlite at the iOS app group container for cross-process DB access
-  - `withFileProvider.ts` — iOS File Provider Extension target + Rust xcframework build (cargo + uniffi-bindgen-swift + xcodebuild)
-  - `withAndroidRustBuild.ts` — Android `.so` build via cargo-ndk + uniffi-bindgen Kotlin + manifest `<provider>` injection
-  - `withAndroidArchitectures.ts` — pins `reactNativeArchitectures` to the ABIs the Rust cache targets (`arm64-v8a,x86_64`)
-  - `withAndroidLargeHeapAndHardwareAcceleration.ts` — manifest tweaks
-  - `withAndroidNetworkSecurityConfig.ts` — restrictive network security policy
-  - `withGradleMemory.ts` — `org.gradle.jvmargs` for big native builds
-  - `withNotifeeForegroundServiceType.ts` — notifee FGS type for transfers
+    - `withOPSQLiteAppGroup.ts` — points op-sqlite at the iOS app group container for cross-process DB access
+    - `withFileProvider.ts` — iOS File Provider Extension target + Rust xcframework build (cargo + uniffi-bindgen-swift + xcodebuild)
+    - `withAndroidRustBuild.ts` — Android `.so` build via cargo-ndk + uniffi-bindgen Kotlin + manifest `<provider>` injection
+    - `withAndroidArchitectures.ts` — pins `reactNativeArchitectures` to the ABIs the Rust cache targets (`arm64-v8a,x86_64`)
+    - `withAndroidLargeHeapAndHardwareAcceleration.ts` — manifest tweaks
+    - `withAndroidNetworkSecurityConfig.ts` — restrictive network security policy
+    - `withGradleMemory.ts` — `org.gradle.jvmargs` for big native builds
+    - `withNotifeeForegroundServiceType.ts` — notifee FGS type for transfers
 - **Scripts**: `npm run verify` = lint + typecheck + test; `npm run clean` = `.expo/`; `npm run superclean` = `.expo/` + DerivedData + `.gradle/` + Rust target dirs; `npm run prebuild:clean` = clean + expo prebuild --clean; `npm run prebuild:ci:{ios,android}` = superclean + prebuild for one platform
 - **patch-package**: applied via `scripts/postinstall.sh`. Patches in `patches/` cover xcode 3.0.1 (file-provider `addResourceFile` null guard) and expo-media-library version-bumped patches.
 - **cargo-ndk** pinned to 3.5.4 for prebuild (bbqsrc/cargo-ndk#181 — see README)
@@ -391,7 +404,7 @@ const signal = wrapAbortSignalForSdk(abortController.signal)
 const composite = createCompositeAbortSignal(signal1, signal2)
 
 // Unwrap SDK tagged union types
-const unwrapped = unwrapDirMeta(dir)  // → { meta, uuid, shared, linked, root, dir }
+const unwrapped = unwrapDirMeta(dir) // → { meta, uuid, shared, linked, root, dir }
 const unwrapped = unwrapFileMeta(file) // → { meta, shared, linked, root, file }
 
 // Convert to app DriveItem type
@@ -399,8 +412,8 @@ const item = unwrappedDirIntoDriveItem(unwrapped)
 const item = unwrappedFileIntoDriveItem(unwrapped)
 
 // Normalize paths for SDK vs Expo vs BlobUtil
-normalizeFilePathForSdk(path)   // → "/decoded/path"
-normalizeFilePathForExpo(path)  // → "file:///encoded/path"
+normalizeFilePathForSdk(path) // → "/decoded/path"
+normalizeFilePathForExpo(path) // → "file:///encoded/path"
 
 // Handle SDK errors
 const sdkError = unwrapSdkError(error) // → FilenSdkError | null
@@ -427,11 +440,14 @@ const url = getFileUrl(anyFile) // → http://localhost:{port}/...
 - **Concurrency control** via Semaphores + composite abort/pause signals
 - **Event-driven cache invalidation** via typed EventEmitter
 - **Debounced persistence** for in-memory PersistentMap caches to SQLite
-- **msgpackr serialization** with UniffiEnum extension for query/cache persistence
+- **custom JSON serialization** with UniffiEnum extension for query/cache persistence
 - **Focus-aware queries** — refetch on screen focus, pause off-screen re-renders
 - **Online state via `useIsOnline`** — single source of truth bridged to TanStack `onlineManager` via `queries/onlineStatus.ts`. Don't read NetInfo directly in components.
 - **Reconnect handler** (`src/lib/reconnect.ts`) — kicks deferred sync of camera upload, offline cache, notes, chats on every offline→online transition
 - **Root overlay coordination** — Biometric/PrivacyCover lock paint; any new global side-effect must gate on `useAppStore.biometricUnlocked === true` AND `AppState === "active"` before firing
 - **Storage roots** — `src/lib/storageRoots.ts` is the only place that constructs cache/offline/tmp paths. Reference its constants; don't compute paths inline.
 - **Per-feature socket handlers** — the shell `socket.tsx` owns the connection lifecycle + dispatcher; per-feature `socketHandlers.ts` own their slice of events.
+
+```
+
 ```
