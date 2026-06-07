@@ -27,6 +27,13 @@ export const settings = {
 	/** More-menu row: advanced settings (caches, debug) */
 	advanced: "Advanced",
 
+	// ── Offline settings screen ───────────────────────────────────────────────
+	// (screen title reuses the existing `offline` key from drive.ts)
+	/** Offline settings — toggle title: restrict offline syncing to Wi-Fi */
+	sync_offline_on_wifi_only: "Sync on Wi-Fi only",
+	/** Offline settings — subtitle under the Wi-Fi-only toggle */
+	sync_offline_on_wifi_only_description: "Only sync your offline files when connected to Wi-Fi.",
+
 	// ── File / Documents Provider (platform-conditional) ──────────────────────
 	/** iOS-only feature name: integration with the system Files app (File Provider extension) */
 	file_provider: "File Provider",

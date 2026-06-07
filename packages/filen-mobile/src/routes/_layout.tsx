@@ -276,6 +276,10 @@ const RootLayout = () => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="offlineSettings"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="advanced"
 												options={modalOptions}
 											/>

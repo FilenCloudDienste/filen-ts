@@ -33,7 +33,15 @@ import { normalizeFilePathForSdk, extractPathInsideUuidDirectory } from "@/lib/p
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import { atomicWrite, parentCacheKey, type OfflineParent } from "@/features/offline/offlineHelpers"
+import {
+	atomicWrite,
+	parentCacheKey,
+	shouldSkipOfflineSyncForConnection,
+	OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY,
+	type OfflineParent
+} from "@/features/offline/offlineHelpers"
+import secureStore from "@/lib/secureStore"
+import NetInfo from "@react-native-community/netinfo"
 import { validateUuid } from "@/lib/uuid"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { onlineManager } from "@tanstack/react-query"
@@ -575,6 +583,20 @@ export class Offline {
 				// mode (setup.ts fire-and-forget) and for any future caller.
 				if (!onlineManager.isOnline()) {
 					return
+				}
+
+				// Respect the "Sync offline files on Wi-Fi only" setting (default off → always sync).
+				// Mirrors camera upload: skip the automatic sync over cellular. Explicit, user-initiated
+				// store calls (storeFile/storeDirectory) are intentionally NOT gated — only this
+				// background sync is. Skip the NetInfo round-trip entirely when the setting is off.
+				const wifiOnly = (await secureStore.get<boolean>(OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY)) === true
+
+				if (wifiOnly) {
+					const connectionType = (await NetInfo.fetch()).type
+
+					if (shouldSkipOfflineSyncForConnection({ wifiOnly, connectionType })) {
+						return
+					}
 				}
 
 				this.ensureDirectories()

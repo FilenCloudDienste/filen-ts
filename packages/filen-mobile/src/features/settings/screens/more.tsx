@@ -210,6 +210,13 @@ function More() {
 								}
 							},
 							{
+								icon: "cloud-offline-outline",
+								title: t("offline"),
+								onPress: () => {
+									router.push("/offlineSettings")
+								}
+							},
+							{
 								icon: "color-palette-outline",
 								title: t("appearance"),
 								onPress: () => {
