@@ -46,18 +46,13 @@ const setup = {
 				cache.rootUuid = isAuthed.stringifiedClient.rootUuid
 			}
 
-			await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries()])
-
-			// Initialize i18next after secureStore.init() resolves (needs the persisted-language
-			// read) and before setup returns — RootLayout renders null until setup is done, so
-			// i18n is ready before first paint (no flash of raw keys). Serial-awaited, not folded
-			// into the Promise.all above (would race the secureStore read).
-			await initI18n()
-
-			// Apply the persisted theme override (light/dark) before first paint, same reasoning as
-			// initI18n — RootLayout renders null until setup is done, so there's no flash of the wrong
-			// theme. No-op when the user follows the system (uniwind already defaults to it on import).
-			await initTheme()
+			// initI18n / initTheme only read the persisted language / theme from secureStore, which
+			// auth.isAuthed() above already initialized — so they run inside this Promise.all to overlap
+			// with the SQLite/cache restore instead of serializing after it. They stay awaited: RootLayout
+			// renders null until setup resolves, so i18n and the theme override are applied before first
+			// paint (no flash of raw keys or the wrong theme). initTheme is a no-op when following the
+			// system (uniwind already defaults to it on import).
+			await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries(), initI18n(), initTheme()])
 
 			// Wire the reconnect-replay listener after the query cache is hydrated.
 			// Idempotent — only attaches the onlineManager subscription on first call.
