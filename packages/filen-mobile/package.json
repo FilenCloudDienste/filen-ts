@@ -112,6 +112,7 @@
     "expo-system-ui": "~56.0.5",
     "expo-task-manager": "~56.0.17",
     "expo-video": "~56.1.2",
+    "expo-video-thumbnails": "~56.0.3",
     "i18next": "^26.3.1",
     "intl-pluralrules": "^2.0.1",
     "js-xxhash": "^5.0.1",

@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import * as ImageManipulator from "expo-image-manipulator"
-import { type VideoThumbnail, createVideoPlayer } from "expo-video"
+import * as VideoThumbnails from "expo-video-thumbnails"
 import { AnyFile } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { normalizeFilePathForExpo } from "@/lib/paths"
@@ -55,62 +55,18 @@ export async function generateVideo(
 			throw abortError(params.signal)
 		}
 
-		const player = createVideoPlayer(url)
-
-		// The defer below releases the player on every exit path including abort.
-		// Do NOT register a separate onAbort handler that also calls release() — that would double-release a native SharedObject.
-		defer(() => {
-			player.release()
-		})
-
-		if (player.status !== "readyToPlay") {
-			await new Promise<void>((resolve, reject) => {
-				if (params.signal?.aborted) {
-					reject(abortError(params.signal))
-
-					return
-				}
-
-				const cleanup = () => {
-					subscription.remove()
-
-					params.signal?.removeEventListener("abort", onAbort)
-				}
-
-				const subscription = player.addListener("statusChange", ({ status, error }) => {
-					if (status === "readyToPlay") {
-						cleanup()
-
-						resolve()
-					} else if (status === "error") {
-						cleanup()
-
-						reject(new Error(error?.message ?? "Video player failed to load"))
-					}
-				})
-
-				const onAbort = () => {
-					cleanup()
-
-					reject(abortError(params.signal))
-				}
-
-				params.signal?.addEventListener("abort", onAbort, {
-					once: true
-				})
-			})
-		}
-
-		if (params.signal?.aborted) {
-			throw abortError(params.signal)
-		}
-
-		let thumbnails: VideoThumbnail[]
+		// Extract the frame to a FILE rather than an in-memory SharedRef. Feeding a
+		// cross-module SharedRef (expo-video's VideoThumbnail) into the sync
+		// ImageManipulator.manipulate(Either<URL, SharedRef>) traps in the SDK 56
+		// ExpoModulesJSI getAny() layer; a file URI takes the safe string path that
+		// the image flow already uses. getThumbnailAsync takes the time in ms and
+		// extracts at full quality — the single lossy step is the WEBP save below.
+		let thumbnail: VideoThumbnails.VideoThumbnailsResult
 
 		try {
-			thumbnails = await player.generateThumbnailsAsync([params.timestamp], {
-				maxWidth: params.width,
-				maxHeight: params.width
+			thumbnail = await VideoThumbnails.getThumbnailAsync(url, {
+				time: Math.max(0, Math.round(params.timestamp * 1000)),
+				quality: 1
 			})
 		} catch (error) {
 			if (params.signal?.aborted) {
@@ -122,19 +78,32 @@ export async function generateVideo(
 			throw new Error(`Video thumbnail extraction failed at ${params.timestamp}s: ${message}`)
 		}
 
+		// getThumbnailAsync writes an intermediate frame file we no longer need once
+		// it's been resized/re-encoded into the WEBP output.
+		const sourceFile = new FileSystem.File(thumbnail.uri)
+
+		defer(() => {
+			try {
+				if (sourceFile.exists) {
+					sourceFile.delete()
+				}
+			} catch {
+				// Best-effort cleanup of the intermediate extraction file
+			}
+		})
+
 		if (params.signal?.aborted) {
 			throw abortError(params.signal)
 		}
 
-		const thumbnail = thumbnails[0] as VideoThumbnail | undefined
-
-		if (!thumbnail) {
-			throw new Error("No thumbnail generated")
-		}
-
-		// See generateImage: hold Context across renderAsync to prevent Hermes GC from
-		// cancelling the underlying coroutine task via sharedObjectDidRelease.
-		const context = ImageManipulator.ImageManipulator.manipulate(thumbnail)
+		// Resize + re-encode to WEBP via the same string-URI path the image flow uses.
+		// Hold the Context in a local binding across the await (see generateImage):
+		// expo-image-manipulator's Context cancels its underlying coroutine task on
+		// sharedObjectDidRelease, so letting it become Hermes-GC-eligible during
+		// renderAsync would reject with JobCancellationException.
+		const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(thumbnail.uri)).resize({
+			width: params.width
+		})
 
 		let manipulated: ImageManipulator.ImageRef | null = null
 

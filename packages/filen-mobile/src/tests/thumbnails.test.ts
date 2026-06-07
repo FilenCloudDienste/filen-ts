@@ -6,10 +6,7 @@ const {
 	mockResize,
 	mockRotate,
 	mockManipulate,
-	mockGenerateThumbnailsAsync,
-	mockRelease,
-	mockAddListener,
-	mockCreateVideoPlayer,
+	mockGetThumbnailAsync,
 	mockDownloadFileToPath,
 	mockGetSdkClients,
 	mockGetFileUrl,
@@ -29,15 +26,7 @@ const {
 		renderAsync: mockRenderAsync
 	})
 
-	const mockGenerateThumbnailsAsync = vi.fn().mockResolvedValue([{ width: 128, height: 144 }])
-	const mockRelease = vi.fn()
-	const mockAddListener = vi.fn()
-	const mockCreateVideoPlayer = vi.fn(() => ({
-		status: "readyToPlay" as string,
-		generateThumbnailsAsync: mockGenerateThumbnailsAsync,
-		release: mockRelease,
-		addListener: mockAddListener
-	}))
+	const mockGetThumbnailAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/vidframe.jpg", width: 1920, height: 1080 })
 
 	const mockDownloadFileToPath = vi.fn().mockResolvedValue(undefined)
 	const mockGetSdkClients = vi.fn().mockResolvedValue({
@@ -69,10 +58,7 @@ const {
 		mockResize,
 		mockRotate,
 		mockManipulate,
-		mockGenerateThumbnailsAsync,
-		mockRelease,
-		mockAddListener,
-		mockCreateVideoPlayer,
+		mockGetThumbnailAsync,
 		mockDownloadFileToPath,
 		mockGetSdkClients,
 		mockGetFileUrl,
@@ -101,8 +87,8 @@ vi.mock("expo-image-manipulator", () => ({
 	}
 }))
 
-vi.mock("expo-video", () => ({
-	createVideoPlayer: mockCreateVideoPlayer
+vi.mock("expo-video-thumbnails", () => ({
+	getThumbnailAsync: mockGetThumbnailAsync
 }))
 
 vi.mock("@filen/sdk-rs", () => {
@@ -285,13 +271,7 @@ describe("Thumbnails", () => {
 			fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
 		})
 
-		mockGenerateThumbnailsAsync.mockResolvedValue([{ width: 128, height: 144 }])
-		mockCreateVideoPlayer.mockReturnValue({
-			status: "readyToPlay",
-			generateThumbnailsAsync: mockGenerateThumbnailsAsync,
-			release: mockRelease,
-			addListener: mockAddListener
-		})
+		mockGetThumbnailAsync.mockResolvedValue({ uri: "file:///cache/vidframe.jpg", width: 1920, height: 1080 })
 
 		mockHttpStoreState.port = 8080
 		mockHttpStoreState.getFileUrl = mockGetFileUrl
@@ -475,88 +455,29 @@ describe("Thumbnails", () => {
 			const item = makeFileItem("video-uuid", "clip.mp4")
 			const result = await thumbnails.generate({ item })
 
-			expect(mockCreateVideoPlayer).toHaveBeenCalledTimes(1)
-			expect(mockCreateVideoPlayer).toHaveBeenCalledWith(expect.stringContaining("http://localhost:8080/file/video-uuid"))
-			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith([1.0], {
-				maxWidth: 128,
-				maxHeight: 128
+			expect(mockGetThumbnailAsync).toHaveBeenCalledTimes(1)
+			expect(mockGetThumbnailAsync).toHaveBeenCalledWith(expect.stringContaining("http://localhost:8080/file/video-uuid"), {
+				time: 1000,
+				quality: 1
 			})
 			expect(mockManipulate).toHaveBeenCalledTimes(1)
+			expect(mockResize).toHaveBeenCalledWith({ width: 128 })
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
-			expect(mockRelease).toHaveBeenCalledTimes(1)
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/video-uuid.webp`)
 		})
 
-		it("uses custom video timestamp when specified", async () => {
+		it("uses custom video timestamp when specified (seconds → ms)", async () => {
 			const item = makeFileItem("vid-custom-ts", "clip.mp4")
 			await thumbnails.generate({
 				item,
 				videoTimestamp: 5.0
 			})
 
-			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledWith([5.0], expect.any(Object))
-		})
-
-		it("waits for player to be ready before generating thumbnails", async () => {
-			let statusCallback: ((payload: any) => void) | null = null
-			const listenerRegistered = new Promise<void>(resolve => {
-				mockCreateVideoPlayer.mockReturnValue({
-					status: "loading",
-					generateThumbnailsAsync: mockGenerateThumbnailsAsync,
-					release: mockRelease,
-					addListener: vi.fn((_event: string, callback: (payload: { status: string }) => void) => {
-						statusCallback = callback
-						resolve()
-
-						return { remove: vi.fn() }
-					})
-				})
+			expect(mockGetThumbnailAsync).toHaveBeenCalledWith(expect.any(String), {
+				time: 5000,
+				quality: 1
 			})
-
-			const item = makeFileItem("wait-ready-uuid", "clip.mp4")
-
-			let resolved = false
-			const promise = thumbnails.generate({ item }).then(result => {
-				resolved = true
-
-				return result
-			})
-
-			await listenerRegistered
-
-			expect(resolved).toBe(false)
-			expect(mockGenerateThumbnailsAsync).not.toHaveBeenCalled()
-
-			// Simulate player becoming ready
-			statusCallback!({ status: "readyToPlay" })
-
-			const result = await promise
-
-			expect(resolved).toBe(true)
-			expect(mockGenerateThumbnailsAsync).toHaveBeenCalledTimes(1)
-			expect(result).toBe(`${THUMBNAILS_DIR}/wait-ready-uuid.webp`)
-		})
-
-		it("throws when player enters error state", async () => {
-			mockCreateVideoPlayer.mockReturnValue({
-				status: "loading",
-				generateThumbnailsAsync: mockGenerateThumbnailsAsync,
-				release: mockRelease,
-				addListener: vi.fn((_event: string, callback: (payload: { status: string; error?: { message: string } }) => void) => {
-					// Simulate immediate error
-					Promise.resolve().then(() => {
-						callback({ status: "error", error: { message: "codec not supported" } })
-					})
-
-					return { remove: vi.fn() }
-				})
-			})
-
-			const item = makeFileItem("player-err-uuid", "clip.mp4")
-
-			await expect(thumbnails.generate({ item })).rejects.toThrow("codec not supported")
-			expect(mockRelease).toHaveBeenCalledTimes(1)
 		})
 
 		it("waits for HTTP provider when not immediately available", async () => {
@@ -575,7 +496,7 @@ describe("Thumbnails", () => {
 			// Not yet resolved — waiting for provider
 			await Promise.resolve()
 			expect(resolved).toBe(false)
-			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
+			expect(mockGetThumbnailAsync).not.toHaveBeenCalled()
 
 			// Simulate provider becoming available
 			mockHttpStoreState.port = 8080
@@ -588,7 +509,7 @@ describe("Thumbnails", () => {
 			const result = await promise
 
 			expect(resolved).toBe(true)
-			expect(mockCreateVideoPlayer).toHaveBeenCalledTimes(1)
+			expect(mockGetThumbnailAsync).toHaveBeenCalledTimes(1)
 			expect(result).toBe(`${THUMBNAILS_DIR}/wait-http-uuid.webp`)
 		})
 
@@ -612,12 +533,12 @@ describe("Thumbnails", () => {
 			// signal.reason instanceof Error (the default Node.js reason).
 			await expect(promise).rejects.toThrow("This operation was aborted")
 			await expect(promise).rejects.toBeInstanceOf(Error)
-			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
+			expect(mockGetThumbnailAsync).not.toHaveBeenCalled()
 			expect(mockHttpStoreSubscribers.size).toBe(0)
 		})
 
-		it("throws when generateThumbnailsAsync fails, wrapping the message with timestamp context", async () => {
-			mockGenerateThumbnailsAsync.mockRejectedValueOnce(new Error("thumbnail generation failed"))
+		it("throws when frame extraction fails, wrapping the message with timestamp context", async () => {
+			mockGetThumbnailAsync.mockRejectedValueOnce(new Error("thumbnail generation failed"))
 
 			const item = makeFileItem("gen-fail-uuid", "clip.mp4")
 
@@ -627,16 +548,6 @@ describe("Thumbnails", () => {
 			await expect(thumbnails.generate({ item })).rejects.toThrow(
 				"Video thumbnail extraction failed at 1s: thumbnail generation failed"
 			)
-			expect(mockRelease).toHaveBeenCalledTimes(1)
-		})
-
-		it("throws when no thumbnail is generated", async () => {
-			mockGenerateThumbnailsAsync.mockResolvedValueOnce([])
-
-			const item = makeFileItem("empty-thumb-uuid", "clip.mp4")
-
-			await expect(thumbnails.generate({ item })).rejects.toThrow("No thumbnail generated")
-			expect(mockRelease).toHaveBeenCalledTimes(1)
 		})
 	})
 
@@ -745,7 +656,7 @@ describe("Thumbnails", () => {
 				})
 			).rejects.toThrow()
 
-			expect(mockGenerateThumbnailsAsync).not.toHaveBeenCalled()
+			expect(mockGetThumbnailAsync).not.toHaveBeenCalled()
 		})
 
 		it("does not pass signal when not provided", async () => {
@@ -820,7 +731,7 @@ describe("Thumbnails", () => {
 			).rejects.toThrow()
 
 			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
-			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
+			expect(mockGetThumbnailAsync).not.toHaveBeenCalled()
 		})
 
 		it("always throws an Error instance even when signal.reason is undefined", async () => {
@@ -839,47 +750,6 @@ describe("Thumbnails", () => {
 
 			await expect(result).rejects.toThrow("Aborted")
 			await expect(result).rejects.toBeInstanceOf(Error)
-		})
-
-		it("video: aborts during readyToPlay wait", async () => {
-			const controller = new AbortController()
-
-			let statusCallback: ((payload: any) => void) | null = null
-			const listenerRegistered = new Promise<void>(resolve => {
-				mockCreateVideoPlayer.mockReturnValue({
-					status: "loading",
-					generateThumbnailsAsync: mockGenerateThumbnailsAsync,
-					release: mockRelease,
-					addListener: vi.fn((_event: string, callback: (payload: { status: string }) => void) => {
-						statusCallback = callback
-						resolve()
-
-						return { remove: vi.fn() }
-					})
-				})
-			})
-
-			const item = makeFileItem("abort-ready-wait-uuid", "clip.mp4")
-
-			const promise = thumbnails.generate({
-				item,
-				signal: controller.signal
-			})
-
-			await listenerRegistered
-
-			// Abort while waiting for readyToPlay — should not hang
-			controller.abort()
-
-			// Must throw the abort-flavoured error specifically — not a network/codec error.
-			// DOMException("This operation was aborted") is returned by abortError() when
-			// signal.reason instanceof Error (the default Node.js reason).
-			await expect(promise).rejects.toThrow("This operation was aborted")
-			await expect(promise).rejects.toBeInstanceOf(Error)
-
-			// Should not have called generateThumbnailsAsync since we aborted before ready
-			expect(mockGenerateThumbnailsAsync).not.toHaveBeenCalled()
-			expect(statusCallback).not.toBeNull()
 		})
 	})
 
@@ -1218,7 +1088,10 @@ describe("Thumbnails", () => {
 			})
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/local-vid-uuid.webp`)
-			expect(mockCreateVideoPlayer).toHaveBeenCalledWith("file:///local/video.mp4")
+			expect(mockGetThumbnailAsync).toHaveBeenCalledWith("file:///local/video.mp4", {
+				time: 1000,
+				quality: 1
+			})
 		})
 
 		it("returns null for unsupported extensions", async () => {
@@ -1353,8 +1226,8 @@ describe("Thumbnails", () => {
 
 			await expect(thumbnails.generate({ item })).rejects.toThrow("Offline")
 
-			// Must not have started the HTTP provider wait or video player
-			expect(mockCreateVideoPlayer).not.toHaveBeenCalled()
+			// Must not have started the HTTP provider wait or frame extraction
+			expect(mockGetThumbnailAsync).not.toHaveBeenCalled()
 
 			// Failures map must not be incremented — retry after coming back online works
 			mockIsOnline.mockReturnValue(true)
@@ -1362,7 +1235,7 @@ describe("Thumbnails", () => {
 			const result = await thumbnails.generate({ item })
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/offline-vid-uuid.webp`)
-			expect(mockCreateVideoPlayer).toHaveBeenCalledTimes(1)
+			expect(mockGetThumbnailAsync).toHaveBeenCalledTimes(1)
 		})
 
 		it("image: offline path is NOT taken when an offline-cached file exists", async () => {
@@ -1472,7 +1345,6 @@ describe("Thumbnails", () => {
 			await expect(thumbnails.generate({ item })).rejects.toThrow(
 				"Failed to move thumbnail to output path: EROFS read-only file system"
 			)
-			expect(mockRelease).toHaveBeenCalledTimes(1)
 		})
 	})
 
@@ -1528,8 +1400,11 @@ describe("Thumbnails", () => {
 			const result = await thumbnails.generate({ item })
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/vid-offline-uuid.webp`)
-			// The player should have been created with the offline file path (normalized)
-			expect(mockCreateVideoPlayer).toHaveBeenCalledWith(expect.stringContaining("offline/clip.mp4"))
+			// Frame extraction should have used the offline file path (normalized)
+			expect(mockGetThumbnailAsync).toHaveBeenCalledWith(expect.stringContaining("offline/clip.mp4"), {
+				time: 1000,
+				quality: 1
+			})
 			expect(mockGetFileUrl).not.toHaveBeenCalled()
 		})
 	})
