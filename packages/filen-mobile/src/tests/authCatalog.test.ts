@@ -148,32 +148,45 @@ describe("auth catalog", () => {
 
 	// ── Locale JSON completeness ──────────────────────────────────────────────
 
-	it("every non-English locale JSON file contains all non-plural keys present in the en catalog", () => {
+	it("every non-English locale JSON file contains all non-plural keys from the translation snapshot", () => {
 		const localesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../locales")
-		const localeCodes = fs
-			.readdirSync(localesDir)
-			.filter(file => file.endsWith(".json") && !file.startsWith("."))
-			.map(file => file.replace(/\.json$/, ""))
+
+		// Completeness is asserted against the translation snapshot (.en-snapshot.json) — the set of
+		// English keys that have already been TRANSLATED — NOT the live `en` catalog. Translation runs
+		// in CI (scripts/translate-i18n.ts), so a string freshly added to en/*.ts is intentionally
+		// absent from both the locale catalogs AND the snapshot until CI fills them. Diffing against the
+		// snapshot keeps real drift protection (a locale missing an already-translated key fails) without
+		// false-failing every time a developer adds an English string ahead of the CI translation pass.
+		const snapshot = JSON.parse(fs.readFileSync(path.join(localesDir, ".en-snapshot.json"), "utf8")) as Record<
+			string,
+			unknown
+		>
 
 		// Plural forms legitimately differ per language (en uses _one/_other; ru adds
 		// _few/_many, etc.), so completeness is asserted over non-plural keys only —
 		// the suffix-hygiene test above covers the plural keys.
 		const isPluralKey = (key: string) => PLURAL_CONTEXT_SUFFIXES.some(suffix => key.endsWith(suffix))
-		const enKeys = Object.keys(en).filter(key => !isPluralKey(key))
+		const snapshotKeys = Object.keys(snapshot).filter(key => !isPluralKey(key))
+
+		const localeCodes = fs
+			.readdirSync(localesDir)
+			.filter(file => file.endsWith(".json") && !file.startsWith("."))
+			.map(file => file.replace(/\.json$/, ""))
 
 		const missing: Record<string, string[]> = {}
 
 		for (const code of localeCodes) {
 			const locale = JSON.parse(fs.readFileSync(path.join(localesDir, `${code}.json`), "utf8")) as Record<string, unknown>
 			const localeKeys = new Set(Object.keys(locale))
-			const missingForCode = enKeys.filter(key => !localeKeys.has(key))
+			const missingForCode = snapshotKeys.filter(key => !localeKeys.has(key))
 
 			if (missingForCode.length > 0) {
 				missing[code] = missingForCode
 			}
 		}
 
-		// Guard against a vacuous pass if the directory scan finds nothing.
+		// Guard against a vacuous pass if the snapshot or directory scan finds nothing.
+		expect(snapshotKeys.length).toBeGreaterThan(0)
 		expect(localeCodes.length).toBeGreaterThan(0)
 		expect(missing).toEqual({})
 	})
