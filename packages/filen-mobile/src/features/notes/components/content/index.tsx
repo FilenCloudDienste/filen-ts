@@ -22,6 +22,7 @@ import { sync } from "@/features/notes/components/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
+import { useChecklistHideCompleted } from "@/features/notes/checklistView"
 
 const Loading = ({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -53,6 +54,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	const insets = useSafeAreaInsets()
 	const isOnline = useIsOnline()
 	const hasInflightContent = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
+	const [hideCompleted] = useChecklistHideCompleted(note.uuid)
 
 	// Gate the query on three conditions to make editing race-free:
 	//
@@ -221,6 +223,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					initialValue={initialValue ?? ""}
 					onChange={onValueChange}
 					readOnly={!hasWriteAccess}
+					hideCompleted={hideCompleted}
 				/>
 			) : (
 				<TextEditor

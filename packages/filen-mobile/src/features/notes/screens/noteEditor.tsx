@@ -19,6 +19,7 @@ import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { deserializeRouteParam } from "@/lib/serializer"
 import { createMenuButtons } from "@/features/notes/components/note/menu"
+import { useChecklistHideCompleted } from "@/features/notes/checklistView"
 import { useStringifiedClient } from "@/lib/auth"
 import DismissStack from "@/components/dismissStack"
 import { useKeyboardState } from "react-native-keyboard-controller"
@@ -35,6 +36,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 	const navigation = useNavigation()
 	const keyboardState = useKeyboardState()
 	const dispatch = useTextEditorStore(state => state.dispatch)
+	const [hideCompletedChecklistItems, toggleHideCompletedChecklistItems] = useChecklistHideCompleted(note.uuid)
 
 	const writeAccess =
 		note.ownerId === stringifiedClient?.userId ||
@@ -158,7 +160,9 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 									note,
 									writeAccess,
 									origin: "content",
-									isOwner
+									isOwner,
+									hideCompletedChecklistItems,
+									onToggleHideCompletedChecklistItems: toggleHideCompletedChecklistItems
 								})
 							},
 							triggerProps: {

@@ -115,7 +115,9 @@ export function createMenuButtons({
 	isSelected = false,
 	writeAccess,
 	origin,
-	isOwner
+	isOwner,
+	hideCompletedChecklistItems = false,
+	onToggleHideCompletedChecklistItems
 }: {
 	note: TNote
 	// Optional: detail-route callers (origin === "content") don't have a meaningful
@@ -125,6 +127,10 @@ export function createMenuButtons({
 	writeAccess: boolean
 	origin: NoteMenuOrigin
 	isOwner: boolean
+	// Client-side "hide completed items" view toggle — only surfaced in the checklist editor
+	// (origin === "content"). Omitted by list/search callers, so the entry never appears there.
+	hideCompletedChecklistItems?: boolean
+	onToggleHideCompletedChecklistItems?: () => void
 }): MenuButton[] {
 	const buttons: MenuButton[] = []
 
@@ -260,6 +266,16 @@ export function createMenuButtons({
 			}
 		}
 	})
+
+	if (origin === "content" && note.noteType === NoteType.Checklist && onToggleHideCompletedChecklistItems) {
+		buttons.push({
+			id: "hideCompletedChecklistItems",
+			title: t("hide_completed_items"),
+			icon: "eye",
+			checked: hideCompletedChecklistItems,
+			onPress: onToggleHideCompletedChecklistItems
+		})
+	}
 
 	if (writeAccess) {
 		buttons.push({
