@@ -75,7 +75,6 @@ const Contacts = () => {
 			<Contact
 				info={info}
 				nextItem={info.index < items.length - 1 ? items[info.index + 1] : undefined}
-				prevItem={info.index > 0 ? items[info.index - 1] : undefined}
 			/>
 		)
 	}
