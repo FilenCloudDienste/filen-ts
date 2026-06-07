@@ -179,15 +179,6 @@ describe("setup.setup", () => {
 		expect(mockSweepStrayDownloadFiles).not.toHaveBeenCalled()
 	})
 
-	it("skips offline.updateIndex and offline.sync in background mode", async () => {
-		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
-
-		await setup.setup({ background: true })
-
-		expect(mockOffline.updateIndex).not.toHaveBeenCalled()
-		expect(mockOffline.sync).not.toHaveBeenCalled()
-	})
-
 	it("initialises secureStore, sqlite, cache, queries, i18n, and theme unconditionally", async () => {
 		await setup.setup()
 
@@ -235,35 +226,12 @@ describe("setup.setup", () => {
 		expect(mockAudioCache.gc).toHaveBeenCalledOnce()
 	})
 
-	it("calls offline.updateIndex and offline.sync when isAuthed and not background", async () => {
-		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
-
-		await setup.setup()
-		await flushMicrotasks()
-
-		expect(mockOffline.updateIndex).toHaveBeenCalledOnce()
-		expect(mockOffline.sync).toHaveBeenCalledOnce()
-	})
-
-	it("calls alerts.error when offline.updateIndex rejects in the fire-and-forget block", async () => {
-		const offlineErr = new Error("index failed")
-		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
-		mockOffline.updateIndex.mockRejectedValue(offlineErr)
-
-		await setup.setup()
-		await flushMicrotasks()
-
-		expect(mockAlerts.error).toHaveBeenCalledWith(offlineErr)
-	})
-
-	it("does not call offline.updateIndex, offline.sync, foregroundService.init, fileCache.gc, or audioCache.gc when isAuthed is false (foreground)", async () => {
+	it("does not call foregroundService.init, fileCache.gc, or audioCache.gc when isAuthed is false (foreground)", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
 
 		await setup.setup()
 		await flushMicrotasks()
 
-		expect(mockOffline.updateIndex).not.toHaveBeenCalled()
-		expect(mockOffline.sync).not.toHaveBeenCalled()
 		expect(mockForegroundService.init).not.toHaveBeenCalled()
 		expect(mockFileCache.gc).not.toHaveBeenCalled()
 		expect(mockAudioCache.gc).not.toHaveBeenCalled()

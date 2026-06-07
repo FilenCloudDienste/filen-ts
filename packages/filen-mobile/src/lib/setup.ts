@@ -4,8 +4,6 @@ import cache from "@/lib/cache"
 import { run, Semaphore } from "@filen/utils"
 import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
-import offline from "@/features/offline/offline"
-import alerts from "@/lib/alerts"
 import foregroundService from "@/features/transfers/foregroundService"
 import { sweepTmpDir } from "@/lib/tmp"
 import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
@@ -61,19 +59,12 @@ const setup = {
 			// theme. No-op when the user follows the system (uniwind already defaults to it on import).
 			await initTheme()
 
-			// Wire the reconnect-replay listener after the query cache is hydrated
-			// but before the fire-and-forget offline.sync below. Idempotent —
-			// only attaches the onlineManager subscription on first call.
+			// Wire the reconnect-replay listener after the query cache is hydrated.
+			// Idempotent — only attaches the onlineManager subscription on first call.
 			startReconnectListener()
 
 			if (isAuthed.isAuthed && !options?.background) {
 				foregroundService.init().catch(console.error)
-
-				// TODO: Move to host component like camera upload
-				Promise.all([offline.updateIndex(), offline.sync()]).catch(err => {
-					console.error(err)
-					alerts.error(err)
-				})
 
 				// Reclaim disk space from caches that grow unbounded today.
 				// Idempotent; running on an empty cache directory is a no-op.

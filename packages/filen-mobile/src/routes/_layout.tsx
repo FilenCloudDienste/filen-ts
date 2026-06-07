@@ -30,6 +30,7 @@ import { Platform } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import Http from "@/components/http"
 import CameraUploadSync from "@/features/cameraUpload/sync"
+import OfflineSync from "@/features/offline/sync"
 import IncomingShareHandler from "@/features/incomingShare/incomingShareHandler"
 import FloatingBar from "@/components/floatingBar"
 import ForegroundService from "@/features/transfers/components/foregroundService"
@@ -309,6 +310,7 @@ const RootLayout = () => {
 												<NotesSync />
 												<ChatsSync />
 												<CameraUploadSync />
+												<OfflineSync />
 												<IncomingShareHandler />
 												<ForegroundService />
 											</Fragment>
