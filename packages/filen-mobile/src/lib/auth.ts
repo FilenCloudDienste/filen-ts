@@ -81,7 +81,17 @@ class Auth {
 			maxParallelRequests: this.maxParallelRequests
 		})
 
-		await this.saveStringifiedClientToSecureStorage(stringifiedClient)
+		// On launch this runs with the value just read from secureStore, and the only fields this write
+		// would change are the two overrides below — which nothing reads back from disk (the SDK re-injects
+		// the in-memory constants above). Skip the redundant AES-GCM encrypt + atomic file rewrite unless a
+		// migration is actually needed: the stored overrides are absent (old install) or differ from the
+		// current constants. login()/changePassword persist new credentials via their own paths.
+		if (
+			stringifiedClient.maxIoMemoryUsage !== this.maxIoMemoryUsage ||
+			stringifiedClient.maxParallelRequests !== this.maxParallelRequests
+		) {
+			await this.saveStringifiedClientToSecureStorage(stringifiedClient)
+		}
 
 		this.notifyClientsReady()
 

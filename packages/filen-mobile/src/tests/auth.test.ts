@@ -486,6 +486,48 @@ describe("auth.setSdkClients", () => {
 
 		expect(authedSdkClient).toBe(fakeAuthed)
 	})
+
+	it("skips the secureStore write when the stored overrides already match the current constants", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		mockFromStringified.mockReturnValue({ toStringified: vi.fn() })
+
+		const stored = {
+			apiKey: "ak-match",
+			maxIoMemoryUsage: auth.maxIoMemoryUsage,
+			maxParallelRequests: auth.maxParallelRequests
+		} as any
+
+		await auth.setSdkClients(stored)
+
+		expect(vi.mocked(secureStore.default.set)).not.toHaveBeenCalled()
+	})
+
+	it("writes (migrates) when the stored overrides are absent", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		mockFromStringified.mockReturnValue({ toStringified: vi.fn() })
+
+		await auth.setSdkClients({ apiKey: "ak-absent" } as any)
+
+		expect(vi.mocked(secureStore.default.set)).toHaveBeenCalledTimes(1)
+	})
+
+	it("writes (migrates) when a stored override differs from the current constant", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		mockFromStringified.mockReturnValue({ toStringified: vi.fn() })
+
+		const stored = {
+			apiKey: "ak-diff",
+			maxIoMemoryUsage: auth.maxIoMemoryUsage,
+			maxParallelRequests: auth.maxParallelRequests + 1
+		} as any
+
+		await auth.setSdkClients(stored)
+
+		expect(vi.mocked(secureStore.default.set)).toHaveBeenCalledTimes(1)
+	})
 })
 
 describe("auth.getSdkClients", () => {
