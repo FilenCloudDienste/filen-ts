@@ -2,6 +2,7 @@ import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import { Fragment } from "react"
+import { Platform } from "react-native"
 import { useNavigation } from "expo-router"
 import { Image } from "expo-image"
 import { run, formatBytes } from "@filen/utils"
@@ -17,6 +18,11 @@ import offline from "@/features/offline/offline"
 import useCacheSizesQuery, { invalidateCacheSizesQuery } from "@/features/settings/queries/useCacheSizes.query"
 import { useTranslation } from "react-i18next"
 import i18n from "@/lib/i18n"
+import { useSecureStore } from "@/lib/secureStore"
+import {
+	TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
+	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
+} from "@/features/transfers/foregroundService"
 
 const SIZE_LOADING_PLACEHOLDER = "…"
 
@@ -95,6 +101,11 @@ function Advanced() {
 	const cacheSizesQuery = useCacheSizesQuery()
 	const sizes = cacheSizesQuery.data
 
+	const [foregroundServiceEnabled, setForegroundServiceEnabled] = useSecureStore<boolean>(
+		TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
+		DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
+	)
+
 	const offlineSubtitle = (() => {
 		if (!sizes) {
 			return SIZE_LOADING_PLACEHOLDER
@@ -121,6 +132,25 @@ function Advanced() {
 				edges={["left", "right"]}
 			>
 				<SettingsScrollView>
+					{Platform.OS === "android" ? (
+						<Group
+							className="bg-background-tertiary"
+							buttons={[
+								{
+									icon: "notifications-outline",
+									title: t("background_transfers"),
+									subTitle: t("background_transfers_description"),
+									rightItem: {
+										type: "switch",
+										value: foregroundServiceEnabled,
+										onValueChange: () => {
+											setForegroundServiceEnabled(prev => !prev)
+										}
+									}
+								}
+							]}
+						/>
+					) : null}
 					<Group
 						className="bg-background-tertiary"
 						buttons={[

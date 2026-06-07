@@ -33,5 +33,10 @@ export const transfers = {
 	/** Android foreground-service notification body while transfers run (singular). {{count}} is the transfer count, {{percent}} the overall progress, {{speed}} the human-readable speed */
 	transfers_progress_one: "{{count}} transfer · {{percent}}% · {{speed}}",
 	/** Android foreground-service notification body while transfers run (plural). {{count}} is the transfer count, {{percent}} the overall progress, {{speed}} the human-readable speed */
-	transfers_progress_other: "{{count}} transfers · {{percent}}% · {{speed}}"
+	transfers_progress_other: "{{count}} transfers · {{percent}}% · {{speed}}",
+	/** Advanced settings (Android only) — toggle title for the transfers foreground service */
+	background_transfers: "Background transfers",
+	/** Advanced settings (Android only) — subtitle under the background-transfers toggle, explaining the persistent notification trade-off */
+	background_transfers_description:
+		"Keep uploads and downloads running while the app is in the background. Shows a persistent notification while transfers are active."
 } as const
