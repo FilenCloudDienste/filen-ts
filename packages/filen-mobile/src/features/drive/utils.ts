@@ -1,6 +1,7 @@
 import { type TFunction } from "i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
+import { type DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import { driveItemDisplayName } from "@/lib/decryption"
 
@@ -182,4 +183,22 @@ export function resolveDriveHeaderTitle({
 			return ""
 		}
 	}
+}
+
+// The raw "uploaded" timestamp, normalized across the DriveItem shapes used by the
+// item-info rows: shared (non-root + root) directories carry it under `data.inner`,
+// every other shape carries it directly under `data`. Returned as a number for
+// `simpleDate`. Mirrors the per-type access the info rows did inline before.
+export function rawUploadTimestamp(item: DriveItem): number {
+	return item.type === "sharedDirectory" || item.type === "sharedRootDirectory"
+		? Number(item.data.inner.timestamp)
+		: Number(item.data.timestamp)
+}
+
+// Picks the timestamp to display for a created/modified row: the decrypted-meta
+// value when present, else the raw upload timestamp. Preserves the original
+// truthiness fallback (a 0 / 0n / missing meta value falls back to the upload
+// time) — see the "falsy bigint" caveat in the test infra notes.
+export function pickDisplayTimestamp(metaValue: bigint | number | null | undefined, fallbackTimestamp: number): number {
+	return metaValue ? Number(metaValue) : fallbackTimestamp
 }
