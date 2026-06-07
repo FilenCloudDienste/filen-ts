@@ -53,6 +53,8 @@ export const notes = {
 	import_note: "Import note",
 	/** Editor placeholder shown in an empty note body */
 	note_editor_placeholder: "Start writing…",
+	/** Checklist editor — header menu toggle that hides completed (checked) items from view (client-side only, never edits the note) */
+	hide_completed_items: "Hide completed items",
 	/** Error toast when the picked file to import could not be found */
 	import_file_not_found: "File not found",
 	/** Error toast when the picked file to import is missing or empty */

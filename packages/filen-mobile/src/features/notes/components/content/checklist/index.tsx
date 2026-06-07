@@ -6,24 +6,32 @@ import useChecklistStore from "@/features/notes/store/useChecklist.store"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 import Toolbar from "@/features/notes/components/content/checklist/toolbar"
+import { visibleChecklistIds } from "@/features/notes/checklistView"
 
 const Checklist = ({
 	initialValue,
 	onChange,
 	readOnly,
-	autoFocus
+	autoFocus,
+	hideCompleted
 }: {
 	initialValue?: string
 	onChange?: (value: string) => void
 	readOnly?: boolean
 	autoFocus?: boolean
+	hideCompleted?: boolean
 }) => {
 	// didType gates onChange so programmatic hydration (the initialValue useEffect below, which
 	// writes the store directly) never propagates a spurious onChange. It is a ref, not state,
 	// so it reads the up-to-date value synchronously within the same event that flips it —
 	// otherwise the first keystroke would be dropped while a state update is still pending.
 	const didTypeRef = useRef<boolean>(false)
-	const ids = useChecklistStore(useShallow(state => state.ids))
+	// Client-side filter only: hideCompleted drops checked items from the rendered list without
+	// touching `parsed` (the source of truth that gets stringified back into the note), so the
+	// original note content is preserved. useShallow keeps the render stable when off (same ids ref)
+	// and only re-renders when the visible set actually changes (e.g. an item is checked/unchecked),
+	// not on every keystroke.
+	const visibleIds = useChecklistStore(useShallow(state => visibleChecklistIds(state.ids, state.parsed, hideCompleted ?? false)))
 
 	const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
 		useChecklistStore.getState().setParsed(prev =>
@@ -105,7 +113,7 @@ const Checklist = ({
 				keyboardDismissMode="interactive"
 				bottomOffset={32}
 			>
-				{ids.map((id, index) => {
+				{visibleIds.map((id, index) => {
 					return (
 						<Item
 							key={id}
@@ -114,7 +122,7 @@ const Checklist = ({
 							onCheckedChange={onCheckedChange}
 							readOnly={readOnly}
 							onDidType={onTyped}
-							isLast={index === ids.length - 1}
+							isLast={index === visibleIds.length - 1}
 							autoFocus={autoFocus}
 						/>
 					)
