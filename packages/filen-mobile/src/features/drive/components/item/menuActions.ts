@@ -171,7 +171,10 @@ export function createMenuButtons({
 				router.push({
 					pathname: "/driveItemInfo",
 					params: {
-						item: serialize(item)
+						item: serialize(item),
+						// Carry the originating variant so the info sheet derives the
+						// directory-size query mode (sharedIn/out, offline, …) correctly.
+						drivePathType: drivePath.type ?? undefined
 					}
 				})
 			}
@@ -210,7 +213,10 @@ export function createMenuButtons({
 				router.push({
 					pathname: "/changeDirectoryColor",
 					params: {
-						item: serialize(item)
+						item: serialize(item),
+						// Carry the originating variant so the embedded info rows derive the
+						// directory-size query mode (sharedOut, …) correctly.
+						drivePathType: drivePath.type ?? undefined
 					}
 				})
 			}

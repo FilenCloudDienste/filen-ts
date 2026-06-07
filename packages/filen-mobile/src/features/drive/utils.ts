@@ -2,6 +2,7 @@ import { type TFunction } from "i18next"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
 import { type DriveItem } from "@/types"
+import { type UseDirectorySizeQueryParams } from "@/features/drive/queries/useDirectorySize.query"
 import cache from "@/lib/cache"
 import { driveItemDisplayName } from "@/lib/decryption"
 
@@ -201,4 +202,38 @@ export function rawUploadTimestamp(item: DriveItem): number {
 // time) — see the "falsy bigint" caveat in the test infra notes.
 export function pickDisplayTimestamp(metaValue: bigint | number | null | undefined, fallbackTimestamp: number): number {
 	return metaValue ? Number(metaValue) : fallbackTimestamp
+}
+
+// Maps the drive context (variant) to the directory-size query mode. The sharing
+// role (sharedIn vs sharedOut) and trash/offline/linked computation can't be
+// derived from a DriveItem's type alone — they come from the screen we're on —
+// so the item-info size query keys off the active DrivePath instead. Everything
+// not covered (drive / recents / favorites / links / photos / null) is a regular
+// remote directory → "normal".
+export function directorySizeTypeForDrivePath(type: DrivePathType | null | undefined): UseDirectorySizeQueryParams["type"] {
+	switch (type) {
+		case "sharedIn": {
+			return "sharedIn"
+		}
+
+		case "sharedOut": {
+			return "sharedOut"
+		}
+
+		case "trash": {
+			return "trash"
+		}
+
+		case "offline": {
+			return "offline"
+		}
+
+		case "linked": {
+			return "linked"
+		}
+
+		default: {
+			return "normal"
+		}
+	}
 }

@@ -21,10 +21,12 @@ import DismissStack from "@/components/dismissStack"
 import useIsOnline from "@/hooks/useIsOnline"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
+import { isDrivePathType } from "@/hooks/useDrivePath"
 
 const ChangeDirectoryColor = () => {
-	const { item: itemSerialized } = useLocalSearchParams<{
+	const { item: itemSerialized, drivePathType } = useLocalSearchParams<{
 		item?: string
+		drivePathType?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -173,7 +175,10 @@ const ChangeDirectoryColor = () => {
 						</ColorPicker>
 					</View>
 					<View className="bg-transparent mt-10">
-						<Information item={item} />
+						<Information
+							item={item}
+							drivePathType={isDrivePathType(drivePathType) ? drivePathType : undefined}
+						/>
 					</View>
 				</ScrollView>
 			</SafeAreaView>

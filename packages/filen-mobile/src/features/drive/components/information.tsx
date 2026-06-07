@@ -12,7 +12,8 @@ import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
-import { rawUploadTimestamp, pickDisplayTimestamp } from "@/features/drive/utils"
+import { rawUploadTimestamp, pickDisplayTimestamp, directorySizeTypeForDrivePath } from "@/features/drive/utils"
+import { type DrivePathType } from "@/hooks/useDrivePath"
 
 function OfflineStatusRow({ uuid, type }: { uuid: string; type: DriveItem["type"] }) {
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -32,24 +33,21 @@ function OfflineStatusRow({ uuid, type }: { uuid: string; type: DriveItem["type"
 
 function useDriveItemInfoRows(
 	item: DriveItem,
-	linked: boolean | undefined
+	linked: boolean | undefined,
+	drivePathType: DrivePathType | null | undefined
 ): { type: string; title: string; value: string | React.ReactNode }[] {
 	const { t } = useTranslation()
 
 	const directorySizeQuery = useDirectorySizeQuery(
 		{
 			uuid: item?.data.uuid ?? "",
-			// TODO: Fix type for shared in/out based on sharing role
-			type:
-				item.type === "sharedDirectory" ||
-				item.type === "sharedFile" ||
-				item.type === "sharedRootFile" ||
-				item.type === "sharedRootDirectory"
-					? "sharedOut"
-					: "normal"
+			// The sharing role (sharedIn vs sharedOut) and the trash/offline/linked size
+			// computation can't be inferred from item.type — they depend on the screen the
+			// item is shown in — so derive the query mode from the originating DrivePath.
+			type: directorySizeTypeForDrivePath(drivePathType)
 		},
 		{
-			enabled: item !== null && (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory")
+			enabled: item !== null && isDirectoryItem(item)
 		}
 	)
 
@@ -195,9 +193,17 @@ function useDriveItemInfoRows(
 	).filter(info => info.value !== null)
 }
 
-export const Information = ({ item, linked }: { item: DriveItem; linked?: boolean }) => {
+export const Information = ({
+	item,
+	linked,
+	drivePathType
+}: {
+	item: DriveItem
+	linked?: boolean
+	drivePathType?: DrivePathType | null
+}) => {
 	const { t } = useTranslation()
-	const info = useDriveItemInfoRows(item, linked)
+	const info = useDriveItemInfoRows(item, linked, drivePathType)
 
 	return (
 		<View className="bg-transparent flex-col gap-2">

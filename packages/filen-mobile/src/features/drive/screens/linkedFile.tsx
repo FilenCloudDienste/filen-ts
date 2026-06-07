@@ -115,6 +115,7 @@ const LinkedFile = () => {
 						<Information
 							item={item}
 							linked={true}
+							drivePathType="linked"
 						/>
 					</View>
 				</ScrollView>

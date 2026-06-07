@@ -19,6 +19,14 @@ export const DRIVE_PATH_TYPES = [
 ] as const
 export type DrivePathType = (typeof DRIVE_PATH_TYPES)[number]
 
+// Validates a raw route-param string against the known drive variants. Used by
+// the modal screens (item-info / change-color) that receive the originating
+// variant as a serialized string param so they can resolve context-dependent
+// queries (e.g. directory size) the same way the originating list did.
+export function isDrivePathType(value: string | null | undefined): value is DrivePathType {
+	return value != null && (DRIVE_PATH_TYPES as readonly string[]).includes(value)
+}
+
 export type SelectOptions = {
 	type: "single" | "multiple"
 	files: boolean

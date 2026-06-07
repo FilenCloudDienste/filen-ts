@@ -13,10 +13,12 @@ import DismissStack from "@/components/dismissStack"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import { useTranslation } from "react-i18next"
 import DriveItemHero from "@/components/ui/driveItemHero"
+import { isDrivePathType } from "@/hooks/useDrivePath"
 
 const DriveItemInfo = () => {
-	const { item: itemSerialized } = useLocalSearchParams<{
+	const { item: itemSerialized, drivePathType } = useLocalSearchParams<{
 		item?: string
+		drivePathType?: string
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -81,7 +83,10 @@ const DriveItemInfo = () => {
 				>
 					<DriveItemHero item={item} />
 					<View className="bg-transparent mt-10">
-						<Information item={item} />
+						<Information
+							item={item}
+							drivePathType={isDrivePathType(drivePathType) ? drivePathType : undefined}
+						/>
 					</View>
 				</ScrollView>
 			</SafeAreaView>
