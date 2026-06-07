@@ -613,3 +613,28 @@ describe("Sqlite", () => {
 		})
 	})
 })
+
+describe("prefixUpperBound", () => {
+	it("increments the final character to form an exclusive upper bound", async () => {
+		const { prefixUpperBound } = await import("@/lib/sqlite")
+
+		expect(prefixUpperBound("cache:v1:foo:")).toBe("cache:v1:foo;")
+		expect(prefixUpperBound("reactQuery_v1:")).toBe("reactQuery_v1;")
+	})
+
+	it("captures exactly the keys sharing the prefix under BINARY ordering", async () => {
+		const { prefixUpperBound } = await import("@/lib/sqlite")
+		const prefix = "cache:v1:foo:"
+		const upper = prefixUpperBound(prefix)
+		const keys = ["cache:v1:foo:1", "cache:v1:foo:2", "cache:v1:foobar:1", "cache:v1:fon:1", "cache:v1:foo:"]
+		const matched = keys.filter(key => key >= prefix && key < upper)
+
+		expect(matched.sort()).toEqual(["cache:v1:foo:", "cache:v1:foo:1", "cache:v1:foo:2"].sort())
+	})
+
+	it("returns the prefix unchanged for an empty string", async () => {
+		const { prefixUpperBound } = await import("@/lib/sqlite")
+
+		expect(prefixUpperBound("")).toBe("")
+	})
+})

@@ -8,7 +8,7 @@ import {
 	type Dir
 } from "@filen/sdk-rs"
 import { type DriveItem, type Note, type Chat } from "@/types"
-import sqlite from "@/lib/sqlite"
+import sqlite, { prefixUpperBound } from "@/lib/sqlite"
 import { serialize, deserialize } from "@/lib/serializer"
 import { debounce } from "es-toolkit/function"
 import { AppState } from "react-native"
@@ -414,7 +414,10 @@ export class Cache {
 		const results = await Promise.allSettled(
 			this.registry.map(async ({ key, map }) => {
 				const prefix = key + ":"
-				const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
+				const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [
+					prefix,
+					prefixUpperBound(prefix)
+				])
 
 				for (const row of rows) {
 					const entryKey = (row[0] as string).slice(prefix.length)

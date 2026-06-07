@@ -1,6 +1,6 @@
 import { QueryClient, onlineManager, type UseQueryOptions, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
-import sqlite from "@/lib/sqlite"
+import sqlite, { prefixUpperBound } from "@/lib/sqlite"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -99,7 +99,7 @@ export class QueryPersisterKv {
 	public async restore(): Promise<void> {
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 		const db = await sqlite.openDb()
-		const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
+		const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
 
 		for (const row of rows) {
 			// Isolate each row's deserialize so a single corrupt/unparseable value
