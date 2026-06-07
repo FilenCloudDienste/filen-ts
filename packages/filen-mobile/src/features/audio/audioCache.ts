@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { Semaphore, run } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
-import { MUSIC_METADATA_SUPPORTED_EXTENSIONS } from "@/constants"
+import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
 import fileCache from "@/lib/fileCache"
 import { parseWebStream } from "music-metadata"
@@ -36,6 +36,15 @@ function parseMetadata(raw: string): Metadata {
 
 function hasMetadata(m: Metadata): m is NonNullable<Metadata> {
 	return m !== null && Object.keys(m).length > 0
+}
+
+// music-metadata's `parseWebStream` runs on the JS thread; for large inputs it can visibly
+// degrade JS-thread performance (headerless-VBR duration scans, large embedded cover art,
+// general stream/parse overhead). Skip parsing a file whose size is KNOWN to exceed the cap —
+// the track still plays, it just has no cached cover/tags. An unknown size (rare for a
+// downloaded file) falls through and parses as before, so this never regresses that case.
+function audioFileTooLargeToParse(sizeBytes: number | null | undefined): boolean {
+	return typeof sizeBytes === "number" && sizeBytes > AUDIO_METADATA_MAX_PARSE_SIZE_BYTES
 }
 
 export class AudioCache {
@@ -200,7 +209,7 @@ export class AudioCache {
 
 			if (MUSIC_METADATA_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(name).toLowerCase().trim())) {
 				try {
-					if (!metadataFile.exists || metadataFile.size === 0) {
+					if ((!metadataFile.exists || metadataFile.size === 0) && !audioFileTooLargeToParse(audioFile.size)) {
 						if (!audioFile.exists) {
 							throw new Error("Audio file does not exist after download")
 						}
@@ -267,7 +276,7 @@ export class AudioCache {
 						})
 
 						metadataFile.write(serialize(metadata))
-					} else {
+					} else if (metadataFile.exists && metadataFile.size > 0) {
 						metadata = parseMetadata(await metadataFile.text())
 
 						if (!hasMetadata(metadata)) {

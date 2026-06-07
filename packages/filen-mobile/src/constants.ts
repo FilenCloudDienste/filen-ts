@@ -72,6 +72,14 @@ export const MUSIC_METADATA_SUPPORTED_EXTENSIONS = new Set<string>([
 	".ogv"
 ])
 
+// Cap audio metadata parsing by file size. music-metadata's `parseWebStream` runs on the JS
+// thread and, for large files (headerless-VBR duration scans, large embedded cover art, and
+// general stream/parse overhead on Hermes), can visibly degrade JS-thread performance. Above
+// this size audioCache skips parsing — the track still plays, it just falls back to its
+// filename with no cached cover art / tags. 100 MiB clears virtually all normal music
+// (incl. long lossless tracks) and only skips genuinely huge files (podcasts, audiobooks, mixes).
+export const AUDIO_METADATA_MAX_PARSE_SIZE_BYTES = 100 * 1024 * 1024
+
 export const EXPO_IMAGE_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
 		ios: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico", ".icns"],

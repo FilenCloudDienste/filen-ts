@@ -400,6 +400,50 @@ describe("AudioCache", () => {
 			expect(fs.has(metaPath)).toBe(true)
 		})
 
+		it("skips metadata parsing for files larger than the parse-size cap", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-large"
+			const name = "huge.mp3"
+			const item = wrapDrive(makeFileItem(uuid, name))
+
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
+
+			// Mock cap is 1024 bytes — make the on-disk audio file exceed it.
+			fs.set(mockAudioFile.uri, new Uint8Array(2048))
+			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
+
+			const result = await cache.get({ item })
+
+			// Parse is skipped to protect the JS thread; the track is still returned for playback.
+			expect(parseWebStream).not.toHaveBeenCalled()
+			expect(result.metadata).toBeNull()
+			expect(result.audio.uri).toBe(mockAudioFile.uri)
+
+			// No sidecar is written when parsing is skipped.
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+
+			expect(fs.has(metaPath)).toBe(false)
+		})
+
+		it("parses metadata for a file exactly at the parse-size cap (boundary)", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-at-cap"
+			const name = "atcap.mp3"
+			const item = wrapDrive(makeFileItem(uuid, name))
+
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
+
+			// Exactly at the cap (1024) still parses — the gate skips only when strictly greater.
+			fs.set(mockAudioFile.uri, new Uint8Array(1024))
+			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
+
+			const result = await cache.get({ item })
+
+			expect(parseWebStream).toHaveBeenCalled()
+			expect(result.metadata).not.toBeNull()
+			expect(result.metadata!.artist).toBe("Test Artist")
+		})
+
 		it("returns null metadata for unsupported extension", async () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-9"
