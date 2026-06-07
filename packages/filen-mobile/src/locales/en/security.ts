@@ -57,6 +57,10 @@ export const security = {
 	biometric_authentication: "Biometric authentication",
 	/** Biometric authentication row — subtitle describing the feature */
 	biometric_authentication_description: "Unlock the app with Face ID, Touch ID, or your device PIN",
+	/** Security — title for the privacy-screen toggle (hides app contents in the app switcher) */
+	privacy_screen: "Privacy screen",
+	/** Security — subtitle under the privacy-screen toggle */
+	privacy_screen_description: "Hide the app's contents in the app switcher when you leave the app",
 	/**
 	 * Confirmation dialog title shown when enabling biometrics would disable the
 	 * File / Documents Provider (the two cannot be active simultaneously).

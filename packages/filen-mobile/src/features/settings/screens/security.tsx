@@ -15,6 +15,7 @@ import auth from "@/lib/auth"
 import { newTmpFile } from "@/lib/tmp"
 import { shareTmpFile } from "@/lib/share"
 import useIsOnline from "@/hooks/useIsOnline"
+import { usePrivacyScreenEnabled } from "@/features/settings/privacyScreen"
 import { useTranslation } from "react-i18next"
 
 function Security() {
@@ -22,6 +23,7 @@ function Security() {
 	const navigation = useNavigation()
 	const textRed500 = useResolveClassNames("text-red-500")
 	const isOnline = useIsOnline()
+	const [privacyScreen, setPrivacyScreen] = usePrivacyScreenEnabled()
 
 	const accountQuery = useAccountQuery()
 
@@ -179,6 +181,18 @@ function Security() {
 									subTitle: t("biometric_authentication_description"),
 									onPress: () => {
 										router.push("/security/biometric")
+									}
+								},
+								{
+									icon: "eye-off-outline",
+									title: t("privacy_screen"),
+									subTitle: t("privacy_screen_description"),
+									rightItem: {
+										type: "switch",
+										value: privacyScreen,
+										onValueChange: () => {
+											setPrivacyScreen(prev => !prev)
+										}
 									}
 								},
 								{

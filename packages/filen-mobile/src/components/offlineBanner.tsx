@@ -79,11 +79,12 @@ const OfflineBanner = () => {
 		return null
 	}
 
-	// Coordination with the existing root overlays applies ONLY when the user is
-	// authed — <Biometric /> and <PrivacyCover /> only mount inside the authed
-	// Fragment. On auth screens (login / register) the user has no biometric
-	// lock and the banner should surface immediately so they understand why
-	// "sign in" / "register" can't fire.
+	// Coordination with the existing root overlay applies ONLY when the user is
+	// authed — <Biometric /> only mounts inside the authed Fragment. On auth
+	// screens (login / register) the user has no biometric lock and the banner
+	// should surface immediately so they understand why "sign in" / "register"
+	// can't fire. (Privacy-screen redaction is now native/app-wide — not a React
+	// overlay — so it no longer factors into this gate.)
 	if (isAuthed && biometricUnlocked !== true) {
 		return null
 	}

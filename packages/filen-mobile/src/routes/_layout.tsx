@@ -35,7 +35,7 @@ import IncomingShareHandler from "@/features/incomingShare/incomingShareHandler"
 import FloatingBar from "@/components/floatingBar"
 import ForegroundService from "@/features/transfers/components/foregroundService"
 import Biometric from "@/components/biometric"
-import PrivacyCover from "@/components/privacyCover"
+import PrivacyScreen from "@/components/privacyScreen"
 import AccountReminders from "@/components/accountReminders"
 import OfflineBanner from "@/components/offlineBanner"
 
@@ -140,13 +140,14 @@ const RootLayout = () => {
 										 * "sign in" / "register" offline would silently no-op
 										 * (throwOnError suppresses network errors). Its internal
 										 * gate handles authed-vs-unauthed coordination with
-										 * <Biometric /> / <PrivacyCover />.
+										 * <Biometric />.
 										 */}
 										<OfflineBanner />
+										{/* Native app-switcher/background privacy protection (app-wide, OS-level — see PrivacyScreen). */}
+										<PrivacyScreen />
 										{isAuthed && (
 											<Fragment>
 												<Biometric />
-												<PrivacyCover />
 												<AccountReminders />
 											</Fragment>
 										)}
