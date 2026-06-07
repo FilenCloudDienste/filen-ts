@@ -62,6 +62,13 @@ Note: `socketHandlers.ts` exists for `drive`/`chats`/`notes`/`contacts`
 - **Cross-feature imports** use full `@/features/...` paths. Relative imports are forbidden repo-wide (ESLint).
 - **Silent feature libs**: a feature's `<feature>.ts` singleton(s) expose state and never fire alerts/toasts — UI owns UX.
 
+### i18n / localization workflow
+
+- **Only ever edit the English source**: add/change user-facing strings in `src/locales/en/*.ts` (real keys, merged into `typeof en`; `t()` rejects unregistered keys at compile time).
+- **NEVER hand-edit the translated catalogs** `src/locales/<lang>.json` (25 languages) or `src/locales/.en-snapshot.json`. Translation runs in **CI** (`scripts/translate-i18n.ts`, DELTA mode vs the snapshot via the Anthropic API), which fills the locale JSONs and advances the snapshot. Manually adding/placeholdering locale keys (or bumping the snapshot) corrupts that pipeline.
+- The `authCatalog` completeness test diffs the locale JSONs against `.en-snapshot.json` (the keys already translated), NOT the live `en` catalog — so adding an English key is **green locally** (CI then fills the locales + advances the snapshot). Never hand-edit the JSONs or snapshot to "fix" i18n.
+- Plural keys (`_one`/`_other`) still get registered in `src/tests/authCatalog.test.ts` `INTENTIONAL_PLURAL_KEYS`.
+
 ### ESLint guardrails (eslint.config.mjs)
 
 - **Selector-required store hooks**: a bare `useXStore()` (zero args) is an error — must pass a selector (`useXStore(s => s.foo)` or `useShallow(...)`). Project-wide.
