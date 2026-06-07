@@ -114,6 +114,14 @@ export const drive = {
 	scan_document: "Scan document",
 	/** Upload sub-menu item: create a new empty text file */
 	create_text_file: "Create text file",
+	/** Success toast after an upload batch (all succeeded). {{count}} = files uploaded */
+	upload_complete_one: "Uploaded {{count}} file",
+	/** Success toast after an upload batch (all succeeded, plural) */
+	upload_complete_other: "Uploaded {{count}} files",
+	/** Toast after an upload batch where some uploads failed. {{count}} = succeeded, {{failed}} = failed */
+	upload_complete_with_failures_one: "Uploaded {{count}} file, {{failed}} failed",
+	/** Toast after an upload batch where some uploads failed (plural) */
+	upload_complete_with_failures_other: "Uploaded {{count}} files, {{failed}} failed",
 
 	// ── Create directory prompt ────────────────────────────────────────────────
 	/** Create-directory dialog title and menu button label */

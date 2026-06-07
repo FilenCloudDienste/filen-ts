@@ -48,8 +48,13 @@ export function useDriveUpload({
 	drivePath: DrivePath
 	t: TFunction
 }): UseDriveUpload {
-	// Shared tail: surface rejected fan-out entries and failed uploads.
+	// Shared tail: surface rejected fan-out entries + failed uploads, then a success
+	// toast summarizing the batch. Per-failure errors are still shown above; the toast
+	// only appears when at least one upload succeeded (an all-failed batch is already
+	// fully covered by the error banners, so a "success" toast there would be noise).
 	const reportTransferResults = (results: PromiseSettledResult<Result<unknown>>[]): void => {
+		let succeeded = 0
+
 		for (const r of results) {
 			if (r.status === "rejected") {
 				console.error(r.reason)
@@ -57,10 +62,27 @@ export function useDriveUpload({
 			} else if (!r.value.success) {
 				console.error(r.value.error)
 				alerts.error(r.value.error)
+			} else {
+				succeeded++
 			}
 		}
 
-		// TODO: display toast on upload success with number of successfully uploaded files and number of failed uploads
+		if (succeeded === 0) {
+			return
+		}
+
+		const failed = results.length - succeeded
+
+		alerts.normal(
+			failed > 0
+				? t("upload_complete_with_failures", {
+						count: succeeded,
+						failed
+					})
+				: t("upload_complete", {
+						count: succeeded
+					})
+		)
 	}
 
 	const requireMediaPermissions = async (): Promise<boolean> => {

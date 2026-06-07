@@ -66,7 +66,11 @@ const INTENTIONAL_PLURAL_KEYS = new Set([
 	"transfers_active_one",
 	"transfers_active_other",
 	"transfers_progress_one",
-	"transfers_progress_other"
+	"transfers_progress_other",
+	"upload_complete_one",
+	"upload_complete_other",
+	"upload_complete_with_failures_one",
+	"upload_complete_with_failures_other"
 ])
 
 describe("auth catalog", () => {
