@@ -93,3 +93,21 @@ export function parentCacheKey(parent: OfflineParent): string {
 		}
 	}
 }
+
+// secureStore key for the "Sync offline files on Wi-Fi only" setting. Boolean; absent/false →
+// preserves the prior always-sync behavior. Read in offline.sync(); written by the offline
+// settings screen via useSecureStore.
+export const OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY = "offlineSyncWifiOnly"
+
+// Whether offline.sync() should bail for the current connection given the "Wi-Fi only" setting.
+// Mirrors camera upload: only a metered cellular connection is blocked — wifi/ethernet/vpn/unknown
+// still sync, so a misreported connection type can never falsely block a Wi-Fi sync.
+export function shouldSkipOfflineSyncForConnection({
+	wifiOnly,
+	connectionType
+}: {
+	wifiOnly: boolean
+	connectionType: string | null | undefined
+}): boolean {
+	return wifiOnly && connectionType === "cellular"
+}

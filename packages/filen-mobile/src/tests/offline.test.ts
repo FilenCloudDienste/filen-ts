@@ -42,6 +42,12 @@ vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
 vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
 vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
 
+// "Wi-Fi only" offline-sync gate dependencies. Default get → null = setting off, so sync()'s
+// gate is skipped and the existing sync() tests are unaffected. NetInfo is only reached when the
+// setting is on; mock it anyway so an accidental fetch never hits native.
+vi.mock("@/lib/secureStore", () => ({ default: { get: vi.fn().mockResolvedValue(null) } }))
+vi.mock("@react-native-community/netinfo", () => ({ default: { fetch: vi.fn().mockResolvedValue({ type: "wifi" }) } }))
+
 vi.mock("@/lib/events", () => ({
 	default: {
 		subscribe: vi.fn()
@@ -278,6 +284,7 @@ import { onlineManager } from "@tanstack/react-query"
 type OfflineInstance = any
 
 import { VERSION as OFFLINE_VERSION } from "@/features/offline/offline"
+import { shouldSkipOfflineSyncForConnection } from "@/features/offline/offlineHelpers"
 
 const BASE_DIR_URI = `file:///shared/group.io.filen.app/offline/v${OFFLINE_VERSION}`
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
@@ -6024,5 +6031,27 @@ describe("Offline", () => {
 			// The aborted download must have triggered cleanup — no partial directory left.
 			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)
 		})
+	})
+})
+
+describe("shouldSkipOfflineSyncForConnection", () => {
+	it("skips when Wi-Fi-only is on and the connection is cellular", () => {
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: "cellular" })).toBe(true)
+	})
+
+	it("does NOT skip when Wi-Fi-only is on and the connection is Wi-Fi", () => {
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: "wifi" })).toBe(false)
+	})
+
+	it("does NOT skip when Wi-Fi-only is off, even on cellular (default behavior)", () => {
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: false, connectionType: "cellular" })).toBe(false)
+	})
+
+	it("only blocks cellular — ethernet/vpn/unknown/null still sync when Wi-Fi-only is on", () => {
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: "ethernet" })).toBe(false)
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: "vpn" })).toBe(false)
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: "unknown" })).toBe(false)
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: null })).toBe(false)
+		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: undefined })).toBe(false)
 	})
 })
