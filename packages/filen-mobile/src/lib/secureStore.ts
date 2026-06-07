@@ -105,12 +105,24 @@ class SecureStore {
 	}
 
 	public async init(): Promise<void> {
+		if (this.initDone) {
+			return
+		}
+
 		const result = await run(async defer => {
 			await this.initMutex.acquire()
 
 			defer(() => {
 				this.initMutex.release()
 			})
+
+			// Re-check after acquiring the mutex: a concurrent caller may have completed init while we
+			// waited. Without this guard a second init() (e.g. setup()'s Promise.all call, after
+			// auth.isAuthed() already initialized the store) re-reads the cache and re-emits a
+			// secureStoreChange for every stored key — a redundant O(n) pass.
+			if (this.initDone) {
+				return
+			}
 
 			this.ensureDirectories()
 

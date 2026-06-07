@@ -175,6 +175,29 @@ describe("SecureStore", () => {
 			expect(changeEmits).toContainEqual(["secureStoreChange", { key: "key1", value: "val1" }])
 			expect(changeEmits).toContainEqual(["secureStoreChange", { key: "key2", value: "val2" }])
 		})
+
+		it("is idempotent — a second init() on the same instance does not re-read or re-emit", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("k", "v")
+
+			const encryptionKey = await keyCapture
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			await store2.init()
+			mockEvents.emit.mockClear()
+
+			await store2.init()
+
+			const changeEmits = mockEvents.emit.mock.calls.filter(([event]) => event === "secureStoreChange")
+
+			expect(changeEmits).toHaveLength(0)
+		})
 	})
 
 	describe("getEncryptionKey", () => {
