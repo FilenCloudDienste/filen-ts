@@ -2,9 +2,20 @@ import { Platform } from "react-native"
 import notifee, { AndroidImportance, AndroidForegroundServiceType, AuthorizationStatus } from "react-native-notify-kit"
 import { bpsToReadable } from "@filen/utils"
 import i18n from "@/lib/i18n"
+import secureStore from "@/lib/secureStore"
 
 const CHANNEL_ID = "transfers"
 const NOTIFICATION_ID = "filen-transfers-fgs"
+
+// secureStore key for the "Background transfers" setting (Android only). Boolean; absent →
+// DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED (on). When off, start() never displays the
+// foreground-service notification, so the OS no longer keeps backgrounded transfers alive.
+// Read in start() (defense-in-depth for any programmatic caller) and consumed reactively by the
+// Advanced settings toggle + the <ForegroundService /> host, which stops/starts the running
+// service when the toggle flips mid-transfer.
+export const TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY = "transfersForegroundServiceEnabled"
+
+export const DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED = true
 
 export type PermissionStatus = "authorized" | "denied" | "notDetermined" | "notAndroid"
 
@@ -80,6 +91,10 @@ class ForegroundService {
 			return
 		}
 
+		if (!(await this.isEnabled()) || signal?.aborted) {
+			return
+		}
+
 		await this.init()
 
 		if (signal?.aborted) {
@@ -113,6 +128,14 @@ class ForegroundService {
 		await notifee.stopForegroundService()
 
 		this.running = false
+	}
+
+	// Whether the user has the "Background transfers" setting enabled. Absent → on by default,
+	// preserving the prior always-run behavior.
+	private async isEnabled(): Promise<boolean> {
+		const value = await secureStore.get<boolean>(TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY)
+
+		return value ?? DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
 	}
 
 	private async ensurePermission(): Promise<boolean> {

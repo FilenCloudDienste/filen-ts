@@ -35,6 +35,17 @@ vi.mock("@/lib/i18n", () => ({
 	}
 }))
 
+// "Background transfers" setting. null → unset (defaults to enabled). Toggled per-test to assert
+// start() gates on it.
+const mockSecureStoreGet = vi.fn<(key: string) => Promise<unknown>>().mockResolvedValue(null)
+
+vi.mock("@/lib/secureStore", () => ({
+	default: {
+		get: mockSecureStoreGet
+	},
+	useSecureStore: vi.fn()
+}))
+
 beforeEach(() => {
 	vi.clearAllMocks()
 	vi.resetModules()
@@ -43,6 +54,7 @@ beforeEach(() => {
 	mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })
 	mockNotifee.createChannel.mockResolvedValue(undefined)
 	mockBpsToReadable.mockImplementation((speed: number) => `${speed}B/s`)
+	mockSecureStoreGet.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -98,6 +110,41 @@ describe("foregroundService", () => {
 				})
 			})
 		)
+	})
+
+	it("start no-ops when the Background transfers setting is disabled (never inits or requests permission)", async () => {
+		mockSecureStoreGet.mockResolvedValue(false)
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.5, speed: 1024 })
+
+		expect(mockSecureStoreGet).toHaveBeenCalledWith("transfersForegroundServiceEnabled")
+		expect(mockNotifee.registerForegroundService).not.toHaveBeenCalled()
+		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
+		expect(mockNotifee.displayNotification).not.toHaveBeenCalled()
+	})
+
+	it("start proceeds when the Background transfers setting is explicitly enabled", async () => {
+		mockSecureStoreGet.mockResolvedValue(true)
+		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
+	})
+
+	it("start treats an unset Background transfers setting as enabled (default on)", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 1024 })
+
+		expect(mockNotifee.displayNotification).toHaveBeenCalledTimes(1)
 	})
 
 	it("start with DENIED status silently no-ops", async () => {

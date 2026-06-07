@@ -1,11 +1,22 @@
 import { useEffect } from "react"
 import { Platform } from "react-native"
-import foregroundService from "@/features/transfers/foregroundService"
+import foregroundService, {
+	TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
+	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
+} from "@/features/transfers/foregroundService"
 import useTransfersStore, { type TransfersStore } from "@/features/transfers/store/useTransfers.store"
+import { useSecureStore } from "@/lib/secureStore"
 
 function ForegroundService() {
+	const [enabled] = useSecureStore<boolean>(
+		TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
+		DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
+	)
+
 	useEffect(() => {
-		if (Platform.OS !== "android") {
+		// Re-runs when `enabled` flips: turning it off tears down this effect (its cleanup stops a
+		// running service); turning it on re-subscribes and starts one if transfers are already active.
+		if (Platform.OS !== "android" || !enabled) {
 			return
 		}
 
@@ -56,7 +67,7 @@ function ForegroundService() {
 
 			inFlight = inFlight.then(() => foregroundService.stop()).catch(console.error)
 		}
-	}, [])
+	}, [enabled])
 
 	return null
 }
