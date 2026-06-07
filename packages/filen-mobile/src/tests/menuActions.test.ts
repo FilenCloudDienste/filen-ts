@@ -442,7 +442,7 @@ describe("confirmedDriveAction (#34)", () => {
 		expect(callArgs.dismiss?.()).toBe(false)
 	})
 
-	it("dismiss function returns false for sharedFile (not type='file')", () => {
+	it("dismiss function returns true for sharedFile (previewable file type)", () => {
 		confirmedDriveAction({
 			item: makeSharedFile(),
 			promptTitle: "title",
@@ -454,7 +454,38 @@ describe("confirmedDriveAction (#34)", () => {
 
 		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
 
-		// sharedFile.type !== 'file', so dismiss returns false
+		// sharedFile is a previewable file type, so dismiss returns true (closes the
+		// sharedIn/sharedOut/links gallery preview after remove-share / disable-link).
+		expect(callArgs.dismiss?.()).toBe(true)
+	})
+
+	it("dismiss function returns true for sharedRootFile (previewable file type)", () => {
+		confirmedDriveAction({
+			item: { type: "sharedRootFile", data: { uuid: "srf1", undecryptable: false, decryptedMeta: null } } as DriveItem,
+			promptTitle: "title",
+			promptMessage: "message",
+			promptOkText: "ok",
+			action: async () => {},
+			dismissOnSuccess: true
+		})
+
+		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
+
+		expect(callArgs.dismiss?.()).toBe(true)
+	})
+
+	it("dismiss function returns false for sharedRootDirectory (directories aren't previewed)", () => {
+		confirmedDriveAction({
+			item: makeSharedRootDirectory(),
+			promptTitle: "title",
+			promptMessage: "message",
+			promptOkText: "ok",
+			action: async () => {},
+			dismissOnSuccess: true
+		})
+
+		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
+
 		expect(callArgs.dismiss?.()).toBe(false)
 	})
 
@@ -477,6 +508,56 @@ describe("confirmedDriveAction (#34)", () => {
 		expect(callArgs.promptTitle).toBe("Delete forever?")
 		expect(callArgs.promptMessage).toBe("Cannot be undone")
 		expect(callArgs.promptOkText).toBe("Delete")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// #40 — preview-context dismiss threading (buildUndecryptableMenuButtons)
+// ---------------------------------------------------------------------------
+
+describe("buildUndecryptableMenuButtons preview dismiss (#40)", () => {
+	beforeEach(() => {
+		mockConfirmedAction.mockClear()
+	})
+
+	it("threads isPreview=true into deletePermanently → dismiss fn returns true", () => {
+		buildUndecryptableMenuButtons({
+			item: makeFile(),
+			drivePath: makeDrivePath("trash"),
+			isPreview: true,
+			t
+		})
+
+		// trash branch builds [restore (no confirmedAction), deletePermanently (call #0)]
+		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
+
+		expect(typeof callArgs.dismiss).toBe("function")
+		expect(callArgs.dismiss?.()).toBe(true)
+	})
+
+	it("omits dismiss for deletePermanently when not in preview (stays on the trash list)", () => {
+		buildUndecryptableMenuButtons({
+			item: makeFile(),
+			drivePath: makeDrivePath("trash"),
+			t
+		})
+
+		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
+
+		expect(callArgs.dismiss).toBeUndefined()
+	})
+
+	it("threads isPreview=true into the trash action (drive variant)", () => {
+		buildUndecryptableMenuButtons({
+			item: makeFile(),
+			drivePath: makeDrivePath("drive"),
+			isPreview: true,
+			t
+		})
+
+		const callArgs = mockConfirmedAction.mock.calls[0]?.[0] as { dismiss: (() => boolean) | undefined }
+
+		expect(callArgs.dismiss?.()).toBe(true)
 	})
 })
 

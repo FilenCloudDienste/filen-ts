@@ -14,10 +14,14 @@ import { confirmedDriveAction } from "@/features/drive/components/item/menuActio
 export function buildUndecryptableMenuButtons({
 	item,
 	drivePath,
+	isPreview,
 	t
 }: {
 	item: DriveItem
 	drivePath: DrivePath
+	// True when rendered inside the preview (gallery) — destructive actions then pop
+	// the preview on success. See `isPreview` in createMenuButtons.
+	isPreview?: boolean
 	t: TFunction
 }): MenuButton[] {
 	const undecryptableButtons: MenuButton[] = []
@@ -57,7 +61,8 @@ export function buildUndecryptableMenuButtons({
 					promptMessage: t("confirm_delete_permanently"),
 					promptOkText: t("delete_permanently"),
 					action: () => drive.deletePermanently({ item }),
-					dismissOnSuccess: true
+					// Close the preview when deleting from inside it (stays put from the list).
+					dismissOnSuccess: isPreview === true
 				})
 			})
 		}
@@ -80,7 +85,8 @@ export function buildUndecryptableMenuButtons({
 				promptMessage: t("confirm_trash"),
 				promptOkText: t("trash"),
 				action: () => drive.trash({ item }),
-				dismissOnSuccess: false
+				// Close the preview when trashing from inside it.
+				dismissOnSuccess: isPreview === true
 			})
 		})
 	}

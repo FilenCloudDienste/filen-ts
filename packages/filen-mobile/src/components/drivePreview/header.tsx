@@ -128,6 +128,7 @@ const GalleryHeader = ({
 										driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false
 									}
 									showSelectToggle={false}
+									isPreview={true}
 								>
 									{currentItemPreviewType === "audio" ? (
 										<View className="size-11 flex-row items-center justify-center bg-transparent rounded-full">

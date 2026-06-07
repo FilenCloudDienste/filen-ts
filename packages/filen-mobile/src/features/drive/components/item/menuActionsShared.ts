@@ -1,5 +1,6 @@
 import { confirmedAction } from "@/lib/confirmedAction"
 import type { DriveItem } from "@/types"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 // Shared shape for confirmed destructive drive actions (trash / delete / remove
 // offline / remove share / stop sharing / disable link): prompt → guard cancel →
@@ -24,8 +25,9 @@ export function confirmedDriveAction({
 	promptDestructive?: boolean
 	// Return value is awaited then discarded (matches the original `await drive.X(...)`).
 	action: () => Promise<unknown>
-	// When true and the purged item is a file we can navigate away from, pop back
-	// (closes a file preview / detail route sitting on top).
+	// When true and the purged item is a previewable file, pop back (closes the
+	// file preview / detail route sitting on top). Call sites set this from their
+	// preview context — see `isPreview` in createMenuButtons.
 	dismissOnSuccess: boolean
 }): () => Promise<void> {
 	return confirmedAction({
@@ -34,6 +36,9 @@ export function confirmedDriveAction({
 		promptOkText,
 		promptDestructive,
 		action,
-		dismiss: dismissOnSuccess ? () => item.type === "file" : undefined
+		// Only files are previewed (a directory tap navigates into it), so the dismiss
+		// targets any previewable file type — including the shared* variants opened from
+		// the sharedIn/sharedOut/links galleries (the old `type === "file"` check missed those).
+		dismiss: dismissOnSuccess ? () => isFileItem(item) : undefined
 	})
 }

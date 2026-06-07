@@ -25,16 +25,21 @@ export function createMenuButtons({
 	drivePath,
 	isStoredOffline,
 	showSelectToggle,
+	isPreview,
 	t
 }: {
 	item: DriveItem
 	drivePath: DrivePath
 	isStoredOffline: boolean
 	showSelectToggle?: boolean
+	// True when the menu is rendered inside the full-screen preview (gallery) — so
+	// destructive actions that remove the previewed item pop the preview on success.
+	// List-row menus leave this false (they must NOT pop the underlying list).
+	isPreview?: boolean
 	t: TFunction
 }): MenuButton[] {
 	if (item.data.undecryptable) {
-		return buildUndecryptableMenuButtons({ item, drivePath, t })
+		return buildUndecryptableMenuButtons({ item, drivePath, isPreview, t })
 	}
 
 	const menuButtons: MenuButton[] = []
@@ -439,7 +444,6 @@ export function createMenuButtons({
 			title: t("remove_share"),
 			icon: "delete",
 			destructive: true,
-			// TODO: if we are in a preview, close the preview after removing the share
 			onPress: confirmedDriveAction({
 				item,
 				promptTitle: t("remove_share_item"),
@@ -450,7 +454,8 @@ export function createMenuButtons({
 						item,
 						parentUuid: drivePath.uuid ?? undefined
 					}),
-				dismissOnSuccess: false
+				// Close the preview when removing the share from inside it.
+				dismissOnSuccess: isPreview === true
 			})
 		})
 	}
@@ -462,14 +467,14 @@ export function createMenuButtons({
 			title: t("stop_sharing"),
 			icon: "delete",
 			destructive: true,
-			// TODO: if we are in a preview, close the preview after stopping sharing the item
 			onPress: confirmedDriveAction({
 				item,
 				promptTitle: t("stop_sharing_item"),
 				promptMessage: t("confirm_stop_sharing"),
 				promptOkText: t("stop_sharing"),
 				action: () => drive.removeShare({ item }),
-				dismissOnSuccess: false
+				// Close the preview when stopping sharing from inside it.
+				dismissOnSuccess: isPreview === true
 			})
 		})
 	}
@@ -481,14 +486,14 @@ export function createMenuButtons({
 			title: t("disable_public_link"),
 			icon: "delete",
 			destructive: true,
-			// TODO: if we are in a preview, close the preview after
 			onPress: confirmedDriveAction({
 				item,
 				promptTitle: t("disable_public_link"),
 				promptMessage: t("confirm_disable_public_link"),
 				promptOkText: t("disable"),
 				action: () => drive.disablePublicLink({ item }),
-				dismissOnSuccess: false
+				// Close the preview when disabling the link from inside it.
+				dismissOnSuccess: isPreview === true
 			})
 		})
 	}
@@ -500,8 +505,6 @@ export function createMenuButtons({
 			title: t("trash"),
 			icon: "trash",
 			destructive: true,
-			// TODO: if we are in a preview, close the preview after trashing the item
-			//
 			// Note: this is the one destructive action whose confirm alert is NOT styled
 			// destructive (no `destructive: true` on the prompt) — preserved via promptDestructive: false.
 			onPress: confirmedDriveAction({
@@ -511,7 +514,8 @@ export function createMenuButtons({
 				promptOkText: t("trash"),
 				promptDestructive: false,
 				action: () => drive.trash({ item }),
-				dismissOnSuccess: false
+				// Close the preview when trashing from inside it.
+				dismissOnSuccess: isPreview === true
 			})
 		})
 	}
@@ -552,7 +556,9 @@ export function createMenuButtons({
 				promptMessage: t("confirm_delete_permanently"),
 				promptOkText: t("delete_permanently"),
 				action: () => drive.deletePermanently({ item }),
-				dismissOnSuccess: true
+				// Close the preview when deleting from inside it. From the trash list this
+				// stays put (previously it popped the whole trash modal on every file delete).
+				dismissOnSuccess: isPreview === true
 			})
 		})
 	}
