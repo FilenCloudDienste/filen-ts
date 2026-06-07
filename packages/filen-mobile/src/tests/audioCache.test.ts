@@ -444,6 +444,31 @@ describe("AudioCache", () => {
 			expect(result.metadata!.artist).toBe("Test Artist")
 		})
 
+		it("serializes parsing across different items via the global semaphore without deadlocking", async () => {
+			const cache = await createAudioCache()
+
+			const itemA = wrapDrive(makeFileItem("uuid-par-a", "a.mp3"))
+			const itemB = wrapDrive(makeFileItem("uuid-par-b", "b.mp3"))
+
+			const fileA = new File(`${FILE_CACHE_BASE_DIR}/uuid-par-a/uuid-par-a.mp3`)
+			const fileB = new File(`${FILE_CACHE_BASE_DIR}/uuid-par-b/uuid-par-b.mp3`)
+
+			fs.set(fileA.uri, new Uint8Array([1, 2, 3]))
+			fs.set(fileB.uri, new Uint8Array([4, 5, 6]))
+
+			// Return the matching audio file per item, independent of call order.
+			vi.mocked(fileCache.get).mockImplementation((async ({ item }: { item: CacheItem }) =>
+				item.type === "drive" && item.data.data.uuid === "uuid-par-a" ? fileA : fileB) as any)
+
+			// Both fire concurrently — with the N=1 parse semaphore they must still both
+			// resolve (the deferred release runs on every exit path, so no hang).
+			const [resA, resB] = await Promise.all([cache.get({ item: itemA }), cache.get({ item: itemB })])
+
+			expect(resA.metadata).not.toBeNull()
+			expect(resB.metadata).not.toBeNull()
+			expect(parseWebStream).toHaveBeenCalledTimes(2)
+		})
+
 		it("returns null metadata for unsupported extension", async () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-9"

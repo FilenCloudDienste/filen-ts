@@ -80,6 +80,13 @@ export const MUSIC_METADATA_SUPPORTED_EXTENSIONS = new Set<string>([
 // (incl. long lossless tracks) and only skips genuinely huge files (podcasts, audiobooks, mixes).
 export const AUDIO_METADATA_MAX_PARSE_SIZE_BYTES = 100 * 1024 * 1024
 
+// Cap concurrent audio metadata parses. `parseWebStream` is interleaved synchronous work on the
+// single Hermes JS thread — concurrent parses can't run in parallel, they only fill the
+// stream-read await gaps that the UI could otherwise use. Serializing (1) keeps those gaps free
+// for the UI while metadata trickles in one track at a time; bump to 2 to trade some UI headroom
+// for throughput when fetching many tracks at once.
+export const AUDIO_METADATA_MAX_CONCURRENT_PARSES = 1
+
 export const EXPO_IMAGE_SUPPORTED_EXTENSIONS = new Set<string>(
 	Platform.select({
 		ios: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico", ".icns"],
