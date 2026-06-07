@@ -192,6 +192,20 @@ function setupMockDb(): void {
 	})
 
 	mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
+		if (query.startsWith("SELECT key, value FROM kv WHERE key >= ?")) {
+			const gte = params![0] as string
+			const lt = params![1] as string
+			const rows: [string, string][] = []
+
+			for (const [key, value] of kvStore) {
+				if (key >= gte && key < lt) {
+					rows.push([key, value])
+				}
+			}
+
+			return rows
+		}
+
 		if (query.startsWith("SELECT key, value FROM kv WHERE") && query.includes("LIKE")) {
 			const pattern = params![0] as string
 			const rows: [string, string][] = []
