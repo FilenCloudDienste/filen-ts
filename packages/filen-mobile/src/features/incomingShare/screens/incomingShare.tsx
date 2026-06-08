@@ -71,11 +71,18 @@ function IncomingShare() {
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const navigation = useNavigation()
 	const currentPayloadsRef = useRef<ResolvedSharePayload[]>([])
+	const isUploadingRef = useRef(false)
 	const isOnline = useIsOnline()
 
 	const payloads = resolvedSharedPayloads.filter(
 		payload => typeof payload.contentUri === "string" && typeof payload.originalName === "string"
 	)
+
+	// True while the OS share extension is still resolving payloads. The expo-sharing hook
+	// initialises with isResolving=false / resolvedSharedPayloads=[] and only sets isResolving=true
+	// in a post-commit useEffect, so we treat an empty payload list with no error as still-loading
+	// to suppress the "no resolved shares" empty state on the first render frame.
+	const isLoadingPayloads = isResolving || (!error && resolvedSharedPayloads.length === 0)
 
 	const clear = useCallback(async (paylodsToClear: ResolvedSharePayload[]) => {
 		await run(() => {
@@ -110,124 +117,134 @@ function IncomingShare() {
 	}, [navigation, clear])
 
 	const handleUpload = useCallback(async () => {
-		const selectResult = await run(async () => {
-			return await selectDriveItems({
-				type: "single",
-				files: false,
-				directories: true,
-				items: []
+		if (isUploadingRef.current) {
+			return
+		}
+
+		isUploadingRef.current = true
+
+		try {
+			const selectResult = await run(async () => {
+				return await selectDriveItems({
+					type: "single",
+					files: false,
+					directories: true,
+					items: []
+				})
 			})
-		})
 
-		if (!selectResult.success) {
-			console.error(selectResult.error)
-			alerts.error(selectResult.error)
+			if (!selectResult.success) {
+				console.error(selectResult.error)
+				alerts.error(selectResult.error)
 
-			return
-		}
-
-		if (selectResult.data.cancelled) {
-			return
-		}
-
-		const selectedItem = selectResult.data.selectedItems[0]
-
-		if (!selectedItem) {
-			return
-		}
-
-		const remoteDir = (() => {
-			if (selectedItem.type === "root") {
-				return selectedItem.data
+				return
 			}
 
-			const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
-
-			if (!fromCache) {
-				return null
+			if (selectResult.data.cancelled) {
+				return
 			}
 
-			return fromCache
-		})()
+			const selectedItem = selectResult.data.selectedItems[0]
 
-		if (!remoteDir) {
-			return
-		}
+			if (!selectedItem) {
+				return
+			}
 
-		const assetsResult = await runWithLoading(async defer => {
-			return await Promise.all(
-				payloads.map(async payload => {
-					if (!payload.contentUri || !payload.originalName) {
-						return null
-					}
+			const remoteDir = (() => {
+				if (selectedItem.type === "root") {
+					return selectedItem.data
+				}
 
-					const file = new FileSystem.File(payload.contentUri)
+				const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
 
-					defer(() => {
-						if (file.exists) {
-							file.delete()
+				if (!fromCache) {
+					return null
+				}
+
+				return fromCache
+			})()
+
+			if (!remoteDir) {
+				return
+			}
+
+			const assetsResult = await runWithLoading(async defer => {
+				return await Promise.all(
+					payloads.map(async payload => {
+						if (!payload.contentUri || !payload.originalName) {
+							return null
+						}
+
+						const file = new FileSystem.File(payload.contentUri)
+
+						defer(() => {
+							if (file.exists) {
+								file.delete()
+							}
+						})
+
+						const tmpFile = newTmpFile()
+
+						if (tmpFile.exists) {
+							tmpFile.delete()
+						}
+
+						file.copySync(tmpFile)
+
+						return {
+							name: payload.originalName,
+							file: tmpFile
 						}
 					})
+				)
+			})
 
-					const tmpFile = newTmpFile()
+			if (!assetsResult.success) {
+				console.error(assetsResult.error)
+				alerts.error(assetsResult.error)
 
-					if (tmpFile.exists) {
-						tmpFile.delete()
-					}
+				return
+			}
 
-					file.copySync(tmpFile)
-
-					return {
-						name: payload.originalName,
-						file: tmpFile
-					}
-				})
+			const assets = assetsResult.data.filter(
+				(
+					asset
+				): asset is {
+					name: string
+					file: FileSystem.File
+				} => asset !== null
 			)
-		})
 
-		if (!assetsResult.success) {
-			console.error(assetsResult.error)
-			alerts.error(assetsResult.error)
+			clear(currentPayloadsRef.current)
 
-			return
-		}
+			navigation.getParent()?.goBack()
 
-		const assets = assetsResult.data.filter(
-			(
-				asset
-			): asset is {
-				name: string
-				file: FileSystem.File
-			} => asset !== null
-		)
+			const result = await run(async defer => {
+				return await Promise.all(
+					assets.map(async asset => {
+						defer(() => {
+							if (asset.file.exists) {
+								asset.file.delete()
+							}
+						})
 
-		clear(currentPayloadsRef.current)
-
-		navigation.getParent()?.goBack()
-
-		const result = await run(async defer => {
-			return await Promise.all(
-				assets.map(async asset => {
-					defer(() => {
-						if (asset.file.exists) {
-							asset.file.delete()
-						}
+						return await transfers.upload({
+							localFileOrDir: asset.file,
+							parent: remoteDir,
+							name: asset.name
+						})
 					})
+				)
+			})
 
-					return await transfers.upload({
-						localFileOrDir: asset.file,
-						parent: remoteDir,
-						name: asset.name
-					})
-				})
-			)
-		})
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
 
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
+				return
+			}
+		} finally {
+			isUploadingRef.current = false
 		}
 	}, [payloads, navigation, clear])
 
@@ -294,7 +311,7 @@ function IncomingShare() {
 			>
 				<VirtualList
 					data={payloads}
-					loading={isResolving}
+					loading={isLoadingPayloads}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
