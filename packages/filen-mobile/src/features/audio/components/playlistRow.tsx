@@ -18,8 +18,17 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
+import useIsOnline from "@/hooks/useIsOnline"
 
-function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: PlaylistWithItems }): ShowActionSheetOptions["buttons"] {
+export function buildPlaylistRowButtons({
+	t,
+	playlist,
+	isOnline
+}: {
+	t: TFunction
+	playlist: PlaylistWithItems
+	isOnline: boolean
+}): ShowActionSheetOptions["buttons"] {
 	return [
 		{
 			title: t("select"),
@@ -29,6 +38,7 @@ function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: Play
 		},
 		{
 			title: t("rename"),
+			disabled: !isOnline,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
@@ -142,6 +152,7 @@ function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: Play
 			: []),
 		{
 			title: t("add_tracks"),
+			disabled: !isOnline,
 			onPress: async () => {
 				const selectDriveItemsResult = await run(async () => {
 					return await selectDriveItems({
@@ -182,6 +193,7 @@ function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: Play
 		{
 			title: t("delete"),
 			destructive: true,
+			disabled: !isOnline,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
@@ -229,6 +241,7 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const { queueItem } = useAudioQueue()
+	const isOnline = useIsOnline()
 	const isSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.some(p => p.uuid === playlist.uuid)))
 	const arePlaylistsSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.length > 0))
 
@@ -279,7 +292,7 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 				}
 
 				actionSheet.show({
-					buttons: buildPlaylistRowButtons({ t, playlist })
+					buttons: buildPlaylistRowButtons({ t, playlist, isOnline })
 				})
 			}}
 		>
