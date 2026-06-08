@@ -3,6 +3,8 @@ import { type Note, type NoteHistory } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import { sync } from "@/features/notes/components/sync"
 
 export async function setPinned({ note, pinned, signal }: { note: Note; pinned: boolean; signal?: AbortSignal }) {
 	if (pinned === note.pinned) {
@@ -164,6 +166,22 @@ export async function restoreFromHistory({ note, history, signal }: { note: Note
 					: n
 			)
 	})
+
+	// Drop any unsynced local content for this note. Otherwise sync.tsx would
+	// later push the still-queued pre-restore inflight content back to the
+	// server, overwriting the version we just restored from history. Mirrors the
+	// onContentEditedRemotely teardown in components/content/index.tsx.
+	useNotesInflightStore.getState().setInflightContent(prev => {
+		const updated = {
+			...prev
+		}
+
+		delete updated[note.uuid]
+
+		return updated
+	})
+
+	await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 
 	return note
 }

@@ -4,9 +4,10 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ---------------------------------------------------------------------------
 
-const { mockGetSdkClients, mockNotesWithContentQueryUpdate } = vi.hoisted(() => ({
+const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockFlushToDisk } = vi.hoisted(() => ({
 	mockGetSdkClients: vi.fn(),
-	mockNotesWithContentQueryUpdate: vi.fn()
+	mockNotesWithContentQueryUpdate: vi.fn(),
+	mockFlushToDisk: vi.fn().mockResolvedValue(undefined)
 }))
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,12 @@ vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
 	noteContentQueryUpdate: vi.fn()
+}))
+
+vi.mock("@/features/notes/components/sync", () => ({
+	sync: {
+		flushToDisk: mockFlushToDisk
+	}
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -80,6 +87,7 @@ vi.mock("@filen/utils", async () => ({
 
 import { restoreFromHistory } from "@/features/notes/notesLifecycle"
 import { type Note, type NoteHistory } from "@/types"
+import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 
 // ---------------------------------------------------------------------------
 // Factory helpers
@@ -152,6 +160,9 @@ describe("restoreFromHistory", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockReset()
 		mockNotesWithContentQueryUpdate.mockReset()
+		mockFlushToDisk.mockClear()
+		mockFlushToDisk.mockResolvedValue(undefined)
+		useNotesInflightStore.getState().setInflightContent({})
 	})
 
 	it("calls authedSdkClient.restoreNoteFromHistory with the note and history args", async () => {
@@ -279,5 +290,62 @@ describe("restoreFromHistory", () => {
 		const result = await restoreFromHistory({ note, history })
 
 		expect(result.undecryptable).toBe(true)
+	})
+
+	it("removes the restored note's inflight content so a stale pre-restore edit cannot overwrite it", async () => {
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1" })
+		const history = makeHistory()
+
+		// Simulate a still-queued pre-restore edit for this note plus an unrelated one.
+		useNotesInflightStore.getState().setInflightContent({
+			"note-uuid-1": [{ timestamp: 1234, content: "stale pre-restore edit", note }],
+			"other-uuid": [{ timestamp: 5678, content: "untouched", note: makeNote({ uuid: "other-uuid" }) }]
+		})
+
+		await restoreFromHistory({ note, history })
+
+		const inflight = useNotesInflightStore.getState().inflightContent
+
+		expect(inflight["note-uuid-1"]).toBeUndefined()
+		// Inflight for unrelated notes must be left intact.
+		expect(inflight["other-uuid"]).toBeDefined()
+	})
+
+	it("flushes the cleared inflight content to disk after restore", async () => {
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1" })
+		const history = makeHistory()
+
+		useNotesInflightStore.getState().setInflightContent({
+			"note-uuid-1": [{ timestamp: 1234, content: "stale pre-restore edit", note }]
+		})
+
+		await restoreFromHistory({ note, history })
+
+		expect(mockFlushToDisk).toHaveBeenCalledTimes(1)
+
+		// The flushed snapshot must already exclude the restored note's inflight entry.
+		const flushedArg = mockFlushToDisk.mock.calls[0]?.[0]
+
+		expect(flushedArg).toBeDefined()
+		expect(flushedArg["note-uuid-1"]).toBeUndefined()
+	})
+
+	it("does not break when there is no inflight content for the restored note", async () => {
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1" })
+		const history = makeHistory()
+
+		await restoreFromHistory({ note, history })
+
+		expect(useNotesInflightStore.getState().inflightContent["note-uuid-1"]).toBeUndefined()
+		expect(mockFlushToDisk).toHaveBeenCalledTimes(1)
 	})
 })
