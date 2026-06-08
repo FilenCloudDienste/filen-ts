@@ -104,7 +104,7 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 			className="flex-1"
 			contentInsetAdjustmentBehavior="automatic"
 			contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-			loading={chatsQuery.status !== "success"}
+			loading={chatsQuery.status === "pending"}
 			keyExtractor={keyExtractor}
 			data={chats}
 			renderItem={renderItem}
