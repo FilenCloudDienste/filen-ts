@@ -46,6 +46,7 @@ export function buildSelectionMenuButtons({
 		icon: "plus",
 		onPress: async () => {
 			const playlistUuid = playlist.uuid
+			const queueWasEmpty = audio.getQueue().length === 0
 
 			let droppedUndecryptable = false
 
@@ -68,6 +69,10 @@ export function buildSelectionMenuButtons({
 
 			if (droppedUndecryptable) {
 				alerts.normal(t("cannot_decrypt_toast"))
+			}
+
+			if (queueWasEmpty && audio.getQueue().length > 0) {
+				await audio.play()
 			}
 		}
 	})
@@ -263,6 +268,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 			id: "rename",
 			icon: "edit",
 			title: t("rename_playlist"),
+			requiresOnline: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
@@ -311,6 +317,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 			id: "add",
 			icon: "plus",
 			title: t("add_tracks"),
+			requiresOnline: true,
 			onPress: async () => {
 				const selectDriveItemsResult = await run(async () => {
 					return await selectDriveItems({
@@ -353,6 +360,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 			icon: "delete",
 			title: t("delete_playlist"),
 			destructive: true,
+			requiresOnline: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
