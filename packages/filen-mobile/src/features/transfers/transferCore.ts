@@ -79,9 +79,32 @@ function registerPauseListeners(
 	})
 }
 
-// Registers a deferred cleanup that removes the transfer entry from the store once the
-// transfer either succeeds or is aborted. The `succeeded` and `aborted` arguments are
-// getter functions so they capture the latest value at cleanup time, not at registration time.
+// Pure decision predicate for whether a settled transfer entry should be removed from the store.
+// A transfer that succeeded, was aborted, OR finished with errors has reached a terminal state and
+// must be dropped — otherwise the floating bar, the Android foreground service and the speed
+// interval stay alive forever (the errored case was previously missed). A still-running transfer
+// (none of the three) is kept.
+export function shouldRemoveSettledTransfer(args: { succeeded: boolean; aborted: boolean; hasErrors: boolean }): boolean {
+	return args.succeeded || args.aborted || args.hasErrors
+}
+
+// Removes the transfer entry from the store, optionally waiting for an external completion gate
+// first (e.g. camera upload finishing its own bookkeeping). Shared by the deferred success/abort
+// cleanup and the error-write paths so the removal logic stays in one place.
+function removeSettledTransfer(id: string, type: Transfer["type"], awaitExternal?: () => Promise<void>): void {
+	;(awaitExternal ? awaitExternal() : Promise.resolve())
+		.then(() => {
+			useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === type)))
+		})
+		.catch(console.error)
+}
+
+// Registers a deferred cleanup that removes the transfer entry from the store once the transfer
+// succeeds or is aborted. The errored case is handled separately in the post-`run` error blocks:
+// the deferred callback runs inside `run`'s `finally` (before `await run(...)` resolves), so at this
+// point the error has not yet been appended to the store entry — removing it here would race the
+// error write and could hide the failure from the transfers screen. The `succeeded` and `aborted`
+// arguments are getter functions so they capture the latest value at cleanup time, not at registration time.
 function registerCompletionCleanup(args: {
 	id: string
 	type: Transfer["type"]
@@ -93,15 +116,11 @@ function registerCompletionCleanup(args: {
 	const { id, type, succeeded, aborted, awaitExternal, defer } = args
 
 	defer(() => {
-		if (!succeeded() && !aborted()) {
+		if (!shouldRemoveSettledTransfer({ succeeded: succeeded(), aborted: aborted(), hasErrors: false })) {
 			return
 		}
 
-		;(awaitExternal ? awaitExternal() : Promise.resolve())
-			.then(() => {
-				useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === type)))
-			})
-			.catch(console.error)
+		removeSettledTransfer(id, type, awaitExternal)
 	})
 }
 
@@ -447,6 +466,11 @@ export async function uploadCore(
 							: t
 					)
 				)
+
+				// The error is now written to the store entry; remove the settled (errored) transfer so the
+				// floating bar, foreground service and speed interval don't stay alive forever. The thrown
+				// error below still surfaces to the caller's alert path, independent of this removal.
+				removeSettledTransfer(id, "uploadDirectory", awaitExternalCompletionBeforeMarkingAsFinished)
 			}
 
 			throw result.error
@@ -597,6 +621,11 @@ export async function uploadCore(
 						: t
 				)
 			)
+
+			// The error is now written to the store entry; remove the settled (errored) transfer so the
+			// floating bar, foreground service and speed interval don't stay alive forever. The thrown
+			// error below still surfaces to the caller's alert path, independent of this removal.
+			removeSettledTransfer(id, "uploadFile", awaitExternalCompletionBeforeMarkingAsFinished)
 		}
 
 		throw result.error
@@ -947,6 +976,11 @@ export async function downloadCore(
 							: t
 					)
 				)
+
+				// The error is now written to the store entry; remove the settled (errored) transfer so the
+				// floating bar, foreground service and speed interval don't stay alive forever. The thrown
+				// error below still surfaces to the caller's alert path, independent of this removal.
+				removeSettledTransfer(id, "downloadDirectory", awaitExternalCompletionBeforeMarkingAsFinished)
 			}
 
 			throw result.error
@@ -1159,6 +1193,11 @@ export async function downloadCore(
 						: t
 				)
 			)
+
+			// The error is now written to the store entry; remove the settled (errored) transfer so the
+			// floating bar, foreground service and speed interval don't stay alive forever. The thrown
+			// error below still surfaces to the caller's alert path, independent of this removal.
+			removeSettledTransfer(id, "downloadFile", awaitExternalCompletionBeforeMarkingAsFinished)
 		}
 
 		throw result.error

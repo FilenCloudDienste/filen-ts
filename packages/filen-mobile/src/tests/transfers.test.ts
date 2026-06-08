@@ -319,6 +319,7 @@ vi.mock("@/lib/signals", () => ({
 }))
 
 import transfers from "@/features/transfers/transfers"
+import { shouldRemoveSettledTransfer } from "@/features/transfers/transferCore"
 import cache from "@/lib/cache"
 import { fs, File as MockFile, Directory as MockDir } from "@/tests/mocks/expoFileSystem"
 import type * as FileSystem from "expo-file-system"
@@ -635,13 +636,35 @@ describe("Transfers", () => {
 				expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 			})
 
-			it("appends an error entry to the store transfer when hideProgress is false and upload throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and upload throws a non-abort error", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
 				const parent = makeParentDir("parent-uuid")
 				const uploadError = new Error("network failure")
 
 				mockUploadFile.mockRejectedValueOnce(uploadError)
+
+				// Snapshot every store update so we can assert the error was written BEFORE the entry was
+				// removed — the error must surface to the transfers screen even though the entry is dropped.
+				type ErroredEntry = { type: string; errors: { unknown: Error[]; upload: unknown[] } }
+				const snapshots: { type: string; unknownCount: number }[][] = []
+
+				mockSetTransfers.mockImplementation((fn: unknown) => {
+					if (typeof fn === "function") {
+						mockTransfersState.transfers = (fn as (prev: unknown[]) => unknown[])(mockTransfersState.transfers)
+					} else {
+						mockTransfersState.transfers = fn as unknown[]
+					}
+
+					// Project to a bigint-free shape — the download entries embed bigint-laden DriveItems
+					// that JSON.stringify cannot serialize.
+					snapshots.push(
+						(mockTransfersState.transfers as ErroredEntry[]).map(t => ({
+							type: t.type,
+							unknownCount: t.errors.unknown.length
+						}))
+					)
+				})
 
 				await expect(
 					transfers.upload({
@@ -651,16 +674,20 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("network failure")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{
-					id: string
-					type: string
-					errors: { unknown: Error[]; upload: unknown[] }
-				}>
-				const entry = finalTransfers.find(t => t.type === "uploadFile")
+				// Let the removal .then() microtask flush.
+				await new Promise(res => setTimeout(res, 0))
 
-				expect(entry).toBeDefined()
-				expect(entry!.errors.unknown).toHaveLength(1)
-				expect(entry!.errors.unknown[0]).toBe(uploadError)
+				// At some point the entry carried the appended error (so the error surfaced).
+				const erroredSnapshot = snapshots.find(snapshot =>
+					snapshot.some(t => t.type === "uploadFile" && t.unknownCount === 1)
+				)
+
+				expect(erroredSnapshot).toBeDefined()
+
+				// And the settled, errored transfer is no longer in the store — the leak is fixed.
+				const finalEntry = (mockTransfersState.transfers as ErroredEntry[]).find(t => t.type === "uploadFile")
+
+				expect(finalEntry).toBeUndefined()
 			})
 
 			it("calls thumbnails.generateFromLocalFile for image extensions after a successful upload", async () => {
@@ -981,13 +1008,33 @@ describe("Transfers", () => {
 				expect(mockSetTransfers).toHaveBeenCalled()
 			})
 
-			it("appends error entry to store transfer when hideProgress is false and directory upload throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and directory upload throws a non-abort error", async () => {
 				const dir = new FsDirectory("file:///document/testdir")
 				fs.set(dir.uri, "dir")
 				const parent = makeParentDir("parent-uuid")
 				const uploadError = new Error("dir upload failed")
 
 				mockUploadDirRecursively.mockRejectedValueOnce(uploadError)
+
+				type ErroredEntry = { type: string; errors: { unknown: Error[]; upload: unknown[] } }
+				const snapshots: { type: string; unknownCount: number }[][] = []
+
+				mockSetTransfers.mockImplementation((fn: unknown) => {
+					if (typeof fn === "function") {
+						mockTransfersState.transfers = (fn as (prev: unknown[]) => unknown[])(mockTransfersState.transfers)
+					} else {
+						mockTransfersState.transfers = fn as unknown[]
+					}
+
+					// Project to a bigint-free shape — the download entries embed bigint-laden DriveItems
+					// that JSON.stringify cannot serialize.
+					snapshots.push(
+						(mockTransfersState.transfers as ErroredEntry[]).map(t => ({
+							type: t.type,
+							unknownCount: t.errors.unknown.length
+						}))
+					)
+				})
 
 				await expect(
 					transfers.upload({
@@ -997,16 +1044,17 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("dir upload failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{
-					id: string
-					type: string
-					errors: { unknown: Error[]; upload: unknown[] }
-				}>
-				const entry = finalTransfers.find(t => t.type === "uploadDirectory")
+				await new Promise(res => setTimeout(res, 0))
 
-				expect(entry).toBeDefined()
-				expect(entry!.errors.unknown).toHaveLength(1)
-				expect(entry!.errors.unknown[0]).toBe(uploadError)
+				const erroredSnapshot = snapshots.find(snapshot =>
+					snapshot.some(t => t.type === "uploadDirectory" && t.unknownCount === 1)
+				)
+
+				expect(erroredSnapshot).toBeDefined()
+
+				const finalEntry = (mockTransfersState.transfers as ErroredEntry[]).find(t => t.type === "uploadDirectory")
+
+				expect(finalEntry).toBeUndefined()
 			})
 		})
 	})
@@ -1179,12 +1227,32 @@ describe("Transfers", () => {
 				).rejects.toThrow("Destination must be a file for file downloads.")
 			})
 
-			it("appends error entry to store transfer when hideProgress is false and file download throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and file download throws a non-abort error", async () => {
 				const dest = new FsFile("file:///document/dest.txt")
 				const item = makeFileItem("file-uuid")
 				const downloadError = new Error("download failed")
 
 				mockDownloadFileToPath.mockRejectedValueOnce(downloadError)
+
+				type ErroredEntry = { type: string; errors: { unknown: Error[]; download: unknown[] } }
+				const snapshots: { type: string; unknownCount: number }[][] = []
+
+				mockSetTransfers.mockImplementation((fn: unknown) => {
+					if (typeof fn === "function") {
+						mockTransfersState.transfers = (fn as (prev: unknown[]) => unknown[])(mockTransfersState.transfers)
+					} else {
+						mockTransfersState.transfers = fn as unknown[]
+					}
+
+					// Project to a bigint-free shape — the download entries embed bigint-laden DriveItems
+					// that JSON.stringify cannot serialize.
+					snapshots.push(
+						(mockTransfersState.transfers as ErroredEntry[]).map(t => ({
+							type: t.type,
+							unknownCount: t.errors.unknown.length
+						}))
+					)
+				})
 
 				await expect(
 					transfers.download({
@@ -1194,16 +1262,17 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("download failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{
-					id: string
-					type: string
-					errors: { unknown: Error[]; download: unknown[] }
-				}>
-				const entry = finalTransfers.find(t => t.type === "downloadFile")
+				await new Promise(res => setTimeout(res, 0))
 
-				expect(entry).toBeDefined()
-				expect(entry!.errors.unknown).toHaveLength(1)
-				expect(entry!.errors.unknown[0]).toBe(downloadError)
+				const erroredSnapshot = snapshots.find(snapshot =>
+					snapshot.some(t => t.type === "downloadFile" && t.unknownCount === 1)
+				)
+
+				expect(erroredSnapshot).toBeDefined()
+
+				const finalEntry = (mockTransfersState.transfers as ErroredEntry[]).find(t => t.type === "downloadFile")
+
+				expect(finalEntry).toBeUndefined()
 			})
 		})
 
@@ -1280,12 +1349,32 @@ describe("Transfers", () => {
 				expect(mockSetTransfers).toHaveBeenCalled()
 			})
 
-			it("appends error entry to store transfer when hideProgress is false and directory download throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and directory download throws a non-abort error", async () => {
 				const dest = new FsDirectory("file:///document/destdir")
 				const item = makeDirItem("dir-uuid")
 				const downloadError = new Error("dir download failed")
 
 				mockDownloadDirRecursively.mockRejectedValueOnce(downloadError)
+
+				type ErroredEntry = { type: string; errors: { unknown: Error[]; download: unknown[] } }
+				const snapshots: { type: string; unknownCount: number }[][] = []
+
+				mockSetTransfers.mockImplementation((fn: unknown) => {
+					if (typeof fn === "function") {
+						mockTransfersState.transfers = (fn as (prev: unknown[]) => unknown[])(mockTransfersState.transfers)
+					} else {
+						mockTransfersState.transfers = fn as unknown[]
+					}
+
+					// Project to a bigint-free shape — the download entries embed bigint-laden DriveItems
+					// that JSON.stringify cannot serialize.
+					snapshots.push(
+						(mockTransfersState.transfers as ErroredEntry[]).map(t => ({
+							type: t.type,
+							unknownCount: t.errors.unknown.length
+						}))
+					)
+				})
 
 				await expect(
 					transfers.download({
@@ -1295,16 +1384,17 @@ describe("Transfers", () => {
 					})
 				).rejects.toThrow("dir download failed")
 
-				const finalTransfers = mockTransfersState.transfers as Array<{
-					id: string
-					type: string
-					errors: { unknown: Error[]; download: unknown[] }
-				}>
-				const entry = finalTransfers.find(t => t.type === "downloadDirectory")
+				await new Promise(res => setTimeout(res, 0))
 
-				expect(entry).toBeDefined()
-				expect(entry!.errors.unknown).toHaveLength(1)
-				expect(entry!.errors.unknown[0]).toBe(downloadError)
+				const erroredSnapshot = snapshots.find(snapshot =>
+					snapshot.some(t => t.type === "downloadDirectory" && t.unknownCount === 1)
+				)
+
+				expect(erroredSnapshot).toBeDefined()
+
+				const finalEntry = (mockTransfersState.transfers as ErroredEntry[]).find(t => t.type === "downloadDirectory")
+
+				expect(finalEntry).toBeUndefined()
 			})
 
 			it("throws 'Parent directory of shared directory not found in cache' when sharedDirectory parent is absent", async () => {
@@ -1448,5 +1538,28 @@ describe("Transfers", () => {
 
 			expect(result).toBeNull()
 		})
+	})
+})
+
+describe("shouldRemoveSettledTransfer", () => {
+	it("removes a transfer that succeeded", () => {
+		expect(shouldRemoveSettledTransfer({ succeeded: true, aborted: false, hasErrors: false })).toBe(true)
+	})
+
+	it("removes a transfer that was aborted", () => {
+		expect(shouldRemoveSettledTransfer({ succeeded: false, aborted: true, hasErrors: false })).toBe(true)
+	})
+
+	it("removes a transfer that settled with errors (the previously-leaked case)", () => {
+		expect(shouldRemoveSettledTransfer({ succeeded: false, aborted: false, hasErrors: true })).toBe(true)
+	})
+
+	it("keeps a still-running transfer (none of succeeded/aborted/errored)", () => {
+		expect(shouldRemoveSettledTransfer({ succeeded: false, aborted: false, hasErrors: false })).toBe(false)
+	})
+
+	it("removes when more than one terminal condition is true", () => {
+		expect(shouldRemoveSettledTransfer({ succeeded: true, aborted: true, hasErrors: true })).toBe(true)
+		expect(shouldRemoveSettledTransfer({ succeeded: false, aborted: true, hasErrors: true })).toBe(true)
 	})
 })
