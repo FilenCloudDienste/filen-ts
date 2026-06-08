@@ -47,6 +47,15 @@ vi.mock("@/features/notes/queries/useNotesTags.query", () => ({
 	fetchData: vi.fn().mockResolvedValue([])
 }))
 
+// notesLifecycle (via @/features/notes/notes) now imports the sync singleton to
+// clear inflight content after restoreFromHistory. The real sync.tsx pulls in
+// react/native deps that crash in node env, so stub it.
+vi.mock("@/features/notes/components/sync", () => ({
+	sync: {
+		flushToDisk: vi.fn().mockResolvedValue(undefined)
+	}
+}))
+
 // expo-file-system: use the full in-memory mock
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
