@@ -258,6 +258,7 @@ function Advanced() {
 								iconColor: "#ef4444",
 								title: t("clear_offline_files"),
 								subTitle: offlineSubtitle,
+								subTitleNumberOfLines: 1,
 								onPress: () => {
 									confirmAndRun({
 										title: t("clear_offline_files"),
