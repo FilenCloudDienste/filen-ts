@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import { Fragment, useRef } from "react"
 import { CrossGlassContainerView } from "@/components/ui/view"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 import { useResolveClassNames } from "uniwind"
@@ -20,6 +20,7 @@ import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
 import { useNavigation } from "expo-router"
 import { useTranslation } from "react-i18next"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const DriveSelectToolbar = () => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -29,6 +30,8 @@ const DriveSelectToolbar = () => {
 	const selectedItems = useDriveSelectStore(useShallow(state => state.selectedItems))
 	const navigation = useNavigation()
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
+	const isSubmitting = useRef(false)
 
 	const parentDir = (() => {
 		if (!authedSdkClient) {
@@ -81,6 +84,12 @@ const DriveSelectToolbar = () => {
 			return
 		}
 
+		if (!isOnline) {
+			alerts.error(new Error(t("youre_offline")))
+
+			return
+		}
+
 		const promptResult = await run(async () => {
 			return await prompts.input({
 				title: t("create_directory"),
@@ -127,73 +136,89 @@ const DriveSelectToolbar = () => {
 			return
 		}
 
-		switch (drivePath.selectOptions.intention) {
-			case "move": {
-				if (!parentDir || drivePath.selectOptions.items.length === 0 || isSameParentAsSelectedItems) {
-					return
-				}
+		if (drivePath.selectOptions.intention === "move" && !isOnline) {
+			alerts.error(new Error(t("youre_offline")))
 
-				const items = drivePath.selectOptions.items
-				const result = await runWithLoading(async () => {
-					await Promise.all(
-						items.map(async item => {
-							await drive.move({
-								newParent: parentDir,
-								item
+			return
+		}
+
+		if (isSubmitting.current) {
+			return
+		}
+
+		isSubmitting.current = true
+
+		try {
+			switch (drivePath.selectOptions.intention) {
+				case "move": {
+					if (!parentDir || drivePath.selectOptions.items.length === 0 || isSameParentAsSelectedItems) {
+						return
+					}
+
+					const items = drivePath.selectOptions.items
+					const result = await runWithLoading(async () => {
+						await Promise.all(
+							items.map(async item => {
+								await drive.move({
+									newParent: parentDir,
+									item
+								})
 							})
+						)
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					navigation.getParent()?.goBack()
+
+					break
+				}
+
+				case "select": {
+					if (!canSelect) {
+						return
+					}
+
+					navigation.getParent()?.goBack()
+
+					if (selectedItems.length === 0) {
+						if (!parentDir || !drivePath.selectOptions.directories) {
+							return
+						}
+
+						events.emit("driveSelect", {
+							id: drivePath.selectOptions.id,
+							selectedItems: [
+								{
+									type: "root",
+									data: parentDir
+								}
+							],
+							cancelled: false
 						})
-					)
-				})
 
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				navigation.getParent()?.goBack()
-
-				break
-			}
-
-			case "select": {
-				if (!canSelect) {
-					return
-				}
-
-				navigation.getParent()?.goBack()
-
-				if (selectedItems.length === 0) {
-					if (!parentDir || !drivePath.selectOptions.directories) {
 						return
 					}
 
 					events.emit("driveSelect", {
 						id: drivePath.selectOptions.id,
-						selectedItems: [
-							{
-								type: "root",
-								data: parentDir
-							}
-						],
+						selectedItems: selectedItems.map(item => ({
+							type: "driveItem",
+							data: item
+						})),
 						cancelled: false
 					})
 
-					return
+					break
 				}
-
-				events.emit("driveSelect", {
-					id: drivePath.selectOptions.id,
-					selectedItems: selectedItems.map(item => ({
-						type: "driveItem",
-						data: item
-					})),
-					cancelled: false
-				})
-
-				break
 			}
+		} finally {
+			isSubmitting.current = false
 		}
 	}
 
@@ -203,11 +228,12 @@ const DriveSelectToolbar = () => {
 				<PressableScale
 					className="absolute left-4"
 					onPress={createDirectory}
+					enabled={isOnline}
 					style={{
 						bottom: insets.bottom
 					}}
 				>
-					<CrossGlassContainerView className="size-12 flex-row items-center justify-center">
+					<CrossGlassContainerView className={cn("size-12 flex-row items-center justify-center", !isOnline && "opacity-50")}>
 						<MaterialCommunityIcons
 							name="folder-plus-outline"
 							size={24}
@@ -220,7 +246,7 @@ const DriveSelectToolbar = () => {
 				<PressableScale
 					onPress={submit}
 					className="absolute right-4"
-					enabled={!isSameParentAsSelectedItems}
+					enabled={!isSameParentAsSelectedItems && isOnline}
 					style={{
 						bottom: insets.bottom
 					}}
@@ -228,7 +254,7 @@ const DriveSelectToolbar = () => {
 					<CrossGlassContainerView
 						className={cn(
 							"min-h-12 min-w-12 px-4 flex-row items-center justify-center",
-							isSameParentAsSelectedItems && "opacity-50"
+							(isSameParentAsSelectedItems || !isOnline) && "opacity-50"
 						)}
 					>
 						<Text className="font-bold text-blue-500">{t("move_here")}</Text>
