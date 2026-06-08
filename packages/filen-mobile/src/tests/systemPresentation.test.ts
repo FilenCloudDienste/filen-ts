@@ -59,6 +59,21 @@ describe("systemPresentation begin/end", () => {
 		expect(systemPresentation.isReLockSuppressed(Date.now() + RELOCK_SUPPRESSION_GRACE_MS + 5000)).toBe(false)
 	})
 
+	it("starts the grace window only on the 1->0 transition, not on 2->1", () => {
+		systemPresentation.begin()
+		systemPresentation.begin()
+		systemPresentation.end()
+
+		// still one presentation active → no grace recorded yet
+		expect(useSystemPresentationStore.getState().lastEndedAt).toBe(0)
+		expect(systemPresentation.isActive()).toBe(true)
+
+		systemPresentation.end()
+
+		// now fully released → grace window starts
+		expect(useSystemPresentationStore.getState().lastEndedAt).toBeGreaterThan(0)
+	})
+
 	it("isActive reflects active presentations regardless of the grace window", () => {
 		systemPresentation.begin()
 		expect(systemPresentation.isActive()).toBe(true)
