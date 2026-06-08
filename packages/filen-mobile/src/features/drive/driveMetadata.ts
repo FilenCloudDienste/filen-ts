@@ -6,6 +6,18 @@ import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/features/d
 import cache from "@/lib/cache"
 import { toSignalOpts } from "@/lib/signals"
 
+/**
+ * Optimistic updater for the root Favorites listing (`{ type: "favorites", uuid: null }`).
+ * When `favorited` is true, insert/refresh the item; when false, remove it.
+ * `driveItemsQueryUpdateGlobal` only `.map()`s existing rows, so it can never
+ * ADD a newly-favorited item to the Favorites listing — this closes that gap.
+ */
+export function favoritesListingUpdater(prev: DriveItem[], item: DriveItem, favorited: boolean): DriveItem[] {
+	const withoutItem = prev.filter(i => i.data.uuid !== item.data.uuid)
+
+	return favorited ? [...withoutItem, item] : withoutItem
+}
+
 export async function favorite({ item, favorited, signal }: { item: DriveItem; favorited: boolean; signal?: AbortSignal }) {
 	if (item.type !== "directory" && item.type !== "file") {
 		throw new Error("Invalid item type")
@@ -55,7 +67,7 @@ export async function favorite({ item, favorited, signal }: { item: DriveItem; f
 				uuid: null
 			}
 		},
-		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
+		updater: prev => favoritesListingUpdater(prev, item, favorited)
 	})
 
 	return item
