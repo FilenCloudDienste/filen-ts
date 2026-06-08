@@ -36,6 +36,8 @@ vi.mock("@/components/ui/checkbox", () => ({ Checkbox: () => null }))
 vi.mock("@/components/ui/animated", () => ({ AnimatedView: () => null }))
 vi.mock("@/components/ui/menu", () => ({ default: () => null }))
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))
+vi.mock("@/components/ui/listRow", () => ({ default: () => null, ListRowSectionHeader: () => null }))
+vi.mock("@/components/ui/ellipsisMenuTrigger", () => ({ default: () => null }))
 
 // ─── Actual imports ──────────────────────────────────────────────────────────
 
