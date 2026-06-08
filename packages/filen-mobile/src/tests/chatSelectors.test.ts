@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { aggregateChatSelectionFlags, EMPTY_CHAT_FLAGS, chatHasUnread, isMessageUnread } from "@/features/chats/chatSelectors"
+import { aggregateChatSelectionFlags, allVisibleChatsSelected, EMPTY_CHAT_FLAGS, chatHasUnread, isMessageUnread } from "@/features/chats/chatSelectors"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import type { Chat, ChatMessage } from "@/types"
 
@@ -28,6 +28,56 @@ function chat(overrides: Partial<Chat> = {}): Chat {
 		...overrides
 	} as Chat
 }
+
+describe("allVisibleChatsSelected", () => {
+	it("false when visibleChats is empty (nothing to select)", () => {
+		expect(allVisibleChatsSelected([], [])).toBe(false)
+	})
+
+	it("false when selectedChats is empty but visibleChats is not", () => {
+		expect(allVisibleChatsSelected([chat()], [])).toBe(false)
+	})
+
+	it("true when every visible chat is selected (counts match, same UUIDs)", () => {
+		const a = chat({ uuid: "a" })
+		const b = chat({ uuid: "b" })
+
+		expect(allVisibleChatsSelected([a, b], [a, b])).toBe(true)
+	})
+
+	it("true when selectedChats has more entries than visible (new chat deselected after list shrinks)", () => {
+		// selectedChats may carry stale entries; only visible UUIDs matter
+		const a = chat({ uuid: "a" })
+		const b = chat({ uuid: "b" })
+		const extra = chat({ uuid: "extra" })
+
+		expect(allVisibleChatsSelected([a, b], [a, b, extra])).toBe(true)
+	})
+
+	it("false when a new chat arrives (visibleChats grows) and the new one is NOT selected", () => {
+		const a = chat({ uuid: "a" })
+		const b = chat({ uuid: "b" })
+		const newChat = chat({ uuid: "new" })
+
+		// User had selected a + b; newChat arrives in visibleChats but is not selected
+		expect(allVisibleChatsSelected([a, b, newChat], [a, b])).toBe(false)
+	})
+
+	it("true when a new chat arrives and it IS also in selectedChats", () => {
+		const a = chat({ uuid: "a" })
+		const b = chat({ uuid: "b" })
+		const newChat = chat({ uuid: "new" })
+
+		expect(allVisibleChatsSelected([a, b, newChat], [a, b, newChat])).toBe(true)
+	})
+
+	it("false when only a subset of visible chats are selected", () => {
+		const a = chat({ uuid: "a" })
+		const b = chat({ uuid: "b" })
+
+		expect(allVisibleChatsSelected([a, b], [a])).toBe(false)
+	})
+})
 
 describe("EMPTY_CHAT_FLAGS", () => {
 	it("has count 0", () => {
