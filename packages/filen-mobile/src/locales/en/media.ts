@@ -88,6 +88,8 @@ export const media = {
 	playlists: "Playlists",
 	/** Playlists — empty state title */
 	no_playlists: "No playlists",
+	/** Playlists — playlist detail: shown when the playlist can't be found (e.g. a stale deep link) */
+	playlist_not_found: "Playlist not found",
 	/** Playlists — action-sheet / menu item: play the playlist from the beginning */
 	play: "Play",
 	/** Playlists — action-sheet item: add all tracks of this playlist to the playback queue */
