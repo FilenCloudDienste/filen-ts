@@ -120,6 +120,7 @@ const Checklist = ({
 							id={id}
 							onContentChange={onContentChange}
 							onCheckedChange={onCheckedChange}
+							onChange={onChange}
 							readOnly={readOnly}
 							onDidType={onTyped}
 							isLast={index === visibleIds.length - 1}

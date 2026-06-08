@@ -2,10 +2,11 @@ import { useRef, useEffect, useState } from "react"
 import { TextInput, type TextInputKeyPressEvent, type TextInputSubmitEditingEvent } from "react-native"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import { useResolveClassNames } from "uniwind"
-import { type ChecklistItem, cn } from "@filen/utils"
+import { type ChecklistItem, checklistParser, cn } from "@filen/utils"
 import { PressableOpacity } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
 import useChecklistStore from "@/features/notes/store/useChecklist.store"
+import { addChecklistLine, removeChecklistItem } from "@/features/notes/checklistEdit"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 
@@ -17,6 +18,7 @@ const Item = ({
 	id,
 	onContentChange,
 	onCheckedChange,
+	onChange,
 	readOnly,
 	onDidType,
 	autoFocus,
@@ -25,6 +27,7 @@ const Item = ({
 	id: string
 	onContentChange: ({ item, content }: { item: ChecklistItem; content: string }) => void
 	onCheckedChange: ({ item, checked }: { item: ChecklistItem; checked: boolean }) => void
+	onChange?: (value: string) => void
 	readOnly?: boolean
 	onDidType: () => void
 	autoFocus?: boolean
@@ -89,69 +92,61 @@ const Item = ({
 
 	const addNewLine = (after: ChecklistItem) => {
 		const parsed = useChecklistStore.getState().parsed
-		const nextIndex = parsed.findIndex(i => i.id === after.id) + 1
+		const result = addChecklistLine(parsed, after.id, randomUUID())
 
-		if (nextIndex > 0 && parsed[nextIndex] && parsed[nextIndex].content.trim().length === 0) {
-			focusItem(parsed[nextIndex].id)
+		if (!result.changed) {
+			if (result.focusId) {
+				focusItem(result.focusId)
+			}
 
 			return
 		}
 
-		const id = randomUUID()
-		const index = parsed.findIndex(i => i.id === after.id)
-		const newList = [...parsed]
+		useChecklistStore.getState().setParsed(result.next)
+		useChecklistStore.getState().setIds(result.next.map(i => i.id))
 
-		newList.splice(index + 1, 0, {
-			id,
-			checked: false,
-			content: ""
-		})
+		// Propagate the structural edit to the parent so the inflight-content sync fires immediately.
+		// Without this the new row is only persisted on the next keystroke (onChangeText), so a row
+		// added with Enter and left empty would be lost on reopen. Mirrors onCheckedChange in the
+		// parent Checklist, reading the freshly-written store state so the value is never stale.
+		if (onChange) {
+			onChange(checklistParser.stringify(useChecklistStore.getState().parsed))
+		}
 
-		useChecklistStore.getState().setParsed(newList)
-		useChecklistStore.getState().setIds(newList.map(i => i.id))
-
-		// Defer focus: the new <Item> for `id` has not mounted yet, so its ref-registration
+		// Defer focus: the new <Item> for the added row has not mounted yet, so its ref-registration
 		// useEffect has not run and inputRefs[id] is still undefined. A macrotask runs after React
 		// has committed the render and flushed the passive effect, so the ref is registered by then
 		// (matches the focus-after-mount deferral used by the chat input).
-		setTimeout(() => {
-			focusItem(id)
-		}, 0)
+		if (result.focusId) {
+			const focusId = result.focusId
+
+			setTimeout(() => {
+				focusItem(focusId)
+			}, 0)
+		}
 	}
 
 	const removeItem = (item: ChecklistItem) => {
 		const parsed = useChecklistStore.getState().parsed
+		const result = removeChecklistItem(parsed, item.id, randomUUID())
 
-		if (parsed.length === 1) {
-			const id = randomUUID()
-
-			useChecklistStore.getState().setParsed([
-				{
-					id,
-					checked: false,
-					content: ""
-				}
-			])
-
-			useChecklistStore.getState().setIds([id])
-
+		if (!result.changed) {
 			return
 		}
 
-		const index = parsed.findIndex(i => i.id === item.id)
+		useChecklistStore.getState().setParsed(result.next)
+		useChecklistStore.getState().setIds(result.next.map(i => i.id))
 
-		if (index === -1 || index === 0) {
-			return
+		// Propagate the deletion (and the single-item reset) to the parent so the inflight-content
+		// sync fires. Without this the row is removed from the store/UI but never persisted, so the
+		// deleted item reappears from the server on reopen (data loss). Mirrors onCheckedChange in
+		// the parent Checklist, reading the freshly-written store state so the value is never stale.
+		if (onChange) {
+			onChange(checklistParser.stringify(useChecklistStore.getState().parsed))
 		}
 
-		const prevItem = parsed[index - 1]
-		const newList = parsed.filter(i => i.id !== item.id)
-
-		useChecklistStore.getState().setParsed(newList)
-		useChecklistStore.getState().setIds(newList.map(i => i.id))
-
-		if (prevItem) {
-			focusItem(prevItem.id)
+		if (result.focusId) {
+			focusItem(result.focusId)
 		}
 	}
 
