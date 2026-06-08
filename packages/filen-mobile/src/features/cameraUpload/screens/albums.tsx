@@ -13,6 +13,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { useTranslation } from "react-i18next"
+import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 
 const Albums = () => {
 	const { t } = useTranslation()
@@ -137,6 +139,12 @@ const Albums = () => {
 									})}
 							/>
 						</GestureHandlerScrollView>
+					) : albumsQuery.status === "error" ? (
+						<ListEmpty
+							icon="warning-outline"
+							title={t("error_generic")}
+							action={<Button onPress={() => refetch()}>{t("try_again")}</Button>}
+						/>
 					) : (
 						<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
 							<Ionicons
