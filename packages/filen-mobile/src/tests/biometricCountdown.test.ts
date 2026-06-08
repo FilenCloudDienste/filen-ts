@@ -56,7 +56,7 @@ vi.mock("react-i18next", () => ({
 	useTranslation: vi.fn(() => ({ t: (k: string) => k }))
 }))
 
-import { remainingMs } from "@/components/biometric"
+import { remainingMs, shouldLockOnBackground, shouldAutoUnlockOnForeground } from "@/components/biometric"
 
 describe("remainingMs", () => {
 	it("returns positive ms when lockedUntil is in the future", () => {
@@ -94,5 +94,47 @@ describe("remainingMs", () => {
 		expect(remainingMs(base + 3000, lockedUntil)).toBe(0)
 		// Any tick after expiry must not go negative
 		expect(remainingMs(base + 4000, lockedUntil)).toBe(0)
+	})
+})
+
+describe("shouldLockOnBackground", () => {
+	it("locks when enabled, authenticated, and not suppressed", () => {
+		expect(shouldLockOnBackground(true, true, false)).toBe(true)
+	})
+
+	it("does not lock when biometric is disabled", () => {
+		expect(shouldLockOnBackground(false, true, false)).toBe(false)
+	})
+
+	it("does not lock when not currently authenticated (preserves an active lockout / prompt)", () => {
+		expect(shouldLockOnBackground(true, false, false)).toBe(false)
+	})
+
+	it("does not lock while inside an in-app presentation (suppressed)", () => {
+		expect(shouldLockOnBackground(true, true, true)).toBe(false)
+	})
+})
+
+describe("shouldAutoUnlockOnForeground", () => {
+	it("auto-unlocks a background lock when returning within the grace window", () => {
+		expect(shouldAutoUnlockOnForeground(true, 5000, 10_000, false)).toBe(true)
+		expect(shouldAutoUnlockOnForeground(true, 10_000, 10_000, false)).toBe(true)
+	})
+
+	it("does not auto-unlock beyond the grace window (BiometricInner prompts instead)", () => {
+		expect(shouldAutoUnlockOnForeground(true, 10_001, 10_000, false)).toBe(false)
+	})
+
+	it("does not auto-unlock when we did not lock on background", () => {
+		expect(shouldAutoUnlockOnForeground(false, 0, 10_000, false)).toBe(false)
+	})
+
+	it("does not auto-unlock while suppressed", () => {
+		expect(shouldAutoUnlockOnForeground(true, 0, 10_000, true)).toBe(false)
+	})
+
+	it("with a zero grace (lock immediately), any elapsed > 0 requires a prompt", () => {
+		expect(shouldAutoUnlockOnForeground(true, 1, 0, false)).toBe(false)
+		expect(shouldAutoUnlockOnForeground(true, 0, 0, false)).toBe(true)
 	})
 })
