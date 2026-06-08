@@ -157,28 +157,37 @@ export class Offline {
 			return
 		}
 
-		if (!DIRECTORY.exists) {
-			DIRECTORY.create({
-				intermediates: true,
-				idempotent: true
-			})
-		}
+		// Native FS create() can throw on disk full / IO / permission errors. Guard so a transient failure
+		// does not propagate out of the module-scope `new Offline()` (which would brick module load) nor out
+		// of synchronous callers. Leave directoriesEnsured=false on failure so the lazy per-operation
+		// ensureDirectories() calls in storeFile/storeDirectory/updateIndex (which run inside run()) retry and
+		// surface the error via their Result path.
+		try {
+			if (!DIRECTORY.exists) {
+				DIRECTORY.create({
+					intermediates: true,
+					idempotent: true
+				})
+			}
 
-		if (!FILES_DIRECTORY.exists) {
-			FILES_DIRECTORY.create({
-				intermediates: true,
-				idempotent: true
-			})
-		}
+			if (!FILES_DIRECTORY.exists) {
+				FILES_DIRECTORY.create({
+					intermediates: true,
+					idempotent: true
+				})
+			}
 
-		if (!DIRECTORIES_DIRECTORY.exists) {
-			DIRECTORIES_DIRECTORY.create({
-				intermediates: true,
-				idempotent: true
-			})
-		}
+			if (!DIRECTORIES_DIRECTORY.exists) {
+				DIRECTORIES_DIRECTORY.create({
+					intermediates: true,
+					idempotent: true
+				})
+			}
 
-		this.directoriesEnsured = true
+			this.directoriesEnsured = true
+		} catch (e) {
+			console.error("[Offline] ensureDirectories failed", e)
+		}
 	}
 
 	/**
