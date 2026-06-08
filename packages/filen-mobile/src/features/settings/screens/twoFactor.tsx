@@ -14,9 +14,11 @@ import QRCode from "react-qr-code"
 import Button from "@/components/ui/button"
 import * as Clipboard from "expo-clipboard"
 import { useTranslation } from "react-i18next"
+import useIsOnline from "@/hooks/useIsOnline"
 
 function TwoFactor() {
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
 
 	const accountQuery = useAccountQuery()
 
@@ -41,7 +43,7 @@ function TwoFactor() {
 					<SettingsScrollView>
 						<Group
 							className="bg-background-tertiary"
-							buttons={buildTwoFactorButtons({ t, accountQuery })}
+							buttons={buildTwoFactorButtons({ t, accountQuery, isOnline })}
 						/>
 						{!accountQuery.data.twoFactorEnabled &&
 							accountQuery.data.twoFactorKey &&

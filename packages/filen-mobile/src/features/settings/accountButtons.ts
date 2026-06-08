@@ -615,12 +615,21 @@ export function buildAccountToggleButtons({
 }
 
 // 2FA enable / disable switch button. Extracted verbatim from twoFactor.tsx.
-export function buildTwoFactorButtons({ t, accountQuery }: { t: TFunction; accountQuery: AccountQuerySuccess }): Button[] {
+export function buildTwoFactorButtons({
+	t,
+	accountQuery,
+	isOnline
+}: {
+	t: TFunction
+	accountQuery: AccountQuerySuccess
+	isOnline: boolean
+}): Button[] {
 	return [
 		{
 			icon: "time-outline",
 			title: t("two_factor_authentication"),
 			subTitle: t("two_factor_authentication_description"),
+			disabled: !isOnline,
 			rightItem: {
 				type: "switch",
 				value: accountQuery.data.twoFactorEnabled,
