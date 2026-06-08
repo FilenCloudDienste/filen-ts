@@ -1,5 +1,52 @@
 import { NoteType, type Note as SdkNote, type NoteTag as SdkNoteTag } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
+import { noteDisplayTitle, tagDisplayName } from "@/lib/decryption"
+import { type ListItem as NoteListItem } from "@/features/notes/components/note"
+
+// Narrows a (grouped) note list to the subset matching the active search query.
+// An empty/whitespace query returns the list unchanged. Section headers are dropped
+// while a query is active (they carry no searchable content). Matching is
+// case-insensitive against `noteDisplayTitle` (which yields the
+// `cannot_decrypt_<uuid>` placeholder for undecryptable notes so they stay
+// searchable via that text) and the note's content. Pure (no React/store reads) so
+// both the list body and the header can derive the SAME visible set from one source
+// — otherwise select-all / deselect-all would operate on search-hidden notes.
+export function filterNoteListItemsBySearchQuery(notes: NoteListItem[], searchQuery: string): NoteListItem[] {
+	const normalized = searchQuery.trim().toLowerCase()
+
+	if (normalized.length === 0) {
+		return notes
+	}
+
+	return notes.filter(note => {
+		if (note.type === "header") {
+			return false
+		}
+
+		if (noteDisplayTitle(note).toLowerCase().includes(normalized)) {
+			return true
+		}
+
+		if (note.content && note.content.toLowerCase().includes(normalized)) {
+			return true
+		}
+
+		return false
+	})
+}
+
+// Narrows a (sorted) tag list to the subset matching the active search query.
+// An empty/whitespace query returns the list unchanged. Matching is case-insensitive
+// against `tagDisplayName`. Pure (no React/store reads).
+export function filterNoteTagsBySearchQuery(tags: NoteTag[], searchQuery: string): NoteTag[] {
+	const normalized = searchQuery.trim().toLowerCase()
+
+	if (normalized.length === 0) {
+		return tags
+	}
+
+	return tags.filter(tag => tagDisplayName(tag).toLowerCase().includes(normalized))
+}
 
 export function wrapSdkNote(sdk: SdkNote): Note {
 	return {

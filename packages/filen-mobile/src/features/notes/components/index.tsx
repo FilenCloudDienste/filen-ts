@@ -1,4 +1,4 @@
-import { Fragment, useState, useCallback } from "react"
+import { Fragment, useState, useCallback, useEffect } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
@@ -7,17 +7,18 @@ import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualLis
 import ListEmpty from "@/components/ui/listEmpty"
 import { type Note as TNote, type NoteTag } from "@/types"
 import { run, fastLocaleCompare, cn } from "@filen/utils"
-import { noteDisplayTitle, tagDisplayName } from "@/lib/decryption"
+import { tagDisplayName } from "@/lib/decryption"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
-import Note, { type ListItem as NoteListItem } from "@/features/notes/components/note"
+import Note, { type ListItem as NoteListItem, type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import { useSecureStore } from "@/lib/secureStore"
 import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
+import { filterNoteListItemsBySearchQuery, filterNoteTagsBySearchQuery } from "@/features/notes/utils"
 
 const Notes = () => {
 	const { t } = useTranslation()
@@ -42,7 +43,7 @@ const Notes = () => {
 			return []
 		}
 
-		let notes = notesSorter.group({
+		const grouped = notesSorter.group({
 			notes: notesQuery.data,
 			groupArchived: true,
 			groupTrashed: true,
@@ -51,49 +52,22 @@ const Notes = () => {
 			tag: tag ?? undefined
 		})
 
-		if (searchQuery.length > 0) {
-			const searchQueryNormalized = searchQuery.trim().toLowerCase()
-
-			notes = notes.filter(note => {
-				if (note.type === "header") {
-					return false
-				}
-
-				if (noteDisplayTitle(note).toLowerCase().includes(searchQueryNormalized)) {
-					return true
-				}
-
-				if (note.content && note.content.toLowerCase().includes(searchQueryNormalized)) {
-					return true
-				}
-
-				return false
-			})
-		}
-
-		return notes
+		return filterNoteListItemsBySearchQuery(grouped, searchQuery)
 	})()
+
+	// The visible note rows the list actually renders (data items only). Passed to the
+	// Header so select-all / deselect-all operate on the SAME search-filtered set —
+	// otherwise they'd silently target search-hidden notes (#15).
+	const visibleNotes = notes.filter((note): note is NoteDataItem => note.type === "note")
 
 	const notesTags = (() => {
 		if (notesTagsQuery.status !== "success") {
 			return []
 		}
 
-		let notesTags = [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
+		const sorted = [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
 
-		if (searchQuery.length > 0) {
-			const searchQueryNormalized = searchQuery.trim().toLowerCase()
-
-			notesTags = notesTags.filter(tag => {
-				if (tagDisplayName(tag).toLowerCase().includes(searchQueryNormalized)) {
-					return true
-				}
-
-				return false
-			})
-		}
-
-		return notesTags
+		return filterNoteTagsBySearchQuery(sorted, searchQuery)
 	})()
 
 	const notesForTag = (() => {
@@ -153,7 +127,7 @@ const Notes = () => {
 		}
 
 		const result = await run(async () => {
-			await notesQuery.refetch()
+			await Promise.all([notesQuery.refetch(), notesTagsQuery.refetch()])
 		})
 
 		if (!result.success) {
@@ -176,6 +150,28 @@ const Notes = () => {
 		}, [])
 	)
 
+	// Selection-ghost purge (#37): a per-tag delete (tag context menu → Delete) or a
+	// remote delete optimistically strips the tag from notesTagsQuery but never touches
+	// selectedTags, leaving a ghost that breaks the select/deselect-all toggle and lets
+	// bulk ops target a tag that no longer exists. Reconcile selectedTags against the
+	// authoritative (unfiltered) tag set whenever the query data changes — keyed on the
+	// live tag uuids so search filtering (which only hides, not removes) doesn't prune.
+	const liveTagUuidsKey = notesTagsQuery.status === "success" ? notesTagsQuery.data.map(noteTag => noteTag.uuid).join(",") : null
+
+	useEffect(() => {
+		if (liveTagUuidsKey === null) {
+			return
+		}
+
+		const liveTagUuids = new Set(liveTagUuidsKey.length > 0 ? liveTagUuidsKey.split(",") : [])
+
+		useNotesStore.getState().setSelectedTags(prev => {
+			const pruned = prev.filter(selectedTag => liveTagUuids.has(selectedTag.uuid))
+
+			return pruned.length === prev.length ? prev : pruned
+		})
+	}, [liveTagUuidsKey])
+
 	const notesEmptyComponent = () => (
 		<ListEmpty
 			icon="document-text-outline"
@@ -192,7 +188,11 @@ const Notes = () => {
 
 	return (
 		<Fragment>
-			<Header setSearchQuery={setSearchQuery} />
+			<Header
+				setSearchQuery={setSearchQuery}
+				visibleNotes={visibleNotes}
+				visibleTags={notesTags}
+			/>
 			<SafeAreaView edges={["left", "right"]}>
 				{viewMode === "notes" ? (
 					<VirtualList

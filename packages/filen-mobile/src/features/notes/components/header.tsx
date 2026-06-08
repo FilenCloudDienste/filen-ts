@@ -1,9 +1,7 @@
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
-import { notesSorter } from "@/lib/sort"
 import { NoteType } from "@filen/sdk-rs"
-import { run, fastLocaleCompare } from "@filen/utils"
-import { tagDisplayName } from "@/lib/decryption"
+import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { router, useLocalSearchParams } from "expo-router"
@@ -19,8 +17,22 @@ import { useStringifiedClient } from "@/lib/auth"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { useTranslation } from "react-i18next"
 import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
+import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
+import { type NoteTag } from "@/types"
 
-export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
+export const Header = ({
+	setSearchQuery,
+	visibleNotes,
+	visibleTags
+}: {
+	setSearchQuery: React.Dispatch<React.SetStateAction<string>>
+	// The search-filtered note rows / tags the list body actually renders. Select-all
+	// and the select/deselect-all toggle MUST operate on these same visible sets — not
+	// the unfiltered query data — or they'd target search-hidden items (#15). With no
+	// search active these equal the full sorted/grouped sets, so behavior is identical.
+	visibleNotes: NoteDataItem[]
+	visibleTags: NoteTag[]
+}) => {
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -55,25 +67,6 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 	})()
 
 	const viewMode = tag ? "notes" : notesViewMode
-
-	const notes =
-		notesQuery.status === "success"
-			? notesSorter.group({
-					notes: notesQuery.data,
-					groupArchived: true,
-					groupTrashed: true,
-					groupFavorited: true,
-					groupPinned: true,
-					tag: tag ?? undefined
-				})
-			: []
-
-	const onlyNotes = notes.filter(n => n.type === "note")
-
-	const notesTags =
-		notesTagsQuery.status === "success"
-			? [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
-			: []
 
 	const createNote = async (type: NoteType) => {
 		const result = await run(async () => {
@@ -131,8 +124,8 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 		noteFlags,
 		tag,
 		viewMode,
-		onlyNotes,
-		notesTags,
+		onlyNotes: visibleNotes,
+		notesTags: visibleTags,
 		createNote
 	})
 
