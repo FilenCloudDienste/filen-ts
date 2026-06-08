@@ -102,7 +102,7 @@ const Drive = () => {
 							alerts.error(result.error)
 						}
 					}}
-					loading={driveItemsQuery.status !== "success"}
+					loading={driveItemsQuery.status === "pending"}
 					emptyComponent={() => (
 						<ListEmpty
 							icon={getDriveEmptyStateIcon(drivePath.type)}
