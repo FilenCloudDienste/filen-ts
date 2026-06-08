@@ -169,7 +169,18 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 								cancelText: t("cancel"),
 								destructive: true
 							},
-							op: c => contacts.block({ email: (c.data as TContact).email })
+							op: c => {
+								const contact = c.data as TContact
+
+								return contacts.block({
+									uuid: contact.uuid,
+									userId: contact.userId,
+									email: contact.email,
+									avatar: contact.avatar,
+									nickName: contact.nickName,
+									timestamp: contact.timestamp
+								})
+							}
 						})
 					}
 				})
