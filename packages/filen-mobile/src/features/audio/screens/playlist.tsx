@@ -1,7 +1,8 @@
 import { Fragment, useCallback } from "react"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import { Platform } from "react-native"
+import View from "@/components/ui/view"
+import { Platform, ActivityIndicator } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import ListEmpty from "@/components/ui/listEmpty"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
@@ -39,7 +40,18 @@ export function Playlist() {
 		enabled: false
 	})
 
-	const playlist = playlistsQuery.status === "success" ? playlistsQuery.data.find(p => p.uuid === uuid) : null
+	const playlist = playlistsQuery.status === "success" ? (playlistsQuery.data.find(p => p.uuid === uuid) ?? null) : null
+
+	if (playlistsQuery.status === "pending") {
+		return (
+			<View className="flex-1 items-center justify-center bg-background-secondary">
+				<ActivityIndicator
+					size="large"
+					color={textForeground.color as string}
+				/>
+			</View>
+		)
+	}
 
 	if (!playlist) {
 		return null
