@@ -7,6 +7,7 @@ import { AnyNormalDir } from "@filen/sdk-rs"
 import { run } from "@filen/utils"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
+import type { DriveItem } from "@/types"
 import useDrivePath from "@/hooks/useDrivePath"
 import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
@@ -24,7 +25,20 @@ import { resolveDriveHeaderTitle } from "@/features/drive/utils"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import { buildSortMenuButton, buildBulkActionMenu } from "@/features/drive/components/headerMenuBuilders"
 
-const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
+const Header = ({
+	setSearchQuery,
+	listItems,
+	queryingGlobalSearch
+}: {
+	setSearchQuery: React.Dispatch<React.SetStateAction<string>>
+	// The search-filtered, sorted set the list body actually renders. Select-all
+	// and the select/deselect-all toggle MUST operate on this same visible set —
+	// not the unfiltered query data — or they'd target search-hidden items.
+	listItems: DriveItem[]
+	// In-flight global (SDK-backed) search indicator. Surfaced as a non-blocking
+	// header spinner; the list keeps showing the instant local-filter results.
+	queryingGlobalSearch: boolean
+}) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -98,8 +112,14 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 			menuButtons.push(buildSortMenuButton(currentSort, setSort, t))
 		}
 
-		if (driveItems.length > 0) {
-			if (selectedDriveItems.length === driveItems.length) {
+		// Select-all / deselect-all must mirror the list body's VISIBLE (search-
+		// filtered) set, not the unfiltered query data. With a search active,
+		// `listItems` is the narrowed subset the user actually sees; selecting all
+		// of `driveItems` would silently pick search-hidden items and the toggle
+		// label would be wrong. With no search active `listItems === itemsSorted`,
+		// so behavior is identical to before.
+		if (listItems.length > 0) {
+			if (selectedDriveItems.length === listItems.length) {
 				menuButtons.push({
 					id: "deselectAll",
 					title: t("deselect_all"),
@@ -114,7 +134,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 					title: t("select_all"),
 					icon: "select",
 					onPress: () => {
-						useDriveStore.getState().selectAllItems(driveItems)
+						useDriveStore.getState().selectAllItems(listItems)
 					}
 				})
 			}
@@ -199,6 +219,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 						id: "takePhotoOrVideo",
 						title: t("take_photo_or_video"),
 						icon: "camera",
+						requiresOnline: true,
 						onPress: upload.takePhotoOrVideo
 					},
 					{
@@ -212,6 +233,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 						id: "createTextFile",
 						title: t("create_text_file"),
 						icon: "text",
+						requiresOnline: true,
 						onPress: upload.createTextFile
 					}
 				]
@@ -236,6 +258,9 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 					id: "syncNow",
 					title: offlineSyncing ? t("syncing") : t("sync_now"),
 					icon: "restore",
+					// offline.sync() silently no-ops when offline; gate the button so
+					// the user gets a disabled affordance instead of zero feedback.
+					requiresOnline: true,
 					disabled: offlineSyncing,
 					onPress: () => {
 						offline.sync().catch(console.error)
@@ -305,6 +330,16 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 						return
 					}
 				}
+			})
+		}
+
+		// Non-blocking in-flight indicator for the debounced global (SDK) search.
+		// The list keeps rendering the instant local-filter results underneath;
+		// this just signals that broader results are still being fetched, instead
+		// of blanking the list with a full-screen spinner.
+		if (queryingGlobalSearch) {
+			items.push({
+				type: "loader"
 			})
 		}
 

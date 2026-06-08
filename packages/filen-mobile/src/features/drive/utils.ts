@@ -50,6 +50,23 @@ export const DRIVE_EMPTY_STATE_TITLE_KEY: Record<DrivePathType, DriveEmptyStateT
 	linked: "folder_is_empty"
 }
 
+// Narrows a (sorted) DriveItem list to the subset matching the active search
+// query. An empty/whitespace query returns the list unchanged. Matching is
+// case-insensitive against `driveItemDisplayName`, which yields the
+// `cannot_decrypt_<uuid>` placeholder for undecryptable items so they stay
+// searchable via that text. Pure (no React/store reads) so both the list body
+// and the header can derive the SAME visible set from one source — otherwise
+// select-all / deselect-all would operate on search-hidden items.
+export function filterDriveItemsBySearchQuery<T extends DriveItem>(items: T[], searchQuery: string): T[] {
+	const normalized = searchQuery.trim().toLowerCase()
+
+	if (normalized.length === 0) {
+		return items
+	}
+
+	return items.filter(item => driveItemDisplayName(item).toLowerCase().includes(normalized))
+}
+
 export function getDriveEmptyStateIcon(type: DrivePathType | null): IoniconName {
 	if (type === null) {
 		return DRIVE_EMPTY_STATE_ICON.drive
