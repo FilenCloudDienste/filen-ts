@@ -62,13 +62,19 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 						params: {
 							uuid: inner.msg.chat
 						},
-						updater: prev => [
-							...prev.filter(m => m.inner.uuid !== inner.msg.inner.uuid),
-							{
-								...wrapMessage(inner.msg),
-								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-							}
-						]
+						// Dedupe by server uuid: if the message is already present (e.g. chats.sendMessage already
+						// reconciled the optimistic in-flight copy into the cache for our own message), leave it
+						// untouched instead of removing and re-appending it, which would cause a brief duplicate.
+						updater: prev =>
+							prev.some(m => m.inner.uuid === inner.msg.inner.uuid)
+								? prev
+								: [
+										...prev,
+										{
+											...wrapMessage(inner.msg),
+											inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+										}
+									]
 					})
 
 					// Update messages query first, then chats query to ensure our unread count logic works correctly
@@ -233,6 +239,11 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 			events.emit("chatConversationDeleted", {
 				uuid: inner.uuid
 			})
+
+			// Purge the deleted chat from the selection immediately so the list selection state (header count,
+			// deselect-all condition, bulk ops) never targets a non-existent conversation while the user stays
+			// on the chats tab. The query cache removal below is deferred, but the selection must not lag behind.
+			useChatsStore.getState().setSelectedChats(prev => prev.filter(c => c.uuid !== inner.uuid))
 
 			// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack if we are inside the chat when this happen.
 			// This is a bit of a band-aid solution, ideally we would have a more robust way to handle this, but it works for now and the delay is short enough that it shouldn't cause any issues.
