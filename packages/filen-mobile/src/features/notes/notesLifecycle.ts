@@ -4,6 +4,7 @@ import { wrapSdkNote } from "@/features/notes/utils"
 import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.query"
 import { notesWithContentQueryUpdate } from "@/features/notes/queries/useNotesWithContent.query"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import useNotesStore from "@/features/notes/store/useNotes.store"
 import { sync } from "@/features/notes/components/sync"
 
 export async function setPinned({ note, pinned, signal }: { note: Note; pinned: boolean; signal?: AbortSignal }) {
@@ -234,6 +235,12 @@ export async function deleteNote({ note, signal }: { note: Note; signal?: AbortS
 				}
 			: undefined
 	)
+
+	// Drop the note from the selection immediately so the list header's
+	// selectedNotes.length count stays correct and bulk ops can't target a note
+	// that no longer exists. The query cache update below runs inside a 3s
+	// timeout, so we must NOT wait for it to clear the selection.
+	useNotesStore.getState().setSelectedNotes(prev => prev.filter(n => n.uuid !== note.uuid))
 
 	// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
 	setTimeout(() => {
