@@ -1,17 +1,15 @@
-import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, useNavigation, useFocusEffect } from "expo-router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
-import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment, useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
-import { run, formatBytes, cn } from "@filen/utils"
+import { run, formatBytes } from "@filen/utils"
 import useDriveItemVersionsQuery from "@/features/drive/queries/useDriveItemVersions.query"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
@@ -21,16 +19,13 @@ import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import type { FileVersion } from "@filen/sdk-rs"
 import Menu, { type MenuButton } from "@/components/ui/menu"
-import { PressableScale } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import DismissStack from "@/components/dismissStack"
 import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import { useShallow } from "zustand/shallow"
 import { runBulk } from "@/lib/bulkOps"
-import { Checkbox } from "@/components/ui/checkbox"
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
+import ListRow from "@/components/ui/listRow"
 
 const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const { t } = useTranslation()
@@ -38,147 +33,121 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 	const areVersionsSelected = useFileVersionsStore(useShallow(state => state.selectedVersions.length > 0))
 
 	return (
-		<View className={cn("flex-row items-center px-4 bg-transparent", isSelected && "bg-background-tertiary")}>
-			<View className="flex-row items-center gap-4 py-2 bg-transparent border-b border-border flex-1">
-				{areVersionsSelected && (
-					<AnimatedView
-						className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
-						entering={FadeIn}
-						exiting={FadeOut}
-					>
-						<Checkbox value={isSelected} />
-					</AnimatedView>
-				)}
-				<PressableScale
-					className="flex-row flex-1 bg-transparent"
-					onPress={() => {
-						if (areVersionsSelected) {
-							useFileVersionsStore.getState().toggleSelectedVersion(version)
-						}
-					}}
-				>
-					<View className="flex-col bg-transparent flex-1 gap-0.5">
-						<Text
-							className="text-foreground"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{simpleDate(Number(version.timestamp))}
-						</Text>
-						<Text
-							className="text-muted-foreground text-xs"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{formatBytes(Number(version.size))}
-						</Text>
-					</View>
-				</PressableScale>
-				<View className="flex-row items-center gap-4 bg-transparent">
-					<Menu
-						type="dropdown"
-						buttons={[
-							{
-								id: "select",
-								title: isSelected ? t("deselect") : t("select"),
-								icon: "select",
-								checked: isSelected,
-								onPress: () => {
-									useFileVersionsStore.getState().toggleSelectedVersion(version)
+		<ListRow
+			separator={true}
+			selectable={areVersionsSelected}
+			selected={isSelected}
+			onPress={() => {
+				if (areVersionsSelected) {
+					useFileVersionsStore.getState().toggleSelectedVersion(version)
+				}
+			}}
+			title={simpleDate(Number(version.timestamp))}
+			subtitle={formatBytes(Number(version.size))}
+			trailing={
+				<Menu
+					type="dropdown"
+					buttons={[
+						{
+							id: "select",
+							title: isSelected ? t("deselect") : t("select"),
+							icon: "select",
+							checked: isSelected,
+							onPress: () => {
+								useFileVersionsStore.getState().toggleSelectedVersion(version)
+							}
+						},
+						{
+							id: "restore",
+							title: t("restore"),
+							icon: "restore",
+							requiresOnline: true,
+							onPress: async () => {
+								const promptResponse = await run(async () => {
+									return await prompts.alert({
+										title: t("restore_version"),
+										message: t("restore_version_confirmation"),
+										cancelText: t("cancel"),
+										okText: t("restore"),
+										destructive: true
+									})
+								})
+
+								if (!promptResponse.success) {
+									console.error(promptResponse.error)
+									alerts.error(promptResponse.error)
+
+									return
 								}
-							},
-							{
-								id: "restore",
-								title: t("restore"),
-								icon: "restore",
-								requiresOnline: true,
-								onPress: async () => {
-									const promptResponse = await run(async () => {
-										return await prompts.alert({
-											title: t("restore_version"),
-											message: t("restore_version_confirmation"),
-											cancelText: t("cancel"),
-											okText: t("restore"),
-											destructive: true
-										})
-									})
 
-									if (!promptResponse.success) {
-										console.error(promptResponse.error)
-										alerts.error(promptResponse.error)
-
-										return
-									}
-
-									if (promptResponse.data.cancelled) {
-										return
-									}
-
-									const result = await runWithLoading(async () => {
-										await drive.restoreFileVersion({
-											item,
-											version
-										})
-									})
-
-									if (!result.success) {
-										console.error(result.error)
-										alerts.error(result.error)
-
-										return
-									}
+								if (promptResponse.data.cancelled) {
+									return
 								}
-							},
-							{
-								id: "delete",
-								title: t("delete"),
-								icon: "delete",
-								destructive: true,
-								requiresOnline: true,
-								onPress: async () => {
-									const promptResponse = await run(async () => {
-										return await prompts.alert({
-											title: t("delete_version"),
-											message: t("delete_version_confirmation"),
-											cancelText: t("cancel"),
-											okText: t("delete"),
-											destructive: true
-										})
+
+								const result = await runWithLoading(async () => {
+									await drive.restoreFileVersion({
+										item,
+										version
 									})
+								})
 
-									if (!promptResponse.success) {
-										console.error(promptResponse.error)
-										alerts.error(promptResponse.error)
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
 
-										return
-									}
-
-									if (promptResponse.data.cancelled) {
-										return
-									}
-
-									const result = await runWithLoading(async () => {
-										await drive.deleteVersion({
-											item,
-											version
-										})
-									})
-
-									if (!result.success) {
-										console.error(result.error)
-										alerts.error(result.error)
-
-										return
-									}
+									return
 								}
 							}
-						]}
-					>
-						<EllipsisMenuTrigger />
-					</Menu>
-				</View>
-			</View>
-		</View>
+						},
+						{
+							id: "delete",
+							title: t("delete"),
+							icon: "delete",
+							destructive: true,
+							requiresOnline: true,
+							onPress: async () => {
+								const promptResponse = await run(async () => {
+									return await prompts.alert({
+										title: t("delete_version"),
+										message: t("delete_version_confirmation"),
+										cancelText: t("cancel"),
+										okText: t("delete"),
+										destructive: true
+									})
+								})
+
+								if (!promptResponse.success) {
+									console.error(promptResponse.error)
+									alerts.error(promptResponse.error)
+
+									return
+								}
+
+								if (promptResponse.data.cancelled) {
+									return
+								}
+
+								const result = await runWithLoading(async () => {
+									await drive.deleteVersion({
+										item,
+										version
+									})
+								})
+
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
+
+									return
+								}
+							}
+						}
+					]}
+				>
+					<EllipsisMenuTrigger />
+				</Menu>
+			}
+		/>
 	)
 }
 

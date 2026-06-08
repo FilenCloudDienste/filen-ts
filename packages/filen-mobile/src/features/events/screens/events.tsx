@@ -1,4 +1,3 @@
-import Text from "@/components/ui/text"
 import { Platform, ActivityIndicator } from "react-native"
 import { router, useNavigation } from "expo-router"
 import View from "@/components/ui/view"
@@ -12,8 +11,8 @@ import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
 import alerts from "@/lib/alerts"
 import { UserEventResult_Tags, type UserEvent } from "@filen/sdk-rs"
-import { PressableScale } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import ListRow from "@/components/ui/listRow"
 import useEventsQuery, { fetchData, eventsQueryUpdate } from "@/features/events/queries/useEvents.query"
 import { eventKindToReadable } from "@/features/events/eventDetails"
 import { serialize } from "@/lib/serializer"
@@ -24,8 +23,10 @@ const ON_END_REACHED_THRESHOLD = 0.5
 
 const Event = ({ event }: { event: UserEvent }) => {
 	return (
-		<PressableScale
-			className="flex-row items-center px-4 bg-transparent"
+		<ListRow
+			separator={true}
+			title={eventKindToReadable(event.kind)}
+			subtitle={simpleDate(Number(event.timestamp))}
 			onPress={() => {
 				router.push({
 					pathname: "/eventInfo",
@@ -34,26 +35,7 @@ const Event = ({ event }: { event: UserEvent }) => {
 					}
 				})
 			}}
-		>
-			<View className="flex-row items-center gap-4 py-2 bg-transparent border-b border-border">
-				<View className="flex-col bg-transparent flex-1 gap-0.5">
-					<Text
-						className="text-foreground"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{eventKindToReadable(event.kind)}
-					</Text>
-					<Text
-						className="text-muted-foreground text-xs"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{simpleDate(Number(event.timestamp))}
-					</Text>
-				</View>
-			</View>
-		</PressableScale>
+		/>
 	)
 }
 

@@ -1,5 +1,4 @@
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
-import Text from "@/components/ui/text"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useLocalSearchParams, router, useNavigation } from "expo-router"
@@ -25,13 +24,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Icon from "@/features/notes/components/note/icon"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
+import ListRow from "@/components/ui/listRow"
 
 const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 	const { t } = useTranslation()
 
 	return (
-		<View className="flex-row items-center px-4 bg-transparent">
-			<View className="flex-row items-center gap-4 py-2 bg-transparent border-b border-border">
+		<ListRow
+			separator={true}
+			leading={
 				<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
 					<Icon
 						note={{
@@ -43,89 +44,76 @@ const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 						iconSize={18}
 					/>
 				</View>
-				<View className="flex-col bg-transparent flex-1 gap-0.5">
-					<Text
-						className="text-foreground"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{simpleDate(Number(history.editedTimestamp))}
-					</Text>
-					<Text
-						className="text-muted-foreground text-xs"
-						numberOfLines={1}
-						ellipsizeMode="tail"
-					>
-						{history.preview ?? t("no_preview_history")}
-					</Text>
-				</View>
-				<View className="flex-row items-center gap-2 bg-transparent">
-					<Menu
-						type="dropdown"
-						buttons={[
-							{
-								id: "view",
-								title: t("view"),
-								icon: "eye",
-								onPress: () => {
-									router.push({
-										pathname: "/note/[uuid]",
-										params: {
-											uuid: note.uuid,
-											history: serialize(history)
-										}
+			}
+			title={simpleDate(Number(history.editedTimestamp))}
+			subtitle={history.preview ?? t("no_preview_history")}
+			subtitleEllipsizeMode="tail"
+			trailing={
+				<Menu
+					type="dropdown"
+					buttons={[
+						{
+							id: "view",
+							title: t("view"),
+							icon: "eye",
+							onPress: () => {
+								router.push({
+									pathname: "/note/[uuid]",
+									params: {
+										uuid: note.uuid,
+										history: serialize(history)
+									}
+								})
+							}
+						},
+						{
+							id: "restore",
+							title: t("restore"),
+							icon: "restore",
+							requiresOnline: true,
+							onPress: async () => {
+								const promptResponse = await run(async () => {
+									return await prompts.alert({
+										title: t("restore_history"),
+										message: t("restore_history_confirmation"),
+										cancelText: t("cancel"),
+										okText: t("restore"),
+										destructive: true
 									})
+								})
+
+								if (!promptResponse.success) {
+									console.error(promptResponse.error)
+									alerts.error(promptResponse.error)
+
+									return
 								}
-							},
-							{
-								id: "restore",
-								title: t("restore"),
-								icon: "restore",
-								requiresOnline: true,
-								onPress: async () => {
-									const promptResponse = await run(async () => {
-										return await prompts.alert({
-											title: t("restore_history"),
-											message: t("restore_history_confirmation"),
-											cancelText: t("cancel"),
-											okText: t("restore"),
-											destructive: true
-										})
+
+								if (promptResponse.data.cancelled) {
+									return
+								}
+
+								const result = await runWithLoading(async () => {
+									await notes.restoreFromHistory({
+										note,
+										history
 									})
+								})
 
-									if (!promptResponse.success) {
-										console.error(promptResponse.error)
-										alerts.error(promptResponse.error)
+								if (!result.success) {
+									console.error(result.error)
+									alerts.error(result.error)
 
-										return
-									}
-
-									if (promptResponse.data.cancelled) {
-										return
-									}
-
-									const result = await runWithLoading(async () => {
-										await notes.restoreFromHistory({
-											note,
-											history
-										})
-									})
-
-									if (!result.success) {
-										console.error(result.error)
-										alerts.error(result.error)
-
-										return
-									}
+									return
 								}
 							}
-						]}
-					>
-						<EllipsisMenuTrigger />
-					</Menu>
-				</View>
-			</View>
-		</View>
+						}
+					]}
+				>
+					<EllipsisMenuTrigger />
+				</Menu>
+			}
+		/>
 	)
 }
 
