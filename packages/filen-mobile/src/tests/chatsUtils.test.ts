@@ -37,7 +37,7 @@ vi.mock("@/lib/i18n", () => ({ default: { t: (k: string) => k }, t: (k: string) 
 // ─── Actual imports ─────────────────────────────────────────────────────────────
 
 import { MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
-import { resolveLinkMedia, type SuccessfulLink } from "@/features/chats/utils"
+import { resolveLinkMedia, resolveReplySenderDisplayName, type SuccessfulLink } from "@/features/chats/utils"
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -182,5 +182,33 @@ describe("resolveLinkMedia", () => {
 			expect(media.name).toBeNull()
 			expect(media.linked).toBe((link as { data: unknown }).data)
 		})
+	})
+})
+
+// ─── resolveReplySenderDisplayName ──────────────────────────────────────────────
+
+describe("resolveReplySenderDisplayName", () => {
+	it("returns the nickName when it is non-empty", () => {
+		expect(resolveReplySenderDisplayName("Alice", "alice@example.com", "Unknown")).toBe("Alice")
+	})
+
+	it("falls back to the email when nickName is empty string", () => {
+		expect(resolveReplySenderDisplayName("", "alice@example.com", "Unknown")).toBe("alice@example.com")
+	})
+
+	it("falls back to the email when nickName is undefined", () => {
+		expect(resolveReplySenderDisplayName(undefined, "alice@example.com", "Unknown")).toBe("alice@example.com")
+	})
+
+	it("falls back to the fallback string when both nickName and email are empty strings", () => {
+		expect(resolveReplySenderDisplayName("", "", "Unknown")).toBe("Unknown")
+	})
+
+	it("falls back to the fallback string when both nickName and email are undefined", () => {
+		expect(resolveReplySenderDisplayName(undefined, undefined, "Unknown")).toBe("Unknown")
+	})
+
+	it("prefers nickName over email even when both are non-empty", () => {
+		expect(resolveReplySenderDisplayName("Bob", "bob@example.com", "Unknown")).toBe("Bob")
 	})
 })
