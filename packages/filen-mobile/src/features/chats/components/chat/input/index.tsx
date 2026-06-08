@@ -102,6 +102,7 @@ const ChatTextInput = ({
 						className="ios:rounded-full rounded-full size-7 bg-blue-500 items-center justify-center"
 						onPress={onSend}
 						hitSlop={15}
+						enabled={chatInputValue.trim().length > 0}
 					>
 						<Ionicons
 							name="arrow-up-outline"
@@ -124,6 +125,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 	const windowDimensions = useWindowDimensions()
 	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
 	const inputRef = useRef<TextInput>(null)
+	const isSendingRef = useRef(false)
 	const stringifiedClient = useStringifiedClient()
 	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 	const sendTypingEventSemaphoreRef = useRef<Semaphore>(new Semaphore(1))
@@ -210,6 +212,10 @@ const Input = ({ chat }: { chat: Chat }) => {
 	)
 
 	const send = async () => {
+		if (isSendingRef.current) {
+			return
+		}
+
 		if (!stringifiedClient || !me) {
 			return
 		}
@@ -220,104 +226,110 @@ const Input = ({ chat }: { chat: Chat }) => {
 			return
 		}
 
-		clearTimeout(typingTimeoutRef.current)
-		sendTypingEvent(ChatTypingType.Up).catch(console.error)
+		isSendingRef.current = true
 
-		inputRef.current?.clear()
+		try {
+			clearTimeout(typingTimeoutRef.current)
+			sendTypingEvent(ChatTypingType.Up).catch(console.error)
 
-		setChatInputValue("")
-		setChatReplyTo(null)
+			inputRef.current?.clear()
 
-		useChatsStore.getState().setInputSelection({
-			start: 0,
-			end: 0
-		})
+			setChatInputValue("")
+			setChatReplyTo(null)
 
-		if (chatEditMessage) {
-			const result = await runWithLoading(async () => {
-				return await chats.editMessage({
-					chat,
-					message: chatEditMessage,
-					newMessage: normalizedMessage
+			useChatsStore.getState().setInputSelection({
+				start: 0,
+				end: 0
+			})
+
+			if (chatEditMessage) {
+				const result = await runWithLoading(async () => {
+					return await chats.editMessage({
+						chat,
+						message: chatEditMessage,
+						newMessage: normalizedMessage
+					})
 				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					setChatInputValue(normalizedMessage)
+
+					useChatsStore.getState().setInputSelection({
+						start: normalizedMessage.length,
+						end: normalizedMessage.length
+					})
+
+					return
+				}
+
+				setChatEditMessage(null)
+
+				return
+			}
+
+			const sentTimestamp = Date.now()
+			const inflightId = randomUUID()
+			const inflightMessage: ChatMessageWithInflightId = {
+				inflightId,
+				chat: chat.uuid,
+				inner: {
+					uuid: inflightId,
+					senderId: stringifiedClient.userId,
+					senderEmail: stringifiedClient.email,
+					senderAvatar: me.avatar,
+					senderNickName: me.nickName,
+					message: normalizedMessage
+				},
+				replyTo: chatReplyTo
+					? {
+							uuid: chatReplyTo.inner.uuid,
+							senderId: chatReplyTo.inner.senderId,
+							senderEmail: chatReplyTo.inner.senderEmail,
+							senderAvatar: chatReplyTo.inner.senderAvatar,
+							senderNickName: chatReplyTo.inner.senderNickName,
+							message: chatReplyTo.inner.message
+						}
+					: undefined,
+				embedDisabled: false,
+				edited: false,
+				editedTimestamp: BigInt(0),
+				sentTimestamp: BigInt(sentTimestamp),
+				undecryptable: false
+			}
+
+			chatMessagesQueryUpdate({
+				params: {
+					uuid: chat.uuid
+				},
+				updater: messages => [...messages.filter(m => m.inflightId !== inflightMessage.inflightId), inflightMessage]
+			})
+
+			useChatsStore.getState().setInflightMessages(prev => ({
+				...prev,
+				[chat.uuid]: {
+					chat,
+					messages: [...(prev[chat.uuid]?.messages ?? []), inflightMessage]
+				}
+			}))
+
+			const result = await run(async () => {
+				await sync.flushToDisk(useChatsStore.getState().inflightMessages)
 			})
 
 			if (!result.success) {
 				console.error(result.error)
 				alerts.error(result.error)
 
-				setChatInputValue(normalizedMessage)
-
-				useChatsStore.getState().setInputSelection({
-					start: normalizedMessage.length,
-					end: normalizedMessage.length
-				})
-
 				return
 			}
 
-			setChatEditMessage(null)
-
-			return
+			sync.syncNow()
+		} finally {
+			isSendingRef.current = false
 		}
-
-		const sentTimestamp = Date.now()
-		const inflightId = randomUUID()
-		const inflightMessage: ChatMessageWithInflightId = {
-			inflightId,
-			chat: chat.uuid,
-			inner: {
-				uuid: inflightId,
-				senderId: stringifiedClient.userId,
-				senderEmail: stringifiedClient.email,
-				senderAvatar: me.avatar,
-				senderNickName: me.nickName,
-				message: normalizedMessage
-			},
-			replyTo: chatReplyTo
-				? {
-						uuid: chatReplyTo.inner.uuid,
-						senderId: chatReplyTo.inner.senderId,
-						senderEmail: chatReplyTo.inner.senderEmail,
-						senderAvatar: chatReplyTo.inner.senderAvatar,
-						senderNickName: chatReplyTo.inner.senderNickName,
-						message: chatReplyTo.inner.message
-					}
-				: undefined,
-			embedDisabled: false,
-			edited: false,
-			editedTimestamp: BigInt(0),
-			sentTimestamp: BigInt(sentTimestamp),
-			undecryptable: false
-		}
-
-		chatMessagesQueryUpdate({
-			params: {
-				uuid: chat.uuid
-			},
-			updater: messages => [...messages.filter(m => m.inflightId !== inflightMessage.inflightId), inflightMessage]
-		})
-
-		useChatsStore.getState().setInflightMessages(prev => ({
-			...prev,
-			[chat.uuid]: {
-				chat,
-				messages: [...(prev[chat.uuid]?.messages ?? []), inflightMessage]
-			}
-		}))
-
-		const result = await run(async () => {
-			await sync.flushToDisk(useChatsStore.getState().inflightMessages)
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
-		}
-
-		sync.syncNow()
 	}
 
 	const onKeyPress = () => {
