@@ -1,9 +1,8 @@
 import { useTranslation } from "react-i18next"
 import { type ListRenderItemInfo } from "@/components/ui/virtualList"
-import View, { CrossGlassContainerView } from "@/components/ui/view"
+import View from "@/components/ui/view"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import alerts from "@/lib/alerts"
-import Text from "@/components/ui/text"
 import { contactDisplayName } from "@/lib/utils"
 import Avatar from "@/components/ui/avatar"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -12,20 +11,14 @@ import contacts from "@/features/contacts/contacts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import useContactsStore, { type ContactListItemWithHeader } from "@/features/contacts/store/useContacts.store"
-import { Checkbox } from "@/components/ui/checkbox"
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useShallow } from "zustand/shallow"
-import { run, cn } from "@filen/utils"
+import { run } from "@filen/utils"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
-import { useResolveClassNames } from "uniwind"
+import ListRow, { ListRowSectionHeader } from "@/components/ui/listRow"
+import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 
 export const ContactSectionHeader = ({ title }: { title: string }) => {
-	return (
-		<View className={cn("w-full h-auto px-4 bg-transparent", "py-2 pt-4")}>
-			<Text className="text-lg">{title}</Text>
-		</View>
-	)
+	return <ListRowSectionHeader title={title} />
 }
 
 export const Contact = ({
@@ -37,7 +30,6 @@ export const Contact = ({
 }) => {
 	const { t } = useTranslation()
 	const selectOptions = useSelectOptions()
-	const textForeground = useResolveClassNames("text-foreground")
 	const { isSelected, selectedCount, bulkMode } = useContactsStore(
 		useShallow(state => ({
 			isSelected: state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid),
@@ -472,118 +464,74 @@ export const Contact = ({
 		})
 	}
 
-	// Flat row style matching the shared participant row: transparent rows on the screen's
-	// secondary background, inset bottom-border separators between rows of the same section,
-	// and a selection tint on the whole row while multi-selecting.
-	return info.item.type === "header" ? (
-		<ContactSectionHeader title={info.item.data.title} />
-	) : (
-		<View
-			className={cn(
-				"flex-row items-center px-4 bg-transparent",
-				isSelected && "bg-background-tertiary",
-				disabled && "opacity-50"
-			)}
-		>
-			<View
-				className={cn(
-					"flex-row items-center gap-4 py-2 bg-transparent flex-1",
-					// Separator between consecutive rows in a section; the last row before a section
-					// header (or the list edge) gets none, so sections read as visually grouped.
-					nextItem && nextItem.type !== "header" && "border-b border-border"
-				)}
-			>
-				{showCheckbox && (
-					<AnimatedView
-						className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
-						entering={FadeIn}
-						exiting={FadeOut}
-					>
-						<Checkbox
-							value={isSelected}
-							onValueChange={onPress}
-							hitSlop={16}
-						/>
-					</AnimatedView>
-				)}
-				<PressableScale
-					className="flex-row bg-transparent flex-1"
-					onPress={onPress}
-				>
-					<View className="flex-row bg-transparent flex-1 gap-3 items-center">
-						<Avatar
-							className="shrink-0"
-							source={info.item.data.avatar}
-							size={32}
-							lastActive={info.item.type === "contact" ? Number(info.item.data.lastActive) : undefined}
-						/>
-						<View className="flex-col bg-transparent gap-0.5 flex-1">
-							<Text
-								className="text-foreground"
-								numberOfLines={1}
-								ellipsizeMode="middle"
+	if (info.item.type === "header") {
+		return <ContactSectionHeader title={info.item.data.title} />
+	}
+
+	const showTrailing = info.item.type === "incomingRequest" || info.item.type === "outgoingRequest" || menuButtons.length > 0
+
+	return (
+		<ListRow
+			separator={!!(nextItem && nextItem.type !== "header")}
+			disabled={disabled}
+			selectable={showCheckbox}
+			selected={isSelected}
+			onSelectedChange={onPress}
+			onPress={onPress}
+			leading={
+				<Avatar
+					className="shrink-0"
+					source={info.item.data.avatar}
+					size={32}
+					lastActive={info.item.type === "contact" ? Number(info.item.data.lastActive) : undefined}
+				/>
+			}
+			title={contactDisplayName(info.item.data)}
+			subtitle={info.item.data.email}
+			trailing={
+				showTrailing ? (
+					<View className="flex-row items-center gap-3 bg-transparent">
+						{info.item.type === "incomingRequest" && (
+							<PressableScale
+								className="bg-green-500 size-8 rounded-full flex-row items-center justify-center"
+								rippleColor="transparent"
+								onPress={onAccept}
+								hitSlop={10}
 							>
-								{contactDisplayName(info.item.data)}
-							</Text>
-							<Text
-								className="text-muted-foreground text-xs"
-								numberOfLines={1}
-								ellipsizeMode="middle"
+								<Ionicons
+									name="checkmark-outline"
+									size={20}
+									color="white"
+								/>
+							</PressableScale>
+						)}
+						{(info.item.type === "outgoingRequest" || info.item.type === "incomingRequest") && (
+							<PressableScale
+								className="bg-red-500 size-8 rounded-full flex-row items-center justify-center"
+								rippleColor="transparent"
+								onPress={onDeny}
+								hitSlop={10}
 							>
-								{info.item.data.email}
-							</Text>
-						</View>
+								<Ionicons
+									name="close-outline"
+									size={20}
+									color="white"
+								/>
+							</PressableScale>
+						)}
+						{menuButtons.length > 0 && (
+							<Menu
+								type="dropdown"
+								isAnchoredToRight={true}
+								buttons={menuButtons}
+							>
+								<EllipsisMenuTrigger />
+							</Menu>
+						)}
 					</View>
-				</PressableScale>
-				<View className="flex-row items-center gap-3 bg-transparent">
-					{info.item.type === "incomingRequest" && (
-						<PressableScale
-							className="bg-green-500 size-8 rounded-full flex-row items-center justify-center"
-							rippleColor="transparent"
-							onPress={onAccept}
-							hitSlop={10}
-						>
-							<Ionicons
-								name="checkmark-outline"
-								size={20}
-								color="white"
-							/>
-						</PressableScale>
-					)}
-					{(info.item.type === "outgoingRequest" || info.item.type === "incomingRequest") && (
-						<PressableScale
-							className="bg-red-500 size-8 rounded-full flex-row items-center justify-center"
-							rippleColor="transparent"
-							onPress={onDeny}
-							hitSlop={10}
-						>
-							<Ionicons
-								name="close-outline"
-								size={20}
-								color="white"
-							/>
-						</PressableScale>
-					)}
-					{menuButtons.length > 0 && (
-						<Menu
-							type="dropdown"
-							isAnchoredToRight={true}
-							buttons={menuButtons}
-						>
-							<CrossGlassContainerView>
-								<PressableScale className="size-9 items-center justify-center">
-									<Ionicons
-										name="ellipsis-horizontal"
-										size={20}
-										color={textForeground.color}
-									/>
-								</PressableScale>
-							</CrossGlassContainerView>
-						</Menu>
-					)}
-				</View>
-			</View>
-		</View>
+				) : undefined
+			}
+		/>
 	)
 }
 
