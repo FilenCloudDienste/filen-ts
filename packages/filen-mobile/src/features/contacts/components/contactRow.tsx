@@ -1,3 +1,4 @@
+import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import View from "@/components/ui/view"
@@ -16,6 +17,7 @@ import { run } from "@filen/utils"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 import ListRow, { ListRowSectionHeader } from "@/components/ui/listRow"
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
+import useIsOnline from "@/hooks/useIsOnline"
 
 export const ContactSectionHeader = ({ title }: { title: string }) => {
 	return <ListRowSectionHeader title={title} />
@@ -30,6 +32,8 @@ export const Contact = ({
 }) => {
 	const { t } = useTranslation()
 	const selectOptions = useSelectOptions()
+	const isOnline = useIsOnline()
+	const inFlightRef = useRef(false)
 	const { isSelected, selectedCount, bulkMode } = useContactsStore(
 		useShallow(state => ({
 			isSelected: state.selectedContacts.some(c => c.type === info.item.type && c.data.uuid === info.item.data.uuid),
@@ -40,6 +44,12 @@ export const Contact = ({
 	const showCheckbox = !!selectOptions || bulkMode
 
 	const onAccept = async () => {
+		if (inFlightRef.current) {
+			return
+		}
+
+		inFlightRef.current = true
+
 		const result = await runWithLoading(async () => {
 			if (info.item.type !== "incomingRequest") {
 				throw new Error("Invalid contact request type")
@@ -50,6 +60,8 @@ export const Contact = ({
 			})
 		})
 
+		inFlightRef.current = false
+
 		if (!result.success) {
 			console.error(result.error)
 			alerts.error(result.error)
@@ -59,6 +71,10 @@ export const Contact = ({
 	}
 
 	const onDeny = async () => {
+		if (inFlightRef.current) {
+			return
+		}
+
 		const promptResponse = await run(async () => {
 			switch (info.item.type) {
 				case "incomingRequest": {
@@ -100,6 +116,8 @@ export const Contact = ({
 			return
 		}
 
+		inFlightRef.current = true
+
 		const result = await runWithLoading(async () => {
 			switch (info.item.type) {
 				case "incomingRequest": {
@@ -124,6 +142,8 @@ export const Contact = ({
 				}
 			}
 		})
+
+		inFlightRef.current = false
 
 		if (!result.success) {
 			console.error(result.error)
@@ -383,7 +403,7 @@ export const Contact = ({
 							title: t("cancel_contact"),
 							message: t("cancel_contact_confirmation"),
 							cancelText: t("cancel"),
-							okText: t("cancel"),
+							okText: t("cancel_request"),
 							destructive: true
 						})
 					})
@@ -494,8 +514,10 @@ export const Contact = ({
 						{info.item.type === "incomingRequest" && (
 							<PressableScale
 								className="bg-green-500 size-8 rounded-full flex-row items-center justify-center"
+								style={{ opacity: isOnline ? 1 : 0.4 }}
 								rippleColor="transparent"
 								onPress={onAccept}
+								enabled={isOnline}
 								hitSlop={10}
 							>
 								<Ionicons
@@ -508,8 +530,10 @@ export const Contact = ({
 						{(info.item.type === "outgoingRequest" || info.item.type === "incomingRequest") && (
 							<PressableScale
 								className="bg-red-500 size-8 rounded-full flex-row items-center justify-center"
+								style={{ opacity: isOnline ? 1 : 0.4 }}
 								rippleColor="transparent"
 								onPress={onDeny}
+								enabled={isOnline}
 								hitSlop={10}
 							>
 								<Ionicons
