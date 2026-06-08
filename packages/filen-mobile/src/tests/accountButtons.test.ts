@@ -677,16 +677,38 @@ describe("buildTwoFactorButtons", () => {
 	it("returns exactly 1 button", () => {
 		const buttons = buildTwoFactorButtons({
 			t,
-			accountQuery: makeAccountQuery()
+			accountQuery: makeAccountQuery(),
+			isOnline: true
 		})
 
 		expect(buttons).toHaveLength(1)
 	})
 
+	it("2FA switch is disabled when isOnline===false", () => {
+		const buttons = buildTwoFactorButtons({
+			t,
+			accountQuery: makeAccountQuery(),
+			isOnline: false
+		})
+
+		expect(buttons[0]?.disabled).toBe(true)
+	})
+
+	it("2FA switch is not disabled when isOnline===true", () => {
+		const buttons = buildTwoFactorButtons({
+			t,
+			accountQuery: makeAccountQuery(),
+			isOnline: true
+		})
+
+		expect(buttons[0]?.disabled).toBe(false)
+	})
+
 	it("switch value mirrors accountQuery.data.twoFactorEnabled (false)", () => {
 		const buttons = buildTwoFactorButtons({
 			t,
-			accountQuery: makeAccountQuery({ twoFactorEnabled: false })
+			accountQuery: makeAccountQuery({ twoFactorEnabled: false }),
+			isOnline: true
 		})
 		const btn = buttons[0]
 
@@ -698,7 +720,8 @@ describe("buildTwoFactorButtons", () => {
 	it("switch value mirrors accountQuery.data.twoFactorEnabled (true)", () => {
 		const buttons = buildTwoFactorButtons({
 			t,
-			accountQuery: makeAccountQuery({ twoFactorEnabled: true })
+			accountQuery: makeAccountQuery({ twoFactorEnabled: true }),
+			isOnline: true
 		})
 		const btn = buttons[0]
 
@@ -717,7 +740,8 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery
+				accountQuery: accountQuery,
+				isOnline: true
 			})
 			const btn = buttons[0]
 
@@ -737,7 +761,8 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery
+				accountQuery: accountQuery,
+				isOnline: true
 			})
 			const btn = buttons[0]
 
@@ -755,7 +780,8 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery
+				accountQuery: accountQuery,
+				isOnline: true
 			})
 			const btn = buttons[0]
 
@@ -785,7 +811,8 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery
+				accountQuery: accountQuery,
+				isOnline: true
 			})
 			const btn = buttons[0]
 
@@ -804,7 +831,8 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery
+				accountQuery: accountQuery,
+				isOnline: true
 			})
 			const btn = buttons[0]
 
@@ -822,7 +850,8 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery
+				accountQuery: accountQuery,
+				isOnline: true
 			})
 			const btn = buttons[0]
 
