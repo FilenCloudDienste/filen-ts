@@ -19,6 +19,7 @@ import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import type { DriveItemFileExtracted } from "@/types"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
@@ -30,6 +31,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 	const [editedText, setEditedText] = useRecyclingState<string | null>(null, [galleryItemKey(item)])
 	const textPrimary = useResolveClassNames("text-primary")
 	const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [galleryItemKey(item)])
+	const isOnline = useIsOnline()
 
 	const parent =
 		item.type === "drive" && drivePath
@@ -53,7 +55,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 			: itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
 
 	const save = async () => {
-		if (editedText === null || readOnly) {
+		if (editedText === null || readOnly || !isOnline) {
 			return
 		}
 
@@ -140,6 +142,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 						className="size-11 items-center justify-center"
 						onPress={save}
 						hitSlop={10}
+						enabled={isOnline}
 					>
 						<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
 							<Ionicons
