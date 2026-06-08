@@ -829,8 +829,8 @@ describe("PauseSignal", () => {
 		ps.addEventListener("pause", spyPause)
 		ps.addEventListener("resume", spyResume)
 		ps.dispose()
-		// The underlying mock signal is a no-op after uniffiDestroy, but pause() still toggles state.
-		// What matters is that the JS listener sets were cleared by dispose().
+		// After dispose() pause() early-returns via the disposed guard, so it never reaches the
+		// listener loop (and the JS listener sets were also cleared by dispose()).
 		ps.pause()
 		expect(spyPause).not.toHaveBeenCalled()
 	})
@@ -838,6 +838,38 @@ describe("PauseSignal", () => {
 	it("dispose() calls uniffiDestroy() on the underlying SDK PauseSignal handle", () => {
 		const sdkSignal = ps.getSignal()
 		const destroySpy = vi.spyOn(sdkSignal, "uniffiDestroy")
+		ps.dispose()
+		expect(destroySpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("pause() after dispose() is a no-op and never touches the freed handle (use-after-dispose crash guard)", () => {
+		const sdkSignal = ps.getSignal()
+		const pauseSpy = vi.spyOn(sdkSignal, "pause")
+		ps.dispose()
+		expect(() => ps.pause()).not.toThrow()
+		expect(pauseSpy).not.toHaveBeenCalled()
+		expect(ps.isPaused()).toBe(false)
+	})
+
+	it("resume() after dispose() is a no-op and never touches the freed handle", () => {
+		const sdkSignal = ps.getSignal()
+		const resumeSpy = vi.spyOn(sdkSignal, "resume")
+		ps.dispose()
+		expect(() => ps.resume()).not.toThrow()
+		expect(resumeSpy).not.toHaveBeenCalled()
+	})
+
+	it("isPaused() returns false after dispose() even if it was paused before", () => {
+		ps.pause()
+		expect(ps.isPaused()).toBe(true)
+		ps.dispose()
+		expect(ps.isPaused()).toBe(false)
+	})
+
+	it("dispose() is idempotent — uniffiDestroy() is called once even when disposed twice", () => {
+		const sdkSignal = ps.getSignal()
+		const destroySpy = vi.spyOn(sdkSignal, "uniffiDestroy")
+		ps.dispose()
 		ps.dispose()
 		expect(destroySpy).toHaveBeenCalledTimes(1)
 	})

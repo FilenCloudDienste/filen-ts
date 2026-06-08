@@ -66,9 +66,13 @@ export class PauseSignal {
 	private readonly signal: SdkPauseSignal = new SdkPauseSignal()
 	private readonly pauseListeners: Set<() => void> = new Set()
 	private readonly resumeListeners: Set<() => void> = new Set()
+	// Set once dispose() frees the underlying Rust Arc handle. After that, pause()/resume()/isPaused()
+	// must not touch the freed handle: a stale UI tap (e.g. Pause/Resume on a settled transfer whose
+	// store entry still lingers) would otherwise throw UnexpectedNullPointer synchronously and crash the app.
+	private disposed: boolean = false
 
 	public pause(): void {
-		if (this.isPaused()) {
+		if (this.disposed || this.isPaused()) {
 			return
 		}
 
@@ -84,7 +88,7 @@ export class PauseSignal {
 	}
 
 	public resume(): void {
-		if (!this.isPaused()) {
+		if (this.disposed || !this.isPaused()) {
 			return
 		}
 
@@ -100,7 +104,7 @@ export class PauseSignal {
 	}
 
 	public isPaused(): boolean {
-		return this.signal.isPaused()
+		return this.disposed ? false : this.signal.isPaused()
 	}
 
 	public getSignal(): SdkPauseSignal {
@@ -148,6 +152,12 @@ export class PauseSignal {
 	// The underlying SdkPauseSignal is a uniffi (Rust Arc-backed) handle that must be released explicitly.
 	// Callers that own a PauseSignal must call dispose() once it is no longer needed.
 	public dispose(): void {
+		if (this.disposed) {
+			return
+		}
+
+		this.disposed = true
+
 		this.removeAllListeners()
 
 		this.signal.uniffiDestroy()
