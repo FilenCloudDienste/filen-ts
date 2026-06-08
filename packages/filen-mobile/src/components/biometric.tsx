@@ -31,6 +31,24 @@ export function remainingMs(now: number, lockedUntil: number): number {
 	return Math.max(0, lockedUntil - now)
 }
 
+// P4: lock the moment we background (only while authenticated and not inside an in-app presentation),
+// so the lock is already mounted before the app repaints on return — no content-leak frame. iOS
+// suspends JS in the background, so this has to be decided at the background transition, not on return.
+export function shouldLockOnBackground(enabled: boolean, authenticated: boolean, suppressed: boolean): boolean {
+	return enabled && authenticated && !suppressed
+}
+
+// On return, auto-clear a background-induced lock without a prompt when we came back within the grace
+// window (lockAfter). Beyond it the lock stays up and BiometricInner prompts.
+export function shouldAutoUnlockOnForeground(
+	lockedByBackground: boolean,
+	elapsedMs: number,
+	lockAfterMs: number,
+	suppressed: boolean
+): boolean {
+	return lockedByBackground && !suppressed && elapsedMs <= lockAfterMs
+}
+
 const OVERLAY_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background"
 
 const ICON_BLOCK_SIZE = 80
@@ -422,10 +440,18 @@ function Biometric() {
 	const lastAppCloseTimestampRef = useRef<number>(0)
 	const lastAppStateRef = useRef<AppStateStatus>(AppState.currentState)
 	const lockAfterMsRef = useRef<number>(biometric.enabled ? biometric.lockAfter * LOCK_BASE_MS : 0)
+	const biometricEnabledRef = useRef<boolean>(biometric.enabled)
+	const authenticatedRef = useRef<boolean>(authenticated)
+	const lockedByBackgroundRef = useRef<boolean>(false)
 
 	useEffect(() => {
 		lockAfterMsRef.current = biometric.enabled ? biometric.lockAfter * LOCK_BASE_MS : 0
+		biometricEnabledRef.current = biometric.enabled
 	}, [biometric])
+
+	useEffect(() => {
+		authenticatedRef.current = authenticated
+	}, [authenticated])
 
 	const show = biometric.enabled && !authenticated
 	const locked = biometric.enabled && new Date().getTime() < biometric.lockedUntil
@@ -445,17 +471,41 @@ function Biometric() {
 			const appStateListener = AppState.addEventListener("change", nextAppState => {
 				if (nextAppState === "background") {
 					lastAppCloseTimestampRef.current = Date.now()
+
+					// Lock at the moment of backgrounding (not on return) so the lock is already covering
+					// before the app repaints content — no content-leak frame. Skipped while inside an
+					// in-app native presentation (picker/permission/scanner), where the user never left.
+					if (
+						shouldLockOnBackground(
+							biometricEnabledRef.current,
+							authenticatedRef.current,
+							systemPresentation.isReLockSuppressed()
+						)
+					) {
+						lockedByBackgroundRef.current = true
+
+						setAuthenticated(false)
+					}
 				}
 
 				if (nextAppState === "active" && lastAppStateRef.current === "background") {
 					const elapsed = Date.now() - lastAppCloseTimestampRef.current
 
-					// Skip the re-lock when the background was caused by an in-app native presentation
-					// (image/document picker, permission dialog, scanner) the user is still inside of —
-					// they never really left the app, so re-prompting on return would be wrong.
-					if (elapsed > lockAfterMsRef.current && !systemPresentation.isReLockSuppressed()) {
-						setAuthenticated(false)
+					// Returned within the grace window — clear the background lock without a prompt. Beyond
+					// it (or if we never locked, e.g. a suppressed picker), leave state as-is so the lock
+					// stays up and BiometricInner prompts.
+					if (
+						shouldAutoUnlockOnForeground(
+							lockedByBackgroundRef.current,
+							elapsed,
+							lockAfterMsRef.current,
+							systemPresentation.isReLockSuppressed()
+						)
+					) {
+						setAuthenticated(true)
 					}
+
+					lockedByBackgroundRef.current = false
 
 					setLastAppOpenTimestamp(Date.now())
 				}
