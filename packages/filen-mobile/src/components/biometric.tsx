@@ -17,6 +17,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { PressableOpacity } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
+import { withSystemPresentation, systemPresentation } from "@/lib/systemPresentation"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -78,14 +79,18 @@ async function promptBiometric(): Promise<LocalAuthentication.LocalAuthenticatio
 		}
 	}
 
-	return await LocalAuthentication.authenticateAsync({
-		cancelLabel: i18n.t("cancel"),
-		promptMessage: i18n.t("authenticate"),
-		promptDescription: i18n.t("authenticate_to_access_app"),
-		promptSubtitle: "",
-		disableDeviceFallback: true,
-		fallbackLabel: i18n.t("use_pin")
-	})
+	// Wrap the system prompt so the privacy blur (which arms on willResignActive) doesn't flash while
+	// the Face ID / Touch ID sheet is up — the prompt resigns the app active without truly leaving it.
+	return await withSystemPresentation(() =>
+		LocalAuthentication.authenticateAsync({
+			cancelLabel: i18n.t("cancel"),
+			promptMessage: i18n.t("authenticate"),
+			promptDescription: i18n.t("authenticate_to_access_app"),
+			promptSubtitle: "",
+			disableDeviceFallback: true,
+			fallbackLabel: i18n.t("use_pin")
+		})
+	)
 }
 
 async function promptPin(biometric: EnabledBiometric): Promise<PinResult> {
@@ -445,7 +450,10 @@ function Biometric() {
 				if (nextAppState === "active" && lastAppStateRef.current === "background") {
 					const elapsed = Date.now() - lastAppCloseTimestampRef.current
 
-					if (elapsed > lockAfterMsRef.current) {
+					// Skip the re-lock when the background was caused by an in-app native presentation
+					// (image/document picker, permission dialog, scanner) the user is still inside of —
+					// they never really left the app, so re-prompting on return would be wrong.
+					if (elapsed > lockAfterMsRef.current && !systemPresentation.isReLockSuppressed()) {
 						setAuthenticated(false)
 					}
 
