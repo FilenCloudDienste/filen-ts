@@ -37,6 +37,7 @@ import useAccountQuery from "@/queries/useAccount.query"
 import MentionSuggestions from "@/features/chats/components/chat/input/mentionSuggestions"
 import EmojiSuggestions from "@/features/chats/components/chat/input/emojiSuggestions"
 import ReplyTo from "@/features/chats/components/chat/input/replyTo"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 
 type ChatTextInputProps = {
 	chatInputValue: string
@@ -431,9 +432,11 @@ const Input = ({ chat }: { chat: Chat }) => {
 							icon: "image",
 							onPress: async () => {
 								const permissionsResult = await run(async () => {
-									return await hasAllNeededMediaPermissions({
-										shouldRequest: true
-									})
+									return await withSystemPresentation(() =>
+										hasAllNeededMediaPermissions({
+											shouldRequest: true
+										})
+									)
 								})
 
 								if (!permissionsResult.success) {
@@ -450,15 +453,17 @@ const Input = ({ chat }: { chat: Chat }) => {
 								}
 
 								const imagePickerResult = await run(async () => {
-									return await ImagePicker.launchImageLibraryAsync({
-										mediaTypes: ["images", "videos"],
-										exif: false,
-										base64: false,
-										quality: 1,
-										allowsMultipleSelection: true,
-										presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-										shouldDownloadFromNetwork: true
-									})
+									return await withSystemPresentation(() =>
+										ImagePicker.launchImageLibraryAsync({
+											mediaTypes: ["images", "videos"],
+											exif: false,
+											base64: false,
+											quality: 1,
+											allowsMultipleSelection: true,
+											presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+											shouldDownloadFromNetwork: true
+										})
+									)
 								})
 
 								if (!imagePickerResult.success) {
@@ -492,9 +497,11 @@ const Input = ({ chat }: { chat: Chat }) => {
 							icon: "camera",
 							onPress: async () => {
 								const permissionsResult = await run(async () => {
-									return await hasAllNeededMediaPermissions({
-										shouldRequest: true
-									})
+									return await withSystemPresentation(() =>
+										hasAllNeededMediaPermissions({
+											shouldRequest: true
+										})
+									)
 								})
 
 								if (!permissionsResult.success) {
@@ -511,15 +518,17 @@ const Input = ({ chat }: { chat: Chat }) => {
 								}
 
 								const imagePickerResult = await run(async () => {
-									return await ImagePicker.launchCameraAsync({
-										mediaTypes: ["images", "videos"],
-										exif: false,
-										base64: false,
-										quality: 1,
-										allowsMultipleSelection: true,
-										presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-										shouldDownloadFromNetwork: true
-									})
+									return await withSystemPresentation(() =>
+										ImagePicker.launchCameraAsync({
+											mediaTypes: ["images", "videos"],
+											exif: false,
+											base64: false,
+											quality: 1,
+											allowsMultipleSelection: true,
+											presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+											shouldDownloadFromNetwork: true
+										})
+									)
 								})
 
 								if (!imagePickerResult.success) {
@@ -553,12 +562,14 @@ const Input = ({ chat }: { chat: Chat }) => {
 							icon: "upload",
 							onPress: async () => {
 								const documentPickerResult = await run(async () => {
-									return await DocumentPicker.getDocumentAsync({
-										type: "*/*",
-										multiple: true,
-										copyToCacheDirectory: true,
-										base64: false
-									})
+									return await withSystemPresentation(() =>
+										DocumentPicker.getDocumentAsync({
+											type: "*/*",
+											multiple: true,
+											copyToCacheDirectory: true,
+											base64: false
+										})
+									)
 								})
 
 								if (!documentPickerResult.success) {

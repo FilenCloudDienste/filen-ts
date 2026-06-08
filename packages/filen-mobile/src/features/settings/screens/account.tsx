@@ -29,6 +29,7 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 import { prepareAvatarFileForUpload } from "@/features/settings/avatarUpload"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 
 function Account() {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -97,16 +98,18 @@ function Account() {
 								}
 
 								const imagePickerResult = await run(async () => {
-									return await ImagePicker.launchImageLibraryAsync({
-										mediaTypes: ["images"],
-										exif: false,
-										base64: false,
-										quality: 1,
-										allowsMultipleSelection: false,
-										allowsEditing: true,
-										presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-										shouldDownloadFromNetwork: true
-									})
+									return await withSystemPresentation(() =>
+										ImagePicker.launchImageLibraryAsync({
+											mediaTypes: ["images"],
+											exif: false,
+											base64: false,
+											quality: 1,
+											allowsMultipleSelection: false,
+											allowsEditing: true,
+											presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
+											shouldDownloadFromNetwork: true
+										})
+									)
 								})
 
 								if (!imagePickerResult.success) {

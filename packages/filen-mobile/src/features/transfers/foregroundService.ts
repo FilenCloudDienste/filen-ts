@@ -3,6 +3,7 @@ import notifee, { AndroidImportance, AndroidForegroundServiceType, Authorization
 import { bpsToReadable } from "@filen/utils"
 import i18n from "@/lib/i18n"
 import secureStore from "@/lib/secureStore"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 
 const CHANNEL_ID = "transfers"
 const NOTIFICATION_ID = "filen-transfers-fgs"
@@ -149,7 +150,7 @@ class ForegroundService {
 			return false
 		}
 
-		const settings = await notifee.requestPermission()
+		const settings = await withSystemPresentation(() => notifee.requestPermission())
 		const granted =
 			settings.authorizationStatus === AuthorizationStatus.AUTHORIZED ||
 			settings.authorizationStatus === AuthorizationStatus.PROVISIONAL

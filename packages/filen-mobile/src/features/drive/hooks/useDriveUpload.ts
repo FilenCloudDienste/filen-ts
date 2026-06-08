@@ -11,6 +11,7 @@ import DocumentScanner, {
 import { randomUUID } from "expo-crypto"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
@@ -87,9 +88,11 @@ export function useDriveUpload({
 
 	const requireMediaPermissions = async (): Promise<boolean> => {
 		const permissionsResult = await run(async () => {
-			return await hasAllNeededMediaPermissions({
-				shouldRequest: true
-			})
+			return await withSystemPresentation(() =>
+				hasAllNeededMediaPermissions({
+					shouldRequest: true
+				})
+			)
 		})
 
 		if (!permissionsResult.success) {
@@ -114,12 +117,14 @@ export function useDriveUpload({
 		}
 
 		const documentPickerResult = await run(async () => {
-			return await DocumentPicker.getDocumentAsync({
-				type: "*/*",
-				multiple: true,
-				copyToCacheDirectory: true,
-				base64: false
-			})
+			return await withSystemPresentation(() =>
+				DocumentPicker.getDocumentAsync({
+					type: "*/*",
+					multiple: true,
+					copyToCacheDirectory: true,
+					base64: false
+				})
+			)
 		})
 
 		if (!documentPickerResult.success) {
@@ -193,7 +198,7 @@ export function useDriveUpload({
 		}
 
 		const imagePickerResult = await run(async () => {
-			return await launcher()
+			return await withSystemPresentation(() => launcher())
 		})
 
 		if (!imagePickerResult.success) {
@@ -297,11 +302,13 @@ export function useDriveUpload({
 		}
 
 		const scannerResult = await run(async () => {
-			return await DocumentScanner.scanDocument({
-				maxNumDocuments: undefined,
-				croppedImageQuality: 100,
-				responseType: DocumentScannerResponseType.ImageFilePath
-			})
+			return await withSystemPresentation(() =>
+				DocumentScanner.scanDocument({
+					maxNumDocuments: undefined,
+					croppedImageQuality: 100,
+					responseType: DocumentScannerResponseType.ImageFilePath
+				})
+			)
 		})
 
 		if (!scannerResult.success) {
