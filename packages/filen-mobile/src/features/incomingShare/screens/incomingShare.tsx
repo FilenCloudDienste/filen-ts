@@ -1,7 +1,6 @@
 import { useIncomingShare, type ResolvedSharePayload } from "expo-sharing"
 import { Platform } from "react-native"
 import { useTranslation } from "react-i18next"
-import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import { Fragment, useCallback, useEffect, useRef } from "react"
@@ -9,7 +8,6 @@ import Header from "@/components/ui/header"
 import { useResolveClassNames } from "uniwind"
 import { useNavigation, useFocusEffect } from "expo-router"
 import VirtualList from "@/components/ui/virtualList"
-import Text from "@/components/ui/text"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import * as FileSystem from "expo-file-system"
 import transfers from "@/features/transfers/transfers"
@@ -25,15 +23,18 @@ import useIncomingShareStore from "@/features/incomingShare/store/useIncomingSha
 import Image from "@/components/ui/image"
 import { getPreviewType } from "@/lib/previewType"
 import { FileIcon } from "@/components/itemIcons"
+import ListRow from "@/components/ui/listRow"
 
 function Payload({ payload }: { payload: ResolvedSharePayload }) {
 	const previewType =
 		payload.contentUri && payload.originalName && payload.contentUri.startsWith("file://") ? getPreviewType(payload.originalName) : null
 
 	return (
-		<View className="px-4 bg-transparent flex-row items-center">
-			<View className="py-3 bg-transparent border-b border-border flex-row items-center gap-4">
-				{previewType === "image" ? (
+		<ListRow
+			separator={true}
+			density="relaxed"
+			leading={
+				previewType === "image" ? (
 					<Image
 						className="bg-transparent"
 						source={{
@@ -53,26 +54,11 @@ function Payload({ payload }: { payload: ResolvedSharePayload }) {
 						width={32}
 						height={32}
 					/>
-				)}
-				<View className="flex-col flex-1 bg-transparent">
-					<Text
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{payload.originalName}
-					</Text>
-					{typeof payload.contentSize === "number" && (
-						<Text
-							className="text-muted-foreground text-xs"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{formatBytes(payload.contentSize)}
-						</Text>
-					)}
-				</View>
-			</View>
-		</View>
+				)
+			}
+			title={payload.originalName}
+			subtitle={typeof payload.contentSize === "number" ? formatBytes(payload.contentSize) : undefined}
+		/>
 	)
 }
 
