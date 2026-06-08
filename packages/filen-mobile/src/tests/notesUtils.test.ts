@@ -14,7 +14,13 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
-import { noteTypeToEditorType, computeTagState } from "@/features/notes/utils"
+import {
+	noteTypeToEditorType,
+	computeTagState,
+	filterNoteListItemsBySearchQuery,
+	filterNoteTagsBySearchQuery
+} from "@/features/notes/utils"
+import { type ListItem as NoteListItem } from "@/features/notes/components/note"
 
 function makeTag(uuid: string): NoteTag {
 	return { uuid } as unknown as NoteTag
@@ -24,6 +30,28 @@ function makeNote(tagUuids: string[]): Note {
 	return {
 		tags: tagUuids.map(uuid => ({ uuid }))
 	} as unknown as Note
+}
+
+function makeNamedTag(uuid: string, name: string): NoteTag {
+	return { uuid, name, undecryptable: false } as unknown as NoteTag
+}
+
+function makeListNote(uuid: string, title: string, content?: string): NoteListItem {
+	return {
+		type: "note",
+		uuid,
+		title,
+		content,
+		undecryptable: false
+	} as unknown as NoteListItem
+}
+
+function makeListHeader(id: string): NoteListItem {
+	return {
+		type: "header",
+		id,
+		title: id
+	} as unknown as NoteListItem
 }
 
 describe("noteTypeToEditorType", () => {
@@ -75,5 +103,86 @@ describe("computeTagState", () => {
 
 	it("returns 'all' for a single tagged note", () => {
 		expect(computeTagState({ notes: [makeNote(["tag-1"])], tag })).toBe("all")
+	})
+})
+
+describe("filterNoteListItemsBySearchQuery", () => {
+	const apple = makeListNote("n1", "Apple pie")
+	const banana = makeListNote("n2", "Banana bread")
+	const header = makeListHeader("favorited")
+	const list: NoteListItem[] = [header, apple, banana]
+
+	it("returns the list unchanged for an empty query (headers preserved)", () => {
+		const result = filterNoteListItemsBySearchQuery(list, "")
+
+		expect(result).toBe(list)
+	})
+
+	it("returns the list unchanged for a whitespace-only query", () => {
+		const result = filterNoteListItemsBySearchQuery(list, "   ")
+
+		expect(result).toBe(list)
+	})
+
+	it("drops section headers when a query is active", () => {
+		const result = filterNoteListItemsBySearchQuery(list, "a")
+
+		expect(result.some(item => item.type === "header")).toBe(false)
+	})
+
+	it("matches case-insensitively against the title", () => {
+		const result = filterNoteListItemsBySearchQuery(list, "APPLE")
+
+		expect(result).toHaveLength(1)
+		expect(result[0]?.type === "note" ? result[0].uuid : null).toBe("n1")
+	})
+
+	it("matches against note content", () => {
+		const withContent = makeListNote("n3", "Untitled", "secret recipe")
+		const result = filterNoteListItemsBySearchQuery([withContent], "recipe")
+
+		expect(result).toHaveLength(1)
+		expect(result[0]?.type === "note" ? result[0].uuid : null).toBe("n3")
+	})
+
+	it("returns the matching subset only", () => {
+		const result = filterNoteListItemsBySearchQuery(list, "banana")
+
+		expect(result.map(item => (item.type === "note" ? item.uuid : item.id))).toEqual(["n2"])
+	})
+
+	it("returns an empty array when nothing matches", () => {
+		expect(filterNoteListItemsBySearchQuery(list, "zzz")).toEqual([])
+	})
+
+	it("matches the cannot_decrypt placeholder for undecryptable notes", () => {
+		const undec = { type: "note", uuid: "abc", undecryptable: true } as unknown as NoteListItem
+		const result = filterNoteListItemsBySearchQuery([undec], "cannot_decrypt_abc")
+
+		expect(result).toHaveLength(1)
+	})
+})
+
+describe("filterNoteTagsBySearchQuery", () => {
+	const work = makeNamedTag("t1", "work")
+	const home = makeNamedTag("t2", "home")
+	const tags: NoteTag[] = [work, home]
+
+	it("returns the list unchanged for an empty query", () => {
+		expect(filterNoteTagsBySearchQuery(tags, "")).toBe(tags)
+	})
+
+	it("returns the list unchanged for a whitespace-only query", () => {
+		expect(filterNoteTagsBySearchQuery(tags, "  ")).toBe(tags)
+	})
+
+	it("matches case-insensitively against the tag name", () => {
+		const result = filterNoteTagsBySearchQuery(tags, "WORK")
+
+		expect(result).toEqual([work])
+	})
+
+	it("returns an empty array when nothing matches", () => {
+		expect(filterNoteTagsBySearchQuery(tags, "zzz")).toEqual([])
 	})
 })
