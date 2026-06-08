@@ -458,7 +458,7 @@ export const Contact = ({
 			return false
 		}
 
-		if (selectOptions.userIdsToExclude.some(c => c === Number(item.data.userId))) {
+		if ((selectOptions.userIdsToExclude ?? []).some(c => c === Number(item.data.userId))) {
 			return true
 		}
 
