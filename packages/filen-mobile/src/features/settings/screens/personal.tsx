@@ -17,6 +17,7 @@ import DismissStack from "@/components/dismissStack"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
 import { countries } from "@/features/settings/constants"
+import useIsOnline from "@/hooks/useIsOnline"
 
 type StringFieldKey = "firstName" | "lastName" | "companyName" | "vatId" | "street" | "streetNumber" | "city" | "postalCode"
 
@@ -31,6 +32,7 @@ function Personal() {
 		deserializeRouteParam<Awaited<ReturnType<typeof fetchData>>["personal"]>(personalSerialized)
 	)
 	const [modified, setModified] = useState<boolean>(false)
+	const isOnline = useIsOnline()
 
 	if (!personal) {
 		return <DismissStack />
@@ -42,6 +44,7 @@ function Personal() {
 		return {
 			title,
 			subTitle: personalData[field] ?? t("not_set"),
+			subTitleNumberOfLines: 1,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
@@ -96,7 +99,7 @@ function Personal() {
 					}
 				}}
 				rightItems={() => {
-					if (!modified) {
+					if (!modified || !isOnline) {
 						return null
 					}
 
@@ -187,6 +190,7 @@ function Personal() {
 							{
 								title: t("country"),
 								subTitle: personal.country ?? t("not_set"),
+								subTitleNumberOfLines: 1,
 								onPress: () => {
 									actionSheet.show({
 										buttons: [
