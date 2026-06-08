@@ -28,7 +28,12 @@ vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForExpo: (p: string) => p
 }))
 
-import { modifyAssetPathOnCollision, sanitizePathSegment, type CollisionParams } from "@/features/cameraUpload/cameraUploadHelpers"
+import {
+	modifyAssetPathOnCollision,
+	sanitizePathSegment,
+	applyAfterActivationToggle,
+	type CollisionParams
+} from "@/features/cameraUpload/cameraUploadHelpers"
 
 // ─── sanitizePathSegment ──────────────────────────────────────────────────────
 
@@ -236,5 +241,85 @@ describe("modifyAssetPathOnCollision", () => {
 
 			expect(path0).not.toBe(path1)
 		})
+	})
+})
+
+// ─── applyAfterActivationToggle ──────────────────────────────────────────────
+
+describe("applyAfterActivationToggle", () => {
+	const baseConfig = {
+		afterActivation: false,
+		activationTimestamp: 0,
+		enabled: true
+	}
+
+	it("stamps activationTimestamp with `now` when enabling (false → true)", () => {
+		const result = applyAfterActivationToggle({
+			config: baseConfig,
+			enabled: true,
+			now: 1700000000000
+		})
+
+		expect(result.afterActivation).toBe(true)
+		expect(result.activationTimestamp).toBe(1700000000000)
+	})
+
+	it("resets activationTimestamp to 0 when disabling (true → false)", () => {
+		const result = applyAfterActivationToggle({
+			config: {
+				afterActivation: true,
+				activationTimestamp: 1700000000000,
+				enabled: true
+			},
+			enabled: false,
+			now: 1800000000000
+		})
+
+		expect(result.afterActivation).toBe(false)
+		expect(result.activationTimestamp).toBe(0)
+	})
+
+	it("ignores `now` when disabling — timestamp is always 0, never the injected value", () => {
+		const result = applyAfterActivationToggle({
+			config: baseConfig,
+			enabled: false,
+			now: 1800000000000
+		})
+
+		expect(result.activationTimestamp).toBe(0)
+	})
+
+	it("preserves unrelated config fields", () => {
+		const result = applyAfterActivationToggle({
+			config: baseConfig,
+			enabled: true,
+			now: 1234
+		})
+
+		expect(result.enabled).toBe(true)
+	})
+
+	it("does not mutate the input config", () => {
+		const config = {
+			afterActivation: false,
+			activationTimestamp: 0,
+			enabled: true
+		}
+
+		applyAfterActivationToggle({
+			config,
+			enabled: true,
+			now: 1234
+		})
+
+		expect(config.afterActivation).toBe(false)
+		expect(config.activationTimestamp).toBe(0)
+	})
+
+	it("is deterministic for the same injected `now`", () => {
+		const a = applyAfterActivationToggle({ config: baseConfig, enabled: true, now: 555 })
+		const b = applyAfterActivationToggle({ config: baseConfig, enabled: true, now: 555 })
+
+		expect(a).toEqual(b)
 	})
 })
