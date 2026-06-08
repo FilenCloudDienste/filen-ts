@@ -233,7 +233,7 @@ const Item = ({
 			</View>
 			<TextInput
 				ref={textInputRef}
-				className="text-foreground shrink-0 flex-1 bg-transparent py-0 my-0"
+				className="text-foreground leading-5 shrink-0 flex-1 bg-transparent py-0 my-0"
 				value={value}
 				onChangeText={onChangeText}
 				multiline={true}
