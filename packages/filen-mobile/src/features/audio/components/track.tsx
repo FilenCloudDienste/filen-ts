@@ -18,6 +18,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
+import useIsOnline from "@/hooks/useIsOnline"
 
 type TrackType = PlaylistWithItems["files"][number]
 
@@ -33,15 +34,18 @@ function selectButton({ t, track }: { t: TFunction; track: TrackType }): ShowAct
 function removeFromPlaylistButton({
 	t,
 	track,
-	playlist
+	playlist,
+	isOnline
 }: {
 	t: TFunction
 	track: TrackType
 	playlist: PlaylistWithItems
+	isOnline: boolean
 }): ShowActionSheetOptions["buttons"][number] {
 	return {
 		title: t("remove_from_playlist"),
 		destructive: true,
+		disabled: !isOnline,
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
 				await audio.savePlaylist({
@@ -65,15 +69,17 @@ function removeFromPlaylistButton({
 function buildUndecryptableTrackButtons({
 	t,
 	track,
-	playlist
+	playlist,
+	isOnline
 }: {
 	t: TFunction
 	track: TrackType
 	playlist: PlaylistWithItems
+	isOnline: boolean
 }): ShowActionSheetOptions["buttons"] {
 	return [
 		selectButton({ t, track }),
-		removeFromPlaylistButton({ t, track, playlist }),
+		removeFromPlaylistButton({ t, track, playlist, isOnline }),
 		{
 			title: t("close"),
 			cancel: true
@@ -81,14 +87,16 @@ function buildUndecryptableTrackButtons({
 	]
 }
 
-function buildTrackButtons({
+export function buildTrackButtons({
 	t,
 	track,
-	playlist
+	playlist,
+	isOnline
 }: {
 	t: TFunction
 	track: TrackType
 	playlist: PlaylistWithItems
+	isOnline: boolean
 }): ShowActionSheetOptions["buttons"] {
 	return [
 		selectButton({ t, track }),
@@ -153,6 +161,7 @@ function buildTrackButtons({
 		},
 		{
 			title: t("add_to_playlist"),
+			disabled: !isOnline,
 			onPress: async () => {
 				const selectResult = await run(async () => {
 					return await selectPlaylists({
@@ -216,7 +225,7 @@ function buildTrackButtons({
 				}
 			}
 		},
-		removeFromPlaylistButton({ t, track, playlist }),
+		removeFromPlaylistButton({ t, track, playlist, isOnline }),
 		{
 			title: t("close"),
 			cancel: true
@@ -228,6 +237,7 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 	const { t } = useTranslation()
 	const drag = useReorderableDrag()
 	const isCurrent = useIsCurrentTrack(track.item.data.uuid)
+	const isOnline = useIsOnline()
 	const { isSelected, areTracksSelected } = usePlaylistTracksStore(
 		useShallow(state => ({
 			isSelected: state.selectedTracks.some(st => st.uuid === track.uuid),
@@ -258,14 +268,14 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 
 				if (undecryptable) {
 					actionSheet.show({
-						buttons: buildUndecryptableTrackButtons({ t, track, playlist })
+						buttons: buildUndecryptableTrackButtons({ t, track, playlist, isOnline })
 					})
 
 					return
 				}
 
 				actionSheet.show({
-					buttons: buildTrackButtons({ t, track, playlist })
+					buttons: buildTrackButtons({ t, track, playlist, isOnline })
 				})
 			}}
 		>
