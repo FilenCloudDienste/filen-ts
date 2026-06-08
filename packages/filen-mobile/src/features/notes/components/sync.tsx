@@ -6,7 +6,7 @@ import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import sqlite from "@/lib/sqlite"
-import { fetchData as notesWithContentQueryFetch } from "@/features/notes/queries/useNotesWithContent.query"
+import { fetchData as notesWithContentQueryFetch, notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
 
 export class Sync {
 	private readonly mutex: Semaphore = new Semaphore(1)
@@ -140,8 +140,16 @@ export class Sync {
 						return
 					}
 
+					// #34 fix: resolve the live note from the query cache so that any
+					// metadata changes (type, participants, encryptionKey) that arrived
+					// via socket between the render-time snapshot and the debounce flush
+					// are reflected in the setContent call. Fall back to the snapshot
+					// if the note is no longer in the cache (e.g. concurrently deleted).
+					const cachedNotes = notesWithContentQueryGet()
+					const liveNote = cachedNotes?.find(n => n.uuid === noteUuid) ?? mostRecentContent.note
+
 					const updatedNote = await notes.setContent({
-						note: mostRecentContent.note,
+						note: liveNote,
 						content: mostRecentContent.content,
 						signal
 					})

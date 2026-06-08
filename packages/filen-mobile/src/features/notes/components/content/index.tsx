@@ -6,7 +6,7 @@ import Checklist from "@/features/notes/components/content/checklist"
 import { noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
-import { ActivityIndicator } from "react-native"
+import { ActivityIndicator, Text, TouchableOpacity } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
@@ -90,9 +90,14 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 	const initialValue = history ? history.content : noteContentQuery.status === "success" ? noteContentQuery.data : null
 
+	// #13 fix: separate loading from error so a genuine server-side error (isError)
+	// no longer shows an eternal blocking spinner with no recovery path.
+	// Offline correctly stays loading (query is disabled, status stays "pending").
 	const loading = history
 		? false
-		: noteContentQuery.isFetching || noteContentQuery.isPending || noteContentQuery.isError || typeof initialValue !== "string"
+		: noteContentQuery.isFetching || noteContentQuery.isPending || typeof initialValue !== "string"
+
+	const fetchError = !history && noteContentQuery.isError
 
 	const { refetch } = noteContentQuery
 
@@ -212,6 +217,21 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			cleanup()
 		}
 	}, [note.uuid, onContentEditedRemotely])
+
+	if (fetchError) {
+		return (
+			<View className="flex-1 items-center justify-center gap-3 p-6">
+				<Text className="text-foreground text-center">{t("error_generic")}</Text>
+				<TouchableOpacity
+					onPress={() => {
+						void refetch()
+					}}
+				>
+					<Text className="text-primary">{t("try_again")}</Text>
+				</TouchableOpacity>
+			</View>
+		)
+	}
 
 	return (
 		<Loading
