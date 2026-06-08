@@ -2,6 +2,7 @@ import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
+import ListEmpty from "@/components/ui/listEmpty"
 import View from "@/components/ui/view"
 import { Fragment } from "react"
 import { router } from "expo-router"
@@ -37,8 +38,14 @@ function TwoFactor() {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				{accountQuery.status !== "success" ? (
+				{accountQuery.status === "pending" ? (
 					<SettingsLoadingView />
+				) : accountQuery.status === "error" ? (
+					<ListEmpty
+						icon="warning-outline"
+						title={t("error_generic")}
+						action={<Button onPress={() => accountQuery.refetch()}>{t("try_again")}</Button>}
+					/>
 				) : (
 					<SettingsScrollView>
 						<Group
