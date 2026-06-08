@@ -69,6 +69,24 @@ export function chatHasUnread(c: Chat, userId: bigint): boolean {
 	return c.lastMessage.sentTimestamp > c.lastFocus
 }
 
+/**
+ * Returns true iff every chat in `visibleChats` is present in `selectedChats`
+ * (matched by uuid), AND `visibleChats` is non-empty.
+ *
+ * Deliberately UUID-based rather than count-based so that a new chat arriving
+ * while selection mode is active (causing `visibleChats.length` to diverge from
+ * `selectedChats.length`) does not incorrectly flip the toggle label.
+ */
+export function allVisibleChatsSelected(visibleChats: readonly Chat[], selectedChats: readonly Chat[]): boolean {
+	if (visibleChats.length === 0) {
+		return false
+	}
+
+	const selectedUuids = new Set(selectedChats.map(c => c.uuid))
+
+	return visibleChats.every(c => selectedUuids.has(c.uuid))
+}
+
 export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigint | undefined): ChatSelectionFlags {
 	if (chats.length === 0 || userId === undefined) {
 		return EMPTY_CHAT_FLAGS

@@ -15,7 +15,7 @@ import alerts from "@/lib/alerts"
 import type { MenuButton } from "@/components/ui/menu"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import { runBulk } from "@/lib/bulkOps"
-import { aggregateChatSelectionFlags, chatHasUnread } from "@/features/chats/chatSelectors"
+import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread } from "@/features/chats/chatSelectors"
 import { useTranslation } from "react-i18next"
 
 const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
@@ -68,12 +68,14 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
 
+		const allSelected = allVisibleChatsSelected(chats, selectedChats)
+
 		menuButtons.push({
 			id: "selectAll",
-			title: selectedChats.length === chats.length ? t("deselect_all") : t("select_all"),
+			title: allSelected ? t("deselect_all") : t("select_all"),
 			icon: "select",
 			onPress: () => {
-				if (selectedChats.length === chats.length) {
+				if (allSelected) {
 					useChatsStore.getState().clearSelectedChats()
 
 					return
