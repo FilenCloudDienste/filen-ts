@@ -5,7 +5,7 @@ import useAppStore from "@/stores/useApp.store"
 import { fetchData } from "@/queries/useLocalAuthentication.query"
 import { type Biometric as TBiometric } from "@/features/settings/screens/biometric"
 import useEffectOnce from "@/hooks/useEffectOnce"
-import { Platform, AppState } from "react-native"
+import { Platform, AppState, type AppStateStatus } from "react-native"
 import { FullWindowOverlay } from "react-native-screens"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
@@ -47,6 +47,79 @@ export function shouldAutoUnlockOnForeground(
 	suppressed: boolean
 ): boolean {
 	return lockedByBackground && !suppressed && elapsedMs <= lockAfterMs
+}
+
+export type BiometricAppStateContext = {
+	enabled: boolean
+	authenticated: boolean
+	suppressed: boolean
+	lockAfterMs: number
+	wasBackground: boolean
+	lockedByBackground: boolean
+	lastAppCloseTimestamp: number
+	now: number
+}
+
+export type BiometricAppStateResult = {
+	wasBackground: boolean
+	lockedByBackground: boolean
+	lastAppCloseTimestamp: number
+	// null = leave `authenticated` unchanged; otherwise call setAuthenticated(value).
+	setAuthenticated: boolean | null
+	// true = re-key BiometricInner (setLastAppOpenTimestamp) to restart the prompt.
+	rekeyPrompt: boolean
+}
+
+// Pure reducer for the AppState lock machine (lock-on-background + within-grace auto-unlock). Extracted
+// from the listener so the sticky-ref bookkeeping is unit-testable; the component just applies the result
+// to its refs/setters. Each AppState event is one call; lastAppCloseTimestamp/wasBackground/lockedByBackground
+// persist across calls via the component's refs.
+export function reduceBiometricAppState(
+	nextAppState: AppStateStatus,
+	ctx: BiometricAppStateContext
+): BiometricAppStateResult {
+	let wasBackground = ctx.wasBackground
+	let lockedByBackground = ctx.lockedByBackground
+	let lastAppCloseTimestamp = ctx.lastAppCloseTimestamp
+	let setAuthenticated: boolean | null = null
+	let rekeyPrompt = false
+
+	if (nextAppState === "background") {
+		lastAppCloseTimestamp = ctx.now
+		wasBackground = true
+
+		// Lock at the moment of backgrounding (not on return) so the lock is already covering before the
+		// app repaints content — no content-leak frame. Skipped while inside an in-app native presentation.
+		if (shouldLockOnBackground(ctx.enabled, ctx.authenticated, ctx.suppressed)) {
+			lockedByBackground = true
+			setAuthenticated = false
+		}
+	}
+
+	// Sticky wasBackground instead of requiring the immediately-previous state to be "background": iOS can
+	// deliver background → inactive → active, which would otherwise skip this whole block.
+	if (nextAppState === "active" && wasBackground) {
+		wasBackground = false
+
+		const elapsed = ctx.now - lastAppCloseTimestamp
+
+		// Returned within the grace window — clear the background lock without a prompt. Beyond it (or if we
+		// never locked, e.g. a suppressed picker), leave state as-is so the lock stays up and prompts.
+		if (shouldAutoUnlockOnForeground(lockedByBackground, elapsed, ctx.lockAfterMs, ctx.suppressed)) {
+			setAuthenticated = true
+		}
+
+		lockedByBackground = false
+		rekeyPrompt = true
+	}
+
+	return {
+		wasBackground,
+		lockedByBackground,
+		lastAppCloseTimestamp,
+		setAuthenticated,
+		rekeyPrompt
+	}
 }
 
 const OVERLAY_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background"
@@ -469,51 +542,29 @@ function Biometric() {
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
 			const appStateListener = AppState.addEventListener("change", nextAppState => {
-				if (nextAppState === "background") {
-					lastAppCloseTimestampRef.current = Date.now()
-					wasBackgroundRef.current = true
+				const now = Date.now()
 
-					// Lock at the moment of backgrounding (not on return) so the lock is already covering
-					// before the app repaints content — no content-leak frame. Skipped while inside an
-					// in-app native presentation (picker/permission/scanner), where the user never left.
-					if (
-						shouldLockOnBackground(
-							biometricEnabledRef.current,
-							authenticatedRef.current,
-							systemPresentation.isReLockSuppressed()
-						)
-					) {
-						lockedByBackgroundRef.current = true
+				const result = reduceBiometricAppState(nextAppState, {
+					enabled: biometricEnabledRef.current,
+					authenticated: authenticatedRef.current,
+					suppressed: systemPresentation.isReLockSuppressed(),
+					lockAfterMs: lockAfterMsRef.current,
+					wasBackground: wasBackgroundRef.current,
+					lockedByBackground: lockedByBackgroundRef.current,
+					lastAppCloseTimestamp: lastAppCloseTimestampRef.current,
+					now
+				})
 
-						setAuthenticated(false)
-					}
+				wasBackgroundRef.current = result.wasBackground
+				lockedByBackgroundRef.current = result.lockedByBackground
+				lastAppCloseTimestampRef.current = result.lastAppCloseTimestamp
+
+				if (result.setAuthenticated !== null) {
+					setAuthenticated(result.setAuthenticated)
 				}
 
-				// Use a sticky "was backgrounded" ref instead of requiring the immediately-previous state to
-				// be "background": iOS can deliver background → inactive → active, which would otherwise skip
-				// this whole block (never auto-unlocking within grace / never re-keying the prompt).
-				if (nextAppState === "active" && wasBackgroundRef.current) {
-					wasBackgroundRef.current = false
-
-					const elapsed = Date.now() - lastAppCloseTimestampRef.current
-
-					// Returned within the grace window — clear the background lock without a prompt. Beyond
-					// it (or if we never locked, e.g. a suppressed picker), leave state as-is so the lock
-					// stays up and BiometricInner prompts.
-					if (
-						shouldAutoUnlockOnForeground(
-							lockedByBackgroundRef.current,
-							elapsed,
-							lockAfterMsRef.current,
-							systemPresentation.isReLockSuppressed()
-						)
-					) {
-						setAuthenticated(true)
-					}
-
-					lockedByBackgroundRef.current = false
-
-					setLastAppOpenTimestamp(Date.now())
+				if (result.rekeyPrompt) {
+					setLastAppOpenTimestamp(now)
 				}
 			})
 
