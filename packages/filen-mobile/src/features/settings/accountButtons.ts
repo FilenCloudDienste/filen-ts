@@ -290,6 +290,7 @@ export function buildProfileButtons({
 			icon: "time-outline",
 			title: t("change_email_address"),
 			subTitle: accountQuery.data.email,
+			subTitleNumberOfLines: 1,
 			disabled: !isOnline,
 			onPress: async () => {
 				const newEmailPromptResult = await run(async () => {
@@ -396,6 +397,7 @@ export function buildProfileButtons({
 			icon: "time-outline",
 			title: t("change_nickname"),
 			subTitle: accountQuery.data.nickName,
+			subTitleNumberOfLines: 1,
 			disabled: !isOnline,
 			onPress: async () => {
 				const promptResult = await run(async () => {
