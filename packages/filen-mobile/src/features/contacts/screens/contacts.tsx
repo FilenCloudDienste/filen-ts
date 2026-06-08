@@ -101,6 +101,18 @@ const Contacts = () => {
 		/>
 	)
 
+	// When a search query becomes non-empty the visible list is filtered, so
+	// any already-selected contacts may no longer appear in the list. Keeping
+	// them selected produces a ghost count: the header shows "N selected" for
+	// rows the user cannot see or deselect. Clear the selection (which also
+	// exits bulk mode via clearSelectedContacts) whenever the user starts
+	// typing a query.
+	useEffect(() => {
+		if (searchQuery.length > 0) {
+			useContactsStore.getState().clearSelectedContacts()
+		}
+	}, [searchQuery])
+
 	useFocusEffect(
 		useCallback(() => {
 			// On focus, only keep selection if we're in bulkMode AND not in
