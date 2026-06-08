@@ -34,6 +34,8 @@ import useAccountQuery from "@/queries/useAccount.query"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import i18n from "@/lib/i18n"
+import ListEmpty from "@/components/ui/listEmpty"
+import { isExpirationChecked, isPublicLinkQueryError } from "@/features/publicLink/utils"
 
 function expirationToText(expiration: PublicLinkExpiration, t: TFunction) {
 	switch (expiration) {
@@ -338,6 +340,7 @@ function PublicLink() {
 												{
 													icon: "link-outline",
 													title: t("enabled"),
+													disabled: !isOnline,
 													rightItem: {
 														type: "switch",
 														value: true,
@@ -468,12 +471,11 @@ function PublicLink() {
 																	].map(expiration => ({
 																		id: expiration.enum.toString(),
 																		title: expiration.title,
-																		checked:
-																			(edited && edited.expiration === expiration.enum) ||
-																			(publicLinkStatusQuery.data
-																				? publicLinkStatusQuery.data.status.expiration ===
-																					expiration.enum
-																				: false),
+																		checked: isExpirationChecked({
+																			candidate: expiration.enum,
+																			editedExpiration: edited?.expiration,
+																			serverExpiration: publicLinkStatusQuery.data?.status.expiration
+																		}),
 																		onPress: () => {
 																			setEdited(prev => ({
 																				...(prev ?? {}),
@@ -537,7 +539,12 @@ function PublicLink() {
 										<Text className="text-xs text-muted-foreground mt-0.5">{t("public_link_description")}</Text>
 										<View className="mt-4 bg-transparent">
 											<Button
+												disabled={!isOnline}
 												onPress={async () => {
+													if (!isOnline) {
+														return
+													}
+
 													const result = await runWithLoading(async () => {
 														return await drive.enablePublicLink({
 															item: itemParsed
@@ -570,6 +577,11 @@ function PublicLink() {
 							</View>
 						)}
 					</Fragment>
+				) : isPublicLinkQueryError(publicLinkStatusQuery.status, accountQuery.status) ? (
+					<ListEmpty
+						icon="warning-outline"
+						title={t("error_generic")}
+					/>
 				) : (
 					<View className="flex-1 items-center justify-center bg-transparent">
 						<ActivityIndicator
