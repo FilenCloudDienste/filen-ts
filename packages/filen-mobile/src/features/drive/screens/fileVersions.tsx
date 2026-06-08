@@ -26,6 +26,7 @@ import { useShallow } from "zustand/shallow"
 import { runBulk } from "@/lib/bulkOps"
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import ListRow from "@/components/ui/listRow"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const { t } = useTranslation()
@@ -156,6 +157,7 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const navigation = useNavigation()
+	const isOnline = useIsOnline()
 	const selectedVersions = useFileVersionsStore(useShallow(state => state.selectedVersions))
 
 	const inSelectionMode = selectedVersions.length > 0
@@ -233,6 +235,8 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 					size: 20
 				},
 				props: {
+					enabled: isOnline,
+					style: !isOnline ? { opacity: 0.5 } : undefined,
 					onPress: async () => {
 						const promptResponse = await run(async () => {
 							return await prompts.alert({
