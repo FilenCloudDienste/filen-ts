@@ -19,6 +19,7 @@ import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 
 type NotesViewMode = "notes" | "tags"
 
@@ -140,12 +141,14 @@ export function buildNotesHeaderRightItems({
 							onPress: () => {
 								run(async defer => {
 									const documentPickerResult = await run(async () => {
-										return await DocumentPicker.getDocumentAsync({
-											type: "text/plain",
-											multiple: false,
-											copyToCacheDirectory: true,
-											base64: false
-										})
+										return await withSystemPresentation(() =>
+											DocumentPicker.getDocumentAsync({
+												type: "text/plain",
+												multiple: false,
+												copyToCacheDirectory: true,
+												base64: false
+											})
+										)
 									})
 
 									if (!documentPickerResult.success) {

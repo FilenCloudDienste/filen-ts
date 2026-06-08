@@ -4,6 +4,7 @@ import useMediaPermissionsQuery from "@/queries/useMediaPermissions.query"
 import { run } from "@filen/utils"
 import { useEffect, useRef, useCallback } from "react"
 import { AppState } from "react-native"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 
 export type MediaPermissions =
 	| {
@@ -47,13 +48,13 @@ export async function hasAllNeededMediaPermissions(params?: { shouldRequest?: bo
 		return false
 	}
 
-	const mediaLibraryRequest = await MediaLibraryLegacy.requestPermissionsAsync()
+	const mediaLibraryRequest = await withSystemPresentation(() => MediaLibraryLegacy.requestPermissionsAsync())
 
 	if (!mediaLibraryRequest.granted || mediaLibraryRequest.accessPrivileges !== "all" || mediaLibraryRequest.expires !== "never") {
 		return false
 	}
 
-	const cameraRequest = await ImagePicker.requestCameraPermissionsAsync()
+	const cameraRequest = await withSystemPresentation(() => ImagePicker.requestCameraPermissionsAsync())
 
 	if (!cameraRequest.granted || cameraRequest.expires !== "never") {
 		return false
