@@ -10,7 +10,6 @@ const VERSION: string = "4.0.1"
 
 const APPLE_TEAM_ID: string = "7YTW5D2K7P"
 const IOS_APP_GROUP_ID: string = "group.io.filen.app"
-const JS_ENGINE: "hermes" | "jsc" = "hermes"
 const ANDROID_MIN_SDK_VERSION: number = 33
 const ANDROID_TARGET_SDK_VERSION: number = 36
 const ANDROID_COMPILE_SDK_VERSION: number = 36
@@ -51,7 +50,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 	icon: "./src/assets/images/icon-light.png",
 	scheme: "iofilenapp",
 	userInterfaceStyle: "automatic",
-	jsEngine: JS_ENGINE,
 	platforms: ["ios", "android"],
 	githubUrl: "https://github.com/FilenCloudDienste/filen-ts/packages/filen-mobile",
 	ios: {
@@ -61,7 +59,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		bundleIdentifier: IDENTIFIER,
 		requireFullScreen: true,
 		usesIcloudStorage: true,
-		jsEngine: JS_ENGINE,
 		appleTeamId: APPLE_TEAM_ID,
 		entitlements: {
 			"com.apple.security.application-groups": [IOS_APP_GROUP_ID]
@@ -96,7 +93,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 	android: {
 		version: VERSION,
 		versionCode: BUILD_NUMBER,
-		jsEngine: JS_ENGINE,
 		allowBackup: false,
 		adaptiveIcon: {
 			backgroundColor: "#FFFFFF",
