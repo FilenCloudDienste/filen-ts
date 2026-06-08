@@ -4,6 +4,8 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import View from "@/components/ui/view"
 import { Fragment } from "react"
+import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import { useNavigation } from "expo-router"
 import { run, cn } from "@filen/utils"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -50,8 +52,18 @@ function Account() {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				{accountQuery.status !== "success" ? (
+				{accountQuery.status === "pending" ? (
 					<SettingsLoadingView />
+				) : accountQuery.status === "error" ? (
+					<ListEmpty
+						icon="warning-outline"
+						title={t("error_generic")}
+						action={
+							<Button onPress={() => accountQuery.refetch()}>
+								{t("try_again")}
+							</Button>
+						}
+					/>
 				) : (
 					<SettingsScrollView>
 						<PressableScale
