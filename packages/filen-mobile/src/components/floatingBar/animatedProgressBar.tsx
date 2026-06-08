@@ -3,7 +3,6 @@ import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "
 import { useResolveClassNames } from "uniwind"
 import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import View from "@/components/ui/view"
-import { useShallow } from "zustand/shallow"
 
 const PROGRESS_BAR_HEIGHT = 3
 
@@ -13,8 +12,7 @@ const TIMING_CONFIG = {
 }
 
 const AnimatedProgressBar = () => {
-	const initialProgress = useTransfersStore(useShallow(state => state.stats.progress))
-	const progress = useSharedValue(initialProgress)
+	const progress = useSharedValue(useTransfersStore.getState().stats.progress)
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const bgBackgroundTertiary = useResolveClassNames("bg-background-tertiary")
 
