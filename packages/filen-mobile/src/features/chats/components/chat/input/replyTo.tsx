@@ -1,4 +1,3 @@
-import { type ChatParticipant } from "@filen/sdk-rs"
 import { type Chat } from "@/types"
 import { messageDisplayBody } from "@/lib/decryption"
 import { useEffect } from "react"
@@ -11,15 +10,18 @@ import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/
 import { useShallow } from "zustand/shallow"
 import { useSecureStore } from "@/lib/secureStore"
 import { contactDisplayName } from "@/lib/utils"
+import { useTranslation } from "react-i18next"
 import Avatar from "@/components/ui/avatar"
 import PopupContainerView from "@/features/chats/components/chat/input/popupContainerView"
+import { resolveReplySenderDisplayName } from "@/features/chats/utils"
 
 export const ReplyTo = ({ chat }: { chat: Chat }) => {
 	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const { t } = useTranslation()
 
-	const info = ((): { show: false } | { show: true; participant: ChatParticipant } => {
+	const info = ((): { show: false } | { show: true; displayName: string } => {
 		if (!chatReplyTo || suggestionsVisible.filter(s => s !== "reply").length > 0) {
 			return {
 				show: false
@@ -28,15 +30,13 @@ export const ReplyTo = ({ chat }: { chat: Chat }) => {
 
 		const participant = chat.participants.find(p => p.userId === chatReplyTo.inner.senderId)
 
-		if (!participant) {
-			return {
-				show: false
-			}
-		}
+		const displayName = participant
+			? contactDisplayName(participant)
+			: resolveReplySenderDisplayName(chatReplyTo.inner.senderNickName, chatReplyTo.inner.senderEmail, t("unknown"))
 
 		return {
 			show: true,
-			participant
+			displayName
 		}
 	})()
 
@@ -85,7 +85,7 @@ export const ReplyTo = ({ chat }: { chat: Chat }) => {
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{contactDisplayName(info.participant)}
+						{info.displayName}
 					</Text>
 					<Text
 						className="flex-1 text-xs text-muted-foreground"

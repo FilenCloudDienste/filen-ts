@@ -5,6 +5,23 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import alerts from "@/lib/alerts"
 import { t as i18nT } from "@/lib/i18n"
 
+/**
+ * Resolves the best available display name for the sender of a reply-to message
+ * when the sender is no longer present in chat.participants (e.g. they left the chat).
+ * Prefers nickName → email → fallback (usually the i18n "unknown" string).
+ */
+export function resolveReplySenderDisplayName(senderNickName: string | undefined, senderEmail: string | undefined, fallback: string): string {
+	if (senderNickName && senderNickName.length > 0) {
+		return senderNickName
+	}
+
+	if (senderEmail && senderEmail.length > 0) {
+		return senderEmail
+	}
+
+	return fallback
+}
+
 // The decrypted-file/directory shape carried by a successful internal link.
 export type InternalLinkData = Extract<
 	LinkResult,
