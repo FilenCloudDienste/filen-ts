@@ -85,7 +85,16 @@ class SecureStore {
 			)
 		}
 
-		this.ensureDirectories()
+		// Best-effort at construction (runs at module import time): a synchronous expo-file-system
+		// failure here (disk full, sandbox path not yet available, OS permissions) must not crash
+		// module evaluation. directoriesEnsured stays false on failure so init()/getEncryptionKey()/
+		// read()/write()/set()/remove()/clear() retry inside their run() wrappers, where a persistent
+		// failure surfaces through the normal result.error path instead.
+		try {
+			this.ensureDirectories()
+		} catch (e) {
+			console.error("SecureStore: deferred directory creation", e)
+		}
 
 		this.mmkv = createMMKV({
 			id: this.fallbackMmkvId,
