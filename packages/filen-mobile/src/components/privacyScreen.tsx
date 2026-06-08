@@ -1,36 +1,88 @@
 import { useEffect } from "react"
-import { usePrivacyScreenEnabled, applyPrivacyScreen } from "@/features/settings/privacyScreen"
-import { systemPresentation } from "@/lib/systemPresentation"
+import { Platform, AppState } from "react-native"
+import { FullWindowOverlay } from "react-native-screens"
+import { useSharedValue, useAnimatedStyle } from "react-native-reanimated"
+import { AnimatedView } from "@/components/ui/animated"
+import View from "@/components/ui/view"
+import Ionicons from "@expo/vector-icons/Ionicons"
+import { useResolveClassNames } from "uniwind"
+import { usePrivacyScreenEnabled } from "@/features/settings/privacyScreen"
+import { useSystemPresentationStore } from "@/lib/systemPresentation"
 
-// Applies the native app-switcher / background privacy protection (expo-screen-capture) from the
-// persisted "Privacy screen" setting. Replaces the old React FullWindowOverlay cover, which raced
-// the OS multitasking snapshot (AppState → setState → render, often too late to redact). Native
-// protection state resets on app restart, so this re-applies the persisted value on every mount;
-// the useSecureStore-backed setting re-runs the effect when the Security toggle flips it.
-// Mounted app-wide (not gated on auth) so it also covers the auth/login screens. Renders nothing.
+const COVER_CLASSES =
+	"absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background items-center justify-center"
+
+// iOS: a FullWindowOverlay (window-level — sits ABOVE native pageSheet/formSheet modals, which the
+// old expo-screen-capture blur did not, since it attached inside the RN root view).
+// Android: a high-z absolute View (mirrors the biometric lock's Parent).
+function Parent({ children }: { children: React.ReactNode }) {
+	if (Platform.OS === "ios") {
+		return <FullWindowOverlay>{children}</FullWindowOverlay>
+	}
+
+	return <View className="absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full">{children}</View>
+}
+
+// React privacy cover. Redacts the app-switcher / recents preview whenever the app is not active, and
+// is NOT shown while an in-app native presentation (picker / permission / Face ID) is on screen
+// (systemPresentation). Replaces the native expo-screen-capture blur, which couldn't cover modals.
 //
-// The native protection arms on willResignActive, which an in-app system prompt (Face ID, an
-// image/document picker, a permission dialog) ALSO fires — flashing the blur even though the user
-// never left the app. To avoid that, this host registers a suppressor with systemPresentation: while
-// any wrapped presentation is on screen the blur is lifted, then restored to the persisted setting.
+// Visibility is driven IMPERATIVELY off AppState (+ the presentation suppression) onto a reanimated
+// shared value, rather than via React state, so it paints as early as possible against the OS
+// snapshot. The overlay is kept mounted the whole time the setting is on (toggle only, no mount cost),
+// and triggers on the "inactive" resign signal (earlier than "background").
+function PrivacyCover() {
+	const textForeground = useResolveClassNames("text-foreground")
+	const opacity = useSharedValue<number>(AppState.currentState === "active" ? 0 : 1)
+
+	useEffect(() => {
+		const apply = (): void => {
+			const active = AppState.currentState === "active"
+			const suppressed = useSystemPresentationStore.getState().activeCount > 0
+
+			opacity.value = !active && !suppressed ? 1 : 0
+		}
+
+		apply()
+
+		const appStateSub = AppState.addEventListener("change", apply)
+		const unsubPresentation = useSystemPresentationStore.subscribe(apply)
+
+		return () => {
+			appStateSub.remove()
+			unsubPresentation()
+		}
+	}, [opacity])
+
+	const animatedStyle = useAnimatedStyle(() => ({
+		opacity: opacity.value
+	}))
+
+	return (
+		<Parent>
+			<AnimatedView
+				className={COVER_CLASSES}
+				style={animatedStyle}
+				pointerEvents="none"
+			>
+				<Ionicons
+					name="lock-closed"
+					size={48}
+					color={textForeground.color}
+				/>
+			</AnimatedView>
+		</Parent>
+	)
+}
+
 function PrivacyScreen() {
 	const [enabled] = usePrivacyScreenEnabled()
 
-	useEffect(() => {
-		// Apply the persisted setting now, honoring any in-flight presentation (so we don't re-arm the
-		// blur on top of a picker that's already open when the setting changes mid-presentation).
-		// Log-only on failure — a privacy-protection call failing isn't user-actionable, and alerting
-		// on every launch would be noise. The native module is first-party + reliable.
-		applyPrivacyScreen(enabled && !systemPresentation.isActive()).catch(console.error)
+	if (!enabled) {
+		return null
+	}
 
-		// Lift the blur around any in-app native presentation and restore it (to the persisted setting)
-		// when it ends. Called on the 0→1 / 1→0 transitions, before the prompt resigns the app active.
-		return systemPresentation.registerSuppressor(async suppressed => {
-			await applyPrivacyScreen(enabled && !suppressed)
-		})
-	}, [enabled])
-
-	return null
+	return <PrivacyCover />
 }
 
 export default PrivacyScreen

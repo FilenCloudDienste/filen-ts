@@ -1,11 +1,15 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, beforeEach } from "vitest"
 import {
-	SystemPresentation,
-	withSystemPresentation,
+	useSystemPresentationStore,
 	systemPresentation,
+	withSystemPresentation,
 	reLockSuppressed,
 	RELOCK_SUPPRESSION_GRACE_MS
 } from "@/lib/systemPresentation"
+
+beforeEach(() => {
+	useSystemPresentationStore.setState({ activeCount: 0, lastEndedAt: 0 })
+})
 
 describe("reLockSuppressed", () => {
 	it("is suppressed while a presentation is active (any positive count)", () => {
@@ -24,77 +28,43 @@ describe("reLockSuppressed", () => {
 	})
 })
 
-describe("SystemPresentation", () => {
-	it("ref-counts begin/end and reports isActive", async () => {
-		const sp = new SystemPresentation()
+describe("systemPresentation begin/end", () => {
+	it("ref-counts and reports isActive", () => {
+		expect(systemPresentation.isActive()).toBe(false)
 
-		expect(sp.isActive()).toBe(false)
-		await sp.begin()
-		expect(sp.isActive()).toBe(true)
-		await sp.begin()
-		expect(sp.isActive()).toBe(true)
-		await sp.end()
-		expect(sp.isActive()).toBe(true)
-		await sp.end()
-		expect(sp.isActive()).toBe(false)
+		systemPresentation.begin()
+		expect(systemPresentation.isActive()).toBe(true)
+		expect(useSystemPresentationStore.getState().activeCount).toBe(1)
+
+		systemPresentation.begin()
+		expect(useSystemPresentationStore.getState().activeCount).toBe(2)
+
+		systemPresentation.end()
+		expect(systemPresentation.isActive()).toBe(true)
+
+		systemPresentation.end()
+		expect(systemPresentation.isActive()).toBe(false)
 	})
 
-	it("calls the suppressor only on the 0->1 and 1->0 transitions", async () => {
-		const sp = new SystemPresentation()
-		const suppressor = vi.fn().mockResolvedValue(undefined)
-		sp.registerSuppressor(suppressor)
-
-		await sp.begin()
-		await sp.begin()
-		expect(suppressor).toHaveBeenCalledTimes(1)
-		expect(suppressor).toHaveBeenLastCalledWith(true)
-
-		await sp.end()
-		expect(suppressor).toHaveBeenCalledTimes(1)
-
-		await sp.end()
-		expect(suppressor).toHaveBeenCalledTimes(2)
-		expect(suppressor).toHaveBeenLastCalledWith(false)
+	it("end() is a no-op at zero (never goes negative)", () => {
+		systemPresentation.end()
+		expect(useSystemPresentationStore.getState().activeCount).toBe(0)
 	})
 
-	it("end() is a no-op when already inactive (never goes negative)", async () => {
-		const sp = new SystemPresentation()
-		const suppressor = vi.fn().mockResolvedValue(undefined)
-		sp.registerSuppressor(suppressor)
+	it("records lastEndedAt on the 1->0 transition for the grace window", () => {
+		systemPresentation.begin()
+		systemPresentation.end()
 
-		await sp.end()
-		expect(sp.isActive()).toBe(false)
-		expect(suppressor).not.toHaveBeenCalled()
+		expect(systemPresentation.isReLockSuppressed()).toBe(true)
+		expect(systemPresentation.isReLockSuppressed(Date.now() + RELOCK_SUPPRESSION_GRACE_MS + 5000)).toBe(false)
 	})
 
-	it("unregister stops further suppressor calls", async () => {
-		const sp = new SystemPresentation()
-		const suppressor = vi.fn().mockResolvedValue(undefined)
-		const unregister = sp.registerSuppressor(suppressor)
+	it("isActive reflects active presentations regardless of the grace window", () => {
+		systemPresentation.begin()
+		expect(systemPresentation.isActive()).toBe(true)
 
-		unregister()
-		await sp.begin()
-		await sp.end()
-		expect(suppressor).not.toHaveBeenCalled()
-	})
-
-	it("isReLockSuppressed is true while active and within grace after release", async () => {
-		const sp = new SystemPresentation()
-
-		await sp.begin()
-		expect(sp.isReLockSuppressed()).toBe(true)
-		await sp.end()
-		expect(sp.isReLockSuppressed()).toBe(true)
-		expect(sp.isReLockSuppressed(Date.now() + RELOCK_SUPPRESSION_GRACE_MS + 5000)).toBe(false)
-	})
-
-	it("swallows a throwing suppressor (begin/end never reject)", async () => {
-		const sp = new SystemPresentation()
-		sp.registerSuppressor(vi.fn().mockRejectedValue(new Error("native fail")))
-
-		await expect(sp.begin()).resolves.toBeUndefined()
-		await expect(sp.end()).resolves.toBeUndefined()
-		expect(sp.isActive()).toBe(false)
+		systemPresentation.end()
+		expect(systemPresentation.isActive()).toBe(false)
 	})
 })
 
