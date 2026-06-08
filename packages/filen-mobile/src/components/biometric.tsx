@@ -97,8 +97,8 @@ async function promptBiometric(): Promise<LocalAuthentication.LocalAuthenticatio
 		}
 	}
 
-	// Wrap the system prompt so the privacy blur (which arms on willResignActive) doesn't flash while
-	// the Face ID / Touch ID sheet is up — the prompt resigns the app active without truly leaving it.
+	// Wrap the system prompt so the privacy cover (shown while the app is inactive) doesn't appear over
+	// the Face ID / Touch ID sheet — the prompt resigns the app active without truly leaving it.
 	return await withSystemPresentation(() =>
 		LocalAuthentication.authenticateAsync({
 			cancelLabel: i18n.t("cancel"),

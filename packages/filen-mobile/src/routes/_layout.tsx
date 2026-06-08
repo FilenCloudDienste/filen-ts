@@ -143,7 +143,7 @@ const RootLayout = () => {
 										 * <Biometric />.
 										 */}
 										<OfflineBanner />
-										{/* Native app-switcher/background privacy protection (app-wide, OS-level — see PrivacyScreen). */}
+										{/* App-switcher/background privacy cover (app-wide React FullWindowOverlay — see PrivacyScreen). */}
 										<PrivacyScreen />
 										{isAuthed && (
 											<Fragment>
