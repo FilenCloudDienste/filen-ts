@@ -12,7 +12,8 @@ const {
 	mockChatsQueryGet,
 	mockChatMessagesQueryGet,
 	mockEventsEmit,
-	mockSetTyping
+	mockSetTyping,
+	mockSetSelectedChats
 } = vi.hoisted(() => {
 	const capturedChatsUpdaters: Array<(prev: unknown[]) => unknown[]> = []
 	const capturedMessagesUpdaters: Array<(prev: unknown[]) => unknown[]> = []
@@ -33,7 +34,8 @@ const {
 		mockChatsQueryGet: vi.fn().mockReturnValue([]),
 		mockChatMessagesQueryGet: vi.fn().mockReturnValue([]),
 		mockEventsEmit: vi.fn(),
-		mockSetTyping: vi.fn()
+		mockSetTyping: vi.fn(),
+		mockSetSelectedChats: vi.fn()
 	}
 })
 
@@ -56,7 +58,8 @@ vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 vi.mock("@/features/chats/store/useChats.store", () => ({
 	default: {
 		getState: vi.fn().mockReturnValue({
-			setTyping: mockSetTyping
+			setTyping: mockSetTyping,
+			setSelectedChats: mockSetSelectedChats
 		})
 	}
 }))
@@ -209,6 +212,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		mockChatMessagesQueryGet.mockReset()
 		mockEventsEmit.mockClear()
 		mockSetTyping.mockClear()
+		mockSetSelectedChats.mockClear()
 		// Clear any pending timeouts
 		for (const key of Object.keys(chatTypingTimeoutsRef)) {
 			clearTimeout(chatTypingTimeoutsRef[Number(key)])
@@ -335,6 +339,50 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			expect(result).toHaveLength(1)
 			expect(result[0]!.inner.uuid).toBe("msg-1")
+		})
+
+		// #41 — when the message is NOT already present, it is appended (no duplicate, no removal of others)
+		it("appends the new message when it is not already present", async () => {
+			const event = makeMessageNewEvent("chat-1", "msg-new", OTHER_USER_ID)
+
+			await handleChatEvent({ event, userId: USER_ID })
+			vi.advanceTimersByTime(1)
+
+			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
+				updater: (prev: Array<{ inner: { uuid: string } }>) => Array<{ inner: { uuid: string } }>
+			}
+
+			const prev = [{ inner: { uuid: "msg-existing" }, undecryptable: false }]
+			const result = updater(prev)
+
+			expect(result).toHaveLength(2)
+			expect(result.map(m => m.inner.uuid)).toEqual(["msg-existing", "msg-new"])
+		})
+
+		// #41 — when the server uuid is already present (e.g. chats.sendMessage already reconciled the optimistic
+		// copy), the updater leaves the cache untouched instead of removing + re-appending → no brief duplicate / reorder
+		it("does NOT remove and re-append an already-present message (returns prev unchanged)", async () => {
+			const event = makeMessageNewEvent("chat-1", "msg-1", USER_ID)
+
+			await handleChatEvent({ event, userId: USER_ID })
+			vi.advanceTimersByTime(3000)
+
+			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
+				updater: (prev: Array<{ inner: { uuid: string }; inflightId: string }>) => Array<{ inner: { uuid: string }; inflightId: string }>
+			}
+
+			// The message already exists with its real inflightId (reconciled by chats.sendMessage)
+			const prev = [
+				{ inner: { uuid: "msg-0" }, inflightId: "", undecryptable: false },
+				{ inner: { uuid: "msg-1" }, inflightId: "real-inflight", undecryptable: false }
+			]
+			const result = updater(prev)
+
+			// Same reference, same order, same inflightId — nothing was stripped or re-appended
+			expect(result).toBe(prev)
+			expect(result).toHaveLength(2)
+			expect(result.map(m => m.inner.uuid)).toEqual(["msg-0", "msg-1"])
+			expect(result[1]!.inflightId).toBe("real-inflight")
 		})
 
 		it("clears the typing indicator for the sender immediately", async () => {
@@ -595,6 +643,36 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			expect(mockEventsEmit).toHaveBeenCalledOnce()
 			expect(mockEventsEmit).toHaveBeenCalledWith("chatConversationDeleted", { uuid: "chat-gone" })
+		})
+
+		// #17 — the deleted chat must be purged from the selection immediately (not deferred behind the 3s timeout)
+		it("purges the deleted chat from selectedChats immediately (before the 3s timeout)", async () => {
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-gone" }])
+
+			const event = makeConversationDeletedEvent("chat-gone")
+
+			await handleChatEvent({ event, userId: USER_ID })
+
+			// Called synchronously — no timer advance needed
+			expect(mockSetSelectedChats).toHaveBeenCalledOnce()
+
+			const updater = mockSetSelectedChats.mock.calls[0]?.[0] as (prev: Array<{ uuid: string }>) => Array<{ uuid: string }>
+			const prev = [{ uuid: "chat-gone" }, { uuid: "chat-keep" }]
+			const result = updater(prev)
+
+			// The deleted chat is removed from the selection; other selected chats remain
+			expect(result).toHaveLength(1)
+			expect(result[0]!.uuid).toBe("chat-keep")
+		})
+
+		it("does NOT purge the selection when the chat is not found", async () => {
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-other" }])
+
+			const event = makeConversationDeletedEvent("chat-gone")
+
+			await handleChatEvent({ event, userId: USER_ID })
+
+			expect(mockSetSelectedChats).not.toHaveBeenCalled()
 		})
 
 		it("does NOT emit when the chat is not found", async () => {
