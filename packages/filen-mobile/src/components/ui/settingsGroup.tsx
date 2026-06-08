@@ -14,6 +14,14 @@ export type Button = {
 	titleClassName?: string
 	subTitle?: string
 	subTitleClassName?: string
+	/**
+	 * When set, limits the subtitle to this many lines (ellipsizeMode "tail").
+	 * Omit (undefined) to preserve the default wrapping behaviour — intentional
+	 * multi-line description strings should NOT pass this prop.
+	 * Pass 1 for rows whose subtitle is user-provided data (email, nickname, …)
+	 * where an unbounded wrap would produce uneven row heights.
+	 */
+	subTitleNumberOfLines?: number
 	badge?: string | React.ReactNode
 	badgeColor?: string
 	onPress?: () => void
@@ -94,6 +102,7 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 						iconColor,
 						title,
 						subTitle,
+						subTitleNumberOfLines,
 						rightItem,
 						badge,
 						badgeColor,
@@ -135,7 +144,13 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 										>
 											{title}
 										</Text>
-										<Text className={cn("text-muted-foreground text-xs", subTitleClassName)}>{subTitle}</Text>
+										<Text
+											className={cn("text-muted-foreground text-xs", subTitleClassName)}
+											numberOfLines={subTitleNumberOfLines}
+											ellipsizeMode={subTitleNumberOfLines !== undefined ? "tail" : undefined}
+										>
+											{subTitle}
+										</Text>
 									</View>
 								) : (
 									<Text
@@ -184,7 +199,7 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 									{rightItem?.type === "custom" && (
 										<View className="items-center flex-row bg-transparent">{rightItem.value}</View>
 									)}
-									{onPress && (
+									{onPress && !disabled && (
 										<Ionicons
 											className="shrink-0"
 											name="chevron-forward-outline"
