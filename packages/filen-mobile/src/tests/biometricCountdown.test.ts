@@ -56,7 +56,29 @@ vi.mock("react-i18next", () => ({
 	useTranslation: vi.fn(() => ({ t: (k: string) => k }))
 }))
 
-import { remainingMs, shouldLockOnBackground, shouldAutoUnlockOnForeground } from "@/components/biometric"
+import {
+	remainingMs,
+	shouldLockOnBackground,
+	shouldAutoUnlockOnForeground,
+	reduceBiometricAppState,
+	type BiometricAppStateContext
+} from "@/components/biometric"
+
+// Baseline context: enabled + authenticated, 10s grace, nothing pending. Each test overrides the fields it
+// exercises. `now` defaults to a fixed epoch so the assertions are deterministic.
+function ctx(overrides: Partial<BiometricAppStateContext> = {}): BiometricAppStateContext {
+	return {
+		enabled: true,
+		authenticated: true,
+		suppressed: false,
+		lockAfterMs: 10_000,
+		wasBackground: false,
+		lockedByBackground: false,
+		lastAppCloseTimestamp: 0,
+		now: 1_000_000,
+		...overrides
+	}
+}
 
 describe("remainingMs", () => {
 	it("returns positive ms when lockedUntil is in the future", () => {
@@ -136,5 +158,156 @@ describe("shouldAutoUnlockOnForeground", () => {
 	it("with a zero grace (lock immediately), any elapsed > 0 requires a prompt", () => {
 		expect(shouldAutoUnlockOnForeground(true, 1, 0, false)).toBe(false)
 		expect(shouldAutoUnlockOnForeground(true, 0, 0, false)).toBe(true)
+	})
+})
+
+describe("reduceBiometricAppState", () => {
+	it("locks on background when enabled, authenticated and not suppressed", () => {
+		const result = reduceBiometricAppState("background", ctx({ now: 5000 }))
+
+		expect(result.setAuthenticated).toBe(false)
+		expect(result.lockedByBackground).toBe(true)
+		expect(result.wasBackground).toBe(true)
+		expect(result.lastAppCloseTimestamp).toBe(5000)
+		expect(result.rekeyPrompt).toBe(false)
+	})
+
+	it("records the background transition but does not lock when not authenticated", () => {
+		const result = reduceBiometricAppState("background", ctx({ authenticated: false, now: 5000 }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.lockedByBackground).toBe(false)
+		// Still sticky-flags the background + stamps the close time so a later return is handled correctly.
+		expect(result.wasBackground).toBe(true)
+		expect(result.lastAppCloseTimestamp).toBe(5000)
+	})
+
+	it("does not lock on background when biometric is disabled", () => {
+		const result = reduceBiometricAppState("background", ctx({ enabled: false }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.wasBackground).toBe(true)
+	})
+
+	it("does not lock on background while inside an in-app presentation (suppressed)", () => {
+		const result = reduceBiometricAppState("background", ctx({ suppressed: true }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.wasBackground).toBe(true)
+	})
+
+	it("auto-unlocks on foreground when returning within the grace window", () => {
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				wasBackground: true,
+				lockedByBackground: true,
+				lastAppCloseTimestamp: 1000,
+				lockAfterMs: 10_000,
+				now: 6000 // elapsed 5000 <= 10000
+			})
+		)
+
+		expect(result.setAuthenticated).toBe(true)
+		expect(result.wasBackground).toBe(false)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.rekeyPrompt).toBe(true)
+	})
+
+	it("stays locked (no auto-unlock) when returning beyond the grace window", () => {
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				wasBackground: true,
+				lockedByBackground: true,
+				lastAppCloseTimestamp: 1000,
+				lockAfterMs: 10_000,
+				now: 20_000 // elapsed 19000 > 10000
+			})
+		)
+
+		// Leave `authenticated` false (set on background) so BiometricInner prompts; still clears bookkeeping + re-keys.
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.wasBackground).toBe(false)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.rekeyPrompt).toBe(true)
+	})
+
+	it("handles the iOS background -> inactive -> active ordering via the sticky wasBackground flag", () => {
+		// 1) background: lock + stamp close time.
+		const bg = reduceBiometricAppState("background", ctx({ now: 1000 }))
+
+		expect(bg.wasBackground).toBe(true)
+		expect(bg.lockedByBackground).toBe(true)
+		expect(bg.setAuthenticated).toBe(false)
+
+		// 2) inactive: a no-op that must NOT clear the sticky flag (iOS inserts this between background and active).
+		const inactive = reduceBiometricAppState(
+			"inactive",
+			ctx({
+				wasBackground: bg.wasBackground,
+				lockedByBackground: bg.lockedByBackground,
+				lastAppCloseTimestamp: bg.lastAppCloseTimestamp,
+				authenticated: false,
+				now: 1500
+			})
+		)
+
+		expect(inactive.setAuthenticated).toBe(null)
+		expect(inactive.wasBackground).toBe(true)
+		expect(inactive.lockedByBackground).toBe(true)
+		expect(inactive.rekeyPrompt).toBe(false)
+
+		// 3) active within grace: the sticky flag still fires the auto-unlock block.
+		const active = reduceBiometricAppState(
+			"active",
+			ctx({
+				wasBackground: inactive.wasBackground,
+				lockedByBackground: inactive.lockedByBackground,
+				lastAppCloseTimestamp: inactive.lastAppCloseTimestamp,
+				authenticated: false,
+				lockAfterMs: 10_000,
+				now: 3000 // elapsed 2000 <= 10000
+			})
+		)
+
+		expect(active.setAuthenticated).toBe(true)
+		expect(active.wasBackground).toBe(false)
+		expect(active.rekeyPrompt).toBe(true)
+	})
+
+	it("with a zero grace (lock immediately), returning never auto-unlocks", () => {
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				wasBackground: true,
+				lockedByBackground: true,
+				lastAppCloseTimestamp: 1000,
+				lockAfterMs: 0,
+				now: 1001 // elapsed 1 > 0
+			})
+		)
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.rekeyPrompt).toBe(true)
+	})
+
+	it("inactive without a prior background is a pure no-op", () => {
+		const result = reduceBiometricAppState("inactive", ctx())
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.wasBackground).toBe(false)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.rekeyPrompt).toBe(false)
+	})
+
+	it("active without a prior background is a pure no-op (does not re-key or unlock)", () => {
+		const result = reduceBiometricAppState("active", ctx({ wasBackground: false }))
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.wasBackground).toBe(false)
+		expect(result.rekeyPrompt).toBe(false)
 	})
 })
