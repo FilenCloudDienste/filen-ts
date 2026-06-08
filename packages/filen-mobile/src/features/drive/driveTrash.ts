@@ -9,6 +9,7 @@ import {
 	driveItemsQueryGet
 } from "@/features/drive/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/features/drive/queries/useDriveItemVersions.query"
+import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import cache from "@/lib/cache"
 
 export async function deletePermanently({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
@@ -264,6 +265,15 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 		})
 	}
 
+	// Drop the now-promoted version from the versions list so the screen
+	// reflects the restore without a manual refetch (mirrors deleteVersion below).
+	driveItemVersionsQueryUpdate({
+		params: {
+			uuid: item.data.uuid
+		},
+		updater: prev => prev.filter(v => v.uuid !== version.uuid)
+	})
+
 	return item
 }
 
@@ -289,4 +299,8 @@ export async function deleteVersion({ item, version, signal }: { item: DriveItem
 		},
 		updater: prev => prev.filter(v => v.uuid !== version.uuid)
 	})
+
+	// Purge the deleted version from any active selection so the header count and
+	// a later bulk-delete can't reference a UUID that no longer exists.
+	useFileVersionsStore.getState().setSelectedVersions(prev => prev.filter(v => v.uuid !== version.uuid))
 }
