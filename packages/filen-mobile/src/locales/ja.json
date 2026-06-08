@@ -526,6 +526,7 @@
 	"placeholder": "空",
 	"play": "再生",
 	"playlist_name_placeholder": "プレイリスト名",
+	"playlist_not_found": "プレイリストが見つかりません",
 	"playlists": "プレイリスト",
 	"please_enter_valid_email": "有効なメールアドレスを入力してください。",
 	"postal_code": "郵便番号",

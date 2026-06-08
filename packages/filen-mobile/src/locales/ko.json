@@ -526,6 +526,7 @@
 	"placeholder": "비어 있음",
 	"play": "재생",
 	"playlist_name_placeholder": "재생목록 이름",
+	"playlist_not_found": "재생목록을 찾을 수 없음",
 	"playlists": "재생목록",
 	"please_enter_valid_email": "유효한 이메일 주소를 입력하세요.",
 	"postal_code": "우편번호",

@@ -526,6 +526,7 @@
 	"placeholder": "Vide",
 	"play": "Lire",
 	"playlist_name_placeholder": "Nom de la playlist",
+	"playlist_not_found": "Playlist introuvable",
 	"playlists": "Playlists",
 	"please_enter_valid_email": "Veuillez saisir une adresse e-mail valide.",
 	"postal_code": "Code postal",

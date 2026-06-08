@@ -526,6 +526,7 @@
 	"placeholder": "Tyhjä",
 	"play": "Toista",
 	"playlist_name_placeholder": "Soittolistan nimi",
+	"playlist_not_found": "Soittolistaa ei löytynyt",
 	"playlists": "Soittolistat",
 	"please_enter_valid_email": "Anna kelvollinen sähköpostiosoite.",
 	"postal_code": "Postinumero",

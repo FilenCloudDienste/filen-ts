@@ -526,6 +526,7 @@
 	"placeholder": "空",
 	"play": "播放",
 	"playlist_name_placeholder": "播放列表名称",
+	"playlist_not_found": "未找到播放列表",
 	"playlists": "播放列表",
 	"please_enter_valid_email": "请输入有效的邮箱地址。",
 	"postal_code": "邮政编码",

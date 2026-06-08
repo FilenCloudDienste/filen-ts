@@ -526,6 +526,7 @@
 	"placeholder": "Tom",
 	"play": "Spela",
 	"playlist_name_placeholder": "Spellistans namn",
+	"playlist_not_found": "Spellistan hittades inte",
 	"playlists": "Spellistor",
 	"please_enter_valid_email": "Ange en giltig e-postadress.",
 	"postal_code": "Postnummer",

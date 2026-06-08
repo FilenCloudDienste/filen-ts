@@ -526,6 +526,7 @@
 	"placeholder": "Vacío",
 	"play": "Reproducir",
 	"playlist_name_placeholder": "Nombre de la lista de reproducción",
+	"playlist_not_found": "Lista de reproducción no encontrada",
 	"playlists": "Listas de reproducción",
 	"please_enter_valid_email": "Introduce una dirección de correo electrónico válida.",
 	"postal_code": "Código postal",

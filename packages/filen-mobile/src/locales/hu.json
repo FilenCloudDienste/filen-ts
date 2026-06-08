@@ -526,6 +526,7 @@
 	"placeholder": "Üres",
 	"play": "Lejátszás",
 	"playlist_name_placeholder": "Lejátszási lista neve",
+	"playlist_not_found": "A lejátszási lista nem található",
 	"playlists": "Lejátszási listák",
 	"please_enter_valid_email": "Adj meg egy érvényes e-mail-címet.",
 	"postal_code": "Irányítószám",

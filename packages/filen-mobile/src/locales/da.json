@@ -526,6 +526,7 @@
 	"placeholder": "Tom",
 	"play": "Afspil",
 	"playlist_name_placeholder": "Navn på afspilningsliste",
+	"playlist_not_found": "Afspilningsliste ikke fundet",
 	"playlists": "Afspilningslister",
 	"please_enter_valid_email": "Indtast en gyldig e-mailadresse.",
 	"postal_code": "Postnummer",

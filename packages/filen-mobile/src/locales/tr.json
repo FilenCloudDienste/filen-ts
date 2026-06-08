@@ -526,6 +526,7 @@
 	"placeholder": "Boş",
 	"play": "Çal",
 	"playlist_name_placeholder": "Çalma listesi adı",
+	"playlist_not_found": "Çalma listesi bulunamadı",
 	"playlists": "Çalma listeleri",
 	"please_enter_valid_email": "Lütfen geçerli bir e-posta adresi girin.",
 	"postal_code": "Posta kodu",
