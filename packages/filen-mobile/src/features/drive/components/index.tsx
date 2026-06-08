@@ -16,9 +16,8 @@ import { Platform } from "react-native"
 import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
-import { driveItemDisplayName } from "@/lib/decryption"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
-import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey } from "@/features/drive/utils"
+import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, filterDriveItemsBySearchQuery } from "@/features/drive/utils"
 
 const Drive = () => {
 	const drivePath = useDrivePath()
@@ -40,27 +39,7 @@ const Drive = () => {
 		sort
 	)
 
-	const items = (() => {
-		if (driveItemsQuery.status !== "success") {
-			return []
-		}
-
-		if (searchQuery.length > 0) {
-			const searchQueryNormalized = searchQuery.trim().toLowerCase()
-
-			return itemsSorted.filter(item => {
-				// driveItemDisplayName returns `cannot_decrypt_<uuid>` for undecryptable
-				// items so they remain searchable via the placeholder text.
-				if (driveItemDisplayName(item).toLowerCase().includes(searchQueryNormalized)) {
-					return true
-				}
-
-				return false
-			})
-		}
-
-		return itemsSorted
-	})()
+	const items = driveItemsQuery.status === "success" ? filterDriveItemsBySearchQuery(itemsSorted, searchQuery) : []
 
 	useFocusEffect(
 		useCallback(() => {
@@ -74,7 +53,11 @@ const Drive = () => {
 
 	return (
 		<Fragment>
-			<Header setSearchQuery={setSearchQuery} />
+			<Header
+				setSearchQuery={setSearchQuery}
+				listItems={items}
+				queryingGlobalSearch={queryingGlobalSearch}
+			/>
 			<SafeAreaView
 				className={cn(
 					"flex-1",
@@ -103,7 +86,10 @@ const Drive = () => {
 						)
 					}}
 					onRefresh={async () => {
-						if (!onlineManager.isOnline()) {
+						// The offline cache listing reads purely from local storage
+						// (the query is networkMode: "always"), so pull-to-refresh must
+						// work while offline. Every other variant hits the network.
+						if (!onlineManager.isOnline() && drivePath.type !== "offline") {
 							return
 						}
 
@@ -116,7 +102,7 @@ const Drive = () => {
 							alerts.error(result.error)
 						}
 					}}
-					loading={driveItemsQuery.status !== "success" || queryingGlobalSearch}
+					loading={driveItemsQuery.status !== "success"}
 					emptyComponent={() => (
 						<ListEmpty
 							icon={getDriveEmptyStateIcon(drivePath.type)}

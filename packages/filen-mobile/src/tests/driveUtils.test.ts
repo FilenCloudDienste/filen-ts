@@ -43,7 +43,8 @@ import {
 	resolveDriveHeaderTitle,
 	rawUploadTimestamp,
 	pickDisplayTimestamp,
-	directorySizeTypeForDrivePath
+	directorySizeTypeForDrivePath,
+	filterDriveItemsBySearchQuery
 } from "@/features/drive/utils"
 import type { DrivePath, SelectOptions, DrivePathType } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
@@ -718,5 +719,82 @@ describe("directorySizeTypeForDrivePath", () => {
 
 	it("undefined → normal", () => {
 		expect(directorySizeTypeForDrivePath(undefined)).toBe("normal")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// #9 — filterDriveItemsBySearchQuery: the SINGLE source of truth shared by the
+// list body and the header's select-all / deselect-all toggle. With an active
+// search this MUST narrow to the visible subset so select-all never targets
+// search-hidden items; with no search it MUST pass the list through unchanged
+// (so behavior is identical to the pre-fix unfiltered path).
+// ---------------------------------------------------------------------------
+
+describe("filterDriveItemsBySearchQuery", () => {
+	beforeEach(() => {
+		// Drive the display name off the item's decrypted name, falling back to the
+		// cannot-decrypt placeholder for undecryptable items — mirroring the real
+		// driveItemDisplayName so the filter's matching surface is realistic.
+		mockDriveItemDisplayName.mockImplementation((item: unknown) => {
+			const i = item as DriveItem
+
+			if (i.data.undecryptable) {
+				return `cannot_decrypt_${i.data.uuid}`
+			}
+
+			return i.data.decryptedMeta?.name ?? i.data.uuid
+		})
+	})
+
+	function namedItem(uuid: string, name: string): DriveItem {
+		return {
+			type: "file",
+			data: { uuid, undecryptable: false, decryptedMeta: { name } } as DriveItem["data"]
+		} as DriveItem
+	}
+
+	const report = namedItem("a", "Report.pdf")
+	const photo = namedItem("b", "Vacation Photo.jpg")
+	const notes = namedItem("c", "report-notes.txt")
+	const list = [report, photo, notes]
+
+	it("empty query returns the list unchanged (same reference)", () => {
+		expect(filterDriveItemsBySearchQuery(list, "")).toBe(list)
+	})
+
+	it("whitespace-only query returns the list unchanged (same reference)", () => {
+		expect(filterDriveItemsBySearchQuery(list, "   ")).toBe(list)
+	})
+
+	it("matches case-insensitively across the display name", () => {
+		expect(filterDriveItemsBySearchQuery(list, "REPORT")).toEqual([report, notes])
+	})
+
+	it("trims surrounding whitespace before matching", () => {
+		expect(filterDriveItemsBySearchQuery(list, "  photo  ")).toEqual([photo])
+	})
+
+	it("returns an empty array when nothing matches (so select-all has nothing to select)", () => {
+		expect(filterDriveItemsBySearchQuery(list, "zzz-no-match")).toEqual([])
+	})
+
+	it("preserves input order of the matched subset", () => {
+		expect(filterDriveItemsBySearchQuery(list, ".")).toEqual([report, photo, notes])
+	})
+
+	it("undecryptable items remain searchable via the cannot_decrypt_<uuid> placeholder", () => {
+		const broken = { type: "file", data: { uuid: "xyz", undecryptable: true, decryptedMeta: null } } as DriveItem
+
+		expect(filterDriveItemsBySearchQuery([report, broken], "cannot_decrypt")).toEqual([broken])
+		expect(filterDriveItemsBySearchQuery([report, broken], "xyz")).toEqual([broken])
+	})
+
+	it("the filtered subset is what select-all would receive — never the full list when a search is active", () => {
+		// Models the header fix: selectAllItems(listItems) must equal the visible
+		// rows, not every item in the directory.
+		const visible = filterDriveItemsBySearchQuery(list, "report")
+
+		expect(visible).toEqual([report, notes])
+		expect(visible).not.toContain(photo)
 	})
 })
