@@ -78,6 +78,8 @@ import { buildSelectionMenuButtons, buildPlaylistMenuButtons } from "@/features/
 import type { PlaylistWithItems } from "@/features/audio/audio"
 import type { PlaylistTrack } from "@/features/audio/store/usePlaylistTracks.store"
 import type { MenuButton } from "@/components/ui/menu"
+import audio from "@/features/audio/audio"
+import { runBulk } from "@/lib/bulkOps"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -202,12 +204,114 @@ describe("buildSelectionMenuButtons", () => {
 })
 
 // ---------------------------------------------------------------------------
+// #51 — bulkAddToQueue auto-starts playback on empty queue
+// ---------------------------------------------------------------------------
+
+describe("buildSelectionMenuButtons — bulkAddToQueue #51", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("calls audio.play() after runBulk when queue was empty and tracks were added", async () => {
+		// Simulate: queue empty before bulk-add, non-empty after
+		const getQueueMock = vi.mocked(audio.getQueue)
+
+		getQueueMock
+			.mockReturnValueOnce([]) // before runBulk (queueWasEmpty check)
+			.mockReturnValueOnce([{ playlistUuid: "p", item: {} as PlaylistTrack["item"] }]) // after runBulk (non-empty check)
+
+		// runBulk is a no-op mock; the handler relies on getQueue() state changes
+		vi.mocked(runBulk).mockResolvedValue(true)
+
+		const playlist = makePlaylist([makeTrack("a")])
+		const selectedTracks = [makeTrack("a")]
+		const buttons = buildSelectionMenuButtons({ t, playlist, selectedTracks })
+		const bulkAddBtn = buttons.find((b: MenuButton) => b.id === "bulkAddToQueue")
+
+		await bulkAddBtn?.onPress?.()
+
+		expect(audio.play).toHaveBeenCalledOnce()
+	})
+
+	it("does NOT call audio.play() when queue was already non-empty before bulk-add", async () => {
+		const getQueueMock = vi.mocked(audio.getQueue)
+
+		getQueueMock.mockReturnValue([{ playlistUuid: "p", item: {} as PlaylistTrack["item"] }])
+
+		vi.mocked(runBulk).mockResolvedValue(true)
+
+		const playlist = makePlaylist([makeTrack("a")])
+		const selectedTracks = [makeTrack("a")]
+		const buttons = buildSelectionMenuButtons({ t, playlist, selectedTracks })
+		const bulkAddBtn = buttons.find((b: MenuButton) => b.id === "bulkAddToQueue")
+
+		await bulkAddBtn?.onPress?.()
+
+		expect(audio.play).not.toHaveBeenCalled()
+	})
+
+	it("does NOT call audio.play() when queue is still empty after bulk-add (all tracks undecryptable)", async () => {
+		const getQueueMock = vi.mocked(audio.getQueue)
+
+		getQueueMock.mockReturnValue([]) // empty both before and after
+
+		vi.mocked(runBulk).mockResolvedValue(true)
+
+		const playlist = makePlaylist([makeTrack("a")])
+		const selectedTracks = [makeTrack("a")]
+		const buttons = buildSelectionMenuButtons({ t, playlist, selectedTracks })
+		const bulkAddBtn = buttons.find((b: MenuButton) => b.id === "bulkAddToQueue")
+
+		await bulkAddBtn?.onPress?.()
+
+		expect(audio.play).not.toHaveBeenCalled()
+	})
+})
+
+// ---------------------------------------------------------------------------
 // #65 — buildPlaylistMenuButtons
 // ---------------------------------------------------------------------------
 
 describe("buildPlaylistMenuButtons", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	// --- #21: requiresOnline flags ---
+	it("rename button has requiresOnline:true", () => {
+		const playlist = makePlaylist([])
+		const buttons = buildPlaylistMenuButtons({ t, playlist })
+		const btn = buttons.find((b: MenuButton) => b.id === "rename")
+
+		expect(btn?.requiresOnline).toBe(true)
+	})
+
+	it("add button has requiresOnline:true", () => {
+		const playlist = makePlaylist([])
+		const buttons = buildPlaylistMenuButtons({ t, playlist })
+		const btn = buttons.find((b: MenuButton) => b.id === "add")
+
+		expect(btn?.requiresOnline).toBe(true)
+	})
+
+	it("delete button has requiresOnline:true", () => {
+		const playlist = makePlaylist([])
+		const buttons = buildPlaylistMenuButtons({ t, playlist })
+		const btn = buttons.find((b: MenuButton) => b.id === "delete")
+
+		expect(btn?.requiresOnline).toBe(true)
+	})
+
+	it("requiresOnline is present on all three mutating buttons when playlist has files", () => {
+		const playlist = makePlaylist([makeTrack("a")])
+		const buttons = buildPlaylistMenuButtons({ t, playlist })
+		const ids = ["rename", "add", "delete"]
+
+		for (const id of ids) {
+			const btn = buttons.find((b: MenuButton) => b.id === id)
+
+			expect(btn?.requiresOnline, `${id} should have requiresOnline:true`).toBe(true)
+		}
 	})
 
 	it("returns 3 buttons when playlist has no files", () => {
