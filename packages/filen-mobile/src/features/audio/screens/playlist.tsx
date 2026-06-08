@@ -42,19 +42,57 @@ export function Playlist() {
 
 	const playlist = playlistsQuery.status === "success" ? (playlistsQuery.data.find(p => p.uuid === uuid) ?? null) : null
 
-	if (playlistsQuery.status === "pending") {
+	if (playlistsQuery.status === "pending" || !playlist) {
 		return (
-			<View className="flex-1 items-center justify-center bg-background-secondary">
-				<ActivityIndicator
-					size="large"
-					color={textForeground.color as string}
+			<Fragment>
+				<Header
+					title={t("playlists")}
+					transparent={Platform.OS === "ios"}
+					shadowVisible={false}
+					backVisible={Platform.OS === "android"}
+					backgroundColor={Platform.select({
+						ios: undefined,
+						default: bgBackgroundSecondary.backgroundColor as string
+					})}
+					leftItems={Platform.select({
+						ios: [
+							{
+								type: "button",
+								icon: {
+									name: "chevron-back-outline",
+									color: textForeground.color,
+									size: 20
+								},
+								props: {
+									onPress: () => {
+										router.back()
+									}
+								}
+							}
+						],
+						default: undefined
+					})}
 				/>
-			</View>
+				<SafeAreaView
+					className="flex-1 bg-background-secondary"
+					edges={["left", "right"]}
+				>
+					{playlistsQuery.status === "pending" ? (
+						<View className="flex-1 items-center justify-center bg-background-secondary">
+							<ActivityIndicator
+								size="large"
+								color={textForeground.color as string}
+							/>
+						</View>
+					) : (
+						<ListEmpty
+							icon="warning-outline"
+							title={t("playlist_not_found")}
+						/>
+					)}
+				</SafeAreaView>
+			</Fragment>
 		)
-	}
-
-	if (!playlist) {
-		return null
 	}
 
 	const tracksInSelectionMode = selectedTracks.length > 0
