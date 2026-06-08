@@ -117,6 +117,17 @@ export async function renameTag({ tag, newName, signal }: { tag: NoteTag; newNam
 	return tag
 }
 
+export function stripTagFromNotes<T extends { tags: { uuid: string }[] }>(notes: T[], tagUuid: string): T[] {
+	return notes.map(n =>
+		n.tags.some(t => t.uuid === tagUuid)
+			? {
+					...n,
+					tags: n.tags.filter(t => t.uuid !== tagUuid)
+				}
+			: n
+	)
+}
+
 export async function deleteTag({ tag, signal }: { tag: NoteTag; signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
@@ -131,6 +142,10 @@ export async function deleteTag({ tag, signal }: { tag: NoteTag; signal?: AbortS
 
 	notesTagsQueryUpdate({
 		updater: prev => prev.filter(t => t.uuid !== tag.uuid)
+	})
+
+	notesWithContentQueryUpdate({
+		updater: prev => stripTagFromNotes(prev, tag.uuid)
 	})
 }
 
