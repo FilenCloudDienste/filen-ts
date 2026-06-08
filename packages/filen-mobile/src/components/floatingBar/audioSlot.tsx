@@ -9,7 +9,7 @@ import { useResolveClassNames } from "uniwind"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
 import Image from "@/components/ui/image"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { driveItemDisplayName } from "@/lib/decryption"
+import { resolveAudioTrackLabels } from "@/features/audio/utils"
 
 const AudioSlot = () => {
 	const { t } = useTranslation()
@@ -29,6 +29,18 @@ const AudioSlot = () => {
 	)
 
 	const playing = status?.playing ?? false
+
+	const { titleLabel, artistLabel } = resolveAudioTrackLabels(
+		queueItem ?? null,
+		audioMetadataQuery.status === "success",
+		audioMetadataQuery.data?.title,
+		audioMetadataQuery.data?.artist,
+		{
+			notPlaying: t("not_playing"),
+			unknownTitle: t("unknown_title"),
+			unknownArtist: t("unknown_artist")
+		}
+	)
 
 	const onBodyPress = () => {
 		router.push("/playlists")
@@ -53,7 +65,7 @@ const AudioSlot = () => {
 			onPress={onBodyPress}
 		>
 			<View className="flex-row items-center gap-2 bg-transparent flex-1">
-				{queueItem && audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
+				{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
 					<Image
 						className="size-8 rounded-lg bg-background-tertiary"
 						source={{
@@ -78,20 +90,14 @@ const AudioSlot = () => {
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{queueItem && audioMetadataQuery.status === "success"
-							? queueItem.item.data.undecryptable
-								? driveItemDisplayName(queueItem.item)
-								: (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? t("unknown_title"))
-							: t("not_playing")}
+						{titleLabel}
 					</Text>
 					<Text
 						className="text-xs text-muted-foreground"
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{queueItem && audioMetadataQuery.status === "success"
-							? (audioMetadataQuery.data?.artist ?? t("unknown_artist"))
-							: t("not_playing")}
+						{artistLabel}
 					</Text>
 				</View>
 			</View>

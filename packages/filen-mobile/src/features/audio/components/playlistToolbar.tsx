@@ -12,6 +12,7 @@ import { AudioSlider, FONT_TABULAR_NUMS, formatAudioTime } from "@/components/dr
 import alerts from "@/lib/alerts"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
 import { useTranslation } from "react-i18next"
+import { resolveAudioTrackLabels } from "@/features/audio/utils"
 
 const PlaylistToolbar = () => {
 	const { t } = useTranslation()
@@ -32,6 +33,18 @@ const PlaylistToolbar = () => {
 		},
 		{
 			enabled: !!queueItem
+		}
+	)
+
+	const { titleLabel, artistLabel } = resolveAudioTrackLabels(
+		queueItem,
+		audioMetadataQuery.status === "success",
+		audioMetadataQuery.data?.title,
+		audioMetadataQuery.data?.artist,
+		{
+			notPlaying: t("not_playing"),
+			unknownTitle: t("unknown_title"),
+			unknownArtist: t("unknown_artist")
 		}
 	)
 
@@ -73,18 +86,14 @@ const PlaylistToolbar = () => {
 								numberOfLines={1}
 								ellipsizeMode="middle"
 							>
-								{queueItem && audioMetadataQuery.status === "success"
-									? (audioMetadataQuery.data?.title ?? queueItem.item.data.decryptedMeta?.name ?? t("unknown_title"))
-									: t("not_playing")}
+								{titleLabel}
 							</Text>
 							<Text
 								className="text-xs text-muted-foreground"
 								numberOfLines={1}
 								ellipsizeMode="middle"
 							>
-								{queueItem && audioMetadataQuery.status === "success"
-									? (audioMetadataQuery.data?.artist ?? t("unknown_artist"))
-									: t("not_playing")}
+								{artistLabel}
 							</Text>
 						</View>
 					</View>
