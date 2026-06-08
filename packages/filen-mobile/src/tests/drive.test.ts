@@ -484,7 +484,7 @@ describe("drive.favorite", () => {
 		expect(mockAuthedSdkClient.setFavorite).toHaveBeenCalledWith(expect.objectContaining({ tag: "Dir" }), false, undefined)
 	})
 
-	it("favorites query updater removes item by uuid (filter predicate)", async () => {
+	it("favorites query updater adds item on favorite, de-duping by uuid", async () => {
 		const item = makeFileItem({ favorited: false })
 		const modifiedData = { ...item.data, favorited: true }
 		mockAuthedSdkClient.setFavorite.mockResolvedValue({ tag: "File", inner: [modifiedData] })
@@ -492,17 +492,17 @@ describe("drive.favorite", () => {
 
 		await drive.favorite({ item, favorited: true })
 
-		// driveItemsQueryUpdate is called for favorites with a filter predicate
+		// driveItemsQueryUpdate is called for the favorites listing
 		const updateCall = mockDriveItemsQueryUpdate.mock.calls.find(call => call[0]?.params?.path?.type === "favorites")
 
 		expect(updateCall).toBeDefined()
 
-		// Verify the updater removes the item by uuid
+		// Favoriting ADDS the item to the favorites listing (and de-dupes by uuid)
 		const updater = updateCall![0].updater as (prev: DriveItem[]) => DriveItem[]
 		const prev = [item, makeFileItem({ uuid: "other-file" })]
 		const after = updater(prev)
 
-		expect(after.some(i => i.data.uuid === item.data.uuid)).toBe(false)
+		expect(after.filter(i => i.data.uuid === item.data.uuid)).toHaveLength(1)
 		expect(after.some(i => i.data.uuid === "other-file")).toBe(true)
 	})
 
