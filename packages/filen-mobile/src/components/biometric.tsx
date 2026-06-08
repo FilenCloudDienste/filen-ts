@@ -5,7 +5,7 @@ import useAppStore from "@/stores/useApp.store"
 import { fetchData } from "@/queries/useLocalAuthentication.query"
 import { type Biometric as TBiometric } from "@/features/settings/screens/biometric"
 import useEffectOnce from "@/hooks/useEffectOnce"
-import { Platform, AppState, type AppStateStatus } from "react-native"
+import { Platform, AppState } from "react-native"
 import { FullWindowOverlay } from "react-native-screens"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
@@ -438,7 +438,7 @@ function Biometric() {
 	const [authenticated, setAuthenticated] = useState<boolean>(false)
 	const [lastAppOpenTimestamp, setLastAppOpenTimestamp] = useState<number>(0)
 	const lastAppCloseTimestampRef = useRef<number>(0)
-	const lastAppStateRef = useRef<AppStateStatus>(AppState.currentState)
+	const wasBackgroundRef = useRef<boolean>(false)
 	const lockAfterMsRef = useRef<number>(biometric.enabled ? biometric.lockAfter * LOCK_BASE_MS : 0)
 	const biometricEnabledRef = useRef<boolean>(biometric.enabled)
 	const authenticatedRef = useRef<boolean>(authenticated)
@@ -471,6 +471,7 @@ function Biometric() {
 			const appStateListener = AppState.addEventListener("change", nextAppState => {
 				if (nextAppState === "background") {
 					lastAppCloseTimestampRef.current = Date.now()
+					wasBackgroundRef.current = true
 
 					// Lock at the moment of backgrounding (not on return) so the lock is already covering
 					// before the app repaints content — no content-leak frame. Skipped while inside an
@@ -488,7 +489,12 @@ function Biometric() {
 					}
 				}
 
-				if (nextAppState === "active" && lastAppStateRef.current === "background") {
+				// Use a sticky "was backgrounded" ref instead of requiring the immediately-previous state to
+				// be "background": iOS can deliver background → inactive → active, which would otherwise skip
+				// this whole block (never auto-unlocking within grace / never re-keying the prompt).
+				if (nextAppState === "active" && wasBackgroundRef.current) {
+					wasBackgroundRef.current = false
+
 					const elapsed = Date.now() - lastAppCloseTimestampRef.current
 
 					// Returned within the grace window — clear the background lock without a prompt. Beyond
@@ -509,8 +515,6 @@ function Biometric() {
 
 					setLastAppOpenTimestamp(Date.now())
 				}
-
-				lastAppStateRef.current = nextAppState
 			})
 
 			defer(() => {
