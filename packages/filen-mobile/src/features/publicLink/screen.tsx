@@ -25,6 +25,7 @@ import { PasswordState_Tags, PasswordState, PublicLinkExpiration, DirColor } fro
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import * as Sharing from "expo-sharing"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 import Menu from "@/components/ui/menu"
 import { makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
@@ -271,7 +272,7 @@ function PublicLink() {
 														throw new Error(i18n.t("sharing_not_available"))
 													}
 
-													return await Sharing.shareAsync(url)
+													return await withSystemPresentation(() => Sharing.shareAsync(url))
 												})
 
 												if (!result.success) {

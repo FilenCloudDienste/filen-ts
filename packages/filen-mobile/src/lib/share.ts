@@ -1,5 +1,6 @@
 import * as Sharing from "expo-sharing"
 import { run } from "@filen/utils"
+import { withSystemPresentation } from "@/lib/systemPresentation"
 
 /**
  * Shares a freshly-written temporary file through the OS share sheet, then runs the
@@ -29,9 +30,13 @@ export async function shareTmpFile({
 		// Small delay to ensure file is fully written before sharing
 		await new Promise<void>(resolve => setTimeout(resolve, 100))
 
-		await Sharing.shareAsync(uri, {
-			mimeType,
-			dialogTitle: name
-		})
+		// The OS share sheet resigns the app active (the user hasn't left), so funnel it through the
+		// presentation coordinator like the pickers — keeps the privacy cover hidden and skips a re-lock.
+		await withSystemPresentation(() =>
+			Sharing.shareAsync(uri, {
+				mimeType,
+				dialogTitle: name
+			})
+		)
 	})
 }
