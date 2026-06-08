@@ -41,7 +41,19 @@ const AccountReminders = () => {
 
 		const data = accountQuery.data
 
+		// If the app re-locks while reminders are mid-flight, stop landing prompts/navigation over the
+		// lock screen and re-arm so they surface again after the next unlock (the effect re-runs when
+		// biometricUnlocked flips back to true). A native alert already on screen can't be dismissed
+		// programmatically, but this keeps any further prompt or navigation from going behind the lock.
+		const stillUnlocked = (): boolean => useAppStore.getState().biometricUnlocked === true
+
 		const showReminders = async (): Promise<void> => {
+			if (!stillUnlocked()) {
+				firedRef.current = false
+
+				return
+			}
+
 			if (!data.didExportMasterKeys) {
 				const masterKeysResult = await prompts.alert({
 					title: t("master_keys_reminder_title"),
@@ -50,11 +62,23 @@ const AccountReminders = () => {
 					cancelText: t("later")
 				})
 
+				if (!stillUnlocked()) {
+					firedRef.current = false
+
+					return
+				}
+
 				if (!masterKeysResult.cancelled) {
 					router.push("/security")
 
 					return
 				}
+			}
+
+			if (!stillUnlocked()) {
+				firedRef.current = false
+
+				return
 			}
 
 			if (data.storageUsed > data.maxStorage) {
