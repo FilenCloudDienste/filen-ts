@@ -3,16 +3,42 @@ import { router } from "expo-router"
 import { ActivityIndicator } from "react-native"
 import { bpsToReadable } from "@filen/utils"
 import { useTranslation } from "react-i18next"
-import useTransfersStore from "@/features/transfers/store/useTransfers.store"
+import Ionicons from "@expo/vector-icons/Ionicons"
+import useTransfersStore, { type Transfer } from "@/features/transfers/store/useTransfers.store"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import { useResolveClassNames } from "uniwind"
 import AnimatedProgressBar from "@/components/floatingBar/animatedProgressBar"
 
+/**
+ * Returns true when at least one transfer is actively making progress
+ * (i.e. not paused). Used to decide whether to show a spinner vs. a
+ * paused indicator in SpeedDisplay.
+ */
+export function anyActiveTransfer(transfers: Transfer[]): boolean {
+	return transfers.some(t => !t.paused)
+}
+
 const SpeedDisplay = () => {
-	const speed = useTransfersStore(s => s.stats.speed)
+	const { speed, hasActive } = useTransfersStore(
+		useShallow(s => ({
+			speed: s.stats.speed,
+			hasActive: anyActiveTransfer(s.transfers)
+		}))
+	)
 	const textForeground = useResolveClassNames("text-foreground")
+
+	if (!hasActive) {
+		return (
+			<Ionicons
+				name="pause-circle-outline"
+				size={20}
+				color={textForeground.color}
+				style={{ flexShrink: 0 }}
+			/>
+		)
+	}
 
 	if (speed === 0) {
 		return (
