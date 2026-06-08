@@ -17,7 +17,8 @@ const {
 	mockUnwrapFileMeta,
 	mockUnwrappedFileIntoDriveItem,
 	mockUnwrapDirMeta,
-	mockUnwrappedDirIntoDriveItem
+	mockUnwrappedDirIntoDriveItem,
+	mockRemoveFromSelection
 } = vi.hoisted(() => ({
 	mockDriveItemsQueryUpdateGlobal: vi.fn(),
 	mockDriveItemsQueryUpdate: vi.fn(),
@@ -31,7 +32,8 @@ const {
 	mockUnwrapFileMeta: vi.fn((x: unknown) => x),
 	mockUnwrappedFileIntoDriveItem: vi.fn((x: unknown) => x),
 	mockUnwrapDirMeta: vi.fn((x: unknown) => x),
-	mockUnwrappedDirIntoDriveItem: vi.fn((x: unknown) => x)
+	mockUnwrappedDirIntoDriveItem: vi.fn((x: unknown) => x),
+	mockRemoveFromSelection: vi.fn()
 }))
 
 // ---------------------------------------------------------------------------
@@ -64,6 +66,12 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrappedDirIntoDriveItem: mockUnwrappedDirIntoDriveItem,
 	unwrapFileMeta: mockUnwrapFileMeta,
 	unwrappedFileIntoDriveItem: mockUnwrappedFileIntoDriveItem
+}))
+
+vi.mock("@/features/drive/store/useDrive.store", () => ({
+	default: {
+		getState: () => ({ removeFromSelection: mockRemoveFromSelection })
+	}
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -218,6 +226,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 		mockCacheForgetItem.mockClear()
 		mockCacheNewFile.mockClear()
 		mockCacheNewNormalDir.mockClear()
+		mockRemoveFromSelection.mockClear()
 		mockCacheDirectoryUuidToAnyNormalDirGet.mockReset()
 		mockCacheFileUuidToNormalFileGet.mockReset()
 		mockUnwrapParentUuid.mockReturnValue("parent-1")
@@ -293,6 +302,25 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockCacheFileUuidToNormalFileGet).not.toHaveBeenCalled()
 		})
 
+		it("purges the removed folder uuid from the drive selection", async () => {
+			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
+				tag: AnyNormalDir_Tags.Dir,
+				inner: [{ uuid: "folder-1", parent: {} }]
+			})
+
+			await handleDriveEvent({ event: makeFolderDeletedPermanentEvent("folder-1") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["folder-1"])
+		})
+
+		it("purges the selection even when the folder is NOT in the directory cache", async () => {
+			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue(undefined)
+
+			await handleDriveEvent({ event: makeFolderDeletedPermanentEvent("folder-1") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["folder-1"])
+		})
+
 		it("skips the global update when unwrapParentUuid returns null", async () => {
 			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
 				tag: AnyNormalDir_Tags.Dir,
@@ -352,6 +380,22 @@ describe("handleDriveEvent — drive socket handler", () => {
 
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
 			expect(mockCacheForgetItem).toHaveBeenCalledWith("file-not-cached")
+		})
+
+		it("purges the removed file uuid from the drive selection", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue({ uuid: "file-1", parent: {} })
+
+			await handleDriveEvent({ event: makeFileDeletedPermanentEvent("file-1") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["file-1"])
+		})
+
+		it("purges the selection even when the file is NOT in the file cache", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
+
+			await handleDriveEvent({ event: makeFileDeletedPermanentEvent("file-not-cached") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["file-not-cached"])
 		})
 	})
 
@@ -473,6 +517,14 @@ describe("handleDriveEvent — drive socket handler", () => {
 			await handleDriveEvent({ event: makeEvent(DriveEvent_Tags.FileArchived, { uuid: "file-archived" }) })
 
 			expect(mockCacheForgetItem).not.toHaveBeenCalled()
+		})
+
+		it("purges the archived file uuid from the drive selection", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue({ uuid: "file-archived", parent: {} })
+
+			await handleDriveEvent({ event: makeEvent(DriveEvent_Tags.FileArchived, { uuid: "file-archived" }) })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["file-archived"])
 		})
 
 		it("no-op when file is not in cache", async () => {
@@ -700,6 +752,22 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 		})
+
+		it("purges the trashed file uuid from the drive selection", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue({ uuid: "file-trash", parent: {} })
+
+			await handleDriveEvent({ event: makeFileTrashEvent("file-trash") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["file-trash"])
+		})
+
+		it("purges the selection even when the trashed file is NOT in the cache", async () => {
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(undefined)
+
+			await handleDriveEvent({ event: makeFileTrashEvent("file-not-cached") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["file-not-cached"])
+		})
 	})
 
 	describe("DriveEvent_Tags.FolderTrash", () => {
@@ -758,6 +826,25 @@ describe("handleDriveEvent — drive socket handler", () => {
 
 			expect(mockDriveItemsQueryUpdateGlobal).not.toHaveBeenCalled()
 			expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
+		})
+
+		it("purges the trashed folder uuid from the drive selection", async () => {
+			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
+				tag: AnyNormalDir_Tags.Dir,
+				inner: [{ uuid: "dir-trash", parent: {} }]
+			})
+
+			await handleDriveEvent({ event: makeFolderTrashEvent("dir-trash") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["dir-trash"])
+		})
+
+		it("purges the selection even when the trashed folder is NOT in the cache", async () => {
+			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue(undefined)
+
+			await handleDriveEvent({ event: makeFolderTrashEvent("dir-not-cached") })
+
+			expect(mockRemoveFromSelection).toHaveBeenCalledWith(["dir-not-cached"])
 		})
 	})
 

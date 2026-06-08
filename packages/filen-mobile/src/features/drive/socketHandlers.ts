@@ -6,6 +6,7 @@ import {
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
+import useDriveStore from "@/features/drive/store/useDrive.store"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
 
@@ -62,6 +63,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FileDeletedPermanent: {
 			const [inner] = eventInner.inner.inner
 
+			// The item left the current listing — purge it from the selection so
+			// the count / select-all toggle / bulk ops never target a ghost.
+			useDriveStore.getState().removeFromSelection([inner.uuid])
+
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
 			if (fromCache) {
@@ -87,6 +92,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 		case DriveEvent_Tags.FolderDeletedPermanent: {
 			const [inner] = eventInner.inner.inner
+
+			// The item left the current listing — purge it from the selection so
+			// the count / select-all toggle / bulk ops never target a ghost.
+			useDriveStore.getState().removeFromSelection([inner.uuid])
 
 			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
@@ -248,6 +257,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FileTrash: {
 			const [inner] = eventInner.inner.inner
 
+			// The item left the current listing — purge it from the selection so
+			// the count / select-all toggle / bulk ops never target a ghost.
+			useDriveStore.getState().removeFromSelection([inner.uuid])
+
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
 			if (fromCache) {
@@ -289,6 +302,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 		case DriveEvent_Tags.FolderTrash: {
 			const [inner] = eventInner.inner.inner
+
+			// The item left the current listing — purge it from the selection so
+			// the count / select-all toggle / bulk ops never target a ghost.
+			useDriveStore.getState().removeFromSelection([inner.uuid])
 
 			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
 
