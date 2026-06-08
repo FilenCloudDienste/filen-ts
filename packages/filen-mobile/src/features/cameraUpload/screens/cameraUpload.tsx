@@ -2,6 +2,7 @@ import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
+import { applyAfterActivationToggle } from "@/features/cameraUpload/cameraUploadHelpers"
 import View from "@/components/ui/view"
 import { Fragment, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
@@ -49,6 +50,14 @@ const CameraUpload = () => {
 					prev = {
 						...DEFAULT_CONFIG,
 						...prev
+					}
+
+					if (field === "afterActivation") {
+						return applyAfterActivationToggle({
+							config: prev,
+							enabled: !prev.afterActivation,
+							now: Date.now()
+						})
 					}
 
 					return {

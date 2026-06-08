@@ -74,3 +74,25 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 export function sanitizePathSegment(s: string): string {
 	return s.replace(/\//g, "_")
 }
+
+// Toggle the "after activation" camera-upload setting while keeping
+// `activationTimestamp` consistent. Enabling stamps `now` so `listLocal`'s
+// `gte(CREATION_TIME, activationTimestamp)` filter only matches assets created
+// from this moment on; disabling resets it to 0 so the filter is inert.
+// `now` is injected (rather than calling Date.now() here) so the transform
+// stays pure and deterministically testable.
+export function applyAfterActivationToggle<T extends { afterActivation: boolean; activationTimestamp: number }>({
+	config,
+	enabled,
+	now
+}: {
+	config: T
+	enabled: boolean
+	now: number
+}): T {
+	return {
+		...config,
+		afterActivation: enabled,
+		activationTimestamp: enabled ? now : 0
+	}
+}
