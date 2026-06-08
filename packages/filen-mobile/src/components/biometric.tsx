@@ -26,6 +26,10 @@ const LOCK_MULTIPLIER_INITIAL = 1
 const LOCK_MULTIPLIER_MAX_SECONDS = 3600
 const LOCK_BASE_MS = 1000
 
+export function remainingMs(now: number, lockedUntil: number): number {
+	return Math.max(0, lockedUntil - now)
+}
+
 const OVERLAY_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background"
 
 const ICON_BLOCK_SIZE = 80
@@ -357,9 +361,10 @@ function Locked({ lockedUntil, lockSeconds }: { lockedUntil: number; lockSeconds
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
 			const interval = setInterval(() => {
-				const ms = Math.max(0, lockedUntil - Date.now())
+				const ms = remainingMs(Date.now(), lockedUntil)
 
 				if (ms <= 0) {
+					clearInterval(interval)
 					setMsLeft(0)
 
 					setBiometric(prev => {
