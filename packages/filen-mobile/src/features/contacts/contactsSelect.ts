@@ -74,7 +74,9 @@ export function useSelectOptions() {
 				return {
 					multiple: parsed.multiple,
 					id: parsed.id,
-					userIdsToExclude: parsed.userIdsToExclude
+					// Default to [] so a stale/legacy serialized param missing this field can never reach
+					// render as undefined (consumers call .some/.includes on it synchronously).
+					userIdsToExclude: parsed.userIdsToExclude ?? []
 				}
 			} catch {
 				return null
