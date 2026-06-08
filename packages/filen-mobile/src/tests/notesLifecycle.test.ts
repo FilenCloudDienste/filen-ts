@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks (must be defined before any imports)
@@ -85,9 +85,11 @@ vi.mock("@filen/utils", async () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { restoreFromHistory } from "@/features/notes/notesLifecycle"
+import { restoreFromHistory, deleteNote } from "@/features/notes/notesLifecycle"
+import { leave } from "@/features/notes/notesParticipants"
 import { type Note, type NoteHistory } from "@/types"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import useNotesStore from "@/features/notes/store/useNotes.store"
 
 // ---------------------------------------------------------------------------
 // Factory helpers
@@ -347,5 +349,133 @@ describe("restoreFromHistory", () => {
 
 		expect(useNotesInflightStore.getState().inflightContent["note-uuid-1"]).toBeUndefined()
 		expect(mockFlushToDisk).toHaveBeenCalledTimes(1)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Tests: deleteNote selection purge (#14 — selection ghost)
+// ---------------------------------------------------------------------------
+
+describe("deleteNote selection purge", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+		mockGetSdkClients.mockReset()
+		mockNotesWithContentQueryUpdate.mockReset()
+		useNotesStore.getState().setSelectedNotes([])
+	})
+
+	afterEach(() => {
+		vi.clearAllTimers()
+		vi.useRealTimers()
+	})
+
+	it("removes the deleted note from selectedNotes immediately, leaving others intact", async () => {
+		const sdkClient = { deleteNote: vi.fn().mockResolvedValue(undefined) }
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const deleted = makeNote({ uuid: "note-uuid-1", trash: true })
+		const other = makeNote({ uuid: "other-uuid", trash: true })
+
+		useNotesStore.getState().setSelectedNotes([deleted, other])
+
+		await deleteNote({ note: deleted })
+
+		const selected = useNotesStore.getState().selectedNotes
+
+		expect(selected).toHaveLength(1)
+		expect(selected[0]?.uuid).toBe("other-uuid")
+	})
+
+	it("does not touch selectedNotes when the note is not trashed (early return)", async () => {
+		const sdkClient = { deleteNote: vi.fn().mockResolvedValue(undefined) }
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1", trash: false })
+
+		useNotesStore.getState().setSelectedNotes([note])
+
+		await deleteNote({ note })
+
+		expect(sdkClient.deleteNote).not.toHaveBeenCalled()
+		expect(useNotesStore.getState().selectedNotes).toHaveLength(1)
+	})
+
+	it("purges the selection before the 3s query-cache timeout fires", async () => {
+		const sdkClient = { deleteNote: vi.fn().mockResolvedValue(undefined) }
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const deleted = makeNote({ uuid: "note-uuid-1", trash: true })
+
+		useNotesStore.getState().setSelectedNotes([deleted])
+
+		await deleteNote({ note: deleted })
+
+		// Selection is cleared synchronously after the await, before any timer runs.
+		expect(useNotesStore.getState().selectedNotes).toHaveLength(0)
+		// The query-cache filter is still deferred to the timeout.
+		expect(mockNotesWithContentQueryUpdate).not.toHaveBeenCalled()
+
+		vi.advanceTimersByTime(3000)
+
+		expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledTimes(1)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Tests: leave() selection purge (#14 — selection ghost)
+// ---------------------------------------------------------------------------
+
+describe("leave selection purge", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+		mockGetSdkClients.mockReset()
+		mockNotesWithContentQueryUpdate.mockReset()
+		useNotesStore.getState().setSelectedNotes([])
+	})
+
+	afterEach(() => {
+		vi.clearAllTimers()
+		vi.useRealTimers()
+	})
+
+	it("removes the left note from selectedNotes immediately, leaving others intact", async () => {
+		const sdkClient = {
+			removeNoteParticipant: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1")),
+			toStringified: vi.fn().mockResolvedValue({ userId: 1n })
+		}
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const left = makeNote({ uuid: "note-uuid-1" })
+		const other = makeNote({ uuid: "other-uuid" })
+
+		useNotesStore.getState().setSelectedNotes([left, other])
+
+		await leave({ note: left })
+
+		const selected = useNotesStore.getState().selectedNotes
+
+		expect(selected).toHaveLength(1)
+		expect(selected[0]?.uuid).toBe("other-uuid")
+	})
+
+	it("purges the selection before the 3s query-cache timeout fires", async () => {
+		const sdkClient = {
+			removeNoteParticipant: vi.fn().mockResolvedValue(makeSdkNote("note-uuid-1")),
+			toStringified: vi.fn().mockResolvedValue({ userId: 1n })
+		}
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const left = makeNote({ uuid: "note-uuid-1" })
+
+		useNotesStore.getState().setSelectedNotes([left])
+
+		await leave({ note: left })
+
+		expect(useNotesStore.getState().selectedNotes).toHaveLength(0)
+		expect(mockNotesWithContentQueryUpdate).not.toHaveBeenCalled()
+
+		vi.advanceTimersByTime(3000)
+
+		expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledTimes(1)
 	})
 })
