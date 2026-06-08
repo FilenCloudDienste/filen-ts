@@ -2,17 +2,19 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { kvStore, notesState, mockNotesSetContent, mockFetchNotesWithContent, mockCreateExecutableTimeout } = vi.hoisted(() => ({
-	kvStore: new Map<string, unknown>(),
-	notesState: {
-		inflightContent: {} as Record<string, { timestamp: number; content: string; note: { uuid: string } }[]>
-	},
-	mockNotesSetContent: vi.fn().mockResolvedValue({
-		editedTimestamp: BigInt(0)
-	}),
-	mockFetchNotesWithContent: vi.fn().mockResolvedValue([]),
-	mockCreateExecutableTimeout: vi.fn()
-}))
+const { kvStore, notesState, mockNotesSetContent, mockFetchNotesWithContent, mockCreateExecutableTimeout, mockNotesWithContentQueryGet } =
+	vi.hoisted(() => ({
+		kvStore: new Map<string, unknown>(),
+		notesState: {
+			inflightContent: {} as Record<string, { timestamp: number; content: string; note: { uuid: string } }[]>
+		},
+		mockNotesSetContent: vi.fn().mockResolvedValue({
+			editedTimestamp: BigInt(0)
+		}),
+		mockFetchNotesWithContent: vi.fn().mockResolvedValue([]),
+		mockCreateExecutableTimeout: vi.fn(),
+		mockNotesWithContentQueryGet: vi.fn().mockReturnValue(null)
+	}))
 
 vi.mock("react-native", async () => {
 	const listeners = new Map<string, Set<(state: string) => void>>()
@@ -83,7 +85,8 @@ vi.mock("@/features/notes/notes", () => ({
 }))
 
 vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
-	fetchData: mockFetchNotesWithContent
+	fetchData: mockFetchNotesWithContent,
+	notesWithContentQueryGet: mockNotesWithContentQueryGet
 }))
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
@@ -118,6 +121,7 @@ describe("Sync (Notes)", () => {
 		mockNotesSetContent.mockClear()
 		mockFetchNotesWithContent.mockResolvedValue([])
 		mockCreateExecutableTimeout.mockClear()
+		mockNotesWithContentQueryGet.mockReturnValue(null)
 		vi.mocked(sqlite.kvAsync.get).mockClear()
 		vi.mocked(sqlite.kvAsync.set).mockClear()
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
@@ -465,6 +469,100 @@ describe("Sync (Notes)", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(mockNotesSetContent).not.toHaveBeenCalled()
+		})
+
+		it("uses the live note from query cache when available (#34 fix)", async () => {
+			// If the note's metadata changed (e.g. type change via socket) between
+			// the render-time snapshot stored in inflightContent and the debounce
+			// flush, sync() must use the live cache entry, not the stale snapshot.
+			const staleNote = { uuid: "note-1", noteType: "text" }
+			const liveNote = { uuid: "note-1", noteType: "richtext" }
+
+			mockNotesWithContentQueryGet.mockReturnValue([liveNote])
+
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "hello", note: staleNote as unknown as ReturnType<typeof mockNote> }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// setContent must have been called with the live note, not the stale snapshot
+			expect(mockNotesSetContent).toHaveBeenCalledWith(
+				expect.objectContaining({ note: liveNote })
+			)
+		})
+
+		it("falls back to the inflight snapshot when note is absent from cache (#34 fix)", async () => {
+			// If the note was concurrently deleted (cache returns null / note not found),
+			// sync() must fall back to the inflight snapshot rather than dropping the entry.
+			const snapshotNote = { uuid: "note-1" }
+
+			mockNotesWithContentQueryGet.mockReturnValue([]) // note not in cache
+
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "content", note: snapshotNote as ReturnType<typeof mockNote> }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledWith(
+				expect.objectContaining({ note: snapshotNote })
+			)
+		})
+
+		it("falls back to the inflight snapshot when notesWithContentQueryGet returns null (#34 fix)", async () => {
+			const snapshotNote = { uuid: "note-1" }
+
+			mockNotesWithContentQueryGet.mockReturnValue(null) // cache not yet populated
+
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "cold-start", note: snapshotNote as ReturnType<typeof mockNote> }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledWith(
+				expect.objectContaining({ note: snapshotNote })
+			)
 		})
 
 		it("skips uploading when device is offline", async () => {
