@@ -40,6 +40,7 @@ const Photos = () => {
 	useFocusEffect(
 		useCallback(() => {
 			useDriveStore.getState().clearSelectedItems()
+			usePhotosStore.getState().setVisibleDateRange(null)
 
 			return () => {
 				useDriveStore.getState().clearSelectedItems()
@@ -147,7 +148,7 @@ const Photos = () => {
 
 								cameraUpload.sync().catch(console.error)
 							}}
-							loading={driveItemsQuery.status !== "success"}
+							loading={driveItemsQuery.status === "pending"}
 							emptyComponent={() => (
 								<ListEmpty
 									icon="images-outline"
