@@ -14,35 +14,44 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/features/contacts/queries/useContacts.query", () => ({
 	contactsQueryUpdate: vi.fn((opts: { updater: (prev: unknown) => unknown }) => {
 		contactsQueryUpdates.push(opts)
-	})
+	}),
+	BASE_QUERY_KEY: "useContactsQuery"
 }))
 
 vi.mock("@/features/contacts/queries/useContactRequests.query", () => ({
 	contactRequestsQueryUpdate: vi.fn((opts: { updater: (prev: unknown) => unknown }) => {
 		contactRequestsQueryUpdates.push(opts)
-	})
+	}),
+	BASE_QUERY_KEY: "useContactRequestsQuery"
+}))
+
+vi.mock("@/queries/client", () => ({
+	default: {
+		invalidateQueries: vi.fn().mockResolvedValue(undefined)
+	}
 }))
 
 import auth from "@/lib/auth"
 import contacts from "@/features/contacts/contacts"
 import { contactsQueryUpdate } from "@/features/contacts/queries/useContacts.query"
 import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useContactRequests.query"
+import queryClient from "@/queries/client"
 
 function makeContact(overrides?: {
 	uuid?: string
-	userId?: number
+	userId?: bigint
 	email?: string
 	avatar?: string | null
 	nickName?: string | null
-	timestamp?: number
+	timestamp?: bigint
 }) {
 	return {
 		uuid: "aaaa-1111",
-		userId: 1,
+		userId: 1n,
 		email: "alice@example.com",
 		avatar: null,
 		nickName: null,
-		timestamp: 1000,
+		timestamp: 1000n,
 		...overrides
 	}
 }
@@ -62,42 +71,44 @@ beforeEach(() => {
 })
 
 describe("contacts.block", () => {
-	it("throws 'Contact not found' when the contact does not exist in the fetched list", async () => {
-		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: {
-				getContacts: vi.fn().mockResolvedValue([]),
-				blockContact: vi.fn().mockResolvedValue(undefined)
-			}
-		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
-
-		await expect(contacts.block({ email: "nobody@example.com" })).rejects.toThrow("Contact not found")
-	})
-
-	it("does not call blockContact when the contact is not found", async () => {
-		const blockContact = vi.fn()
+	it("calls blockContact with the email", async () => {
+		const blockContact = vi.fn().mockResolvedValue(undefined)
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: {
-				getContacts: vi.fn().mockResolvedValue([]),
-				blockContact
-			}
+			authedSdkClient: { blockContact }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
-		await expect(contacts.block({ email: "ghost@example.com" })).rejects.toThrow()
-		expect(blockContact).not.toHaveBeenCalled()
+		const alice = makeContact({ email: "alice@example.com", uuid: "uuid-alice", userId: 42n })
+
+		await contacts.block({
+			uuid: alice.uuid,
+			userId: alice.userId,
+			email: alice.email,
+			avatar: alice.avatar ?? undefined,
+			nickName: alice.nickName ?? undefined,
+			timestamp: alice.timestamp
+		})
+
+		expect(blockContact).toHaveBeenCalledWith("alice@example.com", undefined)
 	})
 
 	it("moves the contact from contacts to blocked in the query cache update", async () => {
-		const alice = makeContact({ email: "alice@example.com", uuid: "uuid-alice", userId: 42, nickName: "Al" })
+		const alice = makeContact({ email: "alice@example.com", uuid: "uuid-alice", userId: 42n, nickName: "Al" })
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
-				getContacts: vi.fn().mockResolvedValue([alice]),
 				blockContact: vi.fn().mockResolvedValue(undefined)
 			}
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
-		await contacts.block({ email: "alice@example.com" })
+		await contacts.block({
+			uuid: alice.uuid,
+			userId: alice.userId,
+			email: alice.email,
+			avatar: alice.avatar ?? undefined,
+			nickName: alice.nickName ?? undefined,
+			timestamp: alice.timestamp
+		})
 
 		expect(contactsQueryUpdate).toHaveBeenCalledOnce()
 
@@ -108,7 +119,7 @@ describe("contacts.block", () => {
 		expect(next.contacts).toHaveLength(0)
 		expect(next.blocked).toHaveLength(1)
 		expect(next.blocked[0]!.uuid).toBe("uuid-alice")
-		expect(next.blocked[0]!.userId).toBe(42)
+		expect(next.blocked[0]!.userId).toBe(42n)
 		expect(next.blocked[0]!.nickName).toBe("Al")
 	})
 
@@ -117,12 +128,18 @@ describe("contacts.block", () => {
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
-				getContacts: vi.fn().mockResolvedValue([bob]),
 				blockContact: vi.fn().mockResolvedValue(undefined)
 			}
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
-		await contacts.block({ email: "bob@example.com" })
+		await contacts.block({
+			uuid: bob.uuid,
+			userId: bob.userId,
+			email: bob.email,
+			avatar: bob.avatar ?? undefined,
+			nickName: bob.nickName ?? undefined,
+			timestamp: bob.timestamp
+		})
 
 		const update = vi.mocked(contactsQueryUpdate).mock.calls[0]![0]
 		const prev = { contacts: [bob], blocked: [] as (typeof bob)[] }
@@ -132,18 +149,23 @@ describe("contacts.block", () => {
 	})
 
 	it("deduplicates an already-blocked entry identified by email before inserting the new one", async () => {
-		// existingBlocked has the SAME email but a DIFFERENT uuid — exercises the email-based filter
 		const carol = makeContact({ email: "carol@example.com", uuid: "uuid-carol-new" })
 		const existingBlocked = { ...carol, uuid: "uuid-carol-old", nickName: "" }
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
-				getContacts: vi.fn().mockResolvedValue([carol]),
 				blockContact: vi.fn().mockResolvedValue(undefined)
 			}
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
-		await contacts.block({ email: "carol@example.com" })
+		await contacts.block({
+			uuid: carol.uuid,
+			userId: carol.userId,
+			email: carol.email,
+			avatar: carol.avatar ?? undefined,
+			nickName: carol.nickName ?? undefined,
+			timestamp: carol.timestamp
+		})
 
 		const update = vi.mocked(contactsQueryUpdate).mock.calls[0]![0]
 		const prev = { contacts: [carol], blocked: [existingBlocked] }
@@ -155,18 +177,26 @@ describe("contacts.block", () => {
 		expect(next.blocked[0]!.email).toBe("carol@example.com")
 	})
 
-	it("passes the AbortSignal to getContacts and blockContact when provided", async () => {
-		const getContacts = vi.fn().mockResolvedValue([makeContact({ email: "sig@example.com" })])
+	it("passes the AbortSignal to blockContact when provided", async () => {
 		const blockContact = vi.fn().mockResolvedValue(undefined)
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: { getContacts, blockContact }
+			authedSdkClient: { blockContact }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
+		const contact = makeContact({ email: "sig@example.com" })
 		const controller = new AbortController()
-		await contacts.block({ email: "sig@example.com", signal: controller.signal })
 
-		expect(getContacts).toHaveBeenCalledWith({ signal: controller.signal })
+		await contacts.block({
+			uuid: contact.uuid,
+			userId: contact.userId,
+			email: contact.email,
+			avatar: contact.avatar ?? undefined,
+			nickName: contact.nickName ?? undefined,
+			timestamp: contact.timestamp,
+			signal: controller.signal
+		})
+
 		expect(blockContact).toHaveBeenCalledWith("sig@example.com", { signal: controller.signal })
 	})
 })
@@ -301,13 +331,11 @@ describe("contacts.delete", () => {
 })
 
 describe("contacts.acceptRequest", () => {
-	it("filters the accepted request from incoming and updates contacts wholesale", async () => {
-		const alice = makeContact({ email: "alice@example.com", uuid: "uuid-alice" })
-		const getContacts = vi.fn().mockResolvedValue([alice])
+	it("filters the accepted request from incoming in contactRequestsQueryUpdate", async () => {
 		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: { acceptContactRequest, getContacts }
+			authedSdkClient: { acceptContactRequest }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
 		await contacts.acceptRequest({ uuid: "req-accept-1" })
@@ -325,40 +353,32 @@ describe("contacts.acceptRequest", () => {
 		expect(reqNext.outgoing).toEqual([])
 	})
 
-	it("replaces the contacts list wholesale in contactsQueryUpdate after acceptRequest", async () => {
-		const freshContacts = [
-			makeContact({ email: "bob@example.com", uuid: "uuid-bob" }),
-			makeContact({ email: "carol@example.com", uuid: "uuid-carol" })
-		]
-		const getContacts = vi.fn().mockResolvedValue(freshContacts)
+	it("invalidates both contacts and contactRequests queries after acceptRequest instead of calling getContacts() inline", async () => {
+		// #45 fix: acceptRequest now uses queryClient.invalidateQueries for both caches
+		// rather than an inline getContacts() call that could leave them inconsistent.
 		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: { acceptContactRequest, getContacts }
+			authedSdkClient: { acceptContactRequest }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
-		await contacts.acceptRequest({ uuid: "req-accept-fresh" })
+		await contacts.acceptRequest({ uuid: "req-invalidate" })
 
-		expect(contactsQueryUpdate).toHaveBeenCalledOnce()
-		const contactUpdate = vi.mocked(contactsQueryUpdate).mock.calls[0]![0]
-		const staleContacts = [makeContact({ email: "stale@example.com", uuid: "uuid-stale" })]
-		const contactPrev = { contacts: staleContacts, blocked: [] }
-		const contactNext = (contactUpdate as unknown as { updater: (p: typeof contactPrev) => typeof contactPrev }).updater(contactPrev)
+		// contactsQueryUpdate must NOT be called (no inline getContacts anymore)
+		expect(contactsQueryUpdate).not.toHaveBeenCalled()
 
-		// contacts is fully replaced with the fresh list fetched from the SDK
-		expect(contactNext.contacts).toHaveLength(2)
-		expect(contactNext.contacts[0]!.uuid).toBe("uuid-bob")
-		expect(contactNext.contacts[1]!.uuid).toBe("uuid-carol")
-		// blocked is preserved unchanged
-		expect(contactNext.blocked).toEqual([])
+		// invalidateQueries must be called for both keys
+		expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(2)
+		const calls = vi.mocked(queryClient.invalidateQueries).mock.calls.map(c => (c[0] as { queryKey: string[] }).queryKey[0])
+		expect(calls).toContain("useContactsQuery")
+		expect(calls).toContain("useContactRequestsQuery")
 	})
 
 	it("calls acceptContactRequest with the uuid and no options when no signal is given", async () => {
 		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
-		const getContacts = vi.fn().mockResolvedValue([])
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: { acceptContactRequest, getContacts }
+			authedSdkClient: { acceptContactRequest }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
 		await contacts.acceptRequest({ uuid: "req-no-sig" })
@@ -366,48 +386,40 @@ describe("contacts.acceptRequest", () => {
 		expect(acceptContactRequest).toHaveBeenCalledWith("req-no-sig", undefined)
 	})
 
-	it("passes the AbortSignal to acceptContactRequest and getContacts when provided", async () => {
+	it("passes the AbortSignal to acceptContactRequest when provided", async () => {
 		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
-		const getContacts = vi.fn().mockResolvedValue([])
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: { acceptContactRequest, getContacts }
+			authedSdkClient: { acceptContactRequest }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
 		const controller = new AbortController()
 		await contacts.acceptRequest({ uuid: "req-sig", signal: controller.signal })
 
 		expect(acceptContactRequest).toHaveBeenCalledWith("req-sig", { signal: controller.signal })
-		expect(getContacts).toHaveBeenCalledWith({ signal: controller.signal })
 	})
 
-	it("propagates getContacts error after acceptContactRequest succeeds — incoming already filtered, contacts not updated", async () => {
-		const networkError = new Error("network failure")
+	it("still filters incoming request from cache even when the server call succeeds (pre-invalidation optimistic update)", async () => {
 		const acceptContactRequest = vi.fn().mockResolvedValue(undefined)
-		const getContacts = vi.fn().mockRejectedValue(networkError)
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
-			authedSdkClient: { acceptContactRequest, getContacts }
+			authedSdkClient: { acceptContactRequest }
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
-		await expect(contacts.acceptRequest({ uuid: "req-partial-fail" })).rejects.toThrow("network failure")
+		await contacts.acceptRequest({ uuid: "req-partial-ok" })
 
-		// acceptContactRequest succeeded
-		expect(acceptContactRequest).toHaveBeenCalledWith("req-partial-fail", undefined)
-
-		// contactRequestsQueryUpdate was called (incoming was already filtered before getContacts threw)
+		// contactRequestsQueryUpdate was called (incoming was filtered)
 		expect(contactRequestsQueryUpdate).toHaveBeenCalledOnce()
 		const reqUpdate = vi.mocked(contactRequestsQueryUpdate).mock.calls[0]?.[0]
 		const reqPrev = {
-			incoming: [{ uuid: "req-partial-fail" }, { uuid: "req-other" }],
+			incoming: [{ uuid: "req-partial-ok" }, { uuid: "req-other" }],
 			outgoing: [] as Array<{ uuid: string }>
 		}
 		const reqNext = (reqUpdate as unknown as { updater: (p: typeof reqPrev) => typeof reqPrev }).updater(reqPrev)
-		// the accepted request uuid was removed from incoming
 		expect(reqNext.incoming).toHaveLength(1)
 		expect(reqNext.incoming[0]!.uuid).toBe("req-other")
 
-		// contactsQueryUpdate was NOT called because getContacts threw before it could run
+		// contacts is refreshed via invalidation, not a direct cache write
 		expect(contactsQueryUpdate).not.toHaveBeenCalled()
 	})
 })

@@ -1,6 +1,7 @@
 import auth from "@/lib/auth"
-import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useContactRequests.query"
-import { contactsQueryUpdate } from "@/features/contacts/queries/useContacts.query"
+import { contactRequestsQueryUpdate, BASE_QUERY_KEY as CONTACT_REQUESTS_QUERY_KEY } from "@/features/contacts/queries/useContactRequests.query"
+import { contactsQueryUpdate, BASE_QUERY_KEY as CONTACTS_QUERY_KEY } from "@/features/contacts/queries/useContacts.query"
+import queryClient from "@/queries/client"
 
 // Stateless namespace of contact operations (requests, block/unblock, delete). No instance
 // state, so a plain object rather than a class. Silent: throws on failure; UI owns error UX.
@@ -17,6 +18,7 @@ const contacts = {
 				: undefined
 		)
 
+		// Remove the accepted request from the cache immediately for instant UI feedback.
 		contactRequestsQueryUpdate({
 			updater: prev => ({
 				...prev,
@@ -24,19 +26,15 @@ const contacts = {
 			})
 		})
 
-		const contacts = await authedSdkClient.getContacts(
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-
-		contactsQueryUpdate({
-			updater: prev => ({
-				...prev,
-				contacts
-			})
+		// Invalidate both queries so TanStack Query re-fetches with retry rather than
+		// doing an inline getContacts() that — if it fails — would leave the request
+		// removed but the new contact absent (inconsistent gap until next focus refetch).
+		// Consistent with the bulk-accept path in contactsHeader.tsx.
+		queryClient.invalidateQueries({ queryKey: [CONTACTS_QUERY_KEY] }).catch(e => {
+			console.error("[contacts.acceptRequest] Failed to invalidate contacts query", e)
+		})
+		queryClient.invalidateQueries({ queryKey: [CONTACT_REQUESTS_QUERY_KEY] }).catch(e => {
+			console.error("[contacts.acceptRequest] Failed to invalidate contactRequests query", e)
 		})
 	},
 
@@ -80,20 +78,24 @@ const contacts = {
 		})
 	},
 
-	async block({ email, signal }: { email: string; signal?: AbortSignal }) {
+	async block({
+		uuid,
+		userId,
+		email,
+		avatar,
+		nickName,
+		timestamp,
+		signal
+	}: {
+		uuid: string
+		userId: bigint
+		email: string
+		avatar: string | undefined
+		nickName: string | undefined
+		timestamp: bigint
+		signal?: AbortSignal
+	}) {
 		const { authedSdkClient } = await auth.getSdkClients()
-		const contacts = await authedSdkClient.getContacts(
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-		const contactToBlock = contacts.find(c => c.email === email)
-
-		if (!contactToBlock) {
-			throw new Error("Contact not found")
-		}
 
 		await authedSdkClient.blockContact(
 			email,
@@ -111,12 +113,12 @@ const contacts = {
 				blocked: [
 					...prev.blocked.filter(c => c.email !== email),
 					{
-						uuid: contactToBlock.uuid,
-						userId: contactToBlock.userId,
-						email: contactToBlock.email,
-						avatar: contactToBlock.avatar,
-						nickName: contactToBlock.nickName ?? "",
-						timestamp: contactToBlock.timestamp
+						uuid,
+						userId,
+						email,
+						avatar,
+						nickName: nickName ?? "",
+						timestamp
 					}
 				]
 			})
