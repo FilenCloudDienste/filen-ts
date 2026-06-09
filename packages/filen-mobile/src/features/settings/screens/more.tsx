@@ -146,7 +146,7 @@ function More() {
 									]
 								: []),
 							{
-								icon: "share-outline",
+								icon: "download-outline",
 								title: t("shared_with_me"),
 								onPress: () => {
 									router.push({

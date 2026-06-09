@@ -27,8 +27,8 @@ const ListEmpty = ({
 				size={64}
 				color={textMutedForeground.color}
 			/>
-			<Text className="text-base text-foreground mt-2 text-center">{title}</Text>
-			{description ? <Text className="text-xs text-muted-foreground text-center">{description}</Text> : null}
+			<Text className="text-base text-foreground mt-2 text-center max-w-xs">{title}</Text>
+			{description ? <Text className="text-xs text-muted-foreground text-center max-w-xs">{description}</Text> : null}
 			{action ? <View className="mt-4 bg-transparent">{action}</View> : null}
 		</View>
 	)
