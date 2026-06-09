@@ -73,7 +73,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 			requiresOnline: true,
 			onPress: async () => {
 				const permissionsResult = await run(async () => {
-					return await hasAllNeededMediaPermissions({ shouldRequest: true })
+					return await hasAllNeededMediaPermissions({ shouldRequest: true, library: "any", needCamera: false })
 				})
 
 				if (!permissionsResult.success) {

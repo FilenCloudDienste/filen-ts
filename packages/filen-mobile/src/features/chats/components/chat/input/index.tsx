@@ -434,7 +434,9 @@ const Input = ({ chat }: { chat: Chat }) => {
 								const permissionsResult = await run(async () => {
 									return await withSystemPresentation(() =>
 										hasAllNeededMediaPermissions({
-											shouldRequest: true
+											shouldRequest: true,
+											library: "none",
+											needCamera: false
 										})
 									)
 								})
@@ -499,7 +501,9 @@ const Input = ({ chat }: { chat: Chat }) => {
 								const permissionsResult = await run(async () => {
 									return await withSystemPresentation(() =>
 										hasAllNeededMediaPermissions({
-											shouldRequest: true
+											shouldRequest: true,
+											needCamera: true,
+											library: "none"
 										})
 									)
 								})

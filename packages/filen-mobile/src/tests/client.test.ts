@@ -1049,6 +1049,6 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		await fetchData()
 
-		expect(mockHasPermissions).toHaveBeenCalledWith({ shouldRequest: true })
+		expect(mockHasPermissions).toHaveBeenCalledWith({ library: "all", needCamera: false })
 	})
 })
