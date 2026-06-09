@@ -74,6 +74,10 @@ export class File {
 		return this.exists ? Date.now() : null
 	}
 
+	get lastModified(): number | null {
+		return this.exists ? Date.now() : null
+	}
+
 	get creationTime(): number | null {
 		return this.exists ? Date.now() : null
 	}

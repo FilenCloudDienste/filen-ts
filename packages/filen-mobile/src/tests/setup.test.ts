@@ -179,15 +179,33 @@ describe("setup.setup", () => {
 		expect(mockSweepStrayDownloadFiles).not.toHaveBeenCalled()
 	})
 
-	it("initialises secureStore, sqlite, cache, queries, i18n, and theme unconditionally", async () => {
+	it("initialises secureStore, sqlite, queries, i18n, and theme unconditionally", async () => {
 		await setup.setup()
 
 		expect(mockSecureStore.init).toHaveBeenCalledOnce()
 		expect(mockSqlite.init).toHaveBeenCalledOnce()
-		expect(mockCache.restore).toHaveBeenCalledOnce()
 		expect(mockRestoreQueries).toHaveBeenCalledOnce()
 		expect(mockInitI18n).toHaveBeenCalledOnce()
 		expect(mockInitTheme).toHaveBeenCalledOnce()
+	})
+
+	// #1 — cache.restore() is gated on auth: the persistent caches hold decrypted-at-rest metadata,
+	// so they must not be hydrated while logged out (that would re-surface a prior account's data and
+	// defeat the logout wipe).
+	it("restores the cache when authenticated", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+
+		expect(mockCache.restore).toHaveBeenCalledOnce()
+	})
+
+	it("does NOT restore the cache when unauthenticated", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
+
+		await setup.setup()
+
+		expect(mockCache.restore).not.toHaveBeenCalled()
 	})
 
 	it("throws when the inner run callback rejects", async () => {

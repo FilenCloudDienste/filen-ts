@@ -869,4 +869,284 @@ describe("SecureStore", () => {
 			expect(backupFiles.length > 0 || destExists).toBe(true)
 		})
 	})
+
+	describe("present-but-unreadable file does not clobber the store (finding 51)", () => {
+		const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
+
+		it("set() rejects and leaves the encrypted file untouched (does not shrink it to one key)", async () => {
+			// Write a multi-key store and capture the real encryption key.
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client-with-master-keys")
+			await store1.set("fileProvider", true)
+			await store1.set("biometric", "fallback")
+
+			const encryptionKey = await keyCapture
+
+			// Snapshot the intact encrypted blob, then corrupt it so AES-256-GCM auth-tag verification
+			// fails — a present-but-unreadable file (transient IO/decrypt error or partial corruption).
+			const intactBytes = fs.get(fileUri) as Uint8Array
+
+			expect(intactBytes).toBeInstanceOf(Uint8Array)
+
+			const corruptedBytes = new Uint8Array(intactBytes)
+
+			// Flip a byte inside the ciphertext region (after the 12-byte IV) so the auth tag fails.
+			corruptedBytes[20] = (corruptedBytes[20] ?? 0) ^ 0xff
+			fs.set(fileUri, corruptedBytes)
+
+			// A fresh instance with the CORRECT key cannot decrypt the corrupt file.
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			// set() must REJECT — never silently treat the unreadable file as empty.
+			await expect(store2.set("attacker", "single-key")).rejects.toThrow()
+
+			// The on-disk file must be byte-for-byte unchanged: it was NOT overwritten with a brand-new
+			// single-key payload. The other secrets are preserved on disk.
+			const afterBytes = fs.get(fileUri) as Uint8Array
+
+			expect(afterBytes).toEqual(corruptedBytes)
+			expect(afterBytes.length).toBe(corruptedBytes.length)
+
+			// Restore the intact bytes (simulating the transient failure clearing) and prove every
+			// original key is still recoverable — nothing was destroyed.
+			fs.set(fileUri, intactBytes)
+
+			const store3 = createSecureStore()
+
+			await store3.init()
+
+			expect(await store3.get("client")).toBe("stringified-client-with-master-keys")
+			expect(await store3.get("fileProvider")).toBe(true)
+			expect(await store3.get("biometric")).toBe("fallback")
+		})
+
+		it("remove() rejects on a present-but-unreadable file and leaves it untouched", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client")
+			await store1.set("theme", "dark")
+
+			const encryptionKey = await keyCapture
+			const intactBytes = fs.get(fileUri) as Uint8Array
+			const corruptedBytes = new Uint8Array(intactBytes)
+
+			corruptedBytes[15] = (corruptedBytes[15] ?? 0) ^ 0xff
+			fs.set(fileUri, corruptedBytes)
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			await expect(store2.remove("theme")).rejects.toThrow()
+
+			expect(fs.get(fileUri)).toEqual(corruptedBytes)
+		})
+
+		it("init() rejects on a present-but-unreadable file rather than initializing empty", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client")
+
+			const encryptionKey = await keyCapture
+			const intactBytes = fs.get(fileUri) as Uint8Array
+			const corruptedBytes = new Uint8Array(intactBytes)
+
+			corruptedBytes[18] = (corruptedBytes[18] ?? 0) ^ 0xff
+			fs.set(fileUri, corruptedBytes)
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+			mockEvents.emit.mockClear()
+
+			const store2 = createSecureStore()
+
+			await expect(store2.init()).rejects.toThrow()
+
+			// It must NOT have emitted an empty-store init (no secureStoreChange events).
+			const changeEmits = mockEvents.emit.mock.calls.filter(([event]) => event === "secureStoreChange")
+
+			expect(changeEmits).toHaveLength(0)
+		})
+
+		it("a genuinely-absent file still initializes empty (absence is not a failure)", async () => {
+			// No prior writes — the destination file never exists.
+			const store = createSecureStore()
+
+			mockEvents.emit.mockClear()
+
+			await expect(store.init()).resolves.not.toThrow()
+
+			// An empty store: a missing key returns null, and a set then succeeds.
+			expect(await store.get("missing")).toBeNull()
+
+			await expect(store.set("first", "value")).resolves.not.toThrow()
+			expect(await store.get("first")).toBe("value")
+		})
+
+		it("get() still degrades to null on an unreadable file (non-destructive read path)", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client")
+
+			const encryptionKey = await keyCapture
+			const intactBytes = fs.get(fileUri) as Uint8Array
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			// Init against the valid file so the store is warm (initDone), then corrupt the file and
+			// drop the warm cache to force get() down its degrading read() path (not init()).
+			const store2 = createSecureStore()
+
+			await store2.init()
+
+			const corruptedBytes = new Uint8Array(intactBytes)
+
+			corruptedBytes[16] = (corruptedBytes[16] ?? 0) ^ 0xff
+			fs.set(fileUri, corruptedBytes)
+			store2.readCache = null
+
+			// get() never throws — it degrades to null. (It does not corrupt the file either.)
+			const value = await store2.get("client")
+
+			expect(value).toBeNull()
+			expect(fs.get(fileUri)).toEqual(corruptedBytes)
+		})
+	})
+
+	describe("crash-recovery from orphaned backup (finding 52)", () => {
+		const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
+		const dirUri = "file:///shared/group.io.filen.app/secureStore/v1"
+
+		/**
+		 * Simulates the write() hard-crash window: the live store has been moved aside to a
+		 * UUID-named .securestore.bak.* sibling and the destination has not yet been re-created.
+		 * Returns the backup uri.
+		 */
+		function simulateCrashedWriteBackup(): string {
+			const intactBytes = fs.get(fileUri) as Uint8Array
+
+			expect(intactBytes).toBeInstanceOf(Uint8Array)
+
+			const backupUri = `${dirUri}/.securestore.bak.crash-uuid`
+
+			fs.set(backupUri, intactBytes)
+			fs.delete(fileUri)
+
+			return backupUri
+		}
+
+		it("read() recovers data from an orphaned backup when the destination is missing", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client-with-master-keys")
+			await store1.set("language", "en")
+
+			const encryptionKey = await keyCapture
+
+			const backupUri = simulateCrashedWriteBackup()
+
+			expect(fs.has(fileUri)).toBe(false)
+			expect(fs.has(backupUri)).toBe(true)
+
+			// A fresh instance with the correct key must recover from the backup.
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			expect(await store2.get("client")).toBe("stringified-client-with-master-keys")
+			expect(await store2.get("language")).toBe("en")
+
+			// The recovered payload is promoted back into the canonical destination.
+			expect(fs.has(fileUri)).toBe(true)
+		})
+
+		it("init() recovers and re-emits every key from an orphaned backup", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client")
+			await store1.set("fileProvider", true)
+
+			const encryptionKey = await keyCapture
+
+			simulateCrashedWriteBackup()
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+			mockEvents.emit.mockClear()
+
+			const store2 = createSecureStore()
+
+			await store2.init()
+
+			const changeEmits = mockEvents.emit.mock.calls.filter(([event]) => event === "secureStoreChange")
+
+			expect(changeEmits).toContainEqual(["secureStoreChange", { key: "client", value: "stringified-client" }])
+			expect(changeEmits).toContainEqual(["secureStoreChange", { key: "fileProvider", value: true }])
+
+			// Destination restored from the backup.
+			expect(fs.has(fileUri)).toBe(true)
+		})
+
+		it("discards a corrupt backup that fails to decrypt and reports an empty store", async () => {
+			// No prior write: only an undecryptable backup exists alongside a missing destination.
+			const store = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			// Trigger key generation so the store has a stable key, then drop a garbage backup.
+			await store.init()
+
+			await keyCapture
+
+			const backupUri = `${dirUri}/.securestore.bak.garbage`
+
+			fs.set(backupUri, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
+
+			// The corrupt backup must be ignored (it fails the auth-tag gate) — the store stays empty,
+			// no spurious recovery, and the destination is not created from garbage.
+			expect(await store.get("anything")).toBeNull()
+		})
+
+		it("prefers a present+valid destination and cleans up stale backups", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "current-value")
+
+			const encryptionKey = await keyCapture
+
+			// A stale backup sibling coexists with a valid destination (e.g. an orphaned backup from a
+			// prior interrupted write that nonetheless completed).
+			const staleBackupUri = `${dirUri}/.securestore.bak.stale`
+			const staleTmpUri = `${dirUri}/.securestore.tmp.stale`
+
+			fs.set(staleBackupUri, fs.get(fileUri) as Uint8Array)
+			fs.set(staleTmpUri, new Uint8Array([0, 1, 2]))
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			// Reads the live destination, not the stale backup.
+			expect(await store2.get("client")).toBe("current-value")
+
+			// After a confirmed-valid destination read, stale siblings are opportunistically cleaned.
+			expect(fs.has(staleBackupUri)).toBe(false)
+			expect(fs.has(staleTmpUri)).toBe(false)
+			expect(fs.has(fileUri)).toBe(true)
+		})
+	})
 })

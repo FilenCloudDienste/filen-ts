@@ -370,8 +370,16 @@ class CameraUpload {
 				// duplicates consistently receive a collision suffix – stable across runs.
 				// Filename is used as tiebreaker so both local and remote trees resolve
 				// equal creationTimes in the same order.
+				//
+				// Timestamps are floored to seconds before comparison so that sub-second
+				// rounding differences between the local PHAsset timestamp and the server's
+				// stored value (after EXIF-override or network round-trip) do not produce
+				// different orderings across syncs. Null creationTime falls back to
+				// modificationTime, then 0, mirroring the remote-side behaviour.
 				infos.sort((a, b) => {
-					const timeDiff = (a.info.creationTime ?? 0) - (b.info.creationTime ?? 0)
+					const tA = Math.floor((a.info.creationTime ?? a.info.modificationTime ?? 0) / 1000)
+					const tB = Math.floor((b.info.creationTime ?? b.info.modificationTime ?? 0) / 1000)
+					const timeDiff = tA - tB
 
 					if (timeDiff !== 0) {
 						return timeDiff
@@ -386,6 +394,13 @@ class CameraUpload {
 					let path = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).toLowerCase().trim()
 					let iteration = 0
 
+					// Use a seconds-floored creation timestamp as the collision identity.
+					// Flooring to seconds absorbs sub-second drift from EXIF-override or
+					// network round-trips, keeping local and remote trees symmetric without
+					// any per-asset file read at listing time. Null creationTime falls back
+					// to modificationTime then 0, mirroring the remote side.
+					const localContentHash = String(Math.floor((info.creationTime ?? info.modificationTime ?? 0) / 1000))
+
 					while (tree[path]) {
 						path =
 							modifyAssetPathOnCollision({
@@ -393,7 +408,7 @@ class CameraUpload {
 								path,
 								asset: {
 									name: info.filename,
-									creationTime: info.creationTime ?? 0
+									contentHash: localContentHash
 								}
 							}) ?? ""
 
@@ -446,13 +461,19 @@ class CameraUpload {
 		// mirroring the listLocal sort order. The server does not guarantee a stable return
 		// order, so without sorting, collision resolution would assign different path slots
 		// to the same files across runs, causing spurious re-uploads.
+		//
+		// Timestamps are floored to seconds before comparison to match the listLocal
+		// sort behaviour and absorb sub-second drift introduced by EXIF-override or
+		// network round-trips.  Null meta falls back to 0, mirroring the local side.
 		const sortedFiles = files
 			.map(file => ({
 				file,
 				meta: unwrapFileMeta(file.file).meta
 			}))
 			.sort((a, b) => {
-				const timeDiff = (a.meta ? Number(a.meta.created) : 0) - (b.meta ? Number(b.meta.created) : 0)
+				const tA = Math.floor(Number(a.meta?.created ?? 0) / 1000)
+				const tB = Math.floor(Number(b.meta?.created ?? 0) / 1000)
+				const timeDiff = tA - tB
 
 				if (timeDiff !== 0) {
 					return timeDiff
@@ -465,6 +486,10 @@ class CameraUpload {
 			let path = normalizeFilePathForSdk(file.path).toLowerCase().trim()
 			let iteration = 0
 
+			// Use a seconds-floored creation timestamp as the contentHash, matching
+			// the local listLocal computation exactly for symmetric collision resolution.
+			const remoteContentHash = String(Math.floor(Number(meta?.created ?? 0) / 1000))
+
 			while (tree[path]) {
 				path =
 					modifyAssetPathOnCollision({
@@ -472,7 +497,7 @@ class CameraUpload {
 						path,
 						asset: {
 							name: meta?.name ?? FileSystem.Paths.basename(path),
-							creationTime: meta ? Number(meta.created) : 0
+							contentHash: remoteContentHash
 						}
 					}) ?? ""
 
@@ -723,7 +748,11 @@ class CameraUpload {
 									break
 								}
 
-								const tmpFile = newTmpFile()
+								// Create the staging tmp file WITH the original extension so that
+								// compress() can pass the supported-extension gate (it checks
+								// extname(file.uri) — a bare UUID with no extension always fails).
+								const srcExt = FileSystem.Paths.extname(delta.file.info.filename).toLowerCase()
+								const tmpFile = newTmpFile(`${randomUUID()}${srcExt}`)
 
 								defer(() => {
 									if (tmpFile.exists) {
@@ -743,6 +772,16 @@ class CameraUpload {
 									uploadFile = await this.compress(tmpFile)
 								}
 
+								// When compress() rewrites the content to JPEG (e.g. .png → .jpg),
+								// it renames the file to have a .jpg extension.  Mirror that rename
+								// in the upload's `name` parameter so the remote filename and MIME
+								// type stay consistent with the actual bytes.
+								const uploadExt = FileSystem.Paths.extname(uploadFile.uri).toLowerCase()
+								const uploadName =
+									uploadExt !== "" && uploadExt !== srcExt
+										? `${FileSystem.Paths.basename(delta.file.info.filename, FileSystem.Paths.extname(delta.file.info.filename))}${uploadExt}`
+										: delta.file.info.filename
+
 								const parentDir = await this.ensureParentDirectoryExists({
 									config,
 									signal: abortController.signal,
@@ -754,7 +793,7 @@ class CameraUpload {
 									parent: parentDir,
 									signal: abortController.signal,
 									pauseSignal,
-									name: delta.file.info.filename,
+									name: uploadName,
 									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
 									created: delta.file.info.creationTime ?? delta.file.info.modificationTime ?? undefined,
 									hideProgress: params?.background ?? undefined

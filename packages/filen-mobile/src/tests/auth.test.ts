@@ -97,6 +97,9 @@ vi.mock("@/features/offline/offline", () => ({
 	default: {
 		cancel: vi.fn(() => {
 			callLog.push("offline.cancel")
+		}),
+		clearAll: vi.fn(async () => {
+			callLog.push("offline.clearAll")
 		})
 	}
 }))
@@ -119,6 +122,38 @@ vi.mock("@/lib/sqlite", () => ({
 	default: {
 		clearAsync: vi.fn(async () => {
 			callLog.push("sqlite.clearAsync")
+		})
+	}
+}))
+
+vi.mock("@/lib/cache", () => ({
+	default: {
+		clear: vi.fn(() => {
+			callLog.push("cache.clear")
+		})
+	}
+}))
+
+vi.mock("@/lib/fileCache", () => ({
+	default: {
+		clear: vi.fn(async () => {
+			callLog.push("fileCache.clear")
+		})
+	}
+}))
+
+vi.mock("@/lib/thumbnails", () => ({
+	default: {
+		clear: vi.fn(async () => {
+			callLog.push("thumbnails.clear")
+		})
+	}
+}))
+
+vi.mock("@/lib/sandboxCache", () => ({
+	default: {
+		clear: vi.fn(async () => {
+			callLog.push("sandboxCache.clear")
 		})
 	}
 }))
@@ -338,6 +373,100 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("sqlite.clearAsync")
 		expect(callLog).toContain("reloadAppAsync")
 	})
+
+	// #1 — the in-memory cache must be wiped BEFORE the SQLite wipe, and every decrypted-at-rest
+	// store must be wiped, so no decrypted metadata survives logout.
+	it("clears the in-memory cache before wiping SQLite and wipes all decrypted-at-rest stores", async () => {
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+		await promise
+
+		const cacheClearIdx = callLog.indexOf("cache.clear")
+		const sqliteClearIdx = callLog.indexOf("sqlite.clearAsync")
+
+		expect(cacheClearIdx).toBeGreaterThanOrEqual(0)
+		expect(sqliteClearIdx).toBeGreaterThan(cacheClearIdx)
+
+		// All decrypted-at-rest stores are wiped.
+		expect(callLog).toContain("offline.clearAll")
+		expect(callLog).toContain("fileCache.clear")
+		expect(callLog).toContain("thumbnails.clear")
+		expect(callLog).toContain("sandboxCache.clear")
+	})
+
+	// #8 — the SDK client handles must be destroyed and nulled, and clientsReady re-armed, so no
+	// post-wipe getSdkClients() hands out a client whose persisted credentials were just erased.
+	it("destroys + nulls the SDK clients and re-arms clientsReady", async () => {
+		const internals = authInternals()
+		const authedDestroy = vi.fn()
+		const unauthedDestroy = vi.fn()
+
+		internals.authedClient = { uniffiDestroy: authedDestroy }
+		internals.unauthedClient = { uniffiDestroy: unauthedDestroy }
+
+		const beforeClientsReady = internals.clientsReady
+
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+		await promise
+
+		expect(authedDestroy).toHaveBeenCalledTimes(1)
+		expect(unauthedDestroy).toHaveBeenCalledTimes(1)
+		expect(internals.authedClient).toBeNull()
+		expect(internals.unauthedClient).toBeNull()
+
+		// clientsReady was replaced with a fresh promise (re-armed).
+		expect(internals.clientsReady).not.toBe(beforeClientsReady)
+	})
+
+	// #8 — destroy must happen AFTER the cancellations settle (avoid use-after-destroy) and BEFORE
+	// the cache/disk wipe (destroying the authed client tears down the socket that could mutate it).
+	it("destroys the SDK clients after cancellations and before the cache wipe", async () => {
+		const internals = authInternals()
+
+		internals.authedClient = {
+			uniffiDestroy: vi.fn(() => {
+				callLog.push("authedClient.uniffiDestroy")
+			})
+		}
+		internals.unauthedClient = {
+			uniffiDestroy: vi.fn(() => {
+				callLog.push("unauthedClient.uniffiDestroy")
+			})
+		}
+
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+		await promise
+
+		const offlineCancelIdx = callLog.indexOf("offline.cancel")
+		const destroyIdx = callLog.indexOf("authedClient.uniffiDestroy")
+		const cacheClearIdx = callLog.indexOf("cache.clear")
+
+		expect(destroyIdx).toBeGreaterThan(offlineCancelIdx)
+		expect(cacheClearIdx).toBeGreaterThan(destroyIdx)
+	})
+
+	// #8 — a reload rejection must be retried, not swallowed, since the in-memory state is now safe.
+	it("retries reloadAppAsync when it rejects", async () => {
+		const expo = await import("expo")
+
+		vi.mocked(expo.reloadAppAsync).mockRejectedValueOnce(new Error("reload deferred"))
+
+		const promise = auth.logout()
+
+		await vi.runAllTimersAsync()
+		await promise
+
+		const reloadCalls = callLog.filter(c => c === "reloadAppAsync")
+
+		// First attempt rejects (no callLog push), the retry succeeds (pushes once).
+		expect(vi.mocked(expo.reloadAppAsync).mock.calls.length).toBeGreaterThanOrEqual(2)
+		expect(reloadCalls.length).toBeGreaterThanOrEqual(1)
+	})
 })
 
 describe("auth.isAuthed", () => {
@@ -429,6 +558,28 @@ describe("auth.setSdkClients", () => {
 
 		expect(result.authedClient).toBe(fakeAuthed)
 		expect(result.unauthedClient).toBeDefined()
+	})
+
+	// #9 — destroy the prior handles before reassigning so the native Arcs are reclaimed
+	// deterministically rather than orphaned for GC finalization.
+	it("destroys existing authed + unauthed handles before reassigning", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		vi.mocked(secureStore.default.set).mockResolvedValueOnce(undefined)
+
+		const priorAuthedDestroy = vi.fn()
+		const priorUnauthedDestroy = vi.fn()
+		const internals = authInternals()
+
+		internals.authedClient = { uniffiDestroy: priorAuthedDestroy }
+		internals.unauthedClient = { uniffiDestroy: priorUnauthedDestroy }
+
+		mockFromStringified.mockReturnValue({ toStringified: vi.fn() })
+
+		await auth.setSdkClients({ apiKey: "ak-replace" } as any)
+
+		expect(priorAuthedDestroy).toHaveBeenCalledTimes(1)
+		expect(priorUnauthedDestroy).toHaveBeenCalledTimes(1)
 	})
 
 	it("calls saveStringifiedClientToSecureStorage with correct spread", async () => {
@@ -582,6 +733,53 @@ describe("auth.login", () => {
 		const result = await auth.login({ email: "u@v.w", password: "password123", twoFactorCode: "" })
 
 		expect(result).toBe(fakeAuthed)
+	})
+
+	// #9 — login() is called repeatedly (wrong password, post-2FA second attempt), so it must destroy
+	// the handles it is about to replace.
+	it("destroys existing authed + unauthed handles before reassigning", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		vi.mocked(secureStore.default.set).mockResolvedValueOnce(undefined)
+
+		const priorAuthedDestroy = vi.fn()
+		const priorUnauthedDestroy = vi.fn()
+		const internals = authInternals()
+
+		internals.authedClient = { uniffiDestroy: priorAuthedDestroy }
+		internals.unauthedClient = { uniffiDestroy: priorUnauthedDestroy }
+
+		const fakeAuthed = { toStringified: vi.fn().mockResolvedValue({ apiKey: "k" }) }
+
+		mockLogin.mockResolvedValue(fakeAuthed)
+
+		await auth.login({ email: "u@v.w", password: "pass", twoFactorCode: "" })
+
+		expect(priorAuthedDestroy).toHaveBeenCalledTimes(1)
+		expect(priorUnauthedDestroy).toHaveBeenCalledTimes(1)
+	})
+
+	// #9 — when login() rejects, the freshly-created unauthed handle is destroyed and nulled so a
+	// failed attempt does not orphan a native Arc.
+	it("destroys the freshly-created unauthed handle and nulls it when login rejects", async () => {
+		const unauthedDestroy = vi.fn()
+
+		mockFromConfig.mockReturnValueOnce({
+			fromStringified: mockFromStringified,
+			login: vi.fn().mockRejectedValue(new Error("bad password")),
+			register: mockRegister,
+			startPasswordReset: mockStartPasswordReset,
+			resendRegistrationConfirmation: mockResendRegistrationConfirmation,
+			uniffiDestroy: unauthedDestroy
+		} as any)
+
+		await expect(auth.login({ email: "u@v.w", password: "wrong", twoFactorCode: "" })).rejects.toThrow("bad password")
+
+		const internals = authInternals()
+
+		expect(unauthedDestroy).toHaveBeenCalledTimes(1)
+		expect(internals.unauthedClient).toBeNull()
+		expect(internals.authedClient).toBeNull()
 	})
 
 	it("saves the stringified client with maxIoMemoryUsage and maxParallelRequests", async () => {

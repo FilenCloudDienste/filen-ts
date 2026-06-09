@@ -77,7 +77,7 @@ function collision(overrides: Partial<CollisionParams> & { iteration: number }):
 		path: "/camera roll/img_0001.jpg",
 		asset: {
 			name: "IMG_0001.jpg",
-			creationTime: 1700000000000
+			contentHash: "abc123hash"
 		},
 		...rest,
 		iteration
@@ -85,15 +85,15 @@ function collision(overrides: Partial<CollisionParams> & { iteration: number }):
 }
 
 describe("modifyAssetPathOnCollision", () => {
-	describe("iteration 0 — creationTime suffix", () => {
-		it("appends creationTime to the basename and returns lowercase trimmed path", () => {
-			// Current behaviour: path gets the creationTime appended before the extension.
-			expect(collision({ iteration: 0 })).toBe("/camera roll/img_0001_1700000000000.jpg")
+	describe("iteration 0 — seconds-timestamp suffix", () => {
+		it("appends contentHash (seconds-timestamp string) to the basename and returns lowercase trimmed path", () => {
+			// The contentHash field carries a seconds-floored creation timestamp string.
+			expect(collision({ iteration: 0 })).toBe("/camera roll/img_0001_abc123hash.jpg")
 		})
 
-		it("produces different paths for different creationTimes", () => {
-			const a = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", creationTime: 1000 } })
-			const b = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", creationTime: 5000 } })
+		it("produces different paths for different contentHashes", () => {
+			const a = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", contentHash: "hash-a" } })
+			const b = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", contentHash: "hash-b" } })
 
 			expect(a).not.toBe(b)
 		})
@@ -102,7 +102,7 @@ describe("modifyAssetPathOnCollision", () => {
 			const result = collision({
 				iteration: 0,
 				path: "/Camera Roll/IMG_0001.JPG",
-				asset: { name: "IMG_0001.JPG", creationTime: 1000 }
+				asset: { name: "IMG_0001.JPG", contentHash: "SomeHash" }
 			})
 
 			expect(result).toBe(result?.toLowerCase())
@@ -112,35 +112,35 @@ describe("modifyAssetPathOnCollision", () => {
 			const result = collision({
 				iteration: 0,
 				path: "/album/video.mov",
-				asset: { name: "video.MOV", creationTime: 1000 }
+				asset: { name: "video.MOV", contentHash: "hash1" }
 			})
 
 			expect(result).toMatch(/\.mov$/)
 		})
 	})
 
-	describe("iteration 1 — hash of name + creationTime", () => {
+	describe("iteration 1 — xxHash32 of name + contentHash", () => {
 		it("returns a valid path with a lowercase hex hash suffix", () => {
 			expect(collision({ iteration: 1 })).toMatch(/^\/camera roll\/img_0001_[0-9a-f]+\.jpg$/)
 		})
 
-		it("produces different paths for different creationTimes", () => {
-			const a = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", creationTime: 1000 } })
-			const b = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", creationTime: 2000 } })
+		it("produces different paths for different contentHashes", () => {
+			const a = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", contentHash: "hash-a" } })
+			const b = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", contentHash: "hash-b" } })
 
 			expect(a).not.toBe(b)
 		})
 
-		it("produces different paths for different filenames with the same creationTime", () => {
+		it("produces different paths for different filenames with the same contentHash", () => {
 			const a = modifyAssetPathOnCollision({
 				iteration: 1,
 				path: "/album/img_0001.jpg",
-				asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+				asset: { name: "IMG_0001.jpg", contentHash: "same-hash" }
 			})
 			const b = modifyAssetPathOnCollision({
 				iteration: 1,
 				path: "/album/img_0002.jpg",
-				asset: { name: "IMG_0002.jpg", creationTime: 1000 }
+				asset: { name: "IMG_0002.jpg", contentHash: "same-hash" }
 			})
 
 			expect(a).not.toBe(b)
@@ -156,7 +156,7 @@ describe("modifyAssetPathOnCollision", () => {
 
 	describe("exhausted iterations — returns null", () => {
 		it("returns null at iteration 2 (first unsupported value)", () => {
-			// Current behaviour: the default case returns null for any iteration >= 2.
+			// The default case returns null for any iteration >= 2.
 			expect(collision({ iteration: 2 })).toBeNull()
 		})
 
@@ -176,7 +176,7 @@ describe("modifyAssetPathOnCollision", () => {
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "/camera roll/.",
-					asset: { name: ".", creationTime: 1000 }
+					asset: { name: ".", contentHash: "hash1" }
 				})
 			).toBeNull()
 		})
@@ -187,7 +187,7 @@ describe("modifyAssetPathOnCollision", () => {
 			const result = modifyAssetPathOnCollision({
 				iteration: 0,
 				path: "IMG_0001.jpg",
-				asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+				asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 			})
 
 			expect(result).toBeTypeOf("string")
@@ -200,7 +200,7 @@ describe("modifyAssetPathOnCollision", () => {
 			const params: CollisionParams = {
 				iteration: 0,
 				path: "/album/photo.png",
-				asset: { name: "photo.png", creationTime: 1000 }
+				asset: { name: "photo.png", contentHash: "hash1" }
 			}
 
 			expect(modifyAssetPathOnCollision(params)).toBe(modifyAssetPathOnCollision(params))
@@ -210,7 +210,7 @@ describe("modifyAssetPathOnCollision", () => {
 			const params: CollisionParams = {
 				iteration: 1,
 				path: "/album/photo.png",
-				asset: { name: "photo.png", creationTime: 1000 }
+				asset: { name: "photo.png", contentHash: "hash1" }
 			}
 
 			expect(modifyAssetPathOnCollision(params)).toBe(modifyAssetPathOnCollision(params))
@@ -221,7 +221,7 @@ describe("modifyAssetPathOnCollision", () => {
 		it("iteration 0 → non-null, iteration 1 → non-null, iteration 2 → null (exhausted after 2 suffixes)", () => {
 			const base: Omit<CollisionParams, "iteration"> = {
 				path: "/album/img_0001.jpg",
-				asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+				asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 			}
 
 			// Exactly two non-null iterations before exhaustion.
@@ -233,13 +233,103 @@ describe("modifyAssetPathOnCollision", () => {
 		it("the two non-null iterations produce distinct paths so a loop can allocate two extra slots", () => {
 			const base: Omit<CollisionParams, "iteration"> = {
 				path: "/album/img_0001.jpg",
-				asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+				asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 			}
 
 			const path0 = modifyAssetPathOnCollision({ ...base, iteration: 0 })
 			const path1 = modifyAssetPathOnCollision({ ...base, iteration: 1 })
 
 			expect(path0).not.toBe(path1)
+		})
+	})
+
+	describe("seconds-timestamp dedup (#14 regression)", () => {
+		it("two same-named assets at different creation seconds get different collision paths at iteration 0", () => {
+			// Two IMG_0001.jpg assets created 1 second apart must get different paths.
+			const a = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: String(Math.floor(1700000000000 / 1000)) }
+			})
+			const b = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: String(Math.floor(1700000001000 / 1000)) }
+			})
+
+			expect(a).not.toBe(b)
+		})
+
+		it("two same-named assets within the same second collapse to the same path (sub-second drift — deduped by design)", () => {
+			// 700ms and 200ms within the same second both floor to "1700000000".
+			const tsA = String(Math.floor(1700000000700 / 1000)) // "1700000000"
+			const tsB = String(Math.floor(1700000000200 / 1000)) // "1700000000"
+
+			const a = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: tsA }
+			})
+			const b = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: tsB }
+			})
+
+			expect(a).toBe(b)
+			expect(a).toBe("/camera roll/img_0001_1700000000.jpg")
+		})
+
+		it("local and remote sides produce symmetric paths when both use seconds-floored timestamps", () => {
+			// Local: String(Math.floor((creationTime ?? 0) / 1000))
+			// Remote: String(Math.floor(Number(meta?.created ?? 0) / 1000))
+			// Both must produce the same string for the same wall-clock second.
+			const localMs = 1700000000700
+			const remoteMs = 1700000000200 // same second, 500ms earlier
+
+			const localHash = String(Math.floor(localMs / 1000))
+			const remoteHash = String(Math.floor(remoteMs / 1000))
+
+			const localPath = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: localHash }
+			})
+			const remotePath = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: remoteHash }
+			})
+
+			expect(localPath).toBe(remotePath)
+			expect(localPath).toBe("/camera roll/img_0001_1700000000.jpg")
+		})
+
+		it("null creationTime falls back to '0' on both local and remote sides symmetrically", () => {
+			// Local: Math.floor((null ?? 0) / 1000) = 0
+			// Remote: Math.floor(Number(null ?? 0) / 1000) = 0
+			// Both produce contentHash "0" — paths are symmetric.
+			const nullCreationTime: number | null = null
+			const nullCreated: bigint | null | undefined = null
+
+			const localHash = String(Math.floor((nullCreationTime ?? 0) / 1000))
+			const remoteHash = String(Math.floor(Number(nullCreated ?? 0) / 1000))
+
+			expect(localHash).toBe("0")
+			expect(remoteHash).toBe("0")
+
+			const local = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: localHash }
+			})
+			const remote = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: remoteHash }
+			})
+
+			expect(local).toBe(remote)
 		})
 	})
 })

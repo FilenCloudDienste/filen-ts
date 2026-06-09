@@ -1570,4 +1570,103 @@ describe("Cache", () => {
 			expect(kvStore.has(kvKey(name, "second"))).toBe(true)
 		})
 	})
+
+	// #1 — after the logout wipe (clear()), the cache is locked: no stray mutation, debounce, or
+	// AppState-background flush may re-INSERT decrypted metadata into the just-emptied plaintext kv.
+	describe("logout wipe lock (#1)", () => {
+		it("a set() after clear() does not persist on a debounced flush", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			cache.clear()
+
+			// A stray mutation lands during the logout window (e.g. a late socket event before reload).
+			map.set("leaked", "decrypted-meta")
+
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			expect(kvStore.has(kvKey(name, "leaked"))).toBe(false)
+		})
+
+		it("a set() after clear() does not persist on a background flushNow()", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			cache.clear()
+
+			map.set("leaked", "decrypted-meta")
+
+			mockDb.executeBatch.mockClear()
+
+			// Simulate the AppState "background" flush path.
+			const listener = mockAppStateListeners[mockAppStateListeners.length - 1]
+
+			expect(listener).toBeDefined()
+
+			listener!("background")
+
+			await drainUntilExecuteBatch(10)
+
+			expect(mockDb.executeBatch).not.toHaveBeenCalled()
+			expect(kvStore.has(kvKey(name, "leaked"))).toBe(false)
+		})
+
+		it("a fresh restore() after a wipe yields empty maps", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { map } = getFirstMap(cache)
+
+			map.set("a", "1")
+			map.set("b", "2")
+
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			// Logout wipe.
+			cache.clear()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			// Next session hydrates from disk — everything is gone.
+			const next = createCache()
+
+			await next.restore()
+
+			for (const [, m] of getPersistentMaps(next)) {
+				expect(m.size).toBe(0)
+			}
+		})
+
+		it("restore() unlocks the cache so the next session persists normally", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			cache.clear()
+
+			// restore() (next authenticated session) must re-enable persistence.
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("fresh", "value")
+
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			expect(kvStore.has(kvKey(name, "fresh"))).toBe(true)
+		})
+	})
 })
