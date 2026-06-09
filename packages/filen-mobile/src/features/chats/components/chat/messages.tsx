@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { type Chat as TChat } from "@/types"
-import View from "@/components/ui/view"
+import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useChatMessagesQuery from "@/features/chats/queries/useChatMessages.query"
 import VirtualList, { type ListRef } from "@/components/ui/virtualList"
@@ -11,7 +11,7 @@ import { interpolate, useAnimatedStyle } from "react-native-reanimated"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import Message from "@/features/chats/components/chat/message"
-import { ActivityIndicator, type View as TView } from "react-native"
+import { ActivityIndicator, type NativeSyntheticEvent, type NativeScrollEvent, type View as TView } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/utils"
 import chats from "@/features/chats/chats"
@@ -19,6 +19,10 @@ import useViewLayout from "@/hooks/useViewLayout"
 import alerts from "@/lib/alerts"
 import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import { PressableScale } from "@/components/ui/pressables"
+import Ionicons from "@expo/vector-icons/Ionicons"
+
+const SCROLL_THRESHOLD = 300
 
 const Messages = ({ chat }: { chat: TChat }) => {
 	const { t } = useTranslation()
@@ -28,11 +32,27 @@ const Messages = ({ chat }: { chat: TChat }) => {
 	const listRef = useRef<ListRef<ChatMessageWithInflightId>>(null)
 	const [fetchedMessages, setFetchedMessages] = useState<ChatMessageWithInflightId[]>([])
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const textForeground = useResolveClassNames("text-foreground")
 	const [isFetchingMore, setIsFetchingMore] = useState<boolean>(false)
 	const isFetchingMoreRef = useRef<boolean>(false)
 	const hasMoreRef = useRef<boolean>(true)
 	const viewRef = useRef<TView>(null)
 	const { onLayout, layout } = useViewLayout(viewRef)
+	const [scrolledUp, setScrolledUp] = useState<boolean>(false)
+	const scrolledUpRef = useRef<boolean>(false)
+
+	const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+		const next = e.nativeEvent.contentOffset.y > SCROLL_THRESHOLD
+
+		if (next !== scrolledUpRef.current) {
+			scrolledUpRef.current = next
+			setScrolledUp(next)
+		}
+	}
+
+	const onScrollToBottom = () => {
+		listRef.current?.scrollToOffset({ offset: 0, animated: true })
+	}
 
 	const chatMessagesQuery = useChatMessagesQuery(
 		{
@@ -76,142 +96,177 @@ const Messages = ({ chat }: { chat: TChat }) => {
 		}
 	}, [insets.bottom, keyboardAnimation, inputViewLayout.height])
 
+	const scrollDownButtonStyle = useAnimatedStyle(() => {
+		return {
+			bottom: interpolate(
+				keyboardAnimation.progress.value,
+				[0, 1],
+				[inputViewLayout.height + 16 + insets.bottom, inputViewLayout.height + insets.bottom]
+			),
+			right: 16
+		}
+	})
+
 	return (
-		<View
-			ref={viewRef}
-			onLayout={onLayout}
-			className="bg-transparent flex-1"
-			style={{
-				transform: [
-					{
-						scaleY: -1
-					}
-				]
-			}}
-		>
-			<VirtualList
-				ref={listRef}
-				className="flex-1"
-				contentInsetAdjustmentBehavior="automatic"
-				contentContainerClassName="android:pb-8"
-				keyExtractor={item => {
-					return item.inner.uuid
+		<View className="bg-transparent flex-1">
+			<View
+				ref={viewRef}
+				onLayout={onLayout}
+				className="bg-transparent flex-1"
+				style={{
+					transform: [
+						{
+							scaleY: -1
+						}
+					]
 				}}
-				data={messages}
-				renderItem={info => {
-					if (!chat) {
-						return null
-					}
-
-					return (
-						<Message
-							chat={chat}
-							info={info}
-							nextMessage={messages[info.index - 1]}
-							prevMessage={messages[info.index + 1]}
-							layout={layout}
-						/>
-					)
-				}}
-				onEndReachedThreshold={0.5}
-				loading={chatMessagesQuery.status !== "success"}
-				footerComponent={() => {
-					if (!isFetchingMore) {
-						return undefined
-					}
-
-					return (
-						<View className="w-full h-auto items-center justify-center pt-4">
-							<ActivityIndicator
-								size="small"
-								color={textMutedForeground.color}
-							/>
-						</View>
-					)
-				}}
-				onEndReached={async () => {
-					if (
-						isFetchingMoreRef.current ||
-						chatMessagesQuery.status !== "success" ||
-						messages.length === 0 ||
-						!hasMoreRef.current
-					) {
-						return
-					}
-
-					// Inverted list: onEndReached fires when the user scrolls UP
-					// to load older messages. chats.listBefore is an SDK call,
-					// so bail silently offline rather than triggering throwOnError
-					// + the spinner hang it implies.
-					if (!onlineManager.isOnline()) {
-						return
-					}
-
-					const result = await run(async defer => {
-						isFetchingMoreRef.current = true
-
-						setIsFetchingMore(true)
-
-						defer(() => {
-							isFetchingMoreRef.current = false
-
-							setIsFetchingMore(false)
-						})
-
-						const lastMessage = messages[messages.length - 1]
-
-						if (!lastMessage) {
-							return []
+			>
+				<VirtualList
+					ref={listRef}
+					className="flex-1"
+					contentInsetAdjustmentBehavior="automatic"
+					contentContainerClassName="android:pb-8"
+					keyExtractor={item => {
+						return item.inner.uuid
+					}}
+					data={messages}
+					renderItem={info => {
+						if (!chat) {
+							return null
 						}
 
-						const moreMessages = await chats.listBefore({
-							chat,
-							before: lastMessage.sentTimestamp
+						return (
+							<Message
+								chat={chat}
+								info={info}
+								nextMessage={messages[info.index - 1]}
+								prevMessage={messages[info.index + 1]}
+								layout={layout}
+							/>
+						)
+					}}
+					onEndReachedThreshold={0.5}
+					loading={chatMessagesQuery.status !== "success"}
+					footerComponent={() => {
+						if (!isFetchingMore) {
+							return undefined
+						}
+
+						return (
+							<View className="w-full h-auto items-center justify-center pt-4">
+								<ActivityIndicator
+									size="small"
+									color={textMutedForeground.color}
+								/>
+							</View>
+						)
+					}}
+					onEndReached={async () => {
+						if (
+							isFetchingMoreRef.current ||
+							chatMessagesQuery.status !== "success" ||
+							messages.length === 0 ||
+							!hasMoreRef.current
+						) {
+							return
+						}
+
+						// Inverted list: onEndReached fires when the user scrolls UP
+						// to load older messages. chats.listBefore is an SDK call,
+						// so bail silently offline rather than triggering throwOnError
+						// + the spinner hang it implies.
+						if (!onlineManager.isOnline()) {
+							return
+						}
+
+						const result = await run(async defer => {
+							isFetchingMoreRef.current = true
+
+							setIsFetchingMore(true)
+
+							defer(() => {
+								isFetchingMoreRef.current = false
+
+								setIsFetchingMore(false)
+							})
+
+							const lastMessage = messages[messages.length - 1]
+
+							if (!lastMessage) {
+								return []
+							}
+
+							const moreMessages = await chats.listBefore({
+								chat,
+								before: lastMessage.sentTimestamp
+							})
+
+							return moreMessages.map(m => ({
+								...m,
+								inflightId: "" // Placeholder, actual inflightId is only needed for send sync
+							})) satisfies ChatMessageWithInflightId[]
 						})
 
-						return moreMessages.map(m => ({
-							...m,
-							inflightId: "" // Placeholder, actual inflightId is only needed for send sync
-						})) satisfies ChatMessageWithInflightId[]
-					})
+						if (!result.success) {
+							console.error(result.error)
+							alerts.error(result.error)
 
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
+							return
+						}
 
-						return
-					}
+						if (result.data.length === 0) {
+							hasMoreRef.current = false
+						}
 
-					if (result.data.length === 0) {
-						hasMoreRef.current = false
-					}
-
-					setFetchedMessages(prev => [...prev, ...result.data])
-				}}
-				maintainVisibleContentPosition={{
-					disabled: true
-				}}
-				headerComponent={() => {
-					return <AnimatedView style={headerStyle} />
-				}}
-				emptyComponent={() => (
-					<View
-						className="flex-1"
-						style={{
-							transform: [
-								{
-									scaleY: -1
-								}
-							]
-						}}
-					>
-						<ListEmpty
-							icon="chatbubble-outline"
-							title={t("no_messages")}
-						/>
-					</View>
-				)}
-			/>
+						setFetchedMessages(prev => [...prev, ...result.data])
+					}}
+					maintainVisibleContentPosition={{
+						disabled: true
+					}}
+					onScroll={onScroll}
+					scrollEventThrottle={16}
+					headerComponent={() => {
+						return <AnimatedView style={headerStyle} />
+					}}
+					emptyComponent={() => (
+						<View
+							className="flex-1"
+							style={{
+								transform: [
+									{
+										scaleY: -1
+									}
+								]
+							}}
+						>
+							<ListEmpty
+								icon="chatbubble-outline"
+								title={t("no_messages")}
+							/>
+						</View>
+					)}
+				/>
+			</View>
+			{scrolledUp ? (
+				<AnimatedView
+					className="absolute bg-transparent"
+					style={scrollDownButtonStyle}
+				>
+					<CrossGlassContainerView className="size-11 items-center justify-center">
+						<PressableScale
+							hitSlop={10}
+							rippleColor="transparent"
+							onPress={onScrollToBottom}
+						>
+							<Ionicons
+								name="chevron-down"
+								size={22}
+								color={textForeground.color}
+							/>
+						</PressableScale>
+					</CrossGlassContainerView>
+				</AnimatedView>
+			) : null}
 		</View>
 	)
 }
