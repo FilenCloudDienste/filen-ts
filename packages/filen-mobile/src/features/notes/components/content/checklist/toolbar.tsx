@@ -1,6 +1,4 @@
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
-import { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
+import View, { KeyboardStickyView, CrossGlassContainerView } from "@/components/ui/view"
 import { useKeyboardState, KeyboardController } from "react-native-keyboard-controller"
 import { useResolveClassNames } from "uniwind"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -31,9 +29,7 @@ const Toolbar = () => {
 
 	return (
 		<KeyboardStickyView>
-			<AnimatedView
-				entering={FadeIn}
-				exiting={FadeOut}
+			<View
 				className="absolute z-50 bg-transparent"
 				style={{
 					bottom: 16,
@@ -53,7 +49,7 @@ const Toolbar = () => {
 						/>
 					</PressableScale>
 				</CrossGlassContainerView>
-			</AnimatedView>
+			</View>
 		</KeyboardStickyView>
 	)
 }

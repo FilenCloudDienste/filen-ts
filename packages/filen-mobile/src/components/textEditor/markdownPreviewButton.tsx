@@ -1,6 +1,4 @@
-import { AnimatedView } from "@/components/ui/animated"
-import { FadeIn, FadeOut } from "react-native-reanimated"
-import { CrossGlassContainerView } from "@/components/ui/view"
+import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useKeyboardState } from "react-native-keyboard-controller"
 import { useResolveClassNames } from "uniwind"
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6"
@@ -38,28 +36,26 @@ const MarkdownPreviewButton = ({ id }: { id: string }) => {
 	}
 
 	return (
-		<AnimatedView
-			entering={FadeIn}
-			exiting={FadeOut}
-			className="absolute"
+		<View
+			className="absolute bg-transparent z-50"
 			style={{
 				bottom: 16 + insets.bottom,
 				right: 16 + insets.right
 			}}
 		>
-			<PressableScale
-				rippleColor="transparent"
-				onPress={onPress}
-			>
-				<CrossGlassContainerView className="flex-row items-center justify-center rounded-full overflow-hidden border border-border size-12">
+			<CrossGlassContainerView className="flex-row items-center justify-center rounded-full overflow-hidden border border-border size-12">
+				<PressableScale
+					rippleColor="transparent"
+					onPress={onPress}
+				>
 					<FontAwesome6
 						name={active ? "eye-slash" : "eye"}
 						size={18}
 						color={textForeground.color}
 					/>
-				</CrossGlassContainerView>
-			</PressableScale>
-		</AnimatedView>
+				</PressableScale>
+			</CrossGlassContainerView>
+		</View>
 	)
 }
 
