@@ -46,12 +46,12 @@ vi.mock("@/features/audio/store/usePlaylistTracks.store", () => ({
 	}
 }))
 
-vi.mock("@/providers/actionSheet.provider", () => ({
-	actionSheet: { show: vi.fn() }
+vi.mock("@/components/ui/menu", () => ({
+	default: () => null
 }))
 
-vi.mock("@/hooks/useIsOnline", () => ({
-	default: vi.fn(() => true)
+vi.mock("@/components/ui/ellipsisMenuTrigger", () => ({
+	default: () => null
 }))
 
 vi.mock("@/lib/decryption", () => ({
@@ -108,7 +108,7 @@ vi.mock("zustand/shallow", () => ({
 // Subject under test
 // ---------------------------------------------------------------------------
 
-import { buildTrackButtons } from "@/features/audio/components/track"
+import { buildTrackButtons, buildUndecryptableTrackButtons } from "@/features/audio/components/track"
 import { type TFunction } from "i18next"
 import type { PlaylistWithItems } from "@/features/audio/audio"
 
@@ -149,44 +149,73 @@ function makePlaylist(files: PlaylistWithItems["files"] = [fakeFile]): PlaylistW
 }
 
 // ---------------------------------------------------------------------------
-// Tests — BUG #49: offline gating on add_to_playlist / remove_from_playlist
+// Tests — BUG #49 (offline gating), migrated to the Menu contract:
+// the builders now return MenuButton[] where offline gating is declared via
+// requiresOnline:true (resolved to disabled by MenuInner.applyOfflineGate)
+// instead of an inline disabled:!isOnline computed from a builder param.
 // ---------------------------------------------------------------------------
 
-describe("buildTrackButtons — offline gating", () => {
-	it("add_to_playlist and remove_from_playlist carry disabled:true when offline", () => {
+describe("buildTrackButtons — Menu contract", () => {
+	it("add_to_playlist and remove_from_playlist carry requiresOnline:true for the Menu offline gate", () => {
 		const playlist = makePlaylist()
-		const buttons = buildTrackButtons({ t, track: fakeFile, playlist, isOnline: false })
+		const buttons = buildTrackButtons({ t, track: fakeFile, playlist })
 
-		const addToPlaylist = buttons.find(b => b.title === "add_to_playlist")
-		const removeFromPlaylist = buttons.find(b => b.title === "remove_from_playlist")
+		const addToPlaylist = buttons.find(b => b.id === "addToPlaylist")
+		const removeFromPlaylist = buttons.find(b => b.id === "removeFromPlaylist")
 
-		expect(addToPlaylist?.disabled).toBe(true)
-		expect(removeFromPlaylist?.disabled).toBe(true)
+		expect(addToPlaylist?.requiresOnline).toBe(true)
+		expect(removeFromPlaylist?.requiresOnline).toBe(true)
 	})
 
-	it("add_to_playlist and remove_from_playlist carry disabled:false when online", () => {
+	it("remove_from_playlist is destructive", () => {
 		const playlist = makePlaylist()
-		const buttons = buildTrackButtons({ t, track: fakeFile, playlist, isOnline: true })
+		const buttons = buildTrackButtons({ t, track: fakeFile, playlist })
 
-		const addToPlaylist = buttons.find(b => b.title === "add_to_playlist")
-		const removeFromPlaylist = buttons.find(b => b.title === "remove_from_playlist")
+		const removeFromPlaylist = buttons.find(b => b.id === "removeFromPlaylist")
 
-		expect(addToPlaylist?.disabled).toBe(false)
-		expect(removeFromPlaylist?.disabled).toBe(false)
+		expect(removeFromPlaylist?.destructive).toBe(true)
 	})
 
-	it("select, play, add_to_queue, and close are never disabled when offline", () => {
+	it("select, play and add_to_queue are never offline-gated and never pre-disabled", () => {
 		const playlist = makePlaylist()
-		const buttons = buildTrackButtons({ t, track: fakeFile, playlist, isOnline: false })
+		const buttons = buildTrackButtons({ t, track: fakeFile, playlist })
 
-		const select = buttons.find(b => b.title === "select")
-		const play = buttons.find(b => b.title === "play")
-		const addToQueue = buttons.find(b => b.title === "add_to_queue")
-		const close = buttons.find(b => b.cancel === true)
+		const select = buttons.find(b => b.id === "select")
+		const play = buttons.find(b => b.id === "play")
+		const addToQueue = buttons.find(b => b.id === "addToQueue")
 
+		expect(select?.requiresOnline).toBeFalsy()
 		expect(select?.disabled).toBeFalsy()
+		expect(play?.requiresOnline).toBeFalsy()
 		expect(play?.disabled).toBeFalsy()
+		expect(addToQueue?.requiresOnline).toBeFalsy()
 		expect(addToQueue?.disabled).toBeFalsy()
-		expect(close?.disabled).toBeFalsy()
+	})
+
+	it("has no close/cancel item (native menus dismiss on outside tap) and unique ids", () => {
+		const playlist = makePlaylist()
+		const buttons = buildTrackButtons({ t, track: fakeFile, playlist })
+
+		expect(buttons.some(b => b.id === "close" || b.title === "close")).toBe(false)
+		expect(new Set(buttons.map(b => b.id)).size).toBe(buttons.length)
+	})
+})
+
+describe("buildUndecryptableTrackButtons — Menu contract", () => {
+	it("offers only select and the destructive, offline-gated remove_from_playlist", () => {
+		const playlist = makePlaylist()
+		const buttons = buildUndecryptableTrackButtons({ t, track: fakeFile, playlist })
+
+		const ids = buttons.map(b => b.id)
+		const removeFromPlaylist = buttons.find(b => b.id === "removeFromPlaylist")
+
+		expect(ids).toContain("select")
+		expect(ids).toContain("removeFromPlaylist")
+		expect(ids).not.toContain("play")
+		expect(ids).not.toContain("addToQueue")
+		expect(ids).not.toContain("addToPlaylist")
+		expect(buttons.some(b => b.id === "close" || b.title === "close")).toBe(false)
+		expect(removeFromPlaylist?.destructive).toBe(true)
+		expect(removeFromPlaylist?.requiresOnline).toBe(true)
 	})
 })
