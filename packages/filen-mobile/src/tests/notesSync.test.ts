@@ -91,7 +91,7 @@ vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-import { Sync, SyncHost } from "@/features/notes/components/sync"
+import { Sync, SyncHost, mergeInflight } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
@@ -119,6 +119,8 @@ describe("Sync (Notes)", () => {
 		kvStore.clear()
 		notesState.inflightContent = {}
 		mockNotesSetContent.mockClear()
+		mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(0) })
+		mockFetchNotesWithContent.mockClear()
 		mockFetchNotesWithContent.mockResolvedValue([])
 		mockCreateExecutableTimeout.mockClear()
 		mockNotesWithContentQueryGet.mockReturnValue(null)
@@ -136,7 +138,9 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 5000, content: "hello", note }]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			// Cloud still has the OLD content, so the inflight edit must survive
+			// reconciliation (content differs).
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000), content: "old-cloud" }])
 
 			await createSync()
 
@@ -156,39 +160,105 @@ describe("Sync (Notes)", () => {
 			expect(notesState.inflightContent["deleted-note"]).toBeUndefined()
 		})
 
-		it("prunes entries older than cloud editedTimestamp", async () => {
+		it("#4: prunes a disk entry whose content already equals the cloud content", async () => {
+			// #4 principle on the restore path: a disk-seeded inflight entry is
+			// dropped ONLY when its content matches the freshly-fetched cloud
+			// content (already synced) — never via a cross-clock timestamp compare.
 			kvStore.set(KV_KEY, {
-				"note-1": [
-					{ timestamp: 500, content: "old", note: mockNote("note-1") },
-					{ timestamp: 2000, content: "new", note: mockNote("note-1") }
-				]
+				"note-1": [{ timestamp: 5000, content: "already-synced", note: mockNote("note-1") }]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(9999), content: "already-synced" }])
 
 			await createSync()
 
-			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
-			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("new")
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
 		})
 
-		it("prunes entries whose timestamp equals editedTimestamp (strict greater-than filter)", async () => {
-			// The filter is c.timestamp > editedTimestamp (strict). An entry
-			// with timestamp === editedTimestamp must be pruned.
+		it("#4: keeps a disk entry whose content differs from the cloud even when the cloud edited-timestamp is newer", async () => {
+			// The previous timestamp-based prune dropped this entry (cloud
+			// editedTimestamp > local timestamp). Content differs, so it must
+			// survive — it is a genuine unsynced edit.
 			kvStore.set(KV_KEY, {
-				"note-1": [
-					{ timestamp: 1000, content: "equal-boundary", note: mockNote("note-1") },
-					{ timestamp: 1001, content: "one-above", note: mockNote("note-1") }
-				]
+				"note-1": [{ timestamp: 1000, content: "unsynced-local", note: mockNote("note-1") }]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(999999), content: "different-cloud" }])
 
 			await createSync()
 
-			// Only the entry strictly above the boundary must survive.
 			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
-			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("one-above")
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("unsynced-local")
+		})
+
+		it("#41: hydrates the store from disk WITHOUT a network call when offline", async () => {
+			const { onlineManager } = await import("@tanstack/react-query")
+			const spy = vi.spyOn(onlineManager, "isOnline").mockReturnValue(false)
+
+			// beforeEach resets the resolved value but not the call count / a leaked
+			// implementation; this assertion is about THIS restore's network calls.
+			mockFetchNotesWithContent.mockReset()
+			mockFetchNotesWithContent.mockResolvedValue([])
+
+			try {
+				kvStore.set(KV_KEY, {
+					"note-1": [{ timestamp: 5000, content: "offline-pending", note: mockNote("note-1") }]
+				})
+
+				await createSync()
+
+				// Store hydrated purely from disk, no cloud fetch attempted.
+				expect(mockFetchNotesWithContent).not.toHaveBeenCalled()
+				expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+				expect(notesState.inflightContent["note-1"]![0]!.content).toBe("offline-pending")
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
+		it("#41: functional merge keeps an edit typed during the fetch window", async () => {
+			// Simulate an edit landing in the store WHILE the cloud fetch is in
+			// flight: the blind-replace structure would obliterate it; the
+			// functional merge must keep the fresher store edit.
+			kvStore.set(KV_KEY, {
+				"note-1": [{ timestamp: 1000, content: "from-disk", note: mockNote("note-1") }]
+			})
+
+			mockFetchNotesWithContent.mockImplementation(async () => {
+				// An edit is typed (newer local timestamp) during the fetch window.
+				notesState.inflightContent = {
+					"note-1": [{ timestamp: 5000, content: "typed-during-fetch", note: mockNote("note-1") }]
+				}
+
+				return [{ uuid: "note-1", editedTimestamp: BigInt(2000), content: "from-disk" }]
+			})
+
+			await createSync()
+
+			// The fresher store edit survives both the merge and the
+			// content-equality reconcile (its content differs from cloud).
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("typed-during-fetch")
+		})
+
+		it("#41: an offline reconcile failure does not undo the disk hydration", async () => {
+			kvStore.set(KV_KEY, {
+				"note-1": [{ timestamp: 5000, content: "pending", note: mockNote("note-1") }]
+			})
+
+			// Online, but the cloud fetch throws — hydration must already be done
+			// and must NOT be rolled back. setContent also fails (the kicked sync
+			// can't reach the server either), so the hydrated entry stays put.
+			mockFetchNotesWithContent.mockRejectedValue(new Error("network down"))
+			mockNotesSetContent.mockRejectedValue(new Error("network down"))
+
+			await createSync()
+
+			// sync() is kicked after restore — let it settle (it fails, keeping the entry).
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("pending")
 		})
 
 		it("handles empty disk gracefully", async () => {
@@ -202,7 +272,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 5000, content: "pending", note: mockNote("note-1") }]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000), content: "old-cloud" }])
 			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(6000) })
 
 			await createSync()
@@ -213,15 +283,15 @@ describe("Sync (Notes)", () => {
 			expect(mockNotesSetContent).toHaveBeenCalled()
 		})
 
-		it("removes note entirely when all entries are stale after filter", async () => {
+		it("removes note entirely when all entries match cloud content after reconcile", async () => {
 			kvStore.set(KV_KEY, {
 				"note-1": [
-					{ timestamp: 500, content: "stale-1", note: mockNote("note-1") },
-					{ timestamp: 800, content: "stale-2", note: mockNote("note-1") }
+					{ timestamp: 500, content: "synced", note: mockNote("note-1") },
+					{ timestamp: 800, content: "synced", note: mockNote("note-1") }
 				]
 			})
 
-			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000) }])
+			mockFetchNotesWithContent.mockResolvedValue([{ uuid: "note-1", editedTimestamp: BigInt(1000), content: "synced" }])
 
 			await createSync()
 
@@ -233,19 +303,19 @@ describe("Sync (Notes)", () => {
 			kvStore.set(KV_KEY, {
 				"note-valid": [{ timestamp: 5000, content: "keep", note: mockNote("note-valid") }],
 				"note-deleted": [{ timestamp: 5000, content: "remove", note: mockNote("note-deleted") }],
-				"note-stale": [{ timestamp: 500, content: "old", note: mockNote("note-stale") }]
+				"note-synced": [{ timestamp: 500, content: "synced", note: mockNote("note-synced") }]
 			})
 
 			mockFetchNotesWithContent.mockResolvedValue([
-				{ uuid: "note-valid", editedTimestamp: BigInt(1000) },
-				{ uuid: "note-stale", editedTimestamp: BigInt(1000) }
+				{ uuid: "note-valid", editedTimestamp: BigInt(1000), content: "old-cloud" },
+				{ uuid: "note-synced", editedTimestamp: BigInt(1000), content: "synced" }
 			])
 
 			await createSync()
 
 			expect(notesState.inflightContent["note-valid"]).toHaveLength(1)
 			expect(notesState.inflightContent["note-deleted"]).toBeUndefined()
-			expect(notesState.inflightContent["note-stale"]).toBeUndefined()
+			expect(notesState.inflightContent["note-synced"]).toBeUndefined()
 		})
 
 		it("resolves init even on failure", async () => {
@@ -401,6 +471,49 @@ describe("Sync (Notes)", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+		})
+
+		it("#4: an edit typed DURING the in-flight setContent survives the prune (even when editedTimestamp >= it)", async () => {
+			// Regression for #4. The prune must remove only the entry actually
+			// pushed (by its LOCAL timestamp = syncedUpTo), never everything at or
+			// below the SERVER editedTimestamp. We push V1 (timestamp 1000) and,
+			// while setContent is in flight, inject V2 (timestamp 1500). The server
+			// responds with editedTimestamp 2000 (>= V2). Under the old
+			// server-clock prune V2 (1500 <= 2000) was discarded; with the
+			// local-clock prune (> 1000) V2 must survive.
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "V1", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockImplementation(async () => {
+				// V2 is typed during the round trip (newer local timestamp, but still
+				// below the server editedTimestamp).
+				notesState.inflightContent = {
+					"note-1": [
+						{ timestamp: 1500, content: "V2", note: mockNote("note-1") },
+						{ timestamp: 1000, content: "V1", note: mockNote("note-1") }
+					]
+				}
+
+				return { editedTimestamp: BigInt(2000) }
+			})
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// V1 (== syncedUpTo) was pruned; V2 (typed during the round trip) survives.
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("V2")
 		})
 
 		it("handles partial upload failures via Promise.allSettled", async () => {
@@ -886,6 +999,62 @@ describe("Sync (Notes)", () => {
 			unmount()
 
 			expect(removeListenerSpy).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	describe("mergeInflight (#41)", () => {
+		it("seeds uuids the current store does not have", () => {
+			const current = {}
+			const fromDisk = {
+				"note-1": [{ timestamp: 1000, content: "disk", note: mockNote("note-1") }]
+			}
+
+			const merged = mergeInflight(current, fromDisk)
+
+			expect(merged["note-1"]).toHaveLength(1)
+			expect(merged["note-1"]![0]!.content).toBe("disk")
+		})
+
+		it("keeps the fresher current store edit over a staler disk entry", () => {
+			const current = {
+				"note-1": [{ timestamp: 5000, content: "current-newer", note: mockNote("note-1") }]
+			}
+			const fromDisk = {
+				"note-1": [{ timestamp: 1000, content: "disk-older", note: mockNote("note-1") }]
+			}
+
+			const merged = mergeInflight(current, fromDisk)
+
+			expect(merged["note-1"]).toHaveLength(1)
+			expect(merged["note-1"]![0]!.content).toBe("current-newer")
+		})
+
+		it("takes the disk entry when it is newer than the current store entry", () => {
+			const current = {
+				"note-1": [{ timestamp: 1000, content: "current-older", note: mockNote("note-1") }]
+			}
+			const fromDisk = {
+				"note-1": [{ timestamp: 5000, content: "disk-newer", note: mockNote("note-1") }]
+			}
+
+			const merged = mergeInflight(current, fromDisk)
+
+			expect(merged["note-1"]).toHaveLength(1)
+			expect(merged["note-1"]![0]!.content).toBe("disk-newer")
+		})
+
+		it("preserves current-only uuids untouched", () => {
+			const current = {
+				"note-other": [{ timestamp: 2000, content: "stays", note: mockNote("note-other") }]
+			}
+			const fromDisk = {
+				"note-1": [{ timestamp: 1000, content: "disk", note: mockNote("note-1") }]
+			}
+
+			const merged = mergeInflight(current, fromDisk)
+
+			expect(merged["note-other"]![0]!.content).toBe("stays")
+			expect(merged["note-1"]![0]!.content).toBe("disk")
 		})
 	})
 })

@@ -72,7 +72,7 @@ beforeEach(() => {
 
 describe("contacts.block", () => {
 	it("calls blockContact with the email", async () => {
-		const blockContact = vi.fn().mockResolvedValue(undefined)
+		const blockContact = vi.fn().mockResolvedValue("record-uuid-alice")
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: { blockContact }
@@ -81,7 +81,6 @@ describe("contacts.block", () => {
 		const alice = makeContact({ email: "alice@example.com", uuid: "uuid-alice", userId: 42n })
 
 		await contacts.block({
-			uuid: alice.uuid,
 			userId: alice.userId,
 			email: alice.email,
 			avatar: alice.avatar ?? undefined,
@@ -92,17 +91,16 @@ describe("contacts.block", () => {
 		expect(blockContact).toHaveBeenCalledWith("alice@example.com", undefined)
 	})
 
-	it("moves the contact from contacts to blocked in the query cache update", async () => {
+	it("moves the contact from contacts to blocked using the block-record uuid returned by blockContact", async () => {
 		const alice = makeContact({ email: "alice@example.com", uuid: "uuid-alice", userId: 42n, nickName: "Al" })
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
-				blockContact: vi.fn().mockResolvedValue(undefined)
+				blockContact: vi.fn().mockResolvedValue("record-uuid-alice")
 			}
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
 		await contacts.block({
-			uuid: alice.uuid,
 			userId: alice.userId,
 			email: alice.email,
 			avatar: alice.avatar ?? undefined,
@@ -118,7 +116,8 @@ describe("contacts.block", () => {
 
 		expect(next.contacts).toHaveLength(0)
 		expect(next.blocked).toHaveLength(1)
-		expect(next.blocked[0]!.uuid).toBe("uuid-alice")
+		// uuid must be the block-record uuid returned by blockContact, NOT the contact uuid
+		expect(next.blocked[0]!.uuid).toBe("record-uuid-alice")
 		expect(next.blocked[0]!.userId).toBe(42n)
 		expect(next.blocked[0]!.nickName).toBe("Al")
 	})
@@ -128,12 +127,11 @@ describe("contacts.block", () => {
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
-				blockContact: vi.fn().mockResolvedValue(undefined)
+				blockContact: vi.fn().mockResolvedValue("record-uuid-bob")
 			}
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
 		await contacts.block({
-			uuid: bob.uuid,
 			userId: bob.userId,
 			email: bob.email,
 			avatar: bob.avatar ?? undefined,
@@ -149,17 +147,16 @@ describe("contacts.block", () => {
 	})
 
 	it("deduplicates an already-blocked entry identified by email before inserting the new one", async () => {
-		const carol = makeContact({ email: "carol@example.com", uuid: "uuid-carol-new" })
-		const existingBlocked = { ...carol, uuid: "uuid-carol-old", nickName: "" }
+		const carol = makeContact({ email: "carol@example.com", uuid: "uuid-carol-contact" })
+		const existingBlocked = { ...carol, uuid: "uuid-carol-old-record", nickName: "" }
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
-				blockContact: vi.fn().mockResolvedValue(undefined)
+				blockContact: vi.fn().mockResolvedValue("uuid-carol-new-record")
 			}
 		} as unknown as Awaited<ReturnType<typeof auth.getSdkClients>>)
 
 		await contacts.block({
-			uuid: carol.uuid,
 			userId: carol.userId,
 			email: carol.email,
 			avatar: carol.avatar ?? undefined,
@@ -171,14 +168,14 @@ describe("contacts.block", () => {
 		const prev = { contacts: [carol], blocked: [existingBlocked] }
 		const next = (update as unknown as { updater: (p: typeof prev) => typeof prev }).updater(prev)
 
-		// Old entry (uuid-carol-old) must be gone; the freshly-blocked entry (uuid-carol-new) is present
+		// Old block-record (uuid-carol-old-record) must be gone; the new record uuid is present
 		expect(next.blocked).toHaveLength(1)
-		expect(next.blocked[0]!.uuid).toBe("uuid-carol-new")
+		expect(next.blocked[0]!.uuid).toBe("uuid-carol-new-record")
 		expect(next.blocked[0]!.email).toBe("carol@example.com")
 	})
 
 	it("passes the AbortSignal to blockContact when provided", async () => {
-		const blockContact = vi.fn().mockResolvedValue(undefined)
+		const blockContact = vi.fn().mockResolvedValue("record-uuid-sig")
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: { blockContact }
@@ -188,7 +185,6 @@ describe("contacts.block", () => {
 		const controller = new AbortController()
 
 		await contacts.block({
-			uuid: contact.uuid,
 			userId: contact.userId,
 			email: contact.email,
 			avatar: contact.avatar ?? undefined,

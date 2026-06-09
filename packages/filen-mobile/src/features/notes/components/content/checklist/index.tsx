@@ -1,8 +1,9 @@
-import { useRef, useEffect, Fragment } from "react"
+import { useRef, useEffect, useState } from "react"
+import { useStore } from "zustand"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
 import { checklistParser, type ChecklistItem } from "@filen/utils"
 import Item from "@/features/notes/components/content/checklist/item"
-import useChecklistStore from "@/features/notes/store/useChecklist.store"
+import { createChecklistStore, ChecklistStoreContext } from "@/features/notes/store/useChecklist.store"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
 import Toolbar from "@/features/notes/components/content/checklist/toolbar"
@@ -26,15 +27,22 @@ const Checklist = ({
 	// so it reads the up-to-date value synchronously within the same event that flips it —
 	// otherwise the first keystroke would be dropped while a state update is still pending.
 	const didTypeRef = useRef<boolean>(false)
+	// Per-INSTANCE store so two mounted editors (e.g. a live note + a history "View" of the same
+	// uuid) never share checklist state. The lazy useState initializer runs once per mount and is
+	// safe to read during render (unlike useRef().current under react-hooks/refs); GC'd with the component.
+	const [store] = useState(() => createChecklistStore())
 	// Client-side filter only: hideCompleted drops checked items from the rendered list without
 	// touching `parsed` (the source of truth that gets stringified back into the note), so the
 	// original note content is preserved. useShallow keeps the render stable when off (same ids ref)
 	// and only re-renders when the visible set actually changes (e.g. an item is checked/unchecked),
 	// not on every keystroke.
-	const visibleIds = useChecklistStore(useShallow(state => visibleChecklistIds(state.ids, state.parsed, hideCompleted ?? false)))
+	const visibleIds = useStore(
+		store,
+		useShallow(state => visibleChecklistIds(state.ids, state.parsed, hideCompleted ?? false))
+	)
 
 	const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
-		useChecklistStore.getState().setParsed(prev =>
+		store.getState().setParsed(prev =>
 			prev.map(i =>
 				i.id === item.id
 					? {
@@ -46,14 +54,14 @@ const Checklist = ({
 		)
 
 		if (didTypeRef.current && onChange) {
-			const parsed = useChecklistStore.getState().parsed
+			const parsed = store.getState().parsed
 
 			onChange(checklistParser.stringify(parsed))
 		}
 	}
 
 	const onCheckedChange = ({ item, checked }: { item: ChecklistItem; checked: boolean }) => {
-		useChecklistStore.getState().setParsed(prev =>
+		store.getState().setParsed(prev =>
 			prev.map(i =>
 				i.id === item.id
 					? {
@@ -65,7 +73,7 @@ const Checklist = ({
 		)
 
 		if (onChange) {
-			const parsed = useChecklistStore.getState().parsed
+			const parsed = store.getState().parsed
 
 			onChange(checklistParser.stringify(parsed))
 		}
@@ -88,8 +96,8 @@ const Checklist = ({
 			]
 		}
 
-		useChecklistStore.getState().setInputRefs({})
-		useChecklistStore.getState().setInitialIds(
+		store.getState().setInputRefs({})
+		store.getState().setInitialIds(
 			parsed.reduce(
 				(acc, item) => {
 					acc[item.id] = true
@@ -99,12 +107,12 @@ const Checklist = ({
 				{} as Record<string, boolean>
 			)
 		)
-		useChecklistStore.getState().setParsed(parsed)
-		useChecklistStore.getState().setIds(parsed.map(i => i.id))
-	}, [initialValue])
+		store.getState().setParsed(parsed)
+		store.getState().setIds(parsed.map(i => i.id))
+	}, [initialValue, store])
 
 	return (
-		<Fragment>
+		<ChecklistStoreContext.Provider value={store}>
 			<KeyboardAwareScrollView
 				className="flex-1"
 				contentInsetAdjustmentBehavior="automatic"
@@ -130,7 +138,7 @@ const Checklist = ({
 				})}
 			</KeyboardAwareScrollView>
 			{!readOnly && <Toolbar />}
-		</Fragment>
+		</ChecklistStoreContext.Provider>
 	)
 }
 
