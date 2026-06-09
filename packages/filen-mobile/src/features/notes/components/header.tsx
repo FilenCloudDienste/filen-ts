@@ -55,7 +55,14 @@ export const Header = ({
 
 	const liveNotes = notesQuery.status === "success" ? notesQuery.data : []
 	const liveByUuid = new Map(liveNotes.map(note => [note.uuid, note]))
-	const selectedNotesLive = selectedNotes.map(sel => liveByUuid.get(sel.uuid) ?? sel)
+	// Drop stale-snapshot entries rather than falling back to them (#42): if the note is
+	// no longer in the live query result it has been deleted and must not influence flags
+	// or bulk ops — returning the stale object keeps a ghost in the aggregation.
+	const selectedNotesLive = selectedNotes.flatMap(sel => {
+		const live = liveByUuid.get(sel.uuid)
+
+		return live ? [live] : []
+	})
 	const noteFlags = aggregateNoteSelectionFlags(selectedNotesLive, stringifiedClient?.userId)
 
 	const tag = (() => {

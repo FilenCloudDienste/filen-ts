@@ -18,7 +18,7 @@ import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { type TFunction } from "i18next"
-import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
+import { isFileItem, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 
 export function createMenuButtons({
 	item,
@@ -71,45 +71,19 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		isDirectoryItem(item) &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "sharedIn" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "links" ||
-			drivePath.type === "offline" ||
-			drivePath.type === "linked")
-	) {
-		menuButtons.push({
-			id: "open",
-			title: t("open"),
-			icon: "folder",
-			onPress: () => {
-				router.push({
-					pathname: drivePath.selectOptions
-						? "/driveSelect/[uuid]"
-						: drivePath.type === "offline"
-							? "/offline/[uuid]"
-							: drivePath.type === "links"
-								? "/links/[uuid]"
-								: drivePath.type === "drive"
-									? "/tabs/drive/[uuid]"
-									: drivePath.type === "sharedIn"
-										? "/sharedIn/[uuid]"
-										: drivePath.type === "linked"
-											? "/linkedDir/[uuid]"
-											: drivePath.type === "sharedOut"
-												? "/sharedOut/[uuid]"
-												: "",
-					params: {
-						uuid: item.data.uuid,
-						selectOptions: drivePath.selectOptions ? serialize(drivePath.selectOptions) : undefined,
-						linked: drivePath.linked ? serialize(drivePath.linked) : undefined
-					}
-				})
-			}
-		})
+	{
+		const openTarget = resolveDriveNavigationTarget({ item, drivePath })
+
+		if (openTarget) {
+			menuButtons.push({
+				id: "open",
+				title: t("open"),
+				icon: "folder",
+				onPress: () => {
+					router.push(openTarget)
+				}
+			})
+		}
 	}
 
 	const downloadSubButtons = buildDownloadSubButtons({

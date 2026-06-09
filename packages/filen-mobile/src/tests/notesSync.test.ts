@@ -2,19 +2,32 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { kvStore, notesState, mockNotesSetContent, mockFetchNotesWithContent, mockCreateExecutableTimeout, mockNotesWithContentQueryGet } =
-	vi.hoisted(() => ({
-		kvStore: new Map<string, unknown>(),
-		notesState: {
-			inflightContent: {} as Record<string, { timestamp: number; content: string; note: { uuid: string } }[]>
-		},
-		mockNotesSetContent: vi.fn().mockResolvedValue({
-			editedTimestamp: BigInt(0)
-		}),
-		mockFetchNotesWithContent: vi.fn().mockResolvedValue([]),
-		mockCreateExecutableTimeout: vi.fn(),
-		mockNotesWithContentQueryGet: vi.fn().mockReturnValue(null)
-	}))
+const {
+	kvStore,
+	notesState,
+	mockNotesSetContent,
+	mockFetchNotesWithContent,
+	mockCreateExecutableTimeout,
+	mockNotesWithContentQueryGet,
+	mockUnwrapSdkError,
+	mockIsNetworkClassError
+} = vi.hoisted(() => ({
+	kvStore: new Map<string, unknown>(),
+	notesState: {
+		inflightContent: {} as Record<string, { timestamp: number; content: string; note: { uuid: string } }[]>
+	},
+	mockNotesSetContent: vi.fn().mockResolvedValue({
+		editedTimestamp: BigInt(0)
+	}),
+	mockFetchNotesWithContent: vi.fn().mockResolvedValue([]),
+	mockCreateExecutableTimeout: vi.fn(),
+	mockNotesWithContentQueryGet: vi.fn().mockReturnValue(null),
+	// Default: errors are NOT SDK errors (unwrap → null), so the keep-for-retry path
+	// runs (preserving the existing plain-Error retry behaviour). Individual tests
+	// override these to simulate a permission-class vs a network-class SDK rejection.
+	mockUnwrapSdkError: vi.fn().mockReturnValue(null),
+	mockIsNetworkClassError: vi.fn().mockReturnValue(false)
+}))
 
 vi.mock("react-native", async () => {
 	const listeners = new Map<string, Set<(state: string) => void>>()
@@ -91,6 +104,11 @@ vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
+vi.mock("@/lib/sdkErrors", () => ({
+	unwrapSdkError: (e: unknown) => mockUnwrapSdkError(e),
+	isNetworkClassError: (e: unknown) => mockIsNetworkClassError(e)
+}))
+
 import { Sync, SyncHost, mergeInflight } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
 import { AppState } from "react-native"
@@ -124,6 +142,10 @@ describe("Sync (Notes)", () => {
 		mockFetchNotesWithContent.mockResolvedValue([])
 		mockCreateExecutableTimeout.mockClear()
 		mockNotesWithContentQueryGet.mockReturnValue(null)
+		mockUnwrapSdkError.mockReset()
+		mockUnwrapSdkError.mockReturnValue(null)
+		mockIsNetworkClassError.mockReset()
+		mockIsNetworkClassError.mockReturnValue(false)
 		vi.mocked(sqlite.kvAsync.get).mockClear()
 		vi.mocked(sqlite.kvAsync.set).mockClear()
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
@@ -541,6 +563,91 @@ describe("Sync (Notes)", () => {
 			expect(notesState.inflightContent["note-2"]).toBeUndefined()
 
 			// note-1 failed but remains in store for retry
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+		})
+
+		it("#40: drops the inflight entry when setContent rejects with a non-retryable (permission-class) SDK error", async () => {
+			// A read-only / shared / history note whose edit reaches sync is rejected
+			// by the server permanently. Keeping it would loop forever and wedge the
+			// note's content query (enabled: !hasInflightContent). The entry must be
+			// DROPPED so the content query re-enables.
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "no-write-access", note: mockNote("note-1") }]
+			}
+
+			const permissionError = new Error("permission denied")
+
+			mockNotesSetContent.mockRejectedValue(permissionError)
+			// Simulate a permission-class SDK error: it IS an SDK error (unwrap → truthy)
+			// but NOT network-class (won't succeed on retry).
+			mockUnwrapSdkError.mockReturnValue({ kind: () => "Server" })
+			mockIsNetworkClassError.mockReturnValue(false)
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// Dropped — not looped forever.
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+		})
+
+		it("#40: keeps the inflight entry when setContent rejects with a network-class SDK error (still retryable)", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "transient", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValue(new Error("network down"))
+			// SDK error, but network-class → must be retried, NOT dropped.
+			mockUnwrapSdkError.mockReturnValue({ kind: () => "Reqwest" })
+			mockIsNetworkClassError.mockReturnValue(true)
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+		})
+
+		it("#40: keeps the inflight entry when setContent rejects with a non-SDK error (e.g. abort)", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "keep-me", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValue(new Error("not an sdk error"))
+			// Not an SDK error at all (unwrap → null, the beforeEach default) → keep for retry.
+			mockUnwrapSdkError.mockReturnValue(null)
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
 			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
 		})
 

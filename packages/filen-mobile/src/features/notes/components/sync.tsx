@@ -7,6 +7,7 @@ import { AppState } from "react-native"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesWithContentQueryFetch, notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
+import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 
 // #41 fix: functional, per-uuid MERGE used to hydrate the disk-restored inflight
 // queue into the (possibly already-populated) store without clobbering edits the
@@ -250,11 +251,43 @@ export class Sync {
 					// rescheduled debounce and is immune to device-clock skew.
 					const syncedUpTo = mostRecentContent.timestamp
 
-					await notes.setContent({
-						note: liveNote,
-						content: mostRecentContent.content,
-						signal
-					})
+					try {
+						await notes.setContent({
+							note: liveNote,
+							content: mostRecentContent.content,
+							signal
+						})
+					} catch (e) {
+						// #40 hardening: a read-only / shared / history note whose edit
+						// reaches sync (e.g. Quill failed to enforce readOnly) is rejected
+						// by the server with a permanent, non-retryable error. The old
+						// behaviour kept the entry forever, so every sync re-attempted it
+						// and `hasInflightContent` stayed true — permanently DISABLING the
+						// note's content query (`enabled: !hasInflightContent`) and wedging
+						// the editor. DROP the inflight entry on a non-retryable SDK error
+						// so the content query re-enables. Transient/network failures (and
+						// any non-SDK error, e.g. abort) are still re-thrown so the existing
+						// keep-for-retry path runs.
+						const unwrapped = unwrapSdkError(e)
+
+						if (unwrapped && !isNetworkClassError(e)) {
+							useNotesInflightStore.getState().setInflightContent(prev => {
+								const updated = {
+									...prev
+								}
+
+								delete updated[noteUuid]
+
+								return updated
+							})
+
+							console.error(`[NotesSync] Dropping inflight content for note ${noteUuid} after a non-retryable error:`, e)
+
+							return
+						}
+
+						throw e
+					}
 
 					useNotesInflightStore.getState().setInflightContent(prev => {
 						const updated = {
