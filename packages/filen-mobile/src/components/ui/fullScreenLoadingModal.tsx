@@ -2,7 +2,7 @@ import { useState, useEffect } from "react"
 import { Modal, ActivityIndicator, Platform, type NativeSyntheticEvent } from "react-native"
 import { run, type DeferFn, type Result, type Options, runEffect } from "@filen/utils"
 import { FullWindowOverlay } from "react-native-screens"
-import { FadeIn, FadeOut } from "react-native-reanimated"
+import { FadeIn } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
 import events from "@/lib/events"
 
@@ -20,7 +20,7 @@ const FullScreenLoadingModalParent = ({ children, visible }: { children: React.R
 		ios: <FullWindowOverlay>{children}</FullWindowOverlay>,
 		default: (
 			<Modal
-				className="z-9999"
+				className="z-99999"
 				visible={visible}
 				transparent={true}
 				animationType="none"
@@ -36,13 +36,43 @@ const FullScreenLoadingModalParent = ({ children, visible }: { children: React.R
 	})
 }
 
+// How long the overlay lingers after the show-counter reaches 0 before the native presentation is
+// dismissed. Both native containers (Android Modal, iOS FullWindowOverlay) present asynchronously:
+// flipping `visible` back to false while the native show is still mid-flight can swallow the
+// dismiss — and since React never re-sends an unchanged prop, the overlay then stays up FOREVER
+// (stuck spinner, app unusable until restart). Lingering guarantees the presentation has settled
+// before it is dismissed, and coalesces back-to-back operations into one continuous presentation
+// instead of rapid native show/dismiss churn. Showing stays instant so input is blocked immediately.
+const HIDE_LINGER_MS = 150
+
 export const FullScreenLoadingModal = () => {
 	const [count, setCount] = useState<number>(0)
+	const [lingering, setLingering] = useState<boolean>(false)
+
+	// The linger window only counts down while no operation is active; a new show re-arms it
+	// (the timeout is cleared via the effect cleanup when `count` changes), so back-to-back
+	// operations keep one continuous native presentation alive instead of churning show/dismiss.
+	useEffect(() => {
+		if (count > 0 || !lingering) {
+			return
+		}
+
+		const timeout = setTimeout(() => {
+			setLingering(false)
+		}, HIDE_LINGER_MS)
+
+		return () => {
+			clearTimeout(timeout)
+		}
+	}, [count, lingering])
 
 	useEffect(() => {
 		const { cleanup } = runEffect(defer => {
 			const showFullScreenLoadingModalListener = events.subscribe("showFullScreenLoadingModal", () => {
-				setCount(prev => prev + 1)
+				setCount(prev => Math.max(0, prev + 1))
+				// Armed here (not derived in an effect) so `visible` is true from the very first
+				// commit and stays true through the post-completion linger window.
+				setLingering(true)
 			})
 
 			defer(() => {
@@ -58,7 +88,9 @@ export const FullScreenLoadingModal = () => {
 			})
 
 			const forceHideFullScreenLoadingModalListener = events.subscribe("forceHideFullScreenLoadingModal", () => {
+				// The recovery escape hatch dismisses immediately — no linger.
 				setCount(0)
+				setLingering(false)
 			})
 
 			defer(() => {
@@ -71,12 +103,16 @@ export const FullScreenLoadingModal = () => {
 		}
 	}, [])
 
+	// Deliberately NO `exiting` animation: reanimated exit animations defer the native removal of
+	// the removed subtree until the animation completes, and inside a FullWindowOverlay (a separate
+	// window-level container on iOS) that completion can get lost — leaving the full-screen,
+	// touch-intercepting overlay attached FOREVER (stuck spinner, app unusable until restart).
+	// The mount fade-in is safe; hiding is instant by design (after the linger window above).
 	return (
-		<FullScreenLoadingModalParent visible={count > 0}>
+		<FullScreenLoadingModalParent visible={count > 0 || lingering}>
 			<AnimatedView
 				className="flex-1 bg-black/50 justify-center items-center top-0 left-0 right-0 bottom-0 z-9999 w-full h-full absolute"
 				entering={FadeIn}
-				exiting={FadeOut}
 			>
 				<ActivityIndicator
 					size="large"
