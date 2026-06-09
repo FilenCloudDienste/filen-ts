@@ -34,6 +34,14 @@ export const transfers = {
 	transfers_progress_one: "{{count}} transfer · {{percent}}% · {{speed}}",
 	/** Android foreground-service notification body while transfers run (plural). {{count}} is the transfer count, {{percent}} the overall progress, {{speed}} the human-readable speed */
 	transfers_progress_other: "{{count}} transfers · {{percent}}% · {{speed}}",
+	/** Finished-transfer row outcome label shown when a transfer completed successfully */
+	transfer_completed: "Completed",
+	/** Finished-transfer row outcome label shown when a transfer failed with an error */
+	transfer_failed: "Failed",
+	/** Finished-transfer row menu action: remove this single finished entry from the transfers list */
+	transfer_remove_from_list: "Remove from list",
+	/** Header menu action: remove all finished (completed/failed) entries from the transfers list */
+	transfers_clear_finished: "Clear finished",
 	/** Advanced settings (Android only) — toggle title for the transfers foreground service */
 	background_transfers: "Background transfers",
 	/** Advanced settings (Android only) — subtitle under the background-transfers toggle, explaining the persistent notification trade-off */

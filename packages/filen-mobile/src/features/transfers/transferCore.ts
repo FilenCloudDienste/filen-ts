@@ -16,8 +16,9 @@ import {
 	AnyFile,
 	type SharedFile
 } from "@filen/sdk-rs"
-import useTransfersStore, { type Transfer } from "@/features/transfers/store/useTransfers.store"
+import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { driveItemDisplayName } from "@/lib/decryption"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { wrapAbortSignalForSdk, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
@@ -88,12 +89,99 @@ export function shouldRemoveSettledTransfer(args: { succeeded: boolean; aborted:
 	return args.succeeded || args.aborted || args.hasErrors
 }
 
+// Display name for a settled transfer, matching the transfers screen row exactly:
+// uploads use the local file/directory name, downloads use the drive item's decrypted name.
+function finishedTransferName(transfer: Transfer): string {
+	if (transfer.type === "uploadDirectory" || transfer.type === "uploadFile") {
+		return transfer.localFileOrDir.name
+	}
+
+	return driveItemDisplayName(transfer.item)
+}
+
+// Builds a flat, closure-free snapshot of a settled transfer for the finished list. Reads the
+// LIVE store entry (latest bytesTransferred/size/startedAt) at settle time; if it is already gone
+// (defensive — e.g. removed by another path) returns null and the caller skips the append.
+function buildFinishedSnapshot(args: {
+	id: string
+	type: Transfer["type"]
+	outcome: FinishedTransfer["outcome"]
+	errorMessage: string | null
+}): FinishedTransfer | null {
+	const { id, type, outcome, errorMessage } = args
+	const liveEntry = useTransfersStore.getState().transfers.find(t => t.id === id && t.type === type)
+
+	if (!liveEntry) {
+		return null
+	}
+
+	return {
+		id,
+		type,
+		name: finishedTransferName(liveEntry),
+		size: liveEntry.size,
+		bytesTransferred: liveEntry.bytesTransferred,
+		startedAt: liveEntry.startedAt,
+		finishedAt: Date.now(),
+		outcome,
+		errorMessage
+	}
+}
+
+// Unwraps a thrown transfer error into a single diagnostic line for the finished list. Reads the
+// SDK's inner message directly via FilenSdkError (no i18n / human-readable kind localization — that
+// path drags the localization runtime into this silent infra module and the UI alert layer already
+// owns the translated presentation). Falls back to the JS Error message / stringified value.
+function finishedTransferErrorMessage(error: unknown): string | null {
+	if (FilenSdkError.hasInner(error)) {
+		const inner = FilenSdkError.getInner(error)
+
+		return inner.message()
+	}
+
+	if (error instanceof Error) {
+		return error.message
+	}
+
+	return String(error)
+}
+
 // Removes the transfer entry from the store, optionally waiting for an external completion gate
 // first (e.g. camera upload finishing its own bookkeeping). Shared by the deferred success/abort
-// cleanup and the error-write paths so the removal logic stays in one place.
-function removeSettledTransfer(id: string, type: Transfer["type"], awaitExternal?: () => Promise<void>): void {
+// cleanup and the error-write paths so the removal logic stays in one place. When `outcome` is set
+// (succeeded/errored — never aborted), a finished snapshot is appended in the SAME deferred step,
+// AFTER the external-completion fence resolves and BEFORE the active entry is filtered out, so the
+// snapshot captures the entry's final state and the fence stays intact.
+function removeSettledTransfer(
+	id: string,
+	type: Transfer["type"],
+	args?: {
+		awaitExternal?: () => Promise<void>
+		outcome?: FinishedTransfer["outcome"]
+		errorMessage?: string | null
+	}
+): void {
+	const awaitExternal = args?.awaitExternal
+	const outcome = args?.outcome
+	const errorMessage = args?.errorMessage ?? null
+
 	;(awaitExternal ? awaitExternal() : Promise.resolve())
 		.then(() => {
+			if (outcome) {
+				// Append before the filter so the finished entry exists by the time the active one is
+				// dropped. Guarded so a snapshot/append failure never blocks the (mandatory) removal.
+				try {
+					const snapshot = buildFinishedSnapshot({ id, type, outcome, errorMessage })
+					const addFinishedTransfer = useTransfersStore.getState().addFinishedTransfer
+
+					if (snapshot && typeof addFinishedTransfer === "function") {
+						addFinishedTransfer(snapshot)
+					}
+				} catch (e) {
+					console.error(e)
+				}
+			}
+
 			useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === type)))
 		})
 		.catch(console.error)
@@ -116,11 +204,19 @@ function registerCompletionCleanup(args: {
 	const { id, type, succeeded, aborted, awaitExternal, defer } = args
 
 	defer(() => {
-		if (!shouldRemoveSettledTransfer({ succeeded: succeeded(), aborted: aborted(), hasErrors: false })) {
+		const didSucceed = succeeded()
+		const wasAborted = aborted()
+
+		if (!shouldRemoveSettledTransfer({ succeeded: didSucceed, aborted: wasAborted, hasErrors: false })) {
 			return
 		}
 
-		removeSettledTransfer(id, type, awaitExternal)
+		// User-aborted/cancelled transfers are dropped silently — only a genuine success is kept in the
+		// finished list. (Abort wins over success if both are somehow true.)
+		removeSettledTransfer(id, type, {
+			awaitExternal,
+			outcome: didSucceed && !wasAborted ? "succeeded" : undefined
+		})
 	})
 }
 
@@ -474,9 +570,14 @@ export async function uploadCore(
 				)
 
 				// The error is now written to the store entry; remove the settled (errored) transfer so the
-				// floating bar, foreground service and speed interval don't stay alive forever. The thrown
-				// error below still surfaces to the caller's alert path, independent of this removal.
-				removeSettledTransfer(id, "uploadDirectory", awaitExternalCompletionBeforeMarkingAsFinished)
+				// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+				// errored snapshot in the finished list. The thrown error below still surfaces to the
+				// caller's alert path, independent of this removal.
+				removeSettledTransfer(id, "uploadDirectory", {
+					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+					outcome: "errored",
+					errorMessage: finishedTransferErrorMessage(result.error)
+				})
 			}
 
 			throw result.error
@@ -629,9 +730,14 @@ export async function uploadCore(
 			)
 
 			// The error is now written to the store entry; remove the settled (errored) transfer so the
-			// floating bar, foreground service and speed interval don't stay alive forever. The thrown
-			// error below still surfaces to the caller's alert path, independent of this removal.
-			removeSettledTransfer(id, "uploadFile", awaitExternalCompletionBeforeMarkingAsFinished)
+			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+			// errored snapshot in the finished list. The thrown error below still surfaces to the
+			// caller's alert path, independent of this removal.
+			removeSettledTransfer(id, "uploadFile", {
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				outcome: "errored",
+				errorMessage: finishedTransferErrorMessage(result.error)
+			})
 		}
 
 		throw result.error
@@ -1004,9 +1110,14 @@ export async function downloadCore(
 				)
 
 				// The error is now written to the store entry; remove the settled (errored) transfer so the
-				// floating bar, foreground service and speed interval don't stay alive forever. The thrown
-				// error below still surfaces to the caller's alert path, independent of this removal.
-				removeSettledTransfer(id, "downloadDirectory", awaitExternalCompletionBeforeMarkingAsFinished)
+				// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+				// errored snapshot in the finished list. The thrown error below still surfaces to the
+				// caller's alert path, independent of this removal.
+				removeSettledTransfer(id, "downloadDirectory", {
+					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+					outcome: "errored",
+					errorMessage: finishedTransferErrorMessage(result.error)
+				})
 			}
 
 			throw result.error
@@ -1221,9 +1332,14 @@ export async function downloadCore(
 			)
 
 			// The error is now written to the store entry; remove the settled (errored) transfer so the
-			// floating bar, foreground service and speed interval don't stay alive forever. The thrown
-			// error below still surfaces to the caller's alert path, independent of this removal.
-			removeSettledTransfer(id, "downloadFile", awaitExternalCompletionBeforeMarkingAsFinished)
+			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+			// errored snapshot in the finished list. The thrown error below still surfaces to the
+			// caller's alert path, independent of this removal.
+			removeSettledTransfer(id, "downloadFile", {
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				outcome: "errored",
+				errorMessage: finishedTransferErrorMessage(result.error)
+			})
 		}
 
 		throw result.error

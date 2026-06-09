@@ -67,6 +67,27 @@ export type Transfer = {
 	  }
 )
 
+// A flat, monomorphic snapshot of a transfer that has reached a terminal,
+// user-visible state (succeeded or errored). Holds NO closures (no abort/pause/
+// resume) and NO SDK handles, so retaining one is cheap and never leaks a uniffi
+// resource. User-aborted/cancelled transfers are intentionally NOT kept here.
+export type FinishedTransfer = {
+	id: string
+	type: Transfer["type"]
+	name: string
+	size: number
+	bytesTransferred: number
+	startedAt: number
+	finishedAt: number
+	outcome: "succeeded" | "errored"
+	errorMessage: string | null
+}
+
+// The most finished transfers retained for the current session. Beyond this the
+// oldest entries are dropped so a long-running session uploading many small files
+// can't accumulate unbounded memory. Session-only — never persisted.
+export const MAX_FINISHED_TRANSFERS = 200
+
 // Speed smoothing. The Rust SDK only emits byte-transferred events when the
 // network delivers a chunk — on slow or jittery mobile connections that
 // produces irregular bursts and brief 1-2 second blips between cell towers.
@@ -246,16 +267,24 @@ function updateTransfers({
 
 export type TransfersStore = {
 	transfers: Transfer[]
+	finishedTransfers: FinishedTransfer[]
 	stats: {
 		progress: number
 		speed: number
 		count: number
 	}
 	setTransfers: (fn: Transfer[] | ((prev: Transfer[]) => Transfer[])) => void
+	// Append a settled (succeeded/errored) snapshot, then cap at MAX_FINISHED_TRANSFERS by
+	// dropping the OLDEST entries. Deliberately a plain set() that touches ONLY finishedTransfers
+	// — it must never recompute stats or touch the speed interval (those are active-only).
+	addFinishedTransfer: (finished: FinishedTransfer) => void
+	removeFinishedTransfer: (id: string) => void
+	clearFinishedTransfers: () => void
 }
 
 export const useTransfersStore = create<TransfersStore>(set => ({
 	transfers: [],
+	finishedTransfers: [],
 	stats: {
 		progress: 0,
 		speed: 0,
@@ -271,6 +300,28 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 				addToNextUpdateAt: true
 			})
 		})
+	},
+	addFinishedTransfer(finished) {
+		set(state => {
+			const next = [...state.finishedTransfers, finished]
+
+			// Drop the oldest entries (front of the array) once over the cap.
+			if (next.length > MAX_FINISHED_TRANSFERS) {
+				next.splice(0, next.length - MAX_FINISHED_TRANSFERS)
+			}
+
+			return {
+				finishedTransfers: next
+			}
+		})
+	},
+	removeFinishedTransfer(id) {
+		set(state => ({
+			finishedTransfers: state.finishedTransfers.filter(finished => finished.id !== id)
+		}))
+	},
+	clearFinishedTransfers() {
+		set(state => (state.finishedTransfers.length === 0 ? state : { finishedTransfers: [] }))
 	}
 }))
 
