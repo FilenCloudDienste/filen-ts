@@ -135,12 +135,6 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 
 				switch (nextAppState) {
 					case "active": {
-						if (sdkClient.isSocketConnected()) {
-							useSocketStore.getState().setState("connected")
-
-							return
-						}
-
 						if (!socketListenerHandleRef.current) {
 							socketListenerHandleRef.current = (await sdkClient.addEventListener(
 								{
