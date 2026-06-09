@@ -797,16 +797,7 @@ describe("buildTwoFactorButtons", () => {
 		it("calls enable2faGetRecoveryKey with the provided code", async () => {
 			mockPromptsInput.mockResolvedValueOnce({ cancelled: false, type: "string", value: "123456" })
 			mockAuthedSdkClient.enable2faGetRecoveryKey.mockResolvedValueOnce("recovery-key-abc")
-			// Recovery key alert
-			mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
 			runWithLoadingPassthrough()
-
-			// shareTmpFile returns success
-			const { shareTmpFile } = await import("@/lib/share")
-
-			vi.mocked(shareTmpFile).mockResolvedValueOnce({ success: true, data: undefined } as unknown as Awaited<
-				ReturnType<typeof shareTmpFile>
-			>)
 
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
 			const buttons = buildTwoFactorButtons({

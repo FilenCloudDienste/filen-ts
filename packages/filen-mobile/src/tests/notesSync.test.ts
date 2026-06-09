@@ -9,8 +9,8 @@ const {
 	mockFetchNotesWithContent,
 	mockCreateExecutableTimeout,
 	mockNotesWithContentQueryGet,
-	mockUnwrapSdkError,
-	mockIsNetworkClassError
+	ErrorKindMock,
+	sdkErrorState
 } = vi.hoisted(() => ({
 	kvStore: new Map<string, unknown>(),
 	notesState: {
@@ -22,11 +22,23 @@ const {
 	mockFetchNotesWithContent: vi.fn().mockResolvedValue([]),
 	mockCreateExecutableTimeout: vi.fn(),
 	mockNotesWithContentQueryGet: vi.fn().mockReturnValue(null),
-	// Default: errors are NOT SDK errors (unwrap → null), so the keep-for-retry path
-	// runs (preserving the existing plain-Error retry behaviour). Individual tests
-	// override these to simulate a permission-class vs a network-class SDK rejection.
-	mockUnwrapSdkError: vi.fn().mockReturnValue(null),
-	mockIsNetworkClassError: vi.fn().mockReturnValue(false)
+	// Faithful-enough ErrorKind enum (member names mirror @filen/sdk-rs). Numeric values are
+	// irrelevant — the same mock object backs both the call site (kind()) and the real classifier
+	// switch in src/lib/sdkErrors.ts.
+	ErrorKindMock: {
+		Server: "Server",
+		Unauthenticated: "Unauthenticated",
+		Reqwest: "Reqwest",
+		RetryFailed: "RetryFailed",
+		Response: "Response"
+	} as const,
+	// T2: instead of stubbing the classifier verdict, the REAL src/lib/sdkErrors.ts runs against a
+	// mocked @filen/sdk-rs. These cells let each test mark a thrown value as a FilenSdkError of a
+	// chosen kind. By default no value is an SDK error (hasInner → false), so a plain Error follows
+	// the keep-for-retry path.
+	sdkErrorState: {
+		innerOf: new Map<unknown, { kind: () => string; message: () => string }>()
+	}
 }))
 
 vi.mock("react-native", async () => {
@@ -104,12 +116,45 @@ vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-vi.mock("@/lib/sdkErrors", () => ({
-	unwrapSdkError: (e: unknown) => mockUnwrapSdkError(e),
-	isNetworkClassError: (e: unknown) => mockIsNetworkClassError(e)
+// T2: DO NOT mock @/lib/sdkErrors — the real classifier (unwrapSdkError / isNetworkClassError /
+// isRetryableAuthError) runs against this faithful @filen/sdk-rs mock so the VC3 narrowing is
+// exercised end-to-end through the actual sdkErrors.ts code, not a stubbed verdict.
+vi.mock("@filen/sdk-rs", () => {
+	class FilenSdkErrorMock {
+		public static hasInner(error: unknown): boolean {
+			return sdkErrorState.innerOf.has(error)
+		}
+
+		public static getInner(error: unknown): unknown {
+			return sdkErrorState.innerOf.get(error)
+		}
+	}
+
+	return {
+		ErrorKind: ErrorKindMock,
+		FilenSdkError: FilenSdkErrorMock
+	}
+})
+
+// sdkErrors.ts imports @/lib/i18n at module load (used only by the human-readable formatter, not
+// the classifiers under test) — provide a trivial stand-in so the module evaluates.
+vi.mock("@/lib/i18n", () => ({
+	default: {
+		t: (key: string) => key
+	}
 }))
 
-import { Sync, SyncHost, mergeInflight } from "@/features/notes/components/sync"
+// Mark a thrown value as a FilenSdkError of a given kind for the duration of a test.
+function asSdkError<E>(error: E, kind: string): E {
+	sdkErrorState.innerOf.set(error, {
+		kind: () => kind,
+		message: () => `mock ${kind}`
+	})
+
+	return error
+}
+
+import { Sync, SyncHost, mergeInflight, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
@@ -142,10 +187,7 @@ describe("Sync (Notes)", () => {
 		mockFetchNotesWithContent.mockResolvedValue([])
 		mockCreateExecutableTimeout.mockClear()
 		mockNotesWithContentQueryGet.mockReturnValue(null)
-		mockUnwrapSdkError.mockReset()
-		mockUnwrapSdkError.mockReturnValue(null)
-		mockIsNetworkClassError.mockReset()
-		mockIsNetworkClassError.mockReturnValue(false)
+		sdkErrorState.innerOf.clear()
 		vi.mocked(sqlite.kvAsync.get).mockClear()
 		vi.mocked(sqlite.kvAsync.set).mockClear()
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
@@ -566,82 +608,153 @@ describe("Sync (Notes)", () => {
 			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
 		})
 
-		it("#40: drops the inflight entry when setContent rejects with a non-retryable (permission-class) SDK error", async () => {
-			// A read-only / shared / history note whose edit reaches sync is rejected
-			// by the server permanently. Keeping it would loop forever and wedge the
-			// note's content query (enabled: !hasInflightContent). The entry must be
-			// DROPPED so the content query re-enables.
+		const timeoutImpl = (cb: () => void) => ({
+			id: null,
+			execute: vi.fn(() => cb()),
+			cancel: vi.fn()
+		})
+
+		it("VC3/#40: KEEPS the inflight entry on the FIRST non-network SDK error (bounded retry — no first-failure data loss)", async () => {
+			// A transient `ErrorKind.Server` (the catch-all for non-internal_error API errors)
+			// on a WRITABLE note must NOT lose the edit on the first failure. The real classifier
+			// runs: unwrap → truthy, network-class → false, auth → false → bounded retry path.
 			const sync = await createSync()
 
 			notesState.inflightContent = {
-				"note-1": [{ timestamp: 1000, content: "no-write-access", note: mockNote("note-1") }]
+				"note-1": [{ timestamp: 1000, content: "writable-edit", note: mockNote("note-1") }]
 			}
 
-			const permissionError = new Error("permission denied")
-
-			mockNotesSetContent.mockRejectedValue(permissionError)
-			// Simulate a permission-class SDK error: it IS an SDK error (unwrap → truthy)
-			// but NOT network-class (won't succeed on retry).
-			mockUnwrapSdkError.mockReturnValue({ kind: () => "Server" })
-			mockIsNetworkClassError.mockReturnValue(false)
-
-			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
-				id: null,
-				execute: vi.fn(() => cb()),
-				cancel: vi.fn()
-			}))
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("transient server error"), ErrorKindMock.Server))
+			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
 			sync.syncDebounced()
 			sync.executeNow()
 
 			await new Promise(resolve => setTimeout(resolve, 0))
 
-			// Dropped — not looped forever.
+			// Kept for retry after a single Server rejection (1/3).
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("writable-edit")
+		})
+
+		it("VC3/#40: drops the inflight entry only after MAX_NON_RETRYABLE_REJECTIONS consecutive non-network SDK errors (un-wedges a genuine permission rejection)", async () => {
+			// A genuine read-only / permission rejection keeps surfacing the catch-all Server
+			// error. After N consecutive attempts the entry is DROPPED so the content query
+			// re-enables (enabled: !hasInflightContent) instead of wedging forever.
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "read-only-edit", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKindMock.Server))
+			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
+
+			// Fire sync MAX times; on each of the first N-1 the entry survives, on the Nth it drops.
+			for (let attempt = 1; attempt <= MAX_NON_RETRYABLE_REJECTIONS; attempt++) {
+				sync.executeNow()
+
+				await new Promise(resolve => setTimeout(resolve, 0))
+
+				if (attempt < MAX_NON_RETRYABLE_REJECTIONS) {
+					expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+				}
+			}
+
+			// Dropped after N consecutive non-retryable rejections — query can re-enable.
 			expect(notesState.inflightContent["note-1"]).toBeUndefined()
 		})
 
-		it("#40: keeps the inflight entry when setContent rejects with a network-class SDK error (still retryable)", async () => {
+		it("T2/VC3: KEEPS the inflight entry on an Unauthenticated SDK error (re-auth-recoverable — never counted toward the drop bound)", async () => {
+			// Feeds a REAL Unauthenticated-kind error through the actual sdkErrors classifier.
+			// api_key_not_found → ErrorKind.Unauthenticated; a writable edit must survive (it will
+			// succeed once the session refreshes) and must NOT be dropped even after many attempts.
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "edit-during-reauth", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("api_key_not_found"), ErrorKindMock.Unauthenticated))
+			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
+
+			// Far more than MAX rejections — the auth error must never advance the drop bound.
+			for (let attempt = 0; attempt < MAX_NON_RETRYABLE_REJECTIONS + 2; attempt++) {
+				sync.executeNow()
+
+				await new Promise(resolve => setTimeout(resolve, 0))
+			}
+
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("edit-during-reauth")
+		})
+
+		it("VC3/#40: keeps the inflight entry indefinitely on a network-class SDK error (still retryable)", async () => {
 			const sync = await createSync()
 
 			notesState.inflightContent = {
 				"note-1": [{ timestamp: 1000, content: "transient", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValue(new Error("network down"))
-			// SDK error, but network-class → must be retried, NOT dropped.
-			mockUnwrapSdkError.mockReturnValue({ kind: () => "Reqwest" })
-			mockIsNetworkClassError.mockReturnValue(true)
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("network down"), ErrorKindMock.Reqwest))
+			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
-			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
-				id: null,
-				execute: vi.fn(() => cb()),
-				cancel: vi.fn()
-			}))
+			// Even past the bound, a network-class error must never be counted toward the drop.
+			for (let attempt = 0; attempt < MAX_NON_RETRYABLE_REJECTIONS + 1; attempt++) {
+				sync.executeNow()
 
-			sync.syncDebounced()
+				await new Promise(resolve => setTimeout(resolve, 0))
+			}
+
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+		})
+
+		it("VC3/#40: a successful sync between failures RESETS the rejection counter (no premature drop)", async () => {
+			// One Server failure (count 1), then a success drains the note. A subsequent fresh edit
+			// that fails again must start a fresh count — never inherit the earlier failure.
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "v1", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server"), ErrorKindMock.Server))
+			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
+
 			sync.executeNow()
+			await new Promise(resolve => setTimeout(resolve, 0))
 
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1) // 1/3, kept
+
+			// Now succeed — drains the note and clears its counter.
+			mockNotesSetContent.mockResolvedValueOnce({ editedTimestamp: BigInt(2000) })
+			sync.executeNow()
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+
+			// A fresh edit fails once more — must be KEPT (fresh count 1/3, not inheriting the prior 1).
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 3000, content: "v2", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKindMock.Server))
+			sync.executeNow()
 			await new Promise(resolve => setTimeout(resolve, 0))
 
 			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
 		})
 
-		it("#40: keeps the inflight entry when setContent rejects with a non-SDK error (e.g. abort)", async () => {
+		it("VC3/#40: keeps the inflight entry when setContent rejects with a non-SDK error (e.g. abort)", async () => {
 			const sync = await createSync()
 
 			notesState.inflightContent = {
 				"note-1": [{ timestamp: 1000, content: "keep-me", note: mockNote("note-1") }]
 			}
 
+			// Not an SDK error at all (innerOf has no entry → hasInner false) → keep for retry.
 			mockNotesSetContent.mockRejectedValue(new Error("not an sdk error"))
-			// Not an SDK error at all (unwrap → null, the beforeEach default) → keep for retry.
-			mockUnwrapSdkError.mockReturnValue(null)
-
-			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
-				id: null,
-				execute: vi.fn(() => cb()),
-				cancel: vi.fn()
-			}))
+			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
 			sync.syncDebounced()
 			sync.executeNow()

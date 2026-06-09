@@ -34,8 +34,13 @@ const CameraUpload = () => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const isOnline = useIsOnline()
 
+	// Camera upload syncs the photo library — it NEVER uses the camera. Scope the
+	// permission check to the library so a user who grants full photo access but
+	// denies the camera is not blocked here (and gets no spurious camera dialog).
 	const mediaPermissions = useMediaPermissions({
-		shouldRequest: true
+		shouldRequest: true,
+		library: "all",
+		needCamera: false
 	})
 
 	const makeToggleButton = ({ field, title, subTitle }: { field: BooleanConfigKey; title: string; subTitle?: string }): Button => ({

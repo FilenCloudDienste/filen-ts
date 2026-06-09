@@ -125,7 +125,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	if (query.fetchStatus === "paused") {
+	if (query.status !== "success" && query.fetchStatus === "paused") {
 		return (
 			<View className="bg-background flex-1 items-center justify-center px-8">
 				<Ionicons

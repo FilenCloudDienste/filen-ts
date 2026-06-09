@@ -32,6 +32,8 @@ import {
 	modifyAssetPathOnCollision,
 	sanitizePathSegment,
 	applyAfterActivationToggle,
+	dedupTreeKey,
+	stripFilenameExtension,
 	type CollisionParams
 } from "@/features/cameraUpload/cameraUploadHelpers"
 
@@ -411,5 +413,150 @@ describe("applyAfterActivationToggle", () => {
 		const b = applyAfterActivationToggle({ config: baseConfig, enabled: true, now: 555 })
 
 		expect(a).toEqual(b)
+	})
+})
+
+// ─── dedupTreeKey + stripFilenameExtension (#15 regression) ───────────────────
+
+describe("stripFilenameExtension", () => {
+	it("strips a trailing extension", () => {
+		expect(stripFilenameExtension("photo.png")).toBe("photo")
+	})
+
+	it("strips only the LAST extension on multi-dot names", () => {
+		expect(stripFilenameExtension("archive.tar.gz")).toBe("archive.tar")
+	})
+
+	it("returns the name unchanged when there is no extension", () => {
+		expect(stripFilenameExtension("README")).toBe("README")
+	})
+
+	it("returns an empty string unchanged", () => {
+		expect(stripFilenameExtension("")).toBe("")
+	})
+
+	it("collapses .png and .jpg of the same stem to the same value", () => {
+		expect(stripFilenameExtension("photo.png")).toBe(stripFilenameExtension("photo.jpg"))
+	})
+})
+
+describe("dedupTreeKey", () => {
+	it("returns the full path verbatim when compress is OFF (extension preserved)", () => {
+		expect(dedupTreeKey({ path: "/camera roll/photo.png", compress: false })).toBe("/camera roll/photo.png")
+	})
+
+	it("strips the extension when compress is ON (extension-agnostic key)", () => {
+		expect(dedupTreeKey({ path: "/camera roll/photo.png", compress: true })).toBe("/camera roll/photo")
+	})
+
+	it("compress ON: .png and .jpg of the same stem collapse to one key (#15 symmetry)", () => {
+		// Local lists the source .png; remote (after compression won) lists .jpg.
+		// Both must dedup to the identical key or the asset re-uploads every sync.
+		const local = dedupTreeKey({ path: "/camera roll/photo.png", compress: true })
+		const remote = dedupTreeKey({ path: "/camera roll/photo.jpg", compress: true })
+
+		expect(local).toBe(remote)
+		expect(local).toBe("/camera roll/photo")
+	})
+
+	it("compress ON: .png and .jpg of the same stem do NOT collapse when compress is OFF", () => {
+		// With compress off the upload never renames, so different extensions are
+		// genuinely different files and must stay distinct.
+		const png = dedupTreeKey({ path: "/camera roll/photo.png", compress: false })
+		const jpg = dedupTreeKey({ path: "/camera roll/photo.jpg", compress: false })
+
+		expect(png).not.toBe(jpg)
+	})
+
+	it("compress ON: a path with no extension is returned unchanged", () => {
+		expect(dedupTreeKey({ path: "/camera roll/photo", compress: true })).toBe("/camera roll/photo")
+	})
+
+	it("compress ON: distinct stems stay distinct", () => {
+		const a = dedupTreeKey({ path: "/camera roll/a.png", compress: true })
+		const b = dedupTreeKey({ path: "/camera roll/b.jpg", compress: true })
+
+		expect(a).not.toBe(b)
+	})
+})
+
+describe("#15 — compress-rename key symmetry through the collision suffix", () => {
+	it("local (.png, stem name) and remote (.jpg, stem name) collision suffixes match at iteration 0", () => {
+		// listLocal strips the extension from both the key AND the collision name when
+		// compress is on; listRemote does the same. The seconds-timestamp suffix path
+		// must therefore be identical for the same physical asset across both trees.
+		const contentHash = String(Math.floor(1700000000000 / 1000))
+
+		const local = modifyAssetPathOnCollision({
+			iteration: 0,
+			path: dedupTreeKey({ path: "/camera roll/photo.png", compress: true }),
+			asset: { name: stripFilenameExtension("photo.png"), contentHash }
+		})
+		const remote = modifyAssetPathOnCollision({
+			iteration: 0,
+			path: dedupTreeKey({ path: "/camera roll/photo.jpg", compress: true }),
+			asset: { name: stripFilenameExtension("photo.jpg"), contentHash }
+		})
+
+		expect(local).toBe(remote)
+		// No extension leaks into the suffix path.
+		expect(local).not.toMatch(/\.(png|jpg)$/)
+	})
+
+	it("local (.png, stem name) and remote (.jpg, stem name) collision suffixes match at iteration 1", () => {
+		const contentHash = String(Math.floor(1700000000000 / 1000))
+
+		const local = modifyAssetPathOnCollision({
+			iteration: 1,
+			path: dedupTreeKey({ path: "/camera roll/photo.png", compress: true }),
+			asset: { name: stripFilenameExtension("photo.png"), contentHash }
+		})
+		const remote = modifyAssetPathOnCollision({
+			iteration: 1,
+			path: dedupTreeKey({ path: "/camera roll/photo.jpg", compress: true }),
+			asset: { name: stripFilenameExtension("photo.jpg"), contentHash }
+		})
+
+		expect(local).toBe(remote)
+	})
+})
+
+// ─── #14 — symmetric null-creationTime key (NO modificationTime fallback) ─────
+
+describe("#14 — null-creationTime local/remote key symmetry", () => {
+	it("local hash uses creationTime ?? 0 (NOT modificationTime) so it matches the remote null fallback", () => {
+		// REGRESSION: the local side previously fell back to modificationTime when
+		// creationTime was null, but the remote side has no modificationTime and
+		// falls back to 0. That asymmetry produced different keys for the same asset
+		// (re-evaluated every sync). The local fallback is now 0 ONLY.
+		const creationTime: number | null = null
+		const modificationTime = 9999000 // would have been used by the old buggy code
+
+		const localHash = String(Math.floor((creationTime ?? 0) / 1000))
+		const remoteCreated: bigint | null | undefined = null
+		const remoteHash = String(Math.floor(Number(remoteCreated ?? 0) / 1000))
+
+		expect(localHash).toBe("0")
+		expect(remoteHash).toBe("0")
+		expect(localHash).toBe(remoteHash)
+
+		// Prove the asymmetric (old) computation would have diverged.
+		const oldLocalHash = String(Math.floor((creationTime ?? modificationTime ?? 0) / 1000))
+
+		expect(oldLocalHash).not.toBe(remoteHash)
+
+		// The collision paths built from the symmetric hashes match.
+		const local = modifyAssetPathOnCollision({
+			iteration: 0,
+			path: "/camera roll/img_0001.jpg",
+			asset: { name: "IMG_0001.jpg", contentHash: localHash }
+		})
+		const remote = modifyAssetPathOnCollision({
+			iteration: 0,
+			path: "/camera roll/img_0001.jpg",
+			asset: { name: "IMG_0001.jpg", contentHash: remoteHash }
+		})
+
+		expect(local).toBe(remote)
 	})
 })

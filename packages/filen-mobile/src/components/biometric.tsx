@@ -70,6 +70,29 @@ export function shouldReLockOnForeground(
 	return enabled && authenticated && !suppressed && elapsedMs > lockAfterMs
 }
 
+// Residual fail-closed decision for the "picker dismissed AFTER the app already returned active" race
+// (scenario a): iOS kept a picker promise pending past the foreground transition, so the reducer's
+// foreground re-lock could not act (the picker was still suppressing it). This fires on the activeCount
+// 1->0 transition once the picker finally dismisses.
+//
+// The arbiter is the explicit `backgroundedBehindPresentation` flag — set ONLY when a REAL background event
+// fired while a presentation was literally on screen — NOT a bare elapsed > lockAfter against a possibly
+// stale/zero lastAppCloseTimestamp. An ordinary in-app picker resigns the app to "inactive", never
+// "background", so no close timestamp is ever stamped; without this flag a fresh session
+// (lastAppCloseTimestamp 0 → astronomically large elapsed) or any picker used longer than lockAfter after
+// the last real background would spuriously throw the user to the lock screen. When the flag IS set,
+// lastAppCloseTimestamp was stamped by that same background event, so elapsedMs is real and a genuine long
+// absence behind a still-pending picker still fails CLOSED.
+export function shouldReLockOnPresentationEnd(
+	enabled: boolean,
+	authenticated: boolean,
+	backgroundedBehindPresentation: boolean,
+	elapsedMs: number,
+	lockAfterMs: number
+): boolean {
+	return enabled && authenticated && backgroundedBehindPresentation && elapsedMs > lockAfterMs
+}
+
 export type BiometricAppStateContext = {
 	enabled: boolean
 	authenticated: boolean
@@ -82,6 +105,11 @@ export type BiometricAppStateContext = {
 	lockAfterMs: number
 	wasBackground: boolean
 	lockedByBackground: boolean
+	// Sticky: a REAL background event fired while a presentation was literally on screen, so the
+	// lock-on-background was suppressed and the foreground re-lock has not yet been resolved. The residual
+	// presentation-end subscription consults this (NOT a stale timestamp) to fail closed when the picker
+	// finally dismisses.
+	backgroundedBehindPresentation: boolean
 	lastAppCloseTimestamp: number
 	now: number
 }
@@ -89,6 +117,7 @@ export type BiometricAppStateContext = {
 export type BiometricAppStateResult = {
 	wasBackground: boolean
 	lockedByBackground: boolean
+	backgroundedBehindPresentation: boolean
 	lastAppCloseTimestamp: number
 	// null = leave `authenticated` unchanged; otherwise call setAuthenticated(value).
 	setAuthenticated: boolean | null
@@ -106,6 +135,7 @@ export function reduceBiometricAppState(
 ): BiometricAppStateResult {
 	let wasBackground = ctx.wasBackground
 	let lockedByBackground = ctx.lockedByBackground
+	let backgroundedBehindPresentation = ctx.backgroundedBehindPresentation
 	let lastAppCloseTimestamp = ctx.lastAppCloseTimestamp
 	let setAuthenticated: boolean | null = null
 	let rekeyPrompt = false
@@ -120,6 +150,14 @@ export function reduceBiometricAppState(
 		if (shouldLockOnBackground(ctx.enabled, ctx.authenticated, ctx.presentationActive)) {
 			lockedByBackground = true
 			setAuthenticated = false
+			backgroundedBehindPresentation = false
+		} else if (ctx.presentationActive) {
+			// A REAL background fired while a presentation was literally on screen, so the lock-on-background
+			// was suppressed. Remember it (with lastAppCloseTimestamp stamped just above) so the residual
+			// presentation-end subscription can fail CLOSED if the absence outlasts lockAfter once the picker
+			// finally dismisses. This is the ONLY place the flag is set — an ordinary picker (resign-active →
+			// "inactive", no background event) never reaches here, so it never arms the residual re-lock.
+			backgroundedBehindPresentation = true
 		}
 	}
 
@@ -134,11 +172,19 @@ export function reduceBiometricAppState(
 		// never locked, e.g. a suppressed picker), leave state as-is so the lock stays up and prompts.
 		if (shouldAutoUnlockOnForeground(lockedByBackground, elapsed, ctx.lockAfterMs, ctx.suppressed)) {
 			setAuthenticated = true
+			backgroundedBehindPresentation = false
 		} else if (shouldReLockOnForeground(ctx.enabled, ctx.authenticated, elapsed, ctx.lockAfterMs, ctx.suppressed)) {
 			// Background-lock was suppressed (a picker promise stayed pending the whole absence) yet we were
 			// gone longer than lockAfter — fail CLOSED and re-lock now, prompting on return. Grace-inclusive
 			// `suppressed` keeps a quick picker round-trip from spuriously locking.
 			setAuthenticated = false
+			backgroundedBehindPresentation = false
+		} else if (!ctx.suppressed) {
+			// Neither auto-unlock nor re-lock fired and the presentation is fully released (out of grace), so
+			// the foreground decision is resolved — drop the flag. We KEEP it only while still suppressed (the
+			// picker is still pending / within grace), leaving the residual presentation-end subscription to
+			// finish the fail-closed decision when activeCount finally drops to 0.
+			backgroundedBehindPresentation = false
 		}
 
 		lockedByBackground = false
@@ -148,6 +194,7 @@ export function reduceBiometricAppState(
 	return {
 		wasBackground,
 		lockedByBackground,
+		backgroundedBehindPresentation,
 		lastAppCloseTimestamp,
 		setAuthenticated,
 		rekeyPrompt
@@ -558,6 +605,7 @@ function Biometric() {
 	const biometricEnabledRef = useRef<boolean>(biometric.enabled)
 	const authenticatedRef = useRef<boolean>(authenticated)
 	const lockedByBackgroundRef = useRef<boolean>(false)
+	const backgroundedBehindPresentationRef = useRef<boolean>(false)
 
 	useEffect(() => {
 		lockAfterMsRef.current = biometric.enabled ? biometric.lockAfter * LOCK_BASE_MS : 0
@@ -615,12 +663,14 @@ function Biometric() {
 					lockAfterMs: lockAfterMsRef.current,
 					wasBackground: wasBackgroundRef.current,
 					lockedByBackground: lockedByBackgroundRef.current,
+					backgroundedBehindPresentation: backgroundedBehindPresentationRef.current,
 					lastAppCloseTimestamp: lastAppCloseTimestampRef.current,
 					now
 				})
 
 				wasBackgroundRef.current = result.wasBackground
 				lockedByBackgroundRef.current = result.lockedByBackground
+				backgroundedBehindPresentationRef.current = result.backgroundedBehindPresentation
 				lastAppCloseTimestampRef.current = result.lastAppCloseTimestamp
 
 				if (result.setAuthenticated !== null) {
@@ -632,14 +682,18 @@ function Biometric() {
 				}
 			})
 
-			// Residual hardening for scenario (a): iOS suspended JS with a picker promise still pending, so the
-			// background transition was suppressed (activeCount > 0) and never set wasBackground/lockedByBackground.
-			// On return the app is already "active" (the foreground re-evaluation ran with stale wasBackground),
-			// and the picker only dismisses afterwards — firing end() → activeCount 1->0. Re-evaluate the re-lock
-			// at that moment so a long absence behind a still-open picker locks as soon as the picker dismisses.
-			// This fires exactly on the 1->0 transition (activeCount is now 0 → nothing literally on screen) and the
-			// post-release grace has only just started here, so the decision rests solely on elapsed > lockAfter —
-			// a genuine long absence fails CLOSED, while a quick picker round-trip stays under lockAfter and clears.
+			// Residual hardening for scenario (a): a REAL background fired while a picker was literally on screen
+			// (so the lock-on-background was suppressed but backgroundedBehindPresentation got armed). On return
+			// the app is already "active" (the reducer's foreground re-lock could not act — the picker was still
+			// suppressing it), and the picker only dismisses afterwards — firing end() → activeCount 1->0.
+			// Re-evaluate the re-lock at that moment so a long absence behind a still-open picker locks as soon as
+			// the picker dismisses.
+			//
+			// The arbiter is the armed flag, NOT a bare elapsed > lockAfter against a stale/zero close timestamp:
+			// an ordinary picker resigns the app to "inactive" (never "background"), so the flag stays false and
+			// this never fires — no spurious lock on a fresh session or after a picker used long past the last
+			// real background. When the flag IS armed, lastAppCloseTimestamp was stamped by that same background
+			// event, so elapsed is real and a genuine long absence still fails CLOSED.
 			const presentationUnsub = useSystemPresentationStore.subscribe((state, prevState) => {
 				if (!(prevState.activeCount > 0 && state.activeCount === 0)) {
 					return
@@ -651,8 +705,19 @@ function Biometric() {
 
 				const now = Date.now()
 				const elapsed = now - lastAppCloseTimestampRef.current
+				const shouldReLock = shouldReLockOnPresentationEnd(
+					biometricEnabledRef.current,
+					authenticatedRef.current,
+					backgroundedBehindPresentationRef.current,
+					elapsed,
+					lockAfterMsRef.current
+				)
 
-				if (shouldReLockOnForeground(biometricEnabledRef.current, authenticatedRef.current, elapsed, lockAfterMsRef.current, false)) {
+				// The presentation is fully released now — the flag has served its purpose either way, so consume
+				// it so a subsequent nested-presentation end() can't re-fire against the same stale background.
+				backgroundedBehindPresentationRef.current = false
+
+				if (shouldReLock) {
 					setAuthenticated(false)
 					setLastAppOpenTimestamp(now)
 				}

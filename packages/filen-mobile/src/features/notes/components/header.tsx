@@ -124,6 +124,7 @@ export const Header = ({
 		t,
 		textForeground,
 		selectedNotes,
+		selectedNotesLive,
 		selectedTags,
 		notesViewMode,
 		setNotesViewMode,

@@ -141,7 +141,7 @@ vi.mock("@/lib/i18n", () => ({
 
 import * as FileSystem from "expo-file-system"
 import { fs } from "@/tests/mocks/expoFileSystem"
-import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
+import { downloadDriveItemToDevice, clearMediaStoreCopiedCache } from "@/features/drive/driveDownload"
 import type { DriveItem } from "@/types"
 
 // ------------------------------------------------------------------
@@ -232,6 +232,8 @@ beforeEach(() => {
 	mockNewTmpDir.mockReset()
 	mockNewTmpDir.mockImplementation(() => new FileSystem.Directory(`${TMP_BASE}/${crypto.randomUUID()}`))
 	setOS("ios")
+	// Reset the per-item MediaStore deduplication cache so tests are isolated.
+	clearMediaStoreCopiedCache()
 })
 
 // ------------------------------------------------------------------
@@ -972,5 +974,205 @@ describe("downloadDriveItemToDevice — #23 Android directory partial-failure ag
 		expect(tmpBaseExistedDuringCopy).toBe(true)
 		// After run() completes the defer fires and removes tmpBase
 		expect(fs.has(tmpBase)).toBe(false)
+	})
+})
+
+// ------------------------------------------------------------------
+// 6. #23 — Android directory: retry skips already-copied files (idempotency)
+// ------------------------------------------------------------------
+
+describe("downloadDriveItemToDevice — #23 Android directory retry idempotency", () => {
+	beforeEach(() => {
+		setOS("android")
+	})
+
+	it("retry after partial failure: already-succeeded files are NOT re-copied (no duplicate MediaStore entry)", async () => {
+		// Scenario: directory with three files. First invocation copies ok.txt and
+		// also-ok.txt successfully, but fail.txt rejects. The user retries —
+		// on the second call, ok.txt and also-ok.txt must be SKIPPED (copyToMediaStore
+		// must NOT be called again for them), and only fail.txt is retried.
+		const uuid = "idempotency-test-uuid"
+		const dirName = "mydir"
+
+		// --- First invocation ---
+
+		const tmpBase1 = `${TMP_BASE}/idempotency-test-1`
+		const destUri1 = `${tmpBase1}/${dirName}`
+
+		fs.set(tmpBase1, "dir")
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase1))
+
+		const item = makeDirItem({ name: dirName, uuid })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri1, "dir")
+			fs.set(`${destUri1}/ok.txt`, new Uint8Array([1]))
+			fs.set(`${destUri1}/fail.txt`, new Uint8Array([2]))
+			fs.set(`${destUri1}/also-ok.txt`, new Uint8Array([3]))
+
+			return true
+		})
+
+		// fail.txt copy rejects on first attempt; the other two succeed.
+		mockCopyToMediaStore.mockImplementation(({ name }: { name: string }) => {
+			if (name === "fail.txt") {
+				return Promise.reject(new Error("transient OEM error"))
+			}
+
+			return Promise.resolve(undefined)
+		})
+
+		const firstResult = await downloadDriveItemToDevice({ item })
+
+		// First call fails due to the partial failure.
+		expect(firstResult.success).toBe(false)
+		// All three were attempted (allSettled).
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(3)
+
+		// --- Second invocation (retry) ---
+
+		mockCopyToMediaStore.mockClear()
+
+		// Now all copies succeed (transient error resolved).
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const tmpBase2 = `${TMP_BASE}/idempotency-test-2`
+		const destUri2 = `${tmpBase2}/${dirName}`
+
+		fs.set(tmpBase2, "dir")
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase2))
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri2, "dir")
+			fs.set(`${destUri2}/ok.txt`, new Uint8Array([1]))
+			fs.set(`${destUri2}/fail.txt`, new Uint8Array([2]))
+			fs.set(`${destUri2}/also-ok.txt`, new Uint8Array([3]))
+
+			return true
+		})
+
+		const secondResult = await downloadDriveItemToDevice({ item })
+
+		expect(secondResult.success).toBe(true)
+
+		// CRITICAL: only fail.txt should have been copied on the retry.
+		// ok.txt and also-ok.txt were already recorded as succeeded — skip them.
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+
+		const calledNames = mockCopyToMediaStore.mock.calls.map(
+			(call: unknown[]) => (call[0] as { name: string }).name
+		)
+
+		expect(calledNames).toEqual(["fail.txt"])
+		expect(calledNames).not.toContain("ok.txt")
+		expect(calledNames).not.toContain("also-ok.txt")
+	})
+
+	it("retry of a fully successful download: all files are skipped (no re-copy)", async () => {
+		// If the first download completed successfully and the user somehow triggers
+		// the same download again (within the same app session), all files must be
+		// skipped — zero copyToMediaStore calls on the second invocation.
+		const uuid = "full-success-retry-uuid"
+		const dirName = "mydir"
+
+		const tmpBase1 = `${TMP_BASE}/full-success-1`
+		const destUri1 = `${tmpBase1}/${dirName}`
+
+		fs.set(tmpBase1, "dir")
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase1))
+
+		const item = makeDirItem({ name: dirName, uuid })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri1, "dir")
+			fs.set(`${destUri1}/a.txt`, new Uint8Array([1]))
+			fs.set(`${destUri1}/b.txt`, new Uint8Array([2]))
+
+			return true
+		})
+
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const firstResult = await downloadDriveItemToDevice({ item })
+
+		expect(firstResult.success).toBe(true)
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(2)
+
+		// --- Second invocation ---
+
+		mockCopyToMediaStore.mockClear()
+
+		const tmpBase2 = `${TMP_BASE}/full-success-2`
+		const destUri2 = `${tmpBase2}/${dirName}`
+
+		fs.set(tmpBase2, "dir")
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase2))
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri2, "dir")
+			fs.set(`${destUri2}/a.txt`, new Uint8Array([1]))
+			fs.set(`${destUri2}/b.txt`, new Uint8Array([2]))
+
+			return true
+		})
+
+		const secondResult = await downloadDriveItemToDevice({ item })
+
+		expect(secondResult.success).toBe(true)
+		// Both files were already recorded — zero new copies.
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(0)
+	})
+
+	it("different drive items use independent caches — one item's copy does not suppress another", async () => {
+		// Two different directory items with the same internal file name ("file.txt").
+		// The cache must be keyed by item UUID, so copies of item-B are NOT skipped
+		// because item-A already recorded a relPath matching "/file.txt".
+		const uuidA = "item-a-uuid"
+		const uuidB = "item-b-uuid"
+
+		const tmpBaseA = `${TMP_BASE}/item-a`
+		const destUriA = `${tmpBaseA}/dirA`
+
+		fs.set(tmpBaseA, "dir")
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBaseA))
+
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const itemA = makeDirItem({ name: "dirA", uuid: uuidA })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUriA, "dir")
+			fs.set(`${destUriA}/file.txt`, new Uint8Array([1]))
+
+			return true
+		})
+
+		await downloadDriveItemToDevice({ item: itemA })
+
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+
+		// --- Now download item-B with an overlapping file name ---
+
+		mockCopyToMediaStore.mockClear()
+
+		const tmpBaseB = `${TMP_BASE}/item-b`
+		const destUriB = `${tmpBaseB}/dirB`
+
+		fs.set(tmpBaseB, "dir")
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBaseB))
+
+		const itemB = makeDirItem({ name: "dirB", uuid: uuidB })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUriB, "dir")
+			fs.set(`${destUriB}/file.txt`, new Uint8Array([2]))
+
+			return true
+		})
+
+		await downloadDriveItemToDevice({ item: itemB })
+
+		// item-B's file.txt must NOT be suppressed by item-A's cache entry.
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
 	})
 })

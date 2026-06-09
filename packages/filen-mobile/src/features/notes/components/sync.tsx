@@ -7,7 +7,14 @@ import { AppState } from "react-native"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesWithContentQueryFetch, notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
-import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
+import { unwrapSdkError, isNetworkClassError, isRetryableAuthError } from "@/lib/sdkErrors"
+
+// #40 / VC3: a genuine read-only/permission rejection (the server replies with a non-network,
+// non-auth error) must eventually DROP so the wedged content query re-enables — but a TRANSIENT
+// non-network error (e.g. a one-off `ErrorKind.Server`, the catch-all for non-`internal_error` API
+// failures) must NOT lose the first edit. We bound the drop: only after this many CONSECUTIVE
+// non-network, non-auth SDK rejections for the same note do we discard its inflight content.
+export const MAX_NON_RETRYABLE_REJECTIONS = 3
 
 // #41 fix: functional, per-uuid MERGE used to hydrate the disk-restored inflight
 // queue into the (possibly already-populated) store without clobbering edits the
@@ -53,6 +60,11 @@ export class Sync {
 	private readonly initPromise: Promise<void>
 	private resolveInit!: () => void
 	private abortController: AbortController = new AbortController()
+	// VC3: per-note count of CONSECUTIVE non-network, non-auth SDK rejections. Transient (in
+	// memory only — never persisted to disk), reset on any successful sync or when the note's
+	// inflight is dropped/drained. Bounds the #40 drop so a one-off `Server` error never loses
+	// the first edit, while a genuine permission rejection still un-wedges after N attempts.
+	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -212,7 +224,21 @@ export class Sync {
 			const inflightContent = useNotesInflightStore.getState().inflightContent
 
 			if (Object.keys(inflightContent).length === 0) {
+				this.nonRetryableRejections.clear()
+
 				return
+			}
+
+			// VC3: drop stale rejection counters for notes whose inflight is gone (drained,
+			// cleared via the remote-edit reload, or pruned on reconcile). Otherwise a fresh
+			// edit on a previously-rejected note would inherit a stale count and lose part of
+			// its retry budget.
+			for (const trackedUuid of this.nonRetryableRejections.keys()) {
+				const entries = inflightContent[trackedUuid]
+
+				if (!entries || entries.length === 0) {
+					this.nonRetryableRejections.delete(trackedUuid)
+				}
 			}
 
 			const results = await Promise.allSettled(
@@ -260,34 +286,70 @@ export class Sync {
 					} catch (e) {
 						// #40 hardening: a read-only / shared / history note whose edit
 						// reaches sync (e.g. Quill failed to enforce readOnly) is rejected
-						// by the server with a permanent, non-retryable error. The old
-						// behaviour kept the entry forever, so every sync re-attempted it
-						// and `hasInflightContent` stayed true — permanently DISABLING the
-						// note's content query (`enabled: !hasInflightContent`) and wedging
-						// the editor. DROP the inflight entry on a non-retryable SDK error
-						// so the content query re-enables. Transient/network failures (and
-						// any non-SDK error, e.g. abort) are still re-thrown so the existing
-						// keep-for-retry path runs.
+						// by the server with a permanent error. The old behaviour kept the
+						// entry forever, so every sync re-attempted it and `hasInflightContent`
+						// stayed true — permanently DISABLING the note's content query
+						// (`enabled: !hasInflightContent`) and wedging the editor.
+						//
+						// VC3 (data-loss fix): the previous drop fired on ANY non-network SDK
+						// error, so a TRANSIENT `Server` (the catch-all for non-`internal_error`
+						// API errors) or an `Unauthenticated` (re-auth-recoverable, e.g. right
+						// after a password change) silently destroyed a real edit on a WRITABLE
+						// note. The SDK exposes only `kind()`/`message()` (no permission code),
+						// so we cannot positively identify a permission rejection — `Server` is
+						// the only signal and it is a catch-all. We therefore:
+						//   1. KEEP-for-retry on a network-class error (re-throw, existing path).
+						//   2. KEEP-for-retry on an `Unauthenticated` error (re-throw — it resolves
+						//      once the session refreshes; never count it toward the drop bound).
+						//   3. For any OTHER non-network SDK error (incl. the `Server` catch-all),
+						//      BOUND the drop: increment a per-note consecutive-rejection counter
+						//      and only drop once it reaches MAX_NON_RETRYABLE_REJECTIONS. A
+						//      one-off transient error keeps the edit (re-throw to retry); a
+						//      genuine read-only/permission rejection still un-wedges the query
+						//      after N attempts.
+						//   4. Any non-SDK error (e.g. abort) is re-thrown unchanged.
 						const unwrapped = unwrapSdkError(e)
 
-						if (unwrapped && !isNetworkClassError(e)) {
-							useNotesInflightStore.getState().setInflightContent(prev => {
-								const updated = {
-									...prev
-								}
-
-								delete updated[noteUuid]
-
-								return updated
-							})
-
-							console.error(`[NotesSync] Dropping inflight content for note ${noteUuid} after a non-retryable error:`, e)
-
-							return
+						if (!unwrapped || isNetworkClassError(e) || isRetryableAuthError(e)) {
+							throw e
 						}
 
-						throw e
+						const previousRejections = this.nonRetryableRejections.get(noteUuid) ?? 0
+						const rejections = previousRejections + 1
+
+						if (rejections < MAX_NON_RETRYABLE_REJECTIONS) {
+							this.nonRetryableRejections.set(noteUuid, rejections)
+
+							console.error(
+								`[NotesSync] Non-network rejection ${rejections}/${MAX_NON_RETRYABLE_REJECTIONS} for note ${noteUuid}; keeping inflight for retry:`,
+								e
+							)
+
+							throw e
+						}
+
+						this.nonRetryableRejections.delete(noteUuid)
+
+						useNotesInflightStore.getState().setInflightContent(prev => {
+							const updated = {
+								...prev
+							}
+
+							delete updated[noteUuid]
+
+							return updated
+						})
+
+						console.error(
+							`[NotesSync] Dropping inflight content for note ${noteUuid} after ${rejections} consecutive non-retryable errors:`,
+							e
+						)
+
+						return
 					}
+
+					// A successful push clears any accumulated rejection count for this note.
+					this.nonRetryableRejections.delete(noteUuid)
 
 					useNotesInflightStore.getState().setInflightContent(prev => {
 						const updated = {

@@ -85,6 +85,50 @@ export function sanitizePathSegment(s: string): string {
 	return s.replace(/\//g, "_")
 }
 
+// Derive the dedup tree-key for a camera-upload asset path so that listLocal and
+// listRemote resolve the SAME asset to the SAME key — even when compression
+// rewrites the extension on upload.
+//
+// #15: when `compress` is enabled, `compress()` may rewrite e.g. `photo.png` to
+// `photo.jpg` (JPEG output) but ONLY when the compressed bytes are smaller. That
+// outcome cannot be known at listing time, so anticipating a fixed `.jpg`
+// extension would be wrong for the (frequent) case where compression does not
+// win. Instead, when compress is on, the dedup key is made extension-agnostic by
+// stripping the trailing extension and comparing on the name stem. The local key
+// (always the source extension) and the remote key (either source extension when
+// compression lost, or `.jpg` when it won) then collapse to the identical stem,
+// so the asset is matched and not re-evaluated as "missing remotely" every sync.
+//
+// When compress is OFF the full path (extension included) is kept verbatim, so
+// genuinely different-extension siblings never merge.
+export function dedupTreeKey({ path, compress }: { path: string; compress: boolean }): string {
+	if (!compress) {
+		return path
+	}
+
+	const ext = FileSystem.Paths.extname(path)
+
+	if (ext.length === 0) {
+		return path
+	}
+
+	return path.slice(0, -ext.length)
+}
+
+// Strip the trailing extension from a filename so the collision-suffix logic
+// produces an extension-agnostic suffix when compression is enabled. Mirrors
+// `dedupTreeKey`: the local source extension and the remote (possibly `.jpg`)
+// extension must not leak into the collision suffix or the keys diverge again.
+export function stripFilenameExtension(name: string): string {
+	const ext = FileSystem.Paths.extname(name)
+
+	if (ext.length === 0) {
+		return name
+	}
+
+	return name.slice(0, -ext.length)
+}
+
 // Toggle the "after activation" camera-upload setting while keeping
 // `activationTimestamp` consistent. Enabling stamps `now` so `listLocal`'s
 // `gte(CREATION_TIME, activationTimestamp)` filter only matches assets created

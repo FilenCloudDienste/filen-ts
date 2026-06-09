@@ -49,7 +49,7 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 import secureStore from "@/lib/secureStore"
-import { fs, File } from "@/tests/mocks/expoFileSystem"
+import { fs, File, setMtime, clearMtimes } from "@/tests/mocks/expoFileSystem"
 import { isAvailableAsync, getItemAsync, setItemAsync } from "@/tests/mocks/expoSecureStore"
 import { mockMmkv } from "@/tests/mocks/reactNativeMMKV"
 
@@ -84,6 +84,7 @@ function captureEncryptionKey(): Promise<string> {
 
 beforeEach(() => {
 	fs.clear()
+	clearMtimes()
 	mockSecureStoreMap.clear()
 	mockEvents.emit.mockClear()
 	mockEvents.subscribe.mockClear()
@@ -565,6 +566,8 @@ describe("SecureStore", () => {
 	})
 
 	describe("clear", () => {
+		const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
+
 		it("emits secureStoreClear", async () => {
 			const store = createSecureStore()
 
@@ -596,8 +599,6 @@ describe("SecureStore", () => {
 			await store.init()
 
 			await store.set("key", "value")
-
-			const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 
 			expect(fs.has(fileUri)).toBe(true)
 
@@ -641,6 +642,88 @@ describe("SecureStore", () => {
 			const value = await store.get("b")
 
 			expect(value).toBe(2)
+		})
+
+		it("deletes orphaned .securestore.bak.* / .securestore.tmp.* siblings (logout is a wipe)", async () => {
+			const store = createSecureStore()
+
+			await store.init()
+			await store.set("client", "value")
+
+			const dirUri = "file:///shared/group.io.filen.app/secureStore/v1"
+			const orphanBackupUri = `${dirUri}/.securestore.bak.crash-uuid`
+			const orphanTmpUri = `${dirUri}/.securestore.tmp.crash-uuid`
+
+			// Simulate a write() that hard-crashed mid-swap: an intact prior-credentials backup and a
+			// half-written tmp both survive on disk alongside the live destination.
+			fs.set(orphanBackupUri, fs.get(fileUri) as Uint8Array)
+			fs.set(orphanTmpUri, new Uint8Array([0, 1, 2]))
+
+			await store.clear()
+
+			// clear() must wipe ALL on-disk secret material — destination AND every staging sibling.
+			expect(fs.has(fileUri)).toBe(false)
+			expect(fs.has(orphanBackupUri)).toBe(false)
+			expect(fs.has(orphanTmpUri)).toBe(false)
+		})
+
+		it("a surviving backup does not resurrect wiped credentials on the next launch (get path)", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client-with-master-keys")
+
+			const encryptionKey = await keyCapture
+			const dirUri = "file:///shared/group.io.filen.app/secureStore/v1"
+			const orphanBackupUri = `${dirUri}/.securestore.bak.crash-uuid`
+
+			// An intact backup of the credentials survives a prior interrupted write.
+			fs.set(orphanBackupUri, fs.get(fileUri) as Uint8Array)
+
+			// User logs out: clear() must wipe the destination AND the orphaned backup.
+			await store1.clear()
+
+			expect(fs.has(orphanBackupUri)).toBe(false)
+
+			// Next launch: a fresh instance with the SAME key must NOT recover the wiped credentials.
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			expect(await store2.get("client")).toBeNull()
+			expect(fs.has(fileUri)).toBe(false)
+		})
+
+		it("a surviving backup does not resurrect wiped credentials on the next launch (init path)", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client-with-master-keys")
+			await store1.set("fileProvider", true)
+
+			const encryptionKey = await keyCapture
+			const dirUri = "file:///shared/group.io.filen.app/secureStore/v1"
+			const orphanBackupUri = `${dirUri}/.securestore.bak.crash-uuid`
+
+			fs.set(orphanBackupUri, fs.get(fileUri) as Uint8Array)
+
+			await store1.clear()
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+			mockEvents.emit.mockClear()
+
+			const store2 = createSecureStore()
+
+			await store2.init()
+
+			// init() must initialize an EMPTY store — no key is re-emitted from a resurrected backup.
+			const changeEmits = mockEvents.emit.mock.calls.filter(([event]) => event === "secureStoreChange")
+
+			expect(changeEmits).toHaveLength(0)
+			expect(await store2.get("client")).toBeNull()
+			expect(await store2.get("fileProvider")).toBeNull()
 		})
 	})
 
@@ -1117,6 +1200,79 @@ describe("SecureStore", () => {
 			// The corrupt backup must be ignored (it fails the auth-tag gate) — the store stays empty,
 			// no spurious recovery, and the destination is not created from garbage.
 			expect(await store.get("anything")).toBeNull()
+		})
+
+		it("chooses the NEWEST valid backup by lastModified when several exist", async () => {
+			// Produce two DISTINCT valid encrypted payloads under the SAME key by writing the
+			// destination twice and snapshotting it each time. Both blobs decrypt with encryptionKey.
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+
+			await store1.set("client", "older-credentials")
+
+			const olderBytes = new Uint8Array(fs.get(fileUri) as Uint8Array)
+
+			await store1.set("client", "newer-credentials")
+
+			const newerBytes = new Uint8Array(fs.get(fileUri) as Uint8Array)
+
+			const encryptionKey = await keyCapture
+
+			// Drop both as orphaned backups with DIFFERING mtimes and remove the destination, simulating
+			// two interrupted writes whose backups both survived. The older blob is pinned with the
+			// later mtime to prove selection is driven by lastModified, not insertion/enumeration order.
+			fs.delete(fileUri)
+
+			const newerBackupUri = `${dirUri}/.securestore.bak.newer`
+			const olderBackupUri = `${dirUri}/.securestore.bak.older`
+
+			fs.set(newerBackupUri, newerBytes)
+			fs.set(olderBackupUri, olderBytes)
+
+			// Newest-by-mtime is the one holding "newer-credentials".
+			setMtime(newerBackupUri, 2_000)
+			setMtime(olderBackupUri, 1_000)
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			// The newest valid backup wins regardless of which was placed first.
+			expect(await store2.get("client")).toBe("newer-credentials")
+			expect(fs.has(fileUri)).toBe(true)
+		})
+
+		it("falls back to the next-newest valid backup when the newest one is corrupt", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "valid-older-credentials")
+
+			const validBytes = new Uint8Array(fs.get(fileUri) as Uint8Array)
+			const encryptionKey = await keyCapture
+
+			fs.delete(fileUri)
+
+			const corruptNewerUri = `${dirUri}/.securestore.bak.corrupt-newer`
+			const validOlderUri = `${dirUri}/.securestore.bak.valid-older`
+
+			// The newest backup is garbage (fails the AES-256-GCM auth-tag gate); the older one is valid.
+			fs.set(corruptNewerUri, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]))
+			fs.set(validOlderUri, validBytes)
+
+			setMtime(corruptNewerUri, 5_000)
+			setMtime(validOlderUri, 1_000)
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const store2 = createSecureStore()
+
+			// Newest-first ordering tries the corrupt blob, discards it, and recovers the valid older one.
+			expect(await store2.get("client")).toBe("valid-older-credentials")
+			expect(fs.has(fileUri)).toBe(true)
 		})
 
 		it("prefers a present+valid destination and cleans up stale backups", async () => {

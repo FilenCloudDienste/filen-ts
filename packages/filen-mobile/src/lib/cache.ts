@@ -554,6 +554,7 @@ export class Cache {
 
 		for (const { map } of this.registry) {
 			Map.prototype.clear.call(map)
+			map.ready = false
 		}
 
 		this.dirtyUpserts.clear()
