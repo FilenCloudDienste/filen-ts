@@ -79,7 +79,6 @@ const contacts = {
 	},
 
 	async block({
-		uuid,
 		userId,
 		email,
 		avatar,
@@ -87,7 +86,6 @@ const contacts = {
 		timestamp,
 		signal
 	}: {
-		uuid: string
 		userId: bigint
 		email: string
 		avatar: string | undefined
@@ -97,7 +95,7 @@ const contacts = {
 	}) {
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		await authedSdkClient.blockContact(
+		const blockedUuid = await authedSdkClient.blockContact(
 			email,
 			signal
 				? {
@@ -113,7 +111,7 @@ const contacts = {
 				blocked: [
 					...prev.blocked.filter(c => c.email !== email),
 					{
-						uuid,
+						uuid: blockedUuid,
 						userId,
 						email,
 						avatar,

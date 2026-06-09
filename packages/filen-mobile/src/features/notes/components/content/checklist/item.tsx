@@ -1,11 +1,12 @@
-import { useRef, useEffect, useState } from "react"
+import { useRef, useEffect, useState, useContext } from "react"
+import { useStore } from "zustand"
 import { TextInput, type TextInputKeyPressEvent, type TextInputSubmitEditingEvent } from "react-native"
 import MaterialIcons from "@expo/vector-icons/MaterialIcons"
 import { useResolveClassNames } from "uniwind"
 import { type ChecklistItem, checklistParser, cn } from "@filen/utils"
 import { PressableOpacity } from "@/components/ui/pressables"
 import View from "@/components/ui/view"
-import useChecklistStore from "@/features/notes/store/useChecklist.store"
+import { ChecklistStoreContext } from "@/features/notes/store/useChecklist.store"
 import { addChecklistLine, removeChecklistItem } from "@/features/notes/checklistEdit"
 import { useShallow } from "zustand/shallow"
 import { randomUUID } from "expo-crypto"
@@ -36,7 +37,19 @@ const Item = ({
 	const textInputRef = useRef<TextInput>(null)
 	const bgBackground = useResolveClassNames("bg-background")
 	const textPrimary = useResolveClassNames("text-primary")
-	const item = useChecklistStore(useShallow(state => state.parsed.find(i => i.id === id)))
+	// Per-INSTANCE store from the nearest <Checklist> Provider. Always present in practice (<Item> is
+	// only ever rendered inside <Checklist>); the throw guards the developer-error case so the rest of
+	// the component can treat `store` as non-null without an assertion.
+	const store = useContext(ChecklistStoreContext)
+
+	if (!store) {
+		throw new Error("Checklist Item must be rendered within a ChecklistStoreContext.Provider")
+	}
+
+	const item = useStore(
+		store,
+		useShallow(state => state.parsed.find(i => i.id === id))
+	)
 
 	const [value, setValue] = useState<string>(() => normalizeItemContent(item?.content ?? ""))
 
@@ -83,15 +96,15 @@ const Item = ({
 	}
 
 	const focusItem = (id: string) => {
-		const ref = useChecklistStore.getState().inputRefs[id]
-		const content = useChecklistStore.getState().parsed.find(i => i.id === id)?.content ?? ""
+		const ref = store.getState().inputRefs[id]
+		const content = store.getState().parsed.find(i => i.id === id)?.content ?? ""
 
 		ref?.current?.setSelection(content.length, content.length)
 		ref?.current?.focus()
 	}
 
 	const addNewLine = (after: ChecklistItem) => {
-		const parsed = useChecklistStore.getState().parsed
+		const parsed = store.getState().parsed
 		const result = addChecklistLine(parsed, after.id, randomUUID())
 
 		if (!result.changed) {
@@ -102,15 +115,15 @@ const Item = ({
 			return
 		}
 
-		useChecklistStore.getState().setParsed(result.next)
-		useChecklistStore.getState().setIds(result.next.map(i => i.id))
+		store.getState().setParsed(result.next)
+		store.getState().setIds(result.next.map(i => i.id))
 
 		// Propagate the structural edit to the parent so the inflight-content sync fires immediately.
 		// Without this the new row is only persisted on the next keystroke (onChangeText), so a row
 		// added with Enter and left empty would be lost on reopen. Mirrors onCheckedChange in the
 		// parent Checklist, reading the freshly-written store state so the value is never stale.
 		if (onChange) {
-			onChange(checklistParser.stringify(useChecklistStore.getState().parsed))
+			onChange(checklistParser.stringify(store.getState().parsed))
 		}
 
 		// Defer focus: the new <Item> for the added row has not mounted yet, so its ref-registration
@@ -127,22 +140,22 @@ const Item = ({
 	}
 
 	const removeItem = (item: ChecklistItem) => {
-		const parsed = useChecklistStore.getState().parsed
+		const parsed = store.getState().parsed
 		const result = removeChecklistItem(parsed, item.id, randomUUID())
 
 		if (!result.changed) {
 			return
 		}
 
-		useChecklistStore.getState().setParsed(result.next)
-		useChecklistStore.getState().setIds(result.next.map(i => i.id))
+		store.getState().setParsed(result.next)
+		store.getState().setIds(result.next.map(i => i.id))
 
 		// Propagate the deletion (and the single-item reset) to the parent so the inflight-content
 		// sync fires. Without this the row is removed from the store/UI but never persisted, so the
 		// deleted item reappears from the server on reopen (data loss). Mirrors onCheckedChange in
 		// the parent Checklist, reading the freshly-written store state so the value is never stale.
 		if (onChange) {
-			onChange(checklistParser.stringify(useChecklistStore.getState().parsed))
+			onChange(checklistParser.stringify(store.getState().parsed))
 		}
 
 		if (result.focusId) {
@@ -189,11 +202,26 @@ const Item = ({
 			return
 		}
 
-		useChecklistStore.getState().setInputRefs(prev => ({
+		store.getState().setInputRefs(prev => ({
 			...prev,
 			[id]: textInputRef
 		}))
-	}, [item?.id, id])
+
+		// Drop this item's ref on unmount (or id change) so a dismissed editor leaves no foreign refs
+		// in the store. With the per-instance store this is also collected with the component, but the
+		// explicit cleanup keeps inputRefs accurate while the editor stays mounted (rows added/removed).
+		return () => {
+			store.getState().setInputRefs(prev => {
+				const next = {
+					...prev
+				}
+
+				delete next[id]
+
+				return next
+			})
+		}
+	}, [item?.id, id, store])
 
 	if (!item) {
 		return null

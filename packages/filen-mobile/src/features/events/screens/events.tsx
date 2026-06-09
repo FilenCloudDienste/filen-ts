@@ -10,7 +10,7 @@ import { run } from "@filen/utils"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
 import alerts from "@/lib/alerts"
-import { UserEventResult_Tags, type UserEvent } from "@filen/sdk-rs"
+import { UserEventResult_Tags, type UserEvent, type UserEventResult } from "@filen/sdk-rs"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import ListRow from "@/components/ui/listRow"
 import useEventsQuery, { fetchData, eventsQueryUpdate } from "@/features/events/queries/useEvents.query"
@@ -20,6 +20,28 @@ import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 
 const ON_END_REACHED_THRESHOLD = 0.5
+
+/**
+ * Pure pagination helper. Given the set of already-loaded Ok event ids and the
+ * raw next page from the server, returns only the new Ok items (unknown-key Err
+ * entries are discarded — they have no id, cannot be deduped, and must not be
+ * persisted) plus a flag indicating that pagination should terminate.
+ *
+ * Termination fires when the page delivers zero new decryptable events, which
+ * covers: an empty page, an all-Err page, and a page where all Ok ids were
+ * already seen (full dedup). This prevents Err-only pages from causing an
+ * infinite refetch loop.
+ */
+export function computeNextPage(
+	existingOkIds: Set<bigint>,
+	next: UserEventResult[]
+): { newOk: UserEventResult[]; terminate: boolean } {
+	const newOk = next.filter(
+		e => e.tag === UserEventResult_Tags.Ok && !existingOkIds.has(e.inner[0].id)
+	)
+
+	return { newOk, terminate: newOk.length === 0 }
+}
 
 const Event = ({ event }: { event: UserEvent }) => {
 	return (
@@ -58,6 +80,14 @@ const Events = () => {
 					.filter(event => event.tag === UserEventResult_Tags.Ok)
 					.sort((a, b) => Number(b.inner[0].timestamp) - Number(a.inner[0].timestamp))
 			: []
+
+	// When the first page came back but every result was undecryptable, show a
+	// distinct subtitle so the user knows events exist but couldn't be read —
+	// rather than the misleading "No events" empty state.
+	const firstPageErrCount =
+		eventsQuery.status === "success" && events.length === 0
+			? eventsQuery.data.filter(e => e.tag === UserEventResult_Tags.Err).length
+			: 0
 
 	return (
 		<Fragment>
@@ -159,30 +189,27 @@ const Events = () => {
 								return
 							}
 
+							// Build the existing-id set from the already-Ok-filtered events
+							// computed outside the updater, so Err items can never satisfy
+							// a dedup check and cannot prevent termination.
+							const existingOkIds = new Set<bigint>()
+
+							for (const e of events) {
+								existingOkIds.add(e.inner[0].id)
+							}
+
+							const { newOk, terminate } = computeNextPage(existingOkIds, next)
+
+							if (terminate) {
+								setHasMore(false)
+
+								return
+							}
+
+							// Only persist Ok items — Err entries have no stable id, cannot
+							// be deduped, and would cause unbounded cache growth.
 							eventsQueryUpdate({
-								updater: prev => {
-									const existingIds = new Set<bigint>()
-
-									for (const e of prev) {
-										if (e.tag === UserEventResult_Tags.Ok) {
-											existingIds.add(e.inner[0].id)
-										}
-									}
-
-									const filtered = next.filter(e => {
-										if (e.tag !== UserEventResult_Tags.Ok) {
-											return true
-										}
-
-										return !existingIds.has(e.inner[0].id)
-									})
-
-									if (filtered.length === 0) {
-										setHasMore(false)
-									}
-
-									return [...prev, ...filtered]
-								}
+								updater: prev => [...prev, ...newOk]
 							})
 						})
 
@@ -196,6 +223,11 @@ const Events = () => {
 						<ListEmpty
 							icon="list-outline"
 							title={t("no_events")}
+							description={
+								firstPageErrCount > 0
+									? t("events_undecryptable", { count: firstPageErrCount })
+									: undefined
+							}
 						/>
 					)}
 					footerComponent={() => {

@@ -45,16 +45,28 @@ export class Sync {
 				return {}
 			}
 
-			const chatsList = await chatsQueryFetch()
-			const existingChatUuids = new Set(chatsList.map(chat => chat.uuid))
-
-			for (const chatUuid of Object.keys(fromDisk)) {
-				if (!existingChatUuids.has(chatUuid)) {
-					delete fromDisk[chatUuid]
-				}
-			}
-
+			// Hydrate the store FIRST, before any network call. This must work offline: the
+			// persisted queue has to become visible and deliverable for the session even when
+			// the chats-list fetch below throws (offline launch). Pruning is a best-effort
+			// refinement layered on top, never a gate on hydration.
 			useChatsStore.getState().setInflightMessages(fromDisk)
+
+			// Best-effort prune of messages for chats that no longer exist. On a fetch failure
+			// (e.g. offline) keep the unpruned queue rather than dropping everything.
+			try {
+				const chatsList = await chatsQueryFetch()
+				const existingChatUuids = new Set(chatsList.map(chat => chat.uuid))
+
+				for (const chatUuid of Object.keys(fromDisk)) {
+					if (!existingChatUuids.has(chatUuid)) {
+						delete fromDisk[chatUuid]
+					}
+				}
+
+				useChatsStore.getState().setInflightMessages(fromDisk)
+			} catch (e) {
+				console.error("Error pruning restored chat sync queue:", e)
+			}
 
 			return fromDisk
 		})

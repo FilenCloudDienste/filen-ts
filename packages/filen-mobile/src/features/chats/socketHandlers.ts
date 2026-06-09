@@ -4,6 +4,7 @@ import { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/
 import { chatsQueryGet, chatsQueryUpdate } from "@/features/chats/queries/useChats.query"
 import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
+import cache from "@/lib/cache"
 
 export type ChatSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Chat }>
 
@@ -219,8 +220,15 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 		case ChatEvent_Tags.ConversationsNew: {
 			const [inner] = eventInner.inner.inner
 
+			const chat = wrapChat(inner.chat)
+
+			// Seed the messages-query cache map: this chat is introduced without a listChats, so
+			// opening it before the chats list refetches would otherwise cache-miss and render
+			// "No messages" (see useChatMessages.query fetchData).
+			cache.chatUuidToChat.set(chat.uuid, chat)
+
 			chatsQueryUpdate({
-				updater: prev => [...(prev ?? []).filter(c => c.uuid !== inner.chat.uuid), wrapChat(inner.chat)]
+				updater: prev => [...(prev ?? []).filter(c => c.uuid !== chat.uuid), chat]
 			})
 
 			break
@@ -298,16 +306,17 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 				break
 			}
 
+			const updatedChat = {
+				...chat,
+				participants: [...chat.participants.filter(p => p.userId !== inner.participant.userId), inner.participant]
+			}
+
+			// Keep the messages-query cache map coherent with the chats query so a chat that was
+			// only ever introduced via socket (never via listChats) still resolves on open.
+			cache.chatUuidToChat.set(updatedChat.uuid, updatedChat)
+
 			chatsQueryUpdate({
-				updater: prev =>
-					prev.map(c =>
-						c.uuid === inner.chat
-							? {
-									...c,
-									participants: [...c.participants.filter(p => p.userId !== inner.participant.userId), inner.participant]
-								}
-							: c
-					)
+				updater: prev => prev.map(c => (c.uuid === inner.chat ? updatedChat : c))
 			})
 
 			break

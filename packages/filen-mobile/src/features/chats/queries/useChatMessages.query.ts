@@ -5,6 +5,7 @@ import cache from "@/lib/cache"
 import { sortParams } from "@filen/utils"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { wrapMessage } from "@/features/chats/chatsWrap"
+import { chatsQueryGet } from "@/features/chats/queries/useChats.query"
 
 export const BASE_QUERY_KEY = "useChatMessagesQuery"
 
@@ -16,13 +17,22 @@ export async function fetchData(
 	params: UseChatMessagesQueryParams & {
 		signal?: AbortSignal
 	}
-) {
+): Promise<ChatMessageWithInflightId[]> {
 	const { authedSdkClient } = await auth.getSdkClients()
-	const chat = cache.chatUuidToChat.get(params.uuid)
+
+	// The cache map is only populated by listChats. A chat introduced via socket
+	// (ConversationsNew/ConversationParticipantNew) or chats.create won't be there yet,
+	// so fall back to the chats query before giving up.
+	const chat = cache.chatUuidToChat.get(params.uuid) ?? chatsQueryGet()?.find(c => c.uuid === params.uuid)
 
 	if (!chat) {
-		return []
+		// True miss: return the already-cached messages rather than [] so a remount/focus/reconnect
+		// re-run does NOT clobber socket-delivered or optimistic messages with an empty success result.
+		return chatMessagesQueryGet(params) ?? []
 	}
+
+	// Seed the cache so subsequent runs resolve directly and stay coherent with the chats query.
+	cache.chatUuidToChat.set(chat.uuid, chat)
 
 	const messages = await authedSdkClient.listMessagesBefore(
 		chat,
