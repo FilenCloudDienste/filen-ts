@@ -1,9 +1,11 @@
 import { useWindowDimensions, type ViewStyle } from "react-native"
 import { VideoView, useVideoPlayer } from "expo-video"
+import { useEvent } from "expo"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import View from "@/components/ui/view"
+import PreviewLoadingOverlay from "@/components/drivePreview/previewLoadingOverlay"
 
 const PreviewVideo = ({ fileUrl }: { fileUrl: string }) => {
 	const dimensions = useWindowDimensions()
@@ -17,11 +19,17 @@ const PreviewVideo = ({ fileUrl }: { fileUrl: string }) => {
 		p.play()
 	})
 
+	const { status } = useEvent(player, "statusChange", {
+		status: player.status
+	})
+
 	const videoViewStyle: ViewStyle = {
 		width: dimensions.width,
 		height: dimensions.height,
 		paddingTop: headerHeight ? headerHeight + insets.top : 0,
-		paddingBottom: insets.bottom
+		paddingBottom: insets.bottom,
+		paddingLeft: insets.left,
+		paddingRight: insets.right
 	}
 
 	return (
@@ -39,6 +47,7 @@ const PreviewVideo = ({ fileUrl }: { fileUrl: string }) => {
 				nativeControls={true}
 				allowsPictureInPicture={false}
 			/>
+			{status !== "readyToPlay" ? <PreviewLoadingOverlay status={status === "error" ? "error" : "loading"} /> : null}
 		</View>
 	)
 }
