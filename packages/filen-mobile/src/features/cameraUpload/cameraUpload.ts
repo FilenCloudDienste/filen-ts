@@ -185,7 +185,7 @@ class CameraUpload {
 			return file
 		}
 
-		manipulatedFile.copySync(file)
+		await manipulatedFile.copy(file)
 
 		if (manipulatedFile.exists) {
 			manipulatedFile.delete()
@@ -764,7 +764,7 @@ class CameraUpload {
 									tmpFile.delete()
 								}
 
-								assetFile.copySync(tmpFile)
+								await assetFile.copy(tmpFile)
 
 								let uploadFile = tmpFile
 

@@ -1121,7 +1121,7 @@ export async function downloadCore(
 		}
 
 		if (cachedOrOfflineFile.success && cachedOrOfflineFile.data) {
-			cachedOrOfflineFile.data.copySync(destination)
+			await cachedOrOfflineFile.data.copy(destination)
 
 			if (!hideProgress) {
 				useTransfersStore.getState().setTransfers(prev =>
