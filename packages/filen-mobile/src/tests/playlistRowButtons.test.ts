@@ -58,12 +58,8 @@ vi.mock("@/features/audio/store/usePlaylists.store", () => ({
 	}
 }))
 
-vi.mock("@/providers/actionSheet.provider", () => ({
-	actionSheet: { show: vi.fn() }
-}))
-
-vi.mock("@/hooks/useIsOnline", () => ({
-	default: vi.fn(() => true)
+vi.mock("@/components/ui/menu", () => ({
+	default: () => null
 }))
 
 // React component dependencies that playlistRow.tsx imports at the top level
@@ -133,69 +129,86 @@ function makePlaylist(): PlaylistWithItems {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — BUG #20: offline gating on rename / add_tracks / delete
+// Helpers
 // ---------------------------------------------------------------------------
 
-describe("buildPlaylistRowButtons — offline gating", () => {
-	it("rename, add_tracks, delete carry disabled:true when isOnline is false", () => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const fakeFile: any = {
+	uuid: "f1",
+	name: "track.mp3",
+	mime: "audio/mpeg",
+	size: 1000,
+	bucket: "b",
+	key: "k",
+	version: 1,
+	chunks: 1,
+	region: "de-1",
+	playlist: "pl-uuid",
+	item: {}
+}
+
+// ---------------------------------------------------------------------------
+// Tests — BUG #20 (offline gating), migrated to the Menu contract:
+// the builder now returns MenuButton[] where offline gating is declared via
+// requiresOnline:true (resolved to disabled by MenuInner.applyOfflineGate)
+// instead of an inline disabled:!isOnline computed from a builder param.
+// ---------------------------------------------------------------------------
+
+describe("buildPlaylistRowButtons — Menu contract", () => {
+	it("rename, add_tracks and delete carry requiresOnline:true for the Menu offline gate", () => {
 		const playlist = makePlaylist()
-		const buttons = buildPlaylistRowButtons({ t, playlist, isOnline: false })
+		const buttons = buildPlaylistRowButtons({ t, playlist })
 
-		const rename = buttons.find(b => b.title === "rename")
-		const addTracks = buttons.find(b => b.title === "add_tracks")
-		const deleteBtn = buttons.find(b => b.title === "delete")
+		const rename = buttons.find(b => b.id === "rename")
+		const addTracks = buttons.find(b => b.id === "addTracks")
+		const deleteBtn = buttons.find(b => b.id === "delete")
 
-		expect(rename?.disabled).toBe(true)
-		expect(addTracks?.disabled).toBe(true)
-		expect(deleteBtn?.disabled).toBe(true)
+		expect(rename?.requiresOnline).toBe(true)
+		expect(addTracks?.requiresOnline).toBe(true)
+		expect(deleteBtn?.requiresOnline).toBe(true)
 	})
 
-	it("rename, add_tracks, delete carry disabled:false when isOnline is true", () => {
+	it("delete is destructive", () => {
 		const playlist = makePlaylist()
-		const buttons = buildPlaylistRowButtons({ t, playlist, isOnline: true })
+		const buttons = buildPlaylistRowButtons({ t, playlist })
 
-		const rename = buttons.find(b => b.title === "rename")
-		const addTracks = buttons.find(b => b.title === "add_tracks")
-		const deleteBtn = buttons.find(b => b.title === "delete")
+		const deleteBtn = buttons.find(b => b.id === "delete")
 
-		expect(rename?.disabled).toBe(false)
-		expect(addTracks?.disabled).toBe(false)
-		expect(deleteBtn?.disabled).toBe(false)
+		expect(deleteBtn?.destructive).toBe(true)
 	})
 
-	it("select and close buttons are never disabled when offline", () => {
+	it("select is never offline-gated and there is no close/cancel item", () => {
 		const playlist = makePlaylist()
-		const buttons = buildPlaylistRowButtons({ t, playlist, isOnline: false })
+		const buttons = buildPlaylistRowButtons({ t, playlist })
 
-		const select = buttons.find(b => b.title === "select")
-		const close = buttons.find(b => b.cancel === true)
+		const select = buttons.find(b => b.id === "select")
 
+		expect(select?.requiresOnline).toBeFalsy()
 		expect(select?.disabled).toBeFalsy()
-		expect(close?.disabled).toBeFalsy()
+		expect(buttons.some(b => b.id === "close" || b.title === "close")).toBe(false)
+		expect(new Set(buttons.map(b => b.id)).size).toBe(buttons.length)
 	})
 
-	it("play and add_to_queue are never disabled when offline (playlist has files)", () => {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const fakeFile: any = {
-			uuid: "f1",
-			name: "track.mp3",
-			mime: "audio/mpeg",
-			size: 1000,
-			bucket: "b",
-			key: "k",
-			version: 1,
-			chunks: 1,
-			region: "de-1",
-			playlist: "pl-uuid",
-			item: {}
-		}
+	it("play and add_to_queue are present and never offline-gated when the playlist has tracks", () => {
 		const playlist: PlaylistWithItems = { ...makePlaylist(), files: [fakeFile] }
-		const buttons = buildPlaylistRowButtons({ t, playlist, isOnline: false })
+		const buttons = buildPlaylistRowButtons({ t, playlist })
 
-		const play = buttons.find(b => b.title === "play")
-		const addToQueue = buttons.find(b => b.title === "add_to_queue")
+		const play = buttons.find(b => b.id === "play")
+		const addToQueue = buttons.find(b => b.id === "addToQueue")
 
+		expect(play).toBeDefined()
+		expect(addToQueue).toBeDefined()
+		expect(play?.requiresOnline).toBeFalsy()
 		expect(play?.disabled).toBeFalsy()
+		expect(addToQueue?.requiresOnline).toBeFalsy()
 		expect(addToQueue?.disabled).toBeFalsy()
+	})
+
+	it("play and add_to_queue are omitted when the playlist is empty", () => {
+		const playlist = makePlaylist()
+		const buttons = buildPlaylistRowButtons({ t, playlist })
+
+		expect(buttons.some(b => b.id === "play")).toBe(false)
+		expect(buttons.some(b => b.id === "addToQueue")).toBe(false)
 	})
 })

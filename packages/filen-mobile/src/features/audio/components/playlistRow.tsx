@@ -10,7 +10,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import { simpleDateNoTime } from "@/lib/time"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import { actionSheet, type ShowActionSheetOptions } from "@/providers/actionSheet.provider"
+import Menu, { type MenuButton } from "@/components/ui/menu"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import usePlaylistsStore from "@/features/audio/store/usePlaylists.store"
 import { useShallow } from "zustand/shallow"
@@ -18,27 +18,22 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
-import useIsOnline from "@/hooks/useIsOnline"
 
-export function buildPlaylistRowButtons({
-	t,
-	playlist,
-	isOnline
-}: {
-	t: TFunction
-	playlist: PlaylistWithItems
-	isOnline: boolean
-}): ShowActionSheetOptions["buttons"] {
+export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: PlaylistWithItems }): MenuButton[] {
 	return [
 		{
+			id: "select",
 			title: t("select"),
+			icon: "select",
 			onPress: () => {
 				usePlaylistsStore.getState().toggleSelectedPlaylist(playlist)
 			}
 		},
 		{
+			id: "rename",
 			title: t("rename"),
-			disabled: !isOnline,
+			icon: "edit",
+			requiresOnline: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
@@ -84,9 +79,11 @@ export function buildPlaylistRowButtons({
 			}
 		},
 		...(playlist.files.length > 0
-			? [
+			? ([
 					{
+						id: "play",
 						title: t("play"),
+						icon: "play",
 						onPress: async () => {
 							const result = await runWithLoading(async () => {
 								await audio.clearQueue()
@@ -115,7 +112,9 @@ export function buildPlaylistRowButtons({
 						}
 					},
 					{
+						id: "addToQueue",
 						title: t("add_to_queue"),
+						icon: "queue",
 						onPress: async () => {
 							const result = await runWithLoading(async () => {
 								const queueLengthBefore = audio.getQueue().length
@@ -148,11 +147,13 @@ export function buildPlaylistRowButtons({
 							}
 						}
 					}
-				]
+				] satisfies MenuButton[])
 			: []),
 		{
+			id: "addTracks",
 			title: t("add_tracks"),
-			disabled: !isOnline,
+			icon: "plus",
+			requiresOnline: true,
 			onPress: async () => {
 				const selectDriveItemsResult = await run(async () => {
 					return await selectDriveItems({
@@ -191,9 +192,11 @@ export function buildPlaylistRowButtons({
 			}
 		},
 		{
+			id: "delete",
 			title: t("delete"),
+			icon: "delete",
 			destructive: true,
-			disabled: !isOnline,
+			requiresOnline: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({
@@ -229,10 +232,6 @@ export function buildPlaylistRowButtons({
 					return
 				}
 			}
-		},
-		{
-			title: t("close"),
-			cancel: true
 		}
 	]
 }
@@ -241,7 +240,6 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const { queueItem } = useAudioQueue()
-	const isOnline = useIsOnline()
 	const isSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.some(p => p.uuid === playlist.uuid)))
 	const arePlaylistsSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.length > 0))
 
@@ -249,6 +247,11 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 	const disabled =
 		(selectOptions?.playlistUuidsToExclude?.includes(playlist.uuid) ?? false) ||
 		(selectOptions ? !isSelected && !selectOptions.multiple : false)
+
+	// The context menu (long-press) is only available in normal browse mode. In
+	// picker mode (`selectOptions`) or bulk-selection mode (`arePlaylistsSelected`)
+	// the Menu is disabled so the row renders bare and tap toggles selection.
+	const menuDisabled = !!selectOptions || arePlaylistsSelected
 
 	const onPress = () => {
 		if (disabled) {
@@ -261,7 +264,7 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 			return
 		}
 
-		// In bulk-selection mode (selection started via the actionSheet "Select"
+		// In bulk-selection mode (selection started via the context menu "Select"
 		// item), a regular tap toggles the row instead of navigating into the
 		// playlist. Matches the Drive / Notes / Chats pattern.
 		if (arePlaylistsSelected) {
@@ -279,65 +282,63 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 	}
 
 	return (
-		<PressableScale
-			className={cn(
-				"flex-row items-center px-4 gap-3",
-				disabled && "opacity-50 pointer-events-none",
-				isSelected && !selectOptions ? "bg-background-tertiary" : "bg-transparent"
-			)}
-			onPress={onPress}
-			onLongPress={() => {
-				if (selectOptions) {
-					return
-				}
-
-				actionSheet.show({
-					buttons: buildPlaylistRowButtons({ t, playlist, isOnline })
-				})
-			}}
+		<Menu
+			type="context"
+			disabled={menuDisabled}
+			buttons={buildPlaylistRowButtons({ t, playlist })}
 		>
-			{(selectOptions || arePlaylistsSelected) && (
-				<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
-					<Checkbox
-						value={isSelected}
-						onValueChange={onPress}
-						hitSlop={16}
-						color={disabled ? "transparent" : undefined}
+			<PressableScale
+				className={cn(
+					"flex-row items-center px-4 gap-3",
+					disabled && "opacity-50 pointer-events-none",
+					isSelected && !selectOptions ? "bg-background-tertiary" : "bg-transparent"
+				)}
+				onPress={onPress}
+			>
+				{(selectOptions || arePlaylistsSelected) && (
+					<View className="flex-row h-full items-center justify-center bg-transparent shrink-0">
+						<Checkbox
+							value={isSelected}
+							onValueChange={onPress}
+							hitSlop={16}
+							color={disabled ? "transparent" : undefined}
+						/>
+					</View>
+				)}
+				<View
+					className={cn(
+						"bg-background-tertiary size-10 rounded-lg flex-row items-center justify-center",
+						isCurrent ? "border border-blue-500" : "border border-transparent",
+						isSelected ? "bg-background-secondary" : ""
+					)}
+				>
+					<Ionicons
+						name="musical-note"
+						size={16}
+						color={textForeground.color}
 					/>
 				</View>
-			)}
-			<View
-				className={cn(
-					"bg-background-tertiary size-10 rounded-lg flex-row items-center justify-center",
-					isCurrent ? "border border-blue-500" : "border border-transparent"
-				)}
-			>
-				<Ionicons
-					name="musical-note"
-					size={16}
-					color={textForeground.color}
-				/>
-			</View>
-			<View className="flex-col bg-transparent flex-1 border-b border-border py-2.5">
-				<Text
-					numberOfLines={1}
-					ellipsizeMode="middle"
-					className="shrink-0"
-				>
-					{playlist.name}
-				</Text>
-				<Text
-					numberOfLines={1}
-					ellipsizeMode="middle"
-					className="shrink-0 text-xs text-muted-foreground"
-				>
-					{t("tracks_updated", {
-						count: playlist.files.length,
-						date: simpleDateNoTime(playlist.updated)
-					})}
-				</Text>
-			</View>
-		</PressableScale>
+				<View className="flex-col bg-transparent flex-1 border-b border-border py-2.5">
+					<Text
+						numberOfLines={1}
+						ellipsizeMode="middle"
+						className="shrink-0"
+					>
+						{playlist.name}
+					</Text>
+					<Text
+						numberOfLines={1}
+						ellipsizeMode="middle"
+						className="shrink-0 text-xs text-muted-foreground"
+					>
+						{t("tracks_updated", {
+							count: playlist.files.length,
+							date: simpleDateNoTime(playlist.updated)
+						})}
+					</Text>
+				</View>
+			</PressableScale>
+		</Menu>
 	)
 }
 

@@ -10,7 +10,8 @@ import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.que
 import AudioThumbnail from "@/components/ui/audioThumbnail"
 import { useReorderableDrag } from "react-native-reorderable-list"
 import { selectPlaylists } from "@/features/audio/playlistsSelect"
-import { actionSheet, type ShowActionSheetOptions } from "@/providers/actionSheet.provider"
+import Menu, { type MenuButton } from "@/components/ui/menu"
+import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.store"
 import { useShallow } from "zustand/shallow"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -18,34 +19,56 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
-import useIsOnline from "@/hooks/useIsOnline"
 
 type TrackType = PlaylistWithItems["files"][number]
 
-function selectButton({ t, track }: { t: TFunction; track: TrackType }): ShowActionSheetOptions["buttons"][number] {
+// Replaces the queue with the track's playlist (starting at the track) and starts playback.
+// Shared by the row tap (primary action) and the trailing dropdown's "play" button.
+async function playTrack({ t, track, playlist }: { t: TFunction; track: TrackType; playlist: PlaylistWithItems }): Promise<void> {
+	const result = await runWithLoading(async () => {
+		const index = playlist.files.findIndex(f => f.uuid === track.uuid)
+
+		const { droppedUndecryptable } = await audio.replaceQueue({
+			items: playlist.files.map(file => ({
+				item: file.item,
+				playlistUuid: playlist.uuid
+			})),
+			startingPosition: index >= 0 ? index : 0
+		})
+
+		if (droppedUndecryptable) {
+			alerts.normal(t("cannot_decrypt_toast"))
+		}
+
+		await audio.play()
+	})
+
+	if (!result.success) {
+		console.error(result.error)
+		alerts.error(result.error)
+
+		return
+	}
+}
+
+function selectButton({ t, track }: { t: TFunction; track: TrackType }): MenuButton {
 	return {
+		id: "select",
 		title: t("select"),
+		icon: "select",
 		onPress: () => {
 			usePlaylistTracksStore.getState().toggleSelectedTrack(track)
 		}
 	}
 }
 
-function removeFromPlaylistButton({
-	t,
-	track,
-	playlist,
-	isOnline
-}: {
-	t: TFunction
-	track: TrackType
-	playlist: PlaylistWithItems
-	isOnline: boolean
-}): ShowActionSheetOptions["buttons"][number] {
+function removeFromPlaylistButton({ t, track, playlist }: { t: TFunction; track: TrackType; playlist: PlaylistWithItems }): MenuButton {
 	return {
+		id: "removeFromPlaylist",
 		title: t("remove_from_playlist"),
+		icon: "delete",
 		destructive: true,
-		disabled: !isOnline,
+		requiresOnline: true,
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
 				await audio.savePlaylist({
@@ -66,71 +89,33 @@ function removeFromPlaylistButton({
 	}
 }
 
-function buildUndecryptableTrackButtons({
+export function buildUndecryptableTrackButtons({
 	t,
 	track,
-	playlist,
-	isOnline
+	playlist
 }: {
 	t: TFunction
 	track: TrackType
 	playlist: PlaylistWithItems
-	isOnline: boolean
-}): ShowActionSheetOptions["buttons"] {
-	return [
-		selectButton({ t, track }),
-		removeFromPlaylistButton({ t, track, playlist, isOnline }),
-		{
-			title: t("close"),
-			cancel: true
-		}
-	]
+}): MenuButton[] {
+	return [selectButton({ t, track }), removeFromPlaylistButton({ t, track, playlist })]
 }
 
-export function buildTrackButtons({
-	t,
-	track,
-	playlist,
-	isOnline
-}: {
-	t: TFunction
-	track: TrackType
-	playlist: PlaylistWithItems
-	isOnline: boolean
-}): ShowActionSheetOptions["buttons"] {
+export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track: TrackType; playlist: PlaylistWithItems }): MenuButton[] {
 	return [
 		selectButton({ t, track }),
 		{
+			id: "play",
 			title: t("play"),
+			icon: "play",
 			onPress: async () => {
-				const result = await runWithLoading(async () => {
-					const index = playlist.files.findIndex(f => f.uuid === track.uuid)
-
-					const { droppedUndecryptable } = await audio.replaceQueue({
-						items: playlist.files.map(file => ({
-							item: file.item,
-							playlistUuid: playlist.uuid
-						})),
-						startingPosition: index >= 0 ? index : 0
-					})
-
-					if (droppedUndecryptable) {
-						alerts.normal(t("cannot_decrypt_toast"))
-					}
-
-					await audio.play()
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
+				await playTrack({ t, track, playlist })
 			}
 		},
 		{
+			id: "addToQueue",
 			title: t("add_to_queue"),
+			icon: "queue",
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
 					const queueLengthBefore = audio.getQueue().length
@@ -160,8 +145,10 @@ export function buildTrackButtons({
 			}
 		},
 		{
+			id: "addToPlaylist",
 			title: t("add_to_playlist"),
-			disabled: !isOnline,
+			icon: "plus",
+			requiresOnline: true,
 			onPress: async () => {
 				const selectResult = await run(async () => {
 					return await selectPlaylists({
@@ -225,11 +212,7 @@ export function buildTrackButtons({
 				}
 			}
 		},
-		removeFromPlaylistButton({ t, track, playlist, isOnline }),
-		{
-			title: t("close"),
-			cancel: true
-		}
+		removeFromPlaylistButton({ t, track, playlist })
 	]
 }
 
@@ -237,7 +220,6 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 	const { t } = useTranslation()
 	const drag = useReorderableDrag()
 	const isCurrent = useIsCurrentTrack(track.item.data.uuid)
-	const isOnline = useIsOnline()
 	const { isSelected, areTracksSelected } = usePlaylistTracksStore(
 		useShallow(state => ({
 			isSelected: state.selectedTracks.some(st => st.uuid === track.uuid),
@@ -255,67 +237,86 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 	const undecryptable = track.item.data.undecryptable
 	const displayName = driveItemDisplayName(track.item)
 
+	// ListRow-style trailing-menu model: the tap target wraps the leading + body only, the trailing
+	// "⋯" dropdown sits OUTSIDE the PressableScale as a sibling. This is load-bearing on BOTH
+	// platforms: on iOS a native menu trigger also responds to long-press (fights drag-reorder if
+	// it wraps the row), and on Android the trigger is a native MenuView that must receive the tap
+	// itself — nested inside a gesture-handler pressable the parent claims the touch and the menu
+	// never opens. Row tap is the primary action (play); long-press stays a pure drag passthrough;
+	// the trailing trigger is hidden in selection mode where the row tap toggles selection instead.
 	return (
-		<PressableScale
-			className={cn("bg-transparent flex-row items-center px-4 gap-3", isSelected && "bg-background-tertiary")}
-			onLongPress={areTracksSelected ? undefined : drag}
-			onPress={() => {
-				if (areTracksSelected) {
-					usePlaylistTracksStore.getState().toggleSelectedTrack(track)
+		<View className={cn("bg-transparent flex-row items-center px-4", isSelected && "bg-background-tertiary")}>
+			<PressableScale
+				className="bg-transparent flex-row items-center gap-3 flex-1"
+				onLongPress={areTracksSelected ? undefined : drag}
+				onPress={() => {
+					if (areTracksSelected) {
+						usePlaylistTracksStore.getState().toggleSelectedTrack(track)
 
-					return
-				}
+						return
+					}
 
-				if (undecryptable) {
-					actionSheet.show({
-						buttons: buildUndecryptableTrackButtons({ t, track, playlist, isOnline })
-					})
+					if (undecryptable) {
+						alerts.normal(t("cannot_decrypt_toast"))
 
-					return
-				}
+						return
+					}
 
-				actionSheet.show({
-					buttons: buildTrackButtons({ t, track, playlist, isOnline })
-				})
-			}}
-		>
-			{areTracksSelected && (
-				<AnimatedView
-					className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
-					entering={FadeIn}
-					exiting={FadeOut}
-				>
-					<Checkbox value={isSelected} />
-				</AnimatedView>
+					playTrack({ t, track, playlist }).catch(console.error)
+				}}
+			>
+				{areTracksSelected && (
+					<AnimatedView
+						className="flex-row h-full items-center justify-center bg-transparent pr-1 shrink-0"
+						entering={FadeIn}
+						exiting={FadeOut}
+					>
+						<Checkbox value={isSelected} />
+					</AnimatedView>
+				)}
+				<AudioThumbnail
+					pictureUri={audioMetadataQuery.status === "success" ? audioMetadataQuery.data?.pictureUri : null}
+					active={isCurrent}
+					recyclingKey={`toolbar-audio-picture-${track.item.data.uuid}`}
+					className={isSelected ? "bg-background-secondary" : undefined}
+				/>
+				<View className="flex-col bg-transparent flex-1 border-b border-border py-2.5">
+					<Text
+						numberOfLines={1}
+						ellipsizeMode="middle"
+						className="shrink-0"
+					>
+						{undecryptable
+							? displayName
+							: audioMetadataQuery.status === "success" && audioMetadataQuery.data?.title
+								? audioMetadataQuery.data.title
+								: track.name}
+					</Text>
+					<Text
+						numberOfLines={1}
+						ellipsizeMode="middle"
+						className="shrink-0 text-xs text-muted-foreground"
+					>
+						{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.artist
+							? `${audioMetadataQuery.data.artist} • ${formatBytes(track.size)}`
+							: formatBytes(track.size)}
+					</Text>
+				</View>
+			</PressableScale>
+			{!areTracksSelected && (
+				<View className="self-stretch shrink-0 flex-row items-center bg-transparent border-b border-border pl-3">
+					<Menu
+						type="dropdown"
+						isAnchoredToRight={true}
+						buttons={
+							undecryptable ? buildUndecryptableTrackButtons({ t, track, playlist }) : buildTrackButtons({ t, track, playlist })
+						}
+					>
+						<EllipsisMenuTrigger />
+					</Menu>
+				</View>
 			)}
-			<AudioThumbnail
-				pictureUri={audioMetadataQuery.status === "success" ? audioMetadataQuery.data?.pictureUri : null}
-				active={isCurrent}
-				recyclingKey={`toolbar-audio-picture-${track.item.data.uuid}`}
-			/>
-			<View className="flex-col bg-transparent flex-1 border-b border-border py-2.5">
-				<Text
-					numberOfLines={1}
-					ellipsizeMode="middle"
-					className="shrink-0"
-				>
-					{undecryptable
-						? displayName
-						: audioMetadataQuery.status === "success" && audioMetadataQuery.data?.title
-							? audioMetadataQuery.data.title
-							: track.name}
-				</Text>
-				<Text
-					numberOfLines={1}
-					ellipsizeMode="middle"
-					className="shrink-0 text-xs text-muted-foreground"
-				>
-					{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.artist
-						? `${audioMetadataQuery.data.artist} • ${formatBytes(track.size)}`
-						: formatBytes(track.size)}
-				</Text>
-			</View>
-		</PressableScale>
+		</View>
 	)
 }
 
