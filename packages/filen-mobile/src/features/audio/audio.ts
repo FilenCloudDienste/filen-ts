@@ -93,6 +93,12 @@ export class Audio {
 	// Whether we currently intend to be playing; gates the watchdog so it doesn't poll while paused/stopped.
 	private intendPlaying: boolean = false
 
+	// Last status emitted by the player. A PAUSED player emits no further playbackStatusUpdate
+	// events, so freshly-mounted consumers (playlist toolbar slider, floating-bar progress) would
+	// otherwise hydrate from null and show no position until playback resumes. getStatus() lets
+	// them seed from the value the player reported at pause time.
+	private lastStatus: AudioStatus | null = null
+
 	// Lazily-resolved file:// URI for the lock-screen artwork placeholder shown when a track has no embedded cover art.
 	private placeholderArtworkUri: string | null = null
 
@@ -141,6 +147,8 @@ export class Audio {
 		this.setAudioMode()
 
 		this.player.addListener("playbackStatusUpdate", status => {
+			this.lastStatus = status
+
 			events.emit("audioStatus", status)
 
 			if (status.didJustFinish) {
@@ -645,6 +653,8 @@ export class Audio {
 		this.state.position = 0
 		this.shuffleOrder = []
 		this.shufflePosition = 0
+		// Nothing is loaded anymore — don't let consumers hydrate from the cleared track's status.
+		this.lastStatus = null
 	}
 
 	public async play(): Promise<void> {
@@ -781,6 +791,10 @@ export class Audio {
 
 	public getLoading() {
 		return this.state.loading
+	}
+
+	public getStatus(): AudioStatus | null {
+		return this.lastStatus
 	}
 
 	public async getPlaylistsDirectory(signal?: AbortSignal): Promise<Dir> {
@@ -1154,7 +1168,9 @@ export class Audio {
 const audio = new Audio()
 
 export function useAudio() {
-	const [status, setStatus] = useState<AudioStatus | null>(null)
+	// Seed from the cached status: a paused player emits no events, so a null seed would leave
+	// freshly-mounted consumers (toolbar slider position, durations) empty until resume.
+	const [status, setStatus] = useState<AudioStatus | null>(audio.getStatus())
 	const [loading, setLoadingState] = useState<boolean>(audio.getLoading())
 	const [queue, setQueue] = useState<QueueItem[]>(audio.getQueue())
 	const [queuePosition, setQueuePosition] = useState<number>(audio.getPosition())
