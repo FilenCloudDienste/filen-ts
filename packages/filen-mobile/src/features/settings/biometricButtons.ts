@@ -2,6 +2,7 @@ import { type TFunction } from "i18next"
 import { run } from "@filen/utils"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
+import events from "@/lib/events"
 import fileProvider from "@/features/settings/fileProvider"
 import { type Biometric } from "@/features/settings/screens/biometric"
 
@@ -128,6 +129,15 @@ export async function enableBiometric({
 
 		setFileProviderEnabled(false)
 	}
+
+	// Seed the always-mounted lock overlay as "already authenticated for this session" BEFORE the
+	// enabled:true write becomes visible. The overlay's listener runs synchronously at emit time and
+	// queues setAuthenticated(true); the secureStore write below is async, so by the time the overlay
+	// re-renders with enabled === true, authenticated is already true → no lock, no flash. The user is
+	// present and just completed the fallback-password double-prompt, so locking them out immediately is
+	// wrong — the first real lock happens on the next background/app-open. Cold start is unaffected: the
+	// overlay's authenticated defaults to false and this event never fires at launch.
+	events.emit("biometricEnabledInSession")
 
 	setBiometric({
 		lockAfter: 0,

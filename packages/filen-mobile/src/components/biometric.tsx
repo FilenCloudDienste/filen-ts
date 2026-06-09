@@ -17,6 +17,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { PressableOpacity } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
+import events from "@/lib/events"
 import { withSystemPresentation, systemPresentation, useSystemPresentationStore } from "@/lib/systemPresentation"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
@@ -647,6 +648,22 @@ function Biometric() {
 	useEffect(() => {
 		return () => {
 			useAppStore.getState().setBiometricUnlocked(null)
+		}
+	}, [])
+
+	// When the user enables biometric in-session (after the fallback-password double-prompt), the feature
+	// action emits this transient event. We mark THIS session as already authenticated so the imminent
+	// secureStoreChange that flips enabled:true does not compute show=true and immediately throw up the lock
+	// + Face ID prompt. The first real lock then happens on the next background/app-open. This MUST be an
+	// explicit event, not a false→true transition of biometric.enabled: useSecureStore hydrates async, so
+	// cold start ALSO produces that transition and seeding from it would defeat the lock entirely.
+	useEffect(() => {
+		const subscription = events.subscribe("biometricEnabledInSession", () => {
+			setAuthenticated(true)
+		})
+
+		return () => {
+			subscription.remove()
 		}
 	}, [])
 
