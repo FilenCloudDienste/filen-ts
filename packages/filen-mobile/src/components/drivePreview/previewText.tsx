@@ -134,9 +134,10 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 		>
 			{editedText !== null && item.type === "drive" && (
 				<View
-					className="absolute left-0 right-0 bg-transparent z-1000 flex-row items-center justify-end px-4"
+					className="absolute left-0 right-0 bg-transparent z-1000 flex-row items-center justify-end pl-4"
 					style={{
-						top: headerHeight ? headerHeight + insets.top : 0
+						top: headerHeight ? headerHeight + insets.top : 0,
+						paddingRight: 16 + insets.right
 					}}
 				>
 					<PressableScale

@@ -10,6 +10,7 @@ import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.que
 import { ImageBackground, Image } from "@/components/ui/image"
 import { useResolveClassNames } from "uniwind"
 import { Gesture, GestureDetector } from "react-native-gesture-handler"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { type SharedValue, useSharedValue, useAnimatedStyle, withSpring, useDerivedValue } from "react-native-reanimated"
 import { runOnJS } from "react-native-worklets"
 import { Paths } from "expo-file-system"
@@ -64,8 +65,8 @@ const Picture = ({ blurhash, pictureUri, id }: { blurhash?: string; pictureUri?:
 			<View
 				className="bg-background-secondary items-center justify-center rounded-2xl overflow-hidden p-8 shadow-xl"
 				style={{
-					width: Math.floor(dimensions.width * 0.5),
-					height: Math.floor(dimensions.width * 0.5)
+					width: Math.floor(Math.min(dimensions.width, dimensions.height) * 0.5),
+					height: Math.floor(Math.min(dimensions.width, dimensions.height) * 0.5)
 				}}
 			>
 				{pictureUri ? (
@@ -81,7 +82,7 @@ const Picture = ({ blurhash, pictureUri, id }: { blurhash?: string; pictureUri?:
 				) : (
 					<Ionicons
 						name="musical-notes"
-						size={Math.floor(dimensions.width * 0.2)}
+						size={Math.floor(Math.min(dimensions.width, dimensions.height) * 0.2)}
 						color={textForeground.color}
 					/>
 				)}
@@ -96,8 +97,8 @@ const Picture = ({ blurhash, pictureUri, id }: { blurhash?: string; pictureUri?:
 				blurhash
 			}}
 			style={{
-				width: Math.floor(dimensions.width * 0.5),
-				height: Math.floor(dimensions.width * 0.5)
+				width: Math.floor(Math.min(dimensions.width, dimensions.height) * 0.5),
+				height: Math.floor(Math.min(dimensions.width, dimensions.height) * 0.5)
 			}}
 			contentFit="cover"
 			cachePolicy="disk"
@@ -284,6 +285,8 @@ export const AudioSlider = ({
 
 const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagged; metadata: Metadata; fileUrl: string }) => {
 	const { t } = useTranslation()
+	const dimensions = useWindowDimensions()
+	const insets = useSafeAreaInsets()
 	const player = useAudioPlayer(fileUrl, {
 		updateInterval: 1000,
 		crossOrigin: "anonymous"
@@ -291,109 +294,152 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 	const status = useAudioPlayerStatus(player)
 
 	const isLoadingOrBuffering = status.isBuffering || !status.isLoaded
+	const isLandscape = dimensions.width > dimensions.height
 
 	useEffectOnce(() => {
 		audio.setAudioMode()
 		audio.pause()
 	})
 
+	const cover = (
+		<Picture
+			blurhash={metadata?.pictureBlurhash ?? undefined}
+			pictureUri={metadata?.pictureUri ?? undefined}
+			id={galleryItemKey(item)}
+		/>
+	)
+
+	const titleBlock = (
+		<View className={`flex-col bg-transparent w-full px-4 items-center gap-1 ${isLandscape ? "" : "mt-6"}`}>
+			{metadata?.title && metadata?.artist ? (
+				<Fragment>
+					<Text
+						className="font-bold text-white"
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{metadata.artist}
+					</Text>
+					<Text
+						className="text-white"
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{metadata.title}
+					</Text>
+				</Fragment>
+			) : (
+				<Fragment>
+					<Text
+						className="font-bold text-white"
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{t("unknown_artist")}
+					</Text>
+					<Text
+						className="text-white"
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{Paths.parse(item.type === "drive" ? driveItemDisplayName(item.data) : item.data.name).name}
+					</Text>
+				</Fragment>
+			)}
+		</View>
+	)
+
+	const playButton = (
+		<PressableScale
+			className={`bg-white/20 size-16 rounded-full items-center justify-center ${isLandscape ? "mt-6 mb-4" : "mt-10 mb-6"}`}
+			onPress={() => {
+				if (isLoadingOrBuffering) {
+					return
+				}
+
+				if (status.playing) {
+					player.pause()
+				} else if (status.didJustFinish) {
+					player.seekTo(0)
+					player.play()
+				} else {
+					player.play()
+				}
+			}}
+		>
+			{isLoadingOrBuffering ? (
+				<ActivityIndicator
+					color="white"
+					size="small"
+				/>
+			) : (
+				<Ionicons
+					name={status.playing ? "pause" : "play"}
+					size={32}
+					color="white"
+				/>
+			)}
+		</PressableScale>
+	)
+
+	const slider = (
+		<View className="bg-transparent px-4 w-full">
+			<AudioSlider
+				currentTime={status.currentTime}
+				duration={status.duration}
+				onSeek={seconds => {
+					player.seekTo(seconds)
+				}}
+			/>
+		</View>
+	)
+
+	const timeRow = (
+		<View className="w-full flex-row justify-between bg-transparent px-4">
+			<Text
+				className="text-white/70 text-xs"
+				style={FONT_TABULAR_NUMS}
+			>
+				{formatAudioTime(status.currentTime)}
+			</Text>
+			<Text
+				className="text-white/70 text-xs"
+				style={FONT_TABULAR_NUMS}
+			>
+				{formatAudioTime(status.duration)}
+			</Text>
+		</View>
+	)
+
+	if (isLandscape) {
+		return (
+			<Background blurhash={metadata?.pictureBlurhash ?? undefined}>
+				<View
+					className="flex-row items-center justify-center bg-transparent w-full gap-8"
+					style={{
+						paddingLeft: insets.left,
+						paddingRight: insets.right
+					}}
+				>
+					{cover}
+					<View className="flex-1 flex-col items-center justify-center bg-transparent max-w-md">
+						{titleBlock}
+						{playButton}
+						{slider}
+						{timeRow}
+					</View>
+				</View>
+			</Background>
+		)
+	}
+
 	return (
 		<Background blurhash={metadata?.pictureBlurhash ?? undefined}>
-			<Picture
-				blurhash={metadata?.pictureBlurhash ?? undefined}
-				pictureUri={metadata?.pictureUri ?? undefined}
-				id={galleryItemKey(item)}
-			/>
-			<View className="flex-col mt-6 bg-transparent w-full px-4 items-center gap-1">
-				{metadata?.title && metadata?.artist ? (
-					<Fragment>
-						<Text
-							className="font-bold text-white"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{metadata.artist}
-						</Text>
-						<Text
-							className="text-white"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{metadata.title}
-						</Text>
-					</Fragment>
-				) : (
-					<Fragment>
-						<Text
-							className="font-bold text-white"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{t("unknown_artist")}
-						</Text>
-						<Text
-							className="text-white"
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{Paths.parse(item.type === "drive" ? driveItemDisplayName(item.data) : item.data.name).name}
-						</Text>
-					</Fragment>
-				)}
-			</View>
-			<PressableScale
-				className="bg-white/20 size-16 rounded-full mt-10 mb-6 items-center justify-center"
-				onPress={() => {
-					if (isLoadingOrBuffering) {
-						return
-					}
-
-					if (status.playing) {
-						player.pause()
-					} else if (status.didJustFinish) {
-						player.seekTo(0)
-						player.play()
-					} else {
-						player.play()
-					}
-				}}
-			>
-				{isLoadingOrBuffering ? (
-					<ActivityIndicator
-						color="white"
-						size="small"
-					/>
-				) : (
-					<Ionicons
-						name={status.playing ? "pause" : "play"}
-						size={32}
-						color="white"
-					/>
-				)}
-			</PressableScale>
-			<View className="bg-transparent px-4 w-full">
-				<AudioSlider
-					currentTime={status.currentTime}
-					duration={status.duration}
-					onSeek={seconds => {
-						player.seekTo(seconds)
-					}}
-				/>
-			</View>
-			<View className="w-full flex-row justify-between bg-transparent px-4">
-				<Text
-					className="text-white/70 text-xs"
-					style={FONT_TABULAR_NUMS}
-				>
-					{formatAudioTime(status.currentTime)}
-				</Text>
-				<Text
-					className="text-white/70 text-xs"
-					style={FONT_TABULAR_NUMS}
-				>
-					{formatAudioTime(status.duration)}
-				</Text>
-			</View>
+			{cover}
+			{titleBlock}
+			{playButton}
+			{slider}
+			{timeRow}
 		</Background>
 	)
 }
