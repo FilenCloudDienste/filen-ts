@@ -78,7 +78,6 @@ const HeaderTitle = ({ chat }: { chat: TChat }) => {
 			</View>
 			<CrossGlassContainerView
 				className="bg-background-secondary border border-border py-0.5 px-1.5 rounded-full -mt-2"
-				disableBlur={Platform.OS === "android"}
 			>
 				<Text
 					className="text-foreground"

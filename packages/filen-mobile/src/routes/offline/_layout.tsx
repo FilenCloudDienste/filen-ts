@@ -4,7 +4,7 @@ import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { useShallow } from "zustand/shallow"
-import { Platform, ActivityIndicator } from "react-native"
+import { ActivityIndicator } from "react-native"
 import Text from "@/components/ui/text"
 import { useResolveClassNames } from "uniwind"
 import { useTranslation } from "react-i18next"
@@ -27,7 +27,6 @@ const Indicator = () => {
 			}}
 		>
 			<CrossGlassContainerView
-				disableBlur={Platform.OS === "android"}
 				className="flex-col overflow-hidden"
 			>
 				<View className="flex-row items-center justify-between bg-transparent px-4 py-3 gap-4 flex-1">
