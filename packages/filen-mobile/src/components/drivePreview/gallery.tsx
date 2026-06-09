@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useLayoutEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
@@ -18,7 +18,7 @@ import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
 import ListEmpty from "@/components/ui/listEmpty"
 import type { External } from "@/routes/drivePreview"
-import { FlashList } from "@shopify/flash-list"
+import { FlashList, type FlashListRef } from "@shopify/flash-list"
 
 const DISMISS_POSITION_RATIO = 0.25
 const DISMISS_VELOCITY_THRESHOLD = 1000
@@ -178,6 +178,19 @@ function changeZoom(zoomScale: SharedValue<number>, newZoom: number) {
 	zoomScale.value = newZoom
 }
 
+// Resolves the item index to re-anchor on after a rotation. currentIndex is the authoritative "which item
+// is showing" value (set by onViewableItemsChanged); it is null/-1 before the first viewability callback and
+// a mid-rotation misfire can poison it — so fall back to the mount-time seed when it is unusable.
+function resolveAnchorIndex({ itemCount, initialScrollIndex }: { itemCount: number; initialScrollIndex: number }): number {
+	const currentIndex = useDrivePreviewStore.getState().currentIndex
+
+	if (currentIndex === null || currentIndex < 0 || currentIndex >= itemCount) {
+		return initialScrollIndex
+	}
+
+	return currentIndex
+}
+
 const Gallery = () => {
 	const { t } = useTranslation()
 	const dimensions = useWindowDimensions()
@@ -192,8 +205,52 @@ const Gallery = () => {
 	const isDismissing = useSharedValue<number>(0)
 	const items = useDrivePreviewStore(useShallow(state => state.items))
 	const initialScrollIndex = useDrivePreviewStore(useShallow(state => state.initialScrollIndex))
+	const listRef = useRef<FlashListRef<GalleryItemTagged> | null>(null)
 
 	const fadeRange = dimensions.height * 0.5
+	const width = dimensions.width
+
+	// Re-anchor the paging carousel to the current item when the window width changes (rotation).
+	// FlashList positions horizontal items by absolute pixel x (index * width) but keeps the scroll offset as a
+	// raw pixel value across a resize — so without this the list lands on the wrong item / between two items.
+	// We run in a layout effect (refs can't be touched during render under the react-hooks rules): by the time
+	// it fires, the cells have re-measured and recomputeLayouts has repositioned every item for the new width,
+	// so scrollToIndex reads the fresh layout and snapping to the anchor item is sufficient on its own
+	// (clearLayoutCacheOnUpdate is a render-phase-only API and would be a no-op dirty flag at this timing).
+	// Keyed on width only, so a 180° rotation (width unchanged) is a no-op and the mount run is skipped via
+	// the lastWidth guard below.
+	const lastWidth = useRef<number>(width)
+
+	useLayoutEffect(() => {
+		if (width === lastWidth.current) {
+			return
+		}
+
+		lastWidth.current = width
+
+		const itemCount = useDrivePreviewStore.getState().items.length
+
+		if (itemCount === 0) {
+			return
+		}
+
+		const anchorIndex = resolveAnchorIndex({
+			itemCount,
+			initialScrollIndex
+		})
+		const index = Math.max(0, Math.min(anchorIndex, itemCount - 1))
+
+		const list = listRef.current
+
+		if (!list) {
+			return
+		}
+
+		list.scrollToIndex({
+			index,
+			animated: false
+		})
+	}, [width, initialScrollIndex])
 
 	const onDismissGestureStart = () => {
 		lockToCurrentOrientation().catch(console.error)
@@ -354,6 +411,7 @@ const Gallery = () => {
 					style={dismissAnimatedStyle}
 				>
 					<FlashList<GalleryItemTagged>
+						ref={listRef}
 						data={items}
 						keyExtractor={item => galleryItemKey(item)}
 						renderItem={info => {
