@@ -14,6 +14,7 @@ export type Events = {
 		key: string
 	}
 	secureStoreClear: void
+	biometricEnabledInSession: void
 	showFullScreenLoadingModal: void
 	hideFullScreenLoadingModal: void
 	forceHideFullScreenLoadingModal: void
