@@ -20,7 +20,7 @@ import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
 import { useSecureStore } from "@/lib/secureStore"
-import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
+import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/constants"
 import * as FileSystem from "expo-file-system"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useTranslation } from "react-i18next"
@@ -64,7 +64,7 @@ const Photos = () => {
 				filterPhotoGridItems({
 					items: driveItemsQuery.data,
 					getPreviewType,
-					supportedImageExtensions: EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS,
+					supportedImageExtensions: EXPO_IMAGE_SUPPORTED_EXTENSIONS,
 					extname: name => FileSystem.Paths.extname(name)
 				}),
 				"creationDesc"

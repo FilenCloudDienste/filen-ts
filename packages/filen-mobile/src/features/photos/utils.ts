@@ -30,7 +30,7 @@ export function isPhotoGridItem({
 
 	return (
 		(previewType === "image" || previewType === "video") &&
-		(previewType === "image" ? supportedImageExtensions.has(extname(item.data.decryptedMeta.name)) : true)
+		(previewType === "image" ? supportedImageExtensions.has(extname(item.data.decryptedMeta.name).toLowerCase()) : true)
 	)
 }
 

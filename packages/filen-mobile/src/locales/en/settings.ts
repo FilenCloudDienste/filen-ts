@@ -234,6 +234,10 @@ export const settings = {
 	// ── Events log + event details ────────────────────────────────────────────
 	/** Events screen — empty-state title when there is no account activity */
 	no_events: "No events",
+	/** Events screen — empty-state subtitle shown when the server returned events but all are undecryptable (rotated/legacy keys); {{count}} is the number of undecryptable events */
+	events_undecryptable_one: "{{count}} event could not be decrypted",
+	/** Events screen — empty-state subtitle (plural) shown when the server returned events but all are undecryptable */
+	events_undecryptable_other: "{{count}} events could not be decrypted",
 	/** Event details — header title */
 	event_info: "Event info",
 	/** Event details — row label for the kind/type of event */

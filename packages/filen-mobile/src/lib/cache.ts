@@ -223,6 +223,11 @@ export class Cache {
 	private persisting = false
 	private clearGeneration = 0
 
+	// Set by clear() (logout wipe) and reset by restore() (next authenticated session). While locked,
+	// the persist paths refuse to write so a stray mutation, debounce, or AppState-background flush
+	// during the logout window cannot re-INSERT decrypted metadata into the just-emptied plaintext kv.
+	private locked = false
+
 	/**
 	 * Drains (snapshots and clears) the three dirty sets and builds the full
 	 * DELETE/INSERT command list synchronously, without any await or chunking.
@@ -274,10 +279,15 @@ export class Cache {
 	 * Serializes all dirty entries in one go without yielding.
 	 */
 	private persistNow(): void {
+		if (this.locked) {
+			return
+		}
+
 		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
 			return
 		}
 
+		const generation = this.clearGeneration
 		const now = performance.now()
 		const commands = this.drainAndBuild()
 
@@ -289,7 +299,15 @@ export class Cache {
 
 		sqlite
 			.openDb()
-			.then(db => db.executeBatch(commands))
+			.then(db => {
+				// A clear() that lands between draining the dirty sets and opening the DB must win:
+				// writing the just-drained commands would re-INSERT the wiped rows (logout leak).
+				if (generation !== this.clearGeneration) {
+					return
+				}
+
+				return db.executeBatch(commands)
+			})
 			.catch(err => {
 				console.error("[Cache] Failed to batch persist", err)
 			})
@@ -312,6 +330,10 @@ export class Cache {
 		const generation = this.clearGeneration
 
 		try {
+			if (this.locked) {
+				return
+			}
+
 			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
 				return
 			}
@@ -387,7 +409,7 @@ export class Cache {
 		} finally {
 			this.persisting = false
 
-			if (this.dirtyUpserts.size > 0 || this.dirtyDeletes.size > 0 || this.dirtyClears.size > 0) {
+			if (!this.locked && (this.dirtyUpserts.size > 0 || this.dirtyDeletes.size > 0 || this.dirtyClears.size > 0)) {
 				this.persistDirty()
 			}
 		}
@@ -444,6 +466,9 @@ export class Cache {
 		for (const { map } of this.registry) {
 			map.ready = true
 		}
+
+		// A fresh authenticated session has hydrated — re-enable persistence after a prior logout lock.
+		this.locked = false
 	}
 
 	public flush(): void {
@@ -523,11 +548,13 @@ export class Cache {
 	public clear(): void {
 		this.persistDirty.cancel()
 		this.clearGeneration++
+		this.locked = true
 
 		this.secureStore.clear()
 
 		for (const { map } of this.registry) {
 			Map.prototype.clear.call(map)
+			map.ready = false
 		}
 
 		this.dirtyUpserts.clear()

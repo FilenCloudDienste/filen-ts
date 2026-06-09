@@ -326,6 +326,11 @@ export const drive = {
 	/** Header title for the directory-color picker screen */
 	change_directory_color: "Change color",
 
+	// ── Download partial-failure toast (driveDownload.ts) ────────────────────
+	/** Toast shown when a directory download succeeds for some files but fails for others.
+	 *  {{failed}} = number of files that failed, {{total}} = total files attempted */
+	download_partial_failure: "{{failed}} of {{total}} files could not be saved to Downloads",
+
 	// ── Bottom tab labels (routes/tabs/_layout.tsx) ───────────────────────────
 	/** Bottom tab label for the drive (files) tab */
 	tab_drive: "Drive",

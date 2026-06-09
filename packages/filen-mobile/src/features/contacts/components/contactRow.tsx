@@ -254,7 +254,6 @@ export const Contact = ({
 						}
 
 						await contacts.block({
-							uuid: info.item.data.uuid,
 							userId: info.item.data.userId,
 							email: info.item.data.email,
 							avatar: info.item.data.avatar,

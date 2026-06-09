@@ -76,6 +76,12 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
+vi.mock("@/lib/cache", () => ({
+	default: {
+		chatUuidToChat: new Map<string, unknown>()
+	}
+}))
+
 vi.mock("@filen/sdk-rs", () => ({
 	ChatEvent_Tags: {
 		MessageNew: "MessageNew",

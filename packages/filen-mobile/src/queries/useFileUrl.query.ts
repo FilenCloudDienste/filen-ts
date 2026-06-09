@@ -9,6 +9,7 @@ import type { DriveItemFileExtracted } from "@/types"
 import type { FileSource } from "@/queries/fileSource"
 import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
+import { waitForHttpProvider } from "@/lib/thumbnailsHelpers"
 
 export const BASE_QUERY_KEY = "useFileUrlQuery"
 
@@ -72,17 +73,23 @@ export async function fetchData(
 		return normalizeFilePathForExpo(offlineFile.uri)
 	}
 
-	// No local copy. If we're offline, bail with null — the HTTP provider URL
+	// No local copy. If we're genuinely offline, bail with null — the HTTP provider URL
 	// would stall because the provider streams via SDK which needs network.
 	// Returning null lets viewers render an "unavailable offline" state.
 	if (!onlineManager.isOnline()) {
 		return null
 	}
 
-	const getFileUrl = useHttpStore.getState().getFileUrl
+	// Online but the provider may still be booting: `http.tsx` starts it asynchronously on
+	// AppState "active" and clears it on "background". A one-shot getState() here would resolve
+	// SUCCESS+null during that window, leaving the preview stuck in a false "unavailable offline"
+	// state with no retry. Instead, wait for readiness (port + getFileUrl) so the query either
+	// resolves with a real URL or enters error/retry. waitForHttpProvider resolves immediately if
+	// already ready, rejects on abort, and rejects after ~30s.
+	let getFileUrl = useHttpStore.getState().getFileUrl
 
 	if (!getFileUrl) {
-		return null
+		getFileUrl = await waitForHttpProvider(params.signal)
 	}
 
 	return getFileUrlForItem(item, getFileUrl)

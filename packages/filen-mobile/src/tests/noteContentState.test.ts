@@ -1,154 +1,154 @@
-// Tests for the pure loading/error state helpers extracted from
+// @vitest-environment happy-dom
+
+// Tests for the pure loading/error state helpers used by
 // src/features/notes/components/content/index.tsx.
+//
+// T5: these helpers are IMPORTED from the component module (computeNoteLoading /
+//   computeNoteFetchError) — not re-implemented here — so the test actually guards
+//   the live derivation. The component calls the exact same functions. The heavy
+//   transitive imports of content/index.tsx are stubbed below purely so the module
+//   evaluates in the node test runtime; only the two pure helpers are exercised.
 //
 // Bug #13: noteContentQuery.isError must NOT gate the loading flag —
 //   a genuine server error while online must show an error/retry surface,
 //   not a permanent blocking spinner.
 //
-// Bug #34: sync.tsx resolves the live note from the query cache before
-//   calling setContent so that metadata changes (type, participants,
-//   encryptionKey) arriving between the render snapshot and the 3 s
-//   debounce flush are used rather than the stale snapshot.
-//   Tests for that live in notesSync.test.ts.
+// Bug #38: the loading overlay shows ONLY when there is NOTHING to render yet
+//   (initialValue is not a string) AND a fetch is genuinely in flight. The
+//   per-note query is deliberately disabled while offline / while inflight
+//   content exists, so isPending stays true forever — gating on it alone would
+//   spin an eternal spinner over already-rendered content.
 
-import { describe, it, expect } from "vitest"
+import { vi, describe, it, expect } from "vitest"
 
-// ── Helpers mirroring the exact logic in content/index.tsx ───────────────────
-
-/**
- * Returns true when the blocking loading overlay should be shown.
- * Mirrors: `loading = history ? false : isFetching || isPending || typeof initialValue !== "string"`
- */
-function computeLoading({
-	history,
-	isFetching,
-	isPending,
-	initialValue
-}: {
-	history: boolean
-	isFetching: boolean
-	isPending: boolean
-	isError: boolean
-	initialValue: string | null | undefined
-}): boolean {
-	if (history) {
-		return false
+// @filen/sdk-rs pulls a WASM worker helper that references `self` at import; the component only
+// needs the NoteType enum at module-eval, so provide a minimal stand-in.
+vi.mock("@filen/sdk-rs", () => ({
+	NoteType: {
+		Text: "text",
+		Md: "md",
+		Code: "code",
+		Rich: "rich",
+		Checklist: "checklist"
 	}
+}))
 
-	return isFetching || isPending || typeof initialValue !== "string"
-}
+vi.mock("react-native-reanimated", () => ({
+	FadeOut: {},
+	default: {}
+}))
 
-/**
- * Returns true when the error/retry surface should be shown instead of the editor.
- * Mirrors: `fetchError = !history && isError`
- */
-function computeFetchError({ history, isError }: { history: boolean; isError: boolean }): boolean {
-	return !history && isError
-}
+vi.mock("react-native-safe-area-context", () => ({
+	useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 })
+}))
 
-// ── Bug #13 — loading flag must NOT include isError ───────────────────────────
+vi.mock("uniwind", () => ({
+	useResolveClassNames: () => ({ color: "#000" })
+}))
 
-describe("computeLoading (#13 — isError excluded from loading flag)", () => {
+vi.mock("react-i18next", () => ({
+	useTranslation: () => ({ t: (key: string) => key })
+}))
+
+vi.mock("zustand/shallow", () => ({
+	useShallow: (selector: unknown) => selector
+}))
+
+// Component / store / lib modules that content/index.tsx imports but which the pure helpers
+// never touch. Stubbed so the module graph resolves without dragging in their own heavy deps.
+vi.mock("@/components/ui/view", () => ({ default: () => null }))
+vi.mock("@/components/ui/animated", () => ({ AnimatedView: () => null }))
+vi.mock("@/components/textEditor", () => ({ default: () => null }))
+vi.mock("@/features/notes/queries/useNoteContent.query", () => ({ default: () => ({}) }))
+vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({ notesWithContentQueryGet: () => null }))
+vi.mock("@/features/notes/components/content/checklist", () => ({ default: () => null }))
+vi.mock("@/features/notes/utils", () => ({ noteTypeToEditorType: () => "text" }))
+vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: () => [false] }))
+vi.mock("@/features/notes/components/sync", () => ({ sync: {} }))
+vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
+vi.mock("@/features/notes/store/useNotesInflight.store", () => ({ default: { getState: () => ({}) } }))
+vi.mock("@/stores/useTextEditor.store", () => ({ default: () => false }))
+vi.mock("@/lib/events", () => ({ default: { subscribe: () => ({ remove: () => {} }) } }))
+vi.mock("@/lib/alerts", () => ({ default: { error: () => {} } }))
+vi.mock("@/lib/prompts", () => ({ default: {} }))
+vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
+vi.mock("@filen/utils", async () => ({
+	...(await import("@/tests/mocks/filenUtils")),
+	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {
+		const cleanups: (() => void)[] = []
+
+		fn(cleanup => cleanups.push(cleanup))
+
+		return { cleanup: () => cleanups.forEach(c => c()) }
+	}
+}))
+
+import { computeNoteLoading, computeNoteFetchError } from "@/features/notes/components/content"
+
+// ── #38 — loading requires BOTH (no content yet) AND (fetching/pending) ──────────
+
+describe("computeNoteLoading", () => {
 	it("returns false for a history view regardless of query state", () => {
-		expect(
-			computeLoading({ history: true, isFetching: true, isPending: true, isError: true, initialValue: null })
-		).toBe(false)
+		expect(computeNoteLoading({ history: true, isFetching: true, isPending: true, initialValue: null })).toBe(false)
 	})
 
-	it("returns true when query is still fetching (isFetching)", () => {
-		expect(
-			computeLoading({ history: false, isFetching: true, isPending: false, isError: false, initialValue: "content" })
-		).toBe(true)
+	it("returns true when fetching AND there is no string content yet", () => {
+		expect(computeNoteLoading({ history: false, isFetching: true, isPending: false, initialValue: null })).toBe(true)
 	})
 
-	it("returns true when query is pending (no data yet)", () => {
-		expect(
-			computeLoading({ history: false, isFetching: false, isPending: true, isError: false, initialValue: null })
-		).toBe(true)
+	it("returns true when pending AND there is no string content yet", () => {
+		expect(computeNoteLoading({ history: false, isFetching: false, isPending: true, initialValue: null })).toBe(true)
 	})
 
-	it("returns true when initialValue is not a string (null)", () => {
-		expect(
-			computeLoading({ history: false, isFetching: false, isPending: false, isError: false, initialValue: null })
-		).toBe(true)
+	it("returns true when initialValue is undefined and a fetch is in flight", () => {
+		expect(computeNoteLoading({ history: false, isFetching: true, isPending: false, initialValue: undefined })).toBe(true)
 	})
 
-	it("returns true when initialValue is undefined", () => {
-		expect(
-			computeLoading({ history: false, isFetching: false, isPending: false, isError: false, initialValue: undefined })
-		).toBe(true)
+	it("#38: returns FALSE when content is already available even while fetching (no eternal spinner over rendered content)", () => {
+		// The key regression: before the fix, loading was driven by isFetching/isPending
+		// alone, so a disabled-query mount (isPending stays true) spun forever even though
+		// inflight/list content was on screen. Now a string initialValue suppresses loading.
+		expect(computeNoteLoading({ history: false, isFetching: true, isPending: true, initialValue: "rendered" })).toBe(false)
 	})
 
-	it("returns false when query succeeded with a string initialValue", () => {
-		expect(
-			computeLoading({ history: false, isFetching: false, isPending: false, isError: false, initialValue: "hello" })
-		).toBe(false)
+	it("returns false when the query succeeded with a string initialValue", () => {
+		expect(computeNoteLoading({ history: false, isFetching: false, isPending: false, initialValue: "hello" })).toBe(false)
 	})
 
-	it("does not include isError as a direct term (the key regression test)", () => {
-		// Before the fix, isError was included directly in the loading condition.
-		// With status==='error', TanStack Query sets isFetching=false, isPending=false,
-		// but initialValue is still null (no data), so loading is true due to the
-		// typeof check — that is expected and handled via the fetchError early-return
-		// that renders before the Loading spinner. The isError term itself is gone.
-		const withError = computeLoading({ history: false, isFetching: false, isPending: false, isError: true, initialValue: null })
-		const withoutError = computeLoading({ history: false, isFetching: false, isPending: false, isError: false, initialValue: null })
-
-		// Both paths behave identically because isError is no longer in the formula:
-		// the result depends only on isFetching/isPending/initialValue.
-		expect(withError).toBe(withoutError)
+	it("returns false for an empty-string initialValue (valid content, editor should render)", () => {
+		expect(computeNoteLoading({ history: false, isFetching: false, isPending: false, initialValue: "" })).toBe(false)
 	})
 
-	it("loading is true when initialValue is null regardless of isError (typeof check)", () => {
-		// When status==='error', TanStack Query has no data so initialValue stays null.
-		// loading=true here is expected — the fetchError early-return in the JSX
-		// renders the error surface before the Loading spinner ever mounts.
-		expect(
-			computeLoading({ history: false, isFetching: false, isPending: false, isError: true, initialValue: null })
-		).toBe(true)
-	})
-
-	it("returns false for empty-string initialValue (valid, editor should render)", () => {
-		expect(
-			computeLoading({ history: false, isFetching: false, isPending: false, isError: false, initialValue: "" })
-		).toBe(false)
+	it("returns false when nothing is in flight and there is no content (the error path takes over)", () => {
+		// status==='error': isFetching=false, isPending=false, initialValue=null. loading is
+		// false now (no fetch in flight); computeNoteFetchError renders the retry surface.
+		expect(computeNoteLoading({ history: false, isFetching: false, isPending: false, initialValue: null })).toBe(false)
 	})
 })
 
-// ── Bug #13 — fetchError flag separates error from loading ───────────────────
+// ── #13 — fetchError flag separates error from loading ───────────────────────────
 
-describe("computeFetchError (#13 — error/retry surface gating)", () => {
+describe("computeNoteFetchError", () => {
 	it("returns false for a history view even when query errored", () => {
-		expect(computeFetchError({ history: true, isError: true })).toBe(false)
+		expect(computeNoteFetchError({ history: true, isError: true })).toBe(false)
 	})
 
 	it("returns true when not a history view and query errored", () => {
-		expect(computeFetchError({ history: false, isError: true })).toBe(true)
+		expect(computeNoteFetchError({ history: false, isError: true })).toBe(true)
 	})
 
 	it("returns false when query has not errored", () => {
-		expect(computeFetchError({ history: false, isError: false })).toBe(false)
+		expect(computeNoteFetchError({ history: false, isError: false })).toBe(false)
 	})
 
-	it("fetchError=true takes precedence in JSX: the error surface renders first via early return", () => {
-		// When status==='error': isFetching=false, isPending=false, initialValue=null.
-		// loading is true (due to typeof null !== "string") but the component's early
-		// `if (fetchError) { return <ErrorUI /> }` fires before the Loading wrapper,
-		// so the spinner is never mounted. The test asserts both values so readers can
-		// see the interaction explicitly.
-		const loading = computeLoading({
-			history: false,
-			isFetching: false,
-			isPending: false,
-			isError: true,
-			initialValue: null
-		})
-		const fetchError = computeFetchError({ history: false, isError: true })
+	it("#13: on a query error the error surface shows and the spinner does not", () => {
+		// status==='error': isFetching=false, isPending=false, initialValue=null.
+		const loading = computeNoteLoading({ history: false, isFetching: false, isPending: false, initialValue: null })
+		const fetchError = computeNoteFetchError({ history: false, isError: true })
 
-		// fetchError takes over via early return; loading=true is moot in the error path.
 		expect(fetchError).toBe(true)
-		// loading is still true because initialValue is null (no data on error), but
-		// it is never rendered because fetchError's early return fires first.
-		expect(loading).toBe(true)
+		// No fetch in flight → loading is false; the error/retry surface renders via the
+		// component's early `if (fetchError)` return regardless.
+		expect(loading).toBe(false)
 	})
 })

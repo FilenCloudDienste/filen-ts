@@ -5,6 +5,7 @@ import {
 	notesWithContentQueryGet
 } from "@/features/notes/queries/useNotesWithContent.query"
 import events from "@/lib/events"
+import useNotesStore from "@/features/notes/store/useNotes.store"
 
 export type NoteSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Note }>
 
@@ -36,6 +37,11 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 			notesWithContentQueryUpdate({
 				updater: prev => prev.filter(n => n.uuid !== inner.note)
 			})
+
+			// Purge the deleted note from selectedNotes so a ghost can't inflate the
+			// selection count, break the select-all toggle, or cause bulk ops to call
+			// the SDK with a non-existent UUID (#42).
+			useNotesStore.getState().setSelectedNotes(prev => prev.filter(n => n.uuid !== inner.note))
 
 			break
 		}

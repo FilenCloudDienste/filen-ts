@@ -25,6 +25,24 @@ const BUNDLE_URI = "file:///bundle"
 /** The backing store — shared singleton across all tests in the same file. */
 export const fs = new Map<string, Entry>()
 
+/**
+ * Optional per-uri modification times (ms since epoch). When an entry exists here the
+ * File.lastModified / File.modificationTime getters return it verbatim, letting a test pin
+ * DIFFERING mtimes per file (e.g. to prove newest-backup selection). Absent entries fall back
+ * to Date.now(). Tests must clear this alongside fs (see clearMtimes()).
+ */
+export const mtimes = new Map<string, number>()
+
+/** Pin an explicit modification time (ms since epoch) for a uri. */
+export function setMtime(uri: string, ms: number): void {
+	mtimes.set(uri, ms)
+}
+
+/** Reset all pinned modification times — call alongside fs.clear() in beforeEach. */
+export function clearMtimes(): void {
+	mtimes.clear()
+}
+
 /** Resolve a variadic constructor arg to a URI string. */
 function resolveUri(...uris: (string | File | Directory)[]): string {
 	return uris
@@ -71,7 +89,19 @@ export class File {
 	}
 
 	get modificationTime(): number | null {
-		return this.exists ? Date.now() : null
+		if (!this.exists) {
+			return null
+		}
+
+		return mtimes.get(this.uri) ?? Date.now()
+	}
+
+	get lastModified(): number | null {
+		if (!this.exists) {
+			return null
+		}
+
+		return mtimes.get(this.uri) ?? Date.now()
 	}
 
 	get creationTime(): number | null {

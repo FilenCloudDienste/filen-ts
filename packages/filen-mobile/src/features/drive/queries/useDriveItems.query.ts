@@ -30,6 +30,21 @@ import cameraUpload from "@/features/cameraUpload/cameraUpload"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 
+/**
+ * Thrown when a listing is requested for a provided (non-root) directory uuid
+ * that cannot be resolved — neither cached nor found via the SDK by-uuid lookup.
+ * Surfacing this (rather than silently falling back to the context root) puts the
+ * query into `isError`, so the screen renders an error/empty state under the
+ * requested directory's title instead of the wrong root listing.
+ */
+export class DriveDirectoryNotFoundError extends Error {
+	public constructor(uuid: string) {
+		super(`Directory not found: ${uuid}`)
+
+		this.name = "DriveDirectoryNotFoundError"
+	}
+}
+
 export type UseDriveItemsQueryParams = {
 	path: Omit<DrivePath, "selectOptions">
 }
@@ -71,18 +86,25 @@ async function fetchSharedDir(
 	authedSdkClient: Awaited<ReturnType<typeof auth.getSdkClients>>["authedSdkClient"],
 	signal: { signal: AbortSignal } | undefined
 ): Promise<SharedResult | SharedRootResult> {
+	const uuid = params.path.uuid
+	const hasUuid = Boolean(uuid && uuid.length > 0)
+
+	// No uuid → list the shared root. A provided uuid is a real shared
+	// subdirectory; resolving it requires its cached share context, so a cache
+	// miss must surface as not-found rather than silently listing the shared
+	// root under the requested directory's title.
 	const parent = (() => {
-		if (!params.path.uuid || params.path.uuid.length === 0) {
+		if (!hasUuid || !uuid) {
 			return undefined
 		}
 
-		const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(params.path.uuid)
+		const cachedDir = cache.directoryUuidToAnySharedDirWithContext.get(uuid)
 
 		if (cachedDir) {
 			return cachedDir
 		}
 
-		return undefined
+		throw new DriveDirectoryNotFoundError(uuid)
 	})()
 
 	if (!parent) {
@@ -141,20 +163,30 @@ export async function fetchData(
 	const result: Result = await (async () => {
 		switch (params.path.type) {
 			case "drive": {
-				const parent = (() => {
-					const root = new AnyNormalDir.Root(authedSdkClient.root())
+				const uuid = params.path.uuid
 
-					if (!params.path.uuid || params.path.uuid.length === 0) {
-						return root
+				const parent = await (async () => {
+					// No uuid (native-tab nav) or the explicit root uuid → list the user's root.
+					if (!uuid || uuid.length === 0 || uuid === cache.rootUuid) {
+						return new AnyNormalDir.Root(authedSdkClient.root())
 					}
 
-					const cachedDir = cache.directoryUuidToAnyNormalDir.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnyNormalDir.get(uuid)
 
 					if (cachedDir) {
 						return cachedDir
 					}
 
-					return root
+					// A provided non-root uuid that's not cached (e.g. tapped from a
+					// global-search result). Resolve the real directory by uuid instead
+					// of silently falling back to root.
+					const dir = await authedSdkClient.getDirOptional(uuid, signal)
+
+					if (!dir) {
+						throw new DriveDirectoryNotFoundError(uuid)
+					}
+
+					return new AnyNormalDir.Dir(dir)
 				})()
 
 				const result = await authedSdkClient.listDir(parent, signal)
@@ -199,22 +231,12 @@ export async function fetchData(
 			}
 
 			case "favorites": {
-				const parent = (() => {
-					if (!params.path.uuid || params.path.uuid.length === 0) {
-						return null
-					}
+				const uuid = params.path.uuid
 
-					const cachedDir = cache.directoryUuidToAnyNormalDir.get(params.path.uuid)
-
-					if (cachedDir) {
-						return cachedDir
-					}
-
-					return null
-				})()
-
-				// If not parent is provided, we need to list the root favorites
-				if (!parent) {
+				// No uuid → list the root favorites. A provided uuid is a real
+				// subdirectory: resolve it (cache → SDK by-uuid) and list THAT,
+				// never silently fall back to the favorites root.
+				if (!uuid || uuid.length === 0) {
 					const result = await authedSdkClient.listFavorites(signal)
 
 					return {
@@ -222,6 +244,22 @@ export async function fetchData(
 						type: "normal"
 					} satisfies Result
 				}
+
+				const parent = await (async () => {
+					const cachedDir = cache.directoryUuidToAnyNormalDir.get(uuid)
+
+					if (cachedDir) {
+						return cachedDir
+					}
+
+					const dir = await authedSdkClient.getDirOptional(uuid, signal)
+
+					if (!dir) {
+						throw new DriveDirectoryNotFoundError(uuid)
+					}
+
+					return new AnyNormalDir.Dir(dir)
+				})()
 
 				// If we have a parent dir we can simply list it from the main drive
 				const result = await authedSdkClient.listDir(parent, signal)
@@ -259,22 +297,12 @@ export async function fetchData(
 			}
 
 			case "links": {
-				const parent = (() => {
-					if (!params.path.uuid || params.path.uuid.length === 0) {
-						return null
-					}
+				const uuid = params.path.uuid
 
-					const cachedDir = cache.directoryUuidToAnyNormalDir.get(params.path.uuid)
-
-					if (cachedDir) {
-						return cachedDir
-					}
-
-					return null
-				})()
-
-				// If not parent is provided, we need to list the root links
-				if (!parent) {
+				// No uuid → list the root linked items. A provided uuid is a real
+				// subdirectory: resolve it (cache → SDK by-uuid) and list THAT,
+				// never silently fall back to the links root.
+				if (!uuid || uuid.length === 0) {
 					const result = await authedSdkClient.listLinkedItems(signal)
 
 					return {
@@ -282,6 +310,22 @@ export async function fetchData(
 						type: "normal"
 					} satisfies Result
 				}
+
+				const parent = await (async () => {
+					const cachedDir = cache.directoryUuidToAnyNormalDir.get(uuid)
+
+					if (cachedDir) {
+						return cachedDir
+					}
+
+					const dir = await authedSdkClient.getDirOptional(uuid, signal)
+
+					if (!dir) {
+						throw new DriveDirectoryNotFoundError(uuid)
+					}
+
+					return new AnyNormalDir.Dir(dir)
+				})()
 
 				// If we have a parent dir we can simply list it from the main drive
 				const result = await authedSdkClient.listDir(parent, signal)
@@ -293,18 +337,25 @@ export async function fetchData(
 			}
 
 			case "offline": {
+				const uuid = params.path.uuid
+				const hasUuid = Boolean(uuid && uuid.length > 0)
+
+				// No uuid → list the offline root. A provided uuid identifies a real
+				// subdirectory; the offline index is keyed by its cached context, so a
+				// cache miss must surface as not-found rather than silently listing the
+				// whole offline root under the requested directory's title.
 				const parent = (() => {
-					if (!params.path.uuid || params.path.uuid.length === 0) {
+					if (!hasUuid || !uuid) {
 						return null
 					}
 
-					const cachedDir = cache.directoryUuidToAnyDirWithContext.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnyDirWithContext.get(uuid)
 
 					if (cachedDir) {
 						return cachedDir
 					}
 
-					return null
+					throw new DriveDirectoryNotFoundError(uuid)
 				})()
 
 				const [offlineFiles, offlineDirectories] = await Promise.all([
@@ -334,18 +385,25 @@ export async function fetchData(
 					} satisfies Result
 				}
 
+				const linkedUuid = params.path.uuid
+
 				const parent = (() => {
-					if (!params.path.uuid || params.path.uuid.length === 0) {
+					// No uuid → the public link's root listing (resolved below via the
+					// link info). A provided uuid is a real subdirectory of the link;
+					// resolving it requires its cached linked context, so a cache miss
+					// must surface as not-found rather than silently listing the link
+					// root under the requested directory's title.
+					if (!linkedUuid || linkedUuid.length === 0) {
 						return null
 					}
 
-					const cachedDir = cache.directoryUuidToAnyLinkedDirWithMeta.get(params.path.uuid)
+					const cachedDir = cache.directoryUuidToAnyLinkedDirWithMeta.get(linkedUuid)
 
 					if (cachedDir) {
 						return cachedDir
 					}
 
-					return null
+					throw new DriveDirectoryNotFoundError(linkedUuid)
 				})()
 
 				if (!parent) {
@@ -410,25 +468,31 @@ export async function fetchData(
 
 	switch (result.type) {
 		case "normal": {
-			// Photos and recents should not contain dirs, we can skip the extra work
-			if (params.path.type !== "photos" && params.path.type !== "recents") {
-				for (const resultDir of result.dirs) {
-					const unwrappedDir = unwrapDirMeta(resultDir)
-					const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+			// Photos and recents hide directories from the rendered list, but their
+			// subdirectories still need to be CACHED — otherwise downstream consumers
+			// (e.g. photo bulk "make available offline") can't resolve a parent dir by
+			// uuid and silently no-op. So we always unwrap + populate the cache maps,
+			// and only suppress the DISPLAY push for photos/recents.
+			const skipDisplay = params.path.type === "photos" || params.path.type === "recents"
 
+			for (const resultDir of result.dirs) {
+				const unwrappedDir = unwrapDirMeta(resultDir)
+				const driveItem = unwrappedDirIntoDriveItem(unwrappedDir)
+
+				if (!skipDisplay) {
 					items.push(driveItem)
-
-					if (unwrappedDir.meta?.name) {
-						cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
-					}
-
-					cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
-
-					const normalDir = new AnyNormalDir.Dir(resultDir)
-
-					cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
-					cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
 				}
+
+				if (unwrappedDir.meta?.name) {
+					cache.directoryUuidToName.set(unwrappedDir.uuid, unwrappedDir.meta.name)
+				}
+
+				cache.uuidToAnyDriveItem.set(unwrappedDir.uuid, driveItem)
+
+				const normalDir = new AnyNormalDir.Dir(resultDir)
+
+				cache.directoryUuidToAnyNormalDir.set(unwrappedDir.uuid, normalDir)
+				cache.directoryUuidToAnyDirWithContext.set(unwrappedDir.uuid, new AnyDirWithContext.Normal(normalDir))
 			}
 
 			for (const resultFile of result.files) {

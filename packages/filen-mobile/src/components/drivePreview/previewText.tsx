@@ -1,4 +1,5 @@
 import View, { CrossGlassContainerView } from "@/components/ui/view"
+import Text from "@/components/ui/text"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import { getPreviewType } from "@/lib/previewType"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
@@ -168,6 +169,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 }
 
 const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
+	const { t } = useTranslation()
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
 
@@ -190,16 +192,16 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 				}
 	)
 
-	if (query.status !== "success") {
+	const containerStyle = {
+		backgroundColor:
+			previewType === "text" ? bgBackground.backgroundColor : backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
+	}
+
+	if (query.status === "pending" && query.fetchStatus === "fetching") {
 		return (
 			<View
 				className="flex-1 items-center justify-center"
-				style={{
-					backgroundColor:
-						previewType === "text"
-							? bgBackground.backgroundColor
-							: backgroundColors["normal"][theme === "dark" ? "dark" : "light"]
-				}}
+				style={containerStyle}
 			>
 				<ActivityIndicator
 					size="small"
@@ -209,12 +211,65 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
+	if (query.status !== "success" && query.fetchStatus === "paused") {
+		return (
+			<View
+				className="flex-1 items-center justify-center px-8"
+				style={containerStyle}
+			>
+				<Ionicons
+					name="cloud-offline-outline"
+					size={48}
+					color="#9ca3af"
+				/>
+				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("unavailable_offline")}</Text>
+			</View>
+		)
+	}
+
+	if (query.status === "error") {
+		return (
+			<View
+				className="flex-1 items-center justify-center px-8"
+				style={containerStyle}
+			>
+				<Ionicons
+					name="warning-outline"
+					size={48}
+					color="#9ca3af"
+				/>
+				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("preview_load_failed")}</Text>
+				<PressableScale
+					className="mt-4"
+					onPress={() => query.refetch()}
+					hitSlop={10}
+				>
+					<Text className="text-sm leading-5 text-primary">{t("retry")}</Text>
+				</PressableScale>
+			</View>
+		)
+	}
+
+	if (query.status === "success") {
+		return (
+			<PreviewTextInner
+				previewType={previewType === "code" ? "code" : "text"}
+				text={query.data}
+				item={item}
+			/>
+		)
+	}
+
 	return (
-		<PreviewTextInner
-			previewType={previewType === "code" ? "code" : "text"}
-			text={query.data}
-			item={item}
-		/>
+		<View
+			className="flex-1 items-center justify-center"
+			style={containerStyle}
+		>
+			<ActivityIndicator
+				size="small"
+				color="white"
+			/>
+		</View>
 	)
 }
 

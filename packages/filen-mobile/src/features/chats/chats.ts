@@ -9,6 +9,7 @@ import transfers from "@/features/transfers/transfers"
 import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import * as FileSystem from "expo-file-system"
+import cache from "@/lib/cache"
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
@@ -50,6 +51,11 @@ class Chats {
 			signal
 		}).catch(() => {})
 
+		// sendChatMessage is the single commit boundary: once it resolves the message is
+		// irreversibly accepted server-side and carried back on the returned chat's lastMessage.
+		// Everything after this point must be best-effort and never re-throw, otherwise the
+		// inflight retry path (sync.tsx) would re-send the already-committed message and create
+		// a peer-visible duplicate (no client-supplied id means each retry is a brand-new message).
 		chat = wrapChat(
 			await authedSdkClient.sendChatMessage(
 				chat,
@@ -63,7 +69,44 @@ class Chats {
 			)
 		)
 
-		const [[updatedChat]] = await Promise.all([
+		// The committed message is carried back on the returned chat's lastMessage.
+		const sdkLastMessage = chat.lastMessage
+		const lastMessage = sdkLastMessage ? wrapMessage(sdkLastMessage) : null
+
+		// Reconcile the query cache immediately off the committed chat: drop the optimistic
+		// in-flight copy (matched by inflightId) and any prior copy of the same server uuid,
+		// then append the committed message.
+		chatsQueryUpdate({
+			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
+		})
+
+		if (lastMessage) {
+			chatMessagesQueryUpdate({
+				params: {
+					uuid: chat.uuid
+				},
+				updater: prev => [
+					...prev.filter(m => m.inner.uuid !== lastMessage.inner.uuid && m.inflightId !== inflightId),
+					{
+						...lastMessage,
+						inflightId
+					}
+				]
+			})
+		} else {
+			// No committed message on the returned chat (unexpected SDK state) — still drop the
+			// optimistic in-flight copy so the inflight queue can be cleared and the send is not retried.
+			chatMessagesQueryUpdate({
+				params: {
+					uuid: chat.uuid
+				},
+				updater: prev => prev.filter(m => m.inflightId !== inflightId)
+			})
+		}
+
+		// Post-commit housekeeping is best-effort — a rejection here must NOT bubble, or the
+		// committed message would be retried and duplicated.
+		await Promise.allSettled([
 			this.updateLastFocusTimesNow({
 				chats: [chat],
 				signal
@@ -73,37 +116,6 @@ class Chats {
 				signal
 			})
 		])
-
-		if (!updatedChat) {
-			throw new Error("Failed to update chat after sending message")
-		}
-
-		chat = updatedChat
-
-		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
-		})
-
-		const sdkLastMessage = chat.lastMessage
-
-		if (!sdkLastMessage) {
-			throw new Error("No last message after sending message")
-		}
-
-		const lastMessage = wrapMessage(sdkLastMessage)
-
-		chatMessagesQueryUpdate({
-			params: {
-				uuid: chat.uuid
-			},
-			updater: prev => [
-				...prev.filter(m => m.inner.uuid !== lastMessage.inner.uuid && m.inflightId !== inflightId),
-				{
-					...lastMessage,
-					inflightId
-				}
-			]
-		})
 
 		return {
 			chat,
@@ -369,6 +381,10 @@ class Chats {
 					: undefined
 			)
 		)
+
+		// Seed the messages-query cache map so opening the chat before the chats-list refetches
+		// resolves the chat directly instead of cache-missing (which would render "No messages").
+		cache.chatUuidToChat.set(chat.uuid, chat)
 
 		chatsQueryUpdate({
 			updater: prev => [...prev.filter(c => c.uuid !== chat.uuid), chat]

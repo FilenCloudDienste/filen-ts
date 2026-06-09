@@ -8,9 +8,13 @@ const {
 	mockGetSdkClients,
 	mockRestoreFileVersion,
 	mockDeleteFileVersion,
+	mockDeleteFilePermanently,
+	mockDeleteDirPermanently,
 	mockDriveItemsQueryUpdateForNormalParent,
+	mockDriveItemsQueryUpdate,
 	mockDriveItemVersionsQueryUpdate,
 	mockCacheNewFile,
+	mockCacheForgetItem,
 	mockUnwrapParentUuid,
 	mockUnwrapFileMeta,
 	mockUnwrappedFileIntoDriveItem
@@ -18,11 +22,15 @@ const {
 	mockGetSdkClients: vi.fn(),
 	mockRestoreFileVersion: vi.fn(),
 	mockDeleteFileVersion: vi.fn(),
+	mockDeleteFilePermanently: vi.fn().mockResolvedValue(undefined),
+	mockDeleteDirPermanently: vi.fn().mockResolvedValue(undefined),
 	mockDriveItemsQueryUpdateForNormalParent: vi.fn(),
+	mockDriveItemsQueryUpdate: vi.fn(),
 	mockDriveItemVersionsQueryUpdate: vi.fn(),
 	mockCacheNewFile: vi.fn(),
-	// null → restoreFileVersion skips the parent-listing branch, keeping these
-	// tests focused on the versions-list cache + selection purge.
+	mockCacheForgetItem: vi.fn(),
+	// null → restoreFileVersion / deletePermanently skips the global parent-listing
+	// branch, keeping these tests focused on the trash-listing update.
 	mockUnwrapParentUuid: vi.fn().mockReturnValue(null),
 	mockUnwrapFileMeta: vi.fn((x: unknown) => x),
 	// Build a minimal DriveItem-shaped object so the post-restore type guard passes.
@@ -58,7 +66,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdateGlobal: vi.fn(),
-	driveItemsQueryUpdate: vi.fn(),
+	driveItemsQueryUpdate: mockDriveItemsQueryUpdate,
 	driveItemsQueryUpdateForNormalParent: mockDriveItemsQueryUpdateForNormalParent,
 	driveItemsQueryGet: vi.fn()
 }))
@@ -71,13 +79,13 @@ vi.mock("@/lib/cache", () => ({
 	default: {
 		cacheNewFile: mockCacheNewFile,
 		cacheNewNormalDir: vi.fn(),
-		forgetItem: vi.fn()
+		forgetItem: mockCacheForgetItem
 	}
 }))
 
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import { restoreFileVersion, deleteVersion } from "@/features/drive/driveTrash"
+import { restoreFileVersion, deleteVersion, deletePermanently } from "@/features/drive/driveTrash"
 import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import type { DriveItem } from "@/types"
 import type { FileVersion } from "@filen/sdk-rs"
@@ -105,13 +113,17 @@ beforeEach(() => {
 	mockGetSdkClients.mockResolvedValue({
 		authedSdkClient: {
 			restoreFileVersion: mockRestoreFileVersion,
-			deleteFileVersion: mockDeleteFileVersion
+			deleteFileVersion: mockDeleteFileVersion,
+			deleteFilePermanently: mockDeleteFilePermanently,
+			deleteDirPermanently: mockDeleteDirPermanently
 		}
 	})
 
 	// The SDK returns the modified file; the unwrap mock turns it into a DriveItem.
 	mockRestoreFileVersion.mockResolvedValue({ uuid: "file-1" })
 	mockDeleteFileVersion.mockResolvedValue(undefined)
+	mockDeleteFilePermanently.mockResolvedValue(undefined)
+	mockDeleteDirPermanently.mockResolvedValue(undefined)
 })
 
 // ---------------------------------------------------------------------------
@@ -162,5 +174,93 @@ describe("deleteVersion — selection purge (bug #10)", () => {
 
 		expect(mockDriveItemVersionsQueryUpdate).toHaveBeenCalledTimes(1)
 		expect(mockDriveItemVersionsQueryUpdate.mock.calls[0]?.[0]?.params).toEqual({ uuid: "file-1" })
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Bug #34 — deletePermanently must remove item from the trash listing
+// ---------------------------------------------------------------------------
+
+const trashFileItem = {
+	type: "file",
+	data: {
+		uuid: "trash-file-1",
+		parent: null,
+		decryptedMeta: null
+	}
+} as unknown as DriveItem
+
+const trashDirItem = {
+	type: "directory",
+	data: {
+		uuid: "trash-dir-1",
+		parent: null,
+		decryptedMeta: null
+	}
+} as unknown as DriveItem
+
+describe("deletePermanently — trash listing removal (bug #34)", () => {
+	it("calls driveItemsQueryUpdate for the trash path after deleting a file", async () => {
+		await deletePermanently({ item: trashFileItem })
+
+		expect(mockDriveItemsQueryUpdate).toHaveBeenCalledOnce()
+		const call = mockDriveItemsQueryUpdate.mock.calls[0]?.[0] as {
+			params: { path: { type: string; uuid: unknown } }
+		}
+		expect(call.params.path.type).toBe("trash")
+		expect(call.params.path.uuid).toBeNull()
+	})
+
+	it("the trash updater filters out the permanently-deleted file uuid", async () => {
+		await deletePermanently({ item: trashFileItem })
+
+		const updater = mockDriveItemsQueryUpdate.mock.calls[0]?.[0]?.updater as (
+			prev: Array<{ data: { uuid: string } }>
+		) => Array<{ data: { uuid: string } }>
+
+		const prev = [{ data: { uuid: "trash-file-1" } }, { data: { uuid: "other-file" } }]
+		const result = updater(prev)
+
+		expect(result).toHaveLength(1)
+		expect(result[0]?.data.uuid).toBe("other-file")
+	})
+
+	it("calls driveItemsQueryUpdate for the trash path after deleting a directory", async () => {
+		await deletePermanently({ item: trashDirItem })
+
+		expect(mockDriveItemsQueryUpdate).toHaveBeenCalledOnce()
+		const call = mockDriveItemsQueryUpdate.mock.calls[0]?.[0] as {
+			params: { path: { type: string } }
+		}
+		expect(call.params.path.type).toBe("trash")
+	})
+
+	it("the trash updater filters out the permanently-deleted directory uuid", async () => {
+		await deletePermanently({ item: trashDirItem })
+
+		const updater = mockDriveItemsQueryUpdate.mock.calls[0]?.[0]?.updater as (
+			prev: Array<{ data: { uuid: string } }>
+		) => Array<{ data: { uuid: string } }>
+
+		const prev = [{ data: { uuid: "trash-dir-1" } }, { data: { uuid: "other-dir" } }]
+		const result = updater(prev)
+
+		expect(result).toHaveLength(1)
+		expect(result[0]?.data.uuid).toBe("other-dir")
+	})
+
+	it("fires the trash removal even when unwrapParentUuid returns null (the normal trash-item case)", async () => {
+		mockUnwrapParentUuid.mockReturnValue(null)
+
+		await deletePermanently({ item: trashFileItem })
+
+		// driveItemsQueryUpdate (trash removal) must fire
+		expect(mockDriveItemsQueryUpdate).toHaveBeenCalledOnce()
+	})
+
+	it("also calls cache.forgetItem with the deleted item uuid", async () => {
+		await deletePermanently({ item: trashFileItem })
+
+		expect(mockCacheForgetItem).toHaveBeenCalledWith("trash-file-1")
 	})
 })

@@ -6,6 +6,7 @@ import { useEffect, useRef, useCallback } from "react"
 import { runEffect, run, Semaphore } from "@filen/utils"
 import useHttpStore from "@/stores/useHttp.store"
 import alerts from "@/lib/alerts"
+import { queryClient } from "@/queries/client"
 
 const mutex = new Semaphore(1)
 
@@ -37,6 +38,14 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 							})
 
 							httpHandleRef.current = handle
+
+							// Defense-in-depth: the instant the provider is ready, re-resolve every mounted
+							// useFileUrlQuery so previews that resolved (or are waiting) during the boot window
+							// pick up the live URL. The query has networkMode "always", so this isn't gated by
+							// connectivity. Pairs with the readiness-wait in useFileUrl.query.ts.
+							queryClient.invalidateQueries({
+								queryKey: ["useFileUrlQuery"]
+							})
 						}
 
 						break

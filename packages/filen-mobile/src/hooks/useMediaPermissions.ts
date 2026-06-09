@@ -24,19 +24,45 @@ export type MediaPermissions =
 			requestPermissions: () => Promise<boolean>
 	  }
 
-export async function hasAllNeededMediaPermissions(params?: { shouldRequest?: boolean }): Promise<boolean> {
+export type MediaPermissionsParams = {
+	shouldRequest?: boolean
+	/**
+	 * Whether to check/request the CAMERA permission.
+	 * Only pass true for flows that call `launchCameraAsync`.
+	 */
+	needCamera?: boolean
+	/**
+	 * Scope of the media-library check:
+	 * - "all"  → requires `granted && accessPrivileges === "all"` (full access, e.g. camera-upload sync)
+	 * - "any"  → requires `granted` (limited OR all, e.g. save-to-photos)
+	 * - "none" → library check is skipped entirely (PHPicker / camera-only flows)
+	 */
+	library?: "all" | "any" | "none"
+}
+
+export async function hasAllNeededMediaPermissions(params?: MediaPermissionsParams): Promise<boolean> {
+	const library = params?.library ?? "all"
+	const needCamera = params?.needCamera ?? true
+
 	const [mediaLibraryPermissions, cameraPermissions] = await Promise.all([
-		MediaLibraryLegacy.getPermissionsAsync(),
-		ImagePicker.getCameraPermissionsAsync()
+		library !== "none" ? MediaLibraryLegacy.getPermissionsAsync() : null,
+		needCamera ? ImagePicker.getCameraPermissionsAsync() : null
 	])
 
-	if (
-		mediaLibraryPermissions.granted &&
-		mediaLibraryPermissions.accessPrivileges === "all" &&
-		mediaLibraryPermissions.expires === "never" &&
-		cameraPermissions.granted &&
-		cameraPermissions.expires === "never"
-	) {
+	// Check current state
+	const libraryOk =
+		library === "none" ||
+		(library === "all"
+			? mediaLibraryPermissions !== null &&
+			  mediaLibraryPermissions.granted &&
+			  mediaLibraryPermissions.accessPrivileges === "all" &&
+			  mediaLibraryPermissions.expires === "never"
+			: // "any"
+			  mediaLibraryPermissions !== null && mediaLibraryPermissions.granted)
+
+	const cameraOk = !needCamera || (cameraPermissions !== null && cameraPermissions.granted && cameraPermissions.expires === "never")
+
+	if (libraryOk && cameraOk) {
 		return true
 	}
 
@@ -44,26 +70,40 @@ export async function hasAllNeededMediaPermissions(params?: { shouldRequest?: bo
 		return false
 	}
 
-	if (!mediaLibraryPermissions.canAskAgain || !cameraPermissions.canAskAgain) {
+	// Determine whether we can ask again for the parts that failed
+	const libraryCanAsk = library === "none" || libraryOk || (mediaLibraryPermissions !== null && mediaLibraryPermissions.canAskAgain)
+	const cameraCanAsk = !needCamera || cameraOk || (cameraPermissions !== null && cameraPermissions.canAskAgain)
+
+	if (!libraryCanAsk || !cameraCanAsk) {
 		return false
 	}
 
-	const mediaLibraryRequest = await withSystemPresentation(() => MediaLibraryLegacy.requestPermissionsAsync())
+	// Request only the permissions we actually need
+	if (library !== "none" && !libraryOk) {
+		const mediaLibraryRequest = await withSystemPresentation(() => MediaLibraryLegacy.requestPermissionsAsync())
 
-	if (!mediaLibraryRequest.granted || mediaLibraryRequest.accessPrivileges !== "all" || mediaLibraryRequest.expires !== "never") {
-		return false
+		const requestedLibraryOk =
+			library === "all"
+				? mediaLibraryRequest.granted && mediaLibraryRequest.accessPrivileges === "all" && mediaLibraryRequest.expires === "never"
+				: mediaLibraryRequest.granted
+
+		if (!requestedLibraryOk) {
+			return false
+		}
 	}
 
-	const cameraRequest = await withSystemPresentation(() => ImagePicker.requestCameraPermissionsAsync())
+	if (needCamera && !cameraOk) {
+		const cameraRequest = await withSystemPresentation(() => ImagePicker.requestCameraPermissionsAsync())
 
-	if (!cameraRequest.granted || cameraRequest.expires !== "never") {
-		return false
+		if (!cameraRequest.granted || cameraRequest.expires !== "never") {
+			return false
+		}
 	}
 
 	return true
 }
 
-export default function useMediaPermissions(params?: { shouldRequest?: boolean }): MediaPermissions {
+export default function useMediaPermissions(params?: MediaPermissionsParams): MediaPermissions {
 	const didRequestRef = useRef<boolean>(false)
 
 	const query = useMediaPermissionsQuery()
@@ -77,6 +117,7 @@ export default function useMediaPermissions(params?: { shouldRequest?: boolean }
 			})
 
 			return await hasAllNeededMediaPermissions({
+				...params,
 				shouldRequest: true
 			})
 		})
@@ -86,7 +127,7 @@ export default function useMediaPermissions(params?: { shouldRequest?: boolean }
 		}
 
 		return result.data
-	}, [refetch])
+	}, [params, refetch])
 
 	useEffect(() => {
 		if (params?.shouldRequest && !didRequestRef.current) {
@@ -124,15 +165,23 @@ export default function useMediaPermissions(params?: { shouldRequest?: boolean }
 		}
 	}
 
+	const library = params?.library ?? "all"
+	const needCamera = params?.needCamera ?? true
+
+	const libraryGranted =
+		library === "none" ||
+		(library === "all"
+			? query.data.mediaLibrary.granted &&
+			  query.data.mediaLibrary.accessPrivileges === "all" &&
+			  query.data.mediaLibrary.expires === "never"
+			: query.data.mediaLibrary.granted)
+
+	const cameraGranted = !needCamera || (query.data.camera.granted && query.data.camera.expires === "never")
+
 	return {
 		loading: false,
 		error: null,
-		granted:
-			query.data.camera.granted &&
-			query.data.mediaLibrary.granted &&
-			query.data.mediaLibrary.accessPrivileges === "all" &&
-			query.data.mediaLibrary.expires === "never" &&
-			query.data.camera.expires === "never",
+		granted: libraryGranted && cameraGranted,
 		requestPermissions
 	}
 }

@@ -14,7 +14,8 @@ const {
 	mockHttpStoreSubscribers,
 	mockRandomUUID,
 	mockAvailableThumbnails,
-	mockIsOnline
+	mockIsOnline,
+	mockOnlineSubscribers
 } = vi.hoisted(() => {
 	const mockSaveAsync = vi.fn().mockResolvedValue({ uri: "file:///cache/manipulated.jpg" })
 	const mockRenderAsync = vi.fn().mockResolvedValue({ saveAsync: mockSaveAsync })
@@ -51,6 +52,7 @@ const {
 
 	const mockRandomUUID = vi.fn(() => "mock-uuid-1234")
 	const mockIsOnline = vi.fn(() => true)
+	const mockOnlineSubscribers = new Set<(online: boolean) => void>()
 
 	return {
 		mockSaveAsync,
@@ -66,7 +68,8 @@ const {
 		mockHttpStoreSubscribers,
 		mockRandomUUID,
 		mockAvailableThumbnails: new Map<string, boolean>(),
-		mockIsOnline
+		mockIsOnline,
+		mockOnlineSubscribers
 	}
 })
 
@@ -200,7 +203,14 @@ vi.mock("expo-crypto", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
 	onlineManager: {
-		isOnline: mockIsOnline
+		isOnline: mockIsOnline,
+		subscribe: (listener: (online: boolean) => void) => {
+			mockOnlineSubscribers.add(listener)
+
+			return () => {
+				mockOnlineSubscribers.delete(listener)
+			}
+		}
 	}
 }))
 
@@ -1406,6 +1416,134 @@ describe("Thumbnails", () => {
 				quality: 1
 			})
 			expect(mockGetFileUrl).not.toHaveBeenCalled()
+		})
+	})
+
+	// ---------------------------------------------------------------------------
+	// #57 — HTTP-provider-not-ready timeout must NOT be counted as a thumbnail
+	// failure (would otherwise permanently blacklist the uuid for the session).
+	// ---------------------------------------------------------------------------
+	describe("generate — ProviderUnavailableError is non-poisoning (#57)", () => {
+		it("video: a 30s provider-unavailable timeout does not increment the failure counter", async () => {
+			vi.useFakeTimers()
+
+			const item = makeFileItem("provider-timeout-uuid", "clip.mp4")
+
+			// Drive the provider-unavailable timeout MAX_FAILURES (3) times. If the timeout were
+			// counted as a failure, the 4th attempt would throw "Max thumbnail generation failures
+			// reached" instead of trying again.
+			for (let i = 0; i < 3; i++) {
+				mockHttpStoreState.port = null
+				mockHttpStoreState.getFileUrl = null
+
+				let captured: unknown = null
+				const promise = thumbnails.generate({ item }).catch(err => {
+					captured = err
+				})
+
+				await vi.advanceTimersByTimeAsync(31_000)
+				await promise
+
+				expect((captured as Error | null)?.name).toBe("ProviderUnavailableError")
+			}
+
+			vi.useRealTimers()
+
+			// Provider now ready — generation must proceed (NOT blocked by the failure cap),
+			// proving the timeouts were never counted.
+			mockHttpStoreState.port = 8080
+			mockHttpStoreState.getFileUrl = mockGetFileUrl
+
+			const result = await thumbnails.generate({ item })
+
+			expect(result).toBe(`${THUMBNAILS_DIR}/provider-timeout-uuid.webp`)
+			expect(mockGetThumbnailAsync).toHaveBeenCalledTimes(1)
+		})
+
+		it("clears the failure counter when connectivity returns (onlineManager false→true recovery)", async () => {
+			// Drive a genuine content failure to the MAX_FAILURES cap.
+			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt file"))
+
+			const item = makeFileItem("recovery-online-uuid", "photo.jpg")
+
+			for (let i = 0; i < 3; i++) {
+				await expect(thumbnails.generate({ item })).rejects.toThrow("corrupt file")
+			}
+
+			// Confirm it is now blacklisted for the session.
+			mockDownloadFileToPath.mockClear()
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+
+			// Simulate connectivity returning: the recovery subscription clears this.failures.
+			expect(mockOnlineSubscribers.size).toBeGreaterThan(0)
+
+			for (const listener of mockOnlineSubscribers) {
+				listener(true)
+			}
+
+			// Restore a working download — the item must now generate again (counter was cleared).
+			mockDownloadFileToPath.mockImplementation(async (_file: unknown, path: string) => {
+				fs.set(`file://${path}`, new Uint8Array([1, 2, 3]))
+			})
+
+			const result = await thumbnails.generate({ item })
+
+			expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
+			expect(result).toBe(`${THUMBNAILS_DIR}/recovery-online-uuid.webp`)
+		})
+	})
+
+	// ---------------------------------------------------------------------------
+	// #33 — invalidateFile drops the on-disk artifact + availableThumbnails entry
+	// but PRESERVES this.failures, so the consumer's render-error loop stays capped.
+	// (Contrast remove(), which clears this.failures — covered above.)
+	// ---------------------------------------------------------------------------
+	describe("invalidateFile (#33)", () => {
+		it("deletes the on-disk thumbnail file", () => {
+			const outputPath = `${THUMBNAILS_DIR}/invalidate-uuid.webp`
+			fs.set(outputPath, new Uint8Array([0xff, 0xd8]))
+
+			const item = makeFileItem("invalidate-uuid", "photo.jpg")
+			thumbnails.invalidateFile(item)
+
+			expect(fs.has(outputPath)).toBe(false)
+		})
+
+		it("removes the uuid from cache.availableThumbnails", () => {
+			const item = makeFileItem("invalidate-avail-uuid", "photo.jpg")
+			mockAvailableThumbnails.set("invalidate-avail-uuid", true)
+
+			thumbnails.invalidateFile(item)
+
+			expect(mockAvailableThumbnails.has("invalidate-avail-uuid")).toBe(false)
+		})
+
+		it("does NOT reset the failure counter (unlike remove)", async () => {
+			mockDownloadFileToPath.mockRejectedValue(new Error("corrupt"))
+
+			const item = makeFileItem("invalidate-keep-failures-uuid", "photo.jpg")
+
+			// Reach the failure cap.
+			for (let i = 0; i < 3; i++) {
+				await expect(thumbnails.generate({ item })).rejects.toThrow("corrupt")
+			}
+
+			// invalidateFile drops the artifact but must NOT clear this.failures — so the item
+			// stays blacklisted. (remove() would have uncapped it; that distinction is the fix.)
+			thumbnails.invalidateFile(item)
+
+			mockDownloadFileToPath.mockClear()
+			await expect(thumbnails.generate({ item })).rejects.toThrow("Max thumbnail generation failures reached")
+			expect(mockDownloadFileToPath).not.toHaveBeenCalled()
+		})
+
+		it("no-op when the file does not exist", () => {
+			const item = makeFileItem("invalidate-missing-uuid", "photo.jpg")
+
+			expect(() => {
+				thumbnails.invalidateFile(item)
+			}).not.toThrow()
 		})
 	})
 })

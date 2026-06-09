@@ -173,7 +173,6 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 								const contact = c.data as TContact
 
 								return contacts.block({
-									uuid: contact.uuid,
 									userId: contact.userId,
 									email: contact.email,
 									avatar: contact.avatar,

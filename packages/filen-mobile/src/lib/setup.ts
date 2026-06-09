@@ -52,7 +52,19 @@ const setup = {
 			// renders null until setup resolves, so i18n and the theme override are applied before first
 			// paint (no flash of raw keys or the wrong theme). initTheme is a no-op when following the
 			// system (uniwind already defaults to it on import).
-			await Promise.all([secureStore.init(), sqlite.init(), cache.restore(), restoreQueries(), initI18n(), initTheme()])
+			//
+			// cache.restore() is gated on auth: the persistent caches hold decrypted-at-rest metadata, so
+			// hydrating them while logged out would re-surface a prior account's data (the logout wipe
+			// clears them; restoring unconditionally would defeat it). When unauthed the maps stay
+			// un-ready, which is correct — nothing writes the persistent caches before login.
+			await Promise.all([
+				secureStore.init(),
+				sqlite.init(),
+				isAuthed.isAuthed ? cache.restore() : Promise.resolve(),
+				restoreQueries(),
+				initI18n(),
+				initTheme()
+			])
 
 			// Wire the reconnect-replay listener after the query cache is hydrated.
 			// Idempotent — only attaches the onlineManager subscription on first call.

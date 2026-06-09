@@ -5,6 +5,7 @@ import { deserializeRouteParam } from "@/lib/serializer"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -345,13 +346,27 @@ const NoteTags = () => {
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
-				{notesTagsQuery.status !== "success" ? (
+				{notesTagsQuery.status === "pending" ? (
 					<View className="flex-1 bg-transparent items-center justify-center">
 						<ActivityIndicator
 							size="large"
 							color={textForeground.color as string}
 						/>
 					</View>
+				) : notesTagsQuery.status === "error" ? (
+					<ListEmpty
+						icon="alert-circle-outline"
+						title={t("note_tags_error")}
+						action={
+							<Button
+								onPress={() => {
+									void notesTagsQuery.refetch()
+								}}
+							>
+								{t("reload")}
+							</Button>
+						}
+					/>
 				) : tags.length === 0 ? (
 					<ListEmpty
 						icon="pricetag-outline"

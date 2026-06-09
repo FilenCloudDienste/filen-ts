@@ -86,11 +86,13 @@ export function useDriveUpload({
 		)
 	}
 
-	const requireMediaPermissions = async (): Promise<boolean> => {
+	const requireMediaPermissions = async (needCamera: boolean): Promise<boolean> => {
 		const permissionsResult = await run(async () => {
 			return await withSystemPresentation(() =>
 				hasAllNeededMediaPermissions({
-					shouldRequest: true
+					shouldRequest: true,
+					library: "none",
+					needCamera
 				})
 			)
 		})
@@ -193,7 +195,8 @@ export function useDriveUpload({
 			return
 		}
 
-		if (!(await requireMediaPermissions())) {
+		// addTimestamps=true → camera capture (needs CAMERA permission); false → library picker (no camera)
+		if (!(await requireMediaPermissions(addTimestamps))) {
 			return
 		}
 
@@ -297,7 +300,7 @@ export function useDriveUpload({
 			return
 		}
 
-		if (!(await requireMediaPermissions())) {
+		if (!(await requireMediaPermissions(true))) {
 			return
 		}
 

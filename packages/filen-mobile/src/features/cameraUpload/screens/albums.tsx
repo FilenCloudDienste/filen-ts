@@ -24,8 +24,13 @@ const Albums = () => {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
 
+	// The album picker only enumerates the photo library — it NEVER uses the
+	// camera. Scope the permission check to the library so a user who grants full
+	// photo access but denies the camera is not blocked here.
 	const mediaPermissions = useMediaPermissions({
-		shouldRequest: true
+		shouldRequest: true,
+		library: "all",
+		needCamera: false
 	})
 
 	const albumsQuery = useCameraUploadAlbumsQuery()

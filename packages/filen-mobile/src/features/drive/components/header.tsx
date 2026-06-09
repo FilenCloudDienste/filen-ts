@@ -134,7 +134,7 @@ const Header = ({
 					title: t("select_all"),
 					icon: "select",
 					onPress: () => {
-						useDriveStore.getState().selectAllItems(listItems)
+						useDriveStore.getState().selectAllItems(listItems.filter(i => !i.data.undecryptable))
 					}
 				})
 			}

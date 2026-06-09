@@ -33,7 +33,6 @@ describe("getThemeOptions", () => {
 			darkMode: false,
 			colors: makeColors(),
 			platform: "ios",
-			readOnly: false,
 			font: { size: 14 }
 		})
 
@@ -44,15 +43,13 @@ describe("getThemeOptions", () => {
 		const iosResult = getThemeOptions({
 			darkMode: false,
 			colors: makeColors(),
-			platform: "ios",
-			readOnly: false
+			platform: "ios"
 		})
 
 		const androidResult = getThemeOptions({
 			darkMode: false,
 			colors: makeColors(),
-			platform: "android",
-			readOnly: false
+			platform: "android"
 		})
 
 		// Both must have the same keys
@@ -63,8 +60,7 @@ describe("getThemeOptions", () => {
 		const result = getThemeOptions({
 			darkMode: false,
 			colors: makeColors(),
-			platform: "ios",
-			readOnly: false
+			platform: "ios"
 			// font intentionally omitted
 		})
 
@@ -76,7 +72,6 @@ describe("getThemeOptions", () => {
 			darkMode: false,
 			colors: makeColors(),
 			platform: "ios",
-			readOnly: false,
 			font: { lineHeight: 1.5 }
 		})
 
@@ -88,45 +83,22 @@ describe("getThemeOptions", () => {
 			darkMode: false,
 			colors: makeColors(),
 			platform: "ios",
-			readOnly: false,
 			font: { lineHeight: 2.0 }
 		})
 
 		expect(result.editorLineHeight).toBe("2")
 	})
 
-	it("readOnly=true is forwarded as true into the returned object", () => {
-		const result = getThemeOptions({
-			darkMode: false,
-			colors: makeColors(),
-			platform: "ios",
-			readOnly: true
-		})
-
-		expect(result.readOnly).toBe(true)
-	})
-
-	it("readOnly=false is forwarded as false", () => {
-		const result = getThemeOptions({
-			darkMode: false,
-			colors: makeColors(),
-			platform: "android",
-			readOnly: false
-		})
-
-		expect(result.readOnly).toBe(false)
-	})
-
 	it("colors.text.foreground maps to editorTextColor", () => {
 		const colors = makeColors({ foreground: "#abcdef" })
-		const result = getThemeOptions({ darkMode: false, colors, platform: "ios", readOnly: false })
+		const result = getThemeOptions({ darkMode: false, colors, platform: "ios" })
 
 		expect(result.editorTextColor).toBe("#abcdef")
 	})
 
 	it("colors.background.secondary maps to codeBackground", () => {
 		const colors = makeColors({ secondaryBg: "#222222" })
-		const result = getThemeOptions({ darkMode: false, colors, platform: "android", readOnly: false })
+		const result = getThemeOptions({ darkMode: false, colors, platform: "android" })
 
 		expect(result.codeBackground).toBe("#222222")
 	})
@@ -136,7 +108,6 @@ describe("getThemeOptions", () => {
 			darkMode: false,
 			colors: makeColors(),
 			platform: "ios",
-			readOnly: false,
 			font: { family: "monospace" }
 		})
 
@@ -148,7 +119,6 @@ describe("getThemeOptions", () => {
 			darkMode: false,
 			colors: makeColors(),
 			platform: "ios",
-			readOnly: false,
 			font: { family: "JetBrains Mono" }
 		})
 
@@ -160,7 +130,6 @@ describe("getThemeOptions", () => {
 			darkMode: false,
 			colors: makeColors(),
 			platform: "ios",
-			readOnly: false,
 			font: { weight: 700 }
 		})
 
@@ -169,7 +138,7 @@ describe("getThemeOptions", () => {
 
 	it("colors.text.primary maps to toolbarActiveColor", () => {
 		const colors = makeColors({ primary: "#ff0000" })
-		const result = getThemeOptions({ darkMode: false, colors, platform: "ios", readOnly: false })
+		const result = getThemeOptions({ darkMode: false, colors, platform: "ios" })
 
 		expect(result.toolbarActiveColor).toBe("#ff0000")
 	})
