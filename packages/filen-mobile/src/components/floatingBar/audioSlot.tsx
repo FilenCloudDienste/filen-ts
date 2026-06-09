@@ -10,6 +10,7 @@ import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.que
 import Image from "@/components/ui/image"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { resolveAudioTrackLabels } from "@/features/audio/utils"
+import AudioProgressBar from "@/components/floatingBar/audioProgressBar"
 
 const AudioSlot = () => {
 	const { t } = useTranslation()
@@ -60,65 +61,68 @@ const AudioSlot = () => {
 
 	return (
 		<PressableScale
-			className="flex-1 flex-row items-center px-3 py-2 gap-2 min-h-11"
+			className="flex-1 flex-col overflow-hidden min-h-11"
 			rippleColor="transparent"
 			onPress={onBodyPress}
 		>
-			<View className="flex-row items-center gap-2 bg-transparent flex-1">
-				{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
-					<Image
-						className="size-8 rounded-lg bg-background-tertiary"
-						source={{
-							uri: audioMetadataQuery.data.pictureUri
-						}}
-						contentFit="contain"
-						cachePolicy="disk"
-						recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}
-					/>
-				) : (
-					<View className="bg-background-tertiary size-8 rounded-lg flex-row items-center justify-center">
-						<Ionicons
-							name="musical-note"
-							size={16}
+			<View className="flex-row items-center px-3 py-2 gap-2 bg-transparent flex-1">
+				<View className="flex-row items-center gap-2 bg-transparent flex-1">
+					{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
+						<Image
+							className="size-8 rounded-lg bg-background-tertiary"
+							source={{
+								uri: audioMetadataQuery.data.pictureUri
+							}}
+							contentFit="contain"
+							cachePolicy="disk"
+							recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}
+						/>
+					) : (
+						<View className="bg-background-tertiary size-8 rounded-lg flex-row items-center justify-center">
+							<Ionicons
+								name="musical-note"
+								size={16}
+								color={textForeground.color}
+							/>
+						</View>
+					)}
+					<View className="flex-col bg-transparent flex-1 justify-center">
+						<Text
+							className="text-xs"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{titleLabel}
+						</Text>
+						<Text
+							className="text-xs text-muted-foreground"
+							numberOfLines={1}
+							ellipsizeMode="middle"
+						>
+							{artistLabel}
+						</Text>
+					</View>
+				</View>
+				<PressableScale
+					className="shrink-0 size-5 items-center justify-center"
+					rippleColor="transparent"
+					onPress={onTogglePlay}
+				>
+					{loading ? (
+						<ActivityIndicator
+							size="small"
 							color={textForeground.color}
 						/>
-					</View>
-				)}
-				<View className="flex-col bg-transparent flex-1 justify-center">
-					<Text
-						className="text-xs"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{titleLabel}
-					</Text>
-					<Text
-						className="text-xs text-muted-foreground"
-						numberOfLines={1}
-						ellipsizeMode="middle"
-					>
-						{artistLabel}
-					</Text>
-				</View>
+					) : (
+						<Ionicons
+							name={playing ? "pause" : "play"}
+							size={18}
+							color={textForeground.color}
+						/>
+					)}
+				</PressableScale>
 			</View>
-			<PressableScale
-				className="shrink-0 size-5 items-center justify-center"
-				rippleColor="transparent"
-				onPress={onTogglePlay}
-			>
-				{loading ? (
-					<ActivityIndicator
-						size="small"
-						color={textForeground.color}
-					/>
-				) : (
-					<Ionicons
-						name={playing ? "pause" : "play"}
-						size={18}
-						color={textForeground.color}
-					/>
-				)}
-			</PressableScale>
+			<AudioProgressBar />
 		</PressableScale>
 	)
 }
