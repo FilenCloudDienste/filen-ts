@@ -65,7 +65,7 @@ const Photos = () => {
 					items: driveItemsQuery.data,
 					getPreviewType,
 					supportedImageExtensions: EXPO_IMAGE_SUPPORTED_EXTENSIONS,
-					extname: name => FileSystem.Paths.extname(name).toLowerCase()
+					extname: name => FileSystem.Paths.extname(name)
 				}),
 				"creationDesc"
 			)

@@ -3,7 +3,7 @@ import { type JsClientInterface, SocketEvent_Tags, ListenerHandle, GeneralEvent_
 import { useEffect, useRef, useCallback } from "react"
 import { runEffect, run, Semaphore } from "@filen/utils"
 import useChatsStore from "@/features/chats/store/useChats.store"
-import useSocketStore from "@/stores/useSocket.store"
+import useSocketStore, { type State as SocketState } from "@/stores/useSocket.store"
 import alerts from "@/lib/alerts"
 import { AppState, type AppStateStatus } from "react-native"
 import useEffectOnce from "@/hooks/useEffectOnce"
@@ -12,6 +12,24 @@ import { handleNoteEvent } from "@/features/notes/socketHandlers"
 import { handleChatEvent, chatTypingTimeoutsRef } from "@/features/chats/socketHandlers"
 import { handleDriveEvent } from "@/features/drive/socketHandlers"
 import { handleContactEvent } from "@/features/contacts/socketHandlers"
+
+type ConnectionTag =
+	| SocketEvent_Tags.Reconnecting
+	| SocketEvent_Tags.AuthSuccess
+	| SocketEvent_Tags.AuthFailed
+	| SocketEvent_Tags.Unsubscribed
+
+/**
+ * Pure mapping from a connection-lifecycle socket event tag to the corresponding
+ * UI socket state. Exported so that tests can exercise the real production mapping.
+ */
+export function socketEventTagToState(tag: ConnectionTag): SocketState {
+	return tag === SocketEvent_Tags.Reconnecting
+		? "reconnecting"
+		: tag === SocketEvent_Tags.AuthSuccess
+			? "connected"
+			: "disconnected"
+}
 
 async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }) {
 	try {
@@ -26,15 +44,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 				useChatsStore.getState().setTyping({})
 
-				useSocketStore
-					.getState()
-					.setState(
-						event.tag === SocketEvent_Tags.Reconnecting
-							? "reconnecting"
-							: event.tag === SocketEvent_Tags.AuthSuccess
-								? "connected"
-								: "disconnected"
-					)
+				useSocketStore.getState().setState(socketEventTagToState(event.tag))
 
 				if (event.tag === SocketEvent_Tags.AuthSuccess) {
 					// Refetch chats and messages to ensure we have the latest data after reconnect + to update unread counts

@@ -1573,7 +1573,54 @@ describe("Cache", () => {
 
 	// #1 — after the logout wipe (clear()), the cache is locked: no stray mutation, debounce, or
 	// AppState-background flush may re-INSERT decrypted metadata into the just-emptied plaintext kv.
+	// D6 fix: clear() also resets ready=false so stray set() calls are rejected at assertReady(),
+	// not just silently mutated in-memory and then blocked at the persist layer.
 	describe("logout wipe lock (#1)", () => {
+		it("a set() after clear() throws (ready=false) and does not leave a retained in-memory entry", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("pre-clear", "value")
+
+			cache.clear()
+
+			// Stray set() must be rejected at assertReady() — not retained in-memory.
+			expect(() => map.set("leaked", "decrypted-meta")).toThrow("Cache not restored yet")
+
+			// The in-memory map must be empty: pre-clear entry gone, stray entry never stored.
+			expect(map.size).toBe(0)
+			expect(map.has("leaked")).toBe(false)
+			expect(map.has("pre-clear")).toBe(false)
+
+			// No SQLite write must have occurred.
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await vi.advanceTimersToNextTimerAsync().catch(() => {})
+
+			expect(kvStore.has(kvKey(name, "leaked"))).toBe(false)
+		})
+
+		it("all maps have ready=false immediately after clear()", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			// Confirm all maps are ready before clear.
+			for (const [, map] of getPersistentMaps(cache)) {
+				expect(map.ready).toBe(true)
+			}
+
+			cache.clear()
+
+			// After clear, every map must be not-ready.
+			for (const [, map] of getPersistentMaps(cache)) {
+				expect(map.ready).toBe(false)
+			}
+		})
+
 		it("a set() after clear() does not persist on a debounced flush", async () => {
 			const cache = createCache()
 
@@ -1583,8 +1630,8 @@ describe("Cache", () => {
 
 			cache.clear()
 
-			// A stray mutation lands during the logout window (e.g. a late socket event before reload).
-			map.set("leaked", "decrypted-meta")
+			// A stray mutation during the logout window must be rejected (ready=false).
+			expect(() => map.set("leaked", "decrypted-meta")).toThrow("Cache not restored yet")
 
 			cache.flush()
 			vi.advanceTimersByTime(2000)
@@ -1602,7 +1649,8 @@ describe("Cache", () => {
 
 			cache.clear()
 
-			map.set("leaked", "decrypted-meta")
+			// Stray set() is rejected at assertReady — nothing is enqueued.
+			expect(() => map.set("leaked", "decrypted-meta")).toThrow("Cache not restored yet")
 
 			mockDb.executeBatch.mockClear()
 
@@ -1648,15 +1696,25 @@ describe("Cache", () => {
 			}
 		})
 
-		it("restore() unlocks the cache so the next session persists normally", async () => {
+		it("restore() re-arms maps (ready=true) so the next session persists normally", async () => {
 			const cache = createCache()
 
 			await cache.restore()
 
 			cache.clear()
 
+			// All maps are not-ready after clear.
+			for (const [, map] of getPersistentMaps(cache)) {
+				expect(map.ready).toBe(false)
+			}
+
 			// restore() (next authenticated session) must re-enable persistence.
 			await cache.restore()
+
+			// All maps must be ready again.
+			for (const [, map] of getPersistentMaps(cache)) {
+				expect(map.ready).toBe(true)
+			}
 
 			const { name, map } = getFirstMap(cache)
 

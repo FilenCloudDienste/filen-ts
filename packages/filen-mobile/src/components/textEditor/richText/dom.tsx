@@ -272,7 +272,6 @@ const RichTextEditorDom = ({
 				darkMode,
 				colors,
 				platform,
-				readOnly: readOnly ?? false,
 				font
 			})
 		)

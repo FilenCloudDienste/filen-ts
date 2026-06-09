@@ -25,6 +25,36 @@ import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 import { useChecklistHideCompleted } from "@/features/notes/checklistView"
 
+// #38/#13: the blocking loading overlay must show ONLY when there is nothing to render yet AND a
+// fetch is genuinely in flight. The per-note query is deliberately disabled while offline or while
+// inflight content exists, so `isPending` stays true forever — gating on it alone spins an eternal
+// spinner. We therefore require BOTH (no string content yet) AND (fetching or pending). A history
+// view is always non-loading. Pure + exported so the standalone test mirrors the live component
+// instead of re-implementing a divergent copy of the formula (T5).
+export function computeNoteLoading({
+	history,
+	isFetching,
+	isPending,
+	initialValue
+}: {
+	history: boolean
+	isFetching: boolean
+	isPending: boolean
+	initialValue: string | null | undefined
+}): boolean {
+	if (history) {
+		return false
+	}
+
+	return typeof initialValue !== "string" && (isFetching || isPending)
+}
+
+// #13: a genuine server error renders the error/retry surface, never a blocking spinner. The error
+// surface is suppressed for a (read-only) history view.
+export function computeNoteFetchError({ history, isError }: { history: boolean; isError: boolean }): boolean {
+	return !history && isError
+}
+
 const Loading = ({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textEditorReady = useTextEditorStore(useShallow(state => state.ready))
@@ -146,9 +176,17 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// render yet (no inflight, no server, no list content) AND a fetch is genuinely
 	// in flight. #13 fix preserved: a genuine server error renders the retry state
 	// (see fetchError below), not an eternal blocking spinner.
-	const loading = history ? false : typeof initialValue !== "string" && (noteContentQuery.isFetching || noteContentQuery.isPending)
+	const loading = computeNoteLoading({
+		history: Boolean(history),
+		isFetching: noteContentQuery.isFetching,
+		isPending: noteContentQuery.isPending,
+		initialValue
+	})
 
-	const fetchError = !history && noteContentQuery.isError
+	const fetchError = computeNoteFetchError({
+		history: Boolean(history),
+		isError: noteContentQuery.isError
+	})
 
 	const { refetch } = noteContentQuery
 

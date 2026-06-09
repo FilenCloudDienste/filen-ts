@@ -17,11 +17,6 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-// ---------------------------------------------------------------------------
-// The mapping logic extracted verbatim from socket.tsx onEvent().
-// If socket.tsx ever refactors the ternary the test will need a matching update.
-// ---------------------------------------------------------------------------
-
 const { mockSetTyping } = vi.hoisted(() => ({
 	mockSetTyping: vi.fn()
 }))
@@ -29,6 +24,27 @@ const { mockSetTyping } = vi.hoisted(() => ({
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
+
+// Mock the @filen/sdk-rs package so that:
+//  (a) SocketEvent_Tags is available with the real production string values, and
+//  (b) the WASM / RN-uniffi surfaces (which use `self` / native modules) are never loaded.
+vi.mock("@filen/sdk-rs", () => ({
+	SocketEvent_Tags: {
+		AuthSuccess: "AuthSuccess",
+		AuthFailed: "AuthFailed",
+		Reconnecting: "Reconnecting",
+		Unsubscribed: "Unsubscribed",
+		Drive: "Drive",
+		Chat: "Chat",
+		Note: "Note",
+		Contact: "Contact",
+		General: "General"
+	},
+	GeneralEvent_Tags: {
+		PasswordChanged: "PasswordChanged",
+		NewEvent: "NewEvent"
+	}
+}))
 
 vi.mock("@/features/chats/store/useChats.store", () => ({
 	default: {
@@ -66,75 +82,46 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 // ---------------------------------------------------------------------------
-// The mapping under test — mirrors the ternary in onEvent() exactly.
-// SocketEvent_Tags values are reproduced here so the test does not depend
-// on the sdk-rs runtime; they must stay in sync with the SDK enum.
+// Import the real production mapping and the SDK enum — tests now exercise
+// the actual function from socket.tsx, so any future incorrect refactor of
+// the mapping will be caught here.
 // ---------------------------------------------------------------------------
 
-const SocketEvent_Tags = {
-	Reconnecting: "Reconnecting",
-	AuthSuccess: "AuthSuccess",
-	AuthFailed: "AuthFailed",
-	Unsubscribed: "Unsubscribed",
-	General: "General",
-	Drive: "Drive",
-	Chat: "Chat",
-	Note: "Note",
-	Contact: "Contact"
-} as const
-
-type ConnectionTag =
-	| typeof SocketEvent_Tags.Reconnecting
-	| typeof SocketEvent_Tags.AuthSuccess
-	| typeof SocketEvent_Tags.AuthFailed
-	| typeof SocketEvent_Tags.Unsubscribed
-
-type SocketState = "connected" | "disconnected" | "reconnecting"
-
-/** Pure mapping — identical logic to the ternary in socket.tsx onEvent(). */
-function tagToSocketState(tag: ConnectionTag): SocketState {
-	return tag === SocketEvent_Tags.Reconnecting
-		? "reconnecting"
-		: tag === SocketEvent_Tags.AuthSuccess
-			? "connected"
-			: "disconnected"
-}
-
-// ---------------------------------------------------------------------------
-
+import { SocketEvent_Tags } from "@filen/sdk-rs"
+import { socketEventTagToState } from "@/components/shell/socket"
 import { useSocketStore } from "@/stores/useSocket.store"
 
 beforeEach(() => {
 	useSocketStore.setState({ state: "disconnected" })
 })
 
-describe("tagToSocketState — pure event→state mapping", () => {
+describe("socketEventTagToState — pure event→state mapping", () => {
 	it("Reconnecting → reconnecting", () => {
-		expect(tagToSocketState(SocketEvent_Tags.Reconnecting)).toBe("reconnecting")
+		expect(socketEventTagToState(SocketEvent_Tags.Reconnecting)).toBe("reconnecting")
 	})
 
 	it("AuthSuccess → connected", () => {
-		expect(tagToSocketState(SocketEvent_Tags.AuthSuccess)).toBe("connected")
+		expect(socketEventTagToState(SocketEvent_Tags.AuthSuccess)).toBe("connected")
 	})
 
 	it("AuthFailed → disconnected", () => {
-		expect(tagToSocketState(SocketEvent_Tags.AuthFailed)).toBe("disconnected")
+		expect(socketEventTagToState(SocketEvent_Tags.AuthFailed)).toBe("disconnected")
 	})
 
 	it("Unsubscribed → disconnected", () => {
-		expect(tagToSocketState(SocketEvent_Tags.Unsubscribed)).toBe("disconnected")
+		expect(socketEventTagToState(SocketEvent_Tags.Unsubscribed)).toBe("disconnected")
 	})
 })
 
 describe("useSocketStore.setState — driven by mapped values", () => {
 	it("Reconnecting event drives store to 'reconnecting' without polling", () => {
-		useSocketStore.getState().setState(tagToSocketState(SocketEvent_Tags.Reconnecting))
+		useSocketStore.getState().setState(socketEventTagToState(SocketEvent_Tags.Reconnecting))
 
 		expect(useSocketStore.getState().state).toBe("reconnecting")
 	})
 
 	it("AuthSuccess event drives store to 'connected'", () => {
-		useSocketStore.getState().setState(tagToSocketState(SocketEvent_Tags.AuthSuccess))
+		useSocketStore.getState().setState(socketEventTagToState(SocketEvent_Tags.AuthSuccess))
 
 		expect(useSocketStore.getState().state).toBe("connected")
 	})
@@ -142,14 +129,14 @@ describe("useSocketStore.setState — driven by mapped values", () => {
 	it("AuthFailed after connected drives store to 'disconnected', not latched at 'connected'", () => {
 		// Simulate connected then disconnect
 		useSocketStore.getState().setState("connected")
-		useSocketStore.getState().setState(tagToSocketState(SocketEvent_Tags.AuthFailed))
+		useSocketStore.getState().setState(socketEventTagToState(SocketEvent_Tags.AuthFailed))
 
 		expect(useSocketStore.getState().state).toBe("disconnected")
 	})
 
 	it("Unsubscribed after reconnecting drives store to 'disconnected', not latched at 'reconnecting'", () => {
 		useSocketStore.getState().setState("reconnecting")
-		useSocketStore.getState().setState(tagToSocketState(SocketEvent_Tags.Unsubscribed))
+		useSocketStore.getState().setState(socketEventTagToState(SocketEvent_Tags.Unsubscribed))
 
 		expect(useSocketStore.getState().state).toBe("disconnected")
 	})
@@ -161,7 +148,7 @@ describe("useSocketStore.setState — driven by mapped values", () => {
 		// After the fix there is no poll, so driving "reconnecting" then "disconnected"
 		// is permanent — nothing silently reverts it.
 		useSocketStore.getState().setState("reconnecting")
-		useSocketStore.getState().setState(tagToSocketState(SocketEvent_Tags.AuthFailed))
+		useSocketStore.getState().setState(socketEventTagToState(SocketEvent_Tags.AuthFailed))
 
 		// No poll can overwrite this — assert it stays disconnected
 		expect(useSocketStore.getState().state).toBe("disconnected")

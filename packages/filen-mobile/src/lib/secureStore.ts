@@ -241,10 +241,11 @@ class SecureStore {
 		return deserialize(Buffer.concat([decrypted, final])) as Record<string, unknown>
 	}
 
-	// Best-effort, post-recovery cleanup of leftover staging/backup siblings. Only ever invoked
-	// AFTER a confirmed-valid destination decrypt, so deleting these can never remove the only
-	// surviving copy. Any failure here is swallowed — orphans are harmless.
-	private cleanupStaleSiblings(): void {
+	// Enumerate the destination's parent directory and delete every .securestore.tmp.* /
+	// .securestore.bak.* staging sibling, leaving the canonical destination itself untouched.
+	// Best-effort: a failed listing or a failed per-entry delete is swallowed (orphans are
+	// harmless). Shared by cleanupStaleSiblings() (post-read tidy-up) and clear() (logout wipe).
+	private deleteStagingSiblings(): void {
 		try {
 			const destinationUri = this.secureStoreFile.uri
 
@@ -266,8 +267,15 @@ class SecureStore {
 				}
 			}
 		} catch {
-			// Listing failed; the orphans are harmless and will be cleaned on a later successful read.
+			// Listing failed; the orphans are harmless and will be cleaned on a later successful read/clear.
 		}
+	}
+
+	// Best-effort, post-recovery cleanup of leftover staging/backup siblings. Only ever invoked
+	// AFTER a confirmed-valid destination decrypt, so deleting these can never remove the only
+	// surviving copy. Any failure here is swallowed — orphans are harmless.
+	private cleanupStaleSiblings(): void {
+		this.deleteStagingSiblings()
 	}
 
 	// Cross-process crash-recovery scan (finding 52). write() commits in two non-atomic moveSync
@@ -458,10 +466,12 @@ class SecureStore {
 
 			// Stage the new payload in the SAME directory as the destination so the final
 			// move is an atomic intra-volume rename (not a cross-volume copy, which would
-			// widen the crash window). expo-file-system's File.moveSync() has no overwrite
-			// option, so the destination must be absent before the move — but we never let
-			// it reach a state with zero copies: the old file is moved ASIDE to a backup
-			// first, and on any failure during the swap the backup is restored.
+			// widen the crash window). We deliberately move the OLD file ASIDE to a backup
+			// before promoting the staged payload — not to dodge an overwrite limitation
+			// (File.moveSync() does take a RelocationOptions { overwrite }, but a single
+			// overwriting rename would still leave a window with zero intact copies if the
+			// process dies mid-rename) — so that on any failure during the swap the backup
+			// can be restored and the store never reaches a state with zero copies.
 			const parentDirectory = this.secureStoreFile.parentDirectory
 			const destinationUri = this.secureStoreFile.uri
 			const tmpFile = new FileSystem.File(parentDirectory, `.securestore.tmp.${crypto.randomUUID()}`)
@@ -648,6 +658,14 @@ class SecureStore {
 			if (this.secureStoreFile.exists) {
 				this.secureStoreFile.delete()
 			}
+
+			// Logout is a WIPE: deleting only the destination is not enough. A write() that hard-crashed
+			// mid-swap can leave an intact prior-credentials copy under a .securestore.bak.* sibling (and a
+			// half-written .securestore.tmp.*). If those survive clear(), the next launch's backup-recovery
+			// scan (recoverDestinationFromBackup) would RESURRECT the just-wiped secrets. Sweep every
+			// staging sibling unconditionally — including when the destination is already gone — so no
+			// on-disk secret material outlives logout.
+			this.deleteStagingSiblings()
 
 			cache.secureStore.clear()
 

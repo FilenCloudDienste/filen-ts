@@ -172,6 +172,7 @@ import events from "@/lib/events"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
+import * as FileSystem from "expo-file-system"
 
 // #103 — capture constructor-registered handlers in beforeAll (after module
 // evaluation is complete) so the snapshot is not empty when mock-hoisting or
@@ -2612,5 +2613,204 @@ describe("#15 regression — compress() extension gate", () => {
 		const uploadCall = vi.mocked(transfers.upload).mock.calls[0]?.[0] as any
 
 		expect(uploadCall.name).toBe("photo.png")
+	})
+})
+
+// ─── #15 regression: compress-rename dedup tree-key symmetry ─────────────────
+// When compress rewrites .png → .jpg the remote tree-key becomes .jpg while the
+// local key would stay .png. listLocal/listRemote now compute extension-agnostic
+// keys when compress is on, so the asset is matched and NOT re-uploaded each sync.
+
+describe("#15 regression — compress-rename dedup tree-key symmetry", () => {
+	function setupLocalPng(id: string) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: [id] })
+		ml.addAsset({
+			id,
+			filename: "photo.png",
+			uri: `file:///media/${id}`,
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set(`file:///media/${id}`, new Uint8Array([1, 2, 3]))
+	}
+
+	function setupRemote(path: string) {
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path, file: { uuid: "remote-1" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: FileSystem.Paths.basename(path), created: 1000n, modified: 2000n }
+		} as any)
+	}
+
+	it("compress ON: local .png matches remote .jpg (compressed) — no re-upload", async () => {
+		setupLocalPng("c1")
+		// Remote already holds the compressed JPEG result of the same asset.
+		setupRemote("/Camera Roll/photo.jpg")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("compress ON: local .png matches remote .png (compression did not win) — no re-upload", async () => {
+		setupLocalPng("c2")
+		setupRemote("/Camera Roll/photo.png")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("compress OFF: local .png does NOT match remote .jpg — genuinely different, upload fires", async () => {
+		// With compress off the upload never renames, so .png and .jpg are different
+		// files. The keys stay extension-bearing and must NOT merge.
+		setupLocalPng("c3")
+		setupRemote("/Camera Roll/photo.jpg")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: false })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("compress ON: two same-stem assets at different seconds both upload (suffix symmetry holds)", async () => {
+		// Two photo.png assets one second apart. Both must get distinct stem-based
+		// tree slots (base + iteration-0 suffix), neither matching the single remote
+		// entry, so both upload — proving the extension-agnostic keying does not
+		// over-collapse distinct assets.
+		const { Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		// compress is ON and .png passes the manipulator gate, so stub manipulate to
+		// produce a LARGER output → compress() returns the original (no rename),
+		// keeping this test focused on dedup keying rather than the rename path. Each
+		// call yields a UNIQUE manipulated uri so per-asset cleanup doesn't clobber a
+		// sibling's temp file.
+		let manipCount = 0
+
+		vi.mocked(ImageManipulator.manipulate).mockImplementation(() => {
+			const manipulatedUri = `${Paths.cache.uri}/filen-tmp/manip-${manipCount++}.jpg`
+
+			fs.set(manipulatedUri, new Uint8Array(new Array(50).fill(9)))
+
+			const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+
+			return { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) } as any
+		})
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["d1", "d2"] })
+		ml.addAsset({
+			id: "d1",
+			filename: "photo.png",
+			uri: "file:///media/d1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "d2",
+			filename: "photo.png",
+			uri: "file:///media/d2",
+			mediaType: MediaType.IMAGE,
+			creationTime: 2000,
+			modificationTime: 3000
+		})
+		fs.set("file:///media/d1", new Uint8Array([1, 2, 3]))
+		fs.set("file:///media/d2", new Uint8Array([4, 5, 6]))
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+	})
+})
+
+// ─── #14 regression: null-creationTime collision key symmetry ────────────────
+// The local collision contentHash previously fell back to modificationTime when
+// creationTime was null; the remote side has no modificationTime and falls back
+// to 0. For two same-named null-creation assets that collide, the suffixed slot
+// diverged (local used modificationTime, remote used 0), so the file looked
+// "missing remotely" and re-uploaded every sync. Both sides now use
+// creationTime ?? 0, making the collision suffix symmetric.
+
+describe("#14 regression — null-creationTime collision key symmetry", () => {
+	it("two same-named null-creation assets match their remote counterparts — no re-upload", async () => {
+		// Two IMG_0001.jpg assets, BOTH with null creationTime but distinct
+		// modificationTimes. The remote tree mirrors them with created=0n. With the
+		// symmetric (creationTime ?? 0) key the suffixed slot resolves identically on
+		// both sides, so neither uploads.
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["n1", "n2"] })
+		ml.addAsset({
+			id: "n1",
+			filename: "IMG_0001.jpg",
+			uri: "file:///media/n1",
+			mediaType: MediaType.IMAGE,
+			creationTime: null,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "n2",
+			filename: "IMG_0001.jpg",
+			uri: "file:///media/n2",
+			mediaType: MediaType.IMAGE,
+			creationTime: null,
+			modificationTime: 9999000
+		})
+		fs.set("file:///media/n1", new Uint8Array([1, 2, 3]))
+		fs.set("file:///media/n2", new Uint8Array([4, 5, 6]))
+
+		// Remote holds both files: the base slot and the collision-suffixed slot.
+		// created=0n mirrors the null-creation fallback on both sides.
+		const basePath = "/Camera Roll/IMG_0001.jpg"
+		const suffixedPath =
+			modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: "0" }
+			}) ?? ""
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [
+						{ path: basePath, file: { uuid: "remote-base" } },
+						{ path: suffixedPath, file: { uuid: "remote-suffixed" } }
+					]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockImplementation(
+			(file: any) =>
+				({
+					meta: {
+						name: file.uuid === "remote-suffixed" ? FileSystem.Paths.basename(suffixedPath) : "IMG_0001.jpg",
+						created: 0n,
+						modified: 9999000n
+					}
+				}) as any
+		)
+
+		await cameraUpload.sync()
+
+		// Both local files map to slots already present remotely → no uploads.
+		// (Pre-fix, the local suffix used modificationTime so the suffixed slot
+		// diverged from the remote created=0 suffix → spurious re-upload.)
+		expect(transfers.upload).not.toHaveBeenCalled()
 	})
 })

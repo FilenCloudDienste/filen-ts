@@ -222,6 +222,7 @@ function defaultParams() {
 		t: t as never,
 		textForeground: { color: "#fff" } as never,
 		selectedNotes: [] as Note[],
+		selectedNotesLive: [] as Note[],
 		selectedTags: [] as NoteTag[],
 		notesViewMode: "notes" as const,
 		setNotesViewMode: vi.fn(),

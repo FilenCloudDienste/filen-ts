@@ -211,7 +211,7 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	if (query.fetchStatus === "paused") {
+	if (query.status !== "success" && query.fetchStatus === "paused") {
 		return (
 			<View
 				className="flex-1 items-center justify-center px-8"

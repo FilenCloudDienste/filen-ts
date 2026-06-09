@@ -40,14 +40,6 @@ export const security = {
 	/** Recovery-key dialog — title shown after enabling 2FA, presenting the recovery key */
 	two_factor_recovery_key: "Recovery key",
 	/**
-	 * Recovery-key dialog — message body advising the user to save the key.
-	 * NOTE: The original source set BOTH okText AND cancelText to the same "continue" placeholder
-	 * (line ~214), which looks like a copy-paste bug. okText now maps to common "continue";
-	 * cancelText maps to common "close" (a sensible dismiss action for an informational dialog).
-	 */
-	two_factor_recovery_key_description:
-		"Save your recovery key somewhere safe. You will need it if you ever lose access to your authenticator app.",
-	/**
 	 * Recovery-key screen — body copy shown above the key, stressing that this is the only time
 	 * the key can be viewed (it cannot be retrieved from the server again).
 	 */
