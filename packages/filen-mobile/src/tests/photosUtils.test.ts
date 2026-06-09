@@ -3,6 +3,8 @@ import { describe, it, expect } from "vitest"
 import { isPhotoGridItem, filterPhotoGridItems } from "@/features/photos/utils"
 import { type PreviewType } from "@/lib/previewType"
 import { type DriveItem } from "@/types"
+import { Paths } from "@/tests/mocks/expoFileSystem"
+import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/tests/mocks/constants"
 
 // Minimal injected dependencies — kept in the test so the helper stays free of
 // heavy SDK / native imports.
@@ -12,6 +14,12 @@ function extname(path: string): string {
 	const dot = path.lastIndexOf(".")
 
 	return dot === -1 ? "" : path.slice(dot).toLowerCase()
+}
+
+// Production-faithful extname: case-preserving (no .toLowerCase()), matching
+// FileSystem.Paths.extname from expo-file-system used in production code.
+function extnameProduction(path: string): string {
+	return Paths.extname(path)
 }
 
 function getPreviewType(name: string): PreviewType {
@@ -147,5 +155,89 @@ describe("filterPhotoGridItems", () => {
 				...deps
 			})
 		).toEqual([])
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Finding #48 — case-sensitive extension match + wrong extension set
+//
+// These tests inject the REAL production extname (Paths.extname — case-preserving,
+// no .toLowerCase()) together with EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable
+// set, not the ImageManipulator subset).  IMG.HEIC (uppercase) and photo.avif must
+// both be KEPT by the predicate after the fix.
+// ---------------------------------------------------------------------------
+
+function getPreviewTypeForFinding48(name: string): PreviewType {
+	const ext = extnameProduction(name).toLowerCase()
+
+	if ([".jpg", ".jpeg", ".png", ".gif", ".heic", ".heif", ".webp", ".avif", ".svg", ".ico", ".icns"].includes(ext)) {
+		return "image"
+	}
+
+	if ([".mp4", ".mov", ".m4v", ".3gp", ".webm", ".mkv"].includes(ext)) {
+		return "video"
+	}
+
+	return "unknown"
+}
+
+describe("finding #48 — case-insensitive extension + EXPO_IMAGE_SUPPORTED_EXTENSIONS", () => {
+	const productionDeps = {
+		getPreviewType: getPreviewTypeForFinding48,
+		supportedImageExtensions: EXPO_IMAGE_SUPPORTED_EXTENSIONS,
+		extname: extnameProduction
+	}
+
+	it("keeps IMG.HEIC (uppercase extension) — real production extname, displayable set", () => {
+		expect(
+			isPhotoGridItem({
+				item: makeItem({ type: "file", name: "IMG.HEIC" }),
+				...productionDeps
+			})
+		).toBe(true)
+	})
+
+	it("keeps photo.JPG (uppercase) — real production extname, displayable set", () => {
+		expect(
+			isPhotoGridItem({
+				item: makeItem({ type: "file", name: "photo.JPG" }),
+				...productionDeps
+			})
+		).toBe(true)
+	})
+
+	it("keeps photo.avif — present in EXPO_IMAGE_SUPPORTED_EXTENSIONS but absent from ImageManipulator subset", () => {
+		expect(
+			isPhotoGridItem({
+				item: makeItem({ type: "file", name: "photo.avif" }),
+				...productionDeps
+			})
+		).toBe(true)
+	})
+
+	it("keeps photo.AVIF (uppercase avif) — case-insensitive + displayable set", () => {
+		expect(
+			isPhotoGridItem({
+				item: makeItem({ type: "file", name: "photo.AVIF" }),
+				...productionDeps
+			})
+		).toBe(true)
+	})
+
+	it("filterPhotoGridItems keeps mixed-case and avif items together", () => {
+		const items = [
+			makeItem({ type: "file", name: "IMG.HEIC" }),
+			makeItem({ type: "file", name: "photo.JPG" }),
+			makeItem({ type: "file", name: "shot.avif" }),
+			makeItem({ type: "file", name: "clip.mp4" }),
+			makeItem({ type: "file", name: "document.pdf" })
+		]
+
+		const result = filterPhotoGridItems({
+			items,
+			...productionDeps
+		})
+
+		expect(result.map(item => item.data.decryptedMeta?.name)).toEqual(["IMG.HEIC", "photo.JPG", "shot.avif", "clip.mp4"])
 	})
 })

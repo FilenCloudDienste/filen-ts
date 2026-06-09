@@ -120,6 +120,18 @@ vi.mock("@/lib/tmp", () => ({
 	newTmpDir: mockNewTmpDir
 }))
 
+vi.mock("@/lib/i18n", () => ({
+	default: {
+		t: (key: string, params?: Record<string, unknown>) => {
+			if (!params) {
+				return key
+			}
+
+			return `${key}:${JSON.stringify(params)}`
+		}
+	}
+}))
+
 // mime-types maps extension to content type — keep the real module (it's node-safe).
 // No need to mock it.
 
@@ -732,5 +744,233 @@ describe("downloadDriveItemToDevice — Android defer cleanup", () => {
 
 		// iOS defer guard (Platform.OS === "android") prevents deletion
 		expect(fs.has(destBase)).toBe(true)
+	})
+})
+
+// ------------------------------------------------------------------
+// 4. #24 — Android single-file: percent-encoded URI decoded for MediaStore
+// ------------------------------------------------------------------
+
+describe("downloadDriveItemToDevice — #24 Android single-file URI decoding", () => {
+	beforeEach(() => {
+		setOS("android")
+	})
+
+	it("passes decoded path to copyToMediaStore for a name containing a space", async () => {
+		const tmpDir = new FileSystem.Directory(`${TMP_BASE}/space-file-test`)
+
+		mockNewTmpDir.mockReturnValue(tmpDir)
+
+		// Paths.join will percent-encode the space → "My%20Document.pdf" in the URI,
+		// but the SDK wrote bytes to the decoded path "My Document.pdf".
+		// The fix: normalizeFilePathForBlobUtil decodes it before passing to MediaStore.
+		const item = makeFileItem({ name: "My Document.pdf", mime: "application/pdf" })
+
+		const capturedSrc: string[] = []
+
+		mockTransfersDownload.mockResolvedValue(true)
+
+		mockCopyToMediaStore.mockImplementation((_meta: unknown, _type: string, src: string) => {
+			capturedSrc.push(src)
+
+			return Promise.resolve(undefined)
+		})
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(true)
+		expect(capturedSrc).toHaveLength(1)
+
+		// The decoded path must NOT contain %20 — space should be literal
+		const src = capturedSrc[0]
+
+		expect(src).toBeDefined()
+		expect(src).not.toContain("%20")
+		expect(src).toContain("My Document.pdf")
+	})
+
+	it("passes decoded path to copyToMediaStore for a name containing a bare '%'", async () => {
+		const tmpDir = new FileSystem.Directory(`${TMP_BASE}/bare-percent-file-test`)
+
+		mockNewTmpDir.mockReturnValue(tmpDir)
+
+		// A filename containing a literal "%" gets encoded by Paths.join to "%25".
+		// normalizeFilePathForBlobUtil must decode "%25" back to "%" so the path matches
+		// what the SDK wrote.
+		const item = makeFileItem({ name: "50% off.txt", mime: "text/plain" })
+
+		const capturedSrc: string[] = []
+
+		mockTransfersDownload.mockResolvedValue(true)
+
+		mockCopyToMediaStore.mockImplementation((_meta: unknown, _type: string, src: string) => {
+			capturedSrc.push(src)
+
+			return Promise.resolve(undefined)
+		})
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(true)
+		expect(capturedSrc).toHaveLength(1)
+
+		const src = capturedSrc[0]
+
+		expect(src).toBeDefined()
+		// %25 must be decoded back to "%", not left as the encoded form
+		expect(src).not.toContain("%25")
+		expect(src).toContain("50%")
+		expect(src).toContain("off.txt")
+	})
+})
+
+// ------------------------------------------------------------------
+// 5. #23 — Android directory: allSettled aggregates failures, no fail-fast
+// ------------------------------------------------------------------
+
+describe("downloadDriveItemToDevice — #23 Android directory partial-failure aggregation", () => {
+	beforeEach(() => {
+		setOS("android")
+	})
+
+	it("succeeds when all files copy successfully", async () => {
+		const tmpBase = `${TMP_BASE}/all-success-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri, "dir")
+			fs.set(`${destUri}/a.txt`, new Uint8Array([1]))
+			fs.set(`${destUri}/b.txt`, new Uint8Array([2]))
+
+			return true
+		})
+
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(true)
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(2)
+	})
+
+	it("copies all files even when one fails — does not abort sibling copies (allSettled behaviour)", async () => {
+		const tmpBase = `${TMP_BASE}/partial-failure-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri, "dir")
+			fs.set(`${destUri}/ok.txt`, new Uint8Array([1]))
+			fs.set(`${destUri}/fail.txt`, new Uint8Array([2]))
+			fs.set(`${destUri}/also-ok.txt`, new Uint8Array([3]))
+
+			return true
+		})
+
+		// fail.txt copy rejects; the other two succeed
+		mockCopyToMediaStore.mockImplementation(({ name }: { name: string }) => {
+			if (name === "fail.txt") {
+				return Promise.reject(new Error("OEM copy error"))
+			}
+
+			return Promise.resolve(undefined)
+		})
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		// run() wraps the thrown aggregated error
+		expect(result.success).toBe(false)
+
+		// ALL three copies were attempted (allSettled, not all)
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(3)
+	})
+
+	it("throws an aggregated error naming the failed count when any copy fails", async () => {
+		const tmpBase = `${TMP_BASE}/aggregated-error-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri, "dir")
+			fs.set(`${destUri}/good.txt`, new Uint8Array([1]))
+			fs.set(`${destUri}/bad1.txt`, new Uint8Array([2]))
+			fs.set(`${destUri}/bad2.txt`, new Uint8Array([3]))
+
+			return true
+		})
+
+		mockCopyToMediaStore.mockImplementation(({ name }: { name: string }) => {
+			if (name === "bad1.txt" || name === "bad2.txt") {
+				return Promise.reject(new Error("copy failed"))
+			}
+
+			return Promise.resolve(undefined)
+		})
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(false)
+
+		// The error message must include the i18n key + failed=2, total=3
+		const err = (result as { success: false; error: Error }).error
+
+		expect(err.message).toContain("download_partial_failure")
+		expect(err.message).toContain('"failed":2')
+		expect(err.message).toContain('"total":3')
+	})
+
+	it("defers staging dir deletion AFTER all allSettled promises settle — no mid-copy deletion", async () => {
+		// This test verifies that the defer (delete staging dir) does not fire
+		// while copies are still in flight. With Promise.allSettled, run()'s defer
+		// is registered after the allSettled call, so the staging dir exists for
+		// the duration of all copies.
+		const tmpBase = `${TMP_BASE}/defer-order-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri, "dir")
+			fs.set(`${destUri}/file.txt`, new Uint8Array([1]))
+
+			return true
+		})
+
+		// Verify that tmpBase exists at the time copyToMediaStore is called
+		let tmpBaseExistedDuringCopy = false
+
+		mockCopyToMediaStore.mockImplementation(async () => {
+			tmpBaseExistedDuringCopy = fs.has(tmpBase)
+		})
+
+		await downloadDriveItemToDevice({ item })
+
+		expect(tmpBaseExistedDuringCopy).toBe(true)
+		// After run() completes the defer fires and removes tmpBase
+		expect(fs.has(tmpBase)).toBe(false)
 	})
 })

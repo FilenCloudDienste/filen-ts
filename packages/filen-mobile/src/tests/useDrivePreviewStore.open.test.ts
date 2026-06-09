@@ -297,17 +297,18 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 	// -------------------------------------------------------------------------
 	// Finding #210 — photos path: image file with unsupported extension is excluded
 	// -------------------------------------------------------------------------
-	// The photos filter (store lines 111-116) applies an extra allowlist gate:
-	// image-type files must also have an extension in EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.
-	// The mock set contains { .jpg .jpeg .png .heic .webp }; the getPreviewType mock
-	// classifies .avif/.bmp/.gif as "image".  Those extensions must be excluded from
-	// the photos gallery but must NOT be excluded from the regular drive gallery.
+	// The photos filter applies an extra allowlist gate: image-type files must also
+	// have an extension in EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable set).
+	// The mock set contains .jpg .jpeg .png .gif .webp .avif .heic .heif .svg .ico;
+	// the getPreviewType mock classifies .bmp as "image" but it is absent from
+	// EXPO_IMAGE_SUPPORTED_EXTENSIONS — so .bmp is excluded from photos.
+	// .avif IS in EXPO_IMAGE_SUPPORTED_EXTENSIONS and must now be KEPT (finding #48).
 	describe("photos path: unsupported image extension gate", () => {
-		it("excludes an image file whose extension is not in EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS from the photos gallery", () => {
+		it("excludes an image file whose extension is not in EXPO_IMAGE_SUPPORTED_EXTENSIONS from the photos gallery", () => {
 			const photosDrivePath = makeDrivePath("photos")
-			// .avif is classified as "image" by getPreviewType but is absent from the mock
-			// EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS set
-			const unsupportedItem = makeDriveGalleryItem("avif1", "photo.avif")
+			// .bmp is classified as "image" by getPreviewType but is absent from
+			// EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable set)
+			const unsupportedItem = makeDriveGalleryItem("bmp1", "photo.bmp")
 			const supportedItem = makeDriveGalleryItem("jpg1", "photo.jpg")
 			const items: GalleryItemTagged[] = [unsupportedItem, supportedItem]
 
@@ -320,7 +321,7 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
 
 			// Unsupported extension must be filtered out of the photos gallery
-			expect(uuids).not.toContain("avif1")
+			expect(uuids).not.toContain("bmp1")
 			// Supported extension must remain
 			expect(uuids).toContain("jpg1")
 		})
@@ -359,7 +360,7 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			const state = useDrivePreviewStore.getState()
 			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
 
-			// .bmp is classified as "image" but is not in EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS
+			// .bmp is classified as "image" but is not in EXPO_IMAGE_SUPPORTED_EXTENSIONS
 			expect(uuids).not.toContain("bmp1")
 			expect(uuids).toContain("jpg1")
 		})
@@ -437,6 +438,89 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 
 			// currentIndex must remain the pre-set value, not the new call's value
 			expect(useDrivePreviewStore.getState().currentIndex).toBe(5)
+		})
+	})
+
+	// -------------------------------------------------------------------------
+	// Finding #48 — photos path gallery filter: case-insensitive extension +
+	// EXPO_IMAGE_SUPPORTED_EXTENSIONS (not the ImageManipulator subset)
+	//
+	// The store's photos-path filter calls Paths.extname (case-preserving — the
+	// mock mirrors production: no .toLowerCase() in extname itself) then must
+	// lowercase before the Set.has() check.  IMG.HEIC and photo.avif must both
+	// be kept.  Grid and gallery predicates are identical by spec.
+	// -------------------------------------------------------------------------
+	describe("finding #48 — photos path: case-insensitive extension + EXPO_IMAGE_SUPPORTED_EXTENSIONS", () => {
+		it("keeps IMG.HEIC (uppercase extension) in the photos gallery", () => {
+			const photosDrivePath = makeDrivePath("photos")
+			const heicItem = makeDriveGalleryItem("heic1", "IMG.HEIC")
+			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [heicItem, jpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toContain("heic1")
+			expect(uuids).toContain("jpg1")
+		})
+
+		it("keeps photo.avif in the photos gallery — present in EXPO_IMAGE_SUPPORTED_EXTENSIONS but absent from the ImageManipulator subset", () => {
+			const photosDrivePath = makeDrivePath("photos")
+			const avifItem = makeDriveGalleryItem("avif1", "photo.avif")
+			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [avifItem, jpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toContain("avif1")
+			expect(uuids).toContain("jpg1")
+		})
+
+		it("keeps photo.AVIF (uppercase avif) in the photos gallery", () => {
+			const photosDrivePath = makeDrivePath("photos")
+			const avifItem = makeDriveGalleryItem("avif2", "photo.AVIF")
+			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
+			const items: GalleryItemTagged[] = [avifItem, jpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("jpg1", "photo.jpg", photosDrivePath)
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toContain("avif2")
+			expect(uuids).toContain("jpg1")
+		})
+
+		it("keeps photo.JPG (uppercase) in the photos gallery", () => {
+			const photosDrivePath = makeDrivePath("photos")
+			const upperJpgItem = makeDriveGalleryItem("upper1", "PHOTO.JPG")
+			const lowerJpgItem = makeDriveGalleryItem("lower1", "photo.jpg")
+			const items: GalleryItemTagged[] = [upperJpgItem, lowerJpgItem]
+
+			useDrivePreviewStore.getState().open({
+				items,
+				initialItem: makeInitialDriveItem("lower1", "photo.jpg", photosDrivePath)
+			})
+
+			const state = useDrivePreviewStore.getState()
+			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toContain("upper1")
+			expect(uuids).toContain("lower1")
 		})
 	})
 })

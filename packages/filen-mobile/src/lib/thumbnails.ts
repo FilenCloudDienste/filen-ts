@@ -6,8 +6,20 @@ import { run, Semaphore } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { Platform } from "react-native"
 import cache from "@/lib/cache"
+import useHttpStore from "@/stores/useHttp.store"
+import { onlineManager } from "@tanstack/react-query"
 import { THUMBNAILS_VERSION, THUMBNAILS_DIRECTORY } from "@/lib/storageRoots"
-import { abortError, OfflineAbortError, getPath, ensureDirectory, driveItemToAnyFile, getExtension } from "@/lib/thumbnailsHelpers"
+import {
+	abortError,
+	OfflineAbortError,
+	ProviderUnavailableError,
+	getPath,
+	ensureDirectory,
+	driveItemToAnyFile,
+	getExtension,
+	waitForHttpProvider
+} from "@/lib/thumbnailsHelpers"
+import offline from "@/features/offline/offline"
 import { generateImage } from "@/lib/thumbnailsImage"
 import { generateVideo } from "@/lib/thumbnailsVideo"
 
@@ -41,6 +53,29 @@ class Thumbnails {
 
 	public constructor() {
 		ensureDirectory()
+
+		this.subscribeRecovery()
+	}
+
+	// A provider-not-ready (ProviderUnavailableError) or transient decode failure can drive an item
+	// to the MAX_FAILURES blacklist for the rest of the session. Clear the in-memory failure counters
+	// whenever the underlying infrastructure recovers — the HTTP provider booting (port null→non-null)
+	// or connectivity returning (offline→online) — so previously-blacklisted items get a fresh chance.
+	private subscribeRecovery(): void {
+		useHttpStore.subscribe(
+			state => state.port,
+			(port, prevPort) => {
+				if (port !== null && prevPort === null) {
+					this.failures.clear()
+				}
+			}
+		)
+
+		onlineManager.subscribe(isOnline => {
+			if (isOnline) {
+				this.failures.clear()
+			}
+		})
 	}
 
 	public canGenerate(item: DriveItem): boolean {
@@ -161,18 +196,48 @@ class Thumbnails {
 		quality: number
 		videoTimestamp: number
 	}): Promise<string> {
+		const file = driveItemToAnyFile(params.item)
+
+		if (!file) {
+			throw new Error("Unsupported item type")
+		}
+
+		// Resolve the video source URL (offline lookup / online guard / HTTP-provider readiness)
+		// BEFORE acquiring the concurrency slot. The provider boots asynchronously and the wait can
+		// take up to 30s; holding a finite semaphore slot during that idle wait head-of-line-blocks
+		// ALL thumbnail generation (including images). Doing it here means the slot only ever covers
+		// real extract/encode work.
+		let videoSourceUrl: string | null = null
+
+		if (params.isVideo) {
+			const offlineFile = await offline.getLocalFile(params.item)
+
+			if (offlineFile?.exists) {
+				videoSourceUrl = normalizeFilePathForExpo(offlineFile.uri)
+			} else {
+				// Video thumbnails stream via the local HTTP provider, which internally streams from
+				// Filen servers via the SDK. Offline would stall. Throw abort-flavoured so the failures
+				// map isn't poisoned (see generateImage for the same reasoning).
+				if (!onlineManager.isOnline()) {
+					throw new OfflineAbortError()
+				}
+
+				const getFileUrl = await waitForHttpProvider(params.signal)
+
+				videoSourceUrl = getFileUrl(file)
+			}
+		}
+
+		if (params.signal?.aborted) {
+			throw abortError(params.signal)
+		}
+
 		// Acquire here (not in generate()) so concurrent callers waiting on the same in-flight pending promise don't each occupy a slot while idle.
 		await this.semaphore.acquire()
 
 		try {
 			const result = await run(async () => {
 				ensureDirectory()
-
-				const file = driveItemToAnyFile(params.item)
-
-				if (!file) {
-					throw new Error("Unsupported item type")
-				}
 
 				if (params.isImage) {
 					await generateImage({
@@ -183,10 +248,9 @@ class Thumbnails {
 						quality: params.quality,
 						signal: params.signal
 					})
-				} else if (params.isVideo) {
+				} else if (params.isVideo && videoSourceUrl !== null) {
 					await generateVideo({
-						file,
-						item: params.item,
+						sourceUrl: videoSourceUrl,
 						outputPath: params.outputPath,
 						width: params.width,
 						quality: params.quality,
@@ -199,7 +263,11 @@ class Thumbnails {
 			})
 
 			if (!result.success) {
-				if (!params.signal?.aborted && !(result.error instanceof OfflineAbortError)) {
+				if (
+					!params.signal?.aborted &&
+					!(result.error instanceof OfflineAbortError) &&
+					!(result.error instanceof ProviderUnavailableError)
+				) {
 					console.error(
 						"[Thumbnails] generation failed",
 						{
@@ -334,7 +402,7 @@ class Thumbnails {
 
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
-				if (!params.signal?.aborted && !(error instanceof OfflineAbortError)) {
+				if (!params.signal?.aborted && !(error instanceof OfflineAbortError) && !(error instanceof ProviderUnavailableError)) {
 					console.error(
 						"[Thumbnails] generateFromLocalFile failed",
 						{
@@ -396,6 +464,25 @@ class Thumbnails {
 			exists: true,
 			path: normalizeFilePathForExpo(file.uri)
 		}
+	}
+
+	// Invalidate a cached thumbnail WITHOUT resetting its failure counter. Used when a render-time
+	// decode failure (e.g. an undecodable-but-nonzero .webp) means the on-disk artifact must be
+	// discarded, but the failure history must be preserved so the consumer can give up permanently
+	// once MAX_ERROR_RETRIES is exhausted instead of looping generate-on-error forever. Contrast
+	// remove(), which also clears this.failures (for explicit user-initiated invalidation).
+	public invalidateFile(item: DriveItem): void {
+		const file = new FileSystem.File(getPath(item))
+
+		if (file.exists) {
+			try {
+				file.delete()
+			} catch {
+				// Best-effort removal of the corrupt cache entry
+			}
+		}
+
+		cache.availableThumbnails.delete(item.data.uuid)
 	}
 
 	public remove(item: DriveItem): void {

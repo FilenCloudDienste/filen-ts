@@ -8,6 +8,7 @@ import { listLocalDirectoryRecursive } from "@/lib/utils"
 import { normalizeFilePathForBlobUtil } from "@/lib/paths"
 import { newTmpDir } from "@/lib/tmp"
 import transfers from "@/features/transfers/transfers"
+import i18n from "@/lib/i18n"
 
 /**
  * Download a single Drive item (file or directory) to the device's downloads
@@ -69,7 +70,7 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 						mimeType: item.data.decryptedMeta.mime
 					},
 					"Download",
-					destination.uri
+					normalizeFilePathForBlobUtil(destination.uri)
 				)
 
 				return
@@ -78,12 +79,13 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 			if (!isFile && destination instanceof FileSystem.Directory) {
 				const entries = listLocalDirectoryRecursive(destination)
 
-				await Promise.all(
-					entries.map(async entry => {
-						if (entry instanceof FileSystem.Directory) {
-							return
-						}
+				const files = entries.filter(entry => entry instanceof FileSystem.File)
 
+				// Use allSettled so a single failure does not abort sibling copies that are
+				// still in flight, and so the defer does not delete the staging dir while a
+				// copy is still reading from it.
+				const results = await Promise.allSettled(
+					files.map(async entry => {
 						const normalizedEntryPath = normalizeFilePathForBlobUtil(entry.uri)
 						const destinationUriNormalized = normalizeFilePathForBlobUtil(destination.uri)
 
@@ -124,6 +126,12 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 						)
 					})
 				)
+
+				const failedCount = results.filter(r => r.status === "rejected").length
+
+				if (failedCount > 0) {
+					throw new Error(i18n.t("download_partial_failure", { failed: failedCount, total: files.length }))
+				}
 			}
 		}
 	})

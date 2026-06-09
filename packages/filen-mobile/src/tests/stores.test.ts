@@ -266,13 +266,13 @@ describe("useDrivePreviewStore.open", () => {
 		expect((state.items[0] as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid).toBe("docx1")
 	})
 
-	it("for drivePath.type='photos', only image+video items with supported manipulator extensions survive", () => {
+	it("for drivePath.type='photos', only image+video items with displayable image extensions survive", () => {
 		const photosDrivePath = makeDrivePath("photos")
-		// The mock constants set includes: .jpg, .jpeg, .png, .heic, .webp
-		// .gif is NOT in the mock EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS
+		// The photos filter uses EXPO_IMAGE_SUPPORTED_EXTENSIONS (the displayable set),
+		// which includes .gif — expo-image renders gifs, so they belong in the gallery (#48).
 		const items: GalleryItemTagged[] = [
-			makeDriveGalleryItem("img1", "photo.jpg"), // image + supported ext → included
-			makeDriveGalleryItem("img2", "photo.gif"), // image but NOT in manipulator set → excluded
+			makeDriveGalleryItem("img1", "photo.jpg"), // image + displayable ext → included
+			makeDriveGalleryItem("img2", "photo.gif"), // image + displayable ext (gif) → included
 			makeDriveGalleryItem("vid1", "clip.mp4"), // video → included
 			makeDriveGalleryItem("aud1", "track.mp3"), // audio → excluded
 			makeDriveGalleryItem("doc1", "readme.txt") // text → excluded
@@ -290,8 +290,8 @@ describe("useDrivePreviewStore.open", () => {
 		expect(uuids).toContain("vid1")
 		expect(uuids).not.toContain("aud1")
 		expect(uuids).not.toContain("doc1")
-		// .gif is not in mock EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS
-		expect(uuids).not.toContain("img2")
+		// .gif IS displayable (EXPO_IMAGE_SUPPORTED_EXTENSIONS) → included in the gallery (#48)
+		expect(uuids).toContain("img2")
 	})
 
 	it("for a general drive path, audio files are included but docx/pdf/code files are excluded", () => {

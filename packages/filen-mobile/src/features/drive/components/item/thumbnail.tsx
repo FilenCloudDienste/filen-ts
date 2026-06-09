@@ -48,6 +48,11 @@ const FileThumbnailWithGenerate = ({
 	const errorRetryCountRef = useRef<number>(0)
 	const isGeneratingRef = useRef<boolean>(false)
 	const localPathRef = useRef<string | null>(null)
+	// Latches true once an item has exhausted its render-error retry budget. An undecodable-but-
+	// nonzero .webp would otherwise loop forever: <Image> onError → regenerate → same bad bytes →
+	// onError. Once latched, every regeneration entry point bails so the cell renders the static
+	// FileIcon instead. Reset on recycle below so a recycled cell starts fresh for its new item.
+	const failedPermanentlyRef = useRef<boolean>(false)
 
 	const [localPath, setLocalPath] = useRecyclingState<string | null>(
 		() => {
@@ -67,6 +72,7 @@ const FileThumbnailWithGenerate = ({
 			errorRetryCountRef.current = 0
 			isGeneratingRef.current = false
 			localPathRef.current = null
+			failedPermanentlyRef.current = false
 		}
 	)
 
@@ -75,7 +81,13 @@ const FileThumbnailWithGenerate = ({
 	}, [localPath])
 
 	const generate = useCallback(async () => {
-		if (target !== "Cell" || localPathRef.current || !thumbnails.canGenerate(item) || AppState.currentState !== "active") {
+		if (
+			target !== "Cell" ||
+			localPathRef.current ||
+			failedPermanentlyRef.current ||
+			!thumbnails.canGenerate(item) ||
+			AppState.currentState !== "active"
+		) {
 			return
 		}
 
@@ -151,6 +163,15 @@ const FileThumbnailWithGenerate = ({
 		cache.availableThumbnails.delete(item.data.uuid)
 
 		if (errorRetryCountRef.current >= MAX_ERROR_RETRIES) {
+			// Retry budget exhausted. Drop the corrupt on-disk artifact but PRESERVE the lib's
+			// failure counter (invalidateFile, not remove) and latch failedPermanentlyRef so no
+			// regeneration entry point re-fires. Renders the static FileIcon from here on.
+			failedPermanentlyRef.current = true
+
+			thumbnails.invalidateFile(item)
+
+			localPathRef.current = null
+
 			setLocalPath(null)
 
 			return
@@ -158,7 +179,10 @@ const FileThumbnailWithGenerate = ({
 
 		errorRetryCountRef.current += 1
 
-		thumbnails.remove(item)
+		// Non-terminal: discard the bad artifact and try again, but use invalidateFile (NOT remove)
+		// so the lib-side this.failures history survives — remove() would wipe it and uncap the
+		// underlying generate-on-error loop.
+		thumbnails.invalidateFile(item)
 
 		localPathRef.current = null
 
@@ -177,7 +201,7 @@ const FileThumbnailWithGenerate = ({
 	}
 
 	useEffect(() => {
-		if (!localPath) {
+		if (!localPath && !failedPermanentlyRef.current) {
 			generate()
 		}
 	}, [generate, localPath])
@@ -191,7 +215,7 @@ const FileThumbnailWithGenerate = ({
 					abortControllerRef.current = null
 					isGeneratingRef.current = false
 				} else if (nextAppState === "active") {
-					if (!localPathRef.current) {
+					if (!localPathRef.current && !failedPermanentlyRef.current) {
 						generateRef.current?.()
 					}
 				}
@@ -235,7 +259,7 @@ const FileThumbnailWithGenerate = ({
 
 	useFocusEffect(
 		useCallback(() => {
-			if (!localPathRef.current) {
+			if (!localPathRef.current && !failedPermanentlyRef.current) {
 				generateRef.current?.()
 			}
 
