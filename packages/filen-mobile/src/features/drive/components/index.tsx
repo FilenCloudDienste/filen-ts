@@ -8,6 +8,7 @@ import { itemSorter } from "@/lib/sort"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
 import Header from "@/features/drive/components/header"
 import { run, cn } from "@filen/utils"
@@ -17,7 +18,7 @@ import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
-import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, filterDriveItemsBySearchQuery } from "@/features/drive/utils"
+import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, filterDriveItemsBySearchQuery, mergeByUuid } from "@/features/drive/utils"
 
 const Drive = () => {
 	const drivePath = useDrivePath()
@@ -34,12 +35,14 @@ const Drive = () => {
 		}
 	)
 
-	const itemsSorted = itemSorter.sortItems(
-		[...(driveItemsQuery.status === "success" ? driveItemsQuery.data : []), ...globalSearchResult],
-		sort
-	)
-
-	const items = driveItemsQuery.status === "success" ? filterDriveItemsBySearchQuery(itemsSorted, searchQuery) : []
+	// #26 — use retained data unconditionally (stale-while-error); status "error"
+	// with prior data keeps the listing visible instead of flipping to "empty".
+	// #27 — de-dup local listing + global search by uuid before sorting so
+	// FlashList never receives duplicate keys or inflated selection counts.
+	const baseItems = driveItemsQuery.data ?? []
+	const merged = mergeByUuid(baseItems, globalSearchResult)
+	const itemsSorted = itemSorter.sortItems(merged, sort)
+	const items = filterDriveItemsBySearchQuery(itemsSorted, searchQuery)
 
 	useFocusEffect(
 		useCallback(() => {
@@ -103,12 +106,30 @@ const Drive = () => {
 						}
 					}}
 					loading={driveItemsQuery.status === "pending"}
-					emptyComponent={() => (
-						<ListEmpty
-							icon={getDriveEmptyStateIcon(drivePath.type)}
-							title={t(getDriveEmptyStateTitleKey(drivePath.type))}
-						/>
-					)}
+					emptyComponent={() => {
+						// #26 — distinguish a query error with no retained data (show
+						// error + retry) from a genuinely empty directory (existing empty
+						// state). When data was retained through the error, items.length
+						// will be > 0 and this component is not rendered at all.
+						if (driveItemsQuery.status === "error") {
+							return (
+								<ListEmpty
+									icon="alert-circle-outline"
+									title={t("error_generic")}
+									action={
+										<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>
+									}
+								/>
+							)
+						}
+
+						return (
+							<ListEmpty
+								icon={getDriveEmptyStateIcon(drivePath.type)}
+								title={t(getDriveEmptyStateTitleKey(drivePath.type))}
+							/>
+						)
+					}}
 				/>
 			</SafeAreaView>
 		</Fragment>

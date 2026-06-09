@@ -111,7 +111,6 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 const mutex = new Semaphore(1)
 
 const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
-	const checkConnectionIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 	const socketListenerHandleRef = useRef<ListenerHandle | null>(null)
 	const stringifiedClient = useStringifiedClient()
 	const stringifiedClientRef = useRef(stringifiedClient)
@@ -150,11 +149,11 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 								undefined
 							)) as ListenerHandle
 
-							clearInterval(checkConnectionIntervalRef.current)
-
-							checkConnectionIntervalRef.current = setInterval(() => {
-								useSocketStore.getState().setState(prev => (sdkClient.isSocketConnected() ? "connected" : prev))
-							}, 5000)
+							// Seed initial state from SDK once on listener registration;
+							// ongoing state is driven purely by SocketEvent_Tags events.
+							if (sdkClient.isSocketConnected()) {
+								useSocketStore.getState().setState("connected")
+							}
 						}
 
 						break
@@ -167,8 +166,6 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 							socketListenerHandleRef.current = null
 
 							useSocketStore.getState().setState("disconnected")
-
-							clearInterval(checkConnectionIntervalRef.current)
 						}
 
 						break
@@ -192,10 +189,6 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 
 			defer(() => {
 				appStateSubscription.remove()
-			})
-
-			defer(() => {
-				clearInterval(checkConnectionIntervalRef.current)
 			})
 
 			defer(() => {

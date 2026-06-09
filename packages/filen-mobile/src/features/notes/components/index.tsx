@@ -172,6 +172,28 @@ const Notes = () => {
 		})
 	}, [liveTagUuidsKey])
 
+	// Selection-ghost purge (#42): a remote NoteEvent_Tags.Deleted removes the note from
+	// the query cache but selectedNotes is only pruned synchronously in the socket handler
+	// for the primary case. This reconciliation effect is the defense-in-depth mirror of
+	// the selectedTags purge above — it prunes selectedNotes against the UNFILTERED live
+	// note uuid set so any ghost that slips through (e.g. from other removal paths) is
+	// caught before it can inflate the count, break select-all, or fail a bulk op.
+	const liveNoteUuidsKey = notesQuery.status === "success" ? notesQuery.data.map(note => note.uuid).join(",") : null
+
+	useEffect(() => {
+		if (liveNoteUuidsKey === null) {
+			return
+		}
+
+		const liveNoteUuids = new Set(liveNoteUuidsKey.length > 0 ? liveNoteUuidsKey.split(",") : [])
+
+		useNotesStore.getState().setSelectedNotes(prev => {
+			const pruned = prev.filter(selectedNote => liveNoteUuids.has(selectedNote.uuid))
+
+			return pruned.length === prev.length ? prev : pruned
+		})
+	}, [liveNoteUuidsKey])
+
 	const notesEmptyComponent = () => (
 		<ListEmpty
 			icon="document-text-outline"

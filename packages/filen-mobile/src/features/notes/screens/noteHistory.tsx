@@ -6,6 +6,7 @@ import { deserializeRouteParam, serialize } from "@/lib/serializer"
 import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import Header from "@/components/ui/header"
 import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
@@ -149,6 +150,33 @@ const NoteHistory = () => {
 
 	const history = noteHistoryQuery.status === "success" && note ? noteHistoryQuery.data : []
 
+	const historyEmptyComponent = () => {
+		if (noteHistoryQuery.status === "error") {
+			return (
+				<ListEmpty
+					icon="alert-circle-outline"
+					title={t("note_history_error")}
+					action={
+						<Button
+							onPress={() => {
+								void noteHistoryQuery.refetch()
+							}}
+						>
+							{t("reload")}
+						</Button>
+					}
+				/>
+			)
+		}
+
+		return (
+			<ListEmpty
+				icon="time-outline"
+				title={t("no_note_history")}
+			/>
+		)
+	}
+
 	if (!note) {
 		return <DismissStack />
 	}
@@ -189,7 +217,7 @@ const NoteHistory = () => {
 			>
 				<VirtualList
 					data={history}
-					loading={noteHistoryQuery.status !== "success"}
+					loading={noteHistoryQuery.status === "pending"}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
@@ -208,12 +236,7 @@ const NoteHistory = () => {
 							alerts.error(result.error)
 						}
 					}}
-					emptyComponent={() => (
-						<ListEmpty
-							icon="time-outline"
-							title={t("no_note_history")}
-						/>
-					)}
+					emptyComponent={historyEmptyComponent}
 					renderItem={({ item: history }) => {
 						return (
 							<History

@@ -50,6 +50,28 @@ export const DRIVE_EMPTY_STATE_TITLE_KEY: Record<DrivePathType, DriveEmptyStateT
 	linked: "folder_is_empty"
 }
 
+/**
+ * Merge a directory listing with global search results, de-duplicating by uuid.
+ * The local listing copy is preferred (it carries authoritative decryptedMeta /
+ * favorite / offline state); a global search hit is added only when its uuid is
+ * not already present in the local listing.
+ */
+export function mergeByUuid(local: DriveItem[], globalSearch: DriveItem[]): DriveItem[] {
+	const byUuid = new Map<string, DriveItem>()
+
+	for (const item of local) {
+		byUuid.set(item.data.uuid, item)
+	}
+
+	for (const item of globalSearch) {
+		if (!byUuid.has(item.data.uuid)) {
+			byUuid.set(item.data.uuid, item)
+		}
+	}
+
+	return Array.from(byUuid.values())
+}
+
 // Narrows a (sorted) DriveItem list to the subset matching the active search
 // query. An empty/whitespace query returns the list unchanged. Matching is
 // case-insensitive against `driveItemDisplayName`, which yields the

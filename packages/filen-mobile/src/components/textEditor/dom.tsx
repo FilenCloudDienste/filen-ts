@@ -74,15 +74,15 @@ const TextEditorDOM = ({
 	paddingTop?: number
 	paddingBottom?: number
 }) => {
-	const didTypeRef = useRef<boolean>(false)
 	const [value, setValue] = useState<string>(() => decodeEditorInitialValue(initialValue ?? ""))
 	const codeMirrorRef = useRef<ReactCodeMirrorRef>(null)
 
+	// #39 fix: do NOT gate propagation on a physical keydown. `@uiw/react-codemirror`
+	// already filters out programmatic/initial `setValue` changes (it only fires
+	// onChange for real document mutations), so the old `didTypeRef` keydown gate was
+	// redundant and silently dropped paste / voice-dictation / autocomplete inserts
+	// (which emit no keydown). `setValue` keeps the controlled value in sync.
 	const onChange = (value: string) => {
-		if (!didTypeRef.current) {
-			return
-		}
-
 		onValueChange?.(value)
 		setValue(value)
 	}
@@ -194,10 +194,6 @@ const TextEditorDOM = ({
 			})
 		}
 
-		const keydownListener = () => {
-			didTypeRef.current = true
-		}
-
 		const onClickListener = (e: PointerEvent) => {
 			if (!(e.target instanceof HTMLElement)) {
 				return
@@ -221,11 +217,9 @@ const TextEditorDOM = ({
 			})
 		}
 
-		window.addEventListener("keydown", keydownListener)
 		window.addEventListener("click", onClickListener)
 
 		return () => {
-			window.removeEventListener("keydown", keydownListener)
 			window.removeEventListener("click", onClickListener)
 		}
 	}, [])
