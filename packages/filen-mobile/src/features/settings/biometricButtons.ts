@@ -27,6 +27,9 @@ export async function enableBiometric({
 	// provider extensions read auth.json directly and
 	// bypass the JS biometric gate, so having both on at
 	// the same time creates a false sense of security.
+	// NOTE: we only show the warning here — the actual
+	// disable() is deferred until AFTER the fallback password
+	// is validated, so a cancel/mismatch leaves the provider intact.
 	if (fileProviderEnabled) {
 		const confirmProviderDisableResult = await run(async () => {
 			return await prompts.alert({
@@ -47,19 +50,6 @@ export async function enableBiometric({
 		if (confirmProviderDisableResult.data.cancelled) {
 			return
 		}
-
-		const disableProviderResult = await run(async () => {
-			await fileProvider.disable()
-		})
-
-		if (!disableProviderResult.success) {
-			console.error(disableProviderResult.error)
-			alerts.error(disableProviderResult.error)
-
-			return
-		}
-
-		setFileProviderEnabled(false)
 	}
 
 	const fallbackPromptResult = await run(async () => {
@@ -120,6 +110,23 @@ export async function enableBiometric({
 		alerts.error(t("fallback_passwords_do_not_match"))
 
 		return
+	}
+
+	// Password validated — now it is safe to disable the file provider.
+	// Any abort/cancel before this point left the provider untouched.
+	if (fileProviderEnabled) {
+		const disableProviderResult = await run(async () => {
+			await fileProvider.disable()
+		})
+
+		if (!disableProviderResult.success) {
+			console.error(disableProviderResult.error)
+			alerts.error(disableProviderResult.error)
+
+			return
+		}
+
+		setFileProviderEnabled(false)
 	}
 
 	setBiometric({

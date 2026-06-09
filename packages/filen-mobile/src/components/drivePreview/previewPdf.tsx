@@ -2,6 +2,9 @@ import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { ActivityIndicator } from "react-native"
 import View from "@/components/ui/view"
+import Text from "@/components/ui/text"
+import { PressableScale } from "@/components/ui/pressables"
+import Ionicons from "@expo/vector-icons/Ionicons"
 import useFileUriQuery from "@/queries/useFileUri.query"
 import { PdfView, type OnErrorEventPayload } from "@kishannareshpal/expo-pdf"
 import prompts from "@/lib/prompts"
@@ -111,7 +114,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		})
 	}
 
-	if (query.status !== "success") {
+	if (query.status === "pending" && query.fetchStatus === "fetching") {
 		return (
 			<View className="bg-background flex-1 items-center justify-center">
 				<ActivityIndicator
@@ -122,31 +125,75 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		)
 	}
 
-	return (
-		<View className="bg-background flex-1">
-			{didCancelPasswordPrompt ? (
-				<View className="flex-1 bg-transparent items-center justify-center">
-					<Button onPress={() => promptPassword()}>{t("enter_pdf_password")}</Button>
-				</View>
-			) : (
-				<PdfView
-					key={password ?? "no-password"}
-					style={{
-						flex: 1,
-						backgroundColor: "transparent"
-					}}
-					contentPadding={{
-						top: headerHeight ?? 0,
-						bottom: insets.bottom
-					}}
-					password={password ?? undefined}
-					doubleTapToZoom={true}
-					autoScale={false}
-					fitMode="both"
-					uri={query.data.uri}
-					onError={onError}
+	if (query.fetchStatus === "paused") {
+		return (
+			<View className="bg-background flex-1 items-center justify-center px-8">
+				<Ionicons
+					name="cloud-offline-outline"
+					size={48}
+					color="#9ca3af"
 				/>
-			)}
+				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("unavailable_offline")}</Text>
+			</View>
+		)
+	}
+
+	if (query.status === "error") {
+		return (
+			<View className="bg-background flex-1 items-center justify-center px-8">
+				<Ionicons
+					name="warning-outline"
+					size={48}
+					color="#9ca3af"
+				/>
+				<Text className="mt-4 text-center text-sm leading-5 text-muted-foreground">{t("preview_load_failed")}</Text>
+				<PressableScale
+					className="mt-4"
+					onPress={() => query.refetch()}
+					hitSlop={10}
+				>
+					<Text className="text-sm leading-5 text-primary">{t("retry")}</Text>
+				</PressableScale>
+			</View>
+		)
+	}
+
+	if (query.status === "success") {
+		return (
+			<View className="bg-background flex-1">
+				{didCancelPasswordPrompt ? (
+					<View className="flex-1 bg-transparent items-center justify-center">
+						<Button onPress={() => promptPassword()}>{t("enter_pdf_password")}</Button>
+					</View>
+				) : (
+					<PdfView
+						key={password ?? "no-password"}
+						style={{
+							flex: 1,
+							backgroundColor: "transparent"
+						}}
+						contentPadding={{
+							top: headerHeight ?? 0,
+							bottom: insets.bottom
+						}}
+						password={password ?? undefined}
+						doubleTapToZoom={true}
+						autoScale={false}
+						fitMode="both"
+						uri={query.data.uri}
+						onError={onError}
+					/>
+				)}
+			</View>
+		)
+	}
+
+	return (
+		<View className="bg-background flex-1 items-center justify-center">
+			<ActivityIndicator
+				size="small"
+				color="white"
+			/>
 		</View>
 	)
 }

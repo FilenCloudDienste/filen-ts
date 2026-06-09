@@ -656,7 +656,7 @@ class CameraUpload {
 				return
 			}
 
-			const [netState, permissions] = await Promise.all([NetInfo.fetch(), hasAllNeededMediaPermissions()])
+			const [netState, permissions] = await Promise.all([NetInfo.fetch(), hasAllNeededMediaPermissions({ library: "all", needCamera: false })])
 
 			if (!permissions) {
 				return

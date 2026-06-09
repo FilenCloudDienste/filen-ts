@@ -79,9 +79,7 @@ function Account() {
 								}
 
 								const permissionsResult = await run(async () => {
-									return await hasAllNeededMediaPermissions({
-										shouldRequest: true
-									})
+									return await hasAllNeededMediaPermissions({ shouldRequest: true, library: "none", needCamera: false })
 								})
 
 								if (!permissionsResult.success) {
