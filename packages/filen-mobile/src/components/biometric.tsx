@@ -17,7 +17,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { PressableOpacity } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
-import { withSystemPresentation, systemPresentation } from "@/lib/systemPresentation"
+import { withSystemPresentation, systemPresentation, useSystemPresentationStore } from "@/lib/systemPresentation"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -34,8 +34,13 @@ export function remainingMs(now: number, lockedUntil: number): number {
 // P4: lock the moment we background (only while authenticated and not inside an in-app presentation),
 // so the lock is already mounted before the app repaints on return — no content-leak frame. iOS
 // suspends JS in the background, so this has to be decided at the background transition, not on return.
-export function shouldLockOnBackground(enabled: boolean, authenticated: boolean, suppressed: boolean): boolean {
-	return enabled && authenticated && !suppressed
+//
+// This is a SECURITY gate, so it must fail CLOSED: consult ONLY whether a presentation is literally on
+// screen (raw activeCount > 0), never the grace-inclusive re-lock suppression. At a real background the
+// activeCount is already 0, so we lock; we only skip when a picker/permission/Face ID sheet is genuinely
+// presented (which resigns the app active without truly leaving the app).
+export function shouldLockOnBackground(enabled: boolean, authenticated: boolean, presentationActive: boolean): boolean {
+	return enabled && authenticated && !presentationActive
 }
 
 // On return, auto-clear a background-induced lock without a prompt when we came back within the grace
@@ -49,9 +54,30 @@ export function shouldAutoUnlockOnForeground(
 	return lockedByBackground && !suppressed && elapsedMs <= lockAfterMs
 }
 
+// Re-evaluate on return so a real background that outlasted lockAfter re-locks even if the background
+// transition itself was suppressed (scenario: iOS kept a picker promise pending the whole absence, so
+// activeCount > 0 at background time and shouldLockOnBackground skipped). Grace-inclusive `suppressed`
+// stays in the condition so returning straight from a picker (within the post-release grace) does NOT
+// spuriously lock. This only fires for the still-authenticated case (the lock-on-background path already
+// handles the common case), so the gate fails CLOSED on any genuine long absence.
+export function shouldReLockOnForeground(
+	enabled: boolean,
+	authenticated: boolean,
+	elapsedMs: number,
+	lockAfterMs: number,
+	suppressed: boolean
+): boolean {
+	return enabled && authenticated && !suppressed && elapsedMs > lockAfterMs
+}
+
 export type BiometricAppStateContext = {
 	enabled: boolean
 	authenticated: boolean
+	// Raw "a presentation is literally on screen" (activeCount > 0). Drives the lock-on-background and
+	// foreground re-lock decisions, which must fail CLOSED.
+	presentationActive: boolean
+	// Grace-inclusive re-lock suppression (active OR within the post-release grace window). Drives the
+	// within-grace auto-unlock so returning straight from a picker doesn't spuriously lock.
 	suppressed: boolean
 	lockAfterMs: number
 	wasBackground: boolean
@@ -89,8 +115,9 @@ export function reduceBiometricAppState(
 		wasBackground = true
 
 		// Lock at the moment of backgrounding (not on return) so the lock is already covering before the
-		// app repaints content — no content-leak frame. Skipped while inside an in-app native presentation.
-		if (shouldLockOnBackground(ctx.enabled, ctx.authenticated, ctx.suppressed)) {
+		// app repaints content — no content-leak frame. Skipped ONLY while a presentation is literally on
+		// screen (raw activeCount), never within the grace window — a security gate must fail CLOSED.
+		if (shouldLockOnBackground(ctx.enabled, ctx.authenticated, ctx.presentationActive)) {
 			lockedByBackground = true
 			setAuthenticated = false
 		}
@@ -107,6 +134,11 @@ export function reduceBiometricAppState(
 		// never locked, e.g. a suppressed picker), leave state as-is so the lock stays up and prompts.
 		if (shouldAutoUnlockOnForeground(lockedByBackground, elapsed, ctx.lockAfterMs, ctx.suppressed)) {
 			setAuthenticated = true
+		} else if (shouldReLockOnForeground(ctx.enabled, ctx.authenticated, elapsed, ctx.lockAfterMs, ctx.suppressed)) {
+			// Background-lock was suppressed (a picker promise stayed pending the whole absence) yet we were
+			// gone longer than lockAfter — fail CLOSED and re-lock now, prompting on return. Grace-inclusive
+			// `suppressed` keeps a quick picker round-trip from spuriously locking.
+			setAuthenticated = false
 		}
 
 		lockedByBackground = false
@@ -231,13 +263,23 @@ async function applyAuthFailure(biometric: EnabledBiometric): Promise<void> {
 }
 
 async function applyAuthSuccess(biometric: EnabledBiometric, onSuccess: () => void): Promise<void> {
-	await secureStore.set("biometric", {
-		...biometric,
-		lockedMultiplier: LOCK_MULTIPLIER_INITIAL,
-		lockedUntil: 0
-	} satisfies TBiometric)
-
+	// Unlock the UI FIRST — the user passed Face ID / entered the correct PIN, so they must never be stranded
+	// behind a fallible disk write. Resetting the lock-escalation counter is only convenience; persist it as
+	// best-effort and swallow a write failure (the stale lockedUntil/lockedMultiplier is harmless once `show`
+	// is false). Never couple setAuthenticated(true) to secureStore.set.
 	onSuccess()
+
+	const result = await run(() =>
+		secureStore.set("biometric", {
+			...biometric,
+			lockedMultiplier: LOCK_MULTIPLIER_INITIAL,
+			lockedUntil: 0
+		} satisfies TBiometric)
+	)
+
+	if (!result.success) {
+		console.error(result.error)
+	}
 }
 
 function AuthIconBlock() {
@@ -526,8 +568,29 @@ function Biometric() {
 		authenticatedRef.current = authenticated
 	}, [authenticated])
 
+	const [, setLockTick] = useState<number>(0)
+
+	const lockedUntil = biometric.enabled ? biometric.lockedUntil : 0
 	const show = biometric.enabled && !authenticated
-	const locked = biometric.enabled && new Date().getTime() < biometric.lockedUntil
+	const locked = biometric.enabled && new Date().getTime() < lockedUntil
+
+	// Self-owned clock timer so the <Locked> → unlock transition is driven by the wall clock, not by the
+	// (fallible) secureStore write that emits secureStoreChange. `locked` is recomputed from Date.now() on
+	// every render, so this one-shot timeout forces a re-render at expiry that drops us out of <Locked>
+	// regardless of whether the persisted lockedUntil:0 reset actually landed on disk.
+	useEffect(() => {
+		if (!locked) {
+			return
+		}
+
+		const id = setTimeout(() => {
+			setLockTick(t => t + 1)
+		}, remainingMs(Date.now(), lockedUntil) + 50)
+
+		return () => {
+			clearTimeout(id)
+		}
+	}, [locked, lockedUntil])
 
 	useEffect(() => {
 		useAppStore.getState().setBiometricUnlocked(!show)
@@ -547,7 +610,8 @@ function Biometric() {
 				const result = reduceBiometricAppState(nextAppState, {
 					enabled: biometricEnabledRef.current,
 					authenticated: authenticatedRef.current,
-					suppressed: systemPresentation.isReLockSuppressed(),
+					presentationActive: systemPresentation.isActive(),
+					suppressed: systemPresentation.isReLockSuppressed(now),
 					lockAfterMs: lockAfterMsRef.current,
 					wasBackground: wasBackgroundRef.current,
 					lockedByBackground: lockedByBackgroundRef.current,
@@ -568,8 +632,35 @@ function Biometric() {
 				}
 			})
 
+			// Residual hardening for scenario (a): iOS suspended JS with a picker promise still pending, so the
+			// background transition was suppressed (activeCount > 0) and never set wasBackground/lockedByBackground.
+			// On return the app is already "active" (the foreground re-evaluation ran with stale wasBackground),
+			// and the picker only dismisses afterwards — firing end() → activeCount 1->0. Re-evaluate the re-lock
+			// at that moment so a long absence behind a still-open picker locks as soon as the picker dismisses.
+			// This fires exactly on the 1->0 transition (activeCount is now 0 → nothing literally on screen) and the
+			// post-release grace has only just started here, so the decision rests solely on elapsed > lockAfter —
+			// a genuine long absence fails CLOSED, while a quick picker round-trip stays under lockAfter and clears.
+			const presentationUnsub = useSystemPresentationStore.subscribe((state, prevState) => {
+				if (!(prevState.activeCount > 0 && state.activeCount === 0)) {
+					return
+				}
+
+				if (AppState.currentState !== "active") {
+					return
+				}
+
+				const now = Date.now()
+				const elapsed = now - lastAppCloseTimestampRef.current
+
+				if (shouldReLockOnForeground(biometricEnabledRef.current, authenticatedRef.current, elapsed, lockAfterMsRef.current, false)) {
+					setAuthenticated(false)
+					setLastAppOpenTimestamp(now)
+				}
+			})
+
 			defer(() => {
 				appStateListener.remove()
+				presentationUnsub()
 			})
 		})
 

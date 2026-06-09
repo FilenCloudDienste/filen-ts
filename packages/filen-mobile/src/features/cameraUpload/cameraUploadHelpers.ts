@@ -7,7 +7,21 @@ export type CollisionParams = {
 	path: string
 	asset: {
 		name: string
-		creationTime: number
+		/**
+		 * Seconds-normalized creation timestamp used as the stable collision-suffix
+		 * identity for this asset.
+		 *
+		 * Callers supply `String(Math.floor((creationTime ?? 0) / 1000))` on the
+		 * local side and `String(Math.floor(Number(meta?.created ?? 0) / 1000))` on
+		 * the remote side.  Flooring to seconds absorbs sub-second drift introduced
+		 * by the SDK's EXIF-override (which rewrites `meta.created` to
+		 * DateTimeOriginal) and by network round-trips, so both trees produce the
+		 * same suffix for the same physical asset.
+		 *
+		 * Null `creationTime` falls back to 0, mirroring the remote side's null-meta
+		 * fallback — producing the string `"0"` on both sides symmetrically.
+		 */
+		contentHash: string
 	}
 }
 
@@ -15,24 +29,20 @@ export type CollisionParams = {
  * Generates a collision-resolved path for a camera upload asset.
  *
  * When multiple assets share the same filename, this function appends
- * a deterministic suffix based on the asset's metadata. The iteration
- * parameter controls which suffix strategy is used:
+ * a deterministic suffix based on the asset's seconds-normalized creation
+ * timestamp.  The iteration parameter controls which suffix strategy is used:
  *
- *   0 — append creationTime
- *   1 — append hash of name + creationTime
+ *   0 — append contentHash (seconds-timestamp string) directly
+ *   1 — append xxHash32 of name + contentHash
  *
- * Only creationTime is used because modificationTime can change when a
- * file is edited, which would produce different paths across syncs.
+ * Flooring to seconds absorbs sub-second drift from EXIF-override or network
+ * round-trips, keeping local and remote trees symmetric across syncs without
+ * any per-asset file read at listing time.
  *
- * There are exactly TWO iterations (0 and 1), and that is the maximum
- * possible here: the only deterministic inputs available are the asset's
- * name and creationTime, so iteration 0 (creationTime) and iteration 1
- * (hash of name+creationTime) exhaust the distinct suffixes derivable
- * from that fixed input. A third strategy would have to reuse the same
- * data and could not produce a new path — so callers should treat 2 as
- * the hard cap, NOT extend the switch. If two assets genuinely share the
- * same name AND creationTime they are indistinguishable and collapse to
- * the same slot by design (deterministic dedup across syncs).
+ * There are exactly TWO iterations (0 and 1). If two assets genuinely share
+ * both the same name AND the same creation second they are indistinguishable
+ * and collapse to the same slot by design (deterministic dedup across syncs).
+ * Callers should treat 2 as the hard cap, NOT extend the switch.
  *
  * Returns null for iteration >= 2 (exhausted) or when the path is invalid.
  */
@@ -47,14 +57,14 @@ export function modifyAssetPathOnCollision({ iteration, path, asset }: Collision
 
 	switch (iteration) {
 		case 0: {
-			return normalizeFilePathForSdk(FileSystem.Paths.join(parentDir, `${basename}_${asset.creationTime}${ext}`))
+			return normalizeFilePathForSdk(FileSystem.Paths.join(parentDir, `${basename}_${asset.contentHash}${ext}`))
 				.toLowerCase()
 				.trim()
 		}
 
 		case 1: {
 			return normalizeFilePathForSdk(
-				FileSystem.Paths.join(parentDir, `${basename}_${xxHash32(`${asset.name}_${asset.creationTime}`).toString(16)}${ext}`)
+				FileSystem.Paths.join(parentDir, `${basename}_${xxHash32(`${asset.name}_${asset.contentHash}`).toString(16)}${ext}`)
 			)
 				.toLowerCase()
 				.trim()

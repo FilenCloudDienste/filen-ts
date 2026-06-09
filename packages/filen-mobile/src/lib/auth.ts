@@ -17,7 +17,14 @@ import audio from "@/features/audio/audio"
 import offline from "@/features/offline/offline"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import { sync as notesSync } from "@/features/notes/components/sync"
+import cache from "@/lib/cache"
+import fileCache from "@/lib/fileCache"
+import thumbnails from "@/lib/thumbnails"
+import sandboxCache from "@/lib/sandboxCache"
 import { reloadAppAsync } from "expo"
+
+const RELOAD_RETRY_DELAY = 1000
+const RELOAD_MAX_ATTEMPTS = 5
 
 class Auth {
 	private authedClient: JsClientInterface | null = null
@@ -70,10 +77,44 @@ class Auth {
 		this.clientsReadyResolve = null
 	}
 
+	/**
+	 * Re-arm clientsReady with a fresh unresolved promise + resolver. Called on logout so any
+	 * post-wipe getSdkClients() awaiter blocks on the next setSdkClients()/login() instead of
+	 * being handed a client whose persisted credentials were just erased.
+	 */
+	private armClientsReady(): void {
+		this.clientsReady = new Promise(resolve => {
+			this.clientsReadyResolve = resolve
+		})
+	}
+
+	/**
+	 * Best-effort uniffiDestroy of an SDK client handle. The exported interfaces don't declare
+	 * uniffiDestroy (only the concrete JsClient/UnauthJsClient classes do, via UniffiAbstractObject),
+	 * so cast to the structural shape and swallow failures — a destroy error must not abort teardown.
+	 */
+	private destroyClient(client: JsClientInterface | UnauthJsClientInterface | null): void {
+		if (!client) {
+			return
+		}
+
+		try {
+			;(client as unknown as { uniffiDestroy: () => void }).uniffiDestroy()
+		} catch (e) {
+			console.error(e)
+		}
+	}
+
 	public async setSdkClients(stringifiedClient: StringifiedClient): Promise<{
 		authedClient: JsClientInterface
 		unauthedClient: UnauthJsClientInterface
 	}> {
+		// Destroy any handles we are about to orphan so the native Arcs (reqwest pool,
+		// rate limiter, tokio resources, socket) are reclaimed deterministically instead
+		// of leaning on GC finalization. Mirrors the guarded pattern register() uses.
+		this.destroyClient(this.authedClient)
+		this.destroyClient(this.unauthedClient)
+
 		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
 		this.authedClient = this.unauthedClient.fromStringified({
 			...stringifiedClient,
@@ -133,8 +174,27 @@ class Auth {
 	}
 
 	public async login(...params: Parameters<UnauthJsClientInterface["login"]>): Promise<JsClientInterface> {
-		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
-		this.authedClient = await this.unauthedClient.login(...params)
+		// Destroy the handles we are about to replace (the login screen calls login() repeatedly —
+		// wrong-password retries, the second attempt after the 2FA prompt) so each fromConfig() Arc
+		// is reclaimed instead of orphaned. Mirrors the guarded pattern register() uses.
+		this.destroyClient(this.authedClient)
+		this.destroyClient(this.unauthedClient)
+
+		this.authedClient = null
+
+		const unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+
+		this.unauthedClient = unauthedClient
+
+		try {
+			this.authedClient = await unauthedClient.login(...params)
+		} catch (e) {
+			this.destroyClient(unauthedClient)
+
+			this.unauthedClient = null
+
+			throw e
+		}
 
 		if (!this.authedClient) {
 			throw new Error("Login failed, authed client is null")
@@ -186,12 +246,17 @@ class Auth {
 	}
 
 	private async doLogout(): Promise<void> {
-		try {
-			await Promise.all([unregisterBackgroundSync(), audio.stop(), fileProvider.disable()])
-		} catch (e) {
-			console.error(e)
+		// Phase 1 — stop background producers. allSettled so one failure never aborts the wipe.
+		const phase1 = await Promise.allSettled([unregisterBackgroundSync(), audio.stop(), fileProvider.disable()])
+
+		for (const result of phase1) {
+			if (result.status === "rejected") {
+				console.error(result.reason)
+			}
 		}
 
+		// Phase 2 — cancel in-flight work (synchronous aborts). These trip the abort signals the SDK
+		// calls below were issued with, so awaiting them next observes settled cancellations.
 		try {
 			transfers.cancelAll()
 			cameraUpload.cancel()
@@ -202,16 +267,69 @@ class Auth {
 			console.error(e)
 		}
 
+		// Phase 3 — snapshot the SDK clients, then immediately null the fields and re-arm clientsReady
+		// BEFORE any further await. A post-wipe getSdkClients() must block on the next session's
+		// re-init rather than be handed a client whose persisted credentials are about to be erased.
+		const authedClient = this.authedClient
+		const unauthedClient = this.unauthedClient
+
+		this.authedClient = null
+		this.unauthedClient = null
+
+		this.armClientsReady()
+
+		// Phase 4 — destroy the native handles AFTER cancellations settled (avoid use-after-destroy).
+		// Destroying the authed client tears down the socket it owns, so no socket event can mutate the
+		// in-memory cache during the wipe that follows.
+		this.destroyClient(authedClient)
+		this.destroyClient(unauthedClient)
+
+		// Phase 5 — wipe the in-memory cache BEFORE the SQLite wipe. cache.clear() cancels the pending
+		// persist debounce, bumps the clear generation, locks persistence, empties the maps + dirty
+		// sets, and removes the kv rows — so a stray flush can no longer re-INSERT decrypted metadata.
 		try {
-			await Promise.all([secureStore.clear(), sqlite.clearAsync()])
+			cache.clear()
 		} catch (e) {
 			console.error(e)
 		}
 
-		// Wait a bit for everyting to settle before reloading, to avoid potential race conditions
-		await new Promise(resolve => setTimeout(resolve, 3000))
+		// Phase 6 — wipe persisted + decrypted-at-rest state. secureStore (auth secret), SQLite (query
+		// cache + cache kv), and every decrypted-on-disk store. allSettled so a single failure can't
+		// leave the rest of the wipe undone.
+		const wipe = await Promise.allSettled([
+			secureStore.clear(),
+			sqlite.clearAsync(),
+			offline.clearAll(),
+			fileCache.clear(),
+			thumbnails.clear(),
+			sandboxCache.clear()
+		])
 
-		reloadAppAsync().catch(console.error)
+		for (const result of wipe) {
+			if (result.status === "rejected") {
+				console.error(result.reason)
+			}
+		}
+
+		// Phase 7 — reload the JS bundle. The in-memory + native state is now safe, so a failed reload
+		// no longer leaves a live authed client behind; retry rather than swallow the rejection.
+		await this.reloadWithRetry()
+	}
+
+	private async reloadWithRetry(): Promise<void> {
+		for (let attempt = 1; attempt <= RELOAD_MAX_ATTEMPTS; attempt++) {
+			try {
+				await reloadAppAsync()
+
+				return
+			} catch (e) {
+				console.error(e)
+
+				if (attempt < RELOAD_MAX_ATTEMPTS) {
+					await new Promise(resolve => setTimeout(resolve, RELOAD_RETRY_DELAY))
+				}
+			}
+		}
 	}
 }
 

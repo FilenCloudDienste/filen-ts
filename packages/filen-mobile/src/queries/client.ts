@@ -1,4 +1,4 @@
-import { QueryClient, onlineManager, type UseQueryOptions, type Query } from "@tanstack/react-query"
+import { QueryClient, QueryCache, onlineManager, type UseQueryOptions } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite, { prefixUpperBound } from "@/lib/sqlite"
 import { run } from "@filen/utils"
@@ -9,6 +9,7 @@ import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
 import auth from "@/lib/auth"
+import useAppStore from "@/stores/useApp.store"
 
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
@@ -384,39 +385,111 @@ export const DEFAULT_QUERY_OPTIONS: Omit<UseQueryOptions<any, any, any, any>, "q
 	retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
 	retryOnMount: true,
 	networkMode: "offlineFirst",
-	throwOnError(err, query: Query) {
-		console.error("Query error for key:", query?.queryKey, err)
+	// PURE render-phase predicate: only decides whether to throw to an error boundary.
+	// TanStack v5 invokes throwOnError on EVERY render (twice with experimental_prefetchInRender),
+	// so it must have zero side effects. None of our queries throw to an error boundary, hence
+	// a constant `false`. All error UX (logout, banners, logging) now lives in the once-per-settled-error
+	// QueryCache `onError` sink below.
+	throwOnError: () => false
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
 
-		// When offline, suppress network-class errors so the user doesn't see banner storms.
-		// The persistent <OfflineBanner /> is the canonical signal that requests can't go out.
-		if (isNetworkClassError(err) && !onlineManager.isOnline()) {
-			return false
+// Discriminated decision derived purely from the error + connectivity. No side effects, no I/O,
+// no global reads — fully unit-testable. The QueryCache `onError` sink interprets the result.
+export type QueryErrorAction = "suppress" | "logout" | "alert"
+
+export function decideQueryErrorAction(
+	err: unknown,
+	deps: {
+		isNetworkClassError: (error: unknown) => boolean
+		unwrapSdkError: (error: unknown) => { kind: () => ErrorKind } | null
+		isOnline: () => boolean
+	}
+): QueryErrorAction {
+	// When offline, suppress network-class errors so the user doesn't see banner storms.
+	// The persistent <OfflineBanner /> is the canonical signal that requests can't go out.
+	if (deps.isNetworkClassError(err) && !deps.isOnline()) {
+		return "suppress"
+	}
+
+	const unwrappedSdkError = deps.unwrapSdkError(err)
+
+	if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
+		// Auth failures while offline are indistinguishable from network failures;
+		// don't kick the user out — the next online query will surface a real Unauthenticated.
+		if (!deps.isOnline()) {
+			return "suppress"
 		}
 
-		const unwrappedSdkError = unwrapSdkError(err)
+		return "logout"
+	}
 
-		if (unwrappedSdkError && unwrappedSdkError.kind() === ErrorKind.Unauthenticated) {
-			// Auth failures while offline are indistinguishable from network failures;
-			// don't kick the user out — the next online query will surface a real Unauthenticated.
-			if (!onlineManager.isOnline()) {
-				return false
-			}
+	return "alert"
+}
 
+// Suppress duplicate banners for the same error message within a short window. `throwOnError` no
+// longer fires per-render, but distinct queries can still settle into the same error near-simultaneously
+// (e.g. a batch of requests all failing on one outage). The window collapses those into a single banner.
+const ALERT_DEDUPE_WINDOW = 3000
+let lastAlertMessage: string | null = null
+let lastAlertAt = 0
+
+function alertMessageKey(err: unknown): string {
+	if (err instanceof Error) {
+		return err.message
+	}
+
+	return String(err)
+}
+
+const queryCache = new QueryCache({
+	// Fires ONCE when a query settles into an error state — not on every render. This is the
+	// correct place for imperative error UX (logging, logout, banners).
+	onError(err, query) {
+		console.error("Query error for key:", query.queryKey, err)
+
+		const action = decideQueryErrorAction(err, {
+			isNetworkClassError,
+			unwrapSdkError,
+			isOnline: () => onlineManager.isOnline()
+		})
+
+		if (action === "suppress") {
+			return
+		}
+
+		if (action === "logout") {
+			// auth.logout() is internally idempotent (logoutPromise dedup), so concurrent
+			// Unauthenticated errors collapse into a single logout.
 			auth.logout().catch(e => {
 				console.error("[QueryClient] logout failed:", e)
 			})
 
-			return false
+			return
 		}
 
-		alerts.error(err)
+		// action === "alert". Gate on the root-overlay coordination invariant: never surface a banner
+		// while the Biometric/Privacy lock is up or the app is backgrounded, or it leaks behind those overlays.
+		if (useAppStore.getState().biometricUnlocked !== true || AppState.currentState !== "active") {
+			return
+		}
 
-		return false
+		const now = Date.now()
+		const messageKey = alertMessageKey(err)
+
+		if (messageKey === lastAlertMessage && now - lastAlertAt < ALERT_DEDUPE_WINDOW) {
+			return
+		}
+
+		lastAlertMessage = messageKey
+		lastAlertAt = now
+
+		alerts.error(err)
 	}
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-} as Omit<UseQueryOptions<any, any, any, any>, "queryKey" | "queryFn">
+})
 
 export const queryClient = new QueryClient({
+	queryCache,
 	defaultOptions: {
 		queries: {
 			...DEFAULT_QUERY_OPTIONS,

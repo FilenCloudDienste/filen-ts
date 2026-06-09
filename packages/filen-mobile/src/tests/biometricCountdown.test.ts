@@ -60,6 +60,7 @@ import {
 	remainingMs,
 	shouldLockOnBackground,
 	shouldAutoUnlockOnForeground,
+	shouldReLockOnForeground,
 	reduceBiometricAppState,
 	type BiometricAppStateContext
 } from "@/components/biometric"
@@ -70,6 +71,7 @@ function ctx(overrides: Partial<BiometricAppStateContext> = {}): BiometricAppSta
 	return {
 		enabled: true,
 		authenticated: true,
+		presentationActive: false,
 		suppressed: false,
 		lockAfterMs: 10_000,
 		wasBackground: false,
@@ -120,7 +122,7 @@ describe("remainingMs", () => {
 })
 
 describe("shouldLockOnBackground", () => {
-	it("locks when enabled, authenticated, and not suppressed", () => {
+	it("locks when enabled, authenticated, and no presentation literally on screen", () => {
 		expect(shouldLockOnBackground(true, true, false)).toBe(true)
 	})
 
@@ -132,8 +134,28 @@ describe("shouldLockOnBackground", () => {
 		expect(shouldLockOnBackground(true, false, false)).toBe(false)
 	})
 
-	it("does not lock while inside an in-app presentation (suppressed)", () => {
+	it("does not lock while a presentation is literally on screen (raw activeCount)", () => {
 		expect(shouldLockOnBackground(true, true, true)).toBe(false)
+	})
+})
+
+describe("shouldReLockOnForeground", () => {
+	it("re-locks when gone longer than lockAfter and not suppressed", () => {
+		expect(shouldReLockOnForeground(true, true, 10_001, 10_000, false)).toBe(true)
+	})
+
+	it("does not re-lock within lockAfter", () => {
+		expect(shouldReLockOnForeground(true, true, 10_000, 10_000, false)).toBe(false)
+		expect(shouldReLockOnForeground(true, true, 5000, 10_000, false)).toBe(false)
+	})
+
+	it("does not re-lock while suppressed (returning straight from a picker within grace)", () => {
+		expect(shouldReLockOnForeground(true, true, 20_000, 10_000, true)).toBe(false)
+	})
+
+	it("does not re-lock when disabled or not authenticated", () => {
+		expect(shouldReLockOnForeground(false, true, 20_000, 10_000, false)).toBe(false)
+		expect(shouldReLockOnForeground(true, false, 20_000, 10_000, false)).toBe(false)
 	})
 })
 
@@ -190,12 +212,24 @@ describe("reduceBiometricAppState", () => {
 		expect(result.wasBackground).toBe(true)
 	})
 
-	it("does not lock on background while inside an in-app presentation (suppressed)", () => {
-		const result = reduceBiometricAppState("background", ctx({ suppressed: true }))
+	it("does not lock on background while a presentation is literally on screen (presentationActive)", () => {
+		const result = reduceBiometricAppState("background", ctx({ presentationActive: true }))
 
 		expect(result.setAuthenticated).toBe(null)
 		expect(result.lockedByBackground).toBe(false)
 		expect(result.wasBackground).toBe(true)
+	})
+
+	// Finding #11 (scenario b): a REAL background within the post-release grace window (presentation already
+	// off screen → presentationActive false, but suppressed still true) must FAIL CLOSED and lock. The old
+	// single-`suppressed` decision wrongly skipped this — a security gate that failed open.
+	it("locks on a real background within the grace window (presentationActive false but suppressed true)", () => {
+		const result = reduceBiometricAppState("background", ctx({ presentationActive: false, suppressed: true, now: 5000 }))
+
+		expect(result.setAuthenticated).toBe(false)
+		expect(result.lockedByBackground).toBe(true)
+		expect(result.wasBackground).toBe(true)
+		expect(result.lastAppCloseTimestamp).toBe(5000)
 	})
 
 	it("auto-unlocks on foreground when returning within the grace window", () => {
@@ -220,6 +254,9 @@ describe("reduceBiometricAppState", () => {
 		const result = reduceBiometricAppState(
 			"active",
 			ctx({
+				// The background lock already fired (set authenticated false), so the realistic foreground ctx is
+				// authenticated:false — the re-lock guard short-circuits and we just clear bookkeeping + re-key.
+				authenticated: false,
 				wasBackground: true,
 				lockedByBackground: true,
 				lastAppCloseTimestamp: 1000,
@@ -232,6 +269,51 @@ describe("reduceBiometricAppState", () => {
 		expect(result.setAuthenticated).toBe(null)
 		expect(result.wasBackground).toBe(false)
 		expect(result.lockedByBackground).toBe(false)
+		expect(result.rekeyPrompt).toBe(true)
+	})
+
+	// Finding #11 (scenario a): the background transition was suppressed because a picker promise stayed pending
+	// the whole absence (presentationActive true at background → no lock applied, still authenticated). The user
+	// was gone longer than lockAfter, so the foreground re-evaluation must FAIL CLOSED and re-lock — even though
+	// we never locked on background. Grace has elapsed by return, so `suppressed` is false here.
+	it("re-locks on foreground after a suppressed background that outlasted lockAfter", () => {
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				authenticated: true,
+				wasBackground: true,
+				lockedByBackground: false, // background lock was suppressed, so we never locked
+				suppressed: false, // grace elapsed by the time we return
+				lastAppCloseTimestamp: 1000,
+				lockAfterMs: 10_000,
+				now: 20_000 // elapsed 19000 > 10000
+			})
+		)
+
+		expect(result.setAuthenticated).toBe(false)
+		expect(result.wasBackground).toBe(false)
+		expect(result.lockedByBackground).toBe(false)
+		expect(result.rekeyPrompt).toBe(true)
+	})
+
+	// Finding #11: returning STRAIGHT from a picker within the post-release grace window must NOT spuriously lock,
+	// even past lockAfter — the grace-inclusive `suppressed` keeps the foreground re-lock from firing.
+	it("does not re-lock when returning straight from a picker within the grace window", () => {
+		const result = reduceBiometricAppState(
+			"active",
+			ctx({
+				authenticated: true,
+				wasBackground: true,
+				lockedByBackground: false,
+				suppressed: true, // still within the post-release grace window
+				lastAppCloseTimestamp: 1000,
+				lockAfterMs: 10_000,
+				now: 20_000 // elapsed 19000 > 10000, but grace suppresses the re-lock
+			})
+		)
+
+		expect(result.setAuthenticated).toBe(null)
+		expect(result.wasBackground).toBe(false)
 		expect(result.rekeyPrompt).toBe(true)
 	})
 
@@ -282,6 +364,8 @@ describe("reduceBiometricAppState", () => {
 		const result = reduceBiometricAppState(
 			"active",
 			ctx({
+				// lockAfter 0 means the background lock already fired → realistic foreground ctx is authenticated:false.
+				authenticated: false,
 				wasBackground: true,
 				lockedByBackground: true,
 				lastAppCloseTimestamp: 1000,
