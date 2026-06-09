@@ -174,7 +174,9 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 						}}
 						contentPadding={{
 							top: headerHeight ?? 0,
-							bottom: insets.bottom
+							bottom: insets.bottom,
+							left: insets.left,
+							right: insets.right
 						}}
 						password={password ?? undefined}
 						doubleTapToZoom={true}
