@@ -1,13 +1,9 @@
 import * as FileSystem from "expo-file-system"
 import * as ImageManipulator from "expo-image-manipulator"
 import * as VideoThumbnails from "expo-video-thumbnails"
-import { AnyFile } from "@filen/sdk-rs"
-import type { DriveItem } from "@/types"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { run } from "@filen/utils"
-import offline from "@/features/offline/offline"
-import { onlineManager } from "@tanstack/react-query"
-import { abortError, OfflineAbortError, waitForHttpProvider } from "@/lib/thumbnailsHelpers"
+import { abortError } from "@/lib/thumbnailsHelpers"
 
 export async function generateVideo(
 	params: {
@@ -21,35 +17,16 @@ export async function generateVideo(
 				localSourcePath: string
 		  }
 		| {
-				file: AnyFile
-				item: DriveItem
+				// Pre-resolved source URL (local-file URI or the HTTP-provider stream URL). The
+				// caller resolves the offline lookup / provider readiness / online guard BEFORE
+				// acquiring the shared concurrency slot so a provider wait never head-of-line-blocks
+				// the semaphore (see thumbnails.ts).
+				sourceUrl: string
 		  }
 	)
 ): Promise<void> {
 	const result = await run(async defer => {
-		let url: string
-
-		if ("localSourcePath" in params) {
-			url = normalizeFilePathForExpo(params.localSourcePath)
-		} else {
-			const offlineFile = await offline.getLocalFile(params.item)
-
-			if (offlineFile?.exists) {
-				url = normalizeFilePathForExpo(offlineFile.uri)
-			} else {
-				// Video thumbnails stream via the local HTTP provider, which
-				// internally streams from Filen servers via the SDK. Offline
-				// would stall. Throw abort-flavoured so the failures map isn't
-				// poisoned (see generateImage for the same reasoning).
-				if (!onlineManager.isOnline()) {
-					throw new OfflineAbortError()
-				}
-
-				const getFileUrl = await waitForHttpProvider(params.signal)
-
-				url = getFileUrl(params.file)
-			}
-		}
+		const url = "localSourcePath" in params ? normalizeFilePathForExpo(params.localSourcePath) : params.sourceUrl
 
 		if (params.signal?.aborted) {
 			throw abortError(params.signal)

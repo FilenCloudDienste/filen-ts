@@ -166,8 +166,12 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 				op: async item => {
 					const parent = getRealDriveItemParent({ item, drivePath })
 
+					// A null parent means the photo's containing directory was never
+					// cached (e.g. album subdir not yet listed). Silently returning here
+					// reported success while making nothing available offline — surface a
+					// visible failure so runBulk shows an error instead.
 					if (!parent) {
-						return
+						throw new Error(t("directory_not_found"))
 					}
 
 					if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {

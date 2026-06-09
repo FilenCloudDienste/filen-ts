@@ -711,7 +711,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 	})
 
 	describe("DriveEvent_Tags.FileTrash", () => {
-		it("removes from parent (global update) and adds to both recents and trash", async () => {
+		it("removes from parent (global update) and adds to trash only — NOT to recents (bug #35)", async () => {
 			const rawFile = { uuid: "file-trash", parent: {} }
 			const trashedDriveItem = { type: "file", data: { uuid: "file-trash" } }
 
@@ -725,23 +725,35 @@ describe("handleDriveEvent — drive socket handler", () => {
 			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
 			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledWith(expect.objectContaining({ parentUuid: "parent-1" }))
 
-			// Add to recents and trash
-			expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(2)
+			// Only one driveItemsQueryUpdate call: for trash. NOT for recents.
+			expect(mockDriveItemsQueryUpdate).toHaveBeenCalledOnce()
 
-			const recentCall = mockDriveItemsQueryUpdate.mock.calls.find(
-				c => (c[0] as { params: { path: { type: string } } }).params.path.type === "recents"
-			)?.[0] as { updater: (prev: Array<{ data: { uuid: string } }>) => unknown[] }
-			const trashCall = mockDriveItemsQueryUpdate.mock.calls.find(
-				c => (c[0] as { params: { path: { type: string } } }).params.path.type === "trash"
-			)?.[0] as { updater: (prev: Array<{ data: { uuid: string } }>) => unknown[] }
+			const trashCall = mockDriveItemsQueryUpdate.mock.calls[0]?.[0] as {
+				params: { path: { type: string; uuid: unknown } }
+				updater: (prev: Array<{ data: { uuid: string } }>) => unknown[]
+			}
+			expect(trashCall.params.path.type).toBe("trash")
 
-			expect(recentCall).toBeDefined()
-			expect(trashCall).toBeDefined()
-
-			// Each updater deduplicates then appends the trashed item
+			// Trash updater deduplicates then appends the trashed item
 			const prev = [{ data: { uuid: "file-trash" } }, { data: { uuid: "other" } }]
-			const recentResult = recentCall?.updater(prev) as typeof prev
-			expect(recentResult[recentResult.length - 1]).toBe(trashedDriveItem)
+			const trashResult = trashCall.updater(prev) as typeof prev
+			expect(trashResult[trashResult.length - 1]).toBe(trashedDriveItem)
+		})
+
+		it("does NOT add the trashed file to recents (bug #35 regression guard)", async () => {
+			const rawFile = { uuid: "file-trash", parent: {} }
+			const trashedDriveItem = { type: "file", data: { uuid: "file-trash" } }
+
+			mockCacheFileUuidToNormalFileGet.mockReturnValue(rawFile)
+			mockUnwrapFileMeta.mockReturnValue({ file: rawFile, meta: null })
+			mockUnwrappedFileIntoDriveItem.mockReturnValue(trashedDriveItem)
+
+			await handleDriveEvent({ event: makeFileTrashEvent("file-trash") })
+
+			const recentsCall = mockDriveItemsQueryUpdate.mock.calls.find(
+				c => (c[0] as { params: { path: { type: string } } }).params.path.type === "recents"
+			)
+			expect(recentsCall).toBeUndefined()
 		})
 
 		it("no-op when file is not in cache", async () => {
@@ -771,7 +783,7 @@ describe("handleDriveEvent — drive socket handler", () => {
 	})
 
 	describe("DriveEvent_Tags.FolderTrash", () => {
-		it("removes from parent (global update) and adds to both recents and trash", async () => {
+		it("removes from parent (global update) and adds to trash only — NOT to recents (bug #35)", async () => {
 			const rawDir = { uuid: "dir-trash", parent: {} }
 			const trashedDriveItem = { type: "directory", data: { uuid: "dir-trash" } }
 
@@ -785,26 +797,38 @@ describe("handleDriveEvent — drive socket handler", () => {
 			await handleDriveEvent({ event: makeFolderTrashEvent("dir-trash") })
 
 			expect(mockDriveItemsQueryUpdateGlobal).toHaveBeenCalledOnce()
-			expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(2)
+
+			// Only one driveItemsQueryUpdate call: for trash. NOT for recents.
+			expect(mockDriveItemsQueryUpdate).toHaveBeenCalledOnce()
+
+			const trashCall = mockDriveItemsQueryUpdate.mock.calls[0]?.[0] as {
+				params: { path: { type: string; uuid: unknown } }
+				updater: (prev: Array<{ data: { uuid: string } }>) => unknown[]
+			}
+			expect(trashCall.params.path.type).toBe("trash")
+
+			// Trash updater deduplicates then appends the trashed item.
+			const prev = [{ data: { uuid: "dir-trash" } }, { data: { uuid: "other" } }]
+			const trashResult = trashCall.updater(prev) as typeof prev
+			expect(trashResult).toHaveLength(2)
+			expect(trashResult[trashResult.length - 1]).toBe(trashedDriveItem)
+		})
+
+		it("does NOT add the trashed folder to recents (bug #35 regression guard)", async () => {
+			const rawDir = { uuid: "dir-trash", parent: {} }
+			mockCacheDirectoryUuidToAnyNormalDirGet.mockReturnValue({
+				tag: AnyNormalDir_Tags.Dir,
+				inner: [rawDir]
+			})
+			mockUnwrapDirMeta.mockReturnValue({ uuid: "dir-trash", meta: null })
+			mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "dir-trash" } })
+
+			await handleDriveEvent({ event: makeFolderTrashEvent("dir-trash") })
 
 			const recentsCall = mockDriveItemsQueryUpdate.mock.calls.find(
 				c => (c[0] as { params: { path: { type: string } } }).params.path.type === "recents"
-			)?.[0] as { updater: (prev: Array<{ data: { uuid: string } }>) => unknown[] }
-			const trashCall = mockDriveItemsQueryUpdate.mock.calls.find(
-				c => (c[0] as { params: { path: { type: string } } }).params.path.type === "trash"
-			)?.[0] as { updater: (prev: Array<{ data: { uuid: string } }>) => unknown[] }
-
-			expect(recentsCall).toBeDefined()
-			expect(trashCall).toBeDefined()
-
-			// Each updater deduplicates the existing entry by uuid then appends the trashed item.
-			const prev = [{ data: { uuid: "dir-trash" } }, { data: { uuid: "other" } }]
-			const recentsResult = recentsCall?.updater(prev) as typeof prev
-			expect(recentsResult).toHaveLength(2)
-			expect(recentsResult[recentsResult.length - 1]).toBe(trashedDriveItem)
-			const trashResult = trashCall?.updater(prev) as typeof prev
-			expect(trashResult).toHaveLength(2)
-			expect(trashResult[trashResult.length - 1]).toBe(trashedDriveItem)
+			)
+			expect(recentsCall).toBeUndefined()
 		})
 
 		it("no-op when folder is not in cache", async () => {

@@ -26,6 +26,19 @@ export class OfflineAbortError extends Error {
 	}
 }
 
+// Distinguishes a "the local HTTP provider never became ready" timeout from a genuine
+// thumbnail-generation failure. The provider is infrastructure that boots asynchronously on
+// foreground; treating its absence as a content failure would permanently blacklist the uuid
+// in the failures map (see thumbnails.ts). Callers exempt this error from the failure counter,
+// mirroring OfflineAbortError.
+export class ProviderUnavailableError extends Error {
+	public constructor() {
+		super("HTTP provider unavailable after 30s")
+
+		this.name = "ProviderUnavailableError"
+	}
+}
+
 export function getPath(item: DriveItem): string {
 	return FileSystem.Paths.join(DIRECTORY.uri, `${item.data.uuid}.webp`)
 }
@@ -131,7 +144,7 @@ export function waitForHttpProvider(signal?: AbortSignal): Promise<(file: AnyFil
 		timeoutId = setTimeout(() => {
 			cleanup()
 
-			reject(new Error("HTTP provider unavailable after 30s"))
+			reject(new ProviderUnavailableError())
 		}, 30_000)
 	})
 }

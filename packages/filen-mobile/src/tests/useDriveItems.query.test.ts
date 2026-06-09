@@ -262,7 +262,8 @@ import {
 	driveItemsQueryUpdateForNormalParent,
 	fetchData,
 	driveItemsQueryGet,
-	BASE_QUERY_KEY
+	BASE_QUERY_KEY,
+	DriveDirectoryNotFoundError
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapDirMeta, unwrapFileMeta, type UnwrapDirMetaResult, type UnwrapFileMetaResult } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
@@ -537,39 +538,33 @@ describe("fetchData — offline branch", () => {
 		expect(result).toHaveLength(3)
 	})
 
-	it("falls back to null parent when uuid is non-empty but absent from cache — calls listFiles and listDirectories(undefined)", async () => {
-		// uuid is non-empty but NOT present in cacheDirectoryUuidToAnyDirWithContext
-		// the if(cachedDir) branch is false, so the IIFE returns null just as for uuid=""
-		const fileItem = { type: "file", data: { uuid: "f-miss", size: 0n, undecryptable: false, decryptedMeta: null } }
-		const dirItem = { type: "directory", data: { uuid: "d-miss", size: 0n, undecryptable: false, decryptedMeta: null } }
-
-		mockOfflineListFiles.mockResolvedValue([{ item: fileItem }])
-		mockOfflineListDirectories.mockResolvedValue({ directories: [{ item: dirItem }], files: [] })
+	it("throws DriveDirectoryNotFoundError when uuid is non-empty but absent from cache (no silent root fallback)", async () => {
+		// Finding #22: a provided non-root uuid that misses the offline index must NOT
+		// silently list the offline root — it must surface as not-found.
+		mockOfflineListFiles.mockResolvedValue([])
+		mockOfflineListDirectories.mockResolvedValue({ directories: [], files: [] })
 
 		// ensure no cache entry exists for this uuid
 		expect(cacheDirectoryUuidToAnyDirWithContext.has("non-existent-uuid")).toBe(false)
 
-		const result = await fetchData({ path: { type: "offline", uuid: "non-existent-uuid" } })
+		await expect(fetchData({ path: { type: "offline", uuid: "non-existent-uuid" } })).rejects.toBeInstanceOf(
+			DriveDirectoryNotFoundError
+		)
 
-		// parent resolves to null → listFiles() called (no args), listDirectories(undefined)
-		expect(mockOfflineListFiles).toHaveBeenCalledWith()
-		expect(mockOfflineListDirectories).toHaveBeenCalledWith(undefined)
-
-		// both dirs and files from null-parent path are returned
-		expect(result).toHaveLength(2)
-		expect(result.some(i => (i as typeof dirItem).data.uuid === "d-miss")).toBe(true)
-		expect(result.some(i => (i as typeof fileItem).data.uuid === "f-miss")).toBe(true)
+		// The root listing must never run for a missed non-root uuid.
+		expect(mockOfflineListFiles).not.toHaveBeenCalled()
 	})
 
-	it("cache-miss path is distinct from cache-hit path: listFiles not called when uuid is in cache", async () => {
+	it("cache-hit lists the cached subdir; cache-miss throws not-found (paths are distinct)", async () => {
 		const fakeContext = { tag: "Normal" }
 
 		cacheDirectoryUuidToAnyDirWithContext.set("cached-uuid", fakeContext)
 
-		// With uuid in cache — listFiles must NOT be called
+		// With uuid in cache — lists the subdir, listFiles (root files) must NOT be called
 		await fetchData({ path: { type: "offline", uuid: "cached-uuid" } })
 
 		expect(mockOfflineListFiles).not.toHaveBeenCalled()
+		expect(mockOfflineListDirectories).toHaveBeenCalledWith(fakeContext)
 
 		// Reset for the cache-miss check
 		mockOfflineListFiles.mockClear()
@@ -577,12 +572,120 @@ describe("fetchData — offline branch", () => {
 		mockOfflineListFiles.mockResolvedValue([])
 		mockOfflineListDirectories.mockResolvedValue({ directories: [], files: [] })
 
-		// Same uuid but removed from cache — listFiles IS called
+		// Same uuid but removed from cache — now throws not-found (no root fallback)
 		cacheDirectoryUuidToAnyDirWithContext.delete("cached-uuid")
-		await fetchData({ path: { type: "offline", uuid: "cached-uuid" } })
 
-		expect(mockOfflineListFiles).toHaveBeenCalledWith()
-		expect(mockOfflineListDirectories).toHaveBeenCalledWith(undefined)
+		await expect(fetchData({ path: { type: "offline", uuid: "cached-uuid" } })).rejects.toBeInstanceOf(
+			DriveDirectoryNotFoundError
+		)
+
+		expect(mockOfflineListFiles).not.toHaveBeenCalled()
+	})
+})
+
+// ─── fetchData drive branch — non-root uuid cache miss resolves by-uuid (Finding #22) ───
+
+describe("fetchData — drive branch non-root uuid cache miss", () => {
+	it("resolves a provided non-root uuid via getDirOptional and lists THAT dir (not root)", async () => {
+		const resolvedDir = { uuid: "missed-uuid" }
+		const mockRoot = vi.fn().mockReturnValue({ uuid: "root-uuid" })
+		const mockGetDirOptional = vi.fn().mockResolvedValue(resolvedDir)
+		const mockListDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: {
+				root: mockRoot,
+				getDirOptional: mockGetDirOptional,
+				listDir: mockListDir
+			}
+		})
+
+		// uuid is provided, not the root uuid, and absent from the cache
+		mockCacheRootUuid.value = "root-uuid"
+		expect(cacheDirectoryUuidToAnyNormalDir.has("missed-uuid")).toBe(false)
+
+		await fetchData({ path: { type: "drive", uuid: "missed-uuid" } })
+
+		// Resolved by uuid…
+		expect(mockGetDirOptional).toHaveBeenCalledWith("missed-uuid", undefined)
+
+		// …and listed THAT dir, never the root. AnyNormalDir.Dir wraps the resolved
+		// dir as { inner: [resolvedDir] }; the root would wrap root() instead.
+		expect(mockListDir).toHaveBeenCalledTimes(1)
+		const listedParent = mockListDir.mock.calls[0]![0] as { tag: string; inner: unknown[] }
+		expect(listedParent.tag).toBe("Dir")
+		expect(listedParent.inner[0]).toBe(resolvedDir)
+		expect(mockRoot).not.toHaveBeenCalled()
+	})
+
+	it("throws DriveDirectoryNotFoundError when getDirOptional returns undefined (no silent root fallback)", async () => {
+		const mockRoot = vi.fn().mockReturnValue({ uuid: "root-uuid" })
+		const mockGetDirOptional = vi.fn().mockResolvedValue(undefined)
+		const mockListDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: {
+				root: mockRoot,
+				getDirOptional: mockGetDirOptional,
+				listDir: mockListDir
+			}
+		})
+
+		mockCacheRootUuid.value = "root-uuid"
+
+		await expect(fetchData({ path: { type: "drive", uuid: "ghost-uuid" } })).rejects.toBeInstanceOf(DriveDirectoryNotFoundError)
+
+		// Must NOT fall back to listing the root.
+		expect(mockListDir).not.toHaveBeenCalled()
+	})
+
+	it("lists the root (no by-uuid lookup) when uuid equals cache.rootUuid", async () => {
+		const mockRoot = vi.fn().mockReturnValue({ uuid: "root-uuid" })
+		const mockGetDirOptional = vi.fn()
+		const mockListDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: {
+				root: mockRoot,
+				getDirOptional: mockGetDirOptional,
+				listDir: mockListDir
+			}
+		})
+
+		mockCacheRootUuid.value = "root-uuid"
+
+		await fetchData({ path: { type: "drive", uuid: "root-uuid" } })
+
+		expect(mockGetDirOptional).not.toHaveBeenCalled()
+		expect(mockRoot).toHaveBeenCalled()
+
+		const listedParent = mockListDir.mock.calls[0]![0] as { tag: string }
+		expect(listedParent.tag).toBe("Root")
+	})
+
+	it("uses the cached dir without calling getDirOptional when the uuid is cached", async () => {
+		const cachedNormalDir = { tag: "Dir", inner: ["cached"] }
+
+		cacheDirectoryUuidToAnyNormalDir.set("cached-drive-uuid", cachedNormalDir)
+
+		const mockRoot = vi.fn().mockReturnValue({ uuid: "root-uuid" })
+		const mockGetDirOptional = vi.fn()
+		const mockListDir = vi.fn().mockResolvedValue({ dirs: [], files: [] })
+
+		mockGetSdkClients.mockResolvedValue({
+			authedSdkClient: {
+				root: mockRoot,
+				getDirOptional: mockGetDirOptional,
+				listDir: mockListDir
+			}
+		})
+
+		mockCacheRootUuid.value = "root-uuid"
+
+		await fetchData({ path: { type: "drive", uuid: "cached-drive-uuid" } })
+
+		expect(mockGetDirOptional).not.toHaveBeenCalled()
+		expect(mockListDir).toHaveBeenCalledWith(cachedNormalDir, undefined)
 	})
 })
 
@@ -654,15 +757,19 @@ describe("fetchData — photos branch dir filtering", () => {
 	})
 })
 
-// ─── fetchData post-processing switch: photos/recents dir exclusion guard ───
+// ─── fetchData post-processing switch: photos/recents CACHE dirs but don't DISPLAY them ───
+// Finding #47: photos/recents hide directories from the rendered list, but their
+// subdirectories must still be cached (so consumers like photo bulk "make available
+// offline" can resolve a parent by uuid). So unwrap + cache always run; only the
+// display push is suppressed.
 
-describe("fetchData — post-processing: photos and recents skip dirs", () => {
-	it("does not call unwrapDirMeta for dirs when path type is 'photos'", async () => {
+describe("fetchData — post-processing: photos and recents cache dirs but exclude them from the list", () => {
+	it("caches a dir for 'photos' (unwrap + cache populated) but does NOT push it into the items list", async () => {
 		const remoteDir = { inner: [{ uuid: "remote-dir-uuid-skip" }] }
 
 		mockCameraUploadGetConfig.mockResolvedValue({ enabled: true, remoteDir })
 
-		// A Normal-tagged dir passes the photos fetch filter but should be skipped in post-processing
+		// A Normal-tagged dir passes the photos fetch filter; its inner[0] reaches post-processing.
 		const normalDir = {
 			tag: "Normal",
 			inner: [{ uuid: "dir-skip", parent: null, color: "default", timestamp: 0n, favorited: false, meta: {} }]
@@ -676,12 +783,18 @@ describe("fetchData — post-processing: photos and recents skip dirs", () => {
 
 		vi.mocked(unwrapDirMeta).mockClear()
 
-		await fetchData({ path: { type: "photos", uuid: null } })
+		const result = await fetchData({ path: { type: "photos", uuid: null } })
 
-		expect(vi.mocked(unwrapDirMeta)).not.toHaveBeenCalled()
+		// Dir is CACHED (unwrapped + parent-resolution maps populated)…
+		expect(vi.mocked(unwrapDirMeta)).toHaveBeenCalledWith(normalDir.inner[0])
+		expect(cacheDirectoryUuidToAnyNormalDir.has("dir-skip")).toBe(true)
+		expect(cacheDirectoryUuidToAnyDirWithContext.has("dir-skip")).toBe(true)
+
+		// …but NOT displayed (no directory item in the returned list).
+		expect(result.some(i => (i as DriveItem).data.uuid === "dir-skip")).toBe(false)
 	})
 
-	it("does not call unwrapDirMeta for dirs when path type is 'recents'", async () => {
+	it("caches a dir for 'recents' (unwrap + cache populated) but does NOT push it into the items list", async () => {
 		const dirResult = {
 			uuid: "recents-dir",
 			parent: null,
@@ -699,9 +812,15 @@ describe("fetchData — post-processing: photos and recents skip dirs", () => {
 
 		vi.mocked(unwrapDirMeta).mockClear()
 
-		await fetchData({ path: { type: "recents", uuid: null } })
+		const result = await fetchData({ path: { type: "recents", uuid: null } })
 
-		expect(vi.mocked(unwrapDirMeta)).not.toHaveBeenCalled()
+		// Dir is CACHED…
+		expect(vi.mocked(unwrapDirMeta)).toHaveBeenCalledWith(dirResult)
+		expect(cacheDirectoryUuidToAnyNormalDir.has("recents-dir")).toBe(true)
+		expect(cacheDirectoryUuidToName.get("recents-dir")).toBe("Dir")
+
+		// …but NOT displayed.
+		expect(result.some(i => (i as DriveItem).data.uuid === "recents-dir")).toBe(false)
 	})
 
 	it("calls unwrapDirMeta for dirs when path type is 'drive'", async () => {
