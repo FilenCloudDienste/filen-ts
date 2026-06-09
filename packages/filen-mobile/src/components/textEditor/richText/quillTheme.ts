@@ -30,7 +30,6 @@ export type QuillThemeOptions = {
 	customClass?: string
 	codeBackground?: string
 	codeTextColor?: string
-	readOnly?: boolean
 	editorFontWeight?: string
 }
 
@@ -313,13 +312,11 @@ export class QuillThemeCustomizer {
 export function getThemeOptions({
 	colors,
 	platform,
-	readOnly,
 	font
 }: {
 	darkMode: boolean
 	colors: Colors
 	platform: Platform["OS"]
-	readOnly: boolean
 	font?: Font
 }): QuillThemeOptions {
 	if (platform === "ios") {
@@ -348,8 +345,7 @@ export function getThemeOptions({
 			placeholderColor: colors.text.muted,
 			placeholderStyle: "normal",
 			codeBackground: colors.background.secondary,
-			codeTextColor: colors.text.foreground,
-			readOnly
+			codeTextColor: colors.text.foreground
 		}
 	}
 
@@ -378,8 +374,7 @@ export function getThemeOptions({
 		placeholderColor: colors.text.muted,
 		placeholderStyle: "normal",
 		codeBackground: colors.background.secondary,
-		codeTextColor: colors.text.foreground,
-		readOnly
+		codeTextColor: colors.text.foreground
 	}
 }
 

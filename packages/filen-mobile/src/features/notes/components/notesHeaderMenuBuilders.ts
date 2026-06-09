@@ -32,6 +32,7 @@ export function buildNotesHeaderRightItems({
 	t,
 	textForeground,
 	selectedNotes,
+	selectedNotesLive,
 	selectedTags,
 	notesViewMode,
 	setNotesViewMode,
@@ -45,7 +46,13 @@ export function buildNotesHeaderRightItems({
 }: {
 	t: TFunction
 	textForeground: ReturnType<typeof useResolveClassNames>
+	// The raw selection — drives selection-count gating, the select-all toggle and the
+	// "N selected" title. May contain ghosts (remote-deleted notes still in the store).
 	selectedNotes: Note[]
+	// #42 / D7: the LIVE, ghost-purged selection (selected notes still present in the query
+	// result). ALL bulk ops + export + bulk-tag operate on THIS set so a remote-deleted note
+	// can't fail the whole batch. noteFlags is already aggregated from this same set in the caller.
+	selectedNotesLive: Note[]
 	selectedTags: NoteTag[]
 	notesViewMode: NotesViewMode
 	setNotesViewMode: (fn: NotesViewMode | ((prev: NotesViewMode) => NotesViewMode)) => void
@@ -247,7 +254,7 @@ export function buildNotesHeaderRightItems({
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({
-							items: selectedNotes,
+							items: selectedNotesLive,
 							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 							op: n => notesLib.setPinned({ note: n, pinned: !noteFlags.includesPinned })
 						})
@@ -261,7 +268,7 @@ export function buildNotesHeaderRightItems({
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({
-							items: selectedNotes,
+							items: selectedNotesLive,
 							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 							op: n => notesLib.setFavorited({ note: n, favorite: !noteFlags.includesFavorited })
 						})
@@ -284,7 +291,7 @@ export function buildNotesHeaderRightItems({
 									requiresOnline: true,
 									onPress: async () => {
 										await runBulk({
-											items: selectedNotes,
+											items: selectedNotesLive,
 											clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 											op: async n => {
 												const content = await notesLib.getContent({ note: n })
@@ -312,7 +319,7 @@ export function buildNotesHeaderRightItems({
 						router.push({
 							pathname: "/noteTags",
 							params: {
-								notes: serialize(selectedNotes)
+								notes: serialize(selectedNotesLive)
 							}
 						})
 					}
@@ -325,7 +332,7 @@ export function buildNotesHeaderRightItems({
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({
-							items: selectedNotes,
+							items: selectedNotesLive,
 							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 							op: n => notesLib.duplicate({ note: n })
 						})
@@ -339,14 +346,14 @@ export function buildNotesHeaderRightItems({
 					requiresOnline: true,
 					onPress: async () => {
 						const exportResult = await runWithLoading(async () => {
-							if (selectedNotes.length === 1 && selectedNotes[0]) {
+							if (selectedNotesLive.length === 1 && selectedNotesLive[0]) {
 								return await notesLib.export({
-									note: selectedNotes[0]
+									note: selectedNotesLive[0]
 								})
 							}
 
 							return await notesLib.exportMultiple({
-								notes: selectedNotes
+								notes: selectedNotesLive
 							})
 						})
 
@@ -399,7 +406,7 @@ export function buildNotesHeaderRightItems({
 						requiresOnline: true,
 						onPress: async () => {
 							await runBulk({
-								items: selectedNotes,
+								items: selectedNotesLive,
 								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 								op: n => notesLib.archive({ note: n })
 							})
@@ -419,7 +426,7 @@ export function buildNotesHeaderRightItems({
 						requiresOnline: true,
 						onPress: async () => {
 							await runBulk({
-								items: selectedNotes,
+								items: selectedNotesLive,
 								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 								op: n => notesLib.restore({ note: n })
 							})
@@ -437,7 +444,7 @@ export function buildNotesHeaderRightItems({
 						requiresOnline: true,
 						onPress: async () => {
 							await runBulk({
-								items: selectedNotes,
+								items: selectedNotesLive,
 								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 								confirm: {
 									title: t("trash_selected"),
@@ -462,7 +469,7 @@ export function buildNotesHeaderRightItems({
 						requiresOnline: true,
 						onPress: async () => {
 							await runBulk({
-								items: selectedNotes,
+								items: selectedNotesLive,
 								clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 								confirm: {
 									title: t("delete_selected"),
@@ -487,7 +494,7 @@ export function buildNotesHeaderRightItems({
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({
-							items: selectedNotes,
+							items: selectedNotesLive,
 							clearSelection: () => useNotesStore.getState().clearSelectedNotes(),
 							confirm: {
 								title: t("leave_selected"),

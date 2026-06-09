@@ -69,7 +69,6 @@ const RichTextEditorDom = ({
 }) => {
 	const quillRef = useRef<Quill | null>(null)
 	const editorRef = useRef<HTMLDivElement | null>(null)
-	const didTypeRef = useRef<boolean>(false)
 	const quillThemeRef = useRef<QuillThemeCustomizer | null>(null)
 	const quillFormatsRef = useRef<QuillFormats>({})
 
@@ -98,8 +97,6 @@ const RichTextEditorDom = ({
 		if (!quillRef.current) {
 			return
 		}
-
-		didTypeRef.current = true
 
 		switch (message.type) {
 			case "quillToggleBold": {
@@ -218,18 +215,6 @@ const RichTextEditorDom = ({
 	)
 
 	useEffect(() => {
-		const listener = () => {
-			didTypeRef.current = true
-		}
-
-		window.addEventListener("keydown", listener)
-
-		return () => {
-			window.removeEventListener("keydown", listener)
-		}
-	}, [])
-
-	useEffect(() => {
 		if (!editorRef.current || quillRef.current) {
 			return
 		}
@@ -239,13 +224,20 @@ const RichTextEditorDom = ({
 				toolbar: false
 			},
 			placeholder,
-			theme: "snow"
+			theme: "snow",
+			readOnly: readOnly ?? false
 		})
 
-		quillRef.current.on("text-change", () => {
+		// #39 fix: gate propagation on Quill's own user-vs-programmatic discriminator
+		// (`source`), NOT a physical keydown. The old `didTypeRef` keydown gate dropped
+		// paste / voice-dictation / autocomplete inserts (they emit no keydown). Quill
+		// fires `source === "user"` for genuine user edits AND for toolbar formatting
+		// (which already passes "user"), while the initial `dangerouslyPasteHTML(...,
+		// "silent")` correctly does not propagate.
+		quillRef.current.on("text-change", (_delta, _oldDelta, source) => {
 			postFormatUpdates(postMessage)
 
-			if (!quillRef.current || !didTypeRef.current) {
+			if (!quillRef.current || source !== "user") {
 				return
 			}
 
@@ -255,7 +247,16 @@ const RichTextEditorDom = ({
 		quillRef.current.on("selection-change", () => {
 			postFormatUpdates(postMessage)
 		})
-	}, [placeholder, onValueChange, postFormatUpdates, postMessage])
+	}, [placeholder, onValueChange, postFormatUpdates, postMessage, readOnly])
+
+	// #40 fix: actually ENFORCE read-only. The Quill instance honours the construction
+	// `readOnly` flag, and this effect re-applies it whenever the prop flips so a
+	// read-only / shared / history note cannot be edited at all (CodeMirror already
+	// honours `readOnly`; this was Quill-specific). Without it, a read-only edit wrote
+	// to the inflight store and wedged note sync forever.
+	useEffect(() => {
+		quillRef.current?.enable(!readOnly)
+	}, [readOnly])
 
 	useEffect(() => {
 		if (!editorRef.current || !quillRef.current) {
@@ -271,7 +272,6 @@ const RichTextEditorDom = ({
 				darkMode,
 				colors,
 				platform,
-				readOnly: readOnly ?? false,
 				font
 			})
 		)
@@ -313,12 +313,13 @@ const RichTextEditorDom = ({
 
 			quillRef.current.clipboard.dangerouslyPasteHTML(sanitized, "silent")
 
-			if (autoFocus) {
+			// #40 fix: never focus / place a caret in a read-only editor.
+			if (autoFocus && !readOnly) {
 				quillRef.current.setSelection(sanitized.length, 0)
 				quillRef.current.focus()
 			}
 		}
-	}, [initialValue, autoFocus])
+	}, [initialValue, autoFocus, readOnly])
 
 	const readyEmittedRef = useRef(false)
 

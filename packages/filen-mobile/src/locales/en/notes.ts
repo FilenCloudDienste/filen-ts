@@ -136,6 +136,8 @@ export const notes = {
 	tag_notes_count_and_date_other: "{{count}} notes, {{date}}",
 
 	// ── Note tags screen (add/remove tags to one or many notes) ───────────────
+	/** Tags screen — error-state message when the tags query fails after retries */
+	note_tags_error: "Could not load tags. Please try again.",
 	/** Tags screen — header title when tagging a single note */
 	note_tags: "Tags",
 	/** Tags screen — header title when tagging multiple selected notes */
@@ -154,6 +156,8 @@ export const notes = {
 	// ── Note history ──────────────────────────────────────────────────────────
 	/** History screen — header title (a note's version history) */
 	note_history: "Note history",
+	/** History screen — error-state message when the history query fails after retries */
+	note_history_error: "Could not load history. Please try again.",
 	/** History screen — empty-state message when a note has no past versions */
 	no_note_history: "No history",
 	/** History row — fallback text when a version has no content preview */

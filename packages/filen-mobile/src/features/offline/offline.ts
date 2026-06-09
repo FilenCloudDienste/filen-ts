@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system"
+import { randomUUID } from "expo-crypto"
 import type { DriveItem } from "@/types"
 import { run, Semaphore } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
@@ -145,6 +146,15 @@ export class Offline {
 
 	public constructor() {
 		this.ensureDirectories()
+
+		// Recover from a session that crashed mid-swap (see swapStagingIntoPlace): delete partial staging dirs
+		// and restore any `.old` whose live slot is missing. Best-effort; guarded so a transient FS error can't
+		// brick module load.
+		try {
+			this.reconcileLeftoverStaging()
+		} catch (e) {
+			console.error("[Offline] reconcileLeftoverStaging failed", e)
+		}
 	}
 
 	public cancel(): void {
@@ -846,21 +856,16 @@ export class Offline {
 									normalizeModificationTimestampForComparison(Number(unwrappedFileMeta.meta.modified)) >
 										normalizeModificationTimestampForComparison(Number(item.data.decryptedMeta.modified))
 								) {
-									if (dataFile.parentDirectory.exists) {
-										dataFile.parentDirectory.delete()
-									}
-
-									this.isItemStoredCache.delete(item.data.uuid)
-
-									if (this.indexCache) {
-										delete this.indexCache.files[item.data.uuid]
-									}
-
-									await this.storeFile({
+									// Stage-then-atomic-swap: download the newer version into a sibling staging dir and only
+									// replace the existing copy on success. A transient download error leaves the offline
+									// copy + caches intact so the next sync retries it (vs. the old delete-then-download which
+									// silently lost the copy on any failure). Don't swallow — log so the loss/retry is visible.
+									await this.restoreFileToStaging({
 										file: unwrappedFileIntoDriveItem(unwrappedFileMeta),
 										parent,
-										skipIndexUpdate: true,
 										signal
+									}).catch(e => {
+										console.error("[Offline] sync re-download of modified file failed; preserving existing copy", e)
 									})
 
 									return
@@ -893,12 +898,27 @@ export class Offline {
 								return
 							}
 
-							await this.storeFile({
-								file: unwrappedFileIntoDriveItem(unwrapFileMeta(updatedFile)),
-								parent,
-								skipIndexUpdate: true,
-								signal
-							})
+							// Re-uploaded under a new UUID: store the new copy FIRST, and only delete the old copy once
+							// the new one is durably stored. storeFile writes to files/{new-uuid} (a fresh dir), so the
+							// old files/{old-uuid} copy is never at risk during the download — on a transient failure we
+							// keep the old copy and surface the error instead of silently swallowing it.
+							const renameRestore = await run(() =>
+								this.storeFile({
+									file: unwrappedFileIntoDriveItem(unwrapFileMeta(updatedFile)),
+									parent,
+									skipIndexUpdate: true,
+									signal
+								})
+							)
+
+							if (!renameRestore.success) {
+								console.error(
+									"[Offline] sync re-store of renamed/re-uploaded file failed; preserving existing copy",
+									renameRestore.error
+								)
+
+								return
+							}
 
 							if (dataFile.parentDirectory.exists) {
 								dataFile.parentDirectory.delete()
@@ -942,9 +962,12 @@ export class Offline {
 							const dirIndex = parentListingDirIndexes.get(key)
 							const existingDir = dirIndex?.byUuid.get(item.data.uuid)
 
-							if (!existingDir && metaFile.parentDirectory.exists) {
-								metaFile.parentDirectory.delete()
-							}
+							// NOTE: the old code deleted the local copy here whenever the UUID was gone remotely —
+							// even when a same-name re-created directory existed (the rename case). That destroyed the
+							// offline copy BEFORE the replacement was stored, losing it on a transient re-store failure
+							// (#44). The delete now lives in the `!existingDir` block below, gated on whether a name
+							// match exists: deferred until the re-store succeeds for a rename, immediate for a genuine
+							// remote deletion.
 
 							if (existingDir && metaFile.exists && metaFile.size > 0) {
 								const unwrappedRemoteDir = unwrapDirMeta(existingDir)
@@ -970,18 +993,49 @@ export class Offline {
 							if (!existingDir) {
 								const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
 								const nameMatch = dirIndex?.byName.get(normalizedName)
+								let renameMatch: DriveItem | undefined = undefined
 
 								if (nameMatch) {
 									const unwrappedNameMatch = unwrapDirMeta(nameMatch)
 
 									if (unwrappedNameMatch.meta && unwrappedNameMatch.uuid !== item.data.uuid) {
-										await this.storeDirectory({
-											directory: unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch)),
-											parent,
-											skipIndexUpdate: true,
-											signal
-										})
+										renameMatch = unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch))
 									}
+								}
+
+								if (!renameMatch) {
+									// Genuine remote deletion (UUID gone, no same-name re-creation) — safe to remove the
+									// local copy immediately.
+									if (metaFile.parentDirectory.exists) {
+										metaFile.parentDirectory.delete()
+									}
+
+									return
+								}
+
+								// Re-created under a new UUID: store the new copy FIRST (into directories/{new-uuid}, a
+								// fresh dir), and only delete the OLD directories/{old-uuid} tree once the re-store succeeds.
+								// A transient failure preserves the old copy and is surfaced via log so the next sync retries.
+								const renameRestore = await run(() =>
+									this.storeDirectory({
+										directory: renameMatch,
+										parent,
+										skipIndexUpdate: true,
+										signal
+									})
+								)
+
+								if (!renameRestore.success) {
+									console.error(
+										"[Offline] sync re-store of renamed/re-created directory failed; preserving existing copy",
+										renameRestore.error
+									)
+
+									return
+								}
+
+								if (metaFile.parentDirectory.exists) {
+									metaFile.parentDirectory.delete()
 								}
 
 								return
@@ -1132,6 +1186,79 @@ export class Offline {
 								remoteFiles.set(normalizedPath, file)
 							}
 
+							// DETECTION PASS (read-only): decide whether the whole tree must be re-downloaded because a
+							// nested file was modified, or an entry was added remotely. We must NOT mutate the live tree
+							// in this pass — if a full resync is needed, storeDirectory({ force: true }) now stages the
+							// replacement and atomically swaps it in, so destroying live children first would reintroduce
+							// the data-loss-on-transient-error bug (#45). (A nested file modification was the one case the
+							// old code pre-deleted the live file for before the resync — that pre-delete is exactly the
+							// destructive step #45 removes.)
+							let needsFullResync = false
+
+							for (const [path, localFile] of localFiles) {
+								const remoteFile = remoteFiles.get(path)
+
+								if (remoteFile && localFile && localFile.item.data.decryptedMeta && isFileItem(localFile.item)) {
+									const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
+
+									if (
+										unwrappedRemoteFile.meta &&
+										normalizeModificationTimestampForComparison(Number(unwrappedRemoteFile.meta.modified)) >
+											normalizeModificationTimestampForComparison(Number(localFile.item.data.decryptedMeta.modified))
+									) {
+										needsFullResync = true
+
+										break
+									}
+								}
+							}
+
+							if (!needsFullResync) {
+								for (const [path, remoteDirectory] of remoteDirectories) {
+									const localDirectory = localDirectories.get(path)
+
+									if (!localDirectory && remoteDirectory) {
+										needsFullResync = true
+
+										break
+									}
+								}
+							}
+
+							if (!needsFullResync) {
+								for (const [path, remoteFile] of remoteFiles) {
+									const localFile = localFiles.get(path)
+
+									if (!localFile && remoteFile) {
+										needsFullResync = true
+
+										break
+									}
+								}
+							}
+
+							// force: true bypasses the isItemStored check, since we know it's stored but stale.
+							if (needsFullResync) {
+								// Stage-then-atomic-swap re-download (owned by storeDirectory). The live tree is left fully
+								// intact until the replacement is durably staged; a transient failure preserves it. Don't
+								// swallow — log so the loss/retry is visible (the next sync retries the preserved copy).
+								await this.storeDirectory({
+									directory: item,
+									parent,
+									skipIndexUpdate: true,
+									force: true,
+									signal
+								}).catch(e => {
+									console.error("[Offline] sync full directory resync failed; preserving existing copy", e)
+								})
+
+								return
+							}
+
+							// PRUNE-ONLY PATH (no full resync needed): entries deleted remotely (a local subdirectory or
+							// file with no remote counterpart) are surgically removed in place. Safe — there is no
+							// re-download that could fail and strand us, so no staging is needed. Matches the original
+							// surgical-removal behavior for the no-addition/no-modification case.
 							for (const [path, localDirectory] of localDirectories) {
 								const remoteDirectory = remoteDirectories.get(path)
 
@@ -1140,61 +1267,12 @@ export class Offline {
 								}
 							}
 
-							// If any file was updated/added/removed in the directory tree, re-download the whole thing.
-							let needsFullResync = false
-
 							for (const [path, localFile] of localFiles) {
 								const remoteFile = remoteFiles.get(path)
 
 								if (!remoteFile && localFile && localFile.file.exists) {
 									localFile.file.delete()
-
-									continue
 								}
-
-								if (remoteFile && localFile && localFile.item.data.decryptedMeta && isFileItem(localFile.item)) {
-									const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
-
-									if (
-										unwrappedRemoteFile.meta &&
-										normalizeModificationTimestampForComparison(Number(unwrappedRemoteFile.meta.modified)) >
-											normalizeModificationTimestampForComparison(
-												Number(localFile.item.data.decryptedMeta.modified)
-											) &&
-										localFile.file.exists
-									) {
-										localFile.file.delete()
-
-										needsFullResync = true
-									}
-								}
-							}
-
-							for (const [path, remoteDirectory] of remoteDirectories) {
-								const localDirectory = localDirectories.get(path)
-
-								if (!localDirectory && remoteDirectory) {
-									needsFullResync = true
-								}
-							}
-
-							for (const [path, remoteFile] of remoteFiles) {
-								const localFile = localFiles.get(path)
-
-								if (!localFile && remoteFile) {
-									needsFullResync = true
-								}
-							}
-
-							// force: true bypasses the isItemStored check, since we know it's stored but stale.
-							if (needsFullResync) {
-								await this.storeDirectory({
-									directory: item,
-									parent,
-									skipIndexUpdate: true,
-									force: true,
-									signal
-								})
 							}
 						})
 					)
@@ -1282,6 +1360,173 @@ export class Offline {
 		this.listFilesCache = files
 
 		return files
+	}
+
+	// Crash-safe swap of a freshly-built staging directory into the live `{uuid}` slot under `baseUri`.
+	// Used by the stage-then-atomic-swap re-download paths (modified/renamed files, force directory resync)
+	// so the existing offline copy is never destroyed until a complete replacement is durably on disk.
+	//
+	// Ordering (each rename is atomic on the same filesystem — staging is a SIBLING of live):
+	//   1. live `{uuid}` → `{uuid}.old` (only if live exists)
+	//   2. staging `{uuid}.staging-*` → `{uuid}`
+	//   3. delete `{uuid}.old`
+	// A crash between 1 and 2 leaves `.old` intact (reconciled on startup → restored). A crash between 2
+	// and 3 leaves a harmless leftover `.old` (reconciled → deleted). `reconcileLeftoverStaging()` runs at
+	// init to clean up any `.staging-*`/`.old` from a crashed session.
+	private swapStagingIntoPlace(baseUri: string, uuid: string, stagingDirName: string): void {
+		const live = new FileSystem.Directory(FileSystem.Paths.join(baseUri, uuid))
+		const old = new FileSystem.Directory(FileSystem.Paths.join(baseUri, `${uuid}.old`))
+		const staging = new FileSystem.Directory(FileSystem.Paths.join(baseUri, stagingDirName))
+
+		if (old.exists) {
+			old.delete()
+		}
+
+		if (live.exists) {
+			live.rename(`${uuid}.old`)
+		}
+
+		staging.rename(uuid)
+
+		const oldAfter = new FileSystem.Directory(FileSystem.Paths.join(baseUri, `${uuid}.old`))
+
+		if (oldAfter.exists) {
+			oldAfter.delete()
+		}
+	}
+
+	// Reconciles leftover `{uuid}.staging-*` and `{uuid}.old` directories from a session that crashed mid-swap
+	// (see swapStagingIntoPlace). Best-effort: any partial `.staging-*` is incomplete by definition and deleted;
+	// an `.old` is restored only if the live `{uuid}` slot is missing (crash between rename steps 1 and 2),
+	// otherwise the live copy won the swap and the leftover `.old` is deleted. Runs once at construction.
+	private reconcileLeftoverStaging(): void {
+		for (const baseDir of [FILES_DIRECTORY, DIRECTORIES_DIRECTORY]) {
+			if (!baseDir.exists) {
+				continue
+			}
+
+			for (const entry of baseDir.list()) {
+				if (!(entry instanceof FileSystem.Directory)) {
+					continue
+				}
+
+				if (entry.name.includes(".staging-")) {
+					if (entry.exists) {
+						entry.delete()
+					}
+
+					continue
+				}
+
+				if (entry.name.endsWith(".old")) {
+					const uuid = entry.name.slice(0, -".old".length)
+					const live = new FileSystem.Directory(FileSystem.Paths.join(baseDir.uri, uuid))
+
+					if (!live.exists) {
+						entry.rename(uuid)
+					} else if (entry.exists) {
+						entry.delete()
+					}
+				}
+			}
+		}
+	}
+
+	// Downloads `file` into a sibling staging directory and, only on success, atomically swaps it into the
+	// live `files/{uuid}` slot — never touching the existing copy or its caches until the replacement is
+	// durably on disk. On any failure OR abort it deletes only the staging dir and throws (so the caller can
+	// surface/log the loss and the next sync retries the preserved copy). Used by sync()'s modified/renamed
+	// re-download branches in place of the old delete-then-download (which lost the copy on a transient error).
+	private async restoreFileToStaging({
+		file,
+		parent,
+		signal
+	}: {
+		file: DriveItem
+		parent: OfflineParent
+		signal?: AbortSignal
+	}): Promise<void> {
+		if (!isFileItem(file) || !file.data.decryptedMeta) {
+			throw new Error("File missing decrypted meta")
+		}
+
+		const result = await run(async defer => {
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
+			const releaseStoreItemLock = await this.acquireStoreItemLock(file.data.uuid)
+
+			defer(() => {
+				releaseStoreItemLock()
+			})
+
+			await this.storeMutex.acquire()
+
+			defer(() => {
+				this.storeMutex.release()
+			})
+
+			this.ensureDirectories()
+
+			const stagingDirName = `${file.data.uuid}.staging-${randomUUID()}`
+			const stagingDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, stagingDirName))
+			const decryptedMeta = file.data.decryptedMeta
+
+			if (!decryptedMeta) {
+				throw new Error("File missing decrypted meta")
+			}
+
+			const stagingDataFile = new FileSystem.File(FileSystem.Paths.join(stagingDir.uri, decryptedMeta.name))
+			const stagingMetaFile = new FileSystem.File(FileSystem.Paths.join(stagingDir.uri, `${file.data.uuid}.filenmeta`))
+
+			// Always delete only the staging dir on the way out (success or failure) — the live copy is never
+			// referenced here, so a thrown download leaves it untouched.
+			defer(() => {
+				if (stagingDir.exists) {
+					stagingDir.delete()
+				}
+			})
+
+			if (stagingDir.exists) {
+				stagingDir.delete()
+			}
+
+			stagingDir.create({
+				intermediates: true,
+				idempotent: true
+			})
+
+			const transferred = await transfers.download({
+				item: file,
+				destination: stagingDataFile,
+				signal
+			})
+
+			if (!transferred) {
+				// Aborted (download returned null) — leave the existing copy + caches untouched.
+				return
+			}
+
+			atomicWrite(
+				stagingMetaFile,
+				serialize({
+					item: file,
+					parent
+				} satisfies FileOrDirectoryOfflineMeta)
+			)
+
+			// Replacement is fully built in staging — swap it into place atomically. Only now is the old copy
+			// removed. invalidateCaches because the filesystem changed.
+			this.swapStagingIntoPlace(FILES_DIRECTORY.uri, file.data.uuid, stagingDirName)
+			this.invalidateCaches()
+		})
+
+		if (!result.success) {
+			throw result.error
+		}
 	}
 
 	public async storeFile({
@@ -1458,10 +1703,21 @@ export class Offline {
 				return
 			}
 
-			const dataDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, directory.data.uuid))
+			// A force re-download (sync's full-resync) must be NON-DESTRUCTIVE: download into a sibling staging
+			// directory and atomically swap it into the live {uuid} slot only on success, so a transient error
+			// can never wipe a populated offline tree before its replacement exists (#45). A first-time/normal
+			// store has nothing to lose, so it downloads straight into the live {uuid} dir as before.
+			const useStaging = Boolean(force)
+			const liveDirectoryName = directory.data.uuid
+			const dataDirectoryName = useStaging ? `${directory.data.uuid}.staging-${randomUUID()}` : directory.data.uuid
+			const dataDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, dataDirectoryName))
 			const metaFile = new FileSystem.File(
-				FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, directory.data.uuid, `${directory.data.uuid}.filenmeta`)
+				FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, dataDirectoryName, `${directory.data.uuid}.filenmeta`)
 			)
+
+			if (useStaging && dataDirectory.exists) {
+				dataDirectory.delete()
+			}
 
 			if (!dataDirectory.exists) {
 				dataDirectory.create({
@@ -1477,6 +1733,17 @@ export class Offline {
 					resolveCompletion?.()
 				})
 
+				// When staging, always tear down only the staging dir on the way out (success or failure). On
+				// success the staging dir has already been renamed into the live slot so this is a no-op; on
+				// failure/abort it leaves the live {uuid} tree (and its caches) completely untouched.
+				if (useStaging) {
+					defer(() => {
+						if (dataDirectory.exists) {
+							dataDirectory.delete()
+						}
+					})
+				}
+
 				const completionPromise = new Promise<void>(resolve => {
 					resolveCompletion = resolve
 				})
@@ -1486,27 +1753,30 @@ export class Offline {
 					destination: dataDirectory,
 					hideProgress,
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
+					preserveDestinationOnStart: useStaging,
 					signal
 				})
 
 				if (transferred) {
 					const entries: DirectoryOfflineMeta["entries"] = {}
 
-					// Anchor the SDK-returned paths on the directory's UUID rather than
+					// Anchor the SDK-returned paths on the destination directory's NAME rather than
 					// slicing by a known prefix. The SDK returns canonical/realpath'd
 					// paths (iOS: /private/var/mobile/..., Android: typically already
 					// canonical) while dataDirectory.uri returns the platform-specific
 					// symlinked form. Lexical prefix comparison can't reconcile that
 					// difference and silently corrupts entry keys, which then breaks
 					// top-level listing AND traps sync() in a constant re-download loop
-					// (localFiles never matches remoteFiles). The UUID anchor is
-					// symlink-agnostic — see extractPathInsideUuidDirectory().
+					// (localFiles never matches remoteFiles). The name anchor is
+					// symlink-agnostic — see extractPathInsideUuidDirectory(). For a normal store the
+					// name IS the uuid; for a staging download it's the staging dir name, which is what
+					// the SDK paths actually contain.
 					for (const { dir, path } of transferred.directories) {
 						if (dir.tag === NonRootDir_Tags.Linked) {
 							continue
 						}
 
-						const inside = extractPathInsideUuidDirectory(path, directory.data.uuid)
+						const inside = extractPathInsideUuidDirectory(path, dataDirectoryName)
 
 						if (!inside) {
 							continue
@@ -1520,7 +1790,7 @@ export class Offline {
 					}
 
 					for (const { file, path } of transferred.files) {
-						const inside = extractPathInsideUuidDirectory(path, directory.data.uuid)
+						const inside = extractPathInsideUuidDirectory(path, dataDirectoryName)
 
 						if (!inside) {
 							continue
@@ -1533,8 +1803,26 @@ export class Offline {
 						}
 					}
 
+					// Write the meta INTO the (possibly staging) data directory so it travels with the tree
+					// during the atomic swap.
+					atomicWrite(
+						metaFile,
+						serialize({
+							item: directory,
+							parent,
+							entries
+						} satisfies DirectoryOfflineMeta)
+					)
+
+					// Atomically swap the fully-built staging tree into the live {uuid} slot. Only now is the
+					// old tree removed — a crash mid-swap is recovered by reconcileLeftoverStaging() at init.
+					if (useStaging) {
+						this.swapStagingIntoPlace(DIRECTORIES_DIRECTORY.uri, liveDirectoryName, dataDirectoryName)
+					}
+
 					// Overlap dedup: if any entry in this directory tree was previously stored standalone,
-					// delete the standalone copy — the directory tree now subsumes it.
+					// delete the standalone copy — the directory tree now subsumes it. Runs against the live
+					// tree, AFTER the swap, and only touches OTHER uuids' standalone copies.
 					const currentIndex = await this.readIndex()
 
 					for (const entryPath in entries) {
@@ -1564,17 +1852,8 @@ export class Offline {
 						}
 					}
 
-					// Must invalidate before writing meta — the dedup above changed the filesystem.
+					// The swap + dedup changed the filesystem — drop all derived caches before the index rebuild.
 					this.invalidateCaches()
-
-					atomicWrite(
-						metaFile,
-						serialize({
-							item: directory,
-							parent,
-							entries
-						} satisfies DirectoryOfflineMeta)
-					)
 
 					if (!skipIndexUpdate) {
 						await this.updateIndex()
@@ -1583,7 +1862,10 @@ export class Offline {
 			})
 
 			if (!innerResult.success) {
-				if (dataDirectory.exists) {
+				// Only a NON-staging (fresh) download deletes its destination on failure — there's nothing of
+				// value there. A staging download leaves the live {uuid} tree untouched (the staging dir is
+				// cleaned up by its own defer above).
+				if (!useStaging && dataDirectory.exists) {
 					dataDirectory.delete()
 				}
 
@@ -1613,14 +1895,19 @@ export class Offline {
 			case "sharedDirectory": {
 				const parentUuid = unwrapParentUuid(item.data.inner.parent)
 
+				// Honor the OfflineParent | null contract: a missing parent must NOT throw here. This runs
+				// for every nested entry inside an unguarded Promise.all in listDirectoriesRecursive, so a
+				// single throw would reject the whole offline index rebuild. All callers handle null with
+				// `if (!parent) continue`, so a missing-parent entry is skipped just like listFiles skips
+				// an undecodable meta.
 				if (!parentUuid) {
-					throw new Error("Shared directory is missing parent information.")
+					return null
 				}
 
 				const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
 
 				if (!parentDirFromCache) {
-					throw new Error("Parent directory of shared directory not found in cache.")
+					return null
 				}
 
 				return new AnyDirWithContext.Shared(

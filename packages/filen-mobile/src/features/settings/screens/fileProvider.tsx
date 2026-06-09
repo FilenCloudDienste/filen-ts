@@ -97,12 +97,11 @@ function FileProviderSettings() {
 						if (confirmResult.data.cancelled) {
 							return
 						}
-
-						setBiometric({
-							enabled: false
-						})
 					}
 
+					// Enable the provider FIRST — only commit the biometric teardown
+					// once we know the enable succeeded, so a disk/SDK failure does not
+					// silently disable biometric without turning the provider on.
 					const enableResult = await run(async () => {
 						await fileProvider.enable()
 					})
@@ -112,6 +111,12 @@ function FileProviderSettings() {
 						alerts.error(enableResult.error)
 
 						return
+					}
+
+					if (biometric.enabled) {
+						setBiometric({
+							enabled: false
+						})
 					}
 
 					setEnabled(true)

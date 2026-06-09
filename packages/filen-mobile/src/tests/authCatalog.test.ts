@@ -70,7 +70,9 @@ const INTENTIONAL_PLURAL_KEYS = new Set([
 	"upload_complete_one",
 	"upload_complete_other",
 	"upload_complete_with_failures_one",
-	"upload_complete_with_failures_other"
+	"upload_complete_with_failures_other",
+	"events_undecryptable_one",
+	"events_undecryptable_other"
 ])
 
 describe("auth catalog", () => {

@@ -172,6 +172,7 @@ import events from "@/lib/events"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs } from "@/tests/mocks/expoFileSystem"
+import * as FileSystem from "expo-file-system"
 
 // #103 — capture constructor-registered handlers in beforeAll (after module
 // evaluation is complete) so the snapshot is not empty when mock-hoisting or
@@ -220,7 +221,7 @@ function collision(overrides?: Partial<CollisionParams> & { iteration: number })
 		path: "/camera roll/img_0001.jpg",
 		asset: {
 			name: "IMG_0001.jpg",
-			creationTime: 1700000000000
+			contentHash: "abc123hash"
 		},
 		...overrides
 	})
@@ -244,42 +245,42 @@ beforeEach(() => {
 // ─── modifyAssetPathOnCollision ──────────────────────────────────────────────
 
 describe("modifyAssetPathOnCollision", () => {
-	describe("iteration 0 — creationTime suffix", () => {
-		it("appends creationTime to the basename", () => {
-			expect(collision({ iteration: 0 })).toBe("/camera roll/img_0001_1700000000000.jpg")
+	describe("iteration 0 — contentHash suffix", () => {
+		it("appends contentHash to the basename", () => {
+			expect(collision({ iteration: 0 })).toBe("/camera roll/img_0001_abc123hash.jpg")
 		})
 
-		it("produces different paths for different creationTimes", () => {
-			const a = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", creationTime: 1000 } })
-			const b = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", creationTime: 5000 } })
+		it("produces different paths for different contentHashes", () => {
+			const a = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", contentHash: "hash-a" } })
+			const b = collision({ iteration: 0, asset: { name: "IMG_0001.jpg", contentHash: "hash-b" } })
 
 			expect(a).not.toBe(b)
 		})
 	})
 
-	describe("iteration 1 — hash of name + creationTime", () => {
+	describe("iteration 1 — hash of name + contentHash", () => {
 		it("returns a valid path with a hex hash suffix", () => {
 			expect(collision({ iteration: 1 })).toMatch(/^\/camera roll\/img_0001_[0-9a-f]+\.jpg$/)
 		})
 
-		it("produces different paths for different creationTimes", () => {
-			const a = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", creationTime: 1000 } })
-			const b = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", creationTime: 2000 } })
+		it("produces different paths for different contentHashes", () => {
+			const a = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", contentHash: "hash-a" } })
+			const b = collision({ iteration: 1, asset: { name: "IMG_0001.jpg", contentHash: "hash-b" } })
 
 			expect(a).not.toBe(b)
 		})
 
-		it("produces different paths for different filenames with same creationTime", () => {
+		it("produces different paths for different filenames with same contentHash", () => {
 			const a = modifyAssetPathOnCollision({
 				iteration: 1,
 				path: "/album/img_0001.jpg",
-				asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+				asset: { name: "IMG_0001.jpg", contentHash: "same-hash" }
 			})
 
 			const b = modifyAssetPathOnCollision({
 				iteration: 1,
 				path: "/album/img_0002.jpg",
-				asset: { name: "IMG_0002.jpg", creationTime: 1000 }
+				asset: { name: "IMG_0002.jpg", contentHash: "same-hash" }
 			})
 
 			expect(a).not.toBe(b)
@@ -305,7 +306,7 @@ describe("modifyAssetPathOnCollision", () => {
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "IMG_0001.jpg",
-					asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+					asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 				})
 			).toBeTypeOf("string")
 		})
@@ -315,7 +316,7 @@ describe("modifyAssetPathOnCollision", () => {
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "",
-					asset: { name: "IMG_0001.jpg", creationTime: 1000 }
+					asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 				})
 			).toBeTypeOf("string")
 		})
@@ -325,7 +326,7 @@ describe("modifyAssetPathOnCollision", () => {
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "/camera roll/.",
-					asset: { name: ".", creationTime: 1000 }
+					asset: { name: ".", contentHash: "hash1" }
 				})
 			).toBeNull()
 		})
@@ -335,7 +336,7 @@ describe("modifyAssetPathOnCollision", () => {
 		it("produces the same result for the same inputs across all iterations", () => {
 			const params: Omit<CollisionParams, "iteration"> = {
 				path: "/album/photo.png",
-				asset: { name: "photo.png", creationTime: 1000 }
+				asset: { name: "photo.png", contentHash: "hash1" }
 			}
 
 			for (let i = 0; i < 2; i++) {
@@ -347,8 +348,8 @@ describe("modifyAssetPathOnCollision", () => {
 	})
 
 	describe("cross-tree consistency", () => {
-		it("produces identical paths for local and remote trees with the same metadata", () => {
-			const asset = { name: "IMG_0001.jpg", creationTime: 1700000000000 }
+		it("produces identical paths for local and remote trees with the same contentHash", () => {
+			const asset = { name: "IMG_0001.jpg", contentHash: "stable-md5-or-timestamp" }
 
 			for (let i = 0; i < 2; i++) {
 				const a = modifyAssetPathOnCollision({ iteration: i, path: "/camera roll/img_0001.jpg", asset })
@@ -364,7 +365,7 @@ describe("modifyAssetPathOnCollision", () => {
 			const result = modifyAssetPathOnCollision({
 				iteration: 0,
 				path: "/Camera Roll/IMG_0001.JPG",
-				asset: { name: "IMG_0001.JPG", creationTime: 1000 }
+				asset: { name: "IMG_0001.JPG", contentHash: "SomeUpperHash" }
 			})
 
 			expect(result).toBe(result?.toLowerCase())
@@ -374,7 +375,7 @@ describe("modifyAssetPathOnCollision", () => {
 			const result = modifyAssetPathOnCollision({
 				iteration: 0,
 				path: "/album/video.mov",
-				asset: { name: "video.MOV", creationTime: 1000 }
+				asset: { name: "video.MOV", contentHash: "hash1" }
 			})
 
 			expect(result).toMatch(/\.mov$/)
@@ -384,7 +385,7 @@ describe("modifyAssetPathOnCollision", () => {
 
 describe("iteration uniqueness", () => {
 	it("produces distinct paths for iteration 0 vs iteration 1", () => {
-		const asset = { name: "IMG_0001.jpg", creationTime: 1000 }
+		const asset = { name: "IMG_0001.jpg", contentHash: "hash-abc" }
 		const path = "/album/img_0001.jpg"
 
 		const path0 = modifyAssetPathOnCollision({ iteration: 0, path, asset })
@@ -399,7 +400,7 @@ describe("iteration uniqueness", () => {
 describe("collision resolution loop", () => {
 	it("resolves collisions by iterating until an empty slot is found", () => {
 		const tree: Record<string, boolean> = {}
-		const asset = { name: "IMG_0001.jpg", creationTime: 1000 }
+		const asset = { name: "IMG_0001.jpg", contentHash: "hash-a" }
 		const basePath = "/album/img_0001.jpg"
 
 		tree[basePath] = true
@@ -424,9 +425,10 @@ describe("collision resolution loop", () => {
 
 		let path2 = basePath
 		let iteration2 = 0
+		const asset2 = { name: "IMG_0001.jpg", contentHash: "hash-b" }
 
 		while (tree[path2]) {
-			path2 = modifyAssetPathOnCollision({ iteration: iteration2, path: path2, asset }) ?? ""
+			path2 = modifyAssetPathOnCollision({ iteration: iteration2, path: path2, asset: asset2 }) ?? ""
 
 			if (path2.length === 0) {
 				break
@@ -442,7 +444,7 @@ describe("collision resolution loop", () => {
 
 	it("skips the asset when all iterations are exhausted", () => {
 		const tree: Record<string, boolean> = {}
-		const asset = { name: "IMG_0001.jpg", creationTime: 1000 }
+		const asset = { name: "IMG_0001.jpg", contentHash: "hash-a" }
 		const basePath = "/album/img_0001.jpg"
 
 		tree[basePath] = true
@@ -2286,5 +2288,529 @@ describe("uploadFailures increment on repeated failure", () => {
 		// Should have uploaded on the third pass (count 2 < MAX_UPLOAD_FAILURES=3)
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 		expect(mockAddSkippedAsset).not.toHaveBeenCalledWith("a1")
+	})
+})
+
+// ─── #14 regression: seconds-timestamp dedup + second-granularity + null creationTime ─
+
+describe("#14 regression — seconds-timestamp dedup and timestamp normalisation", () => {
+	// These tests exercise the direct collision-suffix logic against the
+	// exposed modifyAssetPathOnCollision function and the listLocal/listRemote
+	// symmetry properties expected by the sync engine.
+	// The dedup key is a seconds-floored creation timestamp — cheap, no file
+	// read at listing time, and symmetric between local and remote trees.
+
+	describe("seconds-timestamp dedup via modifyAssetPathOnCollision", () => {
+		it("two same-named assets at different creation seconds resolve to different paths at iteration 0", () => {
+			// Two IMG_0001.jpg assets created 1 second apart must get different paths.
+			const pathA = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: String(Math.floor(1700000000000 / 1000)) }
+			})
+			const pathB = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: String(Math.floor(1700000001000 / 1000)) }
+			})
+
+			expect(pathA).not.toBeNull()
+			expect(pathB).not.toBeNull()
+			expect(pathA).not.toBe(pathB)
+		})
+
+		it("two same-named assets within the same second collapse to one path (sub-second drift — deduped by design)", () => {
+			// 700ms and 200ms within the same second both floor to "1700000000".
+			const pathA = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: String(Math.floor(1700000000700 / 1000)) }
+			})
+			const pathB = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: String(Math.floor(1700000000200 / 1000)) }
+			})
+
+			expect(pathA).toBe(pathB)
+			expect(pathA).toBe("/camera roll/img_0001_1700000000.jpg")
+		})
+	})
+
+	describe("second-granularity symmetry", () => {
+		it("local and remote produce the same collision path when using seconds-floored timestamps", () => {
+			// Local: String(Math.floor((creationTime ?? 0) / 1000))
+			// Remote: String(Math.floor(Number(meta.created ?? 0) / 1000))
+			// Both must produce an identical contentHash for the same wall-clock second.
+
+			// Millisecond timestamps that differ by 500ms but share the same second
+			const localMs = 1700000000700
+			const remoteMs = 1700000000200 // same second, 500ms earlier
+
+			const localHash = String(Math.floor(localMs / 1000)) // "1700000000"
+			const remoteHash = String(Math.floor(remoteMs / 1000)) // "1700000000"
+
+			const localPath = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: localHash }
+			})
+			const remotePath = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: remoteHash }
+			})
+
+			expect(localPath).toBe(remotePath)
+			expect(localPath).toBe("/camera roll/img_0001_1700000000.jpg")
+		})
+
+		it("timestamps in different seconds produce different collision paths (no false equalities)", () => {
+			const hashSecA = String(Math.floor(1700000000000 / 1000)) // "1700000000"
+			const hashSecB = String(Math.floor(1700000001000 / 1000)) // "1700000001"
+
+			const pathA = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: hashSecA }
+			})
+			const pathB = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: hashSecB }
+			})
+
+			expect(pathA).not.toBe(pathB)
+		})
+	})
+
+	describe("null creationTime fallback symmetry", () => {
+		it("null creationTime falls back to '0' (seconds) on local side, matching remote null-meta fallback", () => {
+			// Local: Math.floor((creationTime ?? 0) / 1000) where creationTime is null → 0
+			// Remote: Math.floor(Number(meta?.created ?? 0) / 1000) where meta is null → 0
+			const nullCreationTime: number | null = null
+			const nullCreated: bigint | null | undefined = null
+			const localHash = String(Math.floor((nullCreationTime ?? 0) / 1000))
+			const remoteHash = String(Math.floor(Number(nullCreated ?? 0) / 1000))
+
+			expect(localHash).toBe("0")
+			expect(remoteHash).toBe("0")
+
+			const localPath = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: localHash }
+			})
+			const remotePath = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: remoteHash }
+			})
+
+			expect(localPath).toBe(remotePath)
+		})
+	})
+
+	describe("sync — same-named assets at different seconds get distinct tree paths", () => {
+		it("two same-named assets with different creationTimes are assigned distinct tree paths and uploaded separately", async () => {
+			// Two IMG_0001.jpg assets created 1 second apart must each get a distinct
+			// path in listLocal (via seconds-timestamp dedup) so both are uploaded.
+			ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1", "a2"] })
+			ml.addAsset({
+				id: "a1",
+				filename: "IMG_0001.jpg",
+				uri: "file:///media/a1",
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+			ml.addAsset({
+				id: "a2",
+				filename: "IMG_0001.jpg",
+				uri: "file:///media/a2",
+				mediaType: MediaType.IMAGE,
+				creationTime: 2000,
+				modificationTime: 3000
+			})
+			fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+			fs.set("file:///media/a2", new Uint8Array([4, 5, 6]))
+
+			await cameraUpload.sync()
+
+			// Different creation seconds → distinct collision paths → both uploaded
+			expect(transfers.upload).toHaveBeenCalledTimes(2)
+		})
+
+		it("two same-named assets within the same second get distinct tree slots via the base + collision paths and both upload", async () => {
+			// The first asset (sorted earliest by creationTime) wins the base slot.
+			// The second asset (same second) tries iteration 0 — that slot is free
+			// (different from the base), so both assets end up in distinct tree slots
+			// and both are uploaded. The seconds-timestamp suffix only collapses two
+			// assets when they compete for ALL collision paths (iteration 0 and 1),
+			// which requires that the entire resolution chain is already occupied.
+			ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["b1", "b2"] })
+			ml.addAsset({
+				id: "b1",
+				filename: "IMG_0001.jpg",
+				uri: "file:///media/b1",
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+			ml.addAsset({
+				id: "b2",
+				filename: "IMG_0001.jpg",
+				uri: "file:///media/b2",
+				mediaType: MediaType.IMAGE,
+				// Same second as b1: Math.floor(1500/1000) = Math.floor(1000/1000) = 1.
+				creationTime: 1500,
+				modificationTime: 2000
+			})
+			fs.set("file:///media/b1", new Uint8Array([1, 2, 3]))
+			fs.set("file:///media/b2", new Uint8Array([4, 5, 6]))
+
+			await cameraUpload.sync()
+
+			// b1 → base slot (/img_0001.jpg), b2 → iteration-0 slot (/img_0001_1.jpg)
+			// Both distinct → both uploaded.
+			expect(transfers.upload).toHaveBeenCalledTimes(2)
+		})
+	})
+})
+
+// ─── #15 regression: compress tmp-file extension ─────────────────────────────
+
+describe("#15 regression — compress() extension gate", () => {
+	it("staging tmp file is created with the source extension so the compress extension gate passes for .jpg", async () => {
+		// Before the fix newTmpFile() produced a bare UUID with no extension, so
+		// compress() always got extname("") and returned the file uncompressed.
+		// After the fix the tmp file has the same extension as the source asset.
+
+		const { Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		// Source asset is a .jpg
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["compress-a"] })
+		ml.addAsset({
+			id: "compress-a",
+			filename: "photo.jpg",
+			uri: "file:///media/compress-a",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/compress-a", new Uint8Array(new Array(100).fill(1)))
+
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, compress: true })
+
+		// Set up ImageManipulator to produce a smaller output
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
+
+		fs.set(manipulatedUri, new Uint8Array([1, 2, 3])) // smaller than source (100 bytes)
+
+		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		await cameraUpload.sync()
+
+		// compress() was invoked (ImageManipulator.manipulate was called) — the extension
+		// gate passed because the tmp file had ".jpg" extension, not "".
+		expect(vi.mocked(ImageManipulator.manipulate)).toHaveBeenCalledTimes(1)
+	})
+
+	it("staging tmp file with .png extension reaches compress() and triggers ImageManipulator", async () => {
+		const { Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["compress-b"] })
+		ml.addAsset({
+			id: "compress-b",
+			filename: "screenshot.png",
+			uri: "file:///media/compress-b",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/compress-b", new Uint8Array(new Array(100).fill(2)))
+
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, compress: true })
+
+		// Manipulated file is larger — compress() returns original file unchanged
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/screenshot-manip.png`
+
+		fs.set(manipulatedUri, new Uint8Array(new Array(200).fill(2))) // larger — compress returns original
+
+		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		await cameraUpload.sync()
+
+		// ImageManipulator was called (extension gate passed) even though it returned
+		// the original (no net compression in this test case)
+		expect(vi.mocked(ImageManipulator.manipulate)).toHaveBeenCalledTimes(1)
+	})
+
+	it("when compress rewrites .png to .jpg, the uploaded filename has .jpg extension", async () => {
+		const { Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["compress-c"] })
+		ml.addAsset({
+			id: "compress-c",
+			filename: "photo.png",
+			uri: "file:///media/compress-c",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/compress-c", new Uint8Array(new Array(100).fill(3)))
+
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, compress: true })
+
+		// Manipulated file is smaller — compress() will rename to .jpg
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.png`
+
+		fs.set(manipulatedUri, new Uint8Array([1, 2, 3])) // smaller than 100 bytes
+
+		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		await cameraUpload.sync()
+
+		expect(vi.mocked(transfers.upload)).toHaveBeenCalledTimes(1)
+
+		const uploadCall = vi.mocked(transfers.upload).mock.calls[0]?.[0] as any
+
+		// compress() rewrites .png → .jpg; the upload name should follow
+		expect(uploadCall.name).toMatch(/\.jpg$/)
+		expect(uploadCall.name).not.toMatch(/\.png$/)
+	})
+
+	it("when compress is disabled, uploaded filename preserves the original extension", async () => {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["nocompress-a"] })
+		ml.addAsset({
+			id: "nocompress-a",
+			filename: "photo.png",
+			uri: "file:///media/nocompress-a",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/nocompress-a", new Uint8Array([1, 2, 3]))
+
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, compress: false })
+
+		await cameraUpload.sync()
+
+		expect(vi.mocked(transfers.upload)).toHaveBeenCalledTimes(1)
+
+		const uploadCall = vi.mocked(transfers.upload).mock.calls[0]?.[0] as any
+
+		expect(uploadCall.name).toBe("photo.png")
+	})
+})
+
+// ─── #15 regression: compress-rename dedup tree-key symmetry ─────────────────
+// When compress rewrites .png → .jpg the remote tree-key becomes .jpg while the
+// local key would stay .png. listLocal/listRemote now compute extension-agnostic
+// keys when compress is on, so the asset is matched and NOT re-uploaded each sync.
+
+describe("#15 regression — compress-rename dedup tree-key symmetry", () => {
+	function setupLocalPng(id: string) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: [id] })
+		ml.addAsset({
+			id,
+			filename: "photo.png",
+			uri: `file:///media/${id}`,
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set(`file:///media/${id}`, new Uint8Array([1, 2, 3]))
+	}
+
+	function setupRemote(path: string) {
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path, file: { uuid: "remote-1" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: FileSystem.Paths.basename(path), created: 1000n, modified: 2000n }
+		} as any)
+	}
+
+	it("compress ON: local .png matches remote .jpg (compressed) — no re-upload", async () => {
+		setupLocalPng("c1")
+		// Remote already holds the compressed JPEG result of the same asset.
+		setupRemote("/Camera Roll/photo.jpg")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("compress ON: local .png matches remote .png (compression did not win) — no re-upload", async () => {
+		setupLocalPng("c2")
+		setupRemote("/Camera Roll/photo.png")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("compress OFF: local .png does NOT match remote .jpg — genuinely different, upload fires", async () => {
+		// With compress off the upload never renames, so .png and .jpg are different
+		// files. The keys stay extension-bearing and must NOT merge.
+		setupLocalPng("c3")
+		setupRemote("/Camera Roll/photo.jpg")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: false })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("compress ON: two same-stem assets at different seconds both upload (suffix symmetry holds)", async () => {
+		// Two photo.png assets one second apart. Both must get distinct stem-based
+		// tree slots (base + iteration-0 suffix), neither matching the single remote
+		// entry, so both upload — proving the extension-agnostic keying does not
+		// over-collapse distinct assets.
+		const { Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		// compress is ON and .png passes the manipulator gate, so stub manipulate to
+		// produce a LARGER output → compress() returns the original (no rename),
+		// keeping this test focused on dedup keying rather than the rename path. Each
+		// call yields a UNIQUE manipulated uri so per-asset cleanup doesn't clobber a
+		// sibling's temp file.
+		let manipCount = 0
+
+		vi.mocked(ImageManipulator.manipulate).mockImplementation(() => {
+			const manipulatedUri = `${Paths.cache.uri}/filen-tmp/manip-${manipCount++}.jpg`
+
+			fs.set(manipulatedUri, new Uint8Array(new Array(50).fill(9)))
+
+			const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+
+			return { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) } as any
+		})
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["d1", "d2"] })
+		ml.addAsset({
+			id: "d1",
+			filename: "photo.png",
+			uri: "file:///media/d1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "d2",
+			filename: "photo.png",
+			uri: "file:///media/d2",
+			mediaType: MediaType.IMAGE,
+			creationTime: 2000,
+			modificationTime: 3000
+		})
+		fs.set("file:///media/d1", new Uint8Array([1, 2, 3]))
+		fs.set("file:///media/d2", new Uint8Array([4, 5, 6]))
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+	})
+})
+
+// ─── #14 regression: null-creationTime collision key symmetry ────────────────
+// The local collision contentHash previously fell back to modificationTime when
+// creationTime was null; the remote side has no modificationTime and falls back
+// to 0. For two same-named null-creation assets that collide, the suffixed slot
+// diverged (local used modificationTime, remote used 0), so the file looked
+// "missing remotely" and re-uploaded every sync. Both sides now use
+// creationTime ?? 0, making the collision suffix symmetric.
+
+describe("#14 regression — null-creationTime collision key symmetry", () => {
+	it("two same-named null-creation assets match their remote counterparts — no re-upload", async () => {
+		// Two IMG_0001.jpg assets, BOTH with null creationTime but distinct
+		// modificationTimes. The remote tree mirrors them with created=0n. With the
+		// symmetric (creationTime ?? 0) key the suffixed slot resolves identically on
+		// both sides, so neither uploads.
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["n1", "n2"] })
+		ml.addAsset({
+			id: "n1",
+			filename: "IMG_0001.jpg",
+			uri: "file:///media/n1",
+			mediaType: MediaType.IMAGE,
+			creationTime: null,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "n2",
+			filename: "IMG_0001.jpg",
+			uri: "file:///media/n2",
+			mediaType: MediaType.IMAGE,
+			creationTime: null,
+			modificationTime: 9999000
+		})
+		fs.set("file:///media/n1", new Uint8Array([1, 2, 3]))
+		fs.set("file:///media/n2", new Uint8Array([4, 5, 6]))
+
+		// Remote holds both files: the base slot and the collision-suffixed slot.
+		// created=0n mirrors the null-creation fallback on both sides.
+		const basePath = "/Camera Roll/IMG_0001.jpg"
+		const suffixedPath =
+			modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/camera roll/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: "0" }
+			}) ?? ""
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [
+						{ path: basePath, file: { uuid: "remote-base" } },
+						{ path: suffixedPath, file: { uuid: "remote-suffixed" } }
+					]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockImplementation(
+			(file: any) =>
+				({
+					meta: {
+						name: file.uuid === "remote-suffixed" ? FileSystem.Paths.basename(suffixedPath) : "IMG_0001.jpg",
+						created: 0n,
+						modified: 9999000n
+					}
+				}) as any
+		)
+
+		await cameraUpload.sync()
+
+		// Both local files map to slots already present remotely → no uploads.
+		// (Pre-fix, the local suffix used modificationTime so the suffixed slot
+		// diverged from the remote created=0 suffix → spurious re-upload.)
+		expect(transfers.upload).not.toHaveBeenCalled()
 	})
 })

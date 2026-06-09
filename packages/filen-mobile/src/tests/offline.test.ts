@@ -423,6 +423,42 @@ describe("Offline", () => {
 
 			await expect(createOffline()).resolves.toBeDefined()
 		})
+
+		// Regression (#45): a session that crashed mid-swap can leave a partial `{uuid}.staging-*` directory
+		// and/or a `{uuid}.old`. reconcileLeftoverStaging() (run at construction) deletes incomplete staging,
+		// and restores `.old` only when the live slot is missing (crash between the two rename steps).
+		it("reconciles leftover staging and .old directories on construction", async () => {
+			const liveUuid = "11111111-1111-1111-1111-111111111111"
+			const missingUuid = "22222222-2222-2222-2222-222222222222"
+
+			// A partial staging dir (always incomplete → must be deleted).
+			fs.set(`${DIRECTORIES_DIR_URI}/${liveUuid}.staging-abc`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${liveUuid}.staging-abc/partial.txt`, new Uint8Array([1]))
+
+			// An .old whose live slot STILL exists → the swap completed; the .old is stale → delete it.
+			fs.set(`${DIRECTORIES_DIR_URI}/${liveUuid}`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${liveUuid}/data.txt`, new Uint8Array([2]))
+			fs.set(`${DIRECTORIES_DIR_URI}/${liveUuid}.old`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${liveUuid}.old/data.txt`, new Uint8Array([3]))
+
+			// An .old whose live slot is MISSING → crash between rename steps → restore it to {uuid}.
+			fs.set(`${DIRECTORIES_DIR_URI}/${missingUuid}.old`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${missingUuid}.old/recovered.txt`, new Uint8Array([4]))
+
+			await createOffline()
+
+			// Partial staging deleted.
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${liveUuid}.staging-abc`)).toBe(false)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${liveUuid}.staging-abc/partial.txt`)).toBe(false)
+
+			// Live slot intact, its stale .old deleted.
+			expect(fs.get(`${DIRECTORIES_DIR_URI}/${liveUuid}/data.txt`)).toBeInstanceOf(Uint8Array)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${liveUuid}.old`)).toBe(false)
+
+			// Missing live slot restored from its .old.
+			expect(fs.get(`${DIRECTORIES_DIR_URI}/${missingUuid}/recovered.txt`)).toBeInstanceOf(Uint8Array)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${missingUuid}.old`)).toBe(false)
+		})
 	})
 
 	describe("atomicWrite", () => {
@@ -2201,6 +2237,108 @@ describe("Offline", () => {
 
 			expect(transfers.download).not.toHaveBeenCalled()
 		})
+
+		// Regression (#45): a force re-download (sync's full-resync) that fails must NOT destroy the existing
+		// populated tree. With stage-then-atomic-swap the live directories/{uuid} tree (and its .filenmeta) is
+		// left fully intact on a transient failure; only the sibling staging dir is cleaned up.
+		it("preserves the existing directory tree when a force re-download fails (stage-swap)", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const dirItem = makeDirItem(uuid, "ForceDir")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			// Pre-store a POPULATED tree: a meta with entries + an actual nested data file on disk.
+			writeDirectoryMeta(uuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/inside.txt": { item: makeFileItem("33333333-3333-3333-3333-333333333333", "inside.txt") }
+				}
+			})
+
+			const nestedFileUri = `${DIRECTORIES_DIR_URI}/${uuid}/inside.txt`
+			const metaUri = `${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`
+
+			fs.set(nestedFileUri, new Uint8Array([9, 8, 7]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(dirItem)).toBe(true)
+
+			const metaBefore = fs.get(metaUri)
+
+			// The force re-download fails (transient).
+			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("Disk full"))
+
+			// storeDirectory rethrows the failure (so the caller can surface/retry) — but must not have wiped
+			// the live tree first.
+			await expect(offline.storeDirectory({ directory: dirItem, parent, force: true, skipIndexUpdate: true })).rejects.toThrow(
+				"Disk full"
+			)
+
+			// The live tree survives intact: nested data file + meta unchanged.
+			expect(fs.get(nestedFileUri)).toBeInstanceOf(Uint8Array)
+			expect(Array.from(fs.get(nestedFileUri) as Uint8Array)).toEqual([9, 8, 7])
+			expect(fs.get(metaUri)).toEqual(metaBefore)
+
+			// No staging dir leaked under directories/.
+			const leakedStaging = [...fs.keys()].some(k => k.startsWith(`${DIRECTORIES_DIR_URI}/`) && k.includes(".staging-"))
+
+			expect(leakedStaging).toBe(false)
+
+			// No .old leaked either (swap never started — live was never renamed away).
+			const leakedOld = [...fs.keys()].some(k => k === `${DIRECTORIES_DIR_URI}/${uuid}.old` || k.startsWith(`${DIRECTORIES_DIR_URI}/${uuid}.old/`))
+
+			expect(leakedOld).toBe(false)
+		})
+
+		// Regression (#45): the happy path — a successful force re-download swaps the freshly-staged tree into
+		// the live {uuid} slot, replacing the old content and leaving no staging/.old residue.
+		it("atomically swaps a successful force re-download into the live slot", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const dirItem = makeDirItem(uuid, "ForceDir")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeDirectoryMeta(uuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					"/stale.txt": { item: makeFileItem("33333333-3333-3333-3333-333333333333", "stale.txt") }
+				}
+			})
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/stale.txt`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			// The re-download writes a fresh file into whatever staging dir it is handed as the destination.
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const destUri = destination.uri
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/fresh.txt`, new Uint8Array([2, 2]))
+
+				return { files: [], directories: [] }
+			})
+
+			await offline.storeDirectory({ directory: dirItem, parent, force: true, skipIndexUpdate: true })
+
+			// The fresh content now lives at directories/{uuid}/...
+			expect(fs.get(`${DIRECTORIES_DIR_URI}/${uuid}/fresh.txt`)).toBeInstanceOf(Uint8Array)
+
+			// The meta travelled with the swap.
+			expect(fs.get(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBeInstanceOf(Uint8Array)
+
+			// No staging / .old residue remains.
+			const residue = [...fs.keys()].some(
+				k => k.startsWith(`${DIRECTORIES_DIR_URI}/`) && (k.includes(".staging-") || k.includes(`${uuid}.old`))
+			)
+
+			expect(residue).toBe(false)
+		})
 	})
 
 	describe("storeDirectory skipIndexUpdate", () => {
@@ -2442,6 +2580,73 @@ describe("Offline", () => {
 			const meta = deserialize(new TextDecoder().decode(metaBytes)) as FileOrDirectoryOfflineMeta
 
 			expect((meta.item.data.decryptedMeta as { modified: number } | null)?.modified).toBe(5000)
+		})
+
+		// Regression (#44): a transient re-download failure for a remotely-modified file must NOT destroy the
+		// existing offline copy. The stage-then-atomic-swap path downloads into a sibling staging dir and only
+		// replaces the live copy on success; a failure deletes only staging and leaves the live data/meta intact.
+		it("preserves the existing offline copy and caches when a modified-file re-download fails (stage-swap)", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const parentUuid = "22222222-2222-2222-2222-222222222222"
+			const fileItem = makeFileItem(uuid, "report.txt")
+			const parent = makeParent(parentUuid)
+			const originalBytes = new Uint8Array([1, 2, 3])
+
+			writeFileData(uuid, "report.txt", originalBytes)
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			await offline.updateIndex()
+
+			expect(await offline.isItemStored(fileItem)).toBe(true)
+
+			const dataUri = `${FILES_DIR_URI}/${uuid}/report.txt`
+			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
+
+			// Remote has a newer modified timestamp → triggers the modified-file re-download branch.
+			const newerRemoteFile = {
+				uuid,
+				meta: {
+					tag: "Decoded",
+					inner: [{ name: "report.txt", size: 200n, modified: 5000, created: 900 }]
+				}
+			}
+
+			// The re-download fails (transient network/5xx). Must not wipe the live copy.
+			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("Network error"))
+
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDir: vi.fn().mockResolvedValue({
+						files: [newerRemoteFile],
+						dirs: []
+					})
+				}
+			} as any)
+
+			// sync() must not reject — the per-item failure is caught/logged, the rest of sync proceeds.
+			await expect(offline.sync()).resolves.toBeUndefined()
+
+			// The existing data file is untouched (still the ORIGINAL bytes, not deleted).
+			const data = fs.get(dataUri)
+
+			expect(data).toBeInstanceOf(Uint8Array)
+			expect(Array.from(data as Uint8Array)).toEqual([1, 2, 3])
+
+			// The existing meta still reflects the OLD modified timestamp (1000), not 5000 — no swap happened.
+			const metaBytes = fs.get(metaUri) as Uint8Array
+			const persistedMeta = deserialize(new TextDecoder().decode(metaBytes)) as FileOrDirectoryOfflineMeta
+
+			expect((persistedMeta.item.data.decryptedMeta as { modified: number } | null)?.modified).toBe(1000)
+
+			// The item is still considered stored (cache/index untouched).
+			expect(await offline.isItemStored(fileItem)).toBe(true)
+
+			// No staging dir leaked under files/.
+			const leakedStaging = [...fs.keys()].some(k => k.startsWith(`${FILES_DIR_URI}/`) && k.includes(".staging-"))
+
+			expect(leakedStaging).toBe(false)
 		})
 
 		it("does not re-download a file when remote has same modification time", async () => {
@@ -4125,6 +4330,70 @@ describe("Offline", () => {
 
 			// Clean up
 			cache.directoryUuidToAnySharedDirWithContext.delete(sharedParentUuid)
+			vi.mocked(unwrapParentUuid).mockImplementation(() => null)
+		})
+
+		// Regression (#46): a stored nested-shared-dir entry whose parent is absent from the cache must NOT
+		// throw inside findParentAnyDirWithContext (which runs in the unguarded Promise.all of
+		// listDirectoriesRecursive). It must return null so the entry is skipped and updateIndex() completes
+		// as a PARTIAL rebuild rather than rejecting and aborting the whole offline index.
+		it("yields a partial (not rejected) updateIndex when a nested shared-dir parent is missing from cache", async () => {
+			const topUuid = "11111111-1111-1111-1111-111111111111"
+			const sharedSubDirUuid = "22222222-2222-2222-2222-222222222222"
+			const fileInSharedUuid = "33333333-3333-3333-3333-333333333333"
+			const parent = makeParent("44444444-4444-4444-4444-444444444444")
+			const sharedParentUuid = "55555555-5555-5555-5555-555555555555"
+
+			const topDirItem = makeDirItem(topUuid, "Root")
+
+			const sharedSubDir = {
+				type: "sharedDirectory",
+				data: {
+					uuid: sharedSubDirUuid,
+					decryptedMeta: { name: "SharedSub", size: 0n, modified: 1000, created: 900 },
+					undecryptable: false,
+					inner: { parent: sharedParentUuid }
+				}
+			} as unknown as DriveItem
+
+			writeDirectoryMeta(topUuid, {
+				item: topDirItem,
+				parent,
+				entries: {
+					"/SharedSub": { item: sharedSubDir },
+					"/SharedSub/data.txt": { item: makeFileItem(fileInSharedUuid, "data.txt") }
+				}
+			})
+
+			// Parent resolves to a uuid, but the shared-context cache is EMPTY — the old code threw here.
+			cache.directoryUuidToAnySharedDirWithContext.clear()
+
+			const { unwrapParentUuid } = await import("@/lib/sdkUnwrap")
+
+			vi.mocked(unwrapParentUuid).mockReset()
+			vi.mocked(unwrapParentUuid).mockImplementation(() => sharedParentUuid)
+
+			const offline = await createOffline()
+
+			// Must NOT reject — the missing-parent shared entry is skipped, the rest is rebuilt.
+			await expect(offline.updateIndex()).resolves.toBeUndefined()
+
+			// The index file was written (rebuild reached the end) and the top-level directory survives.
+			expect(fs.has(INDEX_FILE_URI)).toBe(true)
+
+			const index = readIndex()
+
+			expect(index.directories[topUuid]).toBeDefined()
+
+			// The shared subdirectory itself resolves (its parent is the top-level "directory", no cache needed),
+			// so it stays in the index...
+			expect(index.directories[sharedSubDirUuid]).toBeDefined()
+
+			// ...but the file UNDER it — whose parent IS the unresolvable shared-dir (empty cache) — is the entry
+			// that used to throw and abort the whole rebuild. Now it is simply skipped (partial index).
+			expect(index.files[fileInSharedUuid]).toBeUndefined()
+
+			vi.mocked(unwrapParentUuid).mockReset()
 			vi.mocked(unwrapParentUuid).mockImplementation(() => null)
 		})
 	})

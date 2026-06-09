@@ -1,25 +1,35 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockCacheMap, mockFileCacheHas, mockFileCacheGet, mockOfflineGetLocalFile, mockIsOnline, mockHttpStoreState, mockGetFileUrl } =
-	vi.hoisted(() => {
-		const mockGetFileUrl = vi.fn((file: { tag?: string; inner?: unknown }) => {
-			return `http://localhost:8080/file/${(file as { inner?: [{ uuid?: string }] }).inner?.[0]?.uuid ?? "unknown"}`
-		})
-
-		const mockHttpStoreState: { getFileUrl: typeof mockGetFileUrl | null } = {
-			getFileUrl: mockGetFileUrl
-		}
-
-		return {
-			mockCacheMap: new Map<string, unknown>(),
-			mockFileCacheHas: vi.fn().mockResolvedValue(false),
-			mockFileCacheGet: vi.fn().mockResolvedValue(null),
-			mockOfflineGetLocalFile: vi.fn().mockResolvedValue(null),
-			mockIsOnline: vi.fn().mockReturnValue(true),
-			mockHttpStoreState,
-			mockGetFileUrl
-		}
+const {
+	mockCacheMap,
+	mockFileCacheHas,
+	mockFileCacheGet,
+	mockOfflineGetLocalFile,
+	mockIsOnline,
+	mockHttpStoreState,
+	mockGetFileUrl,
+	mockWaitForHttpProvider
+} = vi.hoisted(() => {
+	const mockGetFileUrl = vi.fn((file: { tag?: string; inner?: unknown }) => {
+		return `http://localhost:8080/file/${(file as { inner?: [{ uuid?: string }] }).inner?.[0]?.uuid ?? "unknown"}`
 	})
+
+	const mockHttpStoreState: { getFileUrl: typeof mockGetFileUrl | null } = {
+		getFileUrl: mockGetFileUrl
+	}
+
+	return {
+		mockCacheMap: new Map<string, unknown>(),
+		mockFileCacheHas: vi.fn().mockResolvedValue(false),
+		mockFileCacheGet: vi.fn().mockResolvedValue(null),
+		mockOfflineGetLocalFile: vi.fn().mockResolvedValue(null),
+		mockIsOnline: vi.fn().mockReturnValue(true),
+		mockHttpStoreState,
+		mockGetFileUrl,
+		// Default: reuse the same URL resolver the provider would return once ready.
+		mockWaitForHttpProvider: vi.fn().mockResolvedValue(mockGetFileUrl)
+	}
+})
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
@@ -106,6 +116,10 @@ vi.mock("@/stores/useHttp.store", () => ({
 	}
 }))
 
+vi.mock("@/lib/thumbnailsHelpers", () => ({
+	waitForHttpProvider: mockWaitForHttpProvider
+}))
+
 vi.mock("@/lib/utils", () => ({
 	wrapAbortSignalForSdk: vi.fn(() => ({}))
 }))
@@ -190,6 +204,7 @@ describe("fetchData (useFileUrl.query)", () => {
 					`http://localhost:8080/file/${(file as { inner?: [{ uuid?: string }] }).inner?.[0]?.uuid ?? "unknown"}`
 			)
 		mockHttpStoreState.getFileUrl = mockGetFileUrl
+		mockWaitForHttpProvider.mockReset().mockResolvedValue(mockGetFileUrl)
 	})
 
 	describe("external type", () => {
@@ -307,19 +322,71 @@ describe("fetchData (useFileUrl.query)", () => {
 			expect(mockGetFileUrl).not.toHaveBeenCalled()
 		})
 
-		it("returns null when online but useHttpStore.getFileUrl is null", async () => {
-			const item = makeFileItem("no-provider-uuid")
-			mockCacheMap.set("no-provider-uuid", item)
+		it("waits for the HTTP provider (does NOT return null) when online but getFileUrl is not yet ready (Bug #50)", async () => {
+			const item = makeFileItem("starting-provider-uuid")
+			mockCacheMap.set("starting-provider-uuid", item)
+
+			mockFileCacheHas.mockResolvedValueOnce(false)
+			mockOfflineGetLocalFile.mockResolvedValueOnce(null)
+			mockIsOnline.mockReturnValue(true)
+			// Provider not yet ready at the one-shot getState() read…
+			mockHttpStoreState.getFileUrl = null
+			// …but becomes ready via the readiness-wait, which resolves with the live resolver.
+			mockWaitForHttpProvider.mockResolvedValueOnce(mockGetFileUrl)
+
+			const params: UseFileUrlQueryParams = { type: "drive", data: { uuid: "starting-provider-uuid" } }
+			const result = await fetchData(params)
+
+			expect(mockWaitForHttpProvider).toHaveBeenCalledOnce()
+			// Resolves to the real URL rather than a false success-null.
+			expect(result).toBe(`http://localhost:8080/file/${item.data.uuid}`)
+		})
+
+		it("forwards the abort signal to waitForHttpProvider so the wait rejects on abort (Bug #50)", async () => {
+			const item = makeFileItem("abort-uuid")
+			mockCacheMap.set("abort-uuid", item)
 
 			mockFileCacheHas.mockResolvedValueOnce(false)
 			mockOfflineGetLocalFile.mockResolvedValueOnce(null)
 			mockIsOnline.mockReturnValue(true)
 			mockHttpStoreState.getFileUrl = null
 
-			const params: UseFileUrlQueryParams = { type: "drive", data: { uuid: "no-provider-uuid" } }
+			const controller = new AbortController()
+			const abortRejection = new Error("Aborted")
+			mockWaitForHttpProvider.mockImplementationOnce((signal?: AbortSignal) => {
+				// Mirror the real readiness-wait: reject with the abort reason when aborted.
+				if (signal?.aborted) {
+					return Promise.reject(abortRejection)
+				}
+
+				return Promise.reject(abortRejection)
+			})
+			controller.abort()
+
+			const params: UseFileUrlQueryParams & { signal?: AbortSignal } = {
+				type: "drive",
+				data: { uuid: "abort-uuid" },
+				signal: controller.signal
+			}
+
+			await expect(fetchData(params)).rejects.toBe(abortRejection)
+			expect(mockWaitForHttpProvider).toHaveBeenCalledWith(controller.signal)
+		})
+
+		it("does NOT wait for the provider when offline — returns null directly (Bug #50 genuine-offline path)", async () => {
+			const item = makeFileItem("offline-no-provider-uuid")
+			mockCacheMap.set("offline-no-provider-uuid", item)
+
+			mockFileCacheHas.mockResolvedValueOnce(false)
+			mockOfflineGetLocalFile.mockResolvedValueOnce(null)
+			mockIsOnline.mockReturnValue(false)
+			mockHttpStoreState.getFileUrl = null
+
+			const params: UseFileUrlQueryParams = { type: "drive", data: { uuid: "offline-no-provider-uuid" } }
 			const result = await fetchData(params)
 
 			expect(result).toBeNull()
+			expect(mockWaitForHttpProvider).not.toHaveBeenCalled()
 		})
 	})
 

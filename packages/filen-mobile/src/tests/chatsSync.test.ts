@@ -204,6 +204,70 @@ describe("Sync (Chats)", () => {
 			expect(sqlite.kvAsync.remove).toHaveBeenCalledWith(KV_KEY)
 		})
 
+		// #17 — offline launch must still hydrate the persisted queue. The hydration happens BEFORE
+		// the network prune, and the prune is best-effort: a chatsQueryFetch rejection (offline) must
+		// not abort hydration or drop the queue.
+		it("hydrates the store even when the chats-list fetch rejects (offline launch)", async () => {
+			kvStore.set(KV_KEY, {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-1", "queued offline", 1000)]
+				}
+			})
+
+			// Simulate offline: the network listChats throws.
+			mockFetchChats.mockRejectedValue(new Error("offline"))
+
+			await createSync()
+
+			// The persisted queue is still hydrated despite the fetch failure.
+			expect(chatsState.inflightMessages["chat-1"]).toBeDefined()
+			expect(chatsState.inflightMessages["chat-1"]!.messages).toHaveLength(1)
+		})
+
+		it("does NOT prune (and does not drop the queue) when the chats-list fetch rejects", async () => {
+			kvStore.set(KV_KEY, {
+				"chat-a": {
+					chat: mockChat("chat-a"),
+					messages: [mockMessage("msg-a", "keep-a", 1000)]
+				},
+				"chat-b": {
+					chat: mockChat("chat-b"),
+					messages: [mockMessage("msg-b", "keep-b", 1000)]
+				}
+			})
+
+			mockFetchChats.mockRejectedValue(new Error("offline"))
+
+			await createSync()
+
+			// Both chats survive — no chat is pruned because the prune step failed and was swallowed.
+			expect(chatsState.inflightMessages["chat-a"]).toBeDefined()
+			expect(chatsState.inflightMessages["chat-b"]).toBeDefined()
+		})
+
+		it("hydrates the store BEFORE the network fetch resolves (visible/deliverable immediately)", async () => {
+			kvStore.set(KV_KEY, {
+				"chat-1": {
+					chat: mockChat("chat-1"),
+					messages: [mockMessage("msg-1", "pending", 1000)]
+				}
+			})
+
+			let storeHydratedBeforeFetch = false
+
+			// When the network fetch is consulted, the store must already be hydrated.
+			mockFetchChats.mockImplementation(async () => {
+				storeHydratedBeforeFetch = chatsState.inflightMessages["chat-1"] !== undefined
+
+				return [{ uuid: "chat-1" }]
+			})
+
+			await createSync()
+
+			expect(storeHydratedBeforeFetch).toBe(true)
+		})
+
 		it("mutates the fromDisk object in-place when pruning deleted chats", async () => {
 			// The source does `delete fromDisk[chatUuid]` on the object returned by sqlite.kvAsync.get.
 			// This test confirms the pruned chat UUID is absent from the store state, which is the

@@ -105,6 +105,8 @@ export function buildBulkActionMenu({
 	const menuButtons: MenuButton[] = []
 	const isAtRoot = !drivePath.uuid
 
+	const hasUndecryptable = driveFlags.includesUndecryptable
+
 	if (drivePath.type === "trash") {
 		menuButtons.push({
 			id: "restoreSelected",
@@ -153,7 +155,10 @@ export function buildBulkActionMenu({
 
 	// Favorite/Unfavorite first — toggle is the most-tapped bulk
 	// action, belongs at the top of the menu.
-	if (drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut") {
+	if (
+		!hasUndecryptable &&
+		(drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut")
+	) {
 		menuButtons.push({
 			id: "bulkFavorite",
 			title: driveFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
@@ -180,11 +185,12 @@ export function buildBulkActionMenu({
 	// selected items. useFocusEffect on Drive clears selection when
 	// we return.
 	if (
-		drivePath.type === "drive" ||
-		drivePath.type === "favorites" ||
-		drivePath.type === "sharedOut" ||
-		drivePath.type === "links" ||
-		drivePath.type === "recents"
+		!hasUndecryptable &&
+		(drivePath.type === "drive" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "links" ||
+			drivePath.type === "recents")
 	) {
 		menuButtons.push({
 			id: "bulkMove",
@@ -223,12 +229,13 @@ export function buildBulkActionMenu({
 
 	// Download to device — applies to every read-capable variant.
 	if (
-		drivePath.type === "drive" ||
-		drivePath.type === "recents" ||
-		drivePath.type === "favorites" ||
-		drivePath.type === "sharedIn" ||
-		drivePath.type === "sharedOut" ||
-		drivePath.type === "links"
+		!hasUndecryptable &&
+		(drivePath.type === "drive" ||
+			drivePath.type === "recents" ||
+			drivePath.type === "favorites" ||
+			drivePath.type === "sharedIn" ||
+			drivePath.type === "sharedOut" ||
+			drivePath.type === "links")
 	) {
 		menuButtons.push({
 			id: "bulkDownload",
@@ -256,6 +263,7 @@ export function buildBulkActionMenu({
 	// those). Aggregator flag is computed once via getPreviewType
 	// over decryptedMeta.name.
 	if (
+		!hasUndecryptable &&
 		driveFlags.everyImageOrVideoFile &&
 		(drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites")
 	) {
@@ -266,7 +274,7 @@ export function buildBulkActionMenu({
 			requiresOnline: true,
 			onPress: async () => {
 				const permissionsResult = await run(async () => {
-					return await hasAllNeededMediaPermissions({ shouldRequest: true })
+					return await hasAllNeededMediaPermissions({ shouldRequest: true, library: "any", needCamera: false })
 				})
 
 				if (!permissionsResult.success) {
@@ -334,7 +342,10 @@ export function buildBulkActionMenu({
 	// recipient's public key (SDK shareDir / shareFile). Grouped with
 	// the other "output" actions (download / save-to-photos). The
 	// picker is the confirmation gesture; no extra confirm dialog.
-	if (drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut") {
+	if (
+		!hasUndecryptable &&
+		(drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut")
+	) {
 		menuButtons.push({
 			id: "bulkShareFilenUser",
 			title: t("share_filen_user_selected"),
@@ -386,7 +397,7 @@ export function buildBulkActionMenu({
 	// "show" when the per-item cache hasn't been populated yet.
 	const everySelectedKnownStoredOffline = liveItems.every(it => offline.isItemStoredSync(it) === true)
 
-	if ((drivePath.type === "drive" || drivePath.type === "favorites") && !everySelectedKnownStoredOffline) {
+	if (!hasUndecryptable && (drivePath.type === "drive" || drivePath.type === "favorites") && !everySelectedKnownStoredOffline) {
 		menuButtons.push({
 			id: "bulkMakeOffline",
 			title: t("make_available_offline_selected"),

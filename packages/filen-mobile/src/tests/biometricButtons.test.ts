@@ -149,12 +149,46 @@ describe("enableBiometric", () => {
 		})
 
 		it("calls alerts.error and aborts when fileProvider.disable() throws", async () => {
+			// Confirm the warning, supply two matching passwords (validation passes),
+			// then have disable() fail — biometric must not be set.
 			alertConfirmed()
+			inputReturns("pw")
+			inputReturns("pw")
 			mockFileProviderDisable.mockRejectedValueOnce(new Error("disable failed"))
 
 			await enableBiometric(baseArgs({ fileProviderEnabled: true }))
 
 			expect(mockAlertsError).toHaveBeenCalledOnce()
+			expect(mockSetBiometric).not.toHaveBeenCalled()
+		})
+
+		// ── #53 fix: provider teardown deferred until password validated ──────
+
+		it("does not call fileProvider.disable() when password step is cancelled after confirming warning", async () => {
+			// User confirms the warning but then cancels the fallback-password prompt.
+			// Before the fix: disable() was already called at that point.
+			// After the fix: disable() must NOT be called.
+			alertConfirmed()
+			inputCancelled()
+
+			await enableBiometric(baseArgs({ fileProviderEnabled: true }))
+
+			expect(mockFileProviderDisable).not.toHaveBeenCalled()
+			expect(mockSetFileProviderEnabled).not.toHaveBeenCalled()
+			expect(mockSetBiometric).not.toHaveBeenCalled()
+		})
+
+		it("does not call fileProvider.disable() when passwords mismatch after confirming warning", async () => {
+			// User confirms the warning then types mismatched passwords.
+			// The mismatch must leave the provider intact.
+			alertConfirmed()
+			inputReturns("pass1")
+			inputReturns("pass2")
+
+			await enableBiometric(baseArgs({ fileProviderEnabled: true }))
+
+			expect(mockFileProviderDisable).not.toHaveBeenCalled()
+			expect(mockSetFileProviderEnabled).not.toHaveBeenCalled()
 			expect(mockSetBiometric).not.toHaveBeenCalled()
 		})
 	})

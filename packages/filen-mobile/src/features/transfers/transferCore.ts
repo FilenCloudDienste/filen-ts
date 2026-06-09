@@ -144,6 +144,12 @@ export type DownloadParams = {
 	awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 	pauseSignal?: PauseSignal
 	signal?: AbortSignal
+	// When true, a directory download must NOT pre-delete an existing populated destination before the
+	// recursive download starts (nor delete it again on a non-abort failure). Used by the offline layer's
+	// stage-then-atomic-swap path, where the destination IS the staging dir and a populated live tree must
+	// survive a transient download error. Defaults to false → the original destructive behavior is preserved
+	// for every other (non-offline) caller, which downloads into a fresh/disposable destination.
+	preserveDestinationOnStart?: boolean
 }
 
 // Performs an upload against the SDK with full progress tracking. The two global signals
@@ -688,7 +694,15 @@ export async function uploadCore(
 export async function downloadCore(
 	globalAbortController: AbortController,
 	globalPauseSignal: PauseSignal,
-	{ item, destination, hideProgress, awaitExternalCompletionBeforeMarkingAsFinished, pauseSignal, signal }: DownloadParams
+	{
+		item,
+		destination,
+		hideProgress,
+		awaitExternalCompletionBeforeMarkingAsFinished,
+		pauseSignal,
+		signal,
+		preserveDestinationOnStart
+	}: DownloadParams
 ): Promise<{
 	files: (Omit<FileWithPath, "file"> & {
 		file: File | SharedFile
@@ -807,7 +821,16 @@ export async function downloadCore(
 							throw new Error("Parent directory of shared directory not found in cache.")
 						}
 
-						return new AnyDirWithContext.Shared(parentDirFromCache)
+						// Target the shared directory ITSELF (item.data), borrowing only the shareInfo from the
+						// cached parent — mirrors offline.ts findParentAnyDirWithContext. Wrapping the parent's
+						// AnySharedDirWithContext directly would download the PARENT's (larger) tree instead of
+						// this child directory.
+						return new AnyDirWithContext.Shared(
+							AnySharedDirWithContext.new({
+								dir: new AnySharedDir.Dir(item.data),
+								shareInfo: parentDirFromCache.shareInfo
+							})
+						)
 					}
 
 					case "sharedRootDirectory": {
@@ -821,7 +844,7 @@ export async function downloadCore(
 				}
 			})()
 
-			if (destination.exists) {
+			if (!preserveDestinationOnStart && destination.exists) {
 				destination.delete()
 			}
 
@@ -938,7 +961,10 @@ export async function downloadCore(
 		})
 
 		if (!result.success) {
-			if (destination.exists) {
+			// When the offline layer owns the destination (staging dir), it cleans up on failure and must
+			// keep the live tree intact — so don't delete here. Every other caller downloads into a fresh
+			// destination and relies on this cleanup.
+			if (!preserveDestinationOnStart && destination.exists) {
 				destination.delete()
 			}
 
@@ -1095,7 +1121,7 @@ export async function downloadCore(
 		}
 
 		if (cachedOrOfflineFile.success && cachedOrOfflineFile.data) {
-			cachedOrOfflineFile.data.copySync(destination)
+			await cachedOrOfflineFile.data.copy(destination)
 
 			if (!hideProgress) {
 				useTransfersStore.getState().setTransfers(prev =>

@@ -30,6 +30,12 @@ export const drivePreview = {
 	/** Button shown after the user dismissed the password prompt — re-opens the prompt to enter the PDF password */
 	enter_pdf_password: "Enter password",
 
+	// ── Shared preview error states (previewText.tsx / previewDocx.tsx / previewPdf.tsx) ──────
+	/** Error state body shown when a file preview failed to load */
+	preview_load_failed: "Could not load this file",
+	/** Button label to retry a failed file preview load */
+	retry: "Retry",
+
 	// ── Text preview (previewText.tsx) ─────────────────────────────────────────
 	/** Placeholder shown in the text editor when the previewed file is empty */
 	placeholder: "Empty",

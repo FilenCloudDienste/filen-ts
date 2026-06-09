@@ -12,11 +12,15 @@ const MAX_FILE_SIZE_IMAGE = 32 * 1024 * 1024
 const MAX_REDIRECTS = 5
 
 /**
- * Manually follow up to MAX_REDIRECTS hops for the given method, validating
- * every redirect Location with safeParseUrl before issuing the next hop.
- * This prevents SSRF via open redirect: no request is ever sent to a private
- * or non-HTTPS host because we validate the Location header before following.
- * Returns the final Response on success, or null if any hop is invalid/fails.
+ * Issues the request for the given method and returns the final Response, or null on failure.
+ *
+ * IMPORTANT — SSRF caveat: `redirect: "manual"` is INERT on React Native. RN's `fetch` is the
+ * whatwg-fetch polyfill over XHR, which does not read `request.redirect`; the native stack
+ * (NSURLSession / OkHttp) auto-follows redirects, so JS only ever sees the final response and
+ * the 3xx per-hop validation below is dead code in production. The SSRF guard therefore relies
+ * SOLELY on the caller's post-hoc `safeParseUrl(res.url)` check (validating the final, redirected
+ * URL — rejecting private IPs, non-HTTPS and credentials) plus the immediate body abort in
+ * probeMedia. The per-hop loop is kept only for non-RN runtimes that honor `redirect: "manual"`.
  */
 async function fetchManual(startUrl: string, method: "HEAD" | "GET", signal: AbortSignal): Promise<Response | null> {
 	let currentUrl = startUrl

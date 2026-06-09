@@ -881,4 +881,132 @@ describe("buildBulkActionMenu", () => {
 
 		expect(ids).toEqual(["bulkFavorite", "bulkMove", "bulkDownload", "bulkShareFilenUser", "bulkMakeOffline", "bulkTrash"])
 	})
+
+	// --- #28: includesUndecryptable gates meta-requiring bulk ops ---
+
+	it("includesUndecryptable=true + type='drive' suppresses all meta-requiring actions", () => {
+		mockIsItemStoredSync.mockReturnValue(false)
+		mockIsItemTopLevelStoredSync.mockReturnValue(false)
+
+		const ids = buttonIds(
+			buildBulkActionMenu({
+				drivePath: makeDrivePath("drive"),
+				selectedDriveItems: selectedItems,
+				liveItems,
+				driveFlags: makeFlags({ includesUndecryptable: true, everyImageOrVideoFile: true }),
+				t: t as never
+			})
+		)
+
+		expect(ids).not.toContain("bulkFavorite")
+		expect(ids).not.toContain("bulkMove")
+		expect(ids).not.toContain("bulkDownload")
+		expect(ids).not.toContain("bulkSaveToPhotos")
+		expect(ids).not.toContain("bulkShareFilenUser")
+		expect(ids).not.toContain("bulkMakeOffline")
+	})
+
+	it("includesUndecryptable=true + type='drive' still offers bulkTrash (pure-uuid disposition)", () => {
+		mockIsItemStoredSync.mockReturnValue(false)
+		mockIsItemTopLevelStoredSync.mockReturnValue(false)
+
+		const ids = buttonIds(
+			buildBulkActionMenu({
+				drivePath: makeDrivePath("drive"),
+				selectedDriveItems: selectedItems,
+				liveItems,
+				driveFlags: makeFlags({ includesUndecryptable: true }),
+				t: t as never
+			})
+		)
+
+		expect(ids).toContain("bulkTrash")
+	})
+
+	it("includesUndecryptable=true + type='drive' + anyTopLevelOffline still offers bulkRemoveOffline", () => {
+		mockIsItemStoredSync.mockReturnValue(false)
+		mockIsItemTopLevelStoredSync.mockReturnValue(true)
+
+		const ids = buttonIds(
+			buildBulkActionMenu({
+				drivePath: makeDrivePath("drive"),
+				selectedDriveItems: selectedItems,
+				liveItems,
+				driveFlags: makeFlags({ includesUndecryptable: true }),
+				t: t as never
+			})
+		)
+
+		expect(ids).toContain("bulkRemoveOffline")
+	})
+
+	it("includesUndecryptable=true + type='sharedOut' + isAtRoot still offers bulkStopSharing", () => {
+		const ids = buttonIds(
+			buildBulkActionMenu({
+				drivePath: makeDrivePath("sharedOut", null),
+				selectedDriveItems: selectedItems,
+				liveItems,
+				driveFlags: makeFlags({ includesUndecryptable: true }),
+				t: t as never
+			})
+		)
+
+		expect(ids).toContain("bulkStopSharing")
+		expect(ids).not.toContain("bulkFavorite")
+		expect(ids).not.toContain("bulkDownload")
+		expect(ids).not.toContain("bulkShareFilenUser")
+	})
+
+	it("includesUndecryptable=true + type='sharedIn' + isAtRoot still offers bulkRemoveShare", () => {
+		const ids = buttonIds(
+			buildBulkActionMenu({
+				drivePath: makeDrivePath("sharedIn", null),
+				selectedDriveItems: selectedItems,
+				liveItems,
+				driveFlags: makeFlags({ includesUndecryptable: true }),
+				t: t as never
+			})
+		)
+
+		expect(ids).toContain("bulkRemoveShare")
+		expect(ids).not.toContain("bulkDownload")
+	})
+
+	it("includesUndecryptable=true + type='links' + isAtRoot still offers bulkDisablePublicLink", () => {
+		const ids = buttonIds(
+			buildBulkActionMenu({
+				drivePath: makeDrivePath("links", null),
+				selectedDriveItems: selectedItems,
+				liveItems,
+				driveFlags: makeFlags({ includesUndecryptable: true }),
+				t: t as never
+			})
+		)
+
+		expect(ids).toContain("bulkDisablePublicLink")
+		expect(ids).not.toContain("bulkDownload")
+		expect(ids).not.toContain("bulkMove")
+	})
+
+	it("includesUndecryptable=false (all decryptable) → meta-requiring actions appear as normal", () => {
+		mockIsItemStoredSync.mockReturnValue(false)
+		mockIsItemTopLevelStoredSync.mockReturnValue(false)
+
+		const ids = buttonIds(
+			buildBulkActionMenu({
+				drivePath: makeDrivePath("drive"),
+				selectedDriveItems: selectedItems,
+				liveItems,
+				driveFlags: makeFlags({ includesUndecryptable: false }),
+				t: t as never
+			})
+		)
+
+		expect(ids).toContain("bulkFavorite")
+		expect(ids).toContain("bulkMove")
+		expect(ids).toContain("bulkDownload")
+		expect(ids).toContain("bulkShareFilenUser")
+		expect(ids).toContain("bulkMakeOffline")
+		expect(ids).toContain("bulkTrash")
+	})
 })

@@ -214,9 +214,10 @@ describe("hasAllNeededMediaPermissions", () => {
 	})
 
 	it("returns false when shouldRequest=true, mediaLibrary request succeeds, but camera request fails", async () => {
-		// Initial check fails
+		// Both permissions fail the initial check
 		mockMediaLibraryPermissions.granted = false
 		mockMediaLibraryPermissions.canAskAgain = true
+		mockCameraPermissions.granted = false
 		mockCameraPermissions.canAskAgain = true
 		// mediaLibrary request succeeds
 		mockMediaLibraryRequest.granted = true
@@ -232,15 +233,17 @@ describe("hasAllNeededMediaPermissions", () => {
 
 	// #20 — cameraRequest.granted=true but expires!='never' is the untested OR-branch
 	it("returns false when shouldRequest=true, mediaLibrary request succeeds, camera granted=true but expires!='never'", async () => {
-		// Initial check fails — trigger the request path
+		// Both permissions fail the initial check
 		mockMediaLibraryPermissions.granted = false
 		mockMediaLibraryPermissions.canAskAgain = true
+		mockCameraPermissions.granted = false
+		mockCameraPermissions.expires = "2099-12-31"
 		mockCameraPermissions.canAskAgain = true
 		// mediaLibrary request succeeds fully
 		mockMediaLibraryRequest.granted = true
 		mockMediaLibraryRequest.accessPrivileges = "all"
 		mockMediaLibraryRequest.expires = "never"
-		// camera granted=true but temporary (non-'never') expiry
+		// camera request: granted=true but temporary (non-'never') expiry
 		mockCameraRequest.granted = true
 		mockCameraRequest.expires = "2099-12-31"
 
@@ -265,6 +268,198 @@ describe("hasAllNeededMediaPermissions", () => {
 		const result = await hasAllNeededMediaPermissions({ shouldRequest: true })
 
 		expect(result).toBe(true)
+	})
+})
+
+// ─── hasAllNeededMediaPermissions — scope parameterization ───────────────────
+
+describe("hasAllNeededMediaPermissions — library scope", () => {
+	it('library="all" returns false when accessPrivileges is "limited"', async () => {
+		mockMediaLibraryPermissions.accessPrivileges = "limited"
+
+		const result = await hasAllNeededMediaPermissions({ library: "all", needCamera: false })
+
+		expect(result).toBe(false)
+	})
+
+	it('library="any" returns true when accessPrivileges is "limited" (granted=true)', async () => {
+		mockMediaLibraryPermissions.accessPrivileges = "limited"
+
+		const result = await hasAllNeededMediaPermissions({ library: "any", needCamera: false })
+
+		expect(result).toBe(true)
+	})
+
+	it('library="any" returns true when accessPrivileges is "all" (granted=true)', async () => {
+		// all is a superset of any
+		const result = await hasAllNeededMediaPermissions({ library: "any", needCamera: false })
+
+		expect(result).toBe(true)
+	})
+
+	it('library="any" returns false when mediaLibrary.granted=false', async () => {
+		mockMediaLibraryPermissions.granted = false
+
+		const result = await hasAllNeededMediaPermissions({ library: "any", needCamera: false })
+
+		expect(result).toBe(false)
+	})
+
+	it('library="none" returns true regardless of mediaLibrary state (no camera needed)', async () => {
+		mockMediaLibraryPermissions.granted = false
+		mockMediaLibraryPermissions.accessPrivileges = "none"
+
+		const result = await hasAllNeededMediaPermissions({ library: "none", needCamera: false })
+
+		expect(result).toBe(true)
+	})
+
+	it('library="none" does not request media-library permission even with shouldRequest=true', async () => {
+		mockMediaLibraryPermissions.granted = false
+		mockMediaLibraryPermissions.canAskAgain = true
+
+		// If media-library were checked, limited access would make this return false
+		const result = await hasAllNeededMediaPermissions({ shouldRequest: true, library: "none", needCamera: false })
+
+		expect(result).toBe(true)
+	})
+})
+
+describe("hasAllNeededMediaPermissions — needCamera scope", () => {
+	it("needCamera=false returns true even when camera is denied", async () => {
+		mockCameraPermissions.granted = false
+
+		const result = await hasAllNeededMediaPermissions({ library: "all", needCamera: false })
+
+		expect(result).toBe(true)
+	})
+
+	it("needCamera=false does not request camera even with shouldRequest=true", async () => {
+		// Camera denied but shouldn't block the result
+		mockCameraPermissions.granted = false
+		mockCameraPermissions.canAskAgain = true
+
+		const result = await hasAllNeededMediaPermissions({ shouldRequest: true, library: "all", needCamera: false })
+
+		expect(result).toBe(true)
+	})
+
+	it("needCamera=true (default) returns false when camera is denied", async () => {
+		mockCameraPermissions.granted = false
+
+		const result = await hasAllNeededMediaPermissions({ library: "none", needCamera: true })
+
+		expect(result).toBe(false)
+	})
+
+	it("needCamera=true requests camera when denied and canAskAgain=true", async () => {
+		mockCameraPermissions.granted = false
+		mockCameraPermissions.canAskAgain = true
+		mockCameraRequest.granted = true
+		mockCameraRequest.expires = "never"
+
+		const result = await hasAllNeededMediaPermissions({ shouldRequest: true, library: "none", needCamera: true })
+
+		expect(result).toBe(true)
+	})
+
+	it("needCamera=true returns false when camera canAskAgain=false and shouldRequest=true", async () => {
+		mockCameraPermissions.granted = false
+		mockCameraPermissions.canAskAgain = false
+
+		const result = await hasAllNeededMediaPermissions({ shouldRequest: true, library: "none", needCamera: true })
+
+		expect(result).toBe(false)
+	})
+})
+
+describe("hasAllNeededMediaPermissions — useMediaPermissions hook granted derivation with scope", () => {
+	it('hook with library="all" reports granted=false when accessPrivileges="limited"', () => {
+		mockQueryData.data = {
+			mediaLibrary: {
+				status: "granted",
+				granted: true,
+				canAskAgain: true,
+				expires: "never",
+				accessPrivileges: "limited"
+			},
+			camera: {
+				status: "granted",
+				granted: true,
+				canAskAgain: true,
+				expires: "never"
+			}
+		}
+
+		const { result } = renderHook(() => useMediaPermissions({ library: "all" }))
+
+		expect(result.current.granted).toBe(false)
+	})
+
+	it('hook with library="any" reports granted=true when accessPrivileges="limited"', () => {
+		mockQueryData.data = {
+			mediaLibrary: {
+				status: "granted",
+				granted: true,
+				canAskAgain: true,
+				expires: "never",
+				accessPrivileges: "limited"
+			},
+			camera: {
+				status: "granted",
+				granted: true,
+				canAskAgain: true,
+				expires: "never"
+			}
+		}
+
+		const { result } = renderHook(() => useMediaPermissions({ library: "any", needCamera: false }))
+
+		expect(result.current.granted).toBe(true)
+	})
+
+	it('hook with library="none" reports granted=true even when mediaLibrary.granted=false', () => {
+		mockQueryData.data = {
+			mediaLibrary: {
+				status: "denied",
+				granted: false,
+				canAskAgain: false,
+				expires: "never",
+				accessPrivileges: "none"
+			},
+			camera: {
+				status: "granted",
+				granted: true,
+				canAskAgain: true,
+				expires: "never"
+			}
+		}
+
+		const { result } = renderHook(() => useMediaPermissions({ library: "none", needCamera: false }))
+
+		expect(result.current.granted).toBe(true)
+	})
+
+	it("hook with needCamera=false reports granted=true when camera is denied", () => {
+		mockQueryData.data = {
+			mediaLibrary: {
+				status: "granted",
+				granted: true,
+				canAskAgain: true,
+				expires: "never",
+				accessPrivileges: "all"
+			},
+			camera: {
+				status: "denied",
+				granted: false,
+				canAskAgain: true,
+				expires: "never"
+			}
+		}
+
+		const { result } = renderHook(() => useMediaPermissions({ library: "all", needCamera: false }))
+
+		expect(result.current.granted).toBe(true)
 	})
 })
 
@@ -409,9 +604,11 @@ describe("useMediaPermissions — return shape derivation from query data", () =
 	})
 
 	it("requestPermissions returns false when camera request returns granted=true but expires!='never'", async () => {
-		// Initial permissions don't fully pass (camera expires is not 'never')
+		// Both permissions fail the initial check
 		mockMediaLibraryPermissions.granted = false
 		mockMediaLibraryPermissions.canAskAgain = true
+		mockCameraPermissions.granted = false
+		mockCameraPermissions.expires = "2099-12-31"
 		mockCameraPermissions.canAskAgain = true
 		mockMediaLibraryRequest.granted = true
 		mockMediaLibraryRequest.accessPrivileges = "all"

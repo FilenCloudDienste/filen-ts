@@ -22,7 +22,7 @@ import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import cache from "@/lib/cache"
 import i18n from "@/lib/i18n"
-import { modifyAssetPathOnCollision, sanitizePathSegment } from "@/features/cameraUpload/cameraUploadHelpers"
+import { modifyAssetPathOnCollision, sanitizePathSegment, dedupTreeKey, stripFilenameExtension } from "@/features/cameraUpload/cameraUploadHelpers"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -185,7 +185,7 @@ class CameraUpload {
 			return file
 		}
 
-		manipulatedFile.copySync(file)
+		await manipulatedFile.copy(file)
 
 		if (manipulatedFile.exists) {
 			manipulatedFile.delete()
@@ -370,8 +370,19 @@ class CameraUpload {
 				// duplicates consistently receive a collision suffix – stable across runs.
 				// Filename is used as tiebreaker so both local and remote trees resolve
 				// equal creationTimes in the same order.
+				//
+				// Timestamps are floored to seconds before comparison so that sub-second
+				// rounding differences between the local PHAsset timestamp and the server's
+				// stored value (after EXIF-override or network round-trip) do not produce
+				// different orderings across syncs. #14: null creationTime falls back to 0
+				// ONLY (NOT to modificationTime) so the key is symmetric with the remote
+				// side, which has no modificationTime to consult — a modificationTime
+				// fallback here would make the same null-creation asset hash differently
+				// local vs remote and re-evaluate every sync.
 				infos.sort((a, b) => {
-					const timeDiff = (a.info.creationTime ?? 0) - (b.info.creationTime ?? 0)
+					const tA = Math.floor((a.info.creationTime ?? 0) / 1000)
+					const tB = Math.floor((b.info.creationTime ?? 0) / 1000)
+					const timeDiff = tA - tB
 
 					if (timeDiff !== 0) {
 						return timeDiff
@@ -383,8 +394,22 @@ class CameraUpload {
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
 				for (const { asset, info } of infos) {
 					const originalPath = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).trim()
-					let path = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).toLowerCase().trim()
+					// #15: when compress is enabled the upload may rewrite the extension
+					// (e.g. .png → .jpg), so the dedup key is made extension-agnostic here
+					// and symmetrically on the remote side. The collision-suffix name is
+					// likewise stripped of its extension so the suffix path stays symmetric.
+					const fullPath = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).toLowerCase().trim()
+					let path = dedupTreeKey({ path: fullPath, compress: config.compress })
+					const collisionName = config.compress ? stripFilenameExtension(info.filename) : info.filename
 					let iteration = 0
+
+					// Use a seconds-floored creation timestamp as the collision identity.
+					// Flooring to seconds absorbs sub-second drift from EXIF-override or
+					// network round-trips, keeping local and remote trees symmetric without
+					// any per-asset file read at listing time. #14: null creationTime falls
+					// back to 0 ONLY (NOT to modificationTime) so it matches the remote
+					// side, which has no modificationTime to consult.
+					const localContentHash = String(Math.floor((info.creationTime ?? 0) / 1000))
 
 					while (tree[path]) {
 						path =
@@ -392,8 +417,8 @@ class CameraUpload {
 								iteration,
 								path,
 								asset: {
-									name: info.filename,
-									creationTime: info.creationTime ?? 0
+									name: collisionName,
+									contentHash: localContentHash
 								}
 							}) ?? ""
 
@@ -421,7 +446,15 @@ class CameraUpload {
 		return tree
 	}
 
-	private async listRemote({ remoteDir, signal }: { remoteDir: AnyNormalDir; signal: AbortSignal }): Promise<RemoteTree> {
+	private async listRemote({
+		remoteDir,
+		signal,
+		compress
+	}: {
+		remoteDir: AnyNormalDir
+		signal: AbortSignal
+		compress: boolean
+	}): Promise<RemoteTree> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
 			new AnyDirWithContext.Normal(remoteDir),
@@ -446,13 +479,19 @@ class CameraUpload {
 		// mirroring the listLocal sort order. The server does not guarantee a stable return
 		// order, so without sorting, collision resolution would assign different path slots
 		// to the same files across runs, causing spurious re-uploads.
+		//
+		// Timestamps are floored to seconds before comparison to match the listLocal
+		// sort behaviour and absorb sub-second drift introduced by EXIF-override or
+		// network round-trips.  Null meta falls back to 0, mirroring the local side.
 		const sortedFiles = files
 			.map(file => ({
 				file,
 				meta: unwrapFileMeta(file.file).meta
 			}))
 			.sort((a, b) => {
-				const timeDiff = (a.meta ? Number(a.meta.created) : 0) - (b.meta ? Number(b.meta.created) : 0)
+				const tA = Math.floor(Number(a.meta?.created ?? 0) / 1000)
+				const tB = Math.floor(Number(b.meta?.created ?? 0) / 1000)
+				const timeDiff = tA - tB
 
 				if (timeDiff !== 0) {
 					return timeDiff
@@ -462,8 +501,20 @@ class CameraUpload {
 			})
 
 		for (const { file, meta } of sortedFiles) {
-			let path = normalizeFilePathForSdk(file.path).toLowerCase().trim()
+			const fullPath = normalizeFilePathForSdk(file.path).toLowerCase().trim()
+			// #15: mirror listLocal — when compress is enabled, the remote filename may
+			// be the compressed `.jpg` (or the original extension when compression lost),
+			// so the dedup key is made extension-agnostic and the collision-suffix name is
+			// stripped of its extension. This keeps the remote key symmetric with the local
+			// stem-based key for the same physical asset.
+			let path = dedupTreeKey({ path: fullPath, compress })
+			const remoteName = meta?.name ?? FileSystem.Paths.basename(fullPath)
+			const collisionName = compress ? stripFilenameExtension(remoteName) : remoteName
 			let iteration = 0
+
+			// Use a seconds-floored creation timestamp as the contentHash, matching
+			// the local listLocal computation exactly for symmetric collision resolution.
+			const remoteContentHash = String(Math.floor(Number(meta?.created ?? 0) / 1000))
 
 			while (tree[path]) {
 				path =
@@ -471,8 +522,8 @@ class CameraUpload {
 						iteration,
 						path,
 						asset: {
-							name: meta?.name ?? FileSystem.Paths.basename(path),
-							creationTime: meta ? Number(meta.created) : 0
+							name: collisionName,
+							contentHash: remoteContentHash
 						}
 					}) ?? ""
 
@@ -505,7 +556,8 @@ class CameraUpload {
 			}),
 			this.listRemote({
 				remoteDir: config.remoteDir,
-				signal
+				signal,
+				compress: config.compress
 			})
 		])
 
@@ -631,7 +683,7 @@ class CameraUpload {
 				return
 			}
 
-			const [netState, permissions] = await Promise.all([NetInfo.fetch(), hasAllNeededMediaPermissions()])
+			const [netState, permissions] = await Promise.all([NetInfo.fetch(), hasAllNeededMediaPermissions({ library: "all", needCamera: false })])
 
 			if (!permissions) {
 				return
@@ -723,7 +775,11 @@ class CameraUpload {
 									break
 								}
 
-								const tmpFile = newTmpFile()
+								// Create the staging tmp file WITH the original extension so that
+								// compress() can pass the supported-extension gate (it checks
+								// extname(file.uri) — a bare UUID with no extension always fails).
+								const srcExt = FileSystem.Paths.extname(delta.file.info.filename).toLowerCase()
+								const tmpFile = newTmpFile(`${randomUUID()}${srcExt}`)
 
 								defer(() => {
 									if (tmpFile.exists) {
@@ -735,13 +791,23 @@ class CameraUpload {
 									tmpFile.delete()
 								}
 
-								assetFile.copySync(tmpFile)
+								await assetFile.copy(tmpFile)
 
 								let uploadFile = tmpFile
 
 								if (config.compress) {
 									uploadFile = await this.compress(tmpFile)
 								}
+
+								// When compress() rewrites the content to JPEG (e.g. .png → .jpg),
+								// it renames the file to have a .jpg extension.  Mirror that rename
+								// in the upload's `name` parameter so the remote filename and MIME
+								// type stay consistent with the actual bytes.
+								const uploadExt = FileSystem.Paths.extname(uploadFile.uri).toLowerCase()
+								const uploadName =
+									uploadExt !== "" && uploadExt !== srcExt
+										? `${FileSystem.Paths.basename(delta.file.info.filename, FileSystem.Paths.extname(delta.file.info.filename))}${uploadExt}`
+										: delta.file.info.filename
 
 								const parentDir = await this.ensureParentDirectoryExists({
 									config,
@@ -754,7 +820,7 @@ class CameraUpload {
 									parent: parentDir,
 									signal: abortController.signal,
 									pauseSignal,
-									name: delta.file.info.filename,
+									name: uploadName,
 									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
 									created: delta.file.info.creationTime ?? delta.file.info.modificationTime ?? undefined,
 									hideProgress: params?.background ?? undefined

@@ -1445,6 +1445,56 @@ describe("Transfers", () => {
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
 				expect(result).not.toBeNull()
 			})
+
+			// Regression (#25): a sharedDirectory (non-root) download must target the CHILD directory itself
+			// (item.data), borrowing only the shareInfo from the cached parent — NOT the parent's whole
+			// AnySharedDirWithContext, which would download the parent's (larger) tree.
+			it("targets the child directory (item.data), not the parent, for a sharedDirectory download", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				const sharedDirItem = {
+					type: "sharedDirectory" as const,
+					data: {
+						inner: {
+							parent: { tag: "Uuid", inner: ["parent-uuid"] },
+							uuid: "shared-dir-uuid"
+						},
+						sharingRole: "owner"
+					}
+				}
+
+				mockUnwrapParentUuid.mockReturnValue("parent-uuid")
+
+				// Seed the cache with the PARENT's shared-dir context (a distinct uuid/shareInfo).
+				const parentSharedDirWithContext = { dir: { tag: "Root", inner: [{ inner: { uuid: "parent-uuid" } }] }, shareInfo: "parent-share-info" }
+				const cacheMap = (cache as any).directoryUuidToAnySharedDirWithContext as Map<string, unknown>
+
+				cacheMap.clear()
+				cacheMap.set("parent-uuid", parentSharedDirWithContext)
+
+				await transfers.download({
+					item: sharedDirItem as any,
+					destination: dest,
+					hideProgress: true
+				})
+
+				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
+
+				// downloadDirRecursively(path, callbacks, targetDir, future, opts) — targetDir is arg index 2.
+				const targetDir = mockDownloadDirRecursively.mock.calls[0]?.[2] as any
+
+				// AnyDirWithContext.Shared wrapping AnySharedDirWithContext.new({ dir, shareInfo }).
+				expect(targetDir.tag).toBe("Shared")
+
+				const sharedCtx = targetDir.inner[0]
+
+				// shareInfo is borrowed from the cached PARENT...
+				expect(sharedCtx.shareInfo).toBe("parent-share-info")
+
+				// ...but the targeted dir is the CHILD (item.data) wrapped in AnySharedDir.Dir, NOT the parent.
+				expect(sharedCtx.dir.tag).toBe("Dir")
+				expect(sharedCtx.dir.inner[0].inner.uuid).toBe("shared-dir-uuid")
+				expect(sharedCtx.dir.inner[0]).toBe(sharedDirItem.data)
+			})
 		})
 	})
 

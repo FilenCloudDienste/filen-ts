@@ -745,57 +745,10 @@ export function buildTwoFactorButtons({
 
 					const recoverKey = result.data
 
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("two_factor_recovery_key"),
-							message: t("two_factor_recovery_key_description"),
-							okText: t("continue"),
-							cancelText: t("close")
-						})
+					router.push({
+						pathname: "/security/recoveryKey",
+						params: { recoveryKey: recoverKey }
 					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					const exportResult = await runWithLoading(async () => {
-						const file = newTmpFile(`${accountQuery.data.email}.twoFactorRecoveryKey.${Date.now()}.txt`)
-
-						if (file.exists) {
-							file.delete()
-						}
-
-						file.write(recoverKey)
-
-						return file
-					})
-
-					if (!exportResult.success) {
-						console.error(exportResult.error)
-						alerts.error(exportResult.error)
-
-						return
-					}
-
-					const shareResult = await shareTmpFile({
-						uri: exportResult.data.uri,
-						name: exportResult.data.name,
-						cleanup: () => {
-							if (exportResult.data.exists) {
-								exportResult.data.delete()
-							}
-						}
-					})
-
-					if (!shareResult.success) {
-						console.error(shareResult.error)
-						alerts.error(shareResult.error)
-
-						return
-					}
 				}
 			}
 		}

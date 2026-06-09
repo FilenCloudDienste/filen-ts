@@ -6,9 +6,7 @@ import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 export const BASE_QUERY_KEY = "useCameraUploadAlbumsQuery"
 
 export async function fetchData(_signal?: AbortSignal) {
-	const permissions = await hasAllNeededMediaPermissions({
-		shouldRequest: true
-	})
+	const permissions = await hasAllNeededMediaPermissions({ library: "all", needCamera: false })
 
 	if (!permissions) {
 		return [] as MediaLibraryLegacy.Album[]

@@ -275,17 +275,9 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 				const item = unwrappedFileIntoDriveItem(unwrapFileMeta(fromCache))
 
-				// We have to add it to recents again after removing it above in the global call
-				driveItemsQueryUpdate({
-					params: {
-						path: {
-							type: "recents",
-							uuid: null
-						}
-					},
-					updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.uuid), item]
-				})
-
+				// Do NOT re-add to recents: the global removal above already
+				// removed the item from every listing including recents, which is
+				// correct — trashed files must not appear there.
 				driveItemsQueryUpdate({
 					params: {
 						path: {
@@ -321,17 +313,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 				const item = unwrappedDirIntoDriveItem(unwrapDirMeta(fromCache.inner[0]))
 
-				// We have to add it to recents again after removing it above in the global call
-				driveItemsQueryUpdate({
-					params: {
-						path: {
-							type: "recents",
-							uuid: null
-						}
-					},
-					updater: prev => [...prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid), item]
-				})
-
+				// Do NOT re-add to recents: the global removal above already
+				// removed the item from every listing including recents, which is
+				// correct — trashed directories must not appear there (recents is
+				// files-only per the server contract).
 				driveItemsQueryUpdate({
 					params: {
 						path: {

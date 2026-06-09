@@ -95,10 +95,17 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	makeDriveItemPublicLink: vi.fn()
 }))
 
+vi.mock("@/lib/cache", () => ({
+	default: {
+		chatUuidToChat: new Map<string, unknown>()
+	}
+}))
+
 import chats from "@/features/chats/chats"
 import type { Chat } from "@/types"
 import type { ChatParticipant, Contact } from "@filen/sdk-rs"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import cache from "@/lib/cache"
 
 function makeChat(overrides: Partial<Chat> = {}): Chat {
 	return {
@@ -937,37 +944,108 @@ describe("chats.sendMessage", () => {
 		const result = await chats.sendMessage({ chat, message: "hello world", inflightId: "inflight-2" })
 
 		expect(mockSdkClient.sendChatMessage).toHaveBeenCalledWith(chat, "hello world", undefined, undefined)
-		expect(result.message.inner.message).toBe("hello world")
-		expect(result.message.undecryptable).toBe(false)
+		expect(result.message).not.toBeNull()
+		expect(result.message?.inner.message).toBe("hello world")
+		expect(result.message?.undecryptable).toBe(false)
 	})
 
-	it("throws when updateLastFocusTimesNow returns no chat", async () => {
+	// #16 — idempotent send. sendChatMessage is the single commit boundary; post-commit housekeeping
+	// (updateLastChatFocusTimesNow / markChatRead) is best-effort and must NOT re-throw, otherwise the
+	// inflight retry path would re-send the already-committed message and create a peer-visible duplicate.
+	it("does NOT throw when updateLastChatFocusTimesNow rejects after a committed send (best-effort housekeeping)", async () => {
 		const chat = makeChat({ uuid: "chat-send3" })
-		const sdkChat = { ...chat, key: "some-key", lastMessage: undefined }
+		const sdkLastMessage = {
+			chat: "chat-send3",
+			inner: { uuid: "msg-commit-1", message: "committed", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
+			embedDisabled: false,
+			edited: false,
+			editedTimestamp: 0n,
+			sentTimestamp: 0n,
+			replyTo: undefined
+		}
+		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
 		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
-		// updateLastChatFocusTimesNow returns empty array → updatedChat is undefined
-		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([])
+		// Housekeeping rejects AFTER the commit — must be swallowed, not bubbled.
+		mockSdkClient.updateLastChatFocusTimesNow.mockRejectedValueOnce(new Error("focus-times network error"))
 		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
 
-		await expect(chats.sendMessage({ chat, message: "test", inflightId: "inf-3" })).rejects.toThrow(
-			"Failed to update chat after sending message"
-		)
+		const result = await chats.sendMessage({ chat, message: "committed", inflightId: "inf-3" })
+
+		// The send resolved with the committed message — the inflight retry path will therefore
+		// remove it from the queue (no re-send / no duplicate).
+		expect(result.message).not.toBeNull()
+		expect(result.message?.inner.uuid).toBe("msg-commit-1")
+		// The optimistic copy was reconciled into the messages cache exactly once on the commit.
+		expect(mockChatMessagesQueryUpdate).toHaveBeenCalled()
 	})
 
-	it("throws when chat has no lastMessage after sending", async () => {
+	it("does NOT throw when markChatRead rejects after a committed send (best-effort housekeeping)", async () => {
 		const chat = makeChat({ uuid: "chat-send4" })
-		const sdkChat = { ...chat, key: "some-key", lastMessage: undefined }
+		const sdkLastMessage = {
+			chat: "chat-send4",
+			inner: { uuid: "msg-commit-2", message: "committed2", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
+			embedDisabled: false,
+			edited: false,
+			editedTimestamp: 0n,
+			sentTimestamp: 0n,
+			replyTo: undefined
+		}
+		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
 
 		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
 		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
 		mockSdkClient.updateLastChatFocusTimesNow.mockResolvedValueOnce([sdkChat])
-		mockSdkClient.markChatRead.mockResolvedValueOnce(undefined)
+		mockSdkClient.markChatRead.mockRejectedValueOnce(new Error("mark-read network error"))
 
-		await expect(chats.sendMessage({ chat, message: "test", inflightId: "inf-4" })).rejects.toThrow(
-			"No last message after sending message"
+		const result = await chats.sendMessage({ chat, message: "committed2", inflightId: "inf-4" })
+
+		expect(result.message).not.toBeNull()
+		expect(result.message?.inner.uuid).toBe("msg-commit-2")
+	})
+
+	it("reconciles the messages cache exactly once on the commit, before housekeeping resolves", async () => {
+		// Asserts the commit-boundary reconcile (drop optimistic inflight copy + append committed
+		// message) happens off the chat returned by sendChatMessage, not after the focus/mark-read steps.
+		const chat = makeChat({ uuid: "chat-send-reconcile" })
+		const sdkLastMessage = {
+			chat: "chat-send-reconcile",
+			inner: { uuid: "committed-uuid", message: "reconcile", senderId: 1n, senderEmail: "test@test.com", senderNickName: undefined },
+			embedDisabled: false,
+			edited: false,
+			editedTimestamp: 0n,
+			sentTimestamp: 0n,
+			replyTo: undefined
+		}
+		const sdkChat = { ...chat, key: "some-key", lastMessage: sdkLastMessage }
+
+		mockSdkClient.sendTypingSignal.mockResolvedValueOnce(undefined)
+		mockSdkClient.sendChatMessage.mockResolvedValueOnce(sdkChat)
+		// Housekeeping rejects to prove the reconcile already happened independently of it.
+		mockSdkClient.updateLastChatFocusTimesNow.mockRejectedValueOnce(new Error("boom"))
+		mockSdkClient.markChatRead.mockRejectedValueOnce(new Error("boom"))
+
+		await chats.sendMessage({ chat, message: "reconcile", inflightId: "inf-reconcile" })
+
+		const allMsgUpdaterCalls = mockChatMessagesQueryUpdate.mock.calls
+		const lastMsgCall = allMsgUpdaterCalls[allMsgUpdaterCalls.length - 1]
+
+		expect(lastMsgCall).toBeDefined()
+		expect(lastMsgCall![0].params.uuid).toBe("chat-send-reconcile")
+
+		// The updater drops the optimistic inflight copy (by inflightId) and appends the committed message.
+		const optimistic = makeMessage("optimistic", {
+			inner: { uuid: "optimistic-uuid" },
+			inflightId: "inf-reconcile"
+		} as Partial<ChatMessageWithInflightId>)
+		const updater = lastMsgCall![0].updater
+		const updated = updater([optimistic])
+
+		expect(updated.some((m: ChatMessageWithInflightId) => m.inflightId === "inf-reconcile" && m.inner.uuid !== "committed-uuid")).toBe(
+			false
 		)
+		expect(updated.some((m: ChatMessageWithInflightId) => m.inner.uuid === "committed-uuid")).toBe(true)
 	})
 
 	it("sendMessage succeeds even when sendTypingSignal rejects (typing failure must not gate delivery)", async () => {
@@ -993,7 +1071,8 @@ describe("chats.sendMessage", () => {
 		const result = await chats.sendMessage({ chat, message: "hi", inflightId: "inf-tf" })
 
 		expect(mockSdkClient.sendChatMessage).toHaveBeenCalledTimes(1)
-		expect(result.message.inner.message).toBe("hi")
+		expect(result.message).not.toBeNull()
+		expect(result.message?.inner.message).toBe("hi")
 	})
 
 	it("chatMessagesQueryUpdate deduplicates by uuid and inflightId", async () => {
@@ -1204,6 +1283,23 @@ describe("chats.create", () => {
 		expect(mockSdkClient.createChat).toHaveBeenCalledWith([contact], undefined)
 		expect(result.uuid).toBe("new-chat")
 		expect(result.undecryptable).toBe(false)
+	})
+
+	// #18 — a chat created without a listChats must be seeded into the messages-query cache map,
+	// so opening it before the chats list refetches resolves the chat instead of cache-missing
+	// (which would render "No messages").
+	it("seeds cache.chatUuidToChat so the created chat resolves on open", async () => {
+		const contact = { userId: 9n, email: "seed@test.com" } as unknown as Contact
+		const sdkResult = makeChat({ uuid: "seeded-chat", key: "some-key" })
+
+		mockSdkClient.createChat.mockResolvedValueOnce(sdkResult)
+
+		cache.chatUuidToChat.delete("seeded-chat")
+
+		const result = await chats.create({ contacts: [contact] })
+
+		expect(cache.chatUuidToChat.get("seeded-chat")).toBeDefined()
+		expect(cache.chatUuidToChat.get("seeded-chat")?.uuid).toBe(result.uuid)
 	})
 
 	it("invokes chatsQueryUpdate after creating chat, prepending it if not duplicate", async () => {

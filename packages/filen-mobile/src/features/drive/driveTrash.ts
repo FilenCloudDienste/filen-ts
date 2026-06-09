@@ -42,6 +42,19 @@ export async function deletePermanently({ item, signal }: { item: DriveItem; sig
 
 	cache.forgetItem(item.data.uuid)
 
+	// Always remove from the trash listing — trash items carry `parent = Trash`
+	// sentinel, so unwrappedParentUuidPrevious is always null for them and the
+	// global block below never fires for this function's only real callers.
+	driveItemsQueryUpdate({
+		params: {
+			path: {
+				type: "trash",
+				uuid: null
+			}
+		},
+		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
+	})
+
 	if (unwrappedParentUuidPrevious) {
 		driveItemsQueryUpdateGlobal({
 			parentUuid: unwrappedParentUuidPrevious,

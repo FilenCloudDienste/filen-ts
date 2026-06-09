@@ -26,7 +26,18 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
-vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
+vi.mock("react-native", async () => {
+	const actual = await import("@/tests/mocks/reactNative")
+
+	return {
+		...actual,
+		// The shared mock's AppState has no `currentState`; the onError alert gate reads it.
+		AppState: {
+			...actual.AppState,
+			currentState: "active"
+		}
+	}
+})
 
 vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
 
@@ -64,12 +75,27 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
+vi.mock("@/stores/useApp.store", () => ({
+	default: {
+		getState: () => ({ biometricUnlocked: true })
+	}
+}))
+
 vi.mock("@tanstack/react-query", () => ({
 	QueryClient: class {
 		defaultOptions = {}
+		queryCache: unknown
 		setQueryData: typeof mockSetQueryData = mockSetQueryData
 		getQueryData: typeof mockGetQueryData = mockGetQueryData
-		constructor(_opts?: unknown) {}
+		constructor(opts?: { queryCache?: unknown }) {
+			this.queryCache = opts?.queryCache
+		}
+	},
+	QueryCache: class {
+		config: { onError?: (err: unknown, query: unknown) => void }
+		constructor(config?: { onError?: (err: unknown, query: unknown) => void }) {
+			this.config = config ?? {}
+		}
 	},
 	onlineManager: {
 		isOnline: mockIsOnline
@@ -88,7 +114,14 @@ vi.mock("@tanstack/query-persist-client-core", () => ({
 
 import { type PersistedQuery } from "@tanstack/query-persist-client-core"
 import { ErrorKind } from "@filen/sdk-rs"
-import { shouldPersistQuery, DEFAULT_QUERY_OPTIONS, queryUpdater, QUERY_CLIENT_CACHE_TIME, restoreQueries } from "@/queries/client"
+import {
+	shouldPersistQuery,
+	DEFAULT_QUERY_OPTIONS,
+	decideQueryErrorAction,
+	queryUpdater,
+	QUERY_CLIENT_CACHE_TIME,
+	restoreQueries
+} from "@/queries/client"
 import { type PlaylistWithItems } from "@/features/audio/audio"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -243,126 +276,170 @@ describe("DEFAULT_QUERY_OPTIONS.retryDelay", () => {
 	})
 })
 
-// ─── DEFAULT_QUERY_OPTIONS.throwOnError ──────────────────────────────────────
+// ─── DEFAULT_QUERY_OPTIONS.throwOnError (pure render-phase predicate, Bug #49) ──
 
 describe("DEFAULT_QUERY_OPTIONS.throwOnError", () => {
-	// The function is typed with any, but we need to call it per its real signature:
-	// throwOnError(err, query) => boolean
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const throwOnError = DEFAULT_QUERY_OPTIONS.throwOnError as (err: unknown, query: any) => boolean
 	const fakeQuery = { queryKey: ["testKey"] }
 
 	beforeEach(() => {
-		mockIsNetworkClassError.mockReset()
-		mockIsNetworkClassError.mockReturnValue(false)
-		mockUnwrapSdkError.mockReset()
-		mockUnwrapSdkError.mockReturnValue(null)
-		mockIsOnline.mockReset()
-		mockIsOnline.mockReturnValue(true)
-		mockLogout.mockReset()
-		mockLogout.mockResolvedValue(undefined)
+		mockIsNetworkClassError.mockReset().mockReturnValue(false)
+		mockUnwrapSdkError.mockReset().mockReturnValue(null)
+		mockIsOnline.mockReset().mockReturnValue(true)
+		mockLogout.mockReset().mockResolvedValue(undefined)
 		mockAlertsError.mockReset()
 	})
 
-	it("returns false and does NOT call alerts.error when network error + offline", () => {
+	it("always returns false (never throws to an error boundary)", () => {
+		expect(throwOnError(new Error("network"), fakeQuery)).toBe(false)
+		expect(throwOnError(new Error("plain"), fakeQuery)).toBe(false)
+	})
+
+	it("has ZERO side effects — never calls alerts.error, auth.logout regardless of error/connectivity", () => {
+		// Network + online would historically have alerted; the pure predicate must not.
 		mockIsNetworkClassError.mockReturnValue(true)
-		mockIsOnline.mockReturnValue(false)
+		mockIsOnline.mockReturnValue(true)
+		throwOnError(new Error("network online"), fakeQuery)
 
-		const result = throwOnError(new Error("network"), fakeQuery)
+		// Unauthenticated + online would historically have logged out; the pure predicate must not.
+		mockIsNetworkClassError.mockReturnValue(false)
+		mockUnwrapSdkError.mockReturnValue({ kind: () => ErrorKind.Unauthenticated })
+		throwOnError(new Error("unauth online"), fakeQuery)
 
-		expect(result).toBe(false)
+		// Plain error would historically have alerted; the pure predicate must not.
+		mockUnwrapSdkError.mockReturnValue(null)
+		throwOnError(new Error("plain"), fakeQuery)
+
 		expect(mockAlertsError).not.toHaveBeenCalled()
+		expect(mockLogout).not.toHaveBeenCalled()
+	})
+})
+
+// ─── decideQueryErrorAction (pure decision, Bug #49) ─────────────────────────
+
+describe("decideQueryErrorAction", () => {
+	const baseDeps = {
+		isNetworkClassError: mockIsNetworkClassError,
+		unwrapSdkError: mockUnwrapSdkError,
+		isOnline: mockIsOnline
+	}
+
+	beforeEach(() => {
+		mockIsNetworkClassError.mockReset().mockReturnValue(false)
+		mockUnwrapSdkError.mockReset().mockReturnValue(null)
+		mockIsOnline.mockReset().mockReturnValue(true)
 	})
 
-	it("calls alerts.error and returns false when network error + online", () => {
+	it("suppresses network-class errors while offline", () => {
+		mockIsNetworkClassError.mockReturnValue(true)
+		mockIsOnline.mockReturnValue(false)
+
+		expect(decideQueryErrorAction(new Error("net"), baseDeps)).toBe("suppress")
+	})
+
+	it("alerts on network-class errors while online", () => {
 		mockIsNetworkClassError.mockReturnValue(true)
 		mockIsOnline.mockReturnValue(true)
 
-		const result = throwOnError(new Error("network"), fakeQuery)
-
-		expect(result).toBe(false)
-		expect(mockAlertsError).toHaveBeenCalledTimes(1)
+		expect(decideQueryErrorAction(new Error("net"), baseDeps)).toBe("alert")
 	})
 
-	it("returns false and calls auth.logout when Unauthenticated SDK error + online", async () => {
-		const mockSdkError = {
-			kind: () => ErrorKind.Unauthenticated
-		}
-
-		mockIsNetworkClassError.mockReturnValue(false)
-		mockUnwrapSdkError.mockReturnValue(mockSdkError)
+	it("returns 'logout' for Unauthenticated SDK error while online", () => {
+		mockUnwrapSdkError.mockReturnValue({ kind: () => ErrorKind.Unauthenticated })
 		mockIsOnline.mockReturnValue(true)
 
-		const result = throwOnError(new Error("unauth"), fakeQuery)
-
-		expect(result).toBe(false)
-		// Allow the fire-and-forget logout promise to settle
-		await Promise.resolve()
-		expect(mockLogout).toHaveBeenCalledTimes(1)
+		expect(decideQueryErrorAction(new Error("unauth"), baseDeps)).toBe("logout")
 	})
 
-	it("returns false and does NOT call auth.logout when Unauthenticated SDK error + offline", () => {
-		const mockSdkError = {
-			kind: () => ErrorKind.Unauthenticated
-		}
-
-		mockIsNetworkClassError.mockReturnValue(false)
-		mockUnwrapSdkError.mockReturnValue(mockSdkError)
+	it("suppresses Unauthenticated SDK error while offline (indistinguishable from network failure)", () => {
+		mockUnwrapSdkError.mockReturnValue({ kind: () => ErrorKind.Unauthenticated })
 		mockIsOnline.mockReturnValue(false)
 
-		const result = throwOnError(new Error("unauth offline"), fakeQuery)
+		expect(decideQueryErrorAction(new Error("unauth offline"), baseDeps)).toBe("suppress")
+	})
 
-		expect(result).toBe(false)
+	it("alerts for a non-network non-Unauthenticated SDK error while online", () => {
+		mockUnwrapSdkError.mockReturnValue({ kind: () => ErrorKind.Reqwest })
+		mockIsOnline.mockReturnValue(true)
+
+		expect(decideQueryErrorAction(new Error("sdk"), baseDeps)).toBe("alert")
+	})
+
+	it("alerts for a plain JS error (no SDK inner, not network class)", () => {
+		expect(decideQueryErrorAction(new Error("plain"), baseDeps)).toBe("alert")
+	})
+})
+
+// ─── QueryCache onError sink (Bug #49: once-per-settled-error UX) ─────────────
+
+describe("QueryCache onError sink", () => {
+	type OnError = (err: unknown, query: { queryKey: unknown[] }) => void
+
+	async function getOnError(): Promise<OnError> {
+		// queryClient is built with `new QueryCache({ onError })`; the mocked QueryCache captures
+		// the config so we can drive the sink directly.
+		const mod = await import("@/queries/client")
+		const client = mod.queryClient as unknown as {
+			queryCache: { config: { onError?: OnError } }
+		}
+		const onError = client.queryCache.config.onError
+
+		if (!onError) {
+			throw new Error("onError sink not configured on the QueryCache")
+		}
+
+		return onError
+	}
+
+	beforeEach(() => {
+		mockIsNetworkClassError.mockReset().mockReturnValue(false)
+		mockUnwrapSdkError.mockReset().mockReturnValue(null)
+		mockIsOnline.mockReset().mockReturnValue(true)
+		mockLogout.mockReset().mockResolvedValue(undefined)
+		mockAlertsError.mockReset()
+	})
+
+	it("suppresses (no logout, no alert) for an offline network error", async () => {
+		mockIsNetworkClassError.mockReturnValue(true)
+		mockIsOnline.mockReturnValue(false)
+
+		const onError = await getOnError()
+		onError(new Error("net offline"), { queryKey: ["k"] })
+
 		expect(mockLogout).not.toHaveBeenCalled()
 		expect(mockAlertsError).not.toHaveBeenCalled()
 	})
 
-	it("calls alerts.error for a non-network non-Unauthenticated SDK error", () => {
-		const mockSdkError = {
-			kind: () => ErrorKind.Reqwest
-		}
-
-		// isNetworkClassError returns false (we control it) but unwrapSdkError returns an error
-		// with a kind that is NOT Unauthenticated and is NOT a network class error
-		mockIsNetworkClassError.mockReturnValue(false)
-		mockUnwrapSdkError.mockReturnValue(mockSdkError)
+	it("calls auth.logout (once) for an online Unauthenticated error", async () => {
+		mockUnwrapSdkError.mockReturnValue({ kind: () => ErrorKind.Unauthenticated })
 		mockIsOnline.mockReturnValue(true)
 
-		const testError = new Error("some sdk error")
-		const result = throwOnError(testError, fakeQuery)
+		const onError = await getOnError()
+		onError(new Error("unauth"), { queryKey: ["k"] })
 
-		expect(result).toBe(false)
-		expect(mockAlertsError).toHaveBeenCalledWith(testError)
+		await Promise.resolve()
+
+		expect(mockLogout).toHaveBeenCalledTimes(1)
+		expect(mockAlertsError).not.toHaveBeenCalled()
 	})
 
-	it("calls alerts.error for a plain JS Error that is not a network error and not an SDK error", () => {
-		mockIsNetworkClassError.mockReturnValue(false)
-		mockUnwrapSdkError.mockReturnValue(null)
+	it("alerts for a plain error when unlocked + active", async () => {
+		const err = new Error("boom-unique-1")
+		const onError = await getOnError()
+		onError(err, { queryKey: ["k"] })
 
-		const plainError = new Error("plain error")
-		const result = throwOnError(plainError, fakeQuery)
-
-		expect(result).toBe(false)
-		expect(mockAlertsError).toHaveBeenCalledWith(plainError)
+		expect(mockAlertsError).toHaveBeenCalledWith(err)
 	})
 
-	it("never returns true regardless of branch taken", () => {
-		// Test all branches return false, never true
+	it("dedupes identical alert messages within the dedupe window", async () => {
+		const onError = await getOnError()
 
-		// network error + offline
-		mockIsNetworkClassError.mockReturnValue(true)
-		mockIsOnline.mockReturnValue(false)
-		expect(throwOnError(new Error("a"), fakeQuery)).toBe(false)
+		// Two distinct error objects but identical messages → second is collapsed.
+		onError(new Error("same-message"), { queryKey: ["a"] })
+		onError(new Error("same-message"), { queryKey: ["b"] })
 
-		// network error + online
-		mockIsNetworkClassError.mockReturnValue(true)
-		mockIsOnline.mockReturnValue(true)
-		expect(throwOnError(new Error("b"), fakeQuery)).toBe(false)
-
-		// plain error
-		mockIsNetworkClassError.mockReturnValue(false)
-		mockUnwrapSdkError.mockReturnValue(null)
-		expect(throwOnError(new Error("c"), fakeQuery)).toBe(false)
+		expect(mockAlertsError).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -972,6 +1049,6 @@ describe("useCameraUploadAlbums.query fetchData", () => {
 		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
 		await fetchData()
 
-		expect(mockHasPermissions).toHaveBeenCalledWith({ shouldRequest: true })
+		expect(mockHasPermissions).toHaveBeenCalledWith({ library: "all", needCamera: false })
 	})
 })
