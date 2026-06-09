@@ -1,4 +1,4 @@
-import { Platform, ActivityIndicator } from "react-native"
+import { ActivityIndicator } from "react-native"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
@@ -56,7 +56,6 @@ const PlaylistToolbar = () => {
 			}}
 		>
 			<CrossGlassContainerView
-				disableBlur={Platform.OS === "android"}
 				className="flex-col overflow-hidden px-4 py-4 gap-4 rounded-3xl"
 				disableInteraction={true}
 			>

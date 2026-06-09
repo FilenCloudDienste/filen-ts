@@ -1,5 +1,5 @@
 import { NativeView } from "react-native-boost/runtime"
-import { withUniwind } from "uniwind"
+import { withUniwind, useUniwind } from "uniwind"
 import { type ViewProps, type View as RNView, Platform, type StyleProp, type ViewStyle, StyleSheet } from "react-native"
 import { cn } from "@filen/utils"
 import {
@@ -7,7 +7,6 @@ import {
 	KeyboardAwareScrollView as RNKeyboardControllerKeyboardAwareScrollView,
 	KeyboardStickyView as RNKeyboardControllerKeyboardStickyView
 } from "react-native-keyboard-controller"
-import { BlurView as ExpoBlurView } from "expo-blur"
 import { GlassView as ExpoGlassView, GlassContainer as ExpoGlassContainer } from "expo-glass-effect"
 import { ScrollView as RNGestureHandlerScrollView } from "react-native-gesture-handler"
 
@@ -67,12 +66,6 @@ export const KeyboardStickyView = (
 	)
 }
 
-export const UniwindBlurView = withUniwind(ExpoBlurView) as React.FC<React.ComponentProps<typeof ExpoBlurView>>
-
-export const BlurView = (props: React.ComponentProps<typeof ExpoBlurView> & React.RefAttributes<RNView>) => {
-	return <UniwindBlurView {...props} />
-}
-
 export const UniwindLiquidGlassView = withUniwind(ExpoGlassView) as React.FC<React.ComponentProps<typeof ExpoGlassView>>
 
 export const LiquidGlassView = (props: React.ComponentProps<typeof ExpoGlassView> & React.RefAttributes<RNView>) => {
@@ -85,46 +78,75 @@ export const LiquidGlassContainerView = (props: React.ComponentProps<typeof Expo
 	return <UniwindGlassContainerView {...props} />
 }
 
-const AndroidGlassContainer = ({
-	children,
-	className,
-	style
-}: {
-	children: React.ReactNode
-	className?: string
-	style?: StyleProp<ViewStyle>
-}) => {
-	return (
-		<View
-			className={cn("border border-border rounded-full overflow-hidden bg-background-secondary/85", className)}
-			style={[
-				style,
-				{
-					borderWidth: StyleSheet.hairlineWidth,
-					elevation: 4
-				}
-			]}
-		>
-			{children}
-		</View>
-	)
-}
+// Single-View "liquid glass" approximation for everywhere the real material is unavailable
+// (Android, and iOS with disableLiquidGlass). No blur: expo-blur on Android needs the BlurView
+// to live OUTSIDE its BlurTargetView — a descendant creates a circular RenderNode reference and
+// crashes libhwui with a native stack overflow — which our in-screen glass surfaces can't
+// satisfy, so the material is faked with layered box shadows instead:
+// outer = soft lift, inset top = specular rim catching light, inset bottom = depth shading.
+// Theme-split because the dark stack reads as dirty smudges on light surfaces — light mode
+// needs a much subtler lift/shade and a stronger white rim to register against #f2f2f7.
+const FAKE_GLASS_BOX_SHADOW_DARK: ViewStyle["boxShadow"] = [
+	{
+		offsetX: 0,
+		offsetY: 6,
+		blurRadius: 18,
+		color: "rgba(0, 0, 0, 0.28)"
+	},
+	{
+		offsetX: 0,
+		offsetY: 1,
+		blurRadius: 1,
+		color: "rgba(255, 255, 255, 0.20)",
+		inset: true
+	},
+	{
+		offsetX: 0,
+		offsetY: -1,
+		blurRadius: 1,
+		color: "rgba(0, 0, 0, 0.18)",
+		inset: true
+	}
+]
+
+const FAKE_GLASS_BOX_SHADOW_LIGHT: ViewStyle["boxShadow"] = [
+	{
+		offsetX: 0,
+		offsetY: 4,
+		blurRadius: 14,
+		color: "rgba(0, 0, 0, 0.12)"
+	},
+	{
+		offsetX: 0,
+		offsetY: 1,
+		blurRadius: 1,
+		color: "rgba(255, 255, 255, 0.75)",
+		inset: true
+	},
+	{
+		offsetX: 0,
+		offsetY: -1,
+		blurRadius: 1,
+		color: "rgba(0, 0, 0, 0.06)",
+		inset: true
+	}
+]
 
 export const CrossGlassContainerView = ({
 	children,
 	className,
 	style,
 	disableLiquidGlass,
-	disableBlur,
 	disableInteraction
 }: {
 	children: React.ReactNode
 	className?: string
 	style?: StyleProp<ViewStyle>
 	disableLiquidGlass?: boolean
-	disableBlur?: boolean
 	disableInteraction?: boolean
 }) => {
+	const { theme } = useUniwind()
+
 	if (Platform.OS === "ios" && !disableLiquidGlass) {
 		return (
 			<LiquidGlassView
@@ -137,47 +159,19 @@ export const CrossGlassContainerView = ({
 		)
 	}
 
-	if (disableBlur) {
-		return (
-			<View
-				className={cn("border border-border rounded-full overflow-hidden bg-background-secondary", className)}
-				style={[
-					style,
-					{
-						borderWidth: StyleSheet.hairlineWidth
-					}
-				]}
-			>
-				{children}
-			</View>
-		)
-	}
-
-	if (Platform.OS === "android") {
-		return (
-			<AndroidGlassContainer
-				className={className}
-				style={style}
-			>
-				{children}
-			</AndroidGlassContainer>
-		)
-	}
-
 	return (
-		<BlurView
-			className={cn("border border-border rounded-full overflow-hidden", className)}
-			intensity={100}
-			tint="systemChromeMaterial"
+		<View
+			className={cn("rounded-full overflow-hidden border bg-background-secondary/95 border-black/10 dark:border-white/15", className)}
 			style={[
 				style,
 				{
-					borderWidth: StyleSheet.hairlineWidth
+					borderWidth: StyleSheet.hairlineWidth,
+					boxShadow: theme === "dark" ? FAKE_GLASS_BOX_SHADOW_DARK : FAKE_GLASS_BOX_SHADOW_LIGHT
 				}
 			]}
 		>
 			{children}
-		</BlurView>
+		</View>
 	)
 }
 
