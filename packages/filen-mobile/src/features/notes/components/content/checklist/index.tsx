@@ -40,6 +40,7 @@ const Checklist = ({
 		store,
 		useShallow(state => visibleChecklistIds(state.ids, state.parsed, hideCompleted ?? false))
 	)
+	const initialValueFrozen = useState(() => initialValue)[0]
 
 	const onContentChange = ({ item, content }: { item: ChecklistItem; content: string }) => {
 		store.getState().setParsed(prev =>
@@ -84,7 +85,7 @@ const Checklist = ({
 	}
 
 	useEffect(() => {
-		let parsed = initialValue ? checklistParser.parse(initialValue) : []
+		let parsed = initialValueFrozen ? checklistParser.parse(initialValueFrozen) : []
 
 		if (parsed.length === 0) {
 			parsed = [
@@ -109,7 +110,7 @@ const Checklist = ({
 		)
 		store.getState().setParsed(parsed)
 		store.getState().setIds(parsed.map(i => i.id))
-	}, [initialValue, store])
+	}, [store, initialValueFrozen])
 
 	return (
 		<ChecklistStoreContext.Provider value={store}>

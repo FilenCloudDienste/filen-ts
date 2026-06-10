@@ -1,4 +1,4 @@
-import { useRef, Fragment, useEffect } from "react"
+import { useRef, Fragment, useEffect, useState } from "react"
 import TextEditorDOM from "@/components/textEditor/dom"
 import RichTextEditorDOM, { type QuillFormats, type HeaderLevel } from "@/components/textEditor/richText/dom"
 import { encodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
@@ -142,6 +142,7 @@ export const TextEditor = ({
 	const text = useResolveClassNames("font-normal text-sm")
 	const { theme } = useUniwind()
 	const [textEditorMarkdownPreviewActive] = useSecureStore<Record<string, boolean>>("textEditorMarkdownPreviewActive", {})
+	const encodedInitialValue = useState(() => encodeEditorInitialValue(initialValue ?? ""))[0]
 
 	const markdownPreviewActive = !id ? false : (textEditorMarkdownPreviewActive[id] ?? false)
 
@@ -229,8 +230,6 @@ export const TextEditor = ({
 			useTextEditorStore.getState().setDispatch(null)
 		}
 	}, [type, readOnly])
-
-	const encodedInitialValue = encodeEditorInitialValue(initialValue ?? "")
 
 	return (
 		<Fragment>
