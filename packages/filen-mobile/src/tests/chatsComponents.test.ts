@@ -1,4 +1,4 @@
-import { vi, describe, it, expect } from "vitest"
+import { vi, describe, it, expect, beforeEach } from "vitest"
 
 // ─── Module boundary mocks (must be top-level vi.mock calls, hoisted by Vitest) ─
 
@@ -166,10 +166,21 @@ vi.mock("@/lib/cache", () => ({
 }))
 
 // ── Stores ────────────────────────────────────────────────────────────────────
-vi.mock("@/features/chats/store/useChats.store", () => ({
-	default: vi.fn(() => ({})),
-	useChatsStore: vi.fn(() => ({}))
-}))
+vi.mock("@/features/chats/store/useChats.store", () => {
+	// Callable as a hook AND carrying getState (the chat input's module-level
+	// flushInflightMessagesWithAlert helper reads the store imperatively).
+	const hook = Object.assign(
+		vi.fn(() => ({})),
+		{
+			getState: vi.fn(() => ({ inflightMessages: {} }))
+		}
+	)
+
+	return {
+		default: hook,
+		useChatsStore: hook
+	}
+})
 vi.mock("@/stores/useApp.store", () => ({
 	default: {
 		getState: vi.fn(() => ({ pathname: "/" })),
@@ -221,6 +232,14 @@ vi.mock("@/components/itemIcons", () => ({
 vi.mock("@/features/chats/components/chat/message/menu", () => ({ default: () => null }))
 vi.mock("@/features/drive/screens/driveSelect", () => ({ selectDriveItems: vi.fn() }))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn(x => JSON.stringify(x)) }))
+// chat/input subcomponents + the system-presentation wrapper — not under test, the input
+// module is imported only for its flushInflightMessagesWithAlert helper (M3).
+vi.mock("@/features/chats/components/chat/input/mentionSuggestions", () => ({ default: () => null }))
+vi.mock("@/features/chats/components/chat/input/emojiSuggestions", () => ({ default: () => null }))
+vi.mock("@/features/chats/components/chat/input/replyTo", () => ({ default: () => null }))
+vi.mock("@/lib/systemPresentation", () => ({
+	withSystemPresentation: vi.fn(async (fn: () => Promise<unknown>) => await fn())
+}))
 
 // ─── Actual imports ───────────────────────────────────────────────────────────
 
@@ -233,6 +252,9 @@ import {
 } from "@/features/chats/components/chat/message/regexed"
 
 import { createMenuButtons } from "@/features/chats/components/list/chat/menu"
+import { flushInflightMessagesWithAlert } from "@/features/chats/components/chat/input"
+import { sync } from "@/features/chats/components/sync"
+import alerts from "@/lib/alerts"
 import type { Chat } from "@/types"
 
 // ─── Factory helpers ──────────────────────────────────────────────────────────
@@ -583,5 +605,35 @@ describe("createMenuButtons", () => {
 			const ids = buttons.map(b => b.id)
 			expect(ids).toContain("participants")
 		})
+	})
+})
+
+// ─── M3 — a failing SQLite flush must surface from the send path ─────────────────
+
+// The chat input's send() persists the queued message via this exported helper (T5
+// pattern: the test exercises the LIVE component helper, not a re-implementation).
+// sync.flushToDisk never throws — it reports persistence failure as `false`; before
+// this fix the failure path was unreachable and a failing write left the message
+// memory-only with zero signal.
+describe("flushInflightMessagesWithAlert", () => {
+	beforeEach(() => {
+		vi.mocked(sync.flushToDisk).mockReset()
+		vi.mocked(alerts.error).mockClear()
+	})
+
+	it("alerts when the disk flush reports failure (the message is memory-only)", async () => {
+		vi.mocked(sync.flushToDisk).mockResolvedValue(false)
+
+		await flushInflightMessagesWithAlert()
+
+		expect(alerts.error).toHaveBeenCalledWith("chat_message_not_saved_to_device")
+	})
+
+	it("stays silent when the flush succeeds", async () => {
+		vi.mocked(sync.flushToDisk).mockResolvedValue(true)
+
+		await flushInflightMessagesWithAlert()
+
+		expect(alerts.error).not.toHaveBeenCalled()
 	})
 })

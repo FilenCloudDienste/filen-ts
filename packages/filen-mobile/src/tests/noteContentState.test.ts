@@ -19,7 +19,11 @@
 //   content exists, so isPending stays true forever — gating on it alone would
 //   spin an eternal spinner over already-rendered content.
 
-import { vi, describe, it, expect } from "vitest"
+import { vi, describe, it, expect, beforeEach } from "vitest"
+
+const { mockFlushToDisk } = vi.hoisted(() => ({
+	mockFlushToDisk: vi.fn()
+}))
 
 // @filen/sdk-rs pulls a WASM worker helper that references `self` at import; the component only
 // needs the NoteType enum at module-eval, so provide a minimal stand-in.
@@ -64,12 +68,22 @@ vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({ notesWith
 vi.mock("@/features/notes/components/content/checklist", () => ({ default: () => null }))
 vi.mock("@/features/notes/utils", () => ({ noteTypeToEditorType: () => "text" }))
 vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: () => [false] }))
-vi.mock("@/features/notes/components/sync", () => ({ sync: {} }))
+// M3: flushToDisk is the controllable seam — the live flushInflightContentWithAlert helper
+// (exported from the component module) is exercised against it. hashNoteContent is a
+// deterministic stand-in; buildInflightEntries receives hashes as opaque strings anyway.
+vi.mock("@/features/notes/components/sync", () => ({
+	sync: { flushToDisk: mockFlushToDisk },
+	hashNoteContent: (content: string) => `h(${content})`
+}))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
-vi.mock("@/features/notes/store/useNotesInflight.store", () => ({ default: { getState: () => ({}) } }))
+vi.mock("@/features/notes/store/useNotesInflight.store", () => ({ default: { getState: () => ({ inflightContent: {} }) } }))
 vi.mock("@/stores/useTextEditor.store", () => ({ default: () => false }))
 vi.mock("@/lib/events", () => ({ default: { subscribe: () => ({ remove: () => {} }) } }))
-vi.mock("@/lib/alerts", () => ({ default: { error: () => {} } }))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
+vi.mock("@/lib/i18n", () => ({
+	default: { t: (key: string) => key },
+	t: (key: string) => key
+}))
 vi.mock("@/lib/prompts", () => ({ default: {} }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
 vi.mock("@filen/utils", async () => ({
@@ -83,7 +97,14 @@ vi.mock("@filen/utils", async () => ({
 	}
 }))
 
-import { computeNoteLoading, computeNoteFetchError } from "@/features/notes/components/content"
+import {
+	computeNoteLoading,
+	computeNoteFetchError,
+	buildInflightEntries,
+	flushInflightContentWithAlert
+} from "@/features/notes/components/content"
+import alerts from "@/lib/alerts"
+import { type Note } from "@/types"
 
 // ── #38 — loading requires BOTH (no content yet) AND (fetching/pending) ──────────
 
@@ -150,5 +171,103 @@ describe("computeNoteFetchError", () => {
 		// No fetch in flight → loading is false; the error/retry surface renders via the
 		// component's early `if (fetchError)` return regardless.
 		expect(loading).toBe(false)
+	})
+})
+
+// ── M1 + D3 — inflight entry builder (per-note monotonic timestamps + session base) ──────
+
+describe("buildInflightEntries", () => {
+	const note = { uuid: "note-1" } as Note
+
+	it("M1: a backward clock step still produces a strictly newer timestamp — the newest text wins and the prune cannot discard it", () => {
+		const first = buildInflightEntries({
+			previous: undefined,
+			note,
+			content: "typed-before-step",
+			now: 5000,
+			sessionBaseHash: null
+		})
+
+		// An NTP correction steps the wall clock BACK mid-editing: Date.now() now yields 3000.
+		const second = buildInflightEntries({
+			previous: first,
+			note,
+			content: "typed-after-step",
+			now: 3000,
+			sessionBaseHash: null
+		})
+
+		// The newest TEXT carries the strictly-largest timestamp (5001), so sync's
+		// max-timestamp pick pushes it — the stale pre-step entry can never outrank it.
+		const newest = second.reduce((acc, c) => (c.timestamp > acc.timestamp ? c : acc))
+
+		expect(newest.content).toBe("typed-after-step")
+		expect(newest.timestamp).toBe(5001)
+
+		// And after sync pushes it, the `> syncedUpTo` prune (local-vs-local) removes only
+		// superseded entries — the newest text was the push, nothing stale resurrects.
+		const remainingAfterPrune = second.filter(c => c.timestamp > newest.timestamp)
+
+		expect(remainingAfterPrune).toHaveLength(0)
+	})
+
+	it("M1: a forward-moving clock keeps using the wall-clock timestamp", () => {
+		const first = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: null })
+		const second = buildInflightEntries({ previous: first, note, content: "v2", now: 9000, sessionBaseHash: null })
+
+		expect(second[0]!.timestamp).toBe(9000)
+		expect(second[0]!.content).toBe("v2")
+	})
+
+	it("D3: a fresh session stamps the session base hash onto its first entry", () => {
+		const entries = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: "h(base)" })
+
+		expect(entries).toHaveLength(1)
+		expect(entries[0]!.baseContentHash).toBe("h(base)")
+	})
+
+	it("D3: an ongoing session carries ITS base forward even when the session ref moved on", () => {
+		const first = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: "h(orig)" })
+		const second = buildInflightEntries({ previous: first, note, content: "v2", now: 2000, sessionBaseHash: "h(newer)" })
+
+		expect(second[0]!.baseContentHash).toBe("h(orig)")
+	})
+
+	it("D3: a legacy session (entries without a hash) stays hash-less — one-pass grace, never mid-session stamping", () => {
+		const legacy = [{ timestamp: 1000, content: "restored-from-old-version", note }]
+		const next = buildInflightEntries({ previous: legacy, note, content: "v2", now: 2000, sessionBaseHash: "h(now-known)" })
+
+		expect(next[0]!.baseContentHash).toBeUndefined()
+	})
+
+	it("D3: a fresh session without a known synced seed records no base (pushes unchecked)", () => {
+		const entries = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: null })
+
+		expect(entries[0]!.baseContentHash).toBeUndefined()
+	})
+})
+
+// ── M3 — a failing SQLite flush must surface from the typing path ─────────────────────────
+
+describe("flushInflightContentWithAlert", () => {
+	beforeEach(() => {
+		mockFlushToDisk.mockReset()
+		vi.mocked(alerts.error).mockClear()
+	})
+
+	it("alerts when the disk flush reports failure (the edit is memory-only)", async () => {
+		mockFlushToDisk.mockResolvedValue(false)
+
+		await flushInflightContentWithAlert()
+
+		expect(alerts.error).toHaveBeenCalledWith("note_edit_not_saved_to_device")
+	})
+
+	it("stays silent when the flush succeeds", async () => {
+		mockFlushToDisk.mockResolvedValue(true)
+
+		await flushInflightContentWithAlert()
+
+		expect(alerts.error).not.toHaveBeenCalled()
 	})
 })

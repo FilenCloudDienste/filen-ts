@@ -85,6 +85,12 @@ export const notes = {
 	/** Confirm button that reloads the note's content from the server */
 	reload: "Reload",
 
+	// ── In-flight content sync (note/content + sync) ──────────────────────────
+	/** Toast after a queued local edit was synced OVER newer remote changes — the buried version stays in the note's history. {{name}} is the note title */
+	note_overwrote_newer_remote_changes: "\"{{name}}\" had newer changes — the previous version is in the note's history",
+	/** Error banner when a typed edit could not be persisted to device storage (it survives in memory only until synced) */
+	note_edit_not_saved_to_device: "Your edit could not be saved on this device. Keep the app open until it has synced.",
+
 	// ── Bulk note actions (multi-select toolbar) ──────────────────────────────
 	/** Bulk action: pin every selected note */
 	pin_selected: "Pin selected",

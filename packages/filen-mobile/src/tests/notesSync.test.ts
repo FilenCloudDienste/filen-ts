@@ -6,19 +6,28 @@ const {
 	kvStore,
 	notesState,
 	mockNotesSetContent,
+	mockNotesGetContent,
 	mockFetchNotesWithContent,
 	mockCreateExecutableTimeout,
 	mockNotesWithContentQueryGet,
+	mockNoteContentQueryUpdate,
+	mockNoteContentQueryDataUpdatedAt,
 	ErrorKindMock,
 	sdkErrorState
 } = vi.hoisted(() => ({
+	mockNoteContentQueryUpdate: vi.fn(),
+	mockNoteContentQueryDataUpdatedAt: vi.fn().mockReturnValue(undefined),
 	kvStore: new Map<string, unknown>(),
 	notesState: {
-		inflightContent: {} as Record<string, { timestamp: number; content: string; note: { uuid: string } }[]>
+		inflightContent: {} as Record<
+			string,
+			{ timestamp: number; content: string; note: { uuid: string }; baseContentHash?: string }[]
+		>
 	},
 	mockNotesSetContent: vi.fn().mockResolvedValue({
 		editedTimestamp: BigInt(0)
 	}),
+	mockNotesGetContent: vi.fn().mockResolvedValue(""),
 	mockFetchNotesWithContent: vi.fn().mockResolvedValue([]),
 	mockCreateExecutableTimeout: vi.fn(),
 	mockNotesWithContentQueryGet: vi.fn().mockReturnValue(null),
@@ -105,13 +114,19 @@ vi.mock("@/features/notes/store/useNotesInflight.store", () => {
 
 vi.mock("@/features/notes/notes", () => ({
 	default: {
-		setContent: mockNotesSetContent
+		setContent: mockNotesSetContent,
+		getContent: mockNotesGetContent
 	}
 }))
 
 vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 	fetchData: mockFetchNotesWithContent,
 	notesWithContentQueryGet: mockNotesWithContentQueryGet
+}))
+
+vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
+	noteContentQueryUpdate: mockNoteContentQueryUpdate,
+	noteContentQueryDataUpdatedAt: mockNoteContentQueryDataUpdatedAt
 }))
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
@@ -154,8 +169,9 @@ function asSdkError<E>(error: E, kind: string): E {
 	return error
 }
 
-import { Sync, SyncHost, mergeInflight, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/notes/components/sync"
+import { Sync, SyncHost, mergeInflight, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/notes/components/sync"
 import sqlite from "@/lib/sqlite"
+import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
 import React from "react"
@@ -183,11 +199,18 @@ describe("Sync (Notes)", () => {
 		notesState.inflightContent = {}
 		mockNotesSetContent.mockClear()
 		mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(0) })
+		mockNotesGetContent.mockReset()
+		mockNotesGetContent.mockResolvedValue("")
 		mockFetchNotesWithContent.mockClear()
 		mockFetchNotesWithContent.mockResolvedValue([])
 		mockCreateExecutableTimeout.mockClear()
 		mockNotesWithContentQueryGet.mockReturnValue(null)
+		mockNoteContentQueryUpdate.mockClear()
+		mockNoteContentQueryDataUpdatedAt.mockClear()
+		mockNoteContentQueryDataUpdatedAt.mockReturnValue(undefined)
 		sdkErrorState.innerOf.clear()
+		vi.mocked(alerts.error).mockClear()
+		vi.mocked(alerts.normal).mockClear()
 		vi.mocked(sqlite.kvAsync.get).mockClear()
 		vi.mocked(sqlite.kvAsync.set).mockClear()
 		vi.mocked(sqlite.kvAsync.remove).mockClear()
@@ -393,14 +416,15 @@ describe("Sync (Notes)", () => {
 	})
 
 	describe("flushToDisk", () => {
-		it("writes inflight content to sqlite", async () => {
+		it("writes inflight content to sqlite and reports success (M3)", async () => {
 			const sync = await createSync()
 			const data = {
 				"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
 			}
 
-			await sync.flushToDisk(data)
+			const flushed = await sync.flushToDisk(data)
 
+			expect(flushed).toBe(true)
 			expect(kvStore.get(KV_KEY)).toEqual(data)
 		})
 
@@ -429,7 +453,7 @@ describe("Sync (Notes)", () => {
 			expect(kvStore.has(KV_KEY)).toBe(false)
 		})
 
-		it("catches write errors and logs them — does not throw", async () => {
+		it("M3: catches write errors and reports them as `false` — does not throw", async () => {
 			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			try {
@@ -437,11 +461,13 @@ describe("Sync (Notes)", () => {
 
 				vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
 
-				await sync.flushToDisk({
+				const flushed = await sync.flushToDisk({
 					"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
 				})
 
-				// flushToDisk must not propagate the error
+				// flushToDisk must not propagate the error — it reports failure as `false`
+				// so component call sites can alert (sync-internal callers ignore it).
+				expect(flushed).toBe(false)
 				expect(consoleSpy).toHaveBeenCalledWith("Error flushing note sync to disk:", expect.any(Error))
 			} finally {
 				consoleSpy.mockRestore()
@@ -512,6 +538,60 @@ describe("Sync (Notes)", () => {
 				content: "latest",
 				signal: expect.any(AbortSignal)
 			})
+		})
+
+		it("writes the pushed content into the note content query cache with dataUpdatedAt PRESERVED (editor reseed after drain paints the typed text, no remount)", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "typed text", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+			mockNoteContentQueryDataUpdatedAt.mockReturnValue(424242)
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNoteContentQueryUpdate).toHaveBeenCalledTimes(1)
+			expect(mockNoteContentQueryUpdate).toHaveBeenCalledWith({
+				params: {
+					uuid: "note-1"
+				},
+				updater: "typed text",
+				dataUpdatedAt: 424242
+			})
+		})
+
+		it("does NOT touch the note content query cache when the push fails", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "typed text", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockRejectedValue(new Error("network down"))
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNoteContentQueryUpdate).not.toHaveBeenCalled()
 		})
 
 		it("removes synced entries from store", async () => {
@@ -983,6 +1063,34 @@ describe("Sync (Notes)", () => {
 			expect(sqlite.kvAsync.remove).toHaveBeenCalledWith(KV_KEY)
 		})
 
+		// D2: an aborted pass must NEVER write the queue back to disk. Logout aborts in-flight
+		// sync (Phase 2) and later wipes SQLite (Phase 6) — a late flush would resurrect the
+		// previous account's plaintext queue after the wipe. Mirrors the chats sync fix.
+		it("D2: does NOT flush to disk when the pass was aborted", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockImplementation(async () => {
+				// Abort mid-flight (e.g. logout) — the push itself fails with the abort.
+				sync.cancel()
+
+				throw new Error("aborted mid-flight")
+			})
+
+			vi.mocked(sqlite.kvAsync.set).mockClear()
+			vi.mocked(sqlite.kvAsync.remove).mockClear()
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(sqlite.kvAsync.set).not.toHaveBeenCalled()
+			expect(sqlite.kvAsync.remove).not.toHaveBeenCalled()
+		})
+
 		it("skips upload of subsequent entries when signal is already aborted before sync starts", async () => {
 			// This exercises the per-entry `if (signal.aborted) { return }` guard inside sync().
 			// We pre-abort by calling cancel() before sync() has a chance to iterate entries.
@@ -1032,6 +1140,208 @@ describe("Sync (Notes)", () => {
 			// at most 1 call (the one that triggered cancel) must have reached setContent.
 			// Entries guarded by signal.aborted===true return early without calling setContent.
 			expect(mockNotesSetContent).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	// D3 (binding user decision): local edits ALWAYS win — the push is unconditional, the
+	// conflict machinery only DETECTS that a push buried newer remote work and toasts once,
+	// so the overwrite is never silent ("users won't know history has it" is the failure
+	// being prevented).
+	describe("D3 overwrite-conflict detection", () => {
+		it("pushes anyway (local wins) and toasts ONCE per pass when the cloud moved past the session base", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [
+					{
+						timestamp: 1000,
+						content: "local-wins",
+						note: mockNote("note-1"),
+						baseContentHash: hashNoteContent("base-content")
+					}
+				]
+			}
+
+			// Cloud moved past the base AND differs from what we push → conflict.
+			mockNotesGetContent.mockResolvedValue("newer-remote-content")
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// The push still happened with the local content (local wins, never blocked)…
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "local-wins" }))
+			// …the queue drained…
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+			// …and exactly ONE toast fired (deduped per note per pass), pointing at history.
+			expect(alerts.normal).toHaveBeenCalledTimes(1)
+			expect(alerts.normal).toHaveBeenCalledWith("note_overwrote_newer_remote_changes")
+		})
+
+		it("does not toast when the cloud still equals the session base (no conflict)", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [
+					{
+						timestamp: 1000,
+						content: "local-edit",
+						note: mockNote("note-1"),
+						baseContentHash: hashNoteContent("base-content")
+					}
+				]
+			}
+
+			mockNotesGetContent.mockResolvedValue("base-content")
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "local-edit" }))
+			expect(alerts.normal).not.toHaveBeenCalled()
+		})
+
+		it("does not toast when the cloud already equals the content being pushed", async () => {
+			// E.g. our own previous push landed but the prune was interrupted — re-pushing
+			// identical content overwrites nothing.
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [
+					{
+						timestamp: 1000,
+						content: "same-as-cloud",
+						note: mockNote("note-1"),
+						baseContentHash: hashNoteContent("older-base")
+					}
+				]
+			}
+
+			mockNotesGetContent.mockResolvedValue("same-as-cloud")
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalled()
+			expect(alerts.normal).not.toHaveBeenCalled()
+		})
+
+		it("legacy entries without a base hash push WITHOUT the conflict check (one-time grace)", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "restored-from-old-version", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// No cloud peek, no toast — the push itself still went out.
+			expect(mockNotesGetContent).not.toHaveBeenCalled()
+			expect(alerts.normal).not.toHaveBeenCalled()
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "restored-from-old-version" }))
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+		})
+
+		it("a failed cloud peek still pushes and stays silent (availability beats the toast)", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [
+					{
+						timestamp: 1000,
+						content: "push-me-regardless",
+						note: mockNote("note-1"),
+						baseContentHash: hashNoteContent("base-content")
+					}
+				]
+			}
+
+			mockNotesGetContent.mockRejectedValue(new Error("peek failed"))
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalledWith(expect.objectContaining({ content: "push-me-regardless" }))
+			expect(notesState.inflightContent["note-1"]).toBeUndefined()
+			expect(alerts.normal).not.toHaveBeenCalled()
+			expect(alerts.error).not.toHaveBeenCalled()
+		})
+
+		it("entries typed during the round trip inherit the pushed content's hash as their new base", async () => {
+			// Otherwise the NEXT pass would fetch our own push as "cloud", compare it against
+			// the stale session base and toast a false conflict on every pause-resume cycle.
+			const sync = await createSync()
+
+			const staleBase = hashNoteContent("base-content")
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "V1", note: mockNote("note-1"), baseContentHash: staleBase }]
+			}
+
+			mockNotesGetContent.mockResolvedValue("base-content")
+
+			mockNotesSetContent.mockImplementation(async () => {
+				// V2 is typed during the setContent round trip.
+				notesState.inflightContent = {
+					"note-1": [
+						{ timestamp: 1500, content: "V2", note: mockNote("note-1"), baseContentHash: staleBase },
+						{ timestamp: 1000, content: "V1", note: mockNote("note-1"), baseContentHash: staleBase }
+					]
+				}
+
+				return { editedTimestamp: BigInt(2000) }
+			})
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// V1 pruned; V2 survives with the pushed content's hash as its refreshed base.
+			expect(notesState.inflightContent["note-1"]).toHaveLength(1)
+			expect(notesState.inflightContent["note-1"]![0]!.content).toBe("V2")
+			expect(notesState.inflightContent["note-1"]![0]!.baseContentHash).toBe(hashNoteContent("V1"))
+		})
+
+		it("an aborted pass never toasts", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [
+					{
+						timestamp: 1000,
+						content: "local-wins",
+						note: mockNote("note-1"),
+						baseContentHash: hashNoteContent("base-content")
+					}
+				]
+			}
+
+			mockNotesGetContent.mockResolvedValue("newer-remote-content")
+
+			mockNotesSetContent.mockImplementation(async () => {
+				// The push itself lands, but the pass is aborted (e.g. logout) before the toast.
+				sync.cancel()
+
+				return { editedTimestamp: BigInt(2000) }
+			})
+
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNotesSetContent).toHaveBeenCalled()
+			expect(alerts.normal).not.toHaveBeenCalled()
 		})
 	})
 
