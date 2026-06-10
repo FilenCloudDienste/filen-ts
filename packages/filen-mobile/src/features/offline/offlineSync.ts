@@ -113,26 +113,43 @@ function isGoneListingError(error: unknown): boolean {
 // delegates every filesystem mutation to the lock-taking Offline methods (clearBarrier + per-uuid
 // lock + storeMutex), so clearAll/store/sync interleavings stay safe.
 //
+// Pass modes (design §4.2 — manual ⟹ thorough):
+//   - AUTOMATIC passes (app start / foreground / reconnect) are INDEX-ONLY: they trust the offline
+//     metas as local truth — reconcileTree performs no per-entry disk stats and the standalone
+//     heal stat is skipped. Listing-driven decisions (rename/move/version adoption/deletion) still
+//     apply on every pass; external deletion/corruption of stored bytes is detected only on
+//     thorough passes or lazily at file access (getLocalFile stats; previews fall back).
+//   - THOROUGH passes (user-explicit triggers: offline-screen "Sync now" + pull-to-refresh) are
+//     DISK-VERIFIED: reconcileTree stat-checks every tree entry (size-checked for files) and the
+//     standalone heal (missing/truncated data re-downloads in place) runs. reconcileTree also
+//     self-escalates a single tree to the disk-verified view when leftover .sync-tmp-* temps prove
+//     a crashed mutation pass, regardless of the pass mode.
+//
 // One pass (runPass):
 //   1. Gates: abort signal, onlineManager, Wi-Fi-only setting (all passes incl. manual).
 //   2. Normal trees (own cloud): one getDirOptional per tree root. undefined/trashed → remove;
 //      renamed/moved → updateTreeRootMeta (move re-anchors the parent context); alive → one
-//      hash-idempotent reconcileTree.
+//      hash-idempotent reconcileTree (thorough follows the pass mode).
 //   3. Shared trees + ALL standalone-file parents: ONE deduped listing per unique parent
 //      (listDir/listSharedDir/listInSharedRoot). FolderNotFound/WrongPassword ⇒ children removed;
 //      other failures ⇒ `listing` errors, items skipped (NO deletions on errors).
 //   4. Standalone files: present byUuid → heal (missing/size-mismatched data re-downloads in
-//      place) then rename; vanished → byName version adoption (store new uuid FIRST, remove old
-//      only once storeFile reports the new copy durably stored — an aborted store keeps the old
-//      copy, no error) → own-cloud getFileOptional move-follow/trash/delete → shared ⇒ remove.
+//      place; THOROUGH passes only — automatic passes trust the meta and skip the stat) then
+//      rename; vanished → byName version adoption (store new uuid FIRST, remove old only once
+//      storeFile reports the new copy durably stored — an aborted store keeps the old copy, no
+//      error) → own-cloud getFileOptional move-follow/trash/delete → shared ⇒ remove.
 //   5. Broken standalone metas: rebuild own-cloud alive items via getFileOptional (meta rewrite
 //      when the data file exists, redownload when it does not), remove trashed/deleted leftovers.
 //      Broken TREE metas analogously via getDirOptional: alive → one reconcileTree rebuilds the
-//      meta around the existing bytes; trashed/deleted/undecidable → removeTreeDirectory.
+//      meta around the existing bytes (an unreadable meta yields an empty local view in BOTH
+//      modes); trashed/deleted/undecidable → removeTreeDirectory.
 //   6. Finish: one updateIndex, replace useOfflineStore.syncErrors, stamp lastCompletedAt.
 //
 // Coalescing: concurrent sync() calls join the in-flight pass; auto passes within
 // AUTO_SYNC_MIN_INTERVAL_MS of the last completed pass no-op; manual bypasses the interval.
+// A manual sync() that joins an in-flight AUTO pass awaits that index-only pass as-is — no queue,
+// no mid-flight upgrade (the next explicit manual trigger gets its thorough pass; lastCompletedAt
+// is stamped by the joined pass like any other completion).
 export class OfflineSync {
 	private readonly syncMutex = new Semaphore(1)
 	private inFlight: Promise<void> | null = null
@@ -146,6 +163,10 @@ export class OfflineSync {
 
 	public async sync({ manual }: { manual?: boolean } = {}): Promise<void> {
 		if (this.inFlight) {
+			// Coalescing join (accepted, do NOT queue): a manual sync() arriving while an AUTO pass
+			// is in flight joins that index-only pass without upgrading it to thorough — the user's
+			// next explicit trigger runs its own thorough pass. lastCompletedAt semantics are
+			// unchanged: the joined pass stamps completion exactly like the pass it is.
 			return this.inFlight
 		}
 
@@ -153,7 +174,11 @@ export class OfflineSync {
 			return
 		}
 
-		this.inFlight = this.runPass().finally(() => {
+		// manual ⟹ thorough (design §4.2): user-explicit passes are disk-verified, automatic
+		// passes trust the metas.
+		this.inFlight = this.runPass({
+			thorough: manual === true
+		}).finally(() => {
 			this.inFlight = null
 		})
 
@@ -320,6 +345,7 @@ export class OfflineSync {
 		item,
 		parent,
 		authedSdkClient,
+		thorough,
 		signal,
 		pushError,
 		pushErrors
@@ -327,6 +353,7 @@ export class OfflineSync {
 		item: DriveItem
 		parent: OfflineParent
 		authedSdkClient: AuthedSdkClient
+		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 		pushErrors: (errors: OfflineSyncError[]) => void
@@ -405,6 +432,7 @@ export class OfflineSync {
 				parent: resolvedParent,
 				hideProgress: true,
 				skipIndexUpdate: true,
+				thorough,
 				signal
 			})
 		)
@@ -417,6 +445,7 @@ export class OfflineSync {
 		item,
 		parent,
 		listingState,
+		thorough,
 		signal,
 		pushError,
 		pushErrors
@@ -424,6 +453,7 @@ export class OfflineSync {
 		item: DriveItem
 		parent: OfflineParent
 		listingState: ParentListingState | undefined
+		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 		pushErrors: (errors: OfflineSyncError[]) => void
@@ -486,6 +516,7 @@ export class OfflineSync {
 				parent,
 				hideProgress: true,
 				skipIndexUpdate: true,
+				thorough,
 				signal
 			})
 		)
@@ -564,12 +595,14 @@ export class OfflineSync {
 
 	// One stored standalone file. Decision order for a uuid vanished from its (clean) parent
 	// listing: byName version adoption → own-cloud by-uuid move-follow/trash/delete → shared ⇒
-	// positive evidence of removal.
+	// positive evidence of removal. All those decisions are LISTING-driven and run on every pass;
+	// only the disk-stat heal below is gated on `thorough`.
 	private async syncStandaloneFile({
 		item,
 		parent,
 		listingState,
 		authedSdkClient,
+		thorough,
 		signal,
 		pushError
 	}: {
@@ -577,6 +610,7 @@ export class OfflineSync {
 		parent: OfflineParent
 		listingState: ParentListingState | undefined
 		authedSdkClient: AuthedSdkClient
+		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 	}): Promise<void> {
@@ -629,38 +663,45 @@ export class OfflineSync {
 		const present = listingState.files.byUuid.get(item.data.uuid)
 
 		if (present) {
-			// Alive in place (same uuid ⟹ identical bytes). Heal BEFORE rename: the index still
-			// reflects pre-pass disk state, and redownloadStandaloneFile already writes the
-			// refreshed name + meta — a missing-and-renamed file needs only the one download.
-			// An undecryptable remote meta falls back to the stored item (same uuid ⟹ same bytes).
+			// Alive in place (same uuid ⟹ identical bytes). An undecryptable remote meta falls
+			// back to the stored item (same uuid ⟹ same bytes).
 			const refreshed = present.meta ? unwrappedFileIntoDriveItem(present) : item
 			const currentItem = isFileItem(refreshed) ? refreshed : item
-			const localFile = await offline.getLocalFile(item)
-			const expectedSize = Number(currentItem.data.decryptedMeta?.size ?? -1)
 
-			if (localFile === null || localFile.size !== expectedSize) {
-				const heal = await run(async () =>
-					offline.redownloadStandaloneFile({
-						item: currentItem,
-						parent,
-						signal
-					})
-				)
+			// Standalone heal — THOROUGH passes only: the missing/truncated-data stat is disk
+			// verification, which automatic passes skip (they trust the meta; file access stats
+			// lazily via getLocalFile and previews fall back to download). When it runs, heal goes
+			// BEFORE rename: the index still reflects pre-pass disk state, and
+			// redownloadStandaloneFile already writes the refreshed name + meta — a
+			// missing-and-renamed file needs only the one download.
+			if (thorough) {
+				const localFile = await offline.getLocalFile(item)
+				const expectedSize = Number(currentItem.data.decryptedMeta?.size ?? -1)
 
-				if (!heal.success) {
-					pushError(
-						makeSyncError({
-							itemUuid: item.data.uuid,
-							topLevelUuid: null,
-							name: currentItem.data.decryptedMeta?.name ?? item.data.uuid,
-							itemType: item.type,
-							kind: "download",
-							message: errorMessage(heal.error)
+				if (localFile === null || localFile.size !== expectedSize) {
+					const heal = await run(async () =>
+						offline.redownloadStandaloneFile({
+							item: currentItem,
+							parent,
+							signal
 						})
 					)
-				}
 
-				return
+					if (!heal.success) {
+						pushError(
+							makeSyncError({
+								itemUuid: item.data.uuid,
+								topLevelUuid: null,
+								name: currentItem.data.decryptedMeta?.name ?? item.data.uuid,
+								itemType: item.type,
+								kind: "download",
+								message: errorMessage(heal.error)
+							})
+						)
+					}
+
+					return
+				}
 			}
 
 			if (present.meta && item.data.decryptedMeta && present.meta.name !== item.data.decryptedMeta.name) {
@@ -861,16 +902,19 @@ export class OfflineSync {
 	// aborted-pass residue — nothing lists them, so without this they linger invisibly forever):
 	// one getDirOptional decides. Alive → rebuild the root item from the remote dir, resolve its
 	// parent context, and run ONE reconcileTree over the existing bytes (the unreadable-meta path:
-	// empty local view, hash-idempotent download skips healthy bytes, meta rebuilt from the listing
-	// — near-free). Trashed/deleted/undecidable → removeTreeDirectory. Lookup failure → `listing`
-	// error, dir left for the next pass. Mirrors healBrokenStandalones.
+	// empty local view in BOTH pass modes, hash-idempotent download skips healthy bytes, meta
+	// rebuilt from the listing — near-free; `thorough` simply follows the pass mode).
+	// Trashed/deleted/undecidable → removeTreeDirectory. Lookup failure → `listing` error, dir left
+	// for the next pass. Mirrors healBrokenStandalones.
 	private async healBrokenTrees({
 		authedSdkClient,
+		thorough,
 		signal,
 		pushError,
 		pushErrors
 	}: {
 		authedSdkClient: AuthedSdkClient
+		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 		pushErrors: (errors: OfflineSyncError[]) => void
@@ -958,6 +1002,7 @@ export class OfflineSync {
 							parent: resolvedParent,
 							hideProgress: true,
 							skipIndexUpdate: true,
+							thorough,
 							signal
 						})
 					)
@@ -979,7 +1024,7 @@ export class OfflineSync {
 		)
 	}
 
-	private async runPass(): Promise<void> {
+	private async runPass({ thorough }: { thorough: boolean }): Promise<void> {
 		await run(
 			async defer => {
 				await this.syncMutex.acquire()
@@ -1092,6 +1137,7 @@ export class OfflineSync {
 									item,
 									parent,
 									authedSdkClient,
+									thorough,
 									signal,
 									pushError,
 									pushErrors
@@ -1107,6 +1153,7 @@ export class OfflineSync {
 									item,
 									parent,
 									listingState: parentListings.get(parentCacheKey(parent)),
+									thorough,
 									signal,
 									pushError,
 									pushErrors
@@ -1123,6 +1170,7 @@ export class OfflineSync {
 									parent,
 									listingState: parentListings.get(parentCacheKey(parent)),
 									authedSdkClient,
+									thorough,
 									signal,
 									pushError
 								})
@@ -1138,6 +1186,7 @@ export class OfflineSync {
 					}),
 					this.healBrokenTrees({
 						authedSdkClient,
+						thorough,
 						signal,
 						pushError,
 						pushErrors

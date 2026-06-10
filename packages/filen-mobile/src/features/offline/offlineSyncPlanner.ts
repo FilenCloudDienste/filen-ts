@@ -22,14 +22,27 @@ export type TreeReconcilePlan = {
 	missingUuids: string[]
 }
 
-const TMP_PREFIX = "/.sync-tmp-"
+const TMP_NAME_PREFIX = ".sync-tmp-"
+const TMP_PREFIX = `/${TMP_NAME_PREFIX}`
 
 export function tmpPathForUuid(uuid: string): string {
 	return `${TMP_PREFIX}${uuid}`
 }
 
 export function isSyncTmpName(name: string): boolean {
-	return name.startsWith(".sync-tmp-")
+	return name.startsWith(TMP_NAME_PREFIX)
+}
+
+// Extracts the uuid a /.sync-tmp-{uuid} extraction temp was created for (crash-recovery rescue
+// keys the temp back into the current meta by this uuid). Null for non-temp or malformed names.
+export function uuidFromSyncTmpName(name: string): string | null {
+	if (!isSyncTmpName(name)) {
+		return null
+	}
+
+	const uuid = name.slice(TMP_NAME_PREFIX.length)
+
+	return uuid.length > 0 ? uuid : null
 }
 
 function depth(path: string): number {
