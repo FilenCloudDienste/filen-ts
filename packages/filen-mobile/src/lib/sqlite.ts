@@ -58,6 +58,12 @@ class Sqlite {
 
 	private initMutex: Semaphore = new Semaphore(1)
 
+	// Bumped by every kv wipe (clearAsync / kvAsync.clear). kv writes capture the generation
+	// when they start and silently no-op if a wipe landed before their INSERT executed —
+	// defense-in-depth (mirroring cache.ts's clearGeneration) so an aborted sync's late
+	// `INSERT OR REPLACE` cannot re-INSERT decrypted metadata AFTER the logout Phase 6 wipe.
+	private clearGeneration = 0
+
 	public constructor() {
 		// Maintenance on app background: checkpoint WAL, reclaim free pages, run optimize with query history
 		AppState.addEventListener("change", state => {
@@ -150,6 +156,10 @@ class Sqlite {
 	}
 
 	public async clearAsync(): Promise<void> {
+		// Bump BEFORE the wipe so any write that captured its generation earlier is already
+		// superseded — even one landing while the DELETE is still executing.
+		this.clearGeneration++
+
 		const db = await this.openDb()
 
 		await db.execute("DELETE FROM kv")
@@ -180,6 +190,8 @@ class Sqlite {
 				return null
 			}
 
+			const generation = this.clearGeneration
+
 			const serialized = await new Promise<string>((resolve, reject) => {
 				queueMicrotask(() => {
 					try {
@@ -191,6 +203,13 @@ class Sqlite {
 			})
 
 			const db = await this.openDb()
+
+			// A kv wipe (logout) landed after this write started — discard it silently
+			// rather than re-INSERTing the row into the just-emptied store.
+			if (generation !== this.clearGeneration) {
+				return null
+			}
+
 			const result = await db.execute("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", [key, serialized])
 
 			return result.insertId ?? null
@@ -202,6 +221,9 @@ class Sqlite {
 			return result.map(row => row[0] as string)
 		},
 		clear: async (): Promise<void> => {
+			// Same wipe as clearAsync() — bump the generation so in-flight writes are superseded.
+			this.clearGeneration++
+
 			const db = await this.openDb()
 
 			await db.execute("DELETE FROM kv")

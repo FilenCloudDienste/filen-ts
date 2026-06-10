@@ -1,6 +1,3 @@
-import * as FileSystem from "expo-file-system"
-import { randomUUID } from "expo-crypto"
-import { newTmpFile } from "@/lib/tmp"
 import {
 	AnyDirWithContext,
 	AnyNormalDir,
@@ -16,35 +13,13 @@ import cache from "@/lib/cache"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 
+// atomicWrite moved to shared infra (@/lib/fsAtomic) so lib modules (fileCache, audioCache
+// sidecars) can use it without a lib→features import. Re-exported here so existing offline
+// call sites keep compiling unchanged.
+export { atomicWrite } from "@/lib/fsAtomic"
+
 // "sharedInRoot" means the item lives at the top level of Shared In (no parent dir, just the shared root listing).
 export type OfflineParent = AnyDirWithContext | "sharedInRoot"
-
-/**
- * Write data to a file atomically using write-to-temp-then-move.
- * Prevents corruption from crashes mid-write: the destination is replaced by a SINGLE
- * overwriting move (expo-file-system v56 `moveSync` honors RelocationOptions `overwrite`
- * natively on both platforms) — never a delete-then-move pair, which had a window where
- * a crash between the two steps left the destination missing entirely.
- */
-export function atomicWrite(file: FileSystem.File, data: string | Uint8Array): FileSystem.File {
-	const tmp = newTmpFile(`.tmp-${randomUUID()}`)
-
-	tmp.write(data)
-
-	try {
-		tmp.moveSync(file, {
-			overwrite: true
-		})
-
-		return file
-	} catch (e) {
-		if (tmp.exists) {
-			tmp.delete()
-		}
-
-		throw e
-	}
-}
 
 // Produces a stable string key from the deeply-nested AnyDirWithContext tagged union.
 // Used to dedup parent listings in sync() and for the listDirectories cache.

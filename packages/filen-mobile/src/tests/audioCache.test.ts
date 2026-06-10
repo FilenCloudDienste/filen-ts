@@ -400,6 +400,43 @@ describe("AudioCache", () => {
 			expect(fs.has(metaPath)).toBe(true)
 		})
 
+		it("writes the metadata sidecar atomically (temp file + single overwriting move)", async () => {
+			const cache = await createAudioCache()
+			const uuid = "uuid-atomic-sidecar"
+			const name = "atomic.mp3"
+			const item = wrapDrive(makeFileItem(uuid, name))
+
+			const mockAudioFile = new File(`${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}${extname(name)}`)
+
+			fs.set(mockAudioFile.uri, new Uint8Array([1, 2, 3]))
+			vi.mocked(fileCache.get).mockResolvedValueOnce(mockAudioFile as any)
+
+			const moveSpy = vi.spyOn(File.prototype, "moveSync")
+			let moveCalls: unknown[][] = []
+
+			try {
+				await cache.get({ item })
+			} finally {
+				// mockRestore clears the recorded calls — snapshot them first.
+				moveCalls = [...moveSpy.mock.calls]
+
+				moveSpy.mockRestore()
+			}
+
+			// The sidecar landed via an overwriting move of a temp sibling, never a direct write.
+			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
+			const sidecarMove = moveCalls.find(call => (call[0] as File).uri === metaPath)
+
+			expect(sidecarMove).toBeDefined()
+			expect(sidecarMove?.[1]).toEqual({ overwrite: true })
+			expect(fs.has(metaPath)).toBe(true)
+
+			// No temp file leaked into filen-tmp.
+			for (const key of fs.keys()) {
+				expect(key.includes("/filen-tmp/.tmp-")).toBe(false)
+			}
+		})
+
 		it("skips metadata parsing for files larger than the parse-size cap", async () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-large"

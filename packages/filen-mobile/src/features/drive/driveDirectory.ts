@@ -2,7 +2,6 @@ import auth from "@/lib/auth"
 import { AnyNormalDir, NonRootItem_Tags } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForSdk } from "@/lib/paths"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import cache from "@/lib/cache"
 
@@ -205,7 +204,12 @@ export async function findItemMatchesForName({ name, signal }: { name: string; s
 					item.tag === NonRootItem_Tags.NormalDir
 						? unwrappedDirIntoDriveItem(unwrapDirMeta(item.inner[0]))
 						: unwrappedFileIntoDriveItem(unwrapFileMeta(item.inner[0])),
-				path: normalizeFilePathForSdk(path)
+				// The SDK search path is built from RAW decrypted names — only normalize the
+				// outer shape (leading "/"); NEVER percent-decode it. normalizeFilePathForSdk
+				// decodes %XX escapes (correct only for encoded expo `.uri` inputs) and would
+				// corrupt a literal "%20" in a real filename — the same bug class as the
+				// offline/camera-upload eternal-loop fixes.
+				path: path.startsWith("/") ? path : `/${path}`
 			}
 		})
 		.filter(

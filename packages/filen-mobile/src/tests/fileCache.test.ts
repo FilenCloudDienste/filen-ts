@@ -76,20 +76,21 @@ import { xxHash32 } from "js-xxhash"
 
 const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
 
-function makeFileItem(uuid: string, name: string): DriveItem {
+function makeFileItem(uuid: string, name: string, size: bigint = 100n, favorited: boolean = false): DriveItem {
 	return {
 		type: "file",
 		data: {
 			uuid,
 			decryptedMeta: {
 				name,
-				size: 100n,
+				size,
 				modified: 1000,
 				created: 900,
 				mime: "application/octet-stream"
 			},
 			undecryptable: false,
-			size: 100n
+			size,
+			favorited
 		}
 	} as unknown as DriveItem
 }
@@ -382,17 +383,143 @@ describe("FileCache", () => {
 			expect(emptyResult).toBe(false)
 		})
 
-		it("returns false when metadata doesn't match item", async () => {
+		it("returns false when the cached size doesn't match (content-identity sanity check)", async () => {
 			const cache = await createFileCache()
-			const item = wrapDrive(makeFileItem("mismatch-uuid", "v2.txt"))
-			const staleItem = wrapDrive(makeFileItem("mismatch-uuid", "v1.txt"))
+			const item = wrapDrive(makeFileItem("mismatch-uuid", "doc.txt", 200n))
+			const staleItem = wrapDrive(makeFileItem("mismatch-uuid", "doc.txt", 100n))
 
-			writeFile("mismatch-uuid", "v1.txt")
+			writeFile("mismatch-uuid", "doc.txt")
 			writeMetadata("mismatch-uuid", staleItem)
 
 			const result = await cache.has(item)
 
 			expect(result).toBe(false)
+		})
+
+		it("returns false when the sidecar claims a different uuid", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("uuid-a", "doc.txt"))
+			// A sidecar in uuid-a's directory whose embedded item carries uuid-b
+			// (cross-write / corruption) must never validate uuid-a's bytes.
+			const foreignItem = wrapDrive(makeFileItem("uuid-b", "doc.txt"))
+
+			writeFile("uuid-a", "doc.txt")
+			writeMetadata("uuid-a", foreignItem)
+
+			const result = await cache.has(item)
+
+			expect(result).toBe(false)
+		})
+
+		it("returns true for a renamed + refavorited same-uuid item (metadata-only changes must not invalidate cached bytes)", async () => {
+			const cache = await createFileCache()
+			// uuid rotates on every content change — same uuid means identical bytes,
+			// so a rename/favorite (uuid unchanged) must still HIT.
+			const cachedItem = wrapDrive(makeFileItem("rename-uuid", "old-name.txt", 100n, false))
+			const renamedItem = wrapDrive(makeFileItem("rename-uuid", "new-name.txt", 100n, true))
+
+			writeFile("rename-uuid", "old-name.txt")
+			writeMetadata("rename-uuid", cachedItem)
+
+			const result = await cache.has(renamedItem)
+
+			expect(result).toBe(true)
+		})
+
+		it("hits for a live-shaped item whose serializer round-trip differs structurally (uuid identity, not deep equality)", async () => {
+			const cache = await createFileCache()
+
+			// Live SDK items carry UniffiEnum-style variant CLASS instances and
+			// present-but-undefined keys — shapes a serializer round-trip can never
+			// reproduce (plain objects, missing keys). Deep equality always failed for
+			// these; uuid identity must hit.
+			class FakeVariant {
+				public readonly tag = "Normal"
+				public readonly inner: unknown[]
+
+				public constructor(inner: unknown) {
+					this.inner = [inner]
+				}
+			}
+
+			const liveItem = {
+				type: "drive",
+				data: {
+					type: "file",
+					data: {
+						uuid: "live-uuid",
+						decryptedMeta: {
+							name: "live.txt",
+							size: 100n,
+							modified: 1000,
+							created: 900,
+							mime: "application/octet-stream"
+						},
+						undecryptable: false,
+						size: 100n,
+						parent: new FakeVariant("parent-uuid"),
+						canMakeThumbnail: undefined
+					}
+				}
+			} as unknown as CacheItem
+
+			writeFile("live-uuid", "live.txt")
+
+			// The on-disk sidecar is what a serializer round-trip produces: plain objects,
+			// no class instances, no present-but-undefined keys.
+			const dir = `${BASE_DIR}/live-uuid`
+
+			fs.set(dir, "dir")
+			fs.set(
+				`${dir}/live-uuid.filenmeta`,
+				new Uint8Array(
+					new TextEncoder().encode(
+						serialize({
+							type: "drive",
+							data: {
+								type: "file",
+								data: {
+									uuid: "live-uuid",
+									decryptedMeta: {
+										name: "live.txt",
+										size: 100n,
+										modified: 1000,
+										created: 900,
+										mime: "application/octet-stream"
+									},
+									undecryptable: false,
+									size: 100n,
+									parent: {
+										tag: "Normal",
+										inner: ["parent-uuid"]
+									}
+								}
+							},
+							cachedAt: Date.now()
+						})
+					)
+				)
+			)
+
+			const result = await cache.has(liveItem)
+
+			expect(result).toBe(true)
+		})
+
+		it("returns false and self-heals (deletes the sidecar) when the sidecar is torn JSON", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("torn-uuid", "torn.txt"))
+			const dir = `${BASE_DIR}/torn-uuid`
+			const metaPath = `${dir}/torn-uuid.filenmeta`
+
+			writeFile("torn-uuid", "torn.txt")
+			fs.set(dir, "dir")
+			// A crash mid-write (pre-atomic sidecars) leaves truncated JSON.
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode('{"type":"drive","data"')))
+
+			// Must NOT throw — torn sidecar is a miss, and the entry self-heals.
+			await expect(cache.has(item)).resolves.toBe(false)
+			expect(fs.has(metaPath)).toBe(false)
 		})
 
 		it("returns true via offline fast path when offline file exists", async () => {
@@ -455,6 +582,63 @@ describe("FileCache", () => {
 
 			expect(file).toBeInstanceOf(File)
 			expect(file.uri).toBe(`${BASE_DIR}/cached-uuid/cached-uuid.txt`)
+		})
+
+		it("returns the cached file for a renamed same-uuid item without re-downloading", async () => {
+			const cache = await createFileCache()
+			const cachedItem = wrapDrive(makeFileItem("renamed-hit-uuid", "before.txt"))
+			const renamedItem = wrapDrive(makeFileItem("renamed-hit-uuid", "after.txt"))
+
+			writeFile("renamed-hit-uuid", "before.txt", new Uint8Array([42]))
+			writeMetadata("renamed-hit-uuid", cachedItem)
+
+			const file = await cache.get({ item: renamedItem })
+
+			expect(file.uri).toBe(`${BASE_DIR}/renamed-hit-uuid/renamed-hit-uuid.txt`)
+			// Same uuid means identical bytes — no SDK download may happen.
+			expect(auth.getSdkClients).not.toHaveBeenCalled()
+		})
+
+		it("writes the metadata sidecar atomically (temp file + single overwriting move)", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("atomic-uuid", "atomic.bin"))
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					downloadFileToPath: vi.fn().mockImplementation(async (_anyFile: unknown, path: string) => {
+						fs.set("file://" + path, new Uint8Array([1]))
+					})
+				}
+			} as never)
+
+			const moveSpy = vi.spyOn(File.prototype, "moveSync")
+			let moveCalls: unknown[][] = []
+
+			try {
+				await cache.get({ item })
+			} finally {
+				// mockRestore clears the recorded calls — snapshot them first.
+				moveCalls = [...moveSpy.mock.calls]
+
+				moveSpy.mockRestore()
+			}
+
+			// The sidecar landed via an overwriting move of a temp sibling, never a direct write.
+			const metaUri = `${BASE_DIR}/atomic-uuid/atomic-uuid.filenmeta`
+			const sidecarMove = moveCalls.find(call => (call[0] as File).uri === metaUri)
+
+			expect(sidecarMove).toBeDefined()
+			expect(sidecarMove?.[1]).toEqual({ overwrite: true })
+
+			// Final sidecar is valid and no temp file leaked into filen-tmp.
+			const meta = deserialize(new TextDecoder().decode(await new File(metaUri).bytes())) as Metadata
+
+			expect(meta.type).toBe("drive")
+			expect(meta.cachedAt).toBeTypeOf("number")
+
+			for (const key of fs.keys()) {
+				expect(key.includes("/filen-tmp/.tmp-")).toBe(false)
+			}
 		})
 
 		it("downloads file via SDK when not cached (cache miss)", async () => {
@@ -543,12 +727,12 @@ describe("FileCache", () => {
 			expect(fs.has(`${BASE_DIR}/fail-uuid`)).toBe(false)
 		})
 
-		it("re-downloads when metadata doesn't match", async () => {
+		it("re-downloads when the cached size doesn't match", async () => {
 			const cache = await createFileCache()
-			const staleItem = wrapDrive(makeFileItem("redownload-uuid", "old.txt"))
-			const newItem = wrapDrive(makeFileItem("redownload-uuid", "new.txt"))
+			const staleItem = wrapDrive(makeFileItem("redownload-uuid", "doc.txt", 50n))
+			const newItem = wrapDrive(makeFileItem("redownload-uuid", "doc.txt", 100n))
 
-			writeFile("redownload-uuid", "old.txt", new Uint8Array([1]))
+			writeFile("redownload-uuid", "doc.txt", new Uint8Array([1]))
 			writeMetadata("redownload-uuid", staleItem)
 
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
@@ -572,8 +756,8 @@ describe("FileCache", () => {
 
 			writeFile("replace-uuid", "replace.txt", new Uint8Array([1, 2, 3]))
 
-			// Metadata doesn't match (different item to force re-download)
-			const otherItem = wrapDrive(makeFileItem("replace-uuid", "other.txt"))
+			// Metadata doesn't match (different size to force re-download)
+			const otherItem = wrapDrive(makeFileItem("replace-uuid", "replace.txt", 999n))
 
 			writeMetadata("replace-uuid", otherItem)
 
