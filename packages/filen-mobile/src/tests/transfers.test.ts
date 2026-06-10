@@ -466,6 +466,49 @@ describe("Transfers", () => {
 				expect(mockSetTransfers).not.toHaveBeenCalled()
 			})
 
+			it("epoch-0 created/modified survive to the SDK uploadFile params as 0n (null-guard, not falsy-drop)", async () => {
+				// REGRESSION (#B7): `created ? BigInt(created) : undefined` dropped a valid
+				// epoch-0 timestamp to undefined, letting the server assign its own created
+				// and breaking camera upload's dedup identity for both-null-timestamp assets.
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					hideProgress: true,
+					created: 0,
+					modified: 0
+				})
+
+				expect(mockUploadFile).toHaveBeenCalledTimes(1)
+
+				const params = mockUploadFile.mock.calls[0]?.[0] as { created?: bigint; modified?: bigint }
+
+				expect(params.created).toBe(0n)
+				expect(params.modified).toBe(0n)
+			})
+
+			it("absent created/modified stay undefined in the SDK uploadFile params", async () => {
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					hideProgress: true
+				})
+
+				expect(mockUploadFile).toHaveBeenCalledTimes(1)
+
+				const params = mockUploadFile.mock.calls[0]?.[0] as { created?: bigint; modified?: bigint }
+
+				expect(params.created).toBeUndefined()
+				expect(params.modified).toBeUndefined()
+			})
+
 			it("second upload succeeds after first upload throws (no residual state blocking retry)", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))

@@ -4,7 +4,7 @@ import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { unwrapFileMeta } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
+import { normalizeFilePathForExpo } from "@/lib/paths"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
@@ -22,7 +22,18 @@ import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import cache from "@/lib/cache"
 import i18n from "@/lib/i18n"
-import { modifyAssetPathOnCollision, sanitizePathSegment, dedupTreeKey, stripFilenameExtension } from "@/features/cameraUpload/cameraUploadHelpers"
+import {
+	modifyAssetPathOnCollision,
+	collisionNameSuffix,
+	sanitizePathSegment,
+	dedupTreeKey,
+	stripFilenameExtension,
+	effectiveCreationTimestamp,
+	composeLocalTreePath,
+	rawRemoteTreePath,
+	normalizeCameraUploadHashEntry,
+	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY
+} from "@/features/cameraUpload/cameraUploadHelpers"
 
 export type LocalFile = {
 	asset: MediaLibrary.Asset
@@ -35,12 +46,29 @@ export type LocalFile = {
 	}
 	path: string
 	originalPath: string
+	// #B2: the collision suffix this asset's tree key carries ("" for the base slot).
+	// The upload pipeline appends it to the uploaded filename so the remote listing
+	// reproduces the local key.
+	collisionSuffix: string
 }
 
 export type RemoteFile = FileWithPath
 
 export type LocalTree = Record<string, LocalFile>
 export type RemoteTree = Record<string, RemoteFile>
+
+// A listing plus whether it is KNOWN to be incomplete (enumeration/scan failures).
+// A degraded listing's absences are not evidence of deletion — pruning and
+// mirror-mode drops must only act on clean listings.
+export type LocalListing = {
+	tree: LocalTree
+	degraded: boolean
+}
+
+export type RemoteListing = {
+	tree: RemoteTree
+	degraded: boolean
+}
 
 export type Delta = {
 	type: "upload"
@@ -79,7 +107,11 @@ type AlbumEntry = {
 }
 
 export const MAX_UPLOAD_FAILURES = 3
-// Critical: When changing the config type/object, increment the version to invalidate old configs and clear caches that may contain entries based on the old config structure.
+// Critical: When changing the config type/object, increment the version to invalidate old
+// CONFIGS (the secureStore key below rotates with it). Note this does NOT touch
+// `cache.cameraUploadHashes` — that map lives under cache.ts's own versioned prefix and is
+// never rotated from here; its value-shape changes rely on in-place lazy migration instead
+// (see CameraUploadHashEntry / normalizeCameraUploadHashEntry).
 export const VERSION = 1
 
 class CameraUpload {
@@ -219,8 +251,12 @@ class CameraUpload {
 		return file
 	}
 
-	private async listLocal({ config, signal }: { config: Config; signal: AbortSignal }): Promise<LocalTree> {
+	private async listLocal({ config, signal }: { config: Config; signal: AbortSignal }): Promise<LocalListing> {
 		const tree: LocalTree = {}
+		// Set when any album query or asset-info fetch fails (abort-driven teardown
+		// excluded): the tree is then known-incomplete and its absences must not be
+		// treated as "asset gone from device" by the md5-cache pruning.
+		let degraded = false
 
 		// Defense-in-depth: config persistence is Set-backed in the album-selection UI,
 		// but dedupe here too so a legacy / hand-edited config can't race two iterations
@@ -228,7 +264,10 @@ class CameraUpload {
 		const selectedIds = [...new Set(config.albumIds)]
 
 		if (selectedIds.length === 0) {
-			return tree
+			return {
+				tree,
+				degraded
+			}
 		}
 
 		// Enumerate ALL device albums up front for two reasons:
@@ -393,9 +432,15 @@ class CameraUpload {
 						continue
 					}
 
+					if (signal.aborted) {
+						continue
+					}
+
+					degraded = true
+
 					const failedAsset = assets[index]
 
-					if (signal.aborted || !failedAsset || reportedFailedAssetIds.has(failedAsset.id)) {
+					if (!failedAsset || reportedFailedAssetIds.has(failedAsset.id)) {
 						continue
 					}
 
@@ -414,27 +459,26 @@ class CameraUpload {
 					])
 				}
 
-				// Phase 2: sort by creationTime ascending before building the tree.
-				// On iOS, asset filenames cycle (IMG_0001 … IMG_9999 → IMG_0001 …), so multiple
-				// assets can share the same filename. Because getInfo() resolves in non-deterministic
-				// order, building the tree directly inside Promise.all produces a different
-				// winner for the base path slot on each run, causing re-uploads on every sync.
-				// Sorting first ensures the oldest asset always wins the base slot and newer
-				// duplicates consistently receive a collision suffix – stable across runs.
-				// Filename is used as tiebreaker so both local and remote trees resolve
-				// equal creationTimes in the same order.
+				// Phase 2: sort by effective creation timestamp ascending before building the
+				// tree. On iOS, asset filenames cycle (IMG_0001 … IMG_9999 → IMG_0001 …), so
+				// multiple assets can share the same filename. Because getInfo() resolves in
+				// non-deterministic order, building the tree directly inside Promise.all
+				// produces a different winner for the base path slot on each run, causing
+				// re-uploads on every sync. Sorting first ensures the oldest asset always wins
+				// the base slot and newer duplicates consistently receive a collision suffix –
+				// stable across runs. Filename is used as tiebreaker so both local and remote
+				// trees resolve equal timestamps in the same order.
 				//
 				// Timestamps are floored to seconds before comparison so that sub-second
 				// rounding differences between the local PHAsset timestamp and the server's
 				// stored value (after EXIF-override or network round-trip) do not produce
-				// different orderings across syncs. #14: null creationTime falls back to 0
-				// ONLY (NOT to modificationTime) so the key is symmetric with the remote
-				// side, which has no modificationTime to consult — a modificationTime
-				// fallback here would make the same null-creation asset hash differently
-				// local vs remote and re-evaluate every sync.
+				// different orderings across syncs. #B7: effectiveCreationTimestamp
+				// (creationTime ?? modificationTime ?? 0) is the ONE rule shared by this sort,
+				// the collision suffix AND the upload's `created` parameter — so the remote
+				// side's `meta.created`-based sort mirrors this ordering exactly.
 				infos.sort((a, b) => {
-					const tA = Math.floor((a.info.creationTime ?? 0) / 1000)
-					const tB = Math.floor((b.info.creationTime ?? 0) / 1000)
+					const tA = Math.floor(effectiveCreationTimestamp(a.info) / 1000)
+					const tB = Math.floor(effectiveCreationTimestamp(b.info) / 1000)
 					const timeDiff = tA - tB
 
 					if (timeDiff !== 0) {
@@ -446,39 +490,52 @@ class CameraUpload {
 
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
 				for (const { asset, info } of infos) {
-					const originalPath = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).trim()
+					// #E2: keys are composed from RAW segments (plain "/" joins) — Paths.join
+					// percent-ENCODES segments and normalizeFilePathForSdk percent-DECODES
+					// them, corrupting literal %XX sequences in real filenames (the eternal
+					// re-upload class). For names without decodable %XX the composed key is
+					// byte-identical to the previous pipeline's output.
+					const originalPath = composeLocalTreePath({ folderTitle, filename: info.filename })
 					// #15: when compress is enabled the upload may rewrite the extension
 					// (e.g. .png → .jpg), so the dedup key is made extension-agnostic here
 					// and symmetrically on the remote side. The collision-suffix name is
 					// likewise stripped of its extension so the suffix path stays symmetric.
-					const fullPath = normalizeFilePathForSdk(FileSystem.Paths.join(folderTitle, info.filename)).toLowerCase().trim()
+					const fullPath = originalPath.toLowerCase()
 					let path = dedupTreeKey({ path: fullPath, compress: config.compress })
 					const collisionName = config.compress ? stripFilenameExtension(info.filename) : info.filename
 					let iteration = 0
+					// #B2: remember the suffix the winning slot carries so the upload can
+					// reproduce it in the uploaded filename ("" = base slot, plain name).
+					let collisionSuffixApplied = ""
 
 					// Use a seconds-floored creation timestamp as the collision identity.
 					// Flooring to seconds absorbs sub-second drift from EXIF-override or
 					// network round-trips, keeping local and remote trees symmetric without
-					// any per-asset file read at listing time. #14: null creationTime falls
-					// back to 0 ONLY (NOT to modificationTime) so it matches the remote
-					// side, which has no modificationTime to consult.
-					const localContentHash = String(Math.floor((info.creationTime ?? 0) / 1000))
+					// any per-asset file read at listing time. #B7: the identity is
+					// effectiveCreationTimestamp — the exact value the upload sends as
+					// `created` — so the remote `meta.created`-derived hash mirrors it
+					// (including the null-creationTime → modificationTime fallback).
+					const localContentHash = String(Math.floor(effectiveCreationTimestamp(info) / 1000))
 
 					while (tree[path]) {
-						path =
-							modifyAssetPathOnCollision({
-								iteration,
-								path,
-								asset: {
-									name: collisionName,
-									contentHash: localContentHash
-								}
-							}) ?? ""
+						const collisionAsset = {
+							name: collisionName,
+							contentHash: localContentHash
+						}
+						const resolvedPath = modifyAssetPathOnCollision({
+							iteration,
+							path,
+							asset: collisionAsset
+						})
 
-						if (path.length === 0) {
+						if (resolvedPath === null || resolvedPath.length === 0) {
+							path = ""
+
 							break
 						}
 
+						path = resolvedPath
+						collisionSuffixApplied = collisionNameSuffix({ iteration, asset: collisionAsset }) ?? ""
 						iteration++
 					}
 
@@ -490,7 +547,8 @@ class CameraUpload {
 						asset,
 						info,
 						path,
-						originalPath
+						originalPath,
+						collisionSuffix: collisionSuffixApplied
 					}
 				}
 			})
@@ -508,6 +566,8 @@ class CameraUpload {
 				continue
 			}
 
+			degraded = true
+
 			console.error(result.reason)
 
 			useCameraUploadStore.getState().setErrors(errors => [
@@ -524,7 +584,10 @@ class CameraUpload {
 			])
 		}
 
-		return tree
+		return {
+			tree,
+			degraded
+		}
 	}
 
 	private async listRemote({
@@ -535,7 +598,7 @@ class CameraUpload {
 		remoteDir: AnyNormalDir
 		signal: AbortSignal
 		compress: boolean
-	}): Promise<RemoteTree> {
+	}): Promise<RemoteListing> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		// Per the SDK contract, entries inside errored subtrees are silently ABSENT from
 		// the listing while the call still resolves Ok — collect the scan errors instead
@@ -586,7 +649,10 @@ class CameraUpload {
 		//
 		// Timestamps are floored to seconds before comparison to match the listLocal
 		// sort behaviour and absorb sub-second drift introduced by EXIF-override or
-		// network round-trips.  Null meta falls back to 0, mirroring the local side.
+		// network round-trips. #B7: `meta.created` carries the value the upload sent —
+		// effectiveCreationTimestamp(info) — so this sort mirrors the local one,
+		// including for null-creationTime assets. Null meta falls back to 0, matching
+		// the local side's both-null fallback (the upload sends created=0 for those).
 		const sortedFiles = files
 			.map(file => ({
 				file,
@@ -605,7 +671,11 @@ class CameraUpload {
 			})
 
 		for (const { file, meta } of sortedFiles) {
-			const fullPath = normalizeFilePathForSdk(file.path).toLowerCase().trim()
+			// #E2: `file.path` is the RAW decrypted path — never percent-encoded. It must
+			// NOT be percent-decoded (a literal "%20" in a name would corrupt and a
+			// literal "%2F" would gain a phantom "/" separator), or the key diverges from
+			// the local raw composition and the asset re-uploads forever.
+			const fullPath = rawRemoteTreePath(file.path).toLowerCase()
 			// #15: mirror listLocal — when compress is enabled, the remote filename may
 			// be the compressed `.jpg` (or the original extension when compression lost),
 			// so the dedup key is made extension-agnostic and the collision-suffix name is
@@ -645,15 +715,24 @@ class CameraUpload {
 			tree[path] = file
 		}
 
-		return tree
+		return {
+			tree,
+			// #B4: a degraded listing's absences are not evidence of remote deletion —
+			// mirror-mode cache drops must only act when this is false.
+			degraded: scanErrors.length > 0
+		}
 	}
 
-	private async deltas({ config, signal }: { config: Config; signal: AbortSignal }): Promise<Delta[]> {
+	private async deltas({ config, signal }: { config: Config; signal: AbortSignal }): Promise<{
+		deltas: Delta[]
+		localListing: LocalListing
+		remoteListing: RemoteListing
+	}> {
 		if (!config.remoteDir) {
 			throw new Error("Remote directory is not set in config")
 		}
 
-		const [localTree, remoteTree] = await Promise.all([
+		const [localListing, remoteListing] = await Promise.all([
 			this.listLocal({
 				config,
 				signal
@@ -665,6 +744,8 @@ class CameraUpload {
 			})
 		])
 
+		const localTree = localListing.tree
+		const remoteTree = remoteListing.tree
 		const deltas: Delta[] = []
 
 		for (const path in localTree) {
@@ -689,7 +770,11 @@ class CameraUpload {
 			}
 		}
 
-		return deltas
+		return {
+			deltas,
+			localListing,
+			remoteListing
+		}
 	}
 
 	public async getConfig(): Promise<Config> {
@@ -847,7 +932,11 @@ class CameraUpload {
 				useCameraUploadStore.getState().setSyncing(false)
 			})
 
-			const allDeltas = await this.deltas({
+			const {
+				deltas: allDeltas,
+				localListing,
+				remoteListing
+			} = await this.deltas({
 				config: params?.background
 					? {
 							...config,
@@ -856,6 +945,35 @@ class CameraUpload {
 					: config,
 				signal: abortController.signal
 			})
+
+			// #B4/B6 hygiene: drop md5-cache entries whose local asset is gone from the
+			// device (cheap set difference against the local tree). Gated on a
+			// foreground pass (background forces includeVideos=false, so every video
+			// would falsely look "gone") and a CLEAN local listing (a degraded
+			// listing's absences are not evidence the asset left the device).
+			if (!params?.background && !localListing.degraded) {
+				for (const key of cache.cameraUploadHashes.keys()) {
+					if (!localListing.tree[key]) {
+						cache.cameraUploadHashes.delete(key)
+					}
+				}
+			}
+
+			// #B4 mirror mode ("Re-upload deleted photos", default OFF): when enabled,
+			// an entry whose key is present locally but ABSENT from a CLEAN remote
+			// listing loses its md5-cache shield, so the already-fired delta below
+			// re-uploads it naturally. A degraded listing's absences are not evidence
+			// of deletion and never drop anything. When OFF (default), the shield is
+			// deliberate: photos deleted remotely stay deleted.
+			const reuploadDeleted = (await secureStore.get<boolean>(CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY)) === true
+
+			if (reuploadDeleted && !remoteListing.degraded) {
+				for (const key in localListing.tree) {
+					if (!remoteListing.tree[key]) {
+						cache.cameraUploadHashes.delete(key)
+					}
+				}
+			}
 
 			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
 			// recently captured media is prioritised within the limited OS execution window, then cap the
@@ -883,6 +1001,24 @@ class CameraUpload {
 					const result = await run(async defer => {
 						switch (delta.type) {
 							case "upload": {
+								const cachedEntry = normalizeCameraUploadHashEntry(cache.cameraUploadHashes.get(delta.file.path))
+								const modificationTime = delta.file.info.modificationTime
+
+								// #B6 fast path: iOS bumps asset modificationTime on mere VIEWING,
+								// so this delta fires every sync for view-touched photos. When the
+								// mtime equals the one we last verified the md5 against, skip
+								// immediately — no getUri() (which re-downloads iCloud-offloaded
+								// originals) and no md5 hash. -1 is the "never verified" sentinel
+								// (legacy string entries migrate through it) and never matches.
+								if (
+									cachedEntry &&
+									modificationTime != null &&
+									cachedEntry.verifiedModificationTime !== -1 &&
+									cachedEntry.verifiedModificationTime === modificationTime
+								) {
+									break
+								}
+
 								const uri = await delta.file.asset.getUri()
 
 								if (!uri) {
@@ -901,7 +1037,17 @@ class CameraUpload {
 									throw new Error(i18n.t("camera_upload_processing_failed"))
 								}
 
-								if (md5 === cache.cameraUploadHashes.get(delta.file.path)) {
+								if (cachedEntry && md5 === cachedEntry.md5) {
+									// Content unchanged (view-touched mtime bump or a remotely-
+									// deleted photo with mirror mode off). Record the mtime this
+									// md5 was just verified against so the next pass takes the
+									// fast path above — this also upgrades legacy string entries
+									// to the object shape.
+									cache.cameraUploadHashes.set(delta.file.path, {
+										md5,
+										verifiedModificationTime: modificationTime ?? -1
+									})
+
 									break
 								}
 
@@ -946,10 +1092,23 @@ class CameraUpload {
 								// in the upload's `name` parameter so the remote filename and MIME
 								// type stay consistent with the actual bytes.
 								const uploadExt = FileSystem.Paths.extname(uploadFile.uri).toLowerCase()
-								const uploadName =
+								const plainUploadName =
 									uploadExt !== "" && uploadExt !== srcExt
 										? `${FileSystem.Paths.basename(delta.file.info.filename, FileSystem.Paths.extname(delta.file.info.filename))}${uploadExt}`
 										: delta.file.info.filename
+								// #B2: a collision member uploads under its collision-resolved name
+								// (`name_<suffix>.ext`) so the remote listing's base key reproduces
+								// this asset's local tree key — uploading the plain name would
+								// silently REPLACE the base member as a new version (backend: same
+								// name + same parent = new version). The suffix composes onto the
+								// FINAL name, AFTER the compress extension rewrite, and adds only
+								// [a-z0-9_-] characters, so it needs no sanitization beyond the
+								// plain name's. Non-colliding assets keep their plain name.
+								const plainUploadExt = FileSystem.Paths.extname(plainUploadName)
+								const uploadName =
+									delta.file.collisionSuffix.length > 0
+										? `${FileSystem.Paths.basename(plainUploadName, plainUploadExt)}${delta.file.collisionSuffix}${plainUploadExt}`
+										: plainUploadName
 
 								const parentDir = await this.ensureParentDirectoryExists({
 									config,
@@ -957,6 +1116,10 @@ class CameraUpload {
 									originalPath: delta.file.originalPath
 								})
 
+								// #B7: `created` is effectiveCreationTimestamp — the SAME value the
+								// dedup key suffix and the tree sort are derived from — so the
+								// remote `meta.created` mirrors the local identity on the next
+								// listing (epoch 0 for both-null assets survives end-to-end).
 								const transferResult = await transfers.upload({
 									localFileOrDir: uploadFile,
 									parent: parentDir,
@@ -964,7 +1127,7 @@ class CameraUpload {
 									pauseSignal,
 									name: uploadName,
 									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
-									created: delta.file.info.creationTime ?? delta.file.info.modificationTime ?? undefined,
+									created: effectiveCreationTimestamp(delta.file.info),
 									hideProgress: params?.background ?? undefined
 								})
 
@@ -972,7 +1135,10 @@ class CameraUpload {
 									break
 								}
 
-								cache.cameraUploadHashes.set(delta.file.path, md5)
+								cache.cameraUploadHashes.set(delta.file.path, {
+									md5,
+									verifiedModificationTime: modificationTime ?? -1
+								})
 
 								break
 							}

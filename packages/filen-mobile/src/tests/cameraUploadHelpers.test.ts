@@ -6,36 +6,204 @@ globalThis.__DEV__ = true
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: (filePath: string): string => {
-		let normalizedPath = filePath
-			.trim()
-			.replace(/^file:\/+/, "/")
-			.split("/")
-			.map(segment => (segment.length > 0 ? decodeURIComponent(segment) : segment))
-			.join("/")
-
-		if (!normalizedPath.startsWith("/")) {
-			normalizedPath = "/" + normalizedPath
-		}
-
-		if (normalizedPath.endsWith("/") && normalizedPath !== "/") {
-			normalizedPath = normalizedPath.slice(0, -1)
-		}
-
-		return pathModule.posix.normalize(normalizedPath)
-	},
-	normalizeFilePathForExpo: (p: string) => p
-}))
-
 import {
 	modifyAssetPathOnCollision,
+	collisionNameSuffix,
 	sanitizePathSegment,
 	applyAfterActivationToggle,
 	dedupTreeKey,
 	stripFilenameExtension,
+	effectiveCreationTimestamp,
+	composeLocalTreePath,
+	rawRemoteTreePath,
+	normalizeCameraUploadHashEntry,
+	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY,
 	type CollisionParams
 } from "@/features/cameraUpload/cameraUploadHelpers"
+
+// The PREVIOUS dedup-key pipeline (normalizeFilePathForSdk ∘ Paths.join), replicated
+// verbatim so compatibility tests can prove the raw composition produces byte-identical
+// keys for every name WITHOUT decodable %XX sequences. The real expo Paths.join
+// percent-ENCODES its rest args and normalizeFilePathForSdk percent-DECODES segments —
+// for plain names the two cancel out; for names with literal well-formed %XX they
+// corrupt the key (the bug #E2 removes).
+function oldNormalizeFilePathForSdk(filePath: string): string {
+	let normalizedPath = filePath
+		.trim()
+		.replace(/^file:\/+/, "/")
+		.split("/")
+		.map(segment => {
+			if (segment.length === 0) {
+				return segment
+			}
+
+			try {
+				return decodeURIComponent(segment)
+			} catch {
+				return segment
+			}
+		})
+		.join("/")
+
+	if (!normalizedPath.startsWith("/")) {
+		normalizedPath = "/" + normalizedPath
+	}
+
+	if (normalizedPath.endsWith("/") && normalizedPath !== "/") {
+		normalizedPath = normalizedPath.slice(0, -1)
+	}
+
+	return pathModule.posix.normalize(normalizedPath)
+}
+
+// ─── composeLocalTreePath / rawRemoteTreePath (#E2 raw dedup keys) ───────────
+
+describe("composeLocalTreePath", () => {
+	it("plain names: byte-identical to the previous join+normalize pipeline's output", () => {
+		// For names without decodable %XX the old pipeline was an identity round-trip
+		// (join percent-encoded, normalize percent-decoded). The raw composition must
+		// produce the exact same key so existing md5-cache entries keep matching.
+		const composed = composeLocalTreePath({ folderTitle: "Camera Roll", filename: "IMG_0001.jpg" })
+
+		expect(composed).toBe("/Camera Roll/IMG_0001.jpg")
+		expect(composed).toBe(oldNormalizeFilePathForSdk("Camera Roll/IMG_0001.jpg"))
+		expect(composed.toLowerCase()).toBe("/camera roll/img_0001.jpg")
+	})
+
+	it("preserves a literal %20 in a filename (no percent-decoding)", () => {
+		const composed = composeLocalTreePath({ folderTitle: "Camera Roll", filename: "photo %20 test.jpg" })
+
+		expect(composed).toBe("/Camera Roll/photo %20 test.jpg")
+		// The OLD pipeline corrupted this exact class of name (decode turned the
+		// literal "%20" into a space), making local and remote keys diverge forever.
+		expect(oldNormalizeFilePathForSdk("/Camera Roll/photo %20 test.jpg")).toBe("/Camera Roll/photo   test.jpg")
+	})
+
+	it("a literal %2F in a filename never gains a phantom path separator", () => {
+		const composed = composeLocalTreePath({ folderTitle: "Camera Roll", filename: "a%2Fb.jpg" })
+
+		expect(composed).toBe("/Camera Roll/a%2Fb.jpg")
+		// Exactly two separators: leading + between folder and filename.
+		expect(composed.split("/").length - 1).toBe(2)
+		// The OLD pipeline decoded %2F into "/", splitting the filename into a
+		// phantom extra segment.
+		expect(oldNormalizeFilePathForSdk("/Camera Roll/a%2Fb.jpg")).toBe("/Camera Roll/a/b.jpg")
+	})
+
+	it("trims outer whitespace like the old pipeline did", () => {
+		expect(composeLocalTreePath({ folderTitle: "Camera Roll", filename: "photo.jpg " })).toBe("/Camera Roll/photo.jpg")
+	})
+})
+
+describe("rawRemoteTreePath", () => {
+	it("returns the raw path verbatim (already-leading-slash case)", () => {
+		expect(rawRemoteTreePath("/Camera Roll/photo.jpg")).toBe("/Camera Roll/photo.jpg")
+	})
+
+	it("ensures a leading slash without touching the segments", () => {
+		expect(rawRemoteTreePath("Camera Roll/photo.jpg")).toBe("/Camera Roll/photo.jpg")
+	})
+
+	it("never percent-decodes: literal %20 and %2F stay literal", () => {
+		expect(rawRemoteTreePath("/Camera Roll/photo %20 test.jpg")).toBe("/Camera Roll/photo %20 test.jpg")
+		expect(rawRemoteTreePath("/Camera Roll/a%2Fb.jpg")).toBe("/Camera Roll/a%2Fb.jpg")
+	})
+
+	it("local and remote keys are identical for the same raw name (lowercased comparison)", () => {
+		for (const filename of ["IMG_0001.jpg", "photo %20 test.jpg", "a%2Fb.jpg", "Invoice 50%.pdf"]) {
+			const local = composeLocalTreePath({ folderTitle: "Camera Roll", filename }).toLowerCase()
+			const remote = rawRemoteTreePath(`/Camera Roll/${filename}`).toLowerCase()
+
+			expect(local).toBe(remote)
+		}
+	})
+})
+
+// ─── effectiveCreationTimestamp (#B7 ONE timestamp rule) ─────────────────────
+
+describe("effectiveCreationTimestamp", () => {
+	it("returns creationTime when present", () => {
+		expect(effectiveCreationTimestamp({ creationTime: 1700000000000, modificationTime: 1800000000000 })).toBe(1700000000000)
+	})
+
+	it("falls back to modificationTime when creationTime is null", () => {
+		expect(effectiveCreationTimestamp({ creationTime: null, modificationTime: 1800000000000 })).toBe(1800000000000)
+	})
+
+	it("falls back to 0 when both are null", () => {
+		expect(effectiveCreationTimestamp({ creationTime: null, modificationTime: null })).toBe(0)
+	})
+
+	it("creationTime 0 is a valid epoch timestamp, NOT a fallback trigger", () => {
+		expect(effectiveCreationTimestamp({ creationTime: 0, modificationTime: 1800000000000 })).toBe(0)
+	})
+
+	it("modificationTime 0 is a valid epoch fallback for null creationTime", () => {
+		expect(effectiveCreationTimestamp({ creationTime: null, modificationTime: 0 })).toBe(0)
+	})
+})
+
+// ─── collisionNameSuffix (#B2) ───────────────────────────────────────────────
+
+describe("collisionNameSuffix", () => {
+	it("iteration 0 appends the contentHash directly", () => {
+		expect(collisionNameSuffix({ iteration: 0, asset: { name: "IMG_0001.jpg", contentHash: "1700000000" } })).toBe("_1700000000")
+	})
+
+	it("iteration 1 appends the xxHash32 hex of name + contentHash", () => {
+		expect(collisionNameSuffix({ iteration: 1, asset: { name: "IMG_0001.jpg", contentHash: "1700000000" } })).toMatch(/^_[0-9a-f]+$/)
+	})
+
+	it("returns null for iteration >= 2 (exhausted)", () => {
+		expect(collisionNameSuffix({ iteration: 2, asset: { name: "IMG_0001.jpg", contentHash: "1" } })).toBeNull()
+	})
+
+	it("the suffix is exactly what modifyAssetPathOnCollision embeds into the path", () => {
+		for (const iteration of [0, 1]) {
+			const asset = { name: "IMG_0001.jpg", contentHash: "1700000000" }
+			const suffix = collisionNameSuffix({ iteration, asset })
+			const path = modifyAssetPathOnCollision({ iteration, path: "/camera roll/img_0001.jpg", asset })
+
+			expect(suffix).not.toBeNull()
+			expect(path).toBe(`/camera roll/img_0001${suffix}.jpg`)
+		}
+	})
+
+	it("suffixes contain only filename-safe characters (no sanitization needed)", () => {
+		for (const iteration of [0, 1]) {
+			const suffix = collisionNameSuffix({ iteration, asset: { name: "IMG_0001.jpg", contentHash: "1700000000" } })
+
+			expect(suffix).toMatch(/^_[a-z0-9_-]+$/)
+		}
+	})
+})
+
+// ─── normalizeCameraUploadHashEntry (#B4+B6 lazy migration) ──────────────────
+
+describe("normalizeCameraUploadHashEntry", () => {
+	it("undefined passes through", () => {
+		expect(normalizeCameraUploadHashEntry(undefined)).toBeUndefined()
+	})
+
+	it("a legacy string value becomes { md5, verifiedModificationTime: -1 }", () => {
+		expect(normalizeCameraUploadHashEntry("abc123")).toEqual({
+			md5: "abc123",
+			verifiedModificationTime: -1
+		})
+	})
+
+	it("an object value passes through unchanged (same reference)", () => {
+		const entry = { md5: "abc123", verifiedModificationTime: 1700000000000 }
+
+		expect(normalizeCameraUploadHashEntry(entry)).toBe(entry)
+	})
+})
+
+describe("CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY", () => {
+	it("is a stable secureStore key (persisted setting — never rename)", () => {
+		expect(CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY).toBe("cameraUploadReuploadDeleted")
+	})
+})
 
 // ─── sanitizePathSegment ──────────────────────────────────────────────────────
 
@@ -183,17 +351,28 @@ describe("modifyAssetPathOnCollision", () => {
 			).toBeNull()
 		})
 
-		it("returns a non-null string when path has no parent directory prefix (mock Paths.dirname falls back to DOCUMENT_URI, not '.')", () => {
-			// The mock Paths.dirname for bare filenames returns "file:///document", not ".",
-			// so the null guard does NOT trigger and the function returns a valid path string.
+		it("returns null when the path has no parent directory prefix", () => {
+			// #E2: the parent is now extracted with plain string ops (no Paths.dirname),
+			// so a bare filename — which can never be a valid tree key (keys are always
+			// "/<album>/<name>") — deterministically returns null on every platform
+			// instead of depending on dirname fallback behavior.
 			const result = modifyAssetPathOnCollision({
 				iteration: 0,
 				path: "IMG_0001.jpg",
 				asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 			})
 
-			expect(result).toBeTypeOf("string")
-			expect(result).not.toBeNull()
+			expect(result).toBeNull()
+		})
+
+		it("a root-level path keeps resolving under '/' (no double slash)", () => {
+			const result = modifyAssetPathOnCollision({
+				iteration: 0,
+				path: "/img_0001.jpg",
+				asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
+			})
+
+			expect(result).toBe("/img_0001_hash1.jpg")
 		})
 	})
 
@@ -521,29 +700,28 @@ describe("#15 — compress-rename key symmetry through the collision suffix", ()
 	})
 })
 
-// ─── #14 — symmetric null-creationTime key (NO modificationTime fallback) ─────
+// ─── #B7 — ONE timestamp rule keeps null-creationTime keys symmetric ──────────
 
-describe("#14 — null-creationTime local/remote key symmetry", () => {
-	it("local hash uses creationTime ?? 0 (NOT modificationTime) so it matches the remote null fallback", () => {
-		// REGRESSION: the local side previously fell back to modificationTime when
-		// creationTime was null, but the remote side has no modificationTime and
-		// falls back to 0. That asymmetry produced different keys for the same asset
-		// (re-evaluated every sync). The local fallback is now 0 ONLY.
-		const creationTime: number | null = null
-		const modificationTime = 9999000 // would have been used by the old buggy code
+describe("#B7 — null-creationTime local/remote key symmetry through the upload round-trip", () => {
+	it("the local identity (creationTime ?? modificationTime ?? 0) mirrors remotely because the upload sends the SAME value as `created`", () => {
+		// The remote side derives its hash from `meta.created` — which IS the value
+		// this pipeline uploaded: effectiveCreationTimestamp(info). So whatever the
+		// local fallback resolves to (modificationTime here), the remote listing
+		// reproduces it and the keys stay symmetric. (The previous rule — local key
+		// falls back to 0 while the upload sent modificationTime — made the remote
+		// key diverge for every null-creationTime asset with a modificationTime.)
+		const info = { creationTime: null, modificationTime: 9999000 }
+		const uploadedCreated = effectiveCreationTimestamp(info)
 
-		const localHash = String(Math.floor((creationTime ?? 0) / 1000))
-		const remoteCreated: bigint | null | undefined = null
+		expect(uploadedCreated).toBe(9999000)
+
+		const localHash = String(Math.floor(effectiveCreationTimestamp(info) / 1000))
+		const remoteCreated: bigint = BigInt(uploadedCreated) // what the next listing returns
 		const remoteHash = String(Math.floor(Number(remoteCreated ?? 0) / 1000))
 
-		expect(localHash).toBe("0")
-		expect(remoteHash).toBe("0")
+		expect(localHash).toBe("9999")
+		expect(remoteHash).toBe("9999")
 		expect(localHash).toBe(remoteHash)
-
-		// Prove the asymmetric (old) computation would have diverged.
-		const oldLocalHash = String(Math.floor((creationTime ?? modificationTime ?? 0) / 1000))
-
-		expect(oldLocalHash).not.toBe(remoteHash)
 
 		// The collision paths built from the symmetric hashes match.
 		const local = modifyAssetPathOnCollision({
@@ -558,5 +736,20 @@ describe("#14 — null-creationTime local/remote key symmetry", () => {
 		})
 
 		expect(local).toBe(remote)
+	})
+
+	it("both-null timestamps resolve to epoch 0 on both sides (created=0 survives the upload)", () => {
+		// effectiveCreationTimestamp(null, null) = 0; the upload sends created=0
+		// (transferCore null-guards instead of falsy-dropping), so the remote
+		// `meta.created ?? 0` produces "0" either way — symmetric.
+		const info = { creationTime: null, modificationTime: null }
+
+		expect(effectiveCreationTimestamp(info)).toBe(0)
+
+		const localHash = String(Math.floor(effectiveCreationTimestamp(info) / 1000))
+		const remoteHash = String(Math.floor(Number(0n) / 1000))
+
+		expect(localHash).toBe("0")
+		expect(remoteHash).toBe("0")
 	})
 })

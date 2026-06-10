@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { xxHash32 } from "js-xxhash"
-import { normalizeFilePathForSdk } from "@/lib/paths"
+import { type CameraUploadHashEntry } from "@/lib/cache"
 
 export type CollisionParams = {
 	iteration: number
@@ -11,69 +11,85 @@ export type CollisionParams = {
 		 * Seconds-normalized creation timestamp used as the stable collision-suffix
 		 * identity for this asset.
 		 *
-		 * Callers supply `String(Math.floor((creationTime ?? 0) / 1000))` on the
-		 * local side and `String(Math.floor(Number(meta?.created ?? 0) / 1000))` on
-		 * the remote side.  Flooring to seconds absorbs sub-second drift introduced
-		 * by the SDK's EXIF-override (which rewrites `meta.created` to
-		 * DateTimeOriginal) and by network round-trips, so both trees produce the
-		 * same suffix for the same physical asset.
-		 *
-		 * Null `creationTime` falls back to 0, mirroring the remote side's null-meta
-		 * fallback — producing the string `"0"` on both sides symmetrically.
+		 * Callers supply `String(Math.floor(effectiveCreationTimestamp(info) / 1000))`
+		 * on the local side and `String(Math.floor(Number(meta?.created ?? 0) / 1000))`
+		 * on the remote side. The two are symmetric because the upload pipeline sends
+		 * `effectiveCreationTimestamp(info)` as the file's `created` metadata — the
+		 * remote `meta.created` mirrors the exact value the local key was derived from
+		 * (#B7: ONE timestamp rule on both sides). Flooring to seconds absorbs
+		 * sub-second drift introduced by the SDK's EXIF-override (which may rewrite
+		 * `meta.created` to DateTimeOriginal) and by network round-trips.
 		 */
 		contentHash: string
 	}
 }
 
 /**
- * Generates a collision-resolved path for a camera upload asset.
+ * The deterministic collision suffix (WITHOUT extension) appended to an asset's
+ * basename when its tree slot is already taken. Iteration selects the strategy:
  *
- * When multiple assets share the same filename, this function appends
- * a deterministic suffix based on the asset's seconds-normalized creation
- * timestamp.  The iteration parameter controls which suffix strategy is used:
+ *   0 — `_<contentHash>` (seconds-timestamp string)
+ *   1 — `_<xxHash32(name + contentHash) as hex>`
  *
- *   0 — append contentHash (seconds-timestamp string) directly
- *   1 — append xxHash32 of name + contentHash
- *
- * Flooring to seconds absorbs sub-second drift from EXIF-override or network
- * round-trips, keeping local and remote trees symmetric across syncs without
- * any per-asset file read at listing time.
- *
- * There are exactly TWO iterations (0 and 1). If two assets genuinely share
- * both the same name AND the same creation second they are indistinguishable
- * and collapse to the same slot by design (deterministic dedup across syncs).
- * Callers should treat 2 as the hard cap, NOT extend the switch.
- *
- * Returns null for iteration >= 2 (exhausted) or when the path is invalid.
+ * Returns null for iteration >= 2 (exhausted). #B2: the upload pipeline appends
+ * this same suffix to the uploaded filename so the remote listing reproduces the
+ * local collision key exactly. The suffix only ever contains `[a-z0-9_-]`
+ * characters, so it never needs path-segment sanitization of its own.
  */
-export function modifyAssetPathOnCollision({ iteration, path, asset }: CollisionParams): string | null {
-	const ext = FileSystem.Paths.extname(asset.name)
-	const basename = FileSystem.Paths.basename(asset.name, ext)
-	const parentDir = FileSystem.Paths.dirname(path)
-
-	if (parentDir === "." || basename.length === 0 || parentDir.length === 0 || basename === ".") {
-		return null
-	}
-
+export function collisionNameSuffix({ iteration, asset }: { iteration: number; asset: CollisionParams["asset"] }): string | null {
 	switch (iteration) {
 		case 0: {
-			return normalizeFilePathForSdk(FileSystem.Paths.join(parentDir, `${basename}_${asset.contentHash}${ext}`))
-				.toLowerCase()
-				.trim()
+			return `_${asset.contentHash}`
 		}
 
 		case 1: {
-			return normalizeFilePathForSdk(
-				FileSystem.Paths.join(parentDir, `${basename}_${xxHash32(`${asset.name}_${asset.contentHash}`).toString(16)}${ext}`)
-			)
-				.toLowerCase()
-				.trim()
+			return `_${xxHash32(`${asset.name}_${asset.contentHash}`).toString(16)}`
 		}
 
 		default: {
 			return null
 		}
 	}
+}
+
+/**
+ * Generates a collision-resolved path for a camera upload asset.
+ *
+ * When multiple assets share the same filename, this function appends the
+ * deterministic `collisionNameSuffix` to the basename (see above for the
+ * iteration strategies and the local/remote symmetry contract).
+ *
+ * #E2: the path is composed by PLAIN string concatenation on the raw segments —
+ * never via `Paths.join` (which percent-ENCODES segments) or
+ * `normalizeFilePathForSdk` (which percent-DECODES them and corrupts literal
+ * `%XX` sequences in real filenames). Keys must stay byte-identical to the raw
+ * decrypted names on both sides.
+ *
+ * There are exactly TWO iterations (0 and 1). If two assets genuinely share
+ * both the same name AND the same creation second they are indistinguishable
+ * and collapse to the same slot by design (deterministic dedup across syncs).
+ * Callers should treat 2 as the hard cap, NOT extend the switch.
+ *
+ * Returns null for iteration >= 2 (exhausted) or when the path is invalid
+ * (no parent directory / degenerate basename).
+ */
+export function modifyAssetPathOnCollision({ iteration, path, asset }: CollisionParams): string | null {
+	const ext = FileSystem.Paths.extname(asset.name)
+	const basename = FileSystem.Paths.basename(asset.name, ext)
+	const slashIndex = path.lastIndexOf("/")
+	const parentDir = slashIndex > 0 ? path.slice(0, slashIndex) : slashIndex === 0 ? "/" : ""
+
+	if (parentDir === "." || basename.length === 0 || parentDir.length === 0 || basename === ".") {
+		return null
+	}
+
+	const suffix = collisionNameSuffix({ iteration, asset })
+
+	if (suffix === null) {
+		return null
+	}
+
+	return `${parentDir === "/" ? "" : parentDir}/${basename}${suffix}${ext}`.toLowerCase().trim()
 }
 
 // Strip characters that would split a folder name into multiple path segments
@@ -128,6 +144,65 @@ export function stripFilenameExtension(name: string): string {
 
 	return name.slice(0, -ext.length)
 }
+
+// #B7: ONE timestamp fallback rule for everything that derives an identity from an
+// asset's creation time — the collision tree-key suffix, the collision-group sort
+// AND the upload's `created` parameter. Because the upload sends this exact value
+// as the file's `created` metadata, the remote listing's `meta.created` mirrors it
+// and the local/remote dedup keys stay symmetric — including for assets whose
+// creationTime is null (previously the key fell back to 0 while the upload sent
+// modificationTime, so the remote key diverged and the asset re-evaluated forever).
+// When BOTH timestamps are null the rule yields epoch 0, which still round-trips:
+// the upload sends created=0 (transferCore null-guards instead of falsy-dropping
+// it) and the remote side's `meta.created ?? 0` produces the same identity.
+export function effectiveCreationTimestamp(info: { creationTime: number | null; modificationTime: number | null }): number {
+	return info.creationTime ?? info.modificationTime ?? 0
+}
+
+// #E2: compose the LOCAL dedup tree path from raw segments — plain "/" joins, no
+// `Paths.join` (percent-ENCODES its rest args) and no `normalizeFilePathForSdk`
+// (percent-DECODES segments, corrupting literal `%XX` in real filenames — the
+// eternal re-upload class). `folderTitle` is already sanitized (no "/") by
+// `sanitizePathSegment`; for every name without decodable `%XX` sequences the
+// result is byte-identical to the previous join+normalize pipeline.
+export function composeLocalTreePath({ folderTitle, filename }: { folderTitle: string; filename: string }): string {
+	return `/${folderTitle}/${filename}`.trim()
+}
+
+// #E2: derive the REMOTE dedup tree path from the raw decrypted `file.path` the SDK
+// listing returns — NEVER percent-decoded (a literal "%20" in a decrypted name must
+// stay "%20", and a literal "%2F" must never become a phantom "/" separator). Only
+// guarantees the same outer shape the local composition has: trimmed + leading "/".
+export function rawRemoteTreePath(path: string): string {
+	const trimmed = path.trim()
+
+	return trimmed.startsWith("/") ? trimmed : `/${trimmed}`
+}
+
+// #B4+B6: lazy migration for `cache.cameraUploadHashes` values. Entries persisted
+// before the verified-mtime shape are bare md5 strings; treat them as "never
+// verified" (-1) so the next encounter hashes once and upgrades the entry on write.
+export function normalizeCameraUploadHashEntry(value: CameraUploadHashEntry | string | undefined): CameraUploadHashEntry | undefined {
+	if (value === undefined) {
+		return undefined
+	}
+
+	if (typeof value === "string") {
+		return {
+			md5: value,
+			verifiedModificationTime: -1
+		}
+	}
+
+	return value
+}
+
+// #B4: secureStore key for the "Re-upload deleted photos" setting. Boolean; absent/false →
+// current behavior (an md5-cache entry shields a remotely-deleted photo from re-upload).
+// When true, camera upload mirrors the library: an entry whose key is present locally but
+// absent from a CLEAN remote listing is dropped, so the photo naturally re-uploads.
+// Read in cameraUpload.sync(); written by the camera upload settings screen via useSecureStore.
+export const CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY = "cameraUploadReuploadDeleted"
 
 // Toggle the "after activation" camera-upload setting while keeping
 // `activationTimestamp` consistent. Enabling stamps `now` so `listLocal`'s

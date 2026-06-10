@@ -208,7 +208,12 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import cache from "@/lib/cache"
 import cameraUpload, { type Config } from "@/features/cameraUpload/cameraUpload"
-import { modifyAssetPathOnCollision, type CollisionParams } from "@/features/cameraUpload/cameraUploadHelpers"
+import {
+	modifyAssetPathOnCollision,
+	effectiveCreationTimestamp,
+	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY,
+	type CollisionParams
+} from "@/features/cameraUpload/cameraUploadHelpers"
 import secureStore from "@/lib/secureStore"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
@@ -349,26 +354,28 @@ describe("modifyAssetPathOnCollision", () => {
 	})
 
 	describe("invalid paths", () => {
-		it("returns a fallback path when input has no parent directory", () => {
-			// FileSystem.Paths.dirname falls back to DOCUMENT_URI for bare filenames,
-			// so these produce a valid (non-null) collision path unlike path.posix which returns "."
+		it("returns null when input has no parent directory", () => {
+			// #E2: the parent is extracted with plain string ops — a bare filename can
+			// never be a valid tree key (keys are always "/<album>/<name>"), so this is
+			// deterministically null (matching production posix dirname semantics, which
+			// the old mock-dependent fallback masked).
 			expect(
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "IMG_0001.jpg",
 					asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 				})
-			).toBeTypeOf("string")
+			).toBeNull()
 		})
 
-		it("returns a fallback path when path is empty", () => {
+		it("returns null when path is empty", () => {
 			expect(
 				modifyAssetPathOnCollision({
 					iteration: 0,
 					path: "",
 					asset: { name: "IMG_0001.jpg", contentHash: "hash1" }
 				})
-			).toBeTypeOf("string")
+			).toBeNull()
 		})
 
 		it("returns null when basename is '.'", () => {
@@ -1725,14 +1732,48 @@ describe("MD5 hash cache", () => {
 		}
 	}
 
-	it("skips upload when MD5 matches cached value", async () => {
+	it("skips upload when MD5 matches cached value (legacy string entry) and migrates it to the verified-mtime shape", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
+		// Legacy persisted shape: bare md5 string. It must still shield the upload
+		// (treated as verifiedModificationTime: -1 → one hash, md5 matches → skip)
+		// and be upgraded in place to the object shape carrying the verified mtime.
 		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "mock-md5")
 
 		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+	})
+
+	it("legacy string entry is hashed ONCE, then the following pass takes the verified-mtime fast path (no getUri)", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "mock-md5")
+
+		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
+		const getUriSpy = vi.spyOn(Asset.prototype, "getUri")
+
+		try {
+			// Pass 1: -1 sentinel never matches → hash once → md5 matches → upgrade.
+			await cameraUpload.sync()
+
+			expect(getUriSpy).toHaveBeenCalledTimes(1)
+			expect(transfers.upload).not.toHaveBeenCalled()
+
+			getUriSpy.mockClear()
+
+			// Pass 2: mtime matches the recorded verified value → immediate skip.
+			await cameraUpload.sync()
+
+			expect(getUriSpy).not.toHaveBeenCalled()
+			expect(transfers.upload).not.toHaveBeenCalled()
+		} finally {
+			getUriSpy.mockRestore()
+		}
 	})
 
 	it("proceeds with upload when MD5 differs from cached value — the source branch genuinely distinguishes match vs. mismatch", async () => {
@@ -1789,12 +1830,17 @@ describe("MD5 hash cache", () => {
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 	})
 
-	it("stores MD5 in cache after successful upload", async () => {
+	it("stores MD5 + verified mtime in cache after successful upload (and under the pre-change key shape)", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
 		await cameraUpload.sync()
 
-		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toBe("mock-md5")
+		// The key is byte-identical to the pre-#E2 composed key for plain names, so
+		// existing persisted entries keep matching after the raw-key change.
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
 	})
 
 	it("does not store MD5 in cache when upload fails", async () => {
@@ -1807,14 +1853,166 @@ describe("MD5 hash cache", () => {
 		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(false)
 	})
 
-	it("updates cached MD5 when file content changes", async () => {
+	it("updates cached MD5 + verified mtime when file content changes (upload fires)", async () => {
 		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
 
-		cache.cameraUploadHashes.set("/camera roll/photo.jpg", "old-md5")
+		// Stale verified mtime + different md5 → hash, mismatch → upload + fresh entry.
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "old-md5",
+			verifiedModificationTime: 999
+		})
 
 		await cameraUpload.sync()
 
-		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toBe("mock-md5")
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+	})
+})
+
+// ─── B6: verified-mtime gate ─────────────────────────────────────────────────
+// iOS bumps asset modificationTime on mere VIEWING, so the delta fires every sync
+// for view-touched photos. The verified-mtime entry lets those skip WITHOUT
+// getUri() (which re-downloads iCloud-offloaded originals) and without hashing.
+
+describe("B6 — verified-mtime gate", () => {
+	function setupAsset(modificationTime: number) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+	}
+
+	it("matching verified mtime skips IMMEDIATELY — no getUri, no md5 read, no upload", async () => {
+		setupAsset(2000)
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+		const getUriSpy = vi.spyOn(Asset.prototype, "getUri")
+		const md5Spy = vi.spyOn(MockFile.prototype, "md5", "get")
+
+		try {
+			await cameraUpload.sync()
+
+			expect(getUriSpy).not.toHaveBeenCalled()
+			expect(md5Spy).not.toHaveBeenCalled()
+			expect(transfers.upload).not.toHaveBeenCalled()
+			// The entry is untouched (no redundant write).
+			expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+				md5: "mock-md5",
+				verifiedModificationTime: 2000
+			})
+		} finally {
+			getUriSpy.mockRestore()
+			md5Spy.mockRestore()
+		}
+	})
+
+	it("touched-but-unchanged: one hash on the first pass, quiet (no getUri) on the next", async () => {
+		// mtime bumped (view-touch) but content identical → hash once, md5 matches,
+		// verified mtime advances; the following pass takes the fast path.
+		setupAsset(3000)
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
+		const getUriSpy = vi.spyOn(Asset.prototype, "getUri")
+
+		try {
+			await cameraUpload.sync()
+
+			expect(getUriSpy).toHaveBeenCalledTimes(1)
+			expect(transfers.upload).not.toHaveBeenCalled()
+			expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+				md5: "mock-md5",
+				verifiedModificationTime: 3000
+			})
+
+			getUriSpy.mockClear()
+
+			await cameraUpload.sync()
+
+			expect(getUriSpy).not.toHaveBeenCalled()
+			expect(transfers.upload).not.toHaveBeenCalled()
+		} finally {
+			getUriSpy.mockRestore()
+		}
+	})
+
+	it("changed content uploads and records the new md5 + verified mtime", async () => {
+		setupAsset(3000)
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "different-md5",
+			verifiedModificationTime: 2000
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+			md5: "mock-md5",
+			verifiedModificationTime: 3000
+		})
+	})
+
+	it("the -1 sentinel never fast-skips, even for a (pathological) -1 mtime", async () => {
+		setupAsset(-1)
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: -1
+		})
+
+		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
+		const getUriSpy = vi.spyOn(Asset.prototype, "getUri")
+
+		try {
+			await cameraUpload.sync()
+
+			// Sentinel forces the hash path (md5 then matches → skip upload).
+			expect(getUriSpy).toHaveBeenCalledTimes(1)
+			expect(transfers.upload).not.toHaveBeenCalled()
+		} finally {
+			getUriSpy.mockRestore()
+		}
+	})
+
+	it("null modificationTime stores the -1 sentinel after upload (always re-verifies next pass)", async () => {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: null
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+			md5: "mock-md5",
+			verifiedModificationTime: -1
+		})
 	})
 })
 
@@ -2434,27 +2632,37 @@ describe("#14 regression — seconds-timestamp dedup and timestamp normalisation
 		})
 	})
 
-	describe("null creationTime fallback symmetry", () => {
-		it("null creationTime falls back to '0' (seconds) on local side, matching remote null-meta fallback", () => {
-			// Local: Math.floor((creationTime ?? 0) / 1000) where creationTime is null → 0
-			// Remote: Math.floor(Number(meta?.created ?? 0) / 1000) where meta is null → 0
-			const nullCreationTime: number | null = null
-			const nullCreated: bigint | null | undefined = null
-			const localHash = String(Math.floor((nullCreationTime ?? 0) / 1000))
-			const remoteHash = String(Math.floor(Number(nullCreated ?? 0) / 1000))
+	describe("null creationTime fallback symmetry (#B7 ONE rule)", () => {
+		it("local effectiveCreationTimestamp mirrors the remote `meta.created` because the upload sends the same value", () => {
+			// Local: Math.floor(effectiveCreationTimestamp(info) / 1000) — falls back to
+			// modificationTime, then 0. Remote: Math.floor(Number(meta?.created ?? 0) / 1000)
+			// where created IS the uploaded effectiveCreationTimestamp — so both sides
+			// derive the identical hash for the same asset, for every fallback branch.
+			const infoModFallback = { creationTime: null, modificationTime: 9999000 }
+			const localHashModFallback = String(Math.floor(effectiveCreationTimestamp(infoModFallback) / 1000))
+			const remoteHashModFallback = String(Math.floor(Number(BigInt(effectiveCreationTimestamp(infoModFallback))) / 1000))
 
-			expect(localHash).toBe("0")
-			expect(remoteHash).toBe("0")
+			expect(localHashModFallback).toBe("9999")
+			expect(localHashModFallback).toBe(remoteHashModFallback)
+
+			const infoBothNull = { creationTime: null, modificationTime: null }
+			const localHashBothNull = String(Math.floor(effectiveCreationTimestamp(infoBothNull) / 1000))
+			// Upload sends created=0 (null-guarded, not falsy-dropped); remote `?? 0`
+			// resolves identically even for foreign files with absent meta.
+			const remoteHashBothNull = String(Math.floor(Number(0n) / 1000))
+
+			expect(localHashBothNull).toBe("0")
+			expect(localHashBothNull).toBe(remoteHashBothNull)
 
 			const localPath = modifyAssetPathOnCollision({
 				iteration: 0,
 				path: "/camera roll/img_0001.jpg",
-				asset: { name: "IMG_0001.jpg", contentHash: localHash }
+				asset: { name: "IMG_0001.jpg", contentHash: localHashModFallback }
 			})
 			const remotePath = modifyAssetPathOnCollision({
 				iteration: 0,
 				path: "/camera roll/img_0001.jpg",
-				asset: { name: "IMG_0001.jpg", contentHash: remoteHash }
+				asset: { name: "IMG_0001.jpg", contentHash: remoteHashModFallback }
 			})
 
 			expect(localPath).toBe(remotePath)
@@ -2789,20 +2997,20 @@ describe("#15 regression — compress-rename dedup tree-key symmetry", () => {
 	})
 })
 
-// ─── #14 regression: null-creationTime collision key symmetry ────────────────
-// The local collision contentHash previously fell back to modificationTime when
-// creationTime was null; the remote side has no modificationTime and falls back
-// to 0. For two same-named null-creation assets that collide, the suffixed slot
-// diverged (local used modificationTime, remote used 0), so the file looked
-// "missing remotely" and re-uploaded every sync. Both sides now use
-// creationTime ?? 0, making the collision suffix symmetric.
+// ─── #B7 regression: null-creationTime collision key symmetry ─────────────────
+// ONE timestamp rule (creationTime ?? modificationTime ?? 0) drives the collision
+// suffix, the tree sort AND the upload's `created` parameter. The remote
+// `meta.created` therefore mirrors the exact value the local key was derived
+// from. (The previous "fix" floored the local KEY to 0 for null creationTime
+// while the upload still sent modificationTime as `created` — so the remote
+// suffixed slot diverged anyway and the asset re-evaluated every sync.)
 
-describe("#14 regression — null-creationTime collision key symmetry", () => {
+describe("#B7 regression — null-creationTime collision key symmetry", () => {
 	it("two same-named null-creation assets match their remote counterparts — no re-upload", async () => {
 		// Two IMG_0001.jpg assets, BOTH with null creationTime but distinct
-		// modificationTimes. The remote tree mirrors them with created=0n. With the
-		// symmetric (creationTime ?? 0) key the suffixed slot resolves identically on
-		// both sides, so neither uploads.
+		// modificationTimes. The remote tree mirrors what THIS pipeline uploads:
+		// created = effectiveCreationTimestamp (= modificationTime here) and — per
+		// #B2 — the collision member sits under its SUFFIXED filename.
 		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["n1", "n2"] })
 		ml.addAsset({
 			id: "n1",
@@ -2823,15 +3031,11 @@ describe("#14 regression — null-creationTime collision key symmetry", () => {
 		fs.set("file:///media/n1", new Uint8Array([1, 2, 3]))
 		fs.set("file:///media/n2", new Uint8Array([4, 5, 6]))
 
-		// Remote holds both files: the base slot and the collision-suffixed slot.
-		// created=0n mirrors the null-creation fallback on both sides.
+		// n1 (effective 2000 → second 2) wins the base slot; n2 (effective 9999000 →
+		// second 9999) carries the iteration-0 suffix and was uploaded as
+		// "IMG_0001_9999.jpg", so its remote BASE key equals the local suffixed key.
 		const basePath = "/Camera Roll/IMG_0001.jpg"
-		const suffixedPath =
-			modifyAssetPathOnCollision({
-				iteration: 0,
-				path: "/camera roll/img_0001.jpg",
-				asset: { name: "IMG_0001.jpg", contentHash: "0" }
-			}) ?? ""
+		const suffixedPath = "/Camera Roll/IMG_0001_9999.jpg"
 
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
@@ -2848,19 +3052,474 @@ describe("#14 regression — null-creationTime collision key symmetry", () => {
 		vi.mocked(unwrapFileMeta).mockImplementation(
 			(file: any) =>
 				({
-					meta: {
-						name: file.uuid === "remote-suffixed" ? FileSystem.Paths.basename(suffixedPath) : "IMG_0001.jpg",
-						created: 0n,
-						modified: 9999000n
-					}
+					meta:
+						file.uuid === "remote-suffixed"
+							? { name: "IMG_0001_9999.jpg", created: 9999000n, modified: 9999000n }
+							: { name: "IMG_0001.jpg", created: 2000n, modified: 2000n }
 				}) as any
 		)
 
 		await cameraUpload.sync()
 
 		// Both local files map to slots already present remotely → no uploads.
-		// (Pre-fix, the local suffix used modificationTime so the suffixed slot
-		// diverged from the remote created=0 suffix → spurious re-upload.)
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
+// ─── B7: ONE timestamp rule feeds the upload `created` parameter ──────────────
+
+describe("B7 — upload `created` uses effectiveCreationTimestamp", () => {
+	function setupAsset(creationTime: number | null, modificationTime: number | null) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime,
+			modificationTime
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+	}
+
+	it("null creationTime falls back to modificationTime — the SAME value the dedup key uses", async () => {
+		setupAsset(null, 5000)
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledWith(
+			expect.objectContaining({
+				created: 5000,
+				modified: 5000
+			})
+		)
+	})
+
+	it("both timestamps null → created is epoch 0 (NOT undefined), so the remote identity matches the local '0' key", async () => {
+		setupAsset(null, null)
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		const args = vi.mocked(transfers.upload).mock.calls[0]?.[0] as { created?: number }
+
+		expect(args.created).toBe(0)
+	})
+
+	it("creationTime 0 is a valid epoch timestamp and survives as created: 0", async () => {
+		setupAsset(0, 2000)
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		const args = vi.mocked(transfers.upload).mock.calls[0]?.[0] as { created?: number }
+
+		expect(args.created).toBe(0)
+	})
+})
+
+// ─── B2: collision members upload under their collision-resolved name ─────────
+// Backend contract: same name + same parent = NEW VERSION (silently replaces).
+// Uploading every collision member under the plain name made the newest member
+// silently replace its siblings remotely. Members now upload under the suffixed
+// basename their tree key carries, so the remote base keys reproduce the local
+// keys exactly and siblings coexist.
+
+describe("B2 — collision-resolved upload names", () => {
+	function setupTwoSameNamed() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1", "a2"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "IMG_0001.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "a2",
+			filename: "IMG_0001.jpg",
+			uri: "file:///media/a2",
+			mediaType: MediaType.IMAGE,
+			creationTime: 2000,
+			modificationTime: 3000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+		fs.set("file:///media/a2", new Uint8Array([4, 5, 6]))
+	}
+
+	it("two same-named assets upload under DISTINCT names: plain base + suffixed member (no versioning collision)", async () => {
+		setupTwoSameNamed()
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+
+		const names = vi.mocked(transfers.upload).mock.calls.map(call => (call[0] as { name?: string }).name)
+
+		// Oldest (creationTime 1000) wins the base slot → plain name; the second
+		// (creationTime 2000 → second 2) carries the iteration-0 suffix.
+		expect(names).toContain("IMG_0001.jpg")
+		expect(names).toContain("IMG_0001_2.jpg")
+		expect(new Set(names).size).toBe(2)
+	})
+
+	it("an md5-cached collision member with a plain-named remote counterpart does NOT re-upload (migration shield)", async () => {
+		// Migration scenario: pre-B2, the collision member was uploaded under its
+		// PLAIN name (silently versioning the base member). Remotely there is ONE
+		// plain-named file; locally the member's tree key was ALREADY suffixed and
+		// its md5-cache entry exists. After B2 the suffixed local key has no remote
+		// counterpart — the md5 entry must keep shielding it from re-upload.
+		setupTwoSameNamed()
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path: "/Camera Roll/IMG_0001.jpg", file: { uuid: "remote-1" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: "IMG_0001.jpg", created: 1000n, modified: 2000n }
+		} as any)
+
+		// The member's entry under its (already-suffixed) local key — legacy string shape.
+		cache.cameraUploadHashes.set("/camera roll/img_0001_2.jpg", "mock-md5")
+
+		await cameraUpload.sync()
+
+		// Base member matches the remote plain file; suffixed member is shielded.
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("suffix composes onto the FINAL name after the compress extension rewrite (photo.png → photo_2.jpg)", async () => {
+		const { Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		// Compression WINS (smaller output) → compress() rewrites .png → .jpg. Each
+		// manipulate call yields a unique uri so per-asset cleanup doesn't clobber a
+		// sibling's temp file.
+		let manipCount = 0
+
+		vi.mocked(ImageManipulator.manipulate).mockImplementation(() => {
+			const manipulatedUri = `${Paths.cache.uri}/filen-tmp/manip-b2-${manipCount++}.jpg`
+
+			fs.set(manipulatedUri, new Uint8Array([9]))
+
+			const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+
+			return { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) } as any
+		})
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["c1", "c2"] })
+		ml.addAsset({
+			id: "c1",
+			filename: "photo.png",
+			uri: "file:///media/c1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "c2",
+			filename: "photo.png",
+			uri: "file:///media/c2",
+			mediaType: MediaType.IMAGE,
+			creationTime: 2000,
+			modificationTime: 3000
+		})
+		fs.set("file:///media/c1", new Uint8Array(new Array(100).fill(1)))
+		fs.set("file:///media/c2", new Uint8Array(new Array(100).fill(2)))
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, compress: true })
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+
+		const names = vi.mocked(transfers.upload).mock.calls.map(call => (call[0] as { name?: string }).name)
+
+		// Rewritten extension on both; the collision member's suffix sits BEFORE the
+		// final (rewritten) extension.
+		expect(names).toContain("photo.jpg")
+		expect(names).toContain("photo_2.jpg")
+	})
+})
+
+// ─── E2/B8: raw dedup keys — literal %XX never decodes ────────────────────────
+// The remote listing's `file.path` is the RAW decrypted name. The old pipeline
+// percent-DECODED it (and round-tripped the local side through join's encode +
+// normalize's decode), so a literal well-formed %XX in a real filename corrupted
+// the remote key and the asset re-uploaded forever.
+
+describe("E2/B8 — raw dedup keys (literal %XX filenames)", () => {
+	function setupLocalAndRemoteSameName(filename: string) {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename,
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path: `/Camera Roll/${filename}`, file: { uuid: "remote-1" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: filename, created: 1000n, modified: 2000n }
+		} as any)
+	}
+
+	it("a filename containing literal %20 produces IDENTICAL local and remote keys — no re-upload", async () => {
+		setupLocalAndRemoteSameName("photo %20 test.jpg")
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("a filename containing literal %2F never gains a phantom separator — keys match, no re-upload", async () => {
+		setupLocalAndRemoteSameName("a%2Fb.jpg")
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("a filename with a malformed % (e.g. 'Invoice 50%.jpg') matches its remote counterpart", async () => {
+		setupLocalAndRemoteSameName("Invoice 50%.jpg")
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("%XX-named uploads store their md5 entry under the RAW key", async () => {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo %20 test.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(cache.cameraUploadHashes.get("/camera roll/photo %20 test.jpg")).toEqual({
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+	})
+})
+
+// ─── B4: md5-cache pruning + "Re-upload deleted photos" mirror mode ───────────
+
+describe("B4 — md5-cache pruning and mirror mode", () => {
+	function setupAsset() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+	}
+
+	function setupRemoteWith(paths: string[]) {
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: paths.map((path, index) => ({ path, file: { uuid: `remote-${index}` } }))
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({
+			meta: { name: "photo.jpg", created: 1000n, modified: 2000n }
+		} as any)
+	}
+
+	function enableMirrorMode() {
+		vi.mocked(secureStore.get).mockImplementation(async (key: string) => {
+			if (key === CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY) {
+				return true as any
+			}
+
+			return ENABLED_CONFIG as any
+		})
+	}
+
+	it("pruning removes entries whose local asset is gone (foreground, clean listing)", async () => {
+		setupAsset()
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+		cache.cameraUploadHashes.set("/camera roll/deleted-from-device.jpg", {
+			md5: "stale",
+			verifiedModificationTime: 1
+		})
+
+		await cameraUpload.sync()
+
+		// The local-gone key is pruned; the live asset's entry stays.
+		expect(cache.cameraUploadHashes.has("/camera roll/deleted-from-device.jpg")).toBe(false)
+		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(true)
+	})
+
+	it("background passes do NOT prune (their tree is filtered, not authoritative)", async () => {
+		setupAsset()
+
+		cache.cameraUploadHashes.set("/camera roll/video-or-gone.mp4", {
+			md5: "stale",
+			verifiedModificationTime: 1
+		})
+
+		await cameraUpload.sync({ background: true })
+
+		expect(cache.cameraUploadHashes.has("/camera roll/video-or-gone.mp4")).toBe(true)
+	})
+
+	it("a degraded LOCAL listing does NOT prune (absences are not evidence)", async () => {
+		const { Query } = await import("@/tests/mocks/expoMediaLibrary")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, albumIds: ["album-1", "album-bad"] })
+
+		setupAsset()
+		ml.addAlbum({ id: "album-bad", title: "Bad Album", assetIds: ["b1"] })
+		ml.addAsset({
+			id: "b1",
+			filename: "bad.jpg",
+			uri: "file:///media/b1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/b1", new Uint8Array([4, 5, 6]))
+
+		// The bad album's assets are absent from the tree this pass — their cache
+		// entries must survive.
+		cache.cameraUploadHashes.set("/bad album/bad.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		const originalExe = Query.prototype.exe
+		const spy = vi.spyOn(Query.prototype, "exe").mockImplementation(async function (this: any) {
+			if (this.albumFilter?.id === "album-bad") {
+				throw new Error("album query failed")
+			}
+
+			return await originalExe.call(this)
+		})
+
+		try {
+			await cameraUpload.sync()
+		} finally {
+			spy.mockRestore()
+		}
+
+		expect(cache.cameraUploadHashes.has("/bad album/bad.jpg")).toBe(true)
+	})
+
+	it("mirror mode OFF (default): a remote-absent entry keeps shielding — no drop, no upload", async () => {
+		setupAsset()
+		setupRemoteWith([])
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(true)
+	})
+
+	it("mirror mode ON + clean listing: the remote-absent entry is dropped and the photo re-uploads", async () => {
+		setupAsset()
+		setupRemoteWith([])
+		enableMirrorMode()
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		// Re-recorded after the successful upload.
+		expect(cache.cameraUploadHashes.get("/camera roll/photo.jpg")).toEqual({
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+	})
+
+	it("mirror mode ON: entries present remotely are NOT dropped (no upload either)", async () => {
+		setupAsset()
+		setupRemoteWith(["/Camera Roll/photo.jpg"])
+		enableMirrorMode()
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(true)
+	})
+
+	it("mirror mode ON + DEGRADED listing: nothing is dropped (absences are not evidence), no upload", async () => {
+		setupAsset()
+		enableMirrorMode()
+
+		// Remote listing returns nothing but reports scan errors → degraded.
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async (_dir: any, _progress: any, errorCallback: any) => {
+					errorCallback.onErrors([new Error("subtree failed")])
+
+					return { files: [] }
+				}),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		cache.cameraUploadHashes.set("/camera roll/photo.jpg", {
+			md5: "mock-md5",
+			verifiedModificationTime: 2000
+		})
+
+		await cameraUpload.sync()
+
+		// The entry survived and kept shielding the (still-cached) photo.
+		expect(cache.cameraUploadHashes.has("/camera roll/photo.jpg")).toBe(true)
 		expect(transfers.upload).not.toHaveBeenCalled()
 	})
 })
