@@ -76,17 +76,7 @@ vi.mock("@/lib/paths", () => ({
 			.trim()
 			.replace(/^file:\/+/, "/")
 			.replace(/\/+/g, "/")
-			.replace(/\/$/, ""),
-	extractPathInsideUuidDirectory: (absolutePath: string, dirUuid: string): string | null => {
-		const anchor = `/${dirUuid}/`
-		const idx = absolutePath.lastIndexOf(anchor)
-
-		if (idx < 0) {
-			return null
-		}
-
-		return absolutePath.slice(idx + anchor.length - 1)
-	}
+			.replace(/\/$/, "")
 }))
 
 vi.mock("@/lib/utils", () => ({

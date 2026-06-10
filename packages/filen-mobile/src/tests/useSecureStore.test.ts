@@ -82,13 +82,7 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@/lib/paths", () => ({
 	normalizeFilePathForSdk: (path: string) => path.trim().replace(/^file:\/+/, "/"),
 	normalizeFilePathForExpo: (path: string) => `file://${path.trim().replace(/^file:\/+/, "/")}`,
-	normalizeFilePathForBlobUtil: (path: string) => `file://${path.trim().replace(/^file:\/+/, "/")}`,
-	extractPathInsideUuidDirectory: (absolutePath: string, dirUuid: string) => {
-		const anchor = `/${dirUuid}/`
-		const idx = absolutePath.lastIndexOf(anchor)
-
-		return idx < 0 ? null : absolutePath.slice(idx + anchor.length - 1)
-	}
+	normalizeFilePathForBlobUtil: (path: string) => `file://${path.trim().replace(/^file:\/+/, "/")}`
 }))
 
 import { renderHook, act, waitFor } from "@testing-library/react"

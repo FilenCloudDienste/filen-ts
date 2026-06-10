@@ -175,7 +175,7 @@ import {
 	convertBigInts
 } from "@/lib/utils"
 import { makeDriveItemPublicLink, unwrapParentUuid, resolveCreatedOrTimestamp } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForSdk, normalizeFilePathForExpo, extractPathInsideUuidDirectory } from "@/lib/paths"
+import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { getPreviewType } from "@/lib/previewType"
 import { extractLinks, trimUnbalanced, safeParseUrl } from "@/lib/linkParser"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
@@ -364,44 +364,6 @@ describe("normalizeFilePathForExpo", () => {
 
 	it("handles root path '/' → 'file:///'", () => {
 		expect(normalizeFilePathForExpo("file:///")).toBe("file:///")
-	})
-})
-
-// ---------------------------------------------------------------------------
-// extractPathInsideUuidDirectory
-// ---------------------------------------------------------------------------
-
-describe("extractPathInsideUuidDirectory", () => {
-	const uuid = "550e8400-e29b-41d4-a716-446655440000"
-
-	it("returns the relative path from inside the UUID directory", () => {
-		const result = extractPathInsideUuidDirectory(`/var/mobile/${uuid}/sub/file.jpg`, uuid)
-		expect(result).toBe("/sub/file.jpg")
-	})
-
-	it("returns null when UUID is not in the path", () => {
-		expect(extractPathInsideUuidDirectory("/var/mobile/other/file.jpg", uuid)).toBeNull()
-	})
-
-	it("returns null when path ends exactly at UUID (no trailing slash child)", () => {
-		// The path ends with /UUID — no slash after UUID means no child path
-		expect(extractPathInsideUuidDirectory(`/var/mobile/${uuid}`, uuid)).toBeNull()
-	})
-
-	it("uses lastIndexOf: when UUID appears twice, anchors on last occurrence", () => {
-		// Two UUIDs in path — should use the last one as anchor
-		const result = extractPathInsideUuidDirectory(`/base/${uuid}/middle/${uuid}/file.txt`, uuid)
-		expect(result).toBe("/file.txt")
-	})
-
-	it("handles UUID at start of path", () => {
-		const result = extractPathInsideUuidDirectory(`/${uuid}/file`, uuid)
-		expect(result).toBe("/file")
-	})
-
-	it("returns '/' when absolutePath equals anchor exactly (UUID with trailing slash)", () => {
-		const result = extractPathInsideUuidDirectory(`/${uuid}/`, uuid)
-		expect(result).toBe("/")
 	})
 })
 

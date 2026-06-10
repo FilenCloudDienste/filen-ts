@@ -735,6 +735,8 @@ export class OfflineSync {
 					return
 				}
 
+				let resolvedName: string | undefined
+
 				const result = await run(async () => {
 					const lookup = await run(async () =>
 						authedSdkClient.getFileOptional(uuid, {
@@ -775,6 +777,8 @@ export class OfflineSync {
 
 						return
 					}
+
+					resolvedName = unwrappedRemote.meta.name
 
 					const rebuilt = unwrappedFileIntoDriveItem(unwrappedRemote)
 					const resolvedParent = await this.resolveOwnParentContext({
@@ -822,7 +826,7 @@ export class OfflineSync {
 						makeSyncError({
 							itemUuid: uuid,
 							topLevelUuid: null,
-							name: uuid,
+							name: resolvedName ?? uuid,
 							itemType: "file",
 							kind: "store",
 							message: errorMessage(result.error)
