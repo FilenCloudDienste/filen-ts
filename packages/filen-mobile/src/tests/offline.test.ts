@@ -1616,6 +1616,48 @@ describe("Offline", () => {
 			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(false)
 		})
 
+		// Regression: two concurrent storeDirectory calls for the same uuid both pass the read-only
+		// guards (they run before the locks); call A commits a full tree; call B then enters the lock
+		// and fails. B must NOT delete A's committed tree — the failure is surfaced by throwing, with
+		// zero deletions.
+		it("surfaces the failure WITHOUT deleting when an initial store fails over an existing committed meta", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const dirItem = makeDirItem(uuid, "Committed")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+			const fileItem = makeFileItemWithSize(fileUuid, "a.txt", 1n)
+
+			// A concurrent call already committed this tree (readable meta + healthy bytes on disk) —
+			// but the index is cold, so this call passed the isItemStored guard before the lock.
+			writeDirectoryMeta(uuid, {
+				item: dirItem,
+				parent,
+				entries: makeEntries({ "/a.txt": fileItem })
+			})
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/a.txt`, new Uint8Array([1]))
+
+			const metaBefore = fs.get(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)
+
+			// This pass fails: the listing reports a new entry whose download rejects.
+			mockListing({
+				files: [
+					makeListingFile(fileUuid, "a.txt", "a.txt", 1n),
+					makeListingFile("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "b.txt", "b.txt", 1n)
+				]
+			})
+
+			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("Network error"))
+
+			const offline = await createOffline()
+
+			await expect(offline.storeDirectory({ directory: dirItem, parent, skipIndexUpdate: true })).rejects.toThrow("Network error")
+
+			// The committed tree and its meta survive — only the error is surfaced.
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(true)
+			expect(fs.get(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(metaBefore)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/a.txt`)).toBe(true)
+		})
+
 		it("skips linked directories in entries", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 			const dirItem = makeDirItem(uuid, "WithLinked")
@@ -4055,13 +4097,15 @@ describe("Offline", () => {
 		})
 	})
 
-	describe("storeFile force", () => {
-		it("re-downloads in place even when the file is already stored (self-heal)", async () => {
-			const uuid = "11111111-1111-1111-1111-111111111111"
-			const fileItem = makeFileItem(uuid, "heal.txt")
-			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+	describe("redownloadStandaloneFile", () => {
+		const uuid = "11111111-1111-1111-1111-111111111111"
+		const healParentUuid = "22222222-2222-2222-2222-222222222222"
 
-			// Already stored per the index, but the data file on disk is gone/truncated.
+		it("re-downloads to the exact data path, rewrites the meta, and invalidates caches", async () => {
+			const fileItem = makeFileItem(uuid, "heal.txt")
+			const parent = makeParent(healParentUuid)
+
+			// Stored per meta + index, but the data file on disk is gone (heal scenario).
 			writeFileMeta(uuid, { item: fileItem, parent })
 			writeIndex({
 				files: { [uuid]: { item: fileItem, parent } },
@@ -4078,31 +4122,74 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			// Without force this is a no-op (guard) — covered by "skips download if file is already stored".
-			await offline.storeFile({ file: fileItem, parent, force: true, skipIndexUpdate: true })
+			// Warm the stored cache so we can observe invalidateCaches() afterwards.
+			expect(await offline.isItemStored(fileItem)).toBe(true)
+
+			await offline.redownloadStandaloneFile({ item: fileItem, parent })
 
 			expect(transfers.download).toHaveBeenCalledTimes(1)
-			expect(fs.get(`${FILES_DIR_URI}/${uuid}/heal.txt`)).toBeInstanceOf(Uint8Array)
-			expect(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBeInstanceOf(Uint8Array)
+			expect(Array.from(fs.get(`${FILES_DIR_URI}/${uuid}/heal.txt`) as Uint8Array)).toEqual([7, 7, 7])
+
+			// Meta was rewritten on success.
+			const meta = deserialize(
+				new TextDecoder().decode(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`) as Uint8Array)
+			) as FileOrDirectoryOfflineMeta
+
+			expect(meta.item.data.uuid).toBe(uuid)
+
+			// Caches were invalidated after the heal.
+			expect(offline.isItemStoredSync(fileItem)).toBeUndefined()
 		})
 
-		it("force also bypasses the nested-inside-a-stored-tree guard", async () => {
-			const parentDirUuid = "11111111-1111-1111-1111-111111111111"
-			const childFileUuid = "22222222-2222-2222-2222-222222222222"
-			const childFileItem = makeFileItem(childFileUuid, "nested.txt")
-			const parent = makeParent("33333333-3333-3333-3333-333333333333")
+		it("keeps the meta byte-identical and the data dir intact when the download fails", async () => {
+			const fileItem = makeFileItem(uuid, "heal.txt")
+			const parent = makeParent(healParentUuid)
 
-			writeDirectoryMeta(parentDirUuid, {
-				item: makeDirItem(parentDirUuid, "ParentDir"),
-				parent,
-				entries: makeEntries({
-					"/nested.txt": childFileItem
-				})
-			})
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const metaBefore = fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)
+
+			vi.mocked(transfers.download).mockRejectedValueOnce(new Error("Network error"))
+
+			const offline = await createOffline()
+
+			await expect(offline.redownloadStandaloneFile({ item: fileItem, parent })).rejects.toThrow("Network error")
+
+			// The meta survives byte-identical and the data dir is NOT deleted — the item stays
+			// listed offline so the next sync pass retries the heal.
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(true)
+			expect(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(metaBefore)
+		})
+
+		it("leaves the meta untouched when the download aborts (null result)", async () => {
+			const fileItem = makeFileItem(uuid, "heal.txt")
+			const parent = makeParent(healParentUuid)
+
+			writeFileMeta(uuid, { item: fileItem, parent })
+
+			const metaBefore = fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)
+
+			vi.mocked(transfers.download).mockResolvedValueOnce(null as any)
+
+			const offline = await createOffline()
+
+			await offline.redownloadStandaloneFile({ item: fileItem, parent })
+
+			expect(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(metaBefore)
+		})
+
+		it("removes a stale old-name data file while the meta survives (renamed-stale cleanup)", async () => {
+			const oldItem = makeFileItem(uuid, "old-name.txt")
+			const renamedItem = makeFileItem(uuid, "new-name.txt")
+			const parent = makeParent(healParentUuid)
+
+			// Meta + data still carry the old name; the heal is called with the renamed item.
+			writeFileMeta(uuid, { item: oldItem, parent })
+			writeFileData(uuid, "old-name.txt")
 
 			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }) => {
 				if (destination instanceof File) {
-					destination.write(new Uint8Array([1]))
+					destination.write(new Uint8Array([1, 2]))
 				}
 
 				return { files: [], directories: [] }
@@ -4110,11 +4197,36 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await offline.updateIndex()
+			await offline.redownloadStandaloneFile({ item: renamedItem, parent })
 
-			await offline.storeFile({ file: childFileItem, parent, force: true, skipIndexUpdate: true })
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/old-name.txt`)).toBe(false)
+			expect(Array.from(fs.get(`${FILES_DIR_URI}/${uuid}/new-name.txt`) as Uint8Array)).toEqual([1, 2])
 
-			expect(transfers.download).toHaveBeenCalledTimes(1)
+			const meta = deserialize(
+				new TextDecoder().decode(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`) as Uint8Array)
+			) as FileOrDirectoryOfflineMeta
+
+			expect(meta.item.data.decryptedMeta?.name).toBe("new-name.txt")
+		})
+
+		it("throws for non-file items and missing decrypted meta", async () => {
+			const offline = await createOffline()
+			const parent = makeParent(healParentUuid)
+
+			await expect(offline.redownloadStandaloneFile({ item: makeDirItem(uuid, "not-a-file"), parent })).rejects.toThrow(
+				"Item not of type file"
+			)
+
+			const noMetaFile = {
+				type: "file",
+				data: {
+					uuid,
+					decryptedMeta: null,
+					undecryptable: false
+				}
+			} as unknown as DriveItem
+
+			await expect(offline.redownloadStandaloneFile({ item: noMetaFile, parent })).rejects.toThrow("File missing decrypted meta")
 		})
 	})
 
@@ -4338,6 +4450,35 @@ describe("Offline", () => {
 			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaBefore)
 		})
 
+		// Regression: a failed initialStore pass must only delete the tree when there was NO readable
+		// meta at pass start. Over a committed tree (concurrent-store race) it keeps state and returns
+		// the errors like a sync pass.
+		it("keeps the committed tree when an initialStore pass fails over a readable prior meta", async () => {
+			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/a.txt": fileItem }),
+				disk: { "/a.txt": new Uint8Array([1]) }
+			})
+
+			const metaBefore = fs.get(`${treeUri}/${treeUuid}.filenmeta`)
+			const offline = await createOffline()
+
+			// The pass fails outright at the listing — with no readable meta this would delete + throw.
+			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: vi.fn().mockRejectedValue(new Error("Network down"))
+				}
+			} as any)
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true, initialStore: true })
+
+			expect(errors).toHaveLength(1)
+			expect(errors[0]?.kind).toBe("listing")
+			expect(fs.has(treeUri)).toBe(true)
+			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaBefore)
+			expect(fs.has(`${treeUri}/a.txt`)).toBe(true)
+		})
+
 		it("re-downloads a truncated file (size mismatch counts as missing) and commits after verify", async () => {
 			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 5n)
 			const { dirItem, parent } = seedTree({
@@ -4554,6 +4695,50 @@ describe("Offline", () => {
 
 			expect(errors).toEqual([])
 			expect(fs.has(`${treeUri}/stray.txt`)).toBe(true)
+		})
+
+		// Regression: a pure self-heal pass (download ran, rebuilt meta byte-identical) must still
+		// sweep — otherwise crashed .filendl partials linger forever on trees that never change.
+		it("sweeps a stray .filendl partial on a heal pass even when the meta is byte-identical", async () => {
+			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/a.txt": fileItem }),
+				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }
+			})
+
+			const offline = await createOffline()
+
+			// First pass establishes the canonical serialized meta.
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 3n)] })
+			await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			const metaAfterFirst = fs.get(`${treeUri}/${treeUuid}.filenmeta`)
+
+			// Crash aftermath: the data file is truncated and a .filendl partial lingers.
+			fs.set(`${treeUri}/a.txt`, new Uint8Array([1]))
+			fs.set(`${treeUri}/a.txt.filendl`, new Uint8Array([9, 9]))
+
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 3n)] })
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				fs.set(`${(destination as { uri: string }).uri}/a.txt`, new Uint8Array([1, 2, 3]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toEqual([])
+			expect(transfers.download).toHaveBeenCalledTimes(1)
+
+			// The meta is byte-identical (never rewritten) yet the heal pass still swept the partial.
+			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaAfterFirst)
+			expect(fs.has(`${treeUri}/a.txt.filendl`)).toBe(false)
+			expect((fs.get(`${treeUri}/a.txt`) as Uint8Array).length).toBe(3)
 		})
 
 		it("returns collected errors without committing when the signal aborts before the download", async () => {
