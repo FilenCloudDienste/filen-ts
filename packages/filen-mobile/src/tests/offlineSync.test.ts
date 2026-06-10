@@ -448,9 +448,9 @@ function primeDefaults(): MockClient {
 	vi.mocked(offline.reconcileTree).mockResolvedValue([])
 	vi.mocked(offline.updateTreeRootMeta).mockResolvedValue(undefined)
 	vi.mocked(offline.renameStandaloneFile).mockResolvedValue(undefined)
-	vi.mocked(offline.redownloadStandaloneFile).mockResolvedValue(undefined)
+	vi.mocked(offline.redownloadStandaloneFile).mockResolvedValue(true)
 	vi.mocked(offline.removeItem).mockResolvedValue(undefined)
-	vi.mocked(offline.storeFile).mockResolvedValue(undefined)
+	vi.mocked(offline.storeFile).mockResolvedValue(true)
 	vi.mocked(offline.getLocalFile).mockResolvedValue(null)
 	vi.mocked(offline.removeStandaloneDirectory).mockResolvedValue(undefined)
 	vi.mocked(auth.getSdkClients).mockImplementation(
@@ -785,6 +785,8 @@ describe("offlineSync — standalone files", () => {
 		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
 	})
 
+	// Covers the deleted-data standalone too: listFiles is meta-keyed, so a standalone whose bytes
+	// were deleted (meta intact) is listed here and getLocalFile → null routes it into this heal.
 	it("9. missing on disk while remote alive → redownloadStandaloneFile; heal failure → download error, nothing removed", async () => {
 		givenFiles([
 			{
@@ -866,6 +868,8 @@ describe("offlineSync — standalone files", () => {
 		})
 		vi.mocked(offline.storeFile).mockImplementation(async () => {
 			order.push("storeFile")
+
+			return true
 		})
 		vi.mocked(offline.removeItem).mockImplementation(async () => {
 			order.push("removeItem")
@@ -899,6 +903,30 @@ describe("offlineSync — standalone files", () => {
 		expect(syncErrors()).toHaveLength(1)
 		expect(syncErrors()[0]?.kind).toBe("download")
 		expect(syncErrors()[0]?.itemUuid).toBe("file-old")
+	})
+
+	it("10b. version adoption ABORTED (storeFile resolves false) → old copy kept, NO removeItem, NO error", async () => {
+		const oldItem = makeFileItem("file-old", "doc.txt")
+
+		givenFiles([
+			{
+				item: oldItem,
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.listDir.mockResolvedValue({
+			dirs: [],
+			files: [makeRemoteFile("file-new", "doc.txt", uuidParent("parent-1"))]
+		})
+		// storeFile resolves false = download aborted, nothing stored for the new uuid.
+		vi.mocked(offline.storeFile).mockResolvedValue(false)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.storeFile)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		// Abort is not an error — nothing lands in the error surface; the next pass retries.
+		expect(syncErrors()).toEqual([])
 	})
 
 	it("11. moved (absent, no name match, getFileOptional → other parent) → renameStandaloneFile re-anchor, NOT removed", async () => {
@@ -1123,8 +1151,17 @@ describe("offlineSync — gates & coalescing", () => {
 })
 
 describe("offlineSync — broken standalone metas", () => {
-	it("19. own-cloud alive → renameStandaloneFile rebuild; undefined → removeStandaloneDirectory", async () => {
-		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue(["broken-alive", "broken-gone"])
+	it("19. own-cloud alive WITH data file → renameStandaloneFile rebuild; undefined → removeStandaloneDirectory", async () => {
+		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
+			{
+				uuid: "broken-alive",
+				hasDataFile: true
+			},
+			{
+				uuid: "broken-gone",
+				hasDataFile: true
+			}
+		])
 		client.getFileOptional.mockImplementation(async (uuid: string) =>
 			uuid === "broken-alive" ? makeRemoteFile("broken-alive", "rescued.txt", uuidParent("parent-1")) : undefined
 		)
@@ -1140,13 +1177,20 @@ describe("offlineSync — broken standalone metas", () => {
 
 		expect(renameArgs?.item.data.uuid).toBe("broken-alive")
 		expect(renameArgs?.item.data.decryptedMeta?.name).toBe("rescued.txt")
+		// Data file present — the cheap meta rewrite suffices, no download.
+		expect(vi.mocked(offline.redownloadStandaloneFile)).not.toHaveBeenCalled()
 		expect(vi.mocked(offline.removeStandaloneDirectory)).toHaveBeenCalledTimes(1)
 		expect(vi.mocked(offline.removeStandaloneDirectory)).toHaveBeenCalledWith("broken-gone")
 		expect(syncErrors()).toEqual([])
 	})
 
 	it("19b. broken lookup failure → listing error, dir left for the next pass", async () => {
-		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue(["broken-1"])
+		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
+			{
+				uuid: "broken-1",
+				hasDataFile: true
+			}
+		])
 		client.getFileOptional.mockRejectedValue(new Error("network down"))
 
 		await runManualPass()
@@ -1156,5 +1200,52 @@ describe("offlineSync — broken standalone metas", () => {
 		expect(syncErrors()).toHaveLength(1)
 		expect(syncErrors()[0]?.kind).toBe("listing")
 		expect(syncErrors()[0]?.itemUuid).toBe("broken-1")
+	})
+
+	it("19c. broken dir WITHOUT data file + remote alive → redownloadStandaloneFile (bytes + meta), NOT rename", async () => {
+		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
+			{
+				uuid: "broken-no-data",
+				hasDataFile: false
+			}
+		])
+		client.getFileOptional.mockImplementation(async (uuid: string) =>
+			uuid === "broken-no-data" ? makeRemoteFile("broken-no-data", "rescued.txt", uuidParent("parent-1")) : undefined
+		)
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "parent-1" ? makeRemoteDir("parent-1", "Parent", uuidParent(ROOT_UUID)) : undefined
+		)
+
+		await runManualPass()
+
+		// renameStandaloneFile no-ops without a data file — the dir would stay broken forever.
+		expect(vi.mocked(offline.renameStandaloneFile)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.redownloadStandaloneFile)).toHaveBeenCalledTimes(1)
+
+		const healArgs = vi.mocked(offline.redownloadStandaloneFile).mock.calls[0]?.[0] as unknown as {
+			item: DriveItem
+			parent: {
+				tag: string
+				inner: [
+					{
+						tag: string
+						inner: [
+							{
+								uuid: string
+							}
+						]
+					}
+				]
+			}
+			signal: AbortSignal
+		}
+
+		expect(healArgs.item.data.uuid).toBe("broken-no-data")
+		expect(healArgs.item.data.decryptedMeta?.name).toBe("rescued.txt")
+		expect(healArgs.parent.tag).toBe("Normal")
+		expect(healArgs.parent.inner[0].inner[0].uuid).toBe("parent-1")
+		expect(healArgs.signal).toBeInstanceOf(AbortSignal)
+		expect(vi.mocked(offline.removeStandaloneDirectory)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
 	})
 })

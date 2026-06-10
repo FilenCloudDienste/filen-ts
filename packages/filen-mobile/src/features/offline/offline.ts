@@ -561,6 +561,12 @@ export class Offline {
 		}
 	}
 
+	// Keyed on the META, not the data file: one entry per uuid-named files/ dir with a readable,
+	// non-empty file meta — REGARDLESS of whether the data file still exists. A standalone whose
+	// bytes were deleted while its meta survived is still conceptually stored offline; listing it
+	// routes it through the normal sync decision flow (the heal re-downloads missing bytes, gone
+	// remotes get removed). Dirs with missing/empty/undecodable metas are listBrokenStandaloneUuids
+	// territory.
 	public async listFiles(): Promise<
 		{
 			item: DriveItem
@@ -582,49 +588,36 @@ export class Offline {
 					return
 				}
 
-				const innerEntries = entry.list()
+				const metaFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${entry.name}.filenmeta`))
 
-				await Promise.all(
-					innerEntries.map(async innerEntry => {
-						if (!(innerEntry instanceof FileSystem.File) || innerEntry.name.endsWith(".filenmeta")) {
-							return
-						}
+				if (!metaFile.exists || metaFile.size === 0) {
+					return
+				}
 
-						const dataFile = innerEntry
-						const metaFile = new FileSystem.File(
-							FileSystem.Paths.join(dataFile.parentDirectory.uri, `${dataFile.parentDirectory.name}.filenmeta`)
-						)
+				const readResult = await run(async () => {
+					const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
 
-						if (!dataFile.exists || !metaFile.exists || metaFile.size === 0) {
-							return
-						}
+					if (Object.keys(meta).length === 0) {
+						throw new Error("File meta is empty")
+					}
 
-						const readResult = await run(async () => {
-							const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
+					return meta
+				})
 
-							if (Object.keys(meta).length === 0) {
-								throw new Error("File meta is empty")
-							}
+				if (!readResult.success) {
+					return
+				}
 
-							return meta
-						})
+				const meta = readResult.data
 
-						if (!readResult.success) {
-							return
-						}
+				if (!isFileItem(meta.item)) {
+					return
+				}
 
-						const meta = readResult.data
-
-						if (!isFileItem(meta.item)) {
-							return
-						}
-
-						files.push({
-							item: meta.item,
-							parent: meta.parent
-						})
-					})
-				)
+				files.push({
+					item: meta.item,
+					parent: meta.parent
+				})
 			})
 		)
 
@@ -635,11 +628,13 @@ export class Offline {
 
 	// Scans FILES_DIRECTORY for standalone uuid-named directories whose meta file is missing, empty,
 	// or undecodable while the directory itself still exists. Used by the sync top-level pass to
-	// rebuild (own cloud) or remove (undecidable) broken standalone entries.
-	public async listBrokenStandaloneUuids(): Promise<string[]> {
+	// rebuild (own cloud) or remove (undecidable) broken standalone entries. hasDataFile reports
+	// whether any non-.filenmeta file is present — it decides rebuild (cheap meta rewrite around the
+	// existing bytes) vs redownload (no bytes, e.g. crash or aborted-adoption residue) in the heal.
+	public async listBrokenStandaloneUuids(): Promise<{ uuid: string; hasDataFile: boolean }[]> {
 		this.ensureDirectories()
 
-		const broken: string[] = []
+		const broken: { uuid: string; hasDataFile: boolean }[] = []
 
 		for (const entry of FILES_DIRECTORY.list()) {
 			if (!(entry instanceof FileSystem.Directory) || !validateUuid(entry.name)) {
@@ -647,26 +642,30 @@ export class Offline {
 			}
 
 			const metaFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${entry.name}.filenmeta`))
+			let brokenMeta = !metaFile.exists || metaFile.size === 0
 
-			if (!metaFile.exists || metaFile.size === 0) {
-				broken.push(entry.name)
+			if (!brokenMeta) {
+				const readResult = await run(async () => {
+					const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
 
+					if (Object.keys(meta).length === 0) {
+						throw new Error("File meta is empty")
+					}
+
+					return meta
+				})
+
+				brokenMeta = !readResult.success
+			}
+
+			if (!brokenMeta) {
 				continue
 			}
 
-			const readResult = await run(async () => {
-				const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
-
-				if (Object.keys(meta).length === 0) {
-					throw new Error("File meta is empty")
-				}
-
-				return meta
+			broken.push({
+				uuid: entry.name,
+				hasDataFile: entry.list().some(inner => inner instanceof FileSystem.File && !inner.name.endsWith(".filenmeta"))
 			})
-
-			if (!readResult.success) {
-				broken.push(entry.name)
-			}
 		}
 
 		return broken
@@ -1434,6 +1433,11 @@ export class Offline {
 		return result.data
 	}
 
+	// Resolves true when the file IS stored offline on return (download completed + meta written,
+	// or it was already stored / nested inside a stored tree), false when the download was ABORTED
+	// (transfers.download returned null) — nothing was committed and the partial dir is cleaned up.
+	// Failures still throw. Callers that must not treat an aborted store as durable (e.g. the sync
+	// version adoption, which only drops the old copy once the new one is stored) check the boolean.
 	public async storeFile({
 		file,
 		parent,
@@ -1446,7 +1450,7 @@ export class Offline {
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		signal?: AbortSignal
-	}): Promise<void> {
+	}): Promise<boolean> {
 		const result = await run(async defer => {
 			if (!isFileItem(file)) {
 				throw new Error("Item not of type file")
@@ -1479,14 +1483,14 @@ export class Offline {
 			this.ensureDirectories()
 
 			if (await this.isItemStored(file)) {
-				return
+				return true
 			}
 
 			// Skip if this file already exists inside a stored directory tree (overlap guard).
 			const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
 
 			if (uuidToTopLevel.has(file.data.uuid)) {
-				return
+				return true
 			}
 
 			const dataFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, file.data.decryptedMeta.name))
@@ -1512,7 +1516,7 @@ export class Offline {
 					resolveCompletion = resolve
 				})
 
-				const result = await transfers.download({
+				const downloadResult = await transfers.download({
 					item: file,
 					destination: dataFile,
 					hideProgress,
@@ -1520,21 +1524,26 @@ export class Offline {
 					signal
 				})
 
-				if (result) {
-					atomicWrite(
-						metaFile,
-						serialize({
-							item: file,
-							parent
-						} satisfies FileOrDirectoryOfflineMeta)
-					)
-
-					this.invalidateCaches()
-
-					if (!skipIndexUpdate) {
-						await this.updateIndex()
-					}
+				// Aborted (null result): nothing was committed — no meta write, no index update.
+				if (!downloadResult) {
+					return false
 				}
+
+				atomicWrite(
+					metaFile,
+					serialize({
+						item: file,
+						parent
+					} satisfies FileOrDirectoryOfflineMeta)
+				)
+
+				this.invalidateCaches()
+
+				if (!skipIndexUpdate) {
+					await this.updateIndex()
+				}
+
+				return true
 			})
 
 			if (!innerResult.success) {
@@ -1544,11 +1553,25 @@ export class Offline {
 
 				throw innerResult.error
 			}
+
+			if (!innerResult.data) {
+				// Aborted: clean up the partial download dir (same as the failure path) so no
+				// meta-less files/{uuid}/ residue is left behind, and report not-stored.
+				if (dataFile.parentDirectory.exists) {
+					dataFile.parentDirectory.delete()
+				}
+
+				return false
+			}
+
+			return true
 		})
 
 		if (!result.success) {
 			throw result.error
 		}
+
+		return result.data
 	}
 
 	// Meta-preserving standalone self-heal: re-downloads a stored standalone file's bytes to the
@@ -1556,6 +1579,8 @@ export class Offline {
 	// behind by an older name are removed first; the meta is only rewritten after a successful
 	// download. A failed or aborted heal leaves the meta untouched — the item stays listed offline
 	// so the next sync pass retries. No index update — callers batch one at the end of their pass.
+	// Resolves true when the download completed and the meta was rewritten, false when the download
+	// was aborted (null result). Failures still throw.
 	public async redownloadStandaloneFile({
 		item,
 		parent,
@@ -1564,7 +1589,7 @@ export class Offline {
 		item: DriveItem
 		parent: OfflineParent
 		signal?: AbortSignal
-	}): Promise<void> {
+	}): Promise<boolean> {
 		const result = await run(async defer => {
 			if (!isFileItem(item)) {
 				throw new Error("Item not of type file")
@@ -1638,7 +1663,7 @@ export class Offline {
 
 			if (!downloaded) {
 				// Aborted — meta untouched; the next sync pass retries the heal.
-				return
+				return false
 			}
 
 			const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, metaFileName))
@@ -1652,11 +1677,15 @@ export class Offline {
 			)
 
 			this.invalidateCaches()
+
+			return true
 		})
 
 		if (!result.success) {
 			throw result.error
 		}
+
+		return result.data
 	}
 
 	public async storeDirectory({
