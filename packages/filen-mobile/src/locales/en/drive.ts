@@ -149,6 +149,26 @@ export const drive = {
 	/** Disabled menu button / offline indicator shown while syncing is in progress */
 	syncing: "Syncing…",
 
+	// ── Offline sync errors (features/offline screens/syncErrors.tsx + offline listing) ──
+	/** Header title of the offline sync errors screen */
+	offline_sync_errors: "Sync errors",
+	/** Pressable list-header row on the offline root listing that opens the sync errors screen. {{count}} = number of sync errors */
+	offline_sync_errors_count_one: "{{count}} sync error",
+	/** Pressable list-header row on the offline root listing that opens the sync errors screen. {{count}} = number of sync errors */
+	offline_sync_errors_count_other: "{{count}} sync errors",
+	/** Empty state of the sync errors screen when the last sync pass produced no errors */
+	no_offline_sync_errors: "No sync errors",
+	/** Per-row indicator on the offline listing for an item whose last sync attempt failed */
+	offline_sync_failed: "Sync failed",
+	/** Sync error kind label: downloading the file's content failed */
+	offline_sync_error_kind_download: "Download",
+	/** Sync error kind label: listing the directory's contents failed */
+	offline_sync_error_kind_listing: "Listing",
+	/** Sync error kind label: verifying the stored file's integrity failed */
+	offline_sync_error_kind_verify: "Verification",
+	/** Sync error kind label: storing the file to the offline cache failed */
+	offline_sync_error_kind_store: "Storage",
+
 	// ── Bulk-selection actions (drive/index.tsx Header) ───────────────────────
 	// restore_selected, favorite_selected, unfavorite_selected, download_selected,
 	// make_available_offline_selected and trash_selected live in common.ts.
