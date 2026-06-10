@@ -1,52 +1,29 @@
 import * as FileSystem from "expo-file-system"
-import { randomUUID } from "expo-crypto"
 import type { DriveItem } from "@/types"
 import { run, Semaphore } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize } from "@/lib/serializer"
 import auth from "@/lib/auth"
-import {
-	type File,
-	type Dir,
-	type SharedFile,
-	type SharedDir,
-	type SharedRootDir,
-	NonRootDir_Tags,
-	ErrorKind,
-	AnyDirWithContext,
-	AnySharedDirWithContext,
-	AnySharedDir,
-	AnyNormalDir,
-	AnyDirWithContext_Tags,
-	AnySharedDir_Tags
-} from "@filen/sdk-rs"
-import cache from "@/lib/cache"
-import { normalizeModificationTimestampForComparison } from "@/lib/utils"
+import { NonRootDir_Tags } from "@filen/sdk-rs"
 import {
 	unwrapFileMeta,
 	unwrapDirMeta,
 	unwrapAnyDirUuid,
 	unwrappedDirIntoDriveItem,
-	unwrappedFileIntoDriveItem,
-	unwrapParentUuid
+	unwrappedFileIntoDriveItem
 } from "@/lib/sdkUnwrap"
-import { normalizeFilePathForSdk, extractPathInsideUuidDirectory } from "@/lib/paths"
-import { unwrapSdkError } from "@/lib/sdkErrors"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import {
 	atomicWrite,
 	parentCacheKey,
-	shouldSkipOfflineSyncForConnection,
-	OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY,
 	directoryDriveItemToAnyDirWithContext,
-	type OfflineParent
+	type OfflineParent,
+	type OfflineSyncError,
+	type OfflineSyncErrorKind
 } from "@/features/offline/offlineHelpers"
-import secureStore from "@/lib/secureStore"
-import NetInfo from "@react-native-community/netinfo"
+import { planTreeReconcile, isSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { validateUuid } from "@/lib/uuid"
-import useOfflineStore from "@/features/offline/store/useOffline.store"
-import { onlineManager } from "@tanstack/react-query"
 import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
@@ -59,6 +36,8 @@ import {
 	OFFLINE_INDEX_FILE
 } from "@/lib/storageRoots"
 
+export type Uuid = string
+
 export type FileOrDirectoryOfflineMeta = {
 	item: DriveItem
 	parent: OfflineParent
@@ -66,14 +45,15 @@ export type FileOrDirectoryOfflineMeta = {
 
 export type DirectoryOfflineMeta = FileOrDirectoryOfflineMeta & {
 	entries: Record<
-		string,
+		Uuid,
 		{
 			item: DriveItem
+			// Raw root-relative listing path with leading "/" — original decrypted names,
+			// NEVER decoded or encoded. Disk access is Paths.join(treeDir.uri, path).
+			path: string
 		}
 	>
 }
-
-export type Uuid = string
 
 export type Index = {
 	files: Record<
@@ -101,31 +81,40 @@ export const INDEX_FILE = OFFLINE_INDEX_FILE
 
 // Manages offline file/directory storage on device.
 //
-// Storage layout:
+// Storage layout (v2):
 //   offline/v{N}/files/{uuid}/{filename}        — standalone files (one data file + one .filenmeta)
-//   offline/v{N}/directories/{uuid}/...         — directory trees (recursive download + one .filenmeta with entries map)
+//   offline/v{N}/directories/{uuid}/...         — directory trees (in-place reconciled download + one .filenmeta with entries map)
 //   offline/v{N}/index                          — serialized Index of all stored items (rebuilt on mutation)
 //
 // Key concepts:
 //   - "Standalone" items are stored individually under files/ or as a top-level directory.
-//   - When a directory is stored, its subtree is flattened into entries in the .filenmeta. Any standalone
-//     items that overlap (same UUID already in the directory tree) are removed (overlap dedup).
+//   - A stored directory's subtree is flattened into the .filenmeta `entries` map, keyed by entry
+//     UUID. Each entry records its RAW root-relative listing path (leading "/", original decrypted
+//     names — never decoded/encoded). Disk access is always Paths.join(treeDir.uri, entry.path);
+//     expo-file-system handles percent-encoding internally.
+//   - File UUIDs rotate on every content change (same uuid ⟹ identical bytes), so tree state is a
+//     pure uuid set-diff — there are NO timestamp comparisons anywhere.
+//   - reconcileTree() converges one stored tree onto its remote listing IN PLACE: rename/move/delete
+//     local entries per the pure planner (offlineSyncPlanner), run at most ONE hash-idempotent
+//     directory download for missing entries, verify everything, and only then commit meta + index.
+//     No staging, no swap — a failed pass leaves disk state untouched, returns OfflineSyncErrors,
+//     and the next pass re-converges. A no-op pass writes nothing (serialized-meta fixed point).
 //   - The Index is the source of truth for "is this item offline?" queries and is rebuilt atomically.
-//   - sync() compares local offline state against remote, re-downloading changed/new files and pruning deleted ones.
+//   - Standalone copies that overlap a stored tree (same UUID inside the tree) are removed on commit
+//     (overlap dedup).
 export class Offline {
 	// indexMutex(1): serializes index read/write to prevent concurrent corruption.
 	private readonly indexMutex = new Semaphore(1)
 	private indexCache: Index | null = null
-	// syncMutex(1): only one sync() runs at a time (compares local vs remote state).
-	private readonly syncMutex = new Semaphore(1)
 	// storeMutex(3): allows up to 3 concurrent file/directory downloads while still bounding I/O.
 	private readonly storeMutex = new Semaphore(3)
-	// storeItemMutexes: per-UUID Semaphore(1) lock serializing storeFile/storeDirectory for the same item.
-	// Without this, two concurrent store calls for the same UUID both pass the isItemStored guard (cold cache)
-	// and race the destructive parent-directory delete/recreate, so call B wipes call A's in-flight download
-	// target mid-transfer. Keyed by UUID so distinct items still download concurrently up to storeMutex(3).
+	// storeItemMutexes: per-UUID Semaphore(1) lock serializing storeFile/storeDirectory/reconcileTree
+	// for the same item. Without this, two concurrent store calls for the same UUID both pass the
+	// isItemStored guard (cold cache) and race the destructive parent-directory delete/recreate, so
+	// call B wipes call A's in-flight download target mid-transfer. Keyed by UUID so distinct items
+	// still download concurrently up to storeMutex(3).
 	private readonly storeItemMutexes = new Map<string, Semaphore>()
-	// clearBarrier: serializes clearAll against in-flight storeFile/storeDirectory/removeItem.
+	// clearBarrier: serializes clearAll against in-flight storeFile/storeDirectory/reconcileTree/removeItem.
 	private readonly clearBarrier = new ClearBarrier()
 	private readonly listDirectoriesCache = new Map<string, Awaited<ReturnType<Offline["listDirectories"]>>>()
 	private listFilesCache: Awaited<ReturnType<Offline["listFiles"]>> | null = null
@@ -148,15 +137,6 @@ export class Offline {
 
 	public constructor() {
 		this.ensureDirectories()
-
-		// Recover from a session that crashed mid-swap (see swapStagingIntoPlace): delete partial staging dirs
-		// and restore any `.old` whose live slot is missing. Best-effort; guarded so a transient FS error can't
-		// brick module load.
-		try {
-			this.reconcileLeftoverStaging()
-		} catch (e) {
-			console.error("[Offline] reconcileLeftoverStaging failed", e)
-		}
 	}
 
 	public cancel(): void {
@@ -172,7 +152,7 @@ export class Offline {
 		// Native FS create() can throw on disk full / IO / permission errors. Guard so a transient failure
 		// does not propagate out of the module-scope `new Offline()` (which would brick module load) nor out
 		// of synchronous callers. Leave directoriesEnsured=false on failure so the lazy per-operation
-		// ensureDirectories() calls in storeFile/storeDirectory/updateIndex (which run inside run()) retry and
+		// ensureDirectories() calls in storeFile/reconcileTree/updateIndex (which run inside run()) retry and
 		// surface the error via their Result path.
 		try {
 			if (OFFLINE_PARENT_DIRECTORY.exists) {
@@ -211,9 +191,9 @@ export class Offline {
 	}
 
 	/**
-	 * Acquire the per-UUID store lock, serializing storeFile/storeDirectory for the same item so the
-	 * check-then-act (isItemStored guard → destructive parent delete/recreate → download → index update)
-	 * runs atomically per UUID. Distinct UUIDs are unaffected and still bounded only by storeMutex(3).
+	 * Acquire the per-UUID store lock, serializing storeFile/storeDirectory/reconcileTree for the same
+	 * item so the check-then-act (guards → local mutations → download → commit) runs atomically per
+	 * UUID. Distinct UUIDs are unaffected and still bounded only by storeMutex(3).
 	 * Returns a release function that frees the slot and prunes the map entry once no one else holds or
 	 * waits on it, keeping the map bounded.
 	 */
@@ -333,8 +313,8 @@ export class Offline {
 			index.set(meta.item.data.uuid, topLevelEntry.name)
 
 			// Map all nested entries
-			for (const path in meta.entries) {
-				const entry = meta.entries[path]
+			for (const uuid in meta.entries) {
+				const entry = meta.entries[uuid]
 
 				if (entry) {
 					index.set(entry.item.data.uuid, topLevelEntry.name)
@@ -581,723 +561,9 @@ export class Offline {
 		}
 	}
 
-	// Compares local offline items against remote server state and reconciles:
-	// 1. Collects unique parents from all stored files/dirs, fetches their remote listings in parallel.
-	// 2. For each stored file: deletes if removed remotely, re-downloads if modified, or re-stores under a new UUID if renamed.
-	// 3. For each stored directory: recursively compares entries; sets needsFullResync=true if any diff, then re-downloads.
-	// 4. Rebuilds the index at the end.
+	// TEMPORARY: replaced by offlineSync.sync() in the follow-up commit — see offlineSync.ts (Task 5).
 	public async sync(): Promise<void> {
-		const signal = this.abortController.signal
-
-		await run(
-			async defer => {
-				await this.syncMutex.acquire()
-
-				useOfflineStore.getState().setSyncing(true)
-
-				defer(() => {
-					useOfflineStore.getState().setSyncing(false)
-
-					this.syncMutex.release()
-				})
-
-				if (signal.aborted) {
-					return
-				}
-
-				// sync() reads remote server state for every stored item; without
-				// network those listDir calls would all fail. The reconnect
-				// listener re-fires sync() on offline → online transition, so
-				// returning here is the right behavior for cold-start in airplane
-				// mode (setup.ts fire-and-forget) and for any future caller.
-				if (!onlineManager.isOnline()) {
-					return
-				}
-
-				// Respect the "Sync offline files on Wi-Fi only" setting (default off → always sync).
-				// Mirrors camera upload: skip the automatic sync over cellular. Explicit, user-initiated
-				// store calls (storeFile/storeDirectory) are intentionally NOT gated — only this
-				// background sync is. Skip the NetInfo round-trip entirely when the setting is off.
-				const wifiOnly = (await secureStore.get<boolean>(OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY)) === true
-
-				if (wifiOnly) {
-					const connectionType = (await NetInfo.fetch()).type
-
-					if (shouldSkipOfflineSyncForConnection({ wifiOnly, connectionType })) {
-						return
-					}
-				}
-
-				this.ensureDirectories()
-
-				const [files, { directories: topLevelDirectories }, { authedSdkClient }] = await Promise.all([
-					this.listFiles(),
-					this.listDirectories(),
-					auth.getSdkClients()
-				])
-
-				// Dedup parents: multiple offline items may share a parent dir. We only need to list each parent once.
-				const uniqueParents = new Map<string, OfflineParent>()
-
-				for (const { parent } of files) {
-					const key = parentCacheKey(parent)
-
-					if (!uniqueParents.has(key)) {
-						uniqueParents.set(key, parent)
-					}
-				}
-
-				for (const { parent } of topLevelDirectories) {
-					const key = parentCacheKey(parent)
-
-					if (!uniqueParents.has(key)) {
-						uniqueParents.set(key, parent)
-					}
-				}
-
-				const parentListings = new Map<
-					string,
-					Awaited<
-						| ReturnType<typeof authedSdkClient.listDir>
-						| ReturnType<typeof authedSdkClient.listSharedDir>
-						| ReturnType<typeof authedSdkClient.listInSharedRoot>
-					> | null
-				>()
-
-				await Promise.all(
-					Array.from(uniqueParents.entries()).map(async ([key, parent]) => {
-						if (signal.aborted) {
-							return
-						}
-
-						const listResult = await run(async () => {
-							if (parent === "sharedInRoot") {
-								return await authedSdkClient.listInSharedRoot({ signal })
-							}
-
-							switch (parent.tag) {
-								case AnyDirWithContext_Tags.Normal: {
-									return await authedSdkClient.listDir(parent.inner[0], { signal })
-								}
-
-								case AnyDirWithContext_Tags.Shared: {
-									switch (parent.inner[0].dir.tag) {
-										case AnySharedDir_Tags.Dir:
-										case AnySharedDir_Tags.Root: {
-											return await authedSdkClient.listSharedDir(parent.inner[0].dir, parent.inner[0].shareInfo, {
-												signal
-											})
-										}
-
-										default: {
-											throw new Error("Unsupported shared directory type for listing")
-										}
-									}
-								}
-
-								case AnyDirWithContext_Tags.Linked: {
-									throw new Error("Linked directories are not supported for listing in sync")
-								}
-
-								default: {
-									throw new Error("Unsupported directory type for listing")
-								}
-							}
-						})
-
-						if (!listResult.success) {
-							const unwrappedSdkError = unwrapSdkError(listResult.error)
-
-							if (
-								unwrappedSdkError &&
-								(unwrappedSdkError.kind() === ErrorKind.FolderNotFound ||
-									unwrappedSdkError.kind() === ErrorKind.WrongPassword)
-							) {
-								parentListings.set(key, null)
-							}
-
-							return
-						}
-
-						parentListings.set(key, listResult.data)
-					})
-				)
-
-				// Build byUuid + byName indexes for O(1) lookup during file comparison below.
-				const parentListingIndexes = new Map<
-					string,
-					{
-						byUuid: Map<string, File | SharedFile>
-						byName: Map<string, File | SharedFile>
-					}
-				>()
-
-				for (const [key, listing] of parentListings) {
-					if (!listing) {
-						parentListingIndexes.set(key, {
-							byUuid: new Map(),
-							byName: new Map()
-						})
-
-						continue
-					}
-
-					const byUuid = new Map<string, File | SharedFile>()
-					const byName = new Map<string, File | SharedFile>()
-
-					for (const f of listing.files) {
-						const unwrapped = unwrapFileMeta(f)
-
-						if (!unwrapped.meta) {
-							continue
-						}
-
-						byUuid.set(unwrapped.file.uuid, f)
-						byName.set(unwrapped.meta.name.trim().toLowerCase(), f)
-					}
-
-					parentListingIndexes.set(key, {
-						byUuid,
-						byName
-					})
-				}
-
-				const parentListingDirIndexes = new Map<
-					string,
-					{
-						byUuid: Map<string, Dir | SharedDir | SharedRootDir>
-						byName: Map<string, Dir | SharedDir | SharedRootDir>
-					}
-				>()
-
-				for (const [key, listing] of parentListings) {
-					const byUuid = new Map<string, Dir | SharedDir | SharedRootDir>()
-					const byName = new Map<string, Dir | SharedDir | SharedRootDir>()
-
-					if (listing) {
-						for (const d of listing.dirs) {
-							const unwrapped = unwrapDirMeta(d)
-
-							if (!unwrapped.meta) {
-								continue
-							}
-
-							byUuid.set(unwrapped.uuid, d)
-							byName.set(unwrapped.meta.name.trim().toLowerCase(), d)
-						}
-					}
-
-					parentListingDirIndexes.set(key, {
-						byUuid,
-						byName
-					})
-				}
-
-				if (signal.aborted) {
-					return
-				}
-
-				await Promise.all([
-					...files.map(({ item, parent }) =>
-						run(async () => {
-							if (signal.aborted) {
-								return
-							}
-
-							if (!item.data.decryptedMeta || !isFileItem(item)) {
-								return
-							}
-
-							const dataFile = new FileSystem.File(
-								FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid, item.data.decryptedMeta.name)
-							)
-							const metaFile = new FileSystem.File(
-								FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
-							)
-
-							if (!dataFile.exists || !metaFile.exists) {
-								if (dataFile.parentDirectory.exists) {
-									dataFile.parentDirectory.delete()
-								}
-
-								return
-							}
-
-							const key = parentCacheKey(parent)
-
-							if (!parentListings.has(key)) {
-								return
-							}
-
-							const listing = parentListings.get(key)
-
-							if (!listing) {
-								if (dataFile.parentDirectory.exists) {
-									dataFile.parentDirectory.delete()
-								}
-
-								return
-							}
-
-							const index = parentListingIndexes.get(key)
-							const existingFile = index?.byUuid.get(item.data.uuid)
-
-							if (!existingFile && dataFile.parentDirectory.exists) {
-								dataFile.parentDirectory.delete()
-							}
-
-							if (existingFile && dataFile.exists && metaFile.exists) {
-								const unwrappedFileMeta = unwrapFileMeta(existingFile)
-
-								if (unwrappedFileMeta.meta && unwrappedFileMeta.meta.name !== item.data.decryptedMeta.name) {
-									dataFile.rename(unwrappedFileMeta.meta.name)
-
-									atomicWrite(
-										metaFile,
-										serialize({
-											item: unwrappedFileIntoDriveItem(unwrappedFileMeta),
-											parent
-										} satisfies FileOrDirectoryOfflineMeta)
-									)
-								}
-
-								if (
-									unwrappedFileMeta.meta &&
-									normalizeModificationTimestampForComparison(Number(unwrappedFileMeta.meta.modified)) >
-										normalizeModificationTimestampForComparison(Number(item.data.decryptedMeta.modified))
-								) {
-									// Stage-then-atomic-swap: download the newer version into a sibling staging dir and only
-									// replace the existing copy on success. A transient download error leaves the offline
-									// copy + caches intact so the next sync retries it (vs. the old delete-then-download which
-									// silently lost the copy on any failure). Don't swallow — log so the loss/retry is visible.
-									await this.restoreFileToStaging({
-										file: unwrappedFileIntoDriveItem(unwrappedFileMeta),
-										parent,
-										signal
-									}).catch(e => {
-										console.error("[Offline] sync re-download of modified file failed; preserving existing copy", e)
-									})
-
-									return
-								}
-							}
-
-							if (existingFile) {
-								return
-							}
-
-							// UUID gone from remote but a file with the same name exists — likely re-uploaded.
-							// Re-store under the new UUID so offline stays in sync.
-							let updatedFile: File | SharedFile | undefined = undefined
-							const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
-							const nameMatch = index?.byName.get(normalizedName)
-
-							if (nameMatch) {
-								const unwrappedNameMatch = unwrapFileMeta(nameMatch)
-
-								if (unwrappedNameMatch.meta) {
-									const nameMatchUuid = unwrappedNameMatch.file.uuid
-
-									if (nameMatchUuid !== item.data.uuid) {
-										updatedFile = nameMatch
-									}
-								}
-							}
-
-							if (!updatedFile) {
-								return
-							}
-
-							// Re-uploaded under a new UUID: store the new copy FIRST, and only delete the old copy once
-							// the new one is durably stored. storeFile writes to files/{new-uuid} (a fresh dir), so the
-							// old files/{old-uuid} copy is never at risk during the download — on a transient failure we
-							// keep the old copy and surface the error instead of silently swallowing it.
-							const renameRestore = await run(() =>
-								this.storeFile({
-									file: unwrappedFileIntoDriveItem(unwrapFileMeta(updatedFile)),
-									parent,
-									skipIndexUpdate: true,
-									signal
-								})
-							)
-
-							if (!renameRestore.success) {
-								console.error(
-									"[Offline] sync re-store of renamed/re-uploaded file failed; preserving existing copy",
-									renameRestore.error
-								)
-
-								return
-							}
-
-							if (dataFile.parentDirectory.exists) {
-								dataFile.parentDirectory.delete()
-							}
-						})
-					),
-					...topLevelDirectories.map(({ item, parent }) =>
-						run(async () => {
-							if (signal.aborted) {
-								return
-							}
-
-							if (!item.data.decryptedMeta) {
-								return
-							}
-
-							const metaFile = new FileSystem.File(
-								FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, item.data.uuid, `${item.data.uuid}.filenmeta`)
-							)
-
-							if (!metaFile.exists || metaFile.size === 0) {
-								return
-							}
-
-							const key = parentCacheKey(parent)
-
-							if (!parentListings.has(key)) {
-								return
-							}
-
-							const listing = parentListings.get(key)
-
-							if (!listing) {
-								if (metaFile.parentDirectory.exists) {
-									metaFile.parentDirectory.delete()
-								}
-
-								return
-							}
-
-							const dirIndex = parentListingDirIndexes.get(key)
-							const existingDir = dirIndex?.byUuid.get(item.data.uuid)
-
-							// NOTE: the old code deleted the local copy here whenever the UUID was gone remotely —
-							// even when a same-name re-created directory existed (the rename case). That destroyed the
-							// offline copy BEFORE the replacement was stored, losing it on a transient re-store failure
-							// (#44). The delete now lives in the `!existingDir` block below, gated on whether a name
-							// match exists: deferred until the re-store succeeds for a rename, immediate for a genuine
-							// remote deletion.
-
-							if (existingDir && metaFile.exists && metaFile.size > 0) {
-								const unwrappedRemoteDir = unwrapDirMeta(existingDir)
-
-								if (
-									unwrappedRemoteDir.meta &&
-									item.data.decryptedMeta &&
-									unwrappedRemoteDir.meta.name !== item.data.decryptedMeta.name
-								) {
-									const existingMeta = await this.readDirectoryMeta(item.data.uuid)
-
-									atomicWrite(
-										metaFile,
-										serialize({
-											item: unwrappedDirIntoDriveItem(unwrappedRemoteDir),
-											parent,
-											entries: existingMeta?.entries ?? {}
-										} satisfies DirectoryOfflineMeta)
-									)
-								}
-							}
-
-							if (!existingDir) {
-								const normalizedName = item.data.decryptedMeta.name.trim().toLowerCase()
-								const nameMatch = dirIndex?.byName.get(normalizedName)
-								let renameMatch: DriveItem | undefined = undefined
-
-								if (nameMatch) {
-									const unwrappedNameMatch = unwrapDirMeta(nameMatch)
-
-									if (unwrappedNameMatch.meta && unwrappedNameMatch.uuid !== item.data.uuid) {
-										renameMatch = unwrappedDirIntoDriveItem(unwrapDirMeta(nameMatch))
-									}
-								}
-
-								if (!renameMatch) {
-									// Genuine remote deletion (UUID gone, no same-name re-creation) — safe to remove the
-									// local copy immediately.
-									if (metaFile.parentDirectory.exists) {
-										metaFile.parentDirectory.delete()
-									}
-
-									return
-								}
-
-								// Re-created under a new UUID: store the new copy FIRST (into directories/{new-uuid}, a
-								// fresh dir), and only delete the OLD directories/{old-uuid} tree once the re-store succeeds.
-								// A transient failure preserves the old copy and is surfaced via log so the next sync retries.
-								const renameRestore = await run(() =>
-									this.storeDirectory({
-										directory: renameMatch,
-										parent,
-										skipIndexUpdate: true,
-										signal
-									})
-								)
-
-								if (!renameRestore.success) {
-									console.error(
-										"[Offline] sync re-store of renamed/re-created directory failed; preserving existing copy",
-										renameRestore.error
-									)
-
-									return
-								}
-
-								if (metaFile.parentDirectory.exists) {
-									metaFile.parentDirectory.delete()
-								}
-
-								return
-							}
-
-							const remoteDir: AnyDirWithContext = (() => {
-								switch (item.type) {
-									case "directory": {
-										return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
-									}
-
-									case "sharedDirectory": {
-										const parentUuid = unwrapParentUuid(item.data.inner.parent)
-
-										if (!parentUuid) {
-											throw new Error("Shared directory is missing parent information.")
-										}
-
-										const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
-
-										if (!parentDirFromCache) {
-											throw new Error("Parent directory of shared directory not found in cache.")
-										}
-
-										return new AnyDirWithContext.Shared(
-											AnySharedDirWithContext.new({
-												dir: new AnySharedDir.Dir(item.data),
-												shareInfo: parentDirFromCache.shareInfo
-											})
-										)
-									}
-
-									case "sharedRootDirectory": {
-										return new AnyDirWithContext.Shared(
-											AnySharedDirWithContext.new({
-												dir: new AnySharedDir.Root(item.data),
-												shareInfo: item.data.sharingRole
-											})
-										)
-									}
-
-									default: {
-										throw new Error(`Unsupported directory type: ${item.type}`)
-									}
-								}
-							})()
-
-							const [remoteDirectoryEntries, directoryMetaBytes] = await Promise.all([
-								authedSdkClient.listDirRecursiveWithPaths(
-									remoteDir,
-									{
-										onProgress() {
-											// Noop
-										}
-									},
-									{
-										onErrors() {
-											// Noop
-										}
-									}
-								),
-								metaFile.text()
-							])
-
-							const directoryMeta: DirectoryOfflineMeta = deserialize(directoryMetaBytes)
-
-							if (Object.keys(directoryMeta).length === 0) {
-								if (metaFile.parentDirectory.exists) {
-									metaFile.parentDirectory.delete()
-								}
-
-								return
-							}
-
-							const localDirectories = new Map<
-								string,
-								{
-									item: DriveItem
-									directory: FileSystem.Directory
-								}
-							>()
-							const localFiles = new Map<
-								string,
-								{
-									item: DriveItem
-									file: FileSystem.File
-								}
-							>()
-
-							for (const path in directoryMeta.entries) {
-								const entry = directoryMeta.entries[path]
-
-								if (!entry) {
-									continue
-								}
-
-								switch (entry.item.type) {
-									case "directory":
-									case "sharedRootDirectory":
-									case "sharedDirectory": {
-										const directory = new FileSystem.Directory(
-											FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, item.data.uuid, path)
-										)
-
-										if (directory.exists) {
-											localDirectories.set(path, {
-												item: entry.item,
-												directory
-											})
-										}
-
-										break
-									}
-
-									case "file":
-									case "sharedFile":
-									case "sharedRootFile": {
-										const file = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY, item.data.uuid, path))
-
-										if (file.exists) {
-											localFiles.set(path, {
-												item: entry.item,
-												file
-											})
-										}
-
-										break
-									}
-								}
-							}
-
-							const remoteFiles = new Map<string, File | SharedFile>()
-							const remoteDirectories = new Map<string, Dir | SharedDir | SharedRootDir>()
-
-							for (const { dir, path } of remoteDirectoryEntries.dirs) {
-								if (dir.tag === NonRootDir_Tags.Linked) {
-									continue
-								}
-
-								const normalizedPath = normalizeFilePathForSdk(path)
-
-								remoteDirectories.set(normalizedPath, dir.inner[0])
-							}
-
-							for (const { file, path } of remoteDirectoryEntries.files) {
-								const normalizedPath = normalizeFilePathForSdk(path)
-
-								remoteFiles.set(normalizedPath, file)
-							}
-
-							// DETECTION PASS (read-only): decide whether the whole tree must be re-downloaded because a
-							// nested file was modified, or an entry was added remotely. We must NOT mutate the live tree
-							// in this pass — if a full resync is needed, storeDirectory({ force: true }) now stages the
-							// replacement and atomically swaps it in, so destroying live children first would reintroduce
-							// the data-loss-on-transient-error bug (#45). (A nested file modification was the one case the
-							// old code pre-deleted the live file for before the resync — that pre-delete is exactly the
-							// destructive step #45 removes.)
-							let needsFullResync = false
-
-							for (const [path, localFile] of localFiles) {
-								const remoteFile = remoteFiles.get(path)
-
-								if (remoteFile && localFile && localFile.item.data.decryptedMeta && isFileItem(localFile.item)) {
-									const unwrappedRemoteFile = unwrapFileMeta(remoteFile)
-
-									if (
-										unwrappedRemoteFile.meta &&
-										normalizeModificationTimestampForComparison(Number(unwrappedRemoteFile.meta.modified)) >
-											normalizeModificationTimestampForComparison(Number(localFile.item.data.decryptedMeta.modified))
-									) {
-										needsFullResync = true
-
-										break
-									}
-								}
-							}
-
-							if (!needsFullResync) {
-								for (const [path, remoteDirectory] of remoteDirectories) {
-									const localDirectory = localDirectories.get(path)
-
-									if (!localDirectory && remoteDirectory) {
-										needsFullResync = true
-
-										break
-									}
-								}
-							}
-
-							if (!needsFullResync) {
-								for (const [path, remoteFile] of remoteFiles) {
-									const localFile = localFiles.get(path)
-
-									if (!localFile && remoteFile) {
-										needsFullResync = true
-
-										break
-									}
-								}
-							}
-
-							// force: true bypasses the isItemStored check, since we know it's stored but stale.
-							if (needsFullResync) {
-								// Stage-then-atomic-swap re-download (owned by storeDirectory). The live tree is left fully
-								// intact until the replacement is durably staged; a transient failure preserves it. Don't
-								// swallow — log so the loss/retry is visible (the next sync retries the preserved copy).
-								await this.storeDirectory({
-									directory: item,
-									parent,
-									skipIndexUpdate: true,
-									force: true,
-									signal
-								}).catch(e => {
-									console.error("[Offline] sync full directory resync failed; preserving existing copy", e)
-								})
-
-								return
-							}
-
-							// PRUNE-ONLY PATH (no full resync needed): entries deleted remotely (a local subdirectory or
-							// file with no remote counterpart) are surgically removed in place. Safe — there is no
-							// re-download that could fail and strand us, so no staging is needed. Matches the original
-							// surgical-removal behavior for the no-addition/no-modification case.
-							for (const [path, localDirectory] of localDirectories) {
-								const remoteDirectory = remoteDirectories.get(path)
-
-								if (!remoteDirectory && localDirectory && localDirectory.directory.exists) {
-									localDirectory.directory.delete()
-								}
-							}
-
-							for (const [path, localFile] of localFiles) {
-								const remoteFile = remoteFiles.get(path)
-
-								if (!remoteFile && localFile && localFile.file.exists) {
-									localFile.file.delete()
-								}
-							}
-						})
-					)
-				])
-
-				if (signal.aborted) {
-					return
-				}
-
-				await this.updateIndex()
-			},
-			{
-				throw: true
-			}
-		)
+		// Noop
 	}
 
 	public async listFiles(): Promise<
@@ -1372,102 +638,241 @@ export class Offline {
 		return files
 	}
 
-	// Crash-safe swap of a freshly-built staging directory into the live `{uuid}` slot under `baseUri`.
-	// Used by the stage-then-atomic-swap re-download paths (modified/renamed files, force directory resync)
-	// so the existing offline copy is never destroyed until a complete replacement is durably on disk.
-	//
-	// Ordering (each rename is atomic on the same filesystem — staging is a SIBLING of live):
-	//   1. live `{uuid}` → `{uuid}.old` (only if live exists)
-	//   2. staging `{uuid}.staging-*` → `{uuid}`
-	//   3. delete `{uuid}.old`
-	// A crash between 1 and 2 leaves `.old` intact (reconciled on startup → restored). A crash between 2
-	// and 3 leaves a harmless leftover `.old` (reconciled → deleted). `reconcileLeftoverStaging()` runs at
-	// init to clean up any `.staging-*`/`.old` from a crashed session.
-	private swapStagingIntoPlace(baseUri: string, uuid: string, stagingDirName: string): void {
-		const live = new FileSystem.Directory(FileSystem.Paths.join(baseUri, uuid))
-		const old = new FileSystem.Directory(FileSystem.Paths.join(baseUri, `${uuid}.old`))
-		const staging = new FileSystem.Directory(FileSystem.Paths.join(baseUri, stagingDirName))
+	// Scans FILES_DIRECTORY for standalone uuid-named directories whose meta file is missing, empty,
+	// or undecodable while the directory itself still exists. Used by the sync top-level pass to
+	// rebuild (own cloud) or remove (undecidable) broken standalone entries.
+	public async listBrokenStandaloneUuids(): Promise<string[]> {
+		this.ensureDirectories()
 
-		if (old.exists) {
-			old.delete()
-		}
+		const broken: string[] = []
 
-		if (live.exists) {
-			live.rename(`${uuid}.old`)
-		}
-
-		staging.rename(uuid)
-
-		const oldAfter = new FileSystem.Directory(FileSystem.Paths.join(baseUri, `${uuid}.old`))
-
-		if (oldAfter.exists) {
-			oldAfter.delete()
-		}
-	}
-
-	// Reconciles leftover `{uuid}.staging-*` and `{uuid}.old` directories from a session that crashed mid-swap
-	// (see swapStagingIntoPlace). Best-effort: any partial `.staging-*` is incomplete by definition and deleted;
-	// an `.old` is restored only if the live `{uuid}` slot is missing (crash between rename steps 1 and 2),
-	// otherwise the live copy won the swap and the leftover `.old` is deleted. Runs once at construction.
-	private reconcileLeftoverStaging(): void {
-		for (const baseDir of [FILES_DIRECTORY, DIRECTORIES_DIRECTORY]) {
-			if (!baseDir.exists) {
+		for (const entry of FILES_DIRECTORY.list()) {
+			if (!(entry instanceof FileSystem.Directory) || !validateUuid(entry.name)) {
 				continue
 			}
 
-			for (const entry of baseDir.list()) {
-				if (!(entry instanceof FileSystem.Directory)) {
-					continue
-				}
+			const metaFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${entry.name}.filenmeta`))
 
-				if (entry.name.includes(".staging-")) {
-					if (entry.exists) {
-						entry.delete()
-					}
+			if (!metaFile.exists || metaFile.size === 0) {
+				broken.push(entry.name)
 
-					continue
-				}
-
-				if (entry.name.endsWith(".old")) {
-					const uuid = entry.name.slice(0, -".old".length)
-					const live = new FileSystem.Directory(FileSystem.Paths.join(baseDir.uri, uuid))
-
-					if (!live.exists) {
-						entry.rename(uuid)
-					} else if (entry.exists) {
-						entry.delete()
-					}
-				}
+				continue
 			}
+
+			const readResult = await run(async () => {
+				const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
+
+				if (Object.keys(meta).length === 0) {
+					throw new Error("File meta is empty")
+				}
+
+				return meta
+			})
+
+			if (!readResult.success) {
+				broken.push(entry.name)
+			}
+		}
+
+		return broken
+	}
+
+	// Rewrites a stored tree root's meta {item, parent} while preserving its entries. Used by the
+	// sync top-level pass for remote renames (meta item refresh) and moves (parent re-anchor) — the
+	// on-disk tree itself is uuid-named and therefore name/location independent.
+	public async updateTreeRootMeta({ uuid, item, parent }: { uuid: string; item: DriveItem; parent: OfflineParent }): Promise<void> {
+		await run(
+			async defer => {
+				await this.clearBarrier.enter()
+
+				defer(() => {
+					this.clearBarrier.leave()
+				})
+
+				const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
+
+				defer(() => {
+					releaseStoreItemLock()
+				})
+
+				this.ensureDirectories()
+
+				const existingMeta = await this.readDirectoryMeta(uuid)
+
+				if (!existingMeta) {
+					return
+				}
+
+				const metaFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, uuid, `${uuid}.filenmeta`))
+
+				atomicWrite(
+					metaFile,
+					serialize({
+						item,
+						parent,
+						entries: existingMeta.entries
+					} satisfies DirectoryOfflineMeta)
+				)
+
+				this.invalidateCaches()
+			},
+			{
+				throw: true
+			}
+		)
+	}
+
+	// Renames a standalone stored file's data file in place (remote rename, same uuid ⟹ same bytes)
+	// and rewrites its meta. The current data file is located as the single non-.filenmeta file in
+	// files/{uuid}/ so a stale on-disk name from an older meta still gets corrected.
+	public async renameStandaloneFile({ item, parent }: { item: DriveItem; parent: OfflineParent }): Promise<void> {
+		await run(
+			async defer => {
+				if (!isFileItem(item)) {
+					throw new Error("Item not of type file")
+				}
+
+				if (!item.data.decryptedMeta) {
+					throw new Error("File missing decrypted meta")
+				}
+
+				const newName = item.data.decryptedMeta.name
+
+				await this.clearBarrier.enter()
+
+				defer(() => {
+					this.clearBarrier.leave()
+				})
+
+				const releaseStoreItemLock = await this.acquireStoreItemLock(item.data.uuid)
+
+				defer(() => {
+					releaseStoreItemLock()
+				})
+
+				this.ensureDirectories()
+
+				const standaloneDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid))
+
+				if (!standaloneDir.exists) {
+					return
+				}
+
+				let dataFile: FileSystem.File | null = null
+
+				for (const entry of standaloneDir.list()) {
+					if (entry instanceof FileSystem.File && !entry.name.endsWith(".filenmeta")) {
+						dataFile = entry
+
+						break
+					}
+				}
+
+				if (!dataFile) {
+					return
+				}
+
+				if (dataFile.name !== newName) {
+					dataFile.rename(newName)
+				}
+
+				const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, `${item.data.uuid}.filenmeta`))
+
+				atomicWrite(
+					metaFile,
+					serialize({
+						item,
+						parent
+					} satisfies FileOrDirectoryOfflineMeta)
+				)
+
+				this.invalidateCaches()
+			},
+			{
+				throw: true
+			}
+		)
+	}
+
+	private makeSyncError({
+		itemUuid,
+		topLevelUuid,
+		name,
+		itemType,
+		kind,
+		message
+	}: {
+		itemUuid: string
+		topLevelUuid: string | null
+		name: string
+		itemType: DriveItem["type"]
+		kind: OfflineSyncErrorKind
+		message: string
+	}): OfflineSyncError {
+		return {
+			id: `${itemUuid}:${kind}`,
+			itemUuid,
+			topLevelUuid,
+			name,
+			itemType,
+			kind,
+			message,
+			timestamp: Date.now()
 		}
 	}
 
-	// Downloads `file` into a sibling staging directory and, only on success, atomically swaps it into the
-	// live `files/{uuid}` slot — never touching the existing copy or its caches until the replacement is
-	// durably on disk. On any failure OR abort it deletes only the staging dir and throws (so the caller can
-	// surface/log the loss and the next sync retries the preserved copy). Used by sync()'s modified/renamed
-	// re-download branches in place of the old delete-then-download (which lost the copy on a transient error).
-	private async restoreFileToStaging({
-		file,
+	// Converges one stored directory tree onto its remote listing IN PLACE. Also the initial-store
+	// path (storeDirectory delegates here with initialStore: true).
+	//
+	//   1. Clean leftover /.sync-tmp-* move temps (crash recovery).
+	//   2. One bulk recursive remote listing → uuid → {item, raw path} map (Linked dirs excluded).
+	//   3. Local view from the existing meta, stat-checked (file size mismatch counts as missing —
+	//      truncation self-heal).
+	//   4. Pure plan (offlineSyncPlanner): two-phase moves via tree-root temps + deletes (deletes are
+	//      skipped while the listing is degraded by scan errors) — then execute.
+	//   5. One in-place hash-idempotent directory download for missing uuids; per-entry download
+	//      errors fail the pass.
+	//   6. Verify every remote entry on disk, then commit meta + index ONLY when the pass collected
+	//      zero errors. A rebuilt meta identical to the existing file is a no-op (zero writes).
+	//   7. After a committed pass that downloaded or started with an unreadable meta: orphan sweep
+	//      deletes physical paths the new meta does not claim (incl. crashed .filendl partials).
+	//
+	// Failure policy: no deletions on errors, meta/index never advance on a failed pass. initialStore
+	// is the exception — the partial tree is deleted and the first error is thrown (UI alerts).
+	public async reconcileTree({
+		directory,
 		parent,
+		hideProgress,
+		skipIndexUpdate,
+		initialStore,
 		signal
 	}: {
-		file: DriveItem
+		directory: DriveItem
 		parent: OfflineParent
+		hideProgress?: boolean
+		skipIndexUpdate?: boolean
+		initialStore?: boolean
 		signal?: AbortSignal
-	}): Promise<void> {
-		if (!isFileItem(file) || !file.data.decryptedMeta) {
-			throw new Error("File missing decrypted meta")
-		}
-
+	}): Promise<OfflineSyncError[]> {
 		const result = await run(async defer => {
+			if (!isDirectoryItem(directory)) {
+				throw new Error("Item not of type directory")
+			}
+
+			if (!directory.data.decryptedMeta) {
+				throw new Error("Directory missing decrypted meta")
+			}
+
+			const topLevelUuid = directory.data.uuid
+			const directoryName = directory.data.decryptedMeta.name
+
 			await this.clearBarrier.enter()
 
 			defer(() => {
 				this.clearBarrier.leave()
 			})
 
-			const releaseStoreItemLock = await this.acquireStoreItemLock(file.data.uuid)
+			const releaseStoreItemLock = await this.acquireStoreItemLock(topLevelUuid)
 
 			defer(() => {
 				releaseStoreItemLock()
@@ -1481,62 +886,499 @@ export class Offline {
 
 			this.ensureDirectories()
 
-			const stagingDirName = `${file.data.uuid}.staging-${randomUUID()}`
-			const stagingDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, stagingDirName))
-			const decryptedMeta = file.data.decryptedMeta
+			const errors: OfflineSyncError[] = []
 
-			if (!decryptedMeta) {
-				throw new Error("File missing decrypted meta")
-			}
-
-			const stagingDataFile = new FileSystem.File(FileSystem.Paths.join(stagingDir.uri, decryptedMeta.name))
-			const stagingMetaFile = new FileSystem.File(FileSystem.Paths.join(stagingDir.uri, `${file.data.uuid}.filenmeta`))
-
-			// Always delete only the staging dir on the way out (success or failure) — the live copy is never
-			// referenced here, so a thrown download leaves it untouched.
-			defer(() => {
-				if (stagingDir.exists) {
-					stagingDir.delete()
+			const pushError = (error: OfflineSyncError): void => {
+				if (!errors.some(existing => existing.id === error.id)) {
+					errors.push(error)
 				}
-			})
-
-			if (stagingDir.exists) {
-				stagingDir.delete()
 			}
 
-			stagingDir.create({
-				intermediates: true,
-				idempotent: true
-			})
+			const liveDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid))
 
-			const transferred = await transfers.download({
-				item: file,
-				destination: stagingDataFile,
-				signal
-			})
+			// Initial-store failure policy: a user-initiated first store has no prior state worth
+			// keeping, so a failed pass deletes the partial tree and throws (UI alerts as today).
+			// Sync passes instead keep local state untouched and return the collected errors.
+			const finish = (collected: OfflineSyncError[]): OfflineSyncError[] => {
+				if (initialStore && collected.length > 0) {
+					if (liveDir.exists) {
+						liveDir.delete()
+					}
 
-			if (!transferred) {
-				// Aborted (download returned null) — leave the existing copy + caches untouched.
-				return
+					this.invalidateCaches()
+
+					throw new Error(collected[0]?.message ?? "Storing directory offline failed")
+				}
+
+				return collected
 			}
 
-			atomicWrite(
-				stagingMetaFile,
-				serialize({
-					item: file,
-					parent
-				} satisfies FileOrDirectoryOfflineMeta)
+			if (!liveDir.exists) {
+				liveDir.create({
+					intermediates: true,
+					idempotent: true
+				})
+			}
+
+			// Crash recovery: a previous pass that died mid-move can leave /.sync-tmp-* extraction
+			// temps at the tree root. Delete them — their bytes are restored below by the
+			// hash-idempotent download.
+			for (const entry of liveDir.list()) {
+				if (isSyncTmpName(entry.name)) {
+					entry.delete()
+				}
+			}
+
+			// Remote listing — one bulk recursive metadata fetch. Listing paths are RAW root-relative
+			// original decrypted names; we only prefix "/" and never decode/encode them.
+			const { authedSdkClient } = await auth.getSdkClients()
+			const remoteDir = directoryDriveItemToAnyDirWithContext(directory)
+
+			if (!remoteDir || typeof remoteDir === "string") {
+				throw new Error("Cannot resolve directory context for the remote listing")
+			}
+
+			const scanErrors: unknown[] = []
+
+			const listingResult = await run(async () =>
+				authedSdkClient.listDirRecursiveWithPaths(
+					remoteDir,
+					{
+						onProgress() {
+							// Noop
+						}
+					},
+					{
+						onErrors(errs) {
+							scanErrors.push(...errs)
+						}
+					}
+				)
 			)
 
-			// Replacement is fully built in staging — swap it into place atomically. Only now is the old copy
-			// removed. invalidateCaches because the filesystem changed.
-			this.swapStagingIntoPlace(FILES_DIRECTORY.uri, file.data.uuid, stagingDirName)
+			if (!listingResult.success) {
+				pushError(
+					this.makeSyncError({
+						itemUuid: topLevelUuid,
+						topLevelUuid,
+						name: directoryName,
+						itemType: directory.type,
+						kind: "listing",
+						message: listingResult.error instanceof Error ? listingResult.error.message : String(listingResult.error)
+					})
+				)
+
+				return finish(errors)
+			}
+
+			const remote = new Map<
+				string,
+				RemoteTreeEntry & {
+					item: DriveItem
+				}
+			>()
+
+			for (const { dir, path } of listingResult.data.dirs) {
+				if (dir.tag === NonRootDir_Tags.Linked) {
+					continue
+				}
+
+				const unwrapped = unwrapDirMeta(dir.inner[0])
+
+				remote.set(unwrapped.uuid, {
+					uuid: unwrapped.uuid,
+					item: unwrappedDirIntoDriveItem(unwrapped),
+					path: `/${path}`,
+					isDirectory: true
+				})
+			}
+
+			for (const { file, path } of listingResult.data.files) {
+				const unwrapped = unwrapFileMeta(file)
+
+				if (!unwrapped.meta) {
+					continue
+				}
+
+				remote.set(unwrapped.file.uuid, {
+					uuid: unwrapped.file.uuid,
+					item: unwrappedFileIntoDriveItem(unwrapped),
+					path: `/${path}`,
+					isDirectory: false
+				})
+			}
+
+			// Local view from the existing meta. A file whose on-disk size diverges from its meta size
+			// counts as missing so the download heals truncation for free. An unreadable meta yields an
+			// empty local view — the hash-idempotent download skips healthy bytes and the meta is
+			// rebuilt from the listing (near-free repair).
+			const existingMeta = await this.readDirectoryMeta(topLevelUuid)
+			const metaWasUnreadable = existingMeta === null && !initialStore
+			const metaFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, `${topLevelUuid}.filenmeta`))
+			const currentMetaText = metaFile.exists && metaFile.size > 0 ? await metaFile.text() : null
+			const existingEntries = existingMeta?.entries ?? {}
+			const local: LocalTreeEntry[] = []
+
+			for (const uuid in existingEntries) {
+				const entry = existingEntries[uuid]
+
+				if (!entry) {
+					continue
+				}
+
+				if (isDirectoryItem(entry.item)) {
+					local.push({
+						uuid,
+						path: entry.path,
+						isDirectory: true,
+						existsOnDisk: new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, entry.path)).exists
+					})
+				} else {
+					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, entry.path))
+
+					local.push({
+						uuid,
+						path: entry.path,
+						isDirectory: false,
+						existsOnDisk: dataFile.exists && dataFile.size === Number(entry.item.data.decryptedMeta?.size ?? -1)
+					})
+				}
+			}
+
+			// Scan errors mean entries can be silently absent from the listing — deleting on that
+			// basis would destroy good local copies, so the plan skips deletions for this pass
+			// (moves and downloads still apply; deletions resume once the listing is clean).
+			const plan = planTreeReconcile({
+				remote,
+				local,
+				allowDeletes: scanErrors.length === 0
+			})
+
+			if (scanErrors.length > 0) {
+				pushError(
+					this.makeSyncError({
+						itemUuid: topLevelUuid,
+						topLevelUuid,
+						name: directoryName,
+						itemType: directory.type,
+						kind: "listing",
+						message: `Remote listing degraded (${scanErrors.length} scan error(s)) — skipped deletions for this pass`
+					})
+				)
+			}
+
+			// Execute the planned local mutations. All remote-truth-following and idempotent — safe
+			// even when the pass later fails, since the next pass re-converges from disk state.
+			const opsResult = await run(async () => {
+				for (const op of plan.ops) {
+					if (signal?.aborted) {
+						return false
+					}
+
+					if (op.type === "move") {
+						const destinationParent = new FileSystem.Directory(
+							FileSystem.Paths.dirname(FileSystem.Paths.join(liveDir.uri, op.to))
+						)
+
+						if (!destinationParent.exists) {
+							destinationParent.create({
+								intermediates: true,
+								idempotent: true
+							})
+						}
+
+						if (op.isDirectory) {
+							const from = new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, op.from))
+
+							if (from.exists) {
+								from.move(new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, op.to)))
+							}
+						} else {
+							const from = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, op.from))
+
+							if (from.exists) {
+								from.move(new FileSystem.File(FileSystem.Paths.join(liveDir.uri, op.to)))
+							}
+						}
+
+						continue
+					}
+
+					if (op.isDirectory) {
+						const target = new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, op.path))
+
+						if (target.exists) {
+							target.delete()
+						}
+					} else {
+						const target = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, op.path))
+
+						if (target.exists) {
+							target.delete()
+						}
+					}
+				}
+
+				return true
+			})
+
+			if (plan.ops.length > 0) {
+				// The physical tree (possibly) changed underneath the existing meta — drop derived caches.
+				this.invalidateCaches()
+			}
+
+			if (!opsResult.success) {
+				pushError(
+					this.makeSyncError({
+						itemUuid: topLevelUuid,
+						topLevelUuid,
+						name: directoryName,
+						itemType: directory.type,
+						kind: "store",
+						message: opsResult.error instanceof Error ? opsResult.error.message : String(opsResult.error)
+					})
+				)
+
+				return finish(errors)
+			}
+
+			if (!opsResult.data) {
+				// Aborted mid-ops — leftover temps are cleaned up on the next pass's entry.
+				return finish(errors)
+			}
+
+			// Download missing/changed entries — at most ONE in-place directory download per pass.
+			// The Rust downloader is idempotent per file (size+hash skip), so renames-before-download
+			// maximize skips and only missing/changed bytes transfer.
+			let downloadRan = false
+
+			if (plan.missingUuids.length > 0) {
+				if (signal?.aborted) {
+					return finish(errors)
+				}
+
+				downloadRan = true
+
+				let resolveCompletion: (() => void) | undefined
+
+				defer(() => {
+					resolveCompletion?.()
+				})
+
+				const completionPromise = new Promise<void>(resolve => {
+					resolveCompletion = resolve
+				})
+
+				const downloadResult = await run(async () =>
+					transfers.download({
+						item: directory,
+						destination: liveDir,
+						hideProgress,
+						awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
+						preserveDestinationOnStart: true,
+						signal
+					})
+				)
+
+				if (!downloadResult.success) {
+					pushError(
+						this.makeSyncError({
+							itemUuid: topLevelUuid,
+							topLevelUuid,
+							name: directoryName,
+							itemType: directory.type,
+							kind: "download",
+							message: downloadResult.error instanceof Error ? downloadResult.error.message : String(downloadResult.error)
+						})
+					)
+
+					return finish(errors)
+				}
+
+				const transferred = downloadResult.data
+
+				if (!transferred) {
+					// Aborted — nothing committed; the next pass picks this tree up again.
+					return finish(errors)
+				}
+
+				if ("errors" in transferred && transferred.errors.length > 0) {
+					for (const downloadError of transferred.errors) {
+						// Resolve the failed entry by matching the error's absolute local path against the
+						// raw remote listing paths (longest suffix wins); fall back to the tree root.
+						let matched: (RemoteTreeEntry & { item: DriveItem }) | null = null
+
+						for (const remoteEntry of remote.values()) {
+							if (
+								downloadError.path.endsWith(remoteEntry.path) &&
+								remoteEntry.path.length > (matched?.path.length ?? -1)
+							) {
+								matched = remoteEntry
+							}
+						}
+
+						const errorMessage = await run(async () => downloadError.error.message())
+
+						pushError(
+							this.makeSyncError({
+								itemUuid: matched?.uuid ?? topLevelUuid,
+								topLevelUuid,
+								name: matched?.item.data.decryptedMeta?.name ?? directoryName,
+								itemType: matched?.item.type ?? directory.type,
+								kind: "download",
+								message: errorMessage.success ? errorMessage.data : "Download failed"
+							})
+						)
+					}
+				}
+			}
+
+			// Verify — every remote entry must be present on disk (files at their exact size) before
+			// anything advances.
+			for (const [uuid, remoteEntry] of remote) {
+				if (remoteEntry.isDirectory) {
+					if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, remoteEntry.path)).exists) {
+						pushError(
+							this.makeSyncError({
+								itemUuid: uuid,
+								topLevelUuid,
+								name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
+								itemType: remoteEntry.item.type,
+								kind: "verify",
+								message: `Missing on disk after sync: ${remoteEntry.path}`
+							})
+						)
+					}
+
+					continue
+				}
+
+				const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, remoteEntry.path))
+				const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
+
+				if (!dataFile.exists || dataFile.size !== expectedSize) {
+					pushError(
+						this.makeSyncError({
+							itemUuid: uuid,
+							topLevelUuid,
+							name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
+							itemType: remoteEntry.item.type,
+							kind: "verify",
+							message: `Missing or incomplete on disk after sync: ${remoteEntry.path}`
+						})
+					)
+				}
+			}
+
+			// Commit — ONLY a fully-verified pass advances meta/index.
+			if (errors.length > 0) {
+				return finish(errors)
+			}
+
+			const serialized = serialize({
+				item: directory,
+				parent,
+				entries: Object.fromEntries(
+					[...remote.entries()]
+						.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+						.map(([uuid, remoteEntry]) => [
+							uuid,
+							{
+								item: remoteEntry.item,
+								path: remoteEntry.path
+							}
+						])
+				)
+			} satisfies DirectoryOfflineMeta)
+
+			if (currentMetaText !== null && serialized === currentMetaText) {
+				// Fixed point: nothing changed — a no-op pass performs zero writes.
+				return []
+			}
+
+			atomicWrite(metaFile, serialized)
+
+			// Overlap dedup: entries of this tree subsume their standalone copies.
+			const currentIndex = await this.readIndex()
+
+			for (const entryUuid of remote.keys()) {
+				if (currentIndex.files[entryUuid]) {
+					const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, entryUuid))
+
+					if (standaloneFileDir.exists) {
+						standaloneFileDir.delete()
+					}
+				}
+
+				// Don't delete ourselves — we're reconciling this tree, not a nested one.
+				if (currentIndex.directories[entryUuid] && entryUuid !== topLevelUuid) {
+					const standaloneDirDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, entryUuid))
+
+					if (standaloneDirDir.exists) {
+						standaloneDirDir.delete()
+					}
+				}
+			}
+
 			this.invalidateCaches()
+
+			if (!skipIndexUpdate) {
+				await this.updateIndex()
+			}
+
+			// Orphan sweep — only after a committed pass that ran a download or started with an
+			// unreadable meta: delete physical paths the new meta does not claim (this also cleans
+			// crashed .filendl partials). Never runs on no-op passes.
+			if (downloadRan || metaWasUnreadable) {
+				const claimed = new Set<string>()
+
+				for (const remoteEntry of remote.values()) {
+					let current = remoteEntry.path
+
+					while (current !== "" && current !== "/") {
+						claimed.add(current)
+
+						const lastSlash = current.lastIndexOf("/")
+
+						current = lastSlash <= 0 ? "/" : current.slice(0, lastSlash)
+					}
+				}
+
+				const metaFileName = `${topLevelUuid}.filenmeta`
+
+				const sweep = (dir: FileSystem.Directory, relPrefix: string): void => {
+					for (const entry of dir.list()) {
+						if (relPrefix === "" && entry.name === metaFileName) {
+							continue
+						}
+
+						const relPath = `${relPrefix}/${entry.name}`
+
+						if (claimed.has(relPath)) {
+							if (entry instanceof FileSystem.Directory) {
+								sweep(entry, relPath)
+							}
+
+							continue
+						}
+
+						if (entry.exists) {
+							entry.delete()
+						}
+					}
+				}
+
+				sweep(liveDir, "")
+			}
+
+			return []
 		})
 
 		if (!result.success) {
 			throw result.error
 		}
+
+		return result.data
 	}
 
 	public async storeFile({
@@ -1544,12 +1386,17 @@ export class Offline {
 		parent,
 		hideProgress,
 		skipIndexUpdate,
+		force,
 		signal
 	}: {
 		file: DriveItem
 		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
+		// Skips the already-stored / nested-inside-a-stored-tree guards. Used by the sync self-heal
+		// re-download path, where the item IS stored but its data file is missing or truncated —
+		// the delete-parent-dir-then-download flow below restores it in place.
+		force?: boolean
 		signal?: AbortSignal
 	}): Promise<void> {
 		const result = await run(async defer => {
@@ -1583,15 +1430,17 @@ export class Offline {
 
 			this.ensureDirectories()
 
-			if (await this.isItemStored(file)) {
-				return
-			}
+			if (!force) {
+				if (await this.isItemStored(file)) {
+					return
+				}
 
-			// Skip if this file already exists inside a stored directory tree (overlap guard).
-			const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+				// Skip if this file already exists inside a stored directory tree (overlap guard).
+				const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
 
-			if (uuidToTopLevel.has(file.data.uuid)) {
-				return
+				if (uuidToTopLevel.has(file.data.uuid)) {
+					return
+				}
 			}
 
 			const dataFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, file.data.decryptedMeta.name))
@@ -1634,6 +1483,8 @@ export class Offline {
 						} satisfies FileOrDirectoryOfflineMeta)
 					)
 
+					this.invalidateCaches()
+
 					if (!skipIndexUpdate) {
 						await this.updateIndex()
 					}
@@ -1659,233 +1510,34 @@ export class Offline {
 		parent,
 		hideProgress,
 		skipIndexUpdate,
-		force,
 		signal
 	}: {
 		directory: DriveItem
 		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
-		force?: boolean
 		signal?: AbortSignal
 	}): Promise<void> {
-		const result = await run(async defer => {
-			if (!isDirectoryItem(directory)) {
-				throw new Error("Item not of type directory")
-			}
-
-			if (!directory.data.decryptedMeta) {
-				throw new Error("Directory missing decrypted meta")
-			}
-
-			await this.clearBarrier.enter()
-
-			defer(() => {
-				this.clearBarrier.leave()
-			})
-
-			// Per-UUID lock (outermost of the store locks): serializes the whole guard→delete→download→index
-			// section against another store call for the same directory, so neither wipes the other's in-flight target.
-			const releaseStoreItemLock = await this.acquireStoreItemLock(directory.data.uuid)
-
-			defer(() => {
-				releaseStoreItemLock()
-			})
-
-			await this.storeMutex.acquire()
-
-			defer(() => {
-				this.storeMutex.release()
-			})
-
-			this.ensureDirectories()
-
-			// force skips this check — used by sync() when we know the item is stored but needs re-download.
-			if (!force && (await this.isItemStored(directory))) {
-				return
-			}
-
-			// Skip if this dir is already nested inside another stored directory (but not if it IS a top-level entry).
-			const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
-			const topLevelUuid = uuidToTopLevel.get(directory.data.uuid)
-
-			if (topLevelUuid && topLevelUuid !== directory.data.uuid) {
-				return
-			}
-
-			// A force re-download (sync's full-resync) must be NON-DESTRUCTIVE: download into a sibling staging
-			// directory and atomically swap it into the live {uuid} slot only on success, so a transient error
-			// can never wipe a populated offline tree before its replacement exists (#45). A first-time/normal
-			// store has nothing to lose, so it downloads straight into the live {uuid} dir as before.
-			const useStaging = Boolean(force)
-			const liveDirectoryName = directory.data.uuid
-			const dataDirectoryName = useStaging ? `${directory.data.uuid}.staging-${randomUUID()}` : directory.data.uuid
-			const dataDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, dataDirectoryName))
-			const metaFile = new FileSystem.File(
-				FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, dataDirectoryName, `${directory.data.uuid}.filenmeta`)
-			)
-
-			if (useStaging && dataDirectory.exists) {
-				dataDirectory.delete()
-			}
-
-			if (!dataDirectory.exists) {
-				dataDirectory.create({
-					intermediates: true,
-					idempotent: true
-				})
-			}
-
-			const innerResult = await run(async defer => {
-				let resolveCompletion: (() => void) | undefined
-
-				defer(() => {
-					resolveCompletion?.()
-				})
-
-				// When staging, always tear down only the staging dir on the way out (success or failure). On
-				// success the staging dir has already been renamed into the live slot so this is a no-op; on
-				// failure/abort it leaves the live {uuid} tree (and its caches) completely untouched.
-				if (useStaging) {
-					defer(() => {
-						if (dataDirectory.exists) {
-							dataDirectory.delete()
-						}
-					})
-				}
-
-				const completionPromise = new Promise<void>(resolve => {
-					resolveCompletion = resolve
-				})
-
-				const transferred = await transfers.download({
-					item: directory,
-					destination: dataDirectory,
-					hideProgress,
-					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
-					preserveDestinationOnStart: useStaging,
-					signal
-				})
-
-				if (transferred) {
-					const entries: DirectoryOfflineMeta["entries"] = {}
-
-					// Anchor the SDK-returned paths on the destination directory's NAME rather than
-					// slicing by a known prefix. The SDK returns canonical/realpath'd
-					// paths (iOS: /private/var/mobile/..., Android: typically already
-					// canonical) while dataDirectory.uri returns the platform-specific
-					// symlinked form. Lexical prefix comparison can't reconcile that
-					// difference and silently corrupts entry keys, which then breaks
-					// top-level listing AND traps sync() in a constant re-download loop
-					// (localFiles never matches remoteFiles). The name anchor is
-					// symlink-agnostic — see extractPathInsideUuidDirectory(). For a normal store the
-					// name IS the uuid; for a staging download it's the staging dir name, which is what
-					// the SDK paths actually contain.
-					for (const { dir, path } of transferred.directories) {
-						if (dir.tag === NonRootDir_Tags.Linked) {
-							continue
-						}
-
-						const inside = extractPathInsideUuidDirectory(path, dataDirectoryName)
-
-						if (!inside) {
-							continue
-						}
-
-						const normalizedPath = normalizeFilePathForSdk(inside)
-
-						entries[normalizedPath] = {
-							item: unwrappedDirIntoDriveItem(unwrapDirMeta(dir.inner[0]))
-						}
-					}
-
-					for (const { file, path } of transferred.files) {
-						const inside = extractPathInsideUuidDirectory(path, dataDirectoryName)
-
-						if (!inside) {
-							continue
-						}
-
-						const normalizedPath = normalizeFilePathForSdk(inside)
-
-						entries[normalizedPath] = {
-							item: unwrappedFileIntoDriveItem(unwrapFileMeta(file))
-						}
-					}
-
-					// Write the meta INTO the (possibly staging) data directory so it travels with the tree
-					// during the atomic swap.
-					atomicWrite(
-						metaFile,
-						serialize({
-							item: directory,
-							parent,
-							entries
-						} satisfies DirectoryOfflineMeta)
-					)
-
-					// Atomically swap the fully-built staging tree into the live {uuid} slot. Only now is the
-					// old tree removed — a crash mid-swap is recovered by reconcileLeftoverStaging() at init.
-					if (useStaging) {
-						this.swapStagingIntoPlace(DIRECTORIES_DIRECTORY.uri, liveDirectoryName, dataDirectoryName)
-					}
-
-					// Overlap dedup: if any entry in this directory tree was previously stored standalone,
-					// delete the standalone copy — the directory tree now subsumes it. Runs against the live
-					// tree, AFTER the swap, and only touches OTHER uuids' standalone copies.
-					const currentIndex = await this.readIndex()
-
-					for (const entryPath in entries) {
-						const entry = entries[entryPath]
-
-						if (!entry) {
-							continue
-						}
-
-						const entryUuid = entry.item.data.uuid
-
-						if (currentIndex.files[entryUuid]) {
-							const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, entryUuid))
-
-							if (standaloneFileDir.exists) {
-								standaloneFileDir.delete()
-							}
-						}
-
-						// Don't delete ourselves — we're storing this directory, not a nested one.
-						if (currentIndex.directories[entryUuid] && entryUuid !== directory.data.uuid) {
-							const standaloneDirDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, entryUuid))
-
-							if (standaloneDirDir.exists) {
-								standaloneDirDir.delete()
-							}
-						}
-					}
-
-					// The swap + dedup changed the filesystem — drop all derived caches before the index rebuild.
-					this.invalidateCaches()
-
-					if (!skipIndexUpdate) {
-						await this.updateIndex()
-					}
-				}
-			})
-
-			if (!innerResult.success) {
-				// Only a NON-staging (fresh) download deletes its destination on failure — there's nothing of
-				// value there. A staging download leaves the live {uuid} tree untouched (the staging dir is
-				// cleaned up by its own defer above).
-				if (!useStaging && dataDirectory.exists) {
-					dataDirectory.delete()
-				}
-
-				throw innerResult.error
-			}
-		})
-
-		if (!result.success) {
-			throw result.error
+		if (await this.isItemStored(directory)) {
+			return
 		}
+
+		// Skip if this dir is already nested inside another stored directory (but not if it IS a top-level entry).
+		const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+		const topLevelUuid = uuidToTopLevel.get(directory.data.uuid)
+
+		if (topLevelUuid && topLevelUuid !== directory.data.uuid) {
+			return
+		}
+
+		await this.reconcileTree({
+			directory,
+			parent,
+			hideProgress,
+			skipIndexUpdate,
+			initialStore: true,
+			signal
+		})
 	}
 
 	// Converts a directory DriveItem at the given path into an AnyDirWithContext for SDK calls.
@@ -1996,17 +1648,15 @@ export class Offline {
 			"/": directoryMeta.item
 		}
 
-		for (const path in directoryMeta.entries) {
-			const entryMeta = directoryMeta.entries[path]
+		for (const uuid in directoryMeta.entries) {
+			const entryMeta = directoryMeta.entries[uuid]
 
 			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 				continue
 			}
 
-			const normalizedPath = normalizeFilePathForSdk(path)
-
-			pathToItem[normalizedPath] = entryMeta.item
-			uuidToPath[entryMeta.item.data.uuid] = normalizedPath
+			pathToItem[entryMeta.path] = entryMeta.item
+			uuidToPath[entryMeta.item.data.uuid] = entryMeta.path
 		}
 
 		const targetPath = uuidToPath[parentUuid]
@@ -2018,14 +1668,14 @@ export class Offline {
 			}
 		}
 
-		for (const path in directoryMeta.entries) {
-			const entryMeta = directoryMeta.entries[path]
+		for (const uuid in directoryMeta.entries) {
+			const entryMeta = directoryMeta.entries[uuid]
 
 			if (!entryMeta) {
 				continue
 			}
 
-			let dirname = FileSystem.Paths.dirname(normalizeFilePathForSdk(path))
+			let dirname = FileSystem.Paths.dirname(entryMeta.path)
 
 			if (dirname === "." || dirname === "") {
 				dirname = "/"
@@ -2127,26 +1777,24 @@ export class Offline {
 					"/": directoryMeta.item
 				}
 
-				for (const path in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[path]
+				for (const uuid in directoryMeta.entries) {
+					const entryMeta = directoryMeta.entries[uuid]
 
 					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 						continue
 					}
 
-					const normalizedPath = normalizeFilePathForSdk(path)
-
-					pathToItem[normalizedPath] = entryMeta.item
+					pathToItem[entryMeta.path] = entryMeta.item
 				}
 
-				for (const path in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[path]
+				for (const uuid in directoryMeta.entries) {
+					const entryMeta = directoryMeta.entries[uuid]
 
 					if (!entryMeta) {
 						continue
 					}
 
-					let dirname = FileSystem.Paths.dirname(normalizeFilePathForSdk(path))
+					let dirname = FileSystem.Paths.dirname(entryMeta.path)
 
 					if (dirname === "." || dirname === "") {
 						dirname = "/"
@@ -2276,14 +1924,14 @@ export class Offline {
 					[topLevelUuid]: "/"
 				}
 
-				for (const path in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[path]
+				for (const uuid in directoryMeta.entries) {
+					const entryMeta = directoryMeta.entries[uuid]
 
 					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 						continue
 					}
 
-					uuidToPath[entryMeta.item.data.uuid] = normalizeFilePathForSdk(path)
+					uuidToPath[entryMeta.item.data.uuid] = entryMeta.path
 				}
 
 				const targetPath = uuidToPath[item.data.uuid]
@@ -2300,14 +1948,14 @@ export class Offline {
 				let files = 0
 				let dirs = 0
 
-				for (const path in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[path]
+				for (const uuid in directoryMeta.entries) {
+					const entryMeta = directoryMeta.entries[uuid]
 
 					if (!entryMeta) {
 						continue
 					}
 
-					let dirname = FileSystem.Paths.dirname(normalizeFilePathForSdk(path))
+					let dirname = FileSystem.Paths.dirname(entryMeta.path)
 
 					if (dirname === "." || dirname === "") {
 						dirname = "/"
@@ -2484,8 +2132,8 @@ export class Offline {
 					const directoryMeta = await this.readDirectoryMeta(directoryItem.data.uuid)
 
 					if (directoryMeta) {
-						for (const path in directoryMeta.entries) {
-							const entry = directoryMeta.entries[path]
+						for (const uuid in directoryMeta.entries) {
+							const entry = directoryMeta.entries[uuid]
 
 							if (entry) {
 								driveItemStoredOfflineQueryUpdate({
@@ -2553,7 +2201,8 @@ export class Offline {
 		}
 	}
 
-	// Looks up a file's local path: first checks standalone files/, then searches inside directory trees.
+	// Looks up a file's local path: first checks standalone files/, then the owning directory tree's
+	// uuid-keyed entries (O(1) lookup → join the entry's raw path).
 	public async getLocalFile(item: DriveItem): Promise<FileSystem.File | null> {
 		const cachedLocalFile = this.getLocalFileCache.get(item.data.uuid)
 
@@ -2583,7 +2232,7 @@ export class Offline {
 		}
 
 		// Standalone lookup missed (either no index entry or the file isn't on
-		// disk at the standalone path). Fall through to the directory-tree search
+		// disk at the standalone path). Fall through to the directory-tree lookup
 		// below — the item may live inside a marked-offline directory rather than
 		// marked standalone, and `buildUuidToTopLevelIndex` includes the uuids of
 		// every nested file entry across all marked-offline directories.
@@ -2600,22 +2249,18 @@ export class Offline {
 			return null
 		}
 
-		for (const path in directoryMeta.entries) {
-			const entryMeta = directoryMeta.entries[path]
+		const entryMeta = directoryMeta.entries[item.data.uuid]
 
-			if (!entryMeta || !isFileItem(entryMeta.item)) {
-				continue
-			}
+		if (!entryMeta || !isFileItem(entryMeta.item)) {
+			return null
+		}
 
-			if (entryMeta.item.data.uuid === item.data.uuid) {
-				const foundFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, path))
+		const foundFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, entryMeta.path))
 
-				if (foundFile.exists) {
-					this.getLocalFileCache.set(item.data.uuid, foundFile)
+		if (foundFile.exists) {
+			this.getLocalFileCache.set(item.data.uuid, foundFile)
 
-					return foundFile
-				}
-			}
+			return foundFile
 		}
 
 		return null
@@ -2658,23 +2303,19 @@ export class Offline {
 			}
 		}
 
-		// Check nested entries
-		for (const path in directoryMeta.entries) {
-			const entryMeta = directoryMeta.entries[path]
+		// Nested entries are uuid-keyed — direct lookup, then join the raw path.
+		const entryMeta = directoryMeta.entries[item.data.uuid]
 
-			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
-				continue
-			}
+		if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
+			return null
+		}
 
-			if (entryMeta.item.data.uuid === item.data.uuid) {
-				const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, path))
+		const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, entryMeta.path))
 
-				if (foundDirectory.exists) {
-					this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
+		if (foundDirectory.exists) {
+			this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
 
-					return foundDirectory
-				}
-			}
+			return foundDirectory
 		}
 
 		return null

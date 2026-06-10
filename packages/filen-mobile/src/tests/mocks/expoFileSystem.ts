@@ -446,8 +446,21 @@ export class Directory {
 		}
 	}
 
+	// Matches the real native behavior (verified iOS FileSystemPath.getMoveOrCopyPath + Android
+	// equivalent): moving/copying a directory to a Directory destination follows unix `mv` —
+	// when the destination EXISTS the source moves INTO it (dest/name); when it does not exist
+	// the source is relocated to the exact destination path. A File destination throws
+	// (CopyOrMoveDirectoryToFileException on both platforms).
+	private resolveCopyOrMoveDestination(destination: Directory | File): string {
+		if (!(destination instanceof Directory)) {
+			throw new Error("Cannot copy or move a directory to a file")
+		}
+
+		return destination.exists ? Paths.join(destination.uri, this.name) : destination.uri
+	}
+
 	copy(destination: Directory | File): void {
-		const destUri = destination instanceof Directory ? Paths.join(destination.uri, this.name) : destination.uri
+		const destUri = this.resolveCopyOrMoveDestination(destination)
 		const prefix = this.uri.endsWith("/") ? this.uri : `${this.uri}/`
 
 		fs.set(destUri, "dir")
@@ -462,10 +475,12 @@ export class Directory {
 	}
 
 	move(destination: Directory | File): void {
+		const destUri = this.resolveCopyOrMoveDestination(destination)
+
 		this.copy(destination)
 		this.delete()
 
-		this.uri = destination instanceof Directory ? Paths.join(destination.uri, this.name) : destination.uri
+		this.uri = destUri
 	}
 
 	copySync(destination: Directory | File): void {
