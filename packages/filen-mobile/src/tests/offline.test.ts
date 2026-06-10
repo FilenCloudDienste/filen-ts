@@ -630,18 +630,21 @@ describe("Offline", () => {
 			expect(files).toEqual([])
 		})
 
-		it("skips entries where data file is missing", async () => {
+		it("lists entries whose data file is missing (meta intact) — the sync pass heals the bytes", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 			const fileItem = makeFileItem(uuid, "gone.txt")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 
-			// Only write meta, not the data file
+			// Only write meta, not the data file. The listing is meta-keyed: the entry must still
+			// appear so the sync decision flow sees it (remote-alive → redownload heal, remote-gone
+			// → removal) instead of the dir being invisible forever.
 			writeFileMeta(uuid, { item: fileItem, parent })
 
 			const offline = await createOffline()
 			const files = await offline.listFiles()
 
-			expect(files).toEqual([])
+			expect(files).toHaveLength(1)
+			expect(files[0].item.data.uuid).toBe(uuid)
 		})
 
 		it("caches results on second call", async () => {
@@ -1280,7 +1283,7 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await offline.storeFile({ file: fileItem, parent })
+			await expect(offline.storeFile({ file: fileItem, parent })).resolves.toBe(true)
 
 			// Data file should exist
 			expect(fs.get(`${FILES_DIR_URI}/${uuid}/download.txt`)).toBeInstanceOf(Uint8Array)
@@ -1331,7 +1334,8 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await offline.storeFile({ file: fileItem, parent })
+			// Already stored counts as stored — the guard short-circuits with true.
+			await expect(offline.storeFile({ file: fileItem, parent })).resolves.toBe(true)
 
 			// Download should not have been called
 			expect(transfers.download).not.toHaveBeenCalled()
@@ -1367,12 +1371,31 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await offline.storeFile({ file: fileItem, parent, skipIndexUpdate: true })
+			await expect(offline.storeFile({ file: fileItem, parent, skipIndexUpdate: true })).resolves.toBe(true)
 
 			// Meta file should exist (store completed)
 			expect(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBeInstanceOf(Uint8Array)
 
 			// Index should NOT have been written
+			expect(fs.has(INDEX_FILE_URI)).toBe(false)
+		})
+
+		it("resolves false on an aborted download (null result) — no meta, no index, no residue dir", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "aborted.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			// transfers.download resolves null on abort (pause/cancel) without throwing.
+			vi.mocked(transfers.download).mockResolvedValueOnce(null as any)
+
+			const offline = await createOffline()
+
+			await expect(offline.storeFile({ file: fileItem, parent })).resolves.toBe(false)
+
+			// Nothing committed: no meta, no index — and no empty meta-less files/{uuid}/ residue
+			// (callers like the sync version adoption rely on false ⟹ old copy must be kept).
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(false)
+			expect(fs.has(`${FILES_DIR_URI}/${uuid}`)).toBe(false)
 			expect(fs.has(INDEX_FILE_URI)).toBe(false)
 		})
 
@@ -1429,10 +1452,11 @@ describe("Offline", () => {
 			// The first call's in-flight directory must still be present (not wiped by the second call).
 			expect(fs.get(dataDirUri)).toBe("dir")
 
-			// Release the first download and let both settle.
+			// Release the first download and let both settle. Both report stored: the first did the
+			// work, the second short-circuited on the already-stored guard.
 			releaseFirstDownload()
 
-			await Promise.all([first, second])
+			await expect(Promise.all([first, second])).resolves.toEqual([true, true])
 
 			// Download ran exactly once — the second call saw the item stored and skipped.
 			expect(transfers.download).toHaveBeenCalledTimes(1)
@@ -3680,8 +3704,9 @@ describe("Offline", () => {
 
 			vi.mocked(transfers.download).mockClear()
 
-			// Try to store the child file standalone — should be a no-op
-			await offline.storeFile({ file: childFileItem, parent })
+			// Try to store the child file standalone — should be a no-op that still reports stored
+			// (the file IS available offline inside its parent tree).
+			await expect(offline.storeFile({ file: childFileItem, parent })).resolves.toBe(true)
 
 			expect(transfers.download).not.toHaveBeenCalled()
 		})
@@ -4125,7 +4150,7 @@ describe("Offline", () => {
 			// Warm the stored cache so we can observe invalidateCaches() afterwards.
 			expect(await offline.isItemStored(fileItem)).toBe(true)
 
-			await offline.redownloadStandaloneFile({ item: fileItem, parent })
+			await expect(offline.redownloadStandaloneFile({ item: fileItem, parent })).resolves.toBe(true)
 
 			expect(transfers.download).toHaveBeenCalledTimes(1)
 			expect(Array.from(fs.get(`${FILES_DIR_URI}/${uuid}/heal.txt`) as Uint8Array)).toEqual([7, 7, 7])
@@ -4161,7 +4186,7 @@ describe("Offline", () => {
 			expect(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(metaBefore)
 		})
 
-		it("leaves the meta untouched when the download aborts (null result)", async () => {
+		it("resolves false and leaves the meta untouched when the download aborts (null result)", async () => {
 			const fileItem = makeFileItem(uuid, "heal.txt")
 			const parent = makeParent(healParentUuid)
 
@@ -4173,7 +4198,7 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await offline.redownloadStandaloneFile({ item: fileItem, parent })
+			await expect(offline.redownloadStandaloneFile({ item: fileItem, parent })).resolves.toBe(false)
 
 			expect(fs.get(`${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(metaBefore)
 		})
@@ -4902,11 +4927,12 @@ describe("Offline", () => {
 	})
 
 	describe("listBrokenStandaloneUuids", () => {
-		it("reports uuid dirs with missing, empty, or undecodable metas — and only those", async () => {
+		it("reports uuid dirs with missing, empty, or undecodable metas — and only those — with hasDataFile", async () => {
 			const healthyUuid = "11111111-1111-1111-1111-111111111111"
 			const missingMetaUuid = "22222222-2222-2222-2222-222222222222"
 			const emptyMetaUuid = "33333333-3333-3333-3333-333333333333"
 			const corruptMetaUuid = "44444444-4444-4444-4444-444444444444"
+			const noDataUuid = "55555555-5555-5555-5555-555555555555"
 			const parent = makeParent("99999999-9999-9999-9999-999999999999")
 
 			// Healthy
@@ -4924,13 +4950,26 @@ describe("Offline", () => {
 			writeFileData(corruptMetaUuid, "data.txt")
 			fs.set(`${FILES_DIR_URI}/${corruptMetaUuid}/${corruptMetaUuid}.filenmeta`, new Uint8Array([0xff, 0xfe]))
 
+			// Empty meta-less dir with NO data file (crash / aborted-adoption residue)
+			fs.set(`${FILES_DIR_URI}/${noDataUuid}`, "dir")
+
 			// Non-uuid dir is ignored entirely
 			fs.set(`${FILES_DIR_URI}/not-a-uuid`, "dir")
 
 			const offline = await createOffline()
-			const broken = await offline.listBrokenStandaloneUuids()
+			const broken = (await offline.listBrokenStandaloneUuids()) as { uuid: string; hasDataFile: boolean }[]
 
-			expect(broken.sort()).toEqual([missingMetaUuid, emptyMetaUuid, corruptMetaUuid].sort())
+			expect(broken.map(entry => entry.uuid).sort()).toEqual(
+				[missingMetaUuid, emptyMetaUuid, corruptMetaUuid, noDataUuid].sort()
+			)
+
+			const byUuid = new Map(broken.map(entry => [entry.uuid, entry.hasDataFile]))
+
+			// hasDataFile = any non-.filenmeta file present — drives rebuild vs redownload in the heal.
+			expect(byUuid.get(missingMetaUuid)).toBe(true)
+			expect(byUuid.get(emptyMetaUuid)).toBe(true)
+			expect(byUuid.get(corruptMetaUuid)).toBe(true)
+			expect(byUuid.get(noDataUuid)).toBe(false)
 		})
 
 		it("returns an empty array when everything is healthy", async () => {

@@ -241,11 +241,15 @@ describe("auth.logout", () => {
 		const chatsIdx = callLog.indexOf("chatsSync.cancel")
 		const notesIdx = callLog.indexOf("notesSync.cancel")
 		const offlineIdx = callLog.indexOf("offline.cancel")
+		const offlineSyncIdx = callLog.indexOf("offlineSync.cancel")
 
 		expect(transfersIdx).toBeGreaterThan(phase1End)
 		expect(chatsIdx).toBeGreaterThan(transfersIdx)
 		expect(notesIdx).toBeGreaterThan(chatsIdx)
 		expect(offlineIdx).toBeGreaterThan(notesIdx)
+
+		// The sync orchestrator's in-flight pass is aborted right after the storage layer's cancel.
+		expect(offlineSyncIdx).toBeGreaterThan(offlineIdx)
 
 		// Phase 3: storage clear — must follow all cancels
 		const secureClearIdx = callLog.indexOf("secureStore.clear")

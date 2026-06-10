@@ -113,7 +113,7 @@ describe("startReconnectListener", () => {
 		expect(mockChatsSyncNow).toHaveBeenCalledTimes(2)
 	})
 
-	it("cameraUpload.sync() rejection does not prevent offline.sync(), notesSync.executeNow(), or chatsSync.syncNow() from being called", async () => {
+	it("cameraUpload.sync() rejection does not prevent offlineSync.sync(), notesSync.executeNow(), or chatsSync.syncNow() from being called", async () => {
 		mockCameraUploadSync.mockRejectedValueOnce(new Error("camera upload failed"))
 		const { startReconnectListener } = await import("@/lib/reconnect")
 		startReconnectListener()
@@ -126,7 +126,7 @@ describe("startReconnectListener", () => {
 		expect(mockChatsSyncNow).toHaveBeenCalledTimes(1)
 	})
 
-	it("offline.sync() rejection does not prevent cameraUpload.sync(), notesSync.executeNow(), or chatsSync.syncNow() from being called", async () => {
+	it("offlineSync.sync() rejection does not prevent cameraUpload.sync(), notesSync.executeNow(), or chatsSync.syncNow() from being called", async () => {
 		mockOfflineSync.mockRejectedValueOnce(new Error("offline sync failed"))
 		const { startReconnectListener } = await import("@/lib/reconnect")
 		startReconnectListener()

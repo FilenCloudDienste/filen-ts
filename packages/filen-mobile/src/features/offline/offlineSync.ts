@@ -150,9 +150,10 @@ function makeSyncError({
 //      other failures ⇒ `listing` errors, items skipped (NO deletions on errors).
 //   4. Standalone files: present byUuid → heal (missing/size-mismatched data re-downloads in
 //      place) then rename; vanished → byName version adoption (store new uuid FIRST, remove old
-//      only on success) → own-cloud getFileOptional move-follow/trash/delete → shared ⇒ remove.
-//   5. Broken standalone metas: rebuild own-cloud alive items via getFileOptional, remove
-//      trashed/deleted leftovers.
+//      only once storeFile reports the new copy durably stored — an aborted store keeps the old
+//      copy, no error) → own-cloud getFileOptional move-follow/trash/delete → shared ⇒ remove.
+//   5. Broken standalone metas: rebuild own-cloud alive items via getFileOptional (meta rewrite
+//      when the data file exists, redownload when it does not), remove trashed/deleted leftovers.
 //   6. Finish: one updateIndex, replace useOfflineStore.syncErrors, stamp lastCompletedAt.
 //
 // Coalescing: concurrent sync() calls join the in-flight pass; auto passes within
@@ -641,6 +642,12 @@ export class OfflineSync {
 				return
 			}
 
+			if (!adoption.data) {
+				// Aborted mid-download (not an error): nothing was stored for the new uuid, so the
+				// old copy MUST survive. The next pass retries the adoption.
+				return
+			}
+
 			await offline.removeItem(item)
 
 			return
@@ -708,8 +715,9 @@ export class OfflineSync {
 	}
 
 	// Standalone files/{uuid} dirs whose meta is missing/undecodable: rebuild own-cloud alive items
-	// from getFileOptional; remove trashed/deleted/undecidable leftovers; leave lookup failures for
-	// the next pass.
+	// from getFileOptional — a meta rewrite when the data file still exists, a full redownload when
+	// it does not (crash/aborted-adoption residue, where renameStandaloneFile would no-op forever);
+	// remove trashed/deleted/undecidable leftovers; leave lookup failures for the next pass.
 	private async healBrokenStandalones({
 		authedSdkClient,
 		signal,
@@ -719,10 +727,10 @@ export class OfflineSync {
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 	}): Promise<void> {
-		const brokenUuids = await offline.listBrokenStandaloneUuids()
+		const brokenStandalones = await offline.listBrokenStandaloneUuids()
 
 		await Promise.all(
-			brokenUuids.map(async uuid => {
+			brokenStandalones.map(async ({ uuid, hasDataFile }) => {
 				if (signal.aborted) {
 					return
 				}
@@ -792,11 +800,21 @@ export class OfflineSync {
 						return
 					}
 
-					// Rewrites the meta (and corrects a stale on-disk name) in place.
-					await offline.renameStandaloneFile({
-						item: rebuilt,
-						parent: resolvedParent
-					})
+					if (hasDataFile) {
+						// Bytes exist — rewrites the meta (and corrects a stale on-disk name) in place.
+						await offline.renameStandaloneFile({
+							item: rebuilt,
+							parent: resolvedParent
+						})
+					} else {
+						// No bytes on disk: renameStandaloneFile would no-op without a data file, so
+						// the dir would stay broken forever. Redownload writes bytes AND meta.
+						await offline.redownloadStandaloneFile({
+							item: rebuilt,
+							parent: resolvedParent,
+							signal
+						})
+					}
 				})
 
 				if (!result.success) {
