@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS, queryUpdater, queryClient } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
 import offline from "@/features/offline/offline"
@@ -96,6 +96,22 @@ export function driveItemStoredOfflineQueryUpdate({
 		},
 		dataUpdatedAt
 	)
+}
+
+// Snapshot of every cached entry under BASE_QUERY_KEY (partial key match — i.e. all
+// [BASE_QUERY_KEY, { type, uuid }] queries, including ones restored from SQLite persistence).
+// offline.updateIndex() feeds these to findStaleStoredOfflineEntries (offlineHelpers) to
+// broadcast `false` for cached `true` entries whose uuid is no longer in the rebuilt offline
+// index — otherwise this push-only cache keeps ghost "stored offline" badges forever.
+export function getStoredOfflineQueryCacheEntries(): {
+	queryKey: readonly unknown[]
+	state: {
+		data: unknown
+	}
+}[] {
+	return queryClient.getQueryCache().findAll({
+		queryKey: [BASE_QUERY_KEY]
+	})
 }
 
 export default useDriveItemStoredOfflineQuery

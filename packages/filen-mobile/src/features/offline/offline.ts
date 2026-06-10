@@ -18,13 +18,17 @@ import {
 	atomicWrite,
 	parentCacheKey,
 	directoryDriveItemToAnyDirWithContext,
+	findStaleStoredOfflineEntries,
 	makeSyncError,
 	type OfflineParent,
 	type OfflineSyncError
 } from "@/features/offline/offlineHelpers"
 import { planTreeReconcile, isSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { validateUuid } from "@/lib/uuid"
-import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import {
+	driveItemStoredOfflineQueryUpdate,
+	getStoredOfflineQueryCacheEntries
+} from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 import {
@@ -390,6 +394,19 @@ export class Offline {
 				atomicWrite(INDEX_FILE, serialize(index satisfies Index))
 
 				this.indexCache = index
+
+				// Reconcile the push-only storedOffline query cache against the rebuilt index:
+				// broadcast `false` for every cached `true` whose uuid is no longer indexed.
+				// The per-item loops above only ever broadcast `true`, so without this an item
+				// that vanished from the store wholesale (e.g. an OFFLINE_VERSION sweep) keeps
+				// its persisted `true` forever — a ghost "stored offline" badge for an item the
+				// offline screen doesn't list and whose menu offers neither offline action.
+				for (const staleEntry of findStaleStoredOfflineEntries(getStoredOfflineQueryCacheEntries(), index)) {
+					driveItemStoredOfflineQueryUpdate({
+						updater: false,
+						params: staleEntry
+					})
+				}
 
 				// Eagerly warm uuidToTopLevelCache so the sync isItemTopLevelStoredSync
 				// used by drive item menus returns a defined answer immediately after
