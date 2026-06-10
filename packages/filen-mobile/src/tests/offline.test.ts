@@ -63,7 +63,8 @@ vi.mock("@/features/offline/store/useOffline.store", () => ({
 }))
 
 vi.mock("@/features/drive/queries/useDriveItemStoredOffline.query", () => ({
-	driveItemStoredOfflineQueryUpdate: vi.fn()
+	driveItemStoredOfflineQueryUpdate: vi.fn(),
+	getStoredOfflineQueryCacheEntries: vi.fn(() => [])
 }))
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
@@ -256,7 +257,10 @@ import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
 import { AnyDirWithContext, AnyNormalDir, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
 import transfers from "@/features/transfers/transfers"
-import { driveItemStoredOfflineQueryUpdate } from "@/features/drive/queries/useDriveItemStoredOffline.query"
+import {
+	driveItemStoredOfflineQueryUpdate,
+	getStoredOfflineQueryCacheEntries
+} from "@/features/drive/queries/useDriveItemStoredOffline.query"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
@@ -264,7 +268,11 @@ import cache from "@/lib/cache"
 type OfflineInstance = any
 
 import { VERSION as OFFLINE_VERSION } from "@/features/offline/offline"
-import { shouldSkipOfflineSyncForConnection } from "@/features/offline/offlineHelpers"
+import {
+	findStaleStoredOfflineEntries,
+	shouldSkipOfflineSyncForConnection,
+	type StoredOfflineQueryCacheEntry
+} from "@/features/offline/offlineHelpers"
 
 const BASE_DIR_URI = `file:///shared/group.io.filen.app/offline/v${OFFLINE_VERSION}`
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
@@ -1958,6 +1966,196 @@ describe("Offline", () => {
 
 			expect(updatedUuids).toContain(dirUuid)
 			expect(updatedUuids).toContain(nestedFileUuid)
+		})
+	})
+
+	describe("updateIndex stale storedOffline query reconciliation", () => {
+		const GHOST_UUID = "99999999-9999-9999-9999-999999999999"
+
+		it("broadcasts false for a cached true entry whose uuid is not in the rebuilt index", async () => {
+			const storedUuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(storedUuid, "kept.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeFileData(storedUuid, "kept.txt")
+			writeFileMeta(storedUuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
+				{
+					queryKey: [
+						"useDriveItemStoredOfflineQuery",
+						{
+							type: "directory",
+							uuid: GHOST_UUID
+						}
+					],
+					state: {
+						data: true
+					}
+				}
+			])
+
+			await offline.updateIndex()
+
+			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					updater: false,
+					params: expect.objectContaining({
+						uuid: GHOST_UUID,
+						type: "directory"
+					})
+				})
+			)
+		})
+
+		it("does not broadcast false for a cached true entry whose uuid is in the rebuilt index", async () => {
+			const storedUuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(storedUuid, "kept.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			writeFileData(storedUuid, "kept.txt")
+			writeFileMeta(storedUuid, { item: fileItem, parent })
+
+			const offline = await createOffline()
+
+			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
+				{
+					queryKey: [
+						"useDriveItemStoredOfflineQuery",
+						{
+							type: "file",
+							uuid: storedUuid
+						}
+					],
+					state: {
+						data: true
+					}
+				}
+			])
+
+			await offline.updateIndex()
+
+			const falseCalls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls.filter(([arg]) => arg.updater === false)
+
+			expect(falseCalls).toHaveLength(0)
+
+			// The regular per-item loop still broadcast true for it.
+			expect(driveItemStoredOfflineQueryUpdate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					updater: true,
+					params: expect.objectContaining({
+						uuid: storedUuid,
+						type: "file"
+					})
+				})
+			)
+		})
+
+		it("skips malformed cache keys without throwing and still reconciles valid ones", async () => {
+			const offline = await createOffline()
+
+			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
+				// Missing uuid.
+				{
+					queryKey: [
+						"useDriveItemStoredOfflineQuery",
+						{
+							type: "directory"
+						}
+					],
+					state: {
+						data: true
+					}
+				},
+				// Missing params object entirely.
+				{
+					queryKey: ["useDriveItemStoredOfflineQuery"],
+					state: {
+						data: true
+					}
+				},
+				// Unknown (non-normalized) type value.
+				{
+					queryKey: [
+						"useDriveItemStoredOfflineQuery",
+						{
+							type: "banana",
+							uuid: GHOST_UUID
+						}
+					],
+					state: {
+						data: true
+					}
+				},
+				// Valid ghost entry.
+				{
+					queryKey: [
+						"useDriveItemStoredOfflineQuery",
+						{
+							type: "file",
+							uuid: GHOST_UUID
+						}
+					],
+					state: {
+						data: true
+					}
+				}
+			])
+
+			await expect(offline.updateIndex()).resolves.toBeUndefined()
+
+			const falseCalls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls.filter(([arg]) => arg.updater === false)
+
+			expect(falseCalls).toHaveLength(1)
+			expect(falseCalls[0]?.[0]?.params).toEqual(
+				expect.objectContaining({
+					uuid: GHOST_UUID,
+					type: "file"
+				})
+			)
+		})
+
+		it("does not broadcast false for cached entries whose data is not true", async () => {
+			const offline = await createOffline()
+
+			vi.mocked(driveItemStoredOfflineQueryUpdate).mockClear()
+			vi.mocked(getStoredOfflineQueryCacheEntries).mockReturnValueOnce([
+				{
+					queryKey: [
+						"useDriveItemStoredOfflineQuery",
+						{
+							type: "file",
+							uuid: GHOST_UUID
+						}
+					],
+					state: {
+						data: false
+					}
+				},
+				{
+					queryKey: [
+						"useDriveItemStoredOfflineQuery",
+						{
+							type: "directory",
+							uuid: GHOST_UUID
+						}
+					],
+					state: {
+						data: undefined
+					}
+				}
+			])
+
+			await offline.updateIndex()
+
+			const falseCalls = vi.mocked(driveItemStoredOfflineQueryUpdate).mock.calls.filter(([arg]) => arg.updater === false)
+
+			expect(falseCalls).toHaveLength(0)
 		})
 	})
 
@@ -5428,5 +5626,108 @@ describe("shouldSkipOfflineSyncForConnection", () => {
 		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: "unknown" })).toBe(false)
 		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: null })).toBe(false)
 		expect(shouldSkipOfflineSyncForConnection({ wifiOnly: true, connectionType: undefined })).toBe(false)
+	})
+})
+
+describe("findStaleStoredOfflineEntries", () => {
+	const BASE_KEY = "useDriveItemStoredOfflineQuery"
+	const FILE_UUID = "11111111-1111-1111-1111-111111111111"
+	const DIR_UUID = "22222222-2222-2222-2222-222222222222"
+	const GHOST_UUID = "99999999-9999-9999-9999-999999999999"
+
+	const index = {
+		files: {
+			[FILE_UUID]: {}
+		},
+		directories: {
+			[DIR_UUID]: {}
+		}
+	}
+
+	function entry(params: unknown, data: unknown): StoredOfflineQueryCacheEntry {
+		return {
+			queryKey: params === undefined ? [BASE_KEY] : [BASE_KEY, params],
+			state: {
+				data
+			}
+		}
+	}
+
+	it("returns a true entry whose uuid is missing from the index (file and directory)", () => {
+		expect(findStaleStoredOfflineEntries([entry({ type: "file", uuid: GHOST_UUID }, true)], index)).toEqual([
+			{ uuid: GHOST_UUID, type: "file" }
+		])
+		expect(findStaleStoredOfflineEntries([entry({ type: "directory", uuid: GHOST_UUID }, true)], index)).toEqual([
+			{ uuid: GHOST_UUID, type: "directory" }
+		])
+	})
+
+	it("does not return a true entry whose uuid is present in its type's index section", () => {
+		expect(findStaleStoredOfflineEntries([entry({ type: "file", uuid: FILE_UUID }, true)], index)).toEqual([])
+		expect(findStaleStoredOfflineEntries([entry({ type: "directory", uuid: DIR_UUID }, true)], index)).toEqual([])
+	})
+
+	it("checks the index section matching the entry's type — a files-only uuid is stale as a directory", () => {
+		expect(findStaleStoredOfflineEntries([entry({ type: "directory", uuid: FILE_UUID }, true)], index)).toEqual([
+			{ uuid: FILE_UUID, type: "directory" }
+		])
+		expect(findStaleStoredOfflineEntries([entry({ type: "file", uuid: DIR_UUID }, true)], index)).toEqual([
+			{ uuid: DIR_UUID, type: "file" }
+		])
+	})
+
+	it("ignores entries whose data is not exactly true", () => {
+		expect(
+			findStaleStoredOfflineEntries(
+				[
+					entry({ type: "file", uuid: GHOST_UUID }, false),
+					entry({ type: "file", uuid: GHOST_UUID }, undefined),
+					entry({ type: "file", uuid: GHOST_UUID }, "true"),
+					entry({ type: "file", uuid: GHOST_UUID }, 1)
+				],
+				index
+			)
+		).toEqual([])
+	})
+
+	it("skips malformed keys without throwing", () => {
+		expect(
+			findStaleStoredOfflineEntries(
+				[
+					entry(undefined, true),
+					entry(null, true),
+					entry("not-an-object", true),
+					entry({}, true),
+					entry({ type: "file" }, true),
+					entry({ type: "file", uuid: "" }, true),
+					entry({ type: "file", uuid: 42 }, true),
+					entry({ uuid: GHOST_UUID }, true),
+					entry({ type: "sharedFile", uuid: GHOST_UUID }, true),
+					entry({ type: "banana", uuid: GHOST_UUID }, true)
+				],
+				index
+			)
+		).toEqual([])
+	})
+
+	it("returns every stale entry across a mixed cache snapshot", () => {
+		const result = findStaleStoredOfflineEntries(
+			[
+				entry({ type: "file", uuid: FILE_UUID }, true),
+				entry({ type: "file", uuid: GHOST_UUID }, true),
+				entry({ type: "directory", uuid: GHOST_UUID }, true),
+				entry({ type: "directory", uuid: DIR_UUID }, true)
+			],
+			index
+		)
+
+		expect(result).toEqual([
+			{ uuid: GHOST_UUID, type: "file" },
+			{ uuid: GHOST_UUID, type: "directory" }
+		])
+	})
+
+	it("returns an empty array for an empty cache snapshot", () => {
+		expect(findStaleStoredOfflineEntries([], index)).toEqual([])
 	})
 })

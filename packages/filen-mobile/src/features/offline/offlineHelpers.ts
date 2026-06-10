@@ -226,3 +226,68 @@ export function shouldSkipOfflineSyncForConnection({
 }): boolean {
 	return wifiOnly && connectionType === "cellular"
 }
+
+// One cached useDriveItemStoredOfflineQuery entry as enumerated from the TanStack query cache.
+// Structural subset of TanStack's Query so the stale-entry scan below stays pure and dependency-free.
+export type StoredOfflineQueryCacheEntry = {
+	queryKey: readonly unknown[]
+	state: {
+		data: unknown
+	}
+}
+
+// The storedOffline query cache is push-only (enabled: false, persisted to SQLite) — entries are
+// never refetched, so a cached `true` for an item that vanished from the offline store wholesale
+// (e.g. an OFFLINE_VERSION sweep) would otherwise stay `true` forever: a ghost "stored offline"
+// badge for an item the offline screen doesn't list and whose menu offers neither offline action.
+// Returns the {uuid, type} params of every cached entry claiming `true` whose uuid is NOT in the
+// rebuilt index, so updateIndex can broadcast `false` for them. Query keys are
+// [BASE_QUERY_KEY, { type: "file" | "directory", uuid }] with the type already normalized by the
+// query module; malformed keys are skipped, never thrown on.
+export function findStaleStoredOfflineEntries(
+	cachedEntries: readonly StoredOfflineQueryCacheEntry[],
+	index: {
+		files: Record<string, unknown>
+		directories: Record<string, unknown>
+	}
+): {
+	uuid: string
+	type: "file" | "directory"
+}[] {
+	const stale: {
+		uuid: string
+		type: "file" | "directory"
+	}[] = []
+
+	for (const entry of cachedEntries) {
+		if (entry.state.data !== true) {
+			continue
+		}
+
+		const params = entry.queryKey[1]
+
+		if (typeof params !== "object" || params === null) {
+			continue
+		}
+
+		const { uuid, type } = params as {
+			uuid?: unknown
+			type?: unknown
+		}
+
+		if (typeof uuid !== "string" || uuid.length === 0 || (type !== "file" && type !== "directory")) {
+			continue
+		}
+
+		const stored = type === "file" ? index.files[uuid] : index.directories[uuid]
+
+		if (!stored) {
+			stale.push({
+				uuid,
+				type
+			})
+		}
+	}
+
+	return stale
+}
