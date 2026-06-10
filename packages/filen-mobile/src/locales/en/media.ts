@@ -82,6 +82,11 @@ export const media = {
 	camera_upload_file_missing: "This item could no longer be found on your device.",
 	/** Camera upload error: the photo or video could not be prepared for upload */
 	camera_upload_processing_failed: "This item could not be prepared for upload.",
+	/** Camera upload error: parts of the remote camera upload directory could not be listed,
+	 *  so the sync comparison may be incomplete (backup still continued) */
+	camera_upload_remote_listing_incomplete: "Some remote directories could not be listed. Backup continued, but items may be uploaded again.",
+	/** Camera upload error: a device album could not be read during sync. {{album}} is the album title. */
+	camera_upload_album_listing_failed: "Could not read the album {{album}}. Its items were skipped during this sync.",
 
 	// ── Playlists list ────────────────────────────────────────────────────────
 	/** Playlists screen — header title */
