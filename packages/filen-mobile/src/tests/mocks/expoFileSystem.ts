@@ -68,11 +68,12 @@ function deleteEntryRecursive(uri: string): void {
 }
 
 /**
- * Native move semantics shared by File/Directory move (verified in expo-file-system v56 sources,
- * both platforms): moving onto an EXISTING destination throws unless RelocationOptions
- * `overwrite: true` is passed, in which case the destination is removed first.
+ * Native relocation semantics shared by File/Directory copy AND move (verified in
+ * expo-file-system v56 sources, both platforms — iOS FileSystemPath.copy/move, Android
+ * FileSystemPath.kt copyTo/moveTo): relocating onto an EXISTING destination throws unless
+ * RelocationOptions `overwrite: true` is passed, in which case the destination is removed first.
  */
-function applyMoveOverwriteSemantics(destUri: string, options?: { overwrite?: boolean }): void {
+function applyRelocationOverwriteSemantics(destUri: string, options?: { overwrite?: boolean }): void {
 	if (!fs.has(destUri)) {
 		return
 	}
@@ -203,7 +204,7 @@ export class File {
 		fs.delete(this.uri)
 	}
 
-	copy(destination: File | Directory): void {
+	copy(destination: File | Directory, options?: { overwrite?: boolean }): void {
 		const entry = fs.get(this.uri)
 
 		if (!(entry instanceof Uint8Array)) {
@@ -212,13 +213,15 @@ export class File {
 
 		const destUri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
 
+		applyRelocationOverwriteSemantics(destUri, options)
+
 		fs.set(destUri, new Uint8Array(entry))
 	}
 
 	move(destination: File | Directory, options?: { overwrite?: boolean }): void {
 		const destUri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
 
-		applyMoveOverwriteSemantics(destUri, options)
+		applyRelocationOverwriteSemantics(destUri, options)
 
 		this.copy(destination)
 		this.delete()
@@ -226,8 +229,8 @@ export class File {
 		this.uri = destUri
 	}
 
-	copySync(destination: File | Directory): void {
-		this.copy(destination)
+	copySync(destination: File | Directory, options?: { overwrite?: boolean }): void {
+		this.copy(destination, options)
 	}
 
 	moveSync(destination: File | Directory, options?: { overwrite?: boolean }): void {
@@ -495,8 +498,11 @@ export class Directory {
 		return destination.exists ? Paths.join(destination.uri, this.name) : destination.uri
 	}
 
-	copy(destination: Directory | File): void {
+	copy(destination: Directory | File, options?: { overwrite?: boolean }): void {
 		const destUri = this.resolveCopyOrMoveDestination(destination)
+
+		applyRelocationOverwriteSemantics(destUri, options)
+
 		const prefix = this.uri.endsWith("/") ? this.uri : `${this.uri}/`
 
 		fs.set(destUri, "dir")
@@ -513,7 +519,7 @@ export class Directory {
 	move(destination: Directory | File, options?: { overwrite?: boolean }): void {
 		const destUri = this.resolveCopyOrMoveDestination(destination)
 
-		applyMoveOverwriteSemantics(destUri, options)
+		applyRelocationOverwriteSemantics(destUri, options)
 
 		// Inline the subtree transfer against the pre-resolved destUri (instead of delegating to
 		// copy()) so the destination resolution cannot shift after an overwrite removed it.
@@ -534,8 +540,8 @@ export class Directory {
 		this.uri = destUri
 	}
 
-	copySync(destination: Directory | File): void {
-		this.copy(destination)
+	copySync(destination: Directory | File, options?: { overwrite?: boolean }): void {
+		this.copy(destination, options)
 	}
 
 	moveSync(destination: Directory | File, options?: { overwrite?: boolean }): void {

@@ -63,10 +63,58 @@ vi.mock("@filen/sdk-rs", () => ({
 	AnyDirWithContext: { Normal: vi.fn() }
 }))
 
-vi.mock("@filen/utils", async () => ({
-	...(await import("@/tests/mocks/filenUtils")),
-	fastLocaleCompare: (a: string, b: string) => a.localeCompare(b)
-}))
+vi.mock("@filen/utils", async () => {
+	const sharedMock = await import("@/tests/mocks/filenUtils")
+
+	// The shared mock's Semaphore is a no-op. The staging-bound tests (#B5) need real
+	// acquire/release semantics, so this file substitutes a functional semaphore that
+	// mirrors @filen/utils' Semaphore (counter + FIFO waiter queue).
+	class FunctionalSemaphore {
+		private counter = 0
+		private readonly waiting: (() => void)[] = []
+		private readonly maxCount: number
+
+		public constructor(max: number = 1) {
+			this.maxCount = max
+		}
+
+		public async acquire(): Promise<void> {
+			if (this.counter < this.maxCount) {
+				this.counter++
+
+				return
+			}
+
+			await new Promise<void>(resolve => {
+				this.waiting.push(resolve)
+			})
+		}
+
+		public release(): void {
+			if (this.counter <= 0) {
+				return
+			}
+
+			this.counter--
+
+			while (this.waiting.length > 0 && this.counter < this.maxCount) {
+				this.counter++
+
+				const next = this.waiting.shift()
+
+				if (next) {
+					next()
+				}
+			}
+		}
+	}
+
+	return {
+		...sharedMock,
+		Semaphore: FunctionalSemaphore,
+		fastLocaleCompare: (a: string, b: string) => a.localeCompare(b)
+	}
+})
 
 vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: vi.fn() }
@@ -237,8 +285,10 @@ beforeEach(() => {
 	cameraUpload.cancel()
 	// The parent-directory cache lives on the singleton and survives cancel(),
 	// so clear it explicitly between tests to avoid stale dir refs from earlier
-	// tests masking createDir call assertions.
+	// tests masking createDir call assertions. Same for the in-flight dedupe map
+	// (its entries self-remove on settle, but clear defensively).
 	;(cameraUpload as any).ensureParentDirectoryExistsCache.clear()
+	;(cameraUpload as any).ensureParentDirectoryExistsInFlight.clear()
 	setupDefaultMocks()
 })
 
@@ -2812,5 +2862,410 @@ describe("#14 regression — null-creationTime collision key symmetry", () => {
 		// (Pre-fix, the local suffix used modificationTime so the suffixed slot
 		// diverged from the remote created=0 suffix → spurious re-upload.)
 		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
+// ─── B1 regression: compress copy must overwrite the staging file ─────────────
+// compress() copies the compressed output back onto the tmp staging file, which
+// ALWAYS exists by construction (the asset was copied into it first). Native copy
+// throws when the destination exists unless { overwrite: true } — without it every
+// compression-wins upload failed and the asset was silently skipped after
+// MAX_UPLOAD_FAILURES strikes.
+
+describe("B1 regression — compress copy overwrites the existing staging file", () => {
+	it("mock parity: File.copy onto an existing destination throws without overwrite and succeeds with it", async () => {
+		const { File: MockFile } = await import("@/tests/mocks/expoFileSystem")
+
+		fs.set("file:///cache/src.bin", new Uint8Array([1]))
+		fs.set("file:///cache/dst.bin", new Uint8Array([2]))
+
+		const src = new MockFile("file:///cache/src.bin")
+		const dst = new MockFile("file:///cache/dst.bin")
+
+		expect(() => src.copy(dst)).toThrow("Destination already exists")
+		expect(() => src.copy(dst, { overwrite: true })).not.toThrow()
+		expect(fs.get("file:///cache/dst.bin")).toEqual(new Uint8Array([1]))
+	})
+
+	it("compression-wins path copies the compressed output onto the existing staging file and the upload proceeds", async () => {
+		const { Paths } = await import("@/tests/mocks/expoFileSystem")
+		const { ImageManipulator } = await import("expo-image-manipulator")
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["b1a"] })
+		ml.addAsset({
+			id: "b1a",
+			filename: "photo.jpg",
+			uri: "file:///media/b1a",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/b1a", new Uint8Array(new Array(100).fill(1)))
+
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, compress: true })
+
+		// Manipulated output is smaller — compression wins and gets copied onto the
+		// staging file (which still holds the 100-byte original).
+		const manipulatedUri = `${Paths.cache.uri}/filen-tmp/photo-manip.jpg`
+
+		fs.set(manipulatedUri, new Uint8Array([9, 9, 9]))
+
+		const fakeSaveAsync = vi.fn(async () => ({ uri: manipulatedUri }))
+		const fakeContext = { renderAsync: vi.fn(async () => ({ saveAsync: fakeSaveAsync })) }
+
+		vi.mocked(ImageManipulator.manipulate).mockReturnValueOnce(fakeContext as any)
+
+		let uploadedBytes: Uint8Array | undefined
+
+		vi.mocked(transfers.upload).mockImplementationOnce(async (args: any) => {
+			const entry = fs.get(args.localFileOrDir.uri)
+
+			uploadedBytes = entry instanceof Uint8Array ? entry : undefined
+
+			return { files: [] } as any
+		})
+
+		await cameraUpload.sync()
+
+		// The staging file existed when compress() copied onto it — the upload still
+		// ran, with the compressed bytes, and no error was recorded.
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(uploadedBytes).toEqual(new Uint8Array([9, 9, 9]))
+		expect(mockSetErrors).not.toHaveBeenCalled()
+	})
+})
+
+// ─── B3: degraded remote listing is surfaced, sync still proceeds ─────────────
+// Entries inside errored subtrees are silently ABSENT from listDirRecursiveWithPaths'
+// result while the call still resolves Ok. The scan errors are now collected: ONE
+// degraded-listing entry is recorded into the error store and the pass continues
+// (a permanent scan error must not stop camera backup forever).
+
+describe("B3 — degraded remote listing", () => {
+	function setupSingleAsset() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri: "file:///media/a1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/a1", new Uint8Array([1, 2, 3]))
+	}
+
+	it("scan errors record ONE degraded-listing error and the sync pass still uploads", async () => {
+		setupSingleAsset()
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async (_dir: any, _progress: any, errorCallback: any) => {
+					// Two error batches from different subtrees — still ONE recorded entry.
+					errorCallback.onErrors([new Error("subtree A failed")])
+					errorCallback.onErrors([new Error("subtree B failed")])
+
+					return { files: [] }
+				}),
+				createDir: vi.fn(async () => ({ uuid: "dir" }))
+			}
+		} as any)
+
+		await cameraUpload.sync()
+
+		// The pass proceeded: the local asset still uploaded.
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		// Exactly one error entry, carrying the degraded-listing message.
+		expect(mockSetErrors).toHaveBeenCalledTimes(1)
+
+		const updater = mockSetErrors.mock.calls[0]?.[0] as (prev: unknown[]) => any[]
+		const entries = updater([])
+
+		expect(entries).toHaveLength(1)
+		expect(entries[0].error).toBeInstanceOf(Error)
+		expect((entries[0].error as Error).message).toBe("camera_upload_remote_listing_incomplete")
+	})
+
+	it("no scan errors → no degraded-listing entry (negative case)", async () => {
+		setupSingleAsset()
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(mockSetErrors).not.toHaveBeenCalled()
+	})
+})
+
+// ─── B5: staging bound — at most 4 assets staged in filen-tmp concurrently ────
+
+describe("B5 — staging bound (Semaphore(4) around the per-delta pipeline)", () => {
+	it("with 8 pending deltas at most 4 assets are staged in filen-tmp simultaneously", async () => {
+		const letters = ["a", "b", "c", "d", "e", "f", "g", "h"]
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: letters.map(letter => `s-${letter}`) })
+
+		for (let index = 0; index < letters.length; index++) {
+			const id = `s-${letters[index]}`
+
+			ml.addAsset({
+				id,
+				filename: `photo-${letters[index]}.jpg`,
+				uri: `file:///media/${id}`,
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000 * (index + 1),
+				modificationTime: 1000 * (index + 1)
+			})
+
+			fs.set(`file:///media/${id}`, new Uint8Array([1, 2, 3]))
+		}
+
+		let maxStaged = 0
+
+		vi.mocked(transfers.upload).mockImplementation(async () => {
+			const staged = [...fs.entries()].filter(([key, value]) => key.includes("/filen-tmp/") && value instanceof Uint8Array).length
+
+			maxStaged = Math.max(maxStaged, staged)
+
+			// Yield a macrotask so the other pipelines can progress to their own
+			// staging copies while this upload is "in flight".
+			await new Promise(resolve => setTimeout(resolve, 5))
+
+			return { files: [] } as any
+		})
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(8)
+		expect(maxStaged).toBeGreaterThan(0)
+		// Without the staging semaphore every delta copies its asset into filen-tmp
+		// up front, so this observes 8 staged files; the Semaphore(4) bounds it.
+		expect(maxStaged).toBeLessThanOrEqual(4)
+	})
+})
+
+// ─── B5: ensureParentDirectoryExists in-flight dedupe ─────────────────────────
+// Concurrent deltas for the same album each fired their own createDir round trip
+// before the 60s TTL cache populated. The first caller now creates an in-flight
+// promise keyed like the TTL cache; the rest await it.
+
+describe("B5 — ensureParentDirectoryExists in-flight dedupe", () => {
+	it("N concurrent calls for the same album fire exactly one createDir", async () => {
+		let resolveCreateDir: ((value: { uuid: string }) => void) | undefined
+		const createDir = vi.fn(
+			() =>
+				new Promise(resolve => {
+					resolveCreateDir = resolve
+				})
+		)
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: { createDir }
+		} as any)
+
+		const signal = new AbortController().signal
+		const calls = Array.from({ length: 5 }, () =>
+			(cameraUpload as any).ensureParentDirectoryExists({
+				config: ENABLED_CONFIG,
+				signal,
+				originalPath: "/Camera Roll/photo.jpg"
+			})
+		)
+
+		// Let every caller reach the in-flight gate before resolving the createDir.
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		resolveCreateDir?.({ uuid: "created-dir" })
+
+		const dirs = await Promise.all(calls)
+
+		expect(createDir).toHaveBeenCalledTimes(1)
+		// All callers received the SAME resolved directory instance.
+		expect(new Set(dirs).size).toBe(1)
+	})
+
+	it("the in-flight result populates the TTL cache so later calls do not re-create", async () => {
+		const createDir = vi.fn(async () => ({ uuid: "created-dir" }))
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: { createDir }
+		} as any)
+
+		const signal = new AbortController().signal
+		const params = { config: ENABLED_CONFIG, signal, originalPath: "/Camera Roll/photo.jpg" }
+
+		await Promise.all([
+			(cameraUpload as any).ensureParentDirectoryExists(params),
+			(cameraUpload as any).ensureParentDirectoryExists(params)
+		])
+
+		// Sequential follow-up — served from the TTL cache, not a new createDir.
+		await (cameraUpload as any).ensureParentDirectoryExists(params)
+
+		expect(createDir).toHaveBeenCalledTimes(1)
+	})
+
+	it("a failed createDir clears the in-flight slot so the next call can retry", async () => {
+		const createDir = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce({ uuid: "created-dir" })
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: { createDir }
+		} as any)
+
+		const signal = new AbortController().signal
+		const params = { config: ENABLED_CONFIG, signal, originalPath: "/Camera Roll/photo.jpg" }
+
+		await expect((cameraUpload as any).ensureParentDirectoryExists(params)).rejects.toThrow("boom")
+		await expect((cameraUpload as any).ensureParentDirectoryExists(params)).resolves.toBeDefined()
+
+		expect(createDir).toHaveBeenCalledTimes(2)
+
+		// The in-flight map is empty once everything settled.
+		expect(((cameraUpload as any).ensureParentDirectoryExistsInFlight as Map<string, unknown>).size).toBe(0)
+	})
+})
+
+// ─── B10: silent enumeration drops are surfaced ───────────────────────────────
+// Per-asset and per-album enumeration rejections were filtered out of the
+// allSettled results and discarded — an asset whose info fetch persistently fails
+// was permanently excluded from backup with zero signal. Each rejection is now
+// recorded once per pass in the error store (the failing entry stays excluded
+// from the tree, which is correct).
+
+describe("B10 — enumeration failures are surfaced", () => {
+	it("a rejecting asset-info fetch records an error entry with the asset and the others still sync", async () => {
+		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["good", "bad"] })
+		ml.addAsset({
+			id: "good",
+			filename: "good.jpg",
+			uri: "file:///media/good",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "bad",
+			filename: "bad.jpg",
+			uri: "file:///media/bad",
+			mediaType: MediaType.IMAGE,
+			creationTime: 2000,
+			modificationTime: 3000
+		})
+		fs.set("file:///media/good", new Uint8Array([1, 2, 3]))
+		fs.set("file:///media/bad", new Uint8Array([4, 5, 6]))
+
+		const originalGetFilename = Asset.prototype.getFilename
+		const spy = vi.spyOn(Asset.prototype, "getFilename").mockImplementation(async function (this: { id: string }) {
+			if (this.id === "bad") {
+				throw new Error("info fetch failed")
+			}
+
+			return await originalGetFilename.call(this)
+		})
+
+		try {
+			await cameraUpload.sync()
+		} finally {
+			spy.mockRestore()
+		}
+
+		// The good asset still uploaded.
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		// One error entry for the bad asset, carrying the asset identifier.
+		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
+		const badEntries = entries.filter(entry => entry.asset?.id === "bad")
+
+		expect(badEntries).toHaveLength(1)
+		expect((badEntries[0].error as Error).message).toBe("info fetch failed")
+	})
+
+	it("an asset that fails in two selected albums is recorded once per pass (dedupe)", async () => {
+		const { Asset } = await import("@/tests/mocks/expoMediaLibrary")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, albumIds: ["album-1", "album-2"] })
+
+		ml.addAlbum({ id: "album-1", title: "Album One", assetIds: ["bad"] })
+		ml.addAlbum({ id: "album-2", title: "Album Two", assetIds: ["bad"] })
+		ml.addAsset({
+			id: "bad",
+			filename: "bad.jpg",
+			uri: "file:///media/bad",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/bad", new Uint8Array([1, 2, 3]))
+
+		const spy = vi.spyOn(Asset.prototype, "getFilename").mockImplementation(async function (this: { id: string }) {
+			throw new Error(`info fetch failed for ${this.id}`)
+		})
+
+		try {
+			await cameraUpload.sync()
+		} finally {
+			spy.mockRestore()
+		}
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+
+		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
+		const badEntries = entries.filter(entry => entry.asset?.id === "bad")
+
+		expect(badEntries).toHaveLength(1)
+	})
+
+	it("a rejecting album query records an album-level error entry and other albums still sync", async () => {
+		const { Query } = await import("@/tests/mocks/expoMediaLibrary")
+
+		vi.mocked(secureStore.get).mockResolvedValue({ ...ENABLED_CONFIG, albumIds: ["album-good", "album-bad"] })
+
+		ml.addAlbum({ id: "album-good", title: "Good Album", assetIds: ["g1"] })
+		ml.addAlbum({ id: "album-bad", title: "Bad Album", assetIds: ["b1"] })
+		ml.addAsset({
+			id: "g1",
+			filename: "good.jpg",
+			uri: "file:///media/g1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		ml.addAsset({
+			id: "b1",
+			filename: "bad.jpg",
+			uri: "file:///media/b1",
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+		fs.set("file:///media/g1", new Uint8Array([1, 2, 3]))
+		fs.set("file:///media/b1", new Uint8Array([4, 5, 6]))
+
+		const originalExe = Query.prototype.exe
+		const spy = vi.spyOn(Query.prototype, "exe").mockImplementation(async function (this: any) {
+			if (this.albumFilter?.id === "album-bad") {
+				throw new Error("album query failed")
+			}
+
+			return await originalExe.call(this)
+		})
+
+		try {
+			await cameraUpload.sync()
+		} finally {
+			spy.mockRestore()
+		}
+
+		// The good album's asset still uploaded.
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		const entries = mockSetErrors.mock.calls.map(call => (call[0] as (prev: unknown[]) => any[])([])).flat()
+		const albumFailureEntries = entries.filter(
+			entry => entry.error instanceof Error && (entry.error as Error).message === "camera_upload_album_listing_failed"
+		)
+
+		expect(albumFailureEntries).toHaveLength(1)
 	})
 })

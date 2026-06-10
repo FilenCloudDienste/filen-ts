@@ -87,6 +87,11 @@ class CameraUpload {
 	private globalPauseSignal = new PauseSignal()
 	private syncing: boolean = false
 	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
+	// stagingMutex(4): bounds how many deltas may stage their asset bytes in filen-tmp
+	// concurrently (copy → optional compress → upload → deferred cleanup). The SDK already
+	// bounds network/memory concurrency internally; this bounds app-side DISK usage so a
+	// large pending set cannot stage the whole camera roll at once.
+	private readonly stagingMutex = new Semaphore(4)
 	private readonly uploadFailures = new Map<string, number>()
 	public secureStoreKey: string = `cameraUploadConfig:v${VERSION}`
 
@@ -97,6 +102,11 @@ class CameraUpload {
 			expires: number
 		}
 	>()
+
+	// Dedupes concurrent createDir calls for the same parent before the TTL cache above
+	// populates: the first caller creates the promise, the rest await it. Entries remove
+	// themselves once settled, so a failed createDir can be retried.
+	private readonly ensureParentDirectoryExistsInFlight = new Map<string, Promise<AnyNormalDir>>()
 
 	public constructor() {
 		events.subscribe("secureStoreChange", ({ key }) => {
@@ -185,7 +195,12 @@ class CameraUpload {
 			return file
 		}
 
-		await manipulatedFile.copy(file)
+		// The destination is the tmp staging file, which ALWAYS exists by construction
+		// (the asset was copied into it before compress() was called). Native copy throws
+		// when the destination exists unless overwrite is requested.
+		await manipulatedFile.copy(file, {
+			overwrite: true
+		})
 
 		if (manipulatedFile.exists) {
 			manipulatedFile.delete()
@@ -292,8 +307,17 @@ class CameraUpload {
 			folderTitleByAlbumId.set(id, folderTitle)
 		}
 
-		await Promise.allSettled(
-			Array.from(folderTitleByAlbumId.entries()).map(async ([id, folderTitle]) => {
+		// Enumeration failures must not vanish silently: an asset (or whole album) whose
+		// info fetch persistently fails would otherwise be permanently excluded from backup
+		// with zero signal. Each rejection below is surfaced once per sync pass into the
+		// same error store the cameraUploadErrors screen reads, while the failing entry is
+		// still (correctly) excluded from the tree. The set dedupes assets that belong to
+		// several selected albums.
+		const reportedFailedAssetIds = new Set<string>()
+
+		const albumEntries = Array.from(folderTitleByAlbumId.entries())
+		const albumResults = await Promise.allSettled(
+			albumEntries.map(async ([id, folderTitle]) => {
 				const album = new MediaLibrary.Album(id)
 
 				// Phase 1: query assets with native-level filters to avoid fetching
@@ -313,53 +337,82 @@ class CameraUpload {
 				const assets = await query.exe()
 
 				// Phase 1.5: fetch asset infos concurrently (rate-limited by semaphore).
-				const infos = (
-					await Promise.allSettled(
-						assets.map(async asset => {
-							const result = await run(async defer => {
-								if (signal.aborted) {
-									throw new Error("Aborted")
-								}
-
-								await this.getLocalAssetInfoSemaphore.acquire()
-
-								defer(() => {
-									this.getLocalAssetInfoSemaphore.release()
-								})
-
-								if (signal.aborted) {
-									throw new Error("Aborted")
-								}
-
-								const [filename, creationTime, modificationTime, mediaType] = await Promise.all([
-									asset.getFilename(),
-									asset.getCreationTime(),
-									asset.getModificationTime(),
-									asset.getMediaType()
-								])
-
-								return {
-									asset,
-									info: {
-										id: asset.id,
-										filename,
-										creationTime,
-										modificationTime,
-										mediaType
-									}
-								}
-							})
-
-							if (!result.success) {
-								throw result.error
+				const infoResults = await Promise.allSettled(
+					assets.map(async asset => {
+						const result = await run(async defer => {
+							if (signal.aborted) {
+								throw new Error("Aborted")
 							}
 
-							return result.data
+							await this.getLocalAssetInfoSemaphore.acquire()
+
+							defer(() => {
+								this.getLocalAssetInfoSemaphore.release()
+							})
+
+							if (signal.aborted) {
+								throw new Error("Aborted")
+							}
+
+							const [filename, creationTime, modificationTime, mediaType] = await Promise.all([
+								asset.getFilename(),
+								asset.getCreationTime(),
+								asset.getModificationTime(),
+								asset.getMediaType()
+							])
+
+							return {
+								asset,
+								info: {
+									id: asset.id,
+									filename,
+									creationTime,
+									modificationTime,
+									mediaType
+								}
+							}
 						})
-					)
+
+						if (!result.success) {
+							throw result.error
+						}
+
+						return result.data
+					})
 				)
-					.filter(result => result.status === "fulfilled")
-					.map(result => result.value)
+
+				const infos = infoResults.filter(result => result.status === "fulfilled").map(result => result.value)
+
+				// Surface per-asset enumeration failures (once per asset per pass) into the
+				// error store, then keep them out of the tree below. Abort-driven rejections
+				// are teardown, not failures, and are skipped.
+				for (let index = 0; index < infoResults.length; index++) {
+					const result = infoResults[index]
+
+					if (!result || result.status !== "rejected") {
+						continue
+					}
+
+					const failedAsset = assets[index]
+
+					if (signal.aborted || !failedAsset || reportedFailedAssetIds.has(failedAsset.id)) {
+						continue
+					}
+
+					reportedFailedAssetIds.add(failedAsset.id)
+
+					console.error(result.reason)
+
+					useCameraUploadStore.getState().setErrors(errors => [
+						...errors,
+						{
+							id: randomUUID(),
+							timestamp: Date.now(),
+							error: result.reason,
+							asset: failedAsset
+						}
+					])
+				}
 
 				// Phase 2: sort by creationTime ascending before building the tree.
 				// On iOS, asset filenames cycle (IMG_0001 … IMG_9999 → IMG_0001 …), so multiple
@@ -443,6 +496,34 @@ class CameraUpload {
 			})
 		)
 
+		// Surface per-album enumeration failures: a whole album whose query rejected is
+		// absent from the tree this pass, which must not stay invisible. The album title
+		// identifies the failing album in the recorded entry (album entries are unique per
+		// pass, so this is naturally one entry per failing album per sync).
+		for (let index = 0; index < albumResults.length; index++) {
+			const result = albumResults[index]
+			const entry = albumEntries[index]
+
+			if (!result || result.status !== "rejected" || !entry || signal.aborted) {
+				continue
+			}
+
+			console.error(result.reason)
+
+			useCameraUploadStore.getState().setErrors(errors => [
+				...errors,
+				{
+					id: randomUUID(),
+					timestamp: Date.now(),
+					error: new Error(
+						i18n.t("camera_upload_album_listing_failed", {
+							album: entry[1]
+						})
+					)
+				}
+			])
+		}
+
 		return tree
 	}
 
@@ -456,6 +537,10 @@ class CameraUpload {
 		compress: boolean
 	}): Promise<RemoteTree> {
 		const { authedSdkClient } = await auth.getSdkClients()
+		// Per the SDK contract, entries inside errored subtrees are silently ABSENT from
+		// the listing while the call still resolves Ok — collect the scan errors instead
+		// of discarding them.
+		const scanErrors: unknown[] = []
 		const { files } = await authedSdkClient.listDirRecursiveWithPaths(
 			new AnyDirWithContext.Normal(remoteDir),
 			{
@@ -464,14 +549,33 @@ class CameraUpload {
 				}
 			},
 			{
-				onErrors() {
-					// Noop
+				onErrors(errors) {
+					scanErrors.push(...errors)
 				}
 			},
 			{
 				signal
 			}
 		)
+
+		// A degraded listing must not be silently authoritative: the diff would see the
+		// local counterparts of the missing entries as "missing remotely" and re-upload
+		// them. Surface ONE degraded-listing error per pass and PROCEED — a permanent scan
+		// error must not stop camera backup forever. The md5 gate shields re-uploads of
+		// anything this device already uploaded; the residual risk is version churn on
+		// fresh devices, accepted and surfaced here.
+		if (scanErrors.length > 0 && !signal.aborted) {
+			console.error("[cameraUpload] Remote listing degraded by scan errors:", scanErrors)
+
+			useCameraUploadStore.getState().setErrors(errors => [
+				...errors,
+				{
+					id: randomUUID(),
+					timestamp: Date.now(),
+					error: new Error(i18n.t("camera_upload_remote_listing_incomplete"))
+				}
+			])
+		}
 
 		const tree: RemoteTree = {}
 
@@ -642,16 +746,42 @@ class CameraUpload {
 			throw new Error(i18n.t("error_generic"))
 		}
 
-		const { authedSdkClient } = await auth.getSdkClients()
-		const dir = new AnyNormalDir.Dir(
-			await authedSdkClient.createDir(config.remoteDir, parentDirName, {
-				signal
-			})
-		)
+		// Dedupe concurrent createDir calls for the same parent: before the TTL cache
+		// populates, every concurrent delta for one album fired its own createDir round
+		// trip (server-side get-or-create under a global drive lock — correct, but N
+		// serialized round trips). The first caller creates the in-flight promise, the
+		// rest await it; a failed promise is removed in the finally below so retries work.
+		const inFlight = this.ensureParentDirectoryExistsInFlight.get(cacheKey)
 
-		this.ensureParentDirectoryExistsCache.set(cacheKey, { value: dir, expires: Date.now() + 60000 })
+		if (inFlight) {
+			return await inFlight
+		}
 
-		return dir
+		const remoteDir = config.remoteDir
+		const promise = (async () => {
+			const { authedSdkClient } = await auth.getSdkClients()
+			const dir = new AnyNormalDir.Dir(
+				await authedSdkClient.createDir(remoteDir, parentDirName, {
+					signal
+				})
+			)
+
+			this.ensureParentDirectoryExistsCache.set(cacheKey, { value: dir, expires: Date.now() + 60000 })
+
+			return dir
+		})()
+
+		this.ensureParentDirectoryExistsInFlight.set(cacheKey, promise)
+
+		try {
+			return await promise
+		} finally {
+			// Only remove the entry if it is still OUR promise, so a slow settle cannot
+			// evict a newer in-flight created after this one finished.
+			if (this.ensureParentDirectoryExistsInFlight.get(cacheKey) === promise) {
+				this.ensureParentDirectoryExistsInFlight.delete(cacheKey)
+			}
+		}
 	}
 
 	public async sync(params?: { maxUploads?: number; background?: boolean }): Promise<void> {
@@ -774,6 +904,18 @@ class CameraUpload {
 								if (md5 === cache.cameraUploadHashes.get(delta.file.path)) {
 									break
 								}
+
+								// Bound the staged-on-disk set: without this, every pending delta
+								// copied its full asset into filen-tmp before its upload got an SDK
+								// slot, staging the whole camera roll at once. run() executes
+								// deferred functions LIFO, so this release runs AFTER the tmp-file
+								// cleanup registered below — the slot is freed only once the staged
+								// bytes are gone, keeping disk usage truly bounded.
+								await this.stagingMutex.acquire()
+
+								defer(() => {
+									this.stagingMutex.release()
+								})
 
 								// Create the staging tmp file WITH the original extension so that
 								// compress() can pass the supported-extension gate (it checks
