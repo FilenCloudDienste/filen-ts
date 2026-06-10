@@ -1,7 +1,20 @@
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import { newTmpFile } from "@/lib/tmp"
-import { AnyDirWithContext, AnyDirWithContext_Tags, AnySharedDir_Tags, AnyNormalDir_Tags, AnyLinkedDir_Tags } from "@filen/sdk-rs"
+import {
+	AnyDirWithContext,
+	AnyNormalDir,
+	AnySharedDir,
+	AnySharedDirWithContext,
+	AnyDirWithContext_Tags,
+	AnySharedDir_Tags,
+	AnyNormalDir_Tags,
+	AnyLinkedDir_Tags
+} from "@filen/sdk-rs"
+import { type DriveItem } from "@/types"
+import cache from "@/lib/cache"
+import { unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { isDirectoryItem } from "@/features/drive/driveSelectors"
 
 // "sharedInRoot" means the item lives at the top level of Shared In (no parent dir, just the shared root listing).
 export type OfflineParent = AnyDirWithContext | "sharedInRoot"
@@ -90,6 +103,71 @@ export function parentCacheKey(parent: OfflineParent): string {
 
 		default: {
 			throw new Error("Unknown AnyDirWithContext tag")
+		}
+	}
+}
+
+export type OfflineSyncErrorKind = "download" | "listing" | "verify" | "store"
+
+export type OfflineSyncError = {
+	// `${itemUuid}:${kind}` — stable for dedup
+	id: string
+	itemUuid: string
+	topLevelUuid: string | null
+	name: string
+	itemType: DriveItem["type"]
+	kind: OfflineSyncErrorKind
+	message: string
+	timestamp: number
+}
+
+// Converts a directory DriveItem directly into an AnyDirWithContext (or OfflineParent) for SDK calls.
+// Returns null for non-directory items and for missing shared-parent context.
+// Extracted from Offline.findParentAnyDirWithContext so sync and future reconcile code can reuse
+// the conversion without needing an in-memory pathToItem map.
+export function directoryDriveItemToAnyDirWithContext(item: DriveItem): OfflineParent | null {
+	if (!isDirectoryItem(item)) {
+		return null
+	}
+
+	switch (item.type) {
+		case "directory": {
+			return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
+		}
+
+		case "sharedDirectory": {
+			const parentUuid = unwrapParentUuid(item.data.inner.parent)
+
+			// Honor the OfflineParent | null contract: a missing parent must NOT throw here. This runs
+			// for every nested entry inside an unguarded Promise.all in listDirectoriesRecursive, so a
+			// single throw would reject the whole offline index rebuild. All callers handle null with
+			// `if (!parent) continue`, so a missing-parent entry is skipped just like listFiles skips
+			// an undecodable meta.
+			if (!parentUuid) {
+				return null
+			}
+
+			const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+
+			if (!parentDirFromCache) {
+				return null
+			}
+
+			return new AnyDirWithContext.Shared(
+				AnySharedDirWithContext.new({
+					dir: new AnySharedDir.Dir(item.data),
+					shareInfo: parentDirFromCache.shareInfo
+				})
+			)
+		}
+
+		case "sharedRootDirectory": {
+			return new AnyDirWithContext.Shared(
+				AnySharedDirWithContext.new({
+					dir: new AnySharedDir.Root(item.data),
+					shareInfo: item.data.sharingRole
+				})
+			)
 		}
 	}
 }

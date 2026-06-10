@@ -17,8 +17,9 @@ const BASE_DIRECTORY_URI = Platform.select({
 	default: FileSystem.Paths.document
 })
 
-export const OFFLINE_VERSION = 1
-export const OFFLINE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "offline", `v${OFFLINE_VERSION}`))
+export const OFFLINE_VERSION = 2
+export const OFFLINE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "offline"))
+export const OFFLINE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(OFFLINE_PARENT_DIRECTORY.uri, `v${OFFLINE_VERSION}`))
 export const OFFLINE_FILES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(OFFLINE_DIRECTORY.uri, "files"))
 export const OFFLINE_DIRECTORIES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(OFFLINE_DIRECTORY.uri, "directories"))
 export const OFFLINE_INDEX_FILE = new FileSystem.File(FileSystem.Paths.join(OFFLINE_DIRECTORY.uri, "index"))

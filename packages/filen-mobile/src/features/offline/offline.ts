@@ -39,6 +39,7 @@ import {
 	parentCacheKey,
 	shouldSkipOfflineSyncForConnection,
 	OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY,
+	directoryDriveItemToAnyDirWithContext,
 	type OfflineParent
 } from "@/features/offline/offlineHelpers"
 import secureStore from "@/lib/secureStore"
@@ -51,6 +52,7 @@ import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.qu
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 import {
 	OFFLINE_VERSION,
+	OFFLINE_PARENT_DIRECTORY,
 	OFFLINE_DIRECTORY,
 	OFFLINE_FILES_DIRECTORY,
 	OFFLINE_DIRECTORIES_DIRECTORY,
@@ -173,6 +175,14 @@ export class Offline {
 		// ensureDirectories() calls in storeFile/storeDirectory/updateIndex (which run inside run()) retry and
 		// surface the error via their Result path.
 		try {
+			if (OFFLINE_PARENT_DIRECTORY.exists) {
+				for (const entry of OFFLINE_PARENT_DIRECTORY.list()) {
+					if (entry instanceof FileSystem.Directory && entry.name !== `v${VERSION}`) {
+						entry.delete()
+					}
+				}
+			}
+
 			if (!DIRECTORY.exists) {
 				DIRECTORY.create({
 					intermediates: true,
@@ -1883,50 +1893,11 @@ export class Offline {
 	private findParentAnyDirWithContext(pathToItem: Record<string, DriveItem>, dirname: string): OfflineParent | null {
 		const item = pathToItem[dirname]
 
-		if (!item || !isDirectoryItem(item)) {
+		if (!item) {
 			return null
 		}
 
-		switch (item.type) {
-			case "directory": {
-				return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
-			}
-
-			case "sharedDirectory": {
-				const parentUuid = unwrapParentUuid(item.data.inner.parent)
-
-				// Honor the OfflineParent | null contract: a missing parent must NOT throw here. This runs
-				// for every nested entry inside an unguarded Promise.all in listDirectoriesRecursive, so a
-				// single throw would reject the whole offline index rebuild. All callers handle null with
-				// `if (!parent) continue`, so a missing-parent entry is skipped just like listFiles skips
-				// an undecodable meta.
-				if (!parentUuid) {
-					return null
-				}
-
-				const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
-
-				if (!parentDirFromCache) {
-					return null
-				}
-
-				return new AnyDirWithContext.Shared(
-					AnySharedDirWithContext.new({
-						dir: new AnySharedDir.Dir(item.data),
-						shareInfo: parentDirFromCache.shareInfo
-					})
-				)
-			}
-
-			case "sharedRootDirectory": {
-				return new AnyDirWithContext.Shared(
-					AnySharedDirWithContext.new({
-						dir: new AnySharedDir.Root(item.data),
-						shareInfo: item.data.sharingRole
-					})
-				)
-			}
-		}
+		return directoryDriveItemToAnyDirWithContext(item)
 	}
 
 	// Lists offline directories (and their files). Without parent: returns top-level stored directories.
