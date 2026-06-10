@@ -833,12 +833,17 @@ export class Offline {
 	//   5. One in-place hash-idempotent directory download for missing uuids; per-entry download
 	//      errors fail the pass.
 	//   6. Verify every remote entry on disk, then commit meta + index ONLY when the pass collected
-	//      zero errors. A rebuilt meta identical to the existing file is a no-op (zero writes).
-	//   7. After a committed pass that downloaded or started with an unreadable meta: orphan sweep
-	//      deletes physical paths the new meta does not claim (incl. crashed .filendl partials).
+	//      zero errors. A rebuilt meta identical to the existing file skips the meta write/index
+	//      update; a TRUE no-op pass (no download, readable meta) performs zero writes and no sweep.
+	//   7. After a verified pass that downloaded or started with an unreadable meta — including a
+	//      pure self-heal pass whose rebuilt meta is byte-identical — orphan sweep deletes physical
+	//      paths the meta does not claim (incl. crashed .filendl partials).
 	//
-	// Failure policy: no deletions on errors, meta/index never advance on a failed pass. initialStore
-	// is the exception — the partial tree is deleted and the first error is thrown (UI alerts).
+	// Failure policy: no deletions on errors, meta/index never advance on a failed pass. The one
+	// exception is an initial store with NO readable prior meta — its partial tree is deleted and the
+	// first error is thrown (UI alerts). An initial store over a readable committed meta (e.g. a
+	// concurrent store that lost the per-uuid lock race) keeps state and returns the errors like a
+	// sync pass; storeDirectory surfaces them by throwing without deleting.
 	public async reconcileTree({
 		directory,
 		parent,
@@ -896,23 +901,6 @@ export class Offline {
 
 			const liveDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid))
 
-			// Initial-store failure policy: a user-initiated first store has no prior state worth
-			// keeping, so a failed pass deletes the partial tree and throws (UI alerts as today).
-			// Sync passes instead keep local state untouched and return the collected errors.
-			const finish = (collected: OfflineSyncError[]): OfflineSyncError[] => {
-				if (initialStore && collected.length > 0) {
-					if (liveDir.exists) {
-						liveDir.delete()
-					}
-
-					this.invalidateCaches()
-
-					throw new Error(collected[0]?.message ?? "Storing directory offline failed")
-				}
-
-				return collected
-			}
-
 			if (!liveDir.exists) {
 				liveDir.create({
 					intermediates: true,
@@ -927,6 +915,35 @@ export class Offline {
 				if (isSyncTmpName(entry.name)) {
 					entry.delete()
 				}
+			}
+
+			// Prior state, captured at pass start. The existing meta is both the local-view source and
+			// the failure-policy discriminator: a readable meta means a committed tree exists on disk.
+			// An unreadable meta yields an empty local view — the hash-idempotent download skips
+			// healthy bytes and the meta is rebuilt from the listing (near-free repair).
+			const existingMeta = await this.readDirectoryMeta(topLevelUuid)
+			const metaWasUnreadable = existingMeta === null && !initialStore
+			const metaFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, `${topLevelUuid}.filenmeta`))
+			const currentMetaText = metaFile.exists && metaFile.size > 0 ? await metaFile.text() : null
+
+			// Initial-store failure policy: a user-initiated FIRST store (no readable prior meta) has
+			// no prior state worth keeping, so a failed pass deletes the partial tree and throws (UI
+			// alerts as today). When a readable meta exists, this pass runs over a COMMITTED tree —
+			// e.g. a concurrent initial store that passed the read-only guards, then lost the per-uuid
+			// lock race against a pass that already committed — and deleting would destroy it. Such
+			// failures keep state and return the collected errors like a sync pass instead.
+			const finish = (collected: OfflineSyncError[]): OfflineSyncError[] => {
+				if (initialStore && collected.length > 0 && existingMeta === null) {
+					if (liveDir.exists) {
+						liveDir.delete()
+					}
+
+					this.invalidateCaches()
+
+					throw new Error(collected[0]?.message ?? "Storing directory offline failed")
+				}
+
+				return collected
 			}
 
 			// Remote listing — one bulk recursive metadata fetch. Listing paths are RAW root-relative
@@ -1008,14 +1025,8 @@ export class Offline {
 				})
 			}
 
-			// Local view from the existing meta. A file whose on-disk size diverges from its meta size
-			// counts as missing so the download heals truncation for free. An unreadable meta yields an
-			// empty local view — the hash-idempotent download skips healthy bytes and the meta is
-			// rebuilt from the listing (near-free repair).
-			const existingMeta = await this.readDirectoryMeta(topLevelUuid)
-			const metaWasUnreadable = existingMeta === null && !initialStore
-			const metaFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, `${topLevelUuid}.filenmeta`))
-			const currentMetaText = metaFile.exists && metaFile.size > 0 ? await metaFile.text() : null
+			// Local view from the existing meta (read at pass start above). A file whose on-disk size
+			// diverges from its meta size counts as missing so the download heals truncation for free.
 			const existingEntries = existingMeta?.entries ?? {}
 			const local: LocalTreeEntry[] = []
 
@@ -1291,44 +1302,56 @@ export class Offline {
 				)
 			} satisfies DirectoryOfflineMeta)
 
-			if (currentMetaText !== null && serialized === currentMetaText) {
-				// Fixed point: nothing changed — a no-op pass performs zero writes.
+			const metaUnchanged = currentMetaText !== null && serialized === currentMetaText
+
+			if (metaUnchanged && !downloadRan && !metaWasUnreadable) {
+				// Fixed point: nothing changed — a TRUE no-op pass performs zero writes and no sweep.
 				return []
 			}
 
-			atomicWrite(metaFile, serialized)
+			if (metaUnchanged) {
+				// Byte-identical meta after a heal pass: skip the meta write, overlap dedup and index
+				// update (all derived from the unchanged meta) — but a download still changed bytes on
+				// disk, so derived caches are dropped and the orphan sweep below still runs (crashed
+				// .filendl partials must not outlive a heal).
+				if (downloadRan) {
+					this.invalidateCaches()
+				}
+			} else {
+				atomicWrite(metaFile, serialized)
 
-			// Overlap dedup: entries of this tree subsume their standalone copies.
-			const currentIndex = await this.readIndex()
+				// Overlap dedup: entries of this tree subsume their standalone copies.
+				const currentIndex = await this.readIndex()
 
-			for (const entryUuid of remote.keys()) {
-				if (currentIndex.files[entryUuid]) {
-					const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, entryUuid))
+				for (const entryUuid of remote.keys()) {
+					if (currentIndex.files[entryUuid]) {
+						const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, entryUuid))
 
-					if (standaloneFileDir.exists) {
-						standaloneFileDir.delete()
+						if (standaloneFileDir.exists) {
+							standaloneFileDir.delete()
+						}
+					}
+
+					// Don't delete ourselves — we're reconciling this tree, not a nested one.
+					if (currentIndex.directories[entryUuid] && entryUuid !== topLevelUuid) {
+						const standaloneDirDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, entryUuid))
+
+						if (standaloneDirDir.exists) {
+							standaloneDirDir.delete()
+						}
 					}
 				}
 
-				// Don't delete ourselves — we're reconciling this tree, not a nested one.
-				if (currentIndex.directories[entryUuid] && entryUuid !== topLevelUuid) {
-					const standaloneDirDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, entryUuid))
+				this.invalidateCaches()
 
-					if (standaloneDirDir.exists) {
-						standaloneDirDir.delete()
-					}
+				if (!skipIndexUpdate) {
+					await this.updateIndex()
 				}
 			}
 
-			this.invalidateCaches()
-
-			if (!skipIndexUpdate) {
-				await this.updateIndex()
-			}
-
-			// Orphan sweep — only after a committed pass that ran a download or started with an
-			// unreadable meta: delete physical paths the new meta does not claim (this also cleans
-			// crashed .filendl partials). Never runs on no-op passes.
+			// Orphan sweep — only after a verified pass that ran a download or started with an
+			// unreadable meta: delete physical paths the meta does not claim (this also cleans
+			// crashed .filendl partials). Never runs on true no-op passes.
 			if (downloadRan || metaWasUnreadable) {
 				const claimed = new Set<string>()
 
@@ -1386,17 +1409,12 @@ export class Offline {
 		parent,
 		hideProgress,
 		skipIndexUpdate,
-		force,
 		signal
 	}: {
 		file: DriveItem
 		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
-		// Skips the already-stored / nested-inside-a-stored-tree guards. Used by the sync self-heal
-		// re-download path, where the item IS stored but its data file is missing or truncated —
-		// the delete-parent-dir-then-download flow below restores it in place.
-		force?: boolean
 		signal?: AbortSignal
 	}): Promise<void> {
 		const result = await run(async defer => {
@@ -1430,17 +1448,15 @@ export class Offline {
 
 			this.ensureDirectories()
 
-			if (!force) {
-				if (await this.isItemStored(file)) {
-					return
-				}
+			if (await this.isItemStored(file)) {
+				return
+			}
 
-				// Skip if this file already exists inside a stored directory tree (overlap guard).
-				const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+			// Skip if this file already exists inside a stored directory tree (overlap guard).
+			const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
 
-				if (uuidToTopLevel.has(file.data.uuid)) {
-					return
-				}
+			if (uuidToTopLevel.has(file.data.uuid)) {
+				return
 			}
 
 			const dataFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, file.data.decryptedMeta.name))
@@ -1505,6 +1521,114 @@ export class Offline {
 		}
 	}
 
+	// Meta-preserving standalone self-heal: re-downloads a stored standalone file's bytes to the
+	// exact files/{uuid}/{name} data path while KEEPING the existing meta. Stale data files left
+	// behind by an older name are removed first; the meta is only rewritten after a successful
+	// download. A failed or aborted heal leaves the meta untouched — the item stays listed offline
+	// so the next sync pass retries. No index update — callers batch one at the end of their pass.
+	public async redownloadStandaloneFile({
+		item,
+		parent,
+		signal
+	}: {
+		item: DriveItem
+		parent: OfflineParent
+		signal?: AbortSignal
+	}): Promise<void> {
+		const result = await run(async defer => {
+			if (!isFileItem(item)) {
+				throw new Error("Item not of type file")
+			}
+
+			if (!item.data.decryptedMeta) {
+				throw new Error("File missing decrypted meta")
+			}
+
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
+			const releaseStoreItemLock = await this.acquireStoreItemLock(item.data.uuid)
+
+			defer(() => {
+				releaseStoreItemLock()
+			})
+
+			await this.storeMutex.acquire()
+
+			defer(() => {
+				this.storeMutex.release()
+			})
+
+			this.ensureDirectories()
+
+			const standaloneDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid))
+
+			if (!standaloneDir.exists) {
+				standaloneDir.create({
+					intermediates: true,
+					idempotent: true
+				})
+			}
+
+			const metaFileName = `${item.data.uuid}.filenmeta`
+			const dataFileName = item.data.decryptedMeta.name
+			let deletedStaleData = false
+
+			// Drop stale data files from an older name (the heal may follow a remote rename) — never
+			// the meta, never the current data file (the download overwrites it in place).
+			for (const entry of standaloneDir.list()) {
+				if (entry.name === metaFileName || entry.name === dataFileName) {
+					continue
+				}
+
+				if (entry.exists) {
+					entry.delete()
+
+					deletedStaleData = true
+				}
+			}
+
+			if (deletedStaleData) {
+				// The physical data changed underneath the derived caches (getLocalFile may have
+				// cached the old-name file) — drop them even if the download below fails.
+				this.invalidateCaches()
+			}
+
+			const dataFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, dataFileName))
+
+			const downloaded = await transfers.download({
+				item,
+				destination: dataFile,
+				hideProgress: true,
+				signal
+			})
+
+			if (!downloaded) {
+				// Aborted — meta untouched; the next sync pass retries the heal.
+				return
+			}
+
+			const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, metaFileName))
+
+			atomicWrite(
+				metaFile,
+				serialize({
+					item,
+					parent
+				} satisfies FileOrDirectoryOfflineMeta)
+			)
+
+			this.invalidateCaches()
+		})
+
+		if (!result.success) {
+			throw result.error
+		}
+	}
+
 	public async storeDirectory({
 		directory,
 		parent,
@@ -1530,7 +1654,7 @@ export class Offline {
 			return
 		}
 
-		await this.reconcileTree({
+		const errors = await this.reconcileTree({
 			directory,
 			parent,
 			hideProgress,
@@ -1538,6 +1662,13 @@ export class Offline {
 			initialStore: true,
 			signal
 		})
+
+		// reconcileTree only returns a non-empty error array for an initial store when a readable
+		// committed meta already existed at pass start (it deletes the partial tree and throws
+		// otherwise). Surface the failure to the caller WITHOUT deleting the committed tree.
+		if (errors.length > 0) {
+			throw new Error(errors[0]?.message ?? "Storing directory offline failed")
+		}
 	}
 
 	// Converts a directory DriveItem at the given path into an AnyDirWithContext for SDK calls.
