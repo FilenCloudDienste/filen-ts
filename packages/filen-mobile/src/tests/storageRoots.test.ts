@@ -45,10 +45,10 @@ describe("BASE_DIRECTORY_URI derivation", () => {
 })
 
 describe("version segments embedded in paths", () => {
-	it("OFFLINE_DIRECTORY.uri contains 'offline/v1' (OFFLINE_VERSION=1)", async () => {
+	it("OFFLINE_DIRECTORY.uri contains 'offline/v2' (OFFLINE_VERSION=2)", async () => {
 		const { OFFLINE_DIRECTORY, OFFLINE_VERSION } = await importRoots("android")
 
-		expect(OFFLINE_VERSION).toBe(1)
+		expect(OFFLINE_VERSION).toBe(2)
 		expect(OFFLINE_DIRECTORY.uri).toContain(`offline/v${OFFLINE_VERSION}`)
 	})
 
