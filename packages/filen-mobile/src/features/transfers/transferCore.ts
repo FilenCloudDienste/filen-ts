@@ -14,7 +14,8 @@ import {
 	AnyNormalDir,
 	AnyNormalDir_Tags,
 	AnyFile,
-	type SharedFile
+	type SharedFile,
+	type DownloadError
 } from "@filen/sdk-rs"
 import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
@@ -809,12 +810,22 @@ export async function downloadCore(
 		signal,
 		preserveDestinationOnStart
 	}: DownloadParams
-): Promise<{
-	files: (Omit<FileWithPath, "file"> & {
-		file: File | SharedFile
-	})[]
-	directories: DirWithPath[]
-} | null> {
+): Promise<
+	| {
+			files: (Omit<FileWithPath, "file"> & {
+				file: File | SharedFile
+			})[]
+			directories: DirWithPath[]
+			errors: DownloadError[]
+	  }
+	| {
+			files: (Omit<FileWithPath, "file"> & {
+				file: File | SharedFile
+			})[]
+			directories: DirWithPath[]
+	  }
+	| null
+> {
 	const id = randomUUID()
 	const { authedSdkClient } = await auth.getSdkClients()
 	const transferAbortController = new AbortController()
@@ -903,9 +914,14 @@ export async function downloadCore(
 				})
 			}
 
-			const transferred: Awaited<ReturnType<typeof downloadCore>> = {
+			const transferred: {
+				files: (Omit<FileWithPath, "file"> & { file: File | SharedFile })[]
+				directories: DirWithPath[]
+				errors: DownloadError[]
+			} = {
 				files: [],
-				directories: []
+				directories: [],
+				errors: []
 			}
 
 			const targetDir: AnyDirWithContext = (() => {
@@ -971,6 +987,7 @@ export async function downloadCore(
 									: t
 							)
 						)
+						transferred.errors.push(...errors)
 					},
 					onDownloadUpdate(downloadedDirs, downloadedFiles, downloadedBytes) {
 						for (const downloadedDir of downloadedDirs) {
