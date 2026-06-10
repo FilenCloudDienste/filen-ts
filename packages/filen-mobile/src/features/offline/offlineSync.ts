@@ -17,10 +17,10 @@ import useOfflineStore from "@/features/offline/store/useOffline.store"
 import {
 	parentCacheKey,
 	shouldSkipOfflineSyncForConnection,
+	makeSyncError,
 	OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY,
 	type OfflineParent,
-	type OfflineSyncError,
-	type OfflineSyncErrorKind
+	type OfflineSyncError
 } from "@/features/offline/offlineHelpers"
 import {
 	unwrapDirMeta,
@@ -108,33 +108,6 @@ function isGoneListingError(error: unknown): boolean {
 	return kind === ErrorKind.FolderNotFound || kind === ErrorKind.WrongPassword
 }
 
-function makeSyncError({
-	itemUuid,
-	topLevelUuid,
-	name,
-	itemType,
-	kind,
-	message
-}: {
-	itemUuid: string
-	topLevelUuid: string | null
-	name: string
-	itemType: DriveItem["type"]
-	kind: OfflineSyncErrorKind
-	message: string
-}): OfflineSyncError {
-	return {
-		id: `${itemUuid}:${kind}`,
-		itemUuid,
-		topLevelUuid,
-		name,
-		itemType,
-		kind,
-		message,
-		timestamp: Date.now()
-	}
-}
-
 // Top-level offline sync orchestrator. Decides WHAT changed remotely (pure uuid decisions — file
 // uuids rotate on every content change, so there are NO timestamp comparisons anywhere) and
 // delegates every filesystem mutation to the lock-taking Offline methods (clearBarrier + per-uuid
@@ -154,6 +127,8 @@ function makeSyncError({
 //      copy, no error) → own-cloud getFileOptional move-follow/trash/delete → shared ⇒ remove.
 //   5. Broken standalone metas: rebuild own-cloud alive items via getFileOptional (meta rewrite
 //      when the data file exists, redownload when it does not), remove trashed/deleted leftovers.
+//      Broken TREE metas analogously via getDirOptional: alive → one reconcileTree rebuilds the
+//      meta around the existing bytes; trashed/deleted/undecidable → removeTreeDirectory.
 //   6. Finish: one updateIndex, replace useOfflineStore.syncErrors, stamp lastCompletedAt.
 //
 // Coalescing: concurrent sync() calls join the in-flight pass; auto passes within
@@ -516,6 +491,77 @@ export class OfflineSync {
 		)
 	}
 
+	// Own-cloud by-uuid fallback for a standalone file that vanished from its parent's view
+	// (absent from a clean listing, or the parent itself is gone): ONE getFileOptional decides.
+	// Moved to another own-cloud directory → re-anchor the stored parent context and keep the copy
+	// (renameStandaloneFile rewrites the meta incl. parent and renames the data file when the name
+	// changed too). Trashed/deleted → remove. Lookup failure → `listing` error, keep everything
+	// (retried next pass). Alive but undecryptable → never a deletion signal; keep untouched.
+	private async followStandaloneFileByUuid({
+		item,
+		parent,
+		authedSdkClient,
+		signal,
+		pushError
+	}: {
+		item: DriveItem
+		parent: OfflineParent
+		authedSdkClient: AuthedSdkClient
+		signal: AbortSignal
+		pushError: (error: OfflineSyncError) => void
+	}): Promise<void> {
+		const lookup = await run(async () =>
+			authedSdkClient.getFileOptional(item.data.uuid, {
+				signal
+			})
+		)
+
+		if (!lookup.success) {
+			pushError(
+				makeSyncError({
+					itemUuid: item.data.uuid,
+					topLevelUuid: null,
+					name: item.data.decryptedMeta?.name ?? item.data.uuid,
+					itemType: item.type,
+					kind: "listing",
+					message: errorMessage(lookup.error)
+				})
+			)
+
+			return
+		}
+
+		const remoteFile = lookup.data
+
+		if (remoteFile === undefined || isTrashParent(remoteFile.parent)) {
+			await offline.removeItem(item)
+
+			return
+		}
+
+		const unwrappedRemote = unwrapFileMeta(remoteFile)
+
+		if (!unwrappedRemote.meta) {
+			// Alive but undecryptable — never a deletion signal; keep the local copy untouched.
+			return
+		}
+
+		// Re-anchor the stored parent context; on any parent-resolve failure keep the OLD stored
+		// parent — the next pass retries.
+		const updated = unwrappedFileIntoDriveItem(unwrappedRemote)
+		const newParent =
+			(await this.resolveOwnParentContext({
+				parentUuid: unwrapParentUuid(remoteFile.parent),
+				authedSdkClient,
+				signal
+			})) ?? parent
+
+		await offline.renameStandaloneFile({
+			item: updated,
+			parent: newParent
+		})
+	}
+
 	// One stored standalone file. Decision order for a uuid vanished from its (clean) parent
 	// listing: byName version adoption → own-cloud by-uuid move-follow/trash/delete → shared ⇒
 	// positive evidence of removal.
@@ -559,6 +605,22 @@ export class OfflineSync {
 		}
 
 		if (listingState.status === "gone") {
+			// A gone/revoked parent is positive evidence only for SHARED items (no by-uuid
+			// fallbacks exist on foreign accounts). An OWN-cloud file may have been MOVED elsewhere
+			// before its old parent vanished — give it the same by-uuid move-follow that a
+			// vanished-from-a-clean-listing file gets before concluding removal.
+			if (isOwnCloudParent(parent)) {
+				await this.followStandaloneFileByUuid({
+					item,
+					parent,
+					authedSdkClient,
+					signal,
+					pushError
+				})
+
+				return
+			}
+
 			await offline.removeItem(item)
 
 			return
@@ -622,6 +684,7 @@ export class OfflineSync {
 				offline.storeFile({
 					file: newItem,
 					parent,
+					hideProgress: true,
 					skipIndexUpdate: true,
 					signal
 				})
@@ -654,63 +717,20 @@ export class OfflineSync {
 		}
 
 		// (b) No name match. Shared-in items support no by-uuid fallback — vanished from a clean
-		// listing is positive evidence the item is gone for us.
+		// listing is positive evidence the item is gone for us. Own-cloud items get the by-uuid
+		// move-follow/trash/delete decision.
 		if (!isOwnCloudParent(parent)) {
 			await offline.removeItem(item)
 
 			return
 		}
 
-		const lookup = await run(async () =>
-			authedSdkClient.getFileOptional(item.data.uuid, {
-				signal
-			})
-		)
-
-		if (!lookup.success) {
-			pushError(
-				makeSyncError({
-					itemUuid: item.data.uuid,
-					topLevelUuid: null,
-					name: item.data.decryptedMeta?.name ?? item.data.uuid,
-					itemType: item.type,
-					kind: "listing",
-					message: errorMessage(lookup.error)
-				})
-			)
-
-			return
-		}
-
-		const remoteFile = lookup.data
-
-		if (remoteFile === undefined || isTrashParent(remoteFile.parent)) {
-			await offline.removeItem(item)
-
-			return
-		}
-
-		// Moved to another own-cloud directory: re-anchor the stored parent context and keep the
-		// copy. renameStandaloneFile rewrites the meta (incl. parent) and renames the data file
-		// when the name changed too.
-		const unwrappedRemote = unwrapFileMeta(remoteFile)
-
-		if (!unwrappedRemote.meta) {
-			// Alive but undecryptable — never a deletion signal; keep the local copy untouched.
-			return
-		}
-
-		const updated = unwrappedFileIntoDriveItem(unwrappedRemote)
-		const newParent =
-			(await this.resolveOwnParentContext({
-				parentUuid: unwrapParentUuid(remoteFile.parent),
-				authedSdkClient,
-				signal
-			})) ?? parent
-
-		await offline.renameStandaloneFile({
-			item: updated,
-			parent: newParent
+		await this.followStandaloneFileByUuid({
+			item,
+			parent,
+			authedSdkClient,
+			signal,
+			pushError
 		})
 	}
 
@@ -828,6 +848,128 @@ export class OfflineSync {
 							topLevelUuid: null,
 							name: resolvedName ?? uuid,
 							itemType: "file",
+							kind: "store",
+							message: errorMessage(result.error)
+						})
+					)
+				}
+			})
+		)
+	}
+
+	// Stored tree directories/{uuid} dirs whose meta is missing/empty/undecodable (crash or
+	// aborted-pass residue — nothing lists them, so without this they linger invisibly forever):
+	// one getDirOptional decides. Alive → rebuild the root item from the remote dir, resolve its
+	// parent context, and run ONE reconcileTree over the existing bytes (the unreadable-meta path:
+	// empty local view, hash-idempotent download skips healthy bytes, meta rebuilt from the listing
+	// — near-free). Trashed/deleted/undecidable → removeTreeDirectory. Lookup failure → `listing`
+	// error, dir left for the next pass. Mirrors healBrokenStandalones.
+	private async healBrokenTrees({
+		authedSdkClient,
+		signal,
+		pushError,
+		pushErrors
+	}: {
+		authedSdkClient: AuthedSdkClient
+		signal: AbortSignal
+		pushError: (error: OfflineSyncError) => void
+		pushErrors: (errors: OfflineSyncError[]) => void
+	}): Promise<void> {
+		const brokenTrees = await offline.listBrokenTreeUuids()
+
+		await Promise.all(
+			brokenTrees.map(async uuid => {
+				if (signal.aborted) {
+					return
+				}
+
+				let resolvedName: string | undefined
+
+				const result = await run(async () => {
+					const lookup = await run(async () =>
+						authedSdkClient.getDirOptional(uuid, {
+							signal
+						})
+					)
+
+					if (!lookup.success) {
+						pushError(
+							makeSyncError({
+								itemUuid: uuid,
+								topLevelUuid: uuid,
+								name: uuid,
+								itemType: "directory",
+								kind: "listing",
+								message: errorMessage(lookup.error)
+							})
+						)
+
+						return
+					}
+
+					const remoteDir = lookup.data
+
+					if (remoteDir === undefined || isTrashParent(remoteDir.parent)) {
+						await offline.removeTreeDirectory(uuid)
+
+						return
+					}
+
+					const unwrappedRemote = unwrapDirMeta(remoteDir)
+
+					if (!unwrappedRemote.meta) {
+						// Alive but undecryptable: with no readable local meta AND no decryptable
+						// remote name there is nothing to rebuild a meta around — undecidable, so the
+						// orphaned tree dir is removed (mirrors the broken-standalone policy).
+						await offline.removeTreeDirectory(uuid)
+
+						return
+					}
+
+					resolvedName = unwrappedRemote.meta.name
+
+					const rebuilt = unwrappedDirIntoDriveItem(unwrappedRemote)
+					const resolvedParent = await this.resolveOwnParentContext({
+						parentUuid: unwrapParentUuid(remoteDir.parent),
+						authedSdkClient,
+						signal
+					})
+
+					if (!resolvedParent) {
+						// A broken meta has no stored parent to fall back to — leave the dir for the
+						// next pass instead of writing a meta with a guessed parent.
+						pushError(
+							makeSyncError({
+								itemUuid: uuid,
+								topLevelUuid: uuid,
+								name: unwrappedRemote.meta.name,
+								itemType: "directory",
+								kind: "listing",
+								message: "Could not resolve the parent directory of a broken offline tree meta"
+							})
+						)
+
+						return
+					}
+
+					pushErrors(
+						await offline.reconcileTree({
+							directory: rebuilt,
+							parent: resolvedParent,
+							hideProgress: true,
+							skipIndexUpdate: true,
+							signal
+						})
+					)
+				})
+
+				if (!result.success) {
+					pushError(
+						makeSyncError({
+							itemUuid: uuid,
+							topLevelUuid: uuid,
+							name: resolvedName ?? uuid,
+							itemType: "directory",
 							kind: "store",
 							message: errorMessage(result.error)
 						})
@@ -988,11 +1130,19 @@ export class OfflineSync {
 					)
 				])
 
-				await this.healBrokenStandalones({
-					authedSdkClient,
-					signal,
-					pushError
-				})
+				await Promise.all([
+					this.healBrokenStandalones({
+						authedSdkClient,
+						signal,
+						pushError
+					}),
+					this.healBrokenTrees({
+						authedSdkClient,
+						signal,
+						pushError,
+						pushErrors
+					})
+				])
 
 				if (signal.aborted) {
 					// Aborted mid-pass (logout/teardown): removeItem already reindexed its own

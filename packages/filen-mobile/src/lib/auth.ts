@@ -263,7 +263,6 @@ class Auth {
 			cameraUpload.cancel()
 			chatsSync.cancel()
 			notesSync.cancel()
-			offline.cancel()
 			offlineSync.cancel()
 		} catch (e) {
 			console.error(e)

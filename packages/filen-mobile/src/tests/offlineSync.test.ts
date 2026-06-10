@@ -16,6 +16,7 @@ vi.mock("@/features/offline/offline", () => ({
 		listFiles: vi.fn(),
 		listDirectories: vi.fn(),
 		listBrokenStandaloneUuids: vi.fn(),
+		listBrokenTreeUuids: vi.fn(),
 		updateIndex: vi.fn(),
 		reconcileTree: vi.fn(),
 		updateTreeRootMeta: vi.fn(),
@@ -24,7 +25,8 @@ vi.mock("@/features/offline/offline", () => ({
 		removeItem: vi.fn(),
 		storeFile: vi.fn(),
 		getLocalFile: vi.fn(),
-		removeStandaloneDirectory: vi.fn()
+		removeStandaloneDirectory: vi.fn(),
+		removeTreeDirectory: vi.fn()
 	}
 }))
 
@@ -444,6 +446,7 @@ function primeDefaults(): MockClient {
 		directories: []
 	})
 	vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([])
+	vi.mocked(offline.listBrokenTreeUuids).mockResolvedValue([])
 	vi.mocked(offline.updateIndex).mockResolvedValue(undefined)
 	vi.mocked(offline.reconcileTree).mockResolvedValue([])
 	vi.mocked(offline.updateTreeRootMeta).mockResolvedValue(undefined)
@@ -453,6 +456,7 @@ function primeDefaults(): MockClient {
 	vi.mocked(offline.storeFile).mockResolvedValue(true)
 	vi.mocked(offline.getLocalFile).mockResolvedValue(null)
 	vi.mocked(offline.removeStandaloneDirectory).mockResolvedValue(undefined)
+	vi.mocked(offline.removeTreeDirectory).mockResolvedValue(undefined)
 	vi.mocked(auth.getSdkClients).mockImplementation(
 		async () =>
 			({
@@ -880,6 +884,8 @@ describe("offlineSync — standalone files", () => {
 		expect(order).toEqual(["storeFile", "removeItem"])
 		expect(vi.mocked(offline.storeFile).mock.calls[0]?.[0]?.file.data.uuid).toBe("file-new")
 		expect(vi.mocked(offline.storeFile).mock.calls[0]?.[0]?.skipIndexUpdate).toBe(true)
+		// Background pass — the adoption download must not surface transfer UI progress.
+		expect(vi.mocked(offline.storeFile).mock.calls[0]?.[0]?.hideProgress).toBe(true)
 		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledWith(oldItem)
 		expect(client.getFileOptional).not.toHaveBeenCalled()
 
@@ -1050,6 +1056,121 @@ describe("offlineSync — standalone files", () => {
 				.map(error => error.itemUuid)
 				.sort()
 		).toEqual(["file-1", "file-2"])
+	})
+
+	it("14b. own-cloud parent GONE but file moved elsewhere → by-uuid fallback re-anchors, NOT removed", async () => {
+		givenFiles([
+			{
+				item: makeFileItem("file-1", "doc.txt"),
+				parent: makeNormalParent("parent-gone")
+			}
+		])
+		// The old parent directory itself is gone (FolderNotFound) — but the file was MOVED to
+		// another own-cloud directory before that, so it must be re-anchored, not removed.
+		client.listDir.mockRejectedValue({
+			__kind: "FolderNotFound"
+		})
+		client.getFileOptional.mockImplementation(async (uuid: string) =>
+			uuid === "file-1" ? makeRemoteFile("file-1", "doc.txt", uuidParent("parent-other")) : undefined
+		)
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "parent-other" ? makeRemoteDir("parent-other", "Other", uuidParent(ROOT_UUID)) : undefined
+		)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.renameStandaloneFile)).toHaveBeenCalledTimes(1)
+
+		const renameArgs = vi.mocked(offline.renameStandaloneFile).mock.calls[0]?.[0] as unknown as {
+			item: DriveItem
+			parent: {
+				tag: string
+				inner: [
+					{
+						tag: string
+						inner: [
+							{
+								uuid: string
+							}
+						]
+					}
+				]
+			}
+		}
+
+		expect(renameArgs.item.data.uuid).toBe("file-1")
+		expect(renameArgs.parent.tag).toBe("Normal")
+		expect(renameArgs.parent.inner[0].inner[0].uuid).toBe("parent-other")
+		expect(syncErrors()).toEqual([])
+	})
+
+	it("14c. own-cloud parent GONE and by-uuid says deleted/trashed → removeItem", async () => {
+		const deletedItem = makeFileItem("file-deleted", "a.txt")
+		const trashedItem = makeFileItem("file-trashed", "b.txt")
+
+		givenFiles([
+			{
+				item: deletedItem,
+				parent: makeNormalParent("parent-gone")
+			},
+			{
+				item: trashedItem,
+				parent: makeNormalParent("parent-gone")
+			}
+		])
+		client.listDir.mockRejectedValue({
+			__kind: "FolderNotFound"
+		})
+		client.getFileOptional.mockImplementation(async (uuid: string) =>
+			uuid === "file-trashed" ? makeRemoteFile("file-trashed", "b.txt", trashParent) : undefined
+		)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledWith(deletedItem)
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledWith(trashedItem)
+		expect(vi.mocked(offline.renameStandaloneFile)).not.toHaveBeenCalled()
+	})
+
+	it("14d. own-cloud parent GONE and by-uuid lookup fails → listing error, nothing removed", async () => {
+		givenFiles([
+			{
+				item: makeFileItem("file-1", "doc.txt"),
+				parent: makeNormalParent("parent-gone")
+			}
+		])
+		client.listDir.mockRejectedValue({
+			__kind: "FolderNotFound"
+		})
+		client.getFileOptional.mockRejectedValue(new Error("network down"))
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(syncErrors()).toHaveLength(1)
+		expect(syncErrors()[0]?.kind).toBe("listing")
+		expect(syncErrors()[0]?.itemUuid).toBe("file-1")
+	})
+
+	it("14e. SHARED parent GONE → immediate removeItem, by-uuid fallback never attempted", async () => {
+		const sharedItem = makeFileItem("file-1", "doc.txt")
+
+		givenFiles([
+			{
+				item: sharedItem,
+				parent: makeSharedParent("sparent-gone")
+			}
+		])
+		client.listSharedDir.mockRejectedValue({
+			__kind: "FolderNotFound"
+		})
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledWith(sharedItem)
+		expect(client.getFileOptional).not.toHaveBeenCalled()
 	})
 })
 
@@ -1247,5 +1368,102 @@ describe("offlineSync — broken standalone metas", () => {
 		expect(healArgs.signal).toBeInstanceOf(AbortSignal)
 		expect(vi.mocked(offline.removeStandaloneDirectory)).not.toHaveBeenCalled()
 		expect(syncErrors()).toEqual([])
+	})
+})
+
+describe("offlineSync — broken tree metas", () => {
+	it("20. own-cloud alive → ONE reconcileTree with the rebuilt root item and resolved parent; reconcile errors propagated", async () => {
+		vi.mocked(offline.listBrokenTreeUuids).mockResolvedValue(["broken-tree"])
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "broken-tree") {
+				return makeRemoteDir("broken-tree", "Rescued tree", uuidParent("parent-1"))
+			}
+
+			if (uuid === "parent-1") {
+				return makeRemoteDir("parent-1", "Parent", uuidParent(ROOT_UUID))
+			}
+
+			return undefined
+		})
+		vi.mocked(offline.reconcileTree).mockResolvedValue([
+			{
+				id: "broken-tree:listing",
+				itemUuid: "broken-tree",
+				topLevelUuid: "broken-tree",
+				name: "Rescued tree",
+				itemType: "directory",
+				kind: "listing",
+				message: "degraded",
+				degraded: true,
+				timestamp: Date.now()
+			}
+		])
+
+		await runManualPass()
+
+		// The unreadable-meta reconcile path rebuilds the meta nearly free (hash-skips bytes).
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(1)
+
+		const reconcileArgs = vi.mocked(offline.reconcileTree).mock.calls[0]?.[0] as unknown as {
+			directory: DriveItem
+			parent: {
+				tag: string
+				inner: [
+					{
+						tag: string
+						inner: [
+							{
+								uuid: string
+							}
+						]
+					}
+				]
+			}
+			hideProgress: boolean
+			skipIndexUpdate: boolean
+			signal: AbortSignal
+		}
+
+		expect(reconcileArgs.directory.data.uuid).toBe("broken-tree")
+		expect(reconcileArgs.directory.data.decryptedMeta?.name).toBe("Rescued tree")
+		expect(reconcileArgs.parent.tag).toBe("Normal")
+		expect(reconcileArgs.parent.inner[0].inner[0].uuid).toBe("parent-1")
+		expect(reconcileArgs.hideProgress).toBe(true)
+		expect(reconcileArgs.skipIndexUpdate).toBe(true)
+		expect(reconcileArgs.signal).toBeInstanceOf(AbortSignal)
+		expect(vi.mocked(offline.removeTreeDirectory)).not.toHaveBeenCalled()
+
+		// Reconcile errors bubble into the pass error surface.
+		expect(syncErrors()).toHaveLength(1)
+		expect(syncErrors()[0]?.id).toBe("broken-tree:listing")
+	})
+
+	it("20b. deleted (undefined) or trashed → removeTreeDirectory, no reconcile", async () => {
+		vi.mocked(offline.listBrokenTreeUuids).mockResolvedValue(["broken-deleted", "broken-trashed"])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "broken-trashed" ? makeRemoteDir("broken-trashed", "Trashed tree", trashParent) : undefined
+		)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeTreeDirectory)).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(offline.removeTreeDirectory)).toHaveBeenCalledWith("broken-deleted")
+		expect(vi.mocked(offline.removeTreeDirectory)).toHaveBeenCalledWith("broken-trashed")
+		expect(vi.mocked(offline.reconcileTree)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
+	})
+
+	it("20c. lookup failure → listing error only, dir left for the next pass", async () => {
+		vi.mocked(offline.listBrokenTreeUuids).mockResolvedValue(["broken-tree"])
+		client.getDirOptional.mockRejectedValue(new Error("network down"))
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeTreeDirectory)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.reconcileTree)).not.toHaveBeenCalled()
+		expect(syncErrors()).toHaveLength(1)
+		expect(syncErrors()[0]?.kind).toBe("listing")
+		expect(syncErrors()[0]?.itemUuid).toBe("broken-tree")
+		expect(syncErrors()[0]?.topLevelUuid).toBe("broken-tree")
 	})
 })
