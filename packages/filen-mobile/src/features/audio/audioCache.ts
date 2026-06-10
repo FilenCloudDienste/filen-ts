@@ -3,6 +3,7 @@ import { Semaphore, run } from "@filen/utils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
+import { atomicWrite } from "@/lib/fsAtomic"
 import fileCache from "@/lib/fileCache"
 import { parseWebStream } from "music-metadata"
 import { Image, type ImageRef } from "expo-image"
@@ -280,15 +281,13 @@ export class AudioCache {
 							cachedAt: Date.now()
 						}
 
-						if (metadataFile.exists) {
-							metadataFile.delete()
-						}
+						// Atomic sidecar write (temp + single overwriting move): a crash mid-write
+						// can no longer leave a torn sidecar that has()/get() choke on. Ensure the
+						// parent directory first — atomicWrite's move does not create intermediates
+						// (the old create({ intermediates: true }) covered that).
+						this.ensureDirectory()
 
-						metadataFile.create({
-							intermediates: true
-						})
-
-						metadataFile.write(serialize(metadata))
+						atomicWrite(metadataFile, serialize(metadata))
 					} else if (metadataFile.exists && metadataFile.size > 0) {
 						metadata = parseMetadata(await metadataFile.text())
 

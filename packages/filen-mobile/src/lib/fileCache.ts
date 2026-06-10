@@ -3,7 +3,7 @@ import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import { Semaphore, run } from "@filen/utils"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
-import { isEqual } from "es-toolkit"
+import { atomicWrite } from "@/lib/fsAtomic"
 import auth from "@/lib/auth"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { wrapAbortSignalForSdk } from "@/lib/signals"
@@ -34,6 +34,46 @@ export const VERSION = FILE_CACHE_VERSION
 
 const DEFAULT_GC_AGE_MS = 24 * 60 * 60 * 1000
 export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
+
+/**
+ * Whether a stored metadata sidecar still identifies the same cached bytes as `item`.
+ *
+ * The backend rotates a file's uuid on EVERY content change — the same uuid implies
+ * byte-identical content forever, so the type discriminators + uuid (plus the size as a
+ * cheap sanity check) are a sufficient identity for the cached bytes. Deep equality is
+ * deliberately NOT used: live SDK drive items carry UniffiEnum variant class instances
+ * and present-but-undefined keys that a serializer round-trip cannot reproduce, so deep
+ * comparison treated every revived sidecar as stale and killed the cache for drive items.
+ * Metadata-only mutations (rename, favorite, move) keep the uuid and must NOT invalidate
+ * the cached bytes.
+ */
+function metadataMatchesItem(metadata: Metadata, item: CacheItem): boolean {
+	if (item.type === "drive") {
+		if (item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+			return false
+		}
+
+		// Guard the stored shape at runtime — a corrupt sidecar can carry the right
+		// discriminator with a missing or malformed body.
+		if (metadata.type !== "drive" || typeof metadata.data !== "object" || metadata.data === null) {
+			return false
+		}
+
+		return (
+			metadata.data.type === item.data.type &&
+			metadata.data.data?.uuid === item.data.data.uuid &&
+			metadata.data.data?.size === item.data.data.size
+		)
+	}
+
+	if (metadata.type !== "external" || typeof metadata.data !== "object" || metadata.data === null) {
+		return false
+	}
+
+	// External entries are keyed by xxHash32(url) and their stored name decides the
+	// on-disk extension — compare both, exactly what the old deep equality compared.
+	return metadata.data.url === item.data.url && metadata.data.name === item.data.name
+}
 
 export class FileCache {
 	private readonly mutexes = new Map<string, Semaphore>()
@@ -138,15 +178,32 @@ export class FileCache {
 				return false
 			}
 
-			const metadataContent = deserialize(await metadata.text()) as Metadata
+			let metadataContent: Metadata | null = null
 
-			if (Object.keys(metadataContent).length === 0) {
+			try {
+				metadataContent = deserialize(await metadata.text()) as Metadata
+			} catch (e) {
+				console.error(e)
+
+				// Torn/unparseable sidecar (crash mid-write before sidecars became atomic,
+				// disk corruption): self-heal at access time — treat as a miss and drop the
+				// sidecar so the next get() re-downloads, instead of throwing until gc.
+				try {
+					if (metadata.exists) {
+						metadata.delete()
+					}
+				} catch {
+					// best-effort — a failed delete just leaves the torn sidecar for gc
+				}
+
 				return false
 			}
 
-			const { cachedAt: _, ...metadataWithoutCachedAt } = metadataContent
+			if (!metadataContent || Object.keys(metadataContent).length === 0) {
+				return false
+			}
 
-			return isEqual(metadataWithoutCachedAt, item)
+			return metadataMatchesItem(metadataContent, item)
 		})
 
 		if (!result.success) {
@@ -190,12 +247,8 @@ export class FileCache {
 				try {
 					const metadata = deserialize(await metadataFile.text()) as Metadata
 
-					if (Object.keys(metadata).length > 0) {
-						const { cachedAt: _, ...metadataWithoutCachedAt } = metadata
-
-						if (isEqual(metadataWithoutCachedAt, item)) {
-							return file
-						}
+					if (metadata && Object.keys(metadata).length > 0 && metadataMatchesItem(metadata, item)) {
+						return file
 					}
 				} catch (e) {
 					console.error(e)
@@ -250,16 +303,16 @@ export class FileCache {
 					throw new Error("File does not exist after download")
 				}
 
-				if (metadataFile.exists) {
-					metadataFile.delete()
-				}
-
+				// Atomic sidecar write (temp + single overwriting move): a crash mid-write can
+				// no longer leave a torn sidecar. No delete-first — that would reopen the
+				// window where a crash leaves the entry sidecar-less.
 				if (item.type === "drive") {
 					if (item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
 						throw new Error("Item must be a file or shared file")
 					}
 
-					metadataFile.write(
+					atomicWrite(
+						metadataFile,
 						serialize({
 							type: "drive",
 							data: item.data,
@@ -267,7 +320,8 @@ export class FileCache {
 						} satisfies Metadata)
 					)
 				} else {
-					metadataFile.write(
+					atomicWrite(
+						metadataFile,
 						serialize({
 							type: "external",
 							data: item.data,

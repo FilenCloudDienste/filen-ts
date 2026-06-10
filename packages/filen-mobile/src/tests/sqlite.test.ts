@@ -462,6 +462,137 @@ describe("Sqlite", () => {
 		})
 	})
 
+	// D2 — defense-in-depth for the logout wipe: an aborted sync's late INSERT that
+	// started BEFORE clearAsync() but executes AFTER it must be discarded, never
+	// re-INSERTed into the just-emptied kv. Mirrors cache.ts's clearGeneration pattern.
+	describe("kv clear-generation guard (D2)", () => {
+		it("discards a write that started before clearAsync and lands after it", async () => {
+			const sqlite = await createSqlite()
+
+			await sqlite.init()
+
+			// Stall the write's openDb call so the wipe can land in between.
+			const originalOpenDb = sqlite.openDb.bind(sqlite)
+			let releaseStalledOpen!: () => void
+			const stalledOpenGate = new Promise<void>(resolve => {
+				releaseStalledOpen = resolve
+			})
+			let openCalls = 0
+
+			sqlite.openDb = vi.fn().mockImplementation(async () => {
+				openCalls++
+
+				if (openCalls === 1) {
+					await stalledOpenGate
+				}
+
+				return await originalOpenDb()
+			})
+
+			// The write captures its generation, serializes, then stalls on openDb.
+			const writePromise = sqlite.kvAsync.set("stale-key", "stale-value")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(openCalls).toBe(1)
+
+			// The wipe lands while the write is stalled.
+			await sqlite.clearAsync()
+
+			releaseStalledOpen()
+
+			const result = await writePromise
+
+			// The superseded write is discarded silently.
+			expect(result).toBeNull()
+			expect(await sqlite.kvAsync.contains("stale-key")).toBe(false)
+		})
+
+		it("kvAsync.clear also supersedes in-flight writes", async () => {
+			const sqlite = await createSqlite()
+
+			await sqlite.init()
+
+			const originalOpenDb = sqlite.openDb.bind(sqlite)
+			let releaseStalledOpen!: () => void
+			const stalledOpenGate = new Promise<void>(resolve => {
+				releaseStalledOpen = resolve
+			})
+			let openCalls = 0
+
+			sqlite.openDb = vi.fn().mockImplementation(async () => {
+				openCalls++
+
+				if (openCalls === 1) {
+					await stalledOpenGate
+				}
+
+				return await originalOpenDb()
+			})
+
+			const writePromise = sqlite.kvAsync.set("stale-key", "stale-value")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			await sqlite.kvAsync.clear()
+
+			releaseStalledOpen()
+
+			expect(await writePromise).toBeNull()
+			expect(await sqlite.kvAsync.contains("stale-key")).toBe(false)
+		})
+
+		it("normal writes after a wipe are unaffected", async () => {
+			const sqlite = await createSqlite()
+
+			await sqlite.clearAsync()
+			await sqlite.kvAsync.set("fresh-key", "fresh-value")
+
+			expect(await sqlite.kvAsync.get("fresh-key")).toBe("fresh-value")
+		})
+
+		it("the generation survives multiple clears — a write stalled across two wipes is still discarded", async () => {
+			const sqlite = await createSqlite()
+
+			await sqlite.init()
+
+			const originalOpenDb = sqlite.openDb.bind(sqlite)
+			let releaseStalledOpen!: () => void
+			const stalledOpenGate = new Promise<void>(resolve => {
+				releaseStalledOpen = resolve
+			})
+			let openCalls = 0
+
+			sqlite.openDb = vi.fn().mockImplementation(async () => {
+				openCalls++
+
+				if (openCalls === 1) {
+					await stalledOpenGate
+				}
+
+				return await originalOpenDb()
+			})
+
+			const writePromise = sqlite.kvAsync.set("stale-key", "stale-value")
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			// Two wipes — the generation keeps advancing, never resets.
+			await sqlite.clearAsync()
+			await sqlite.clearAsync()
+
+			releaseStalledOpen()
+
+			expect(await writePromise).toBeNull()
+			expect(await sqlite.kvAsync.contains("stale-key")).toBe(false)
+
+			// And the store still accepts new writes afterwards.
+			await sqlite.kvAsync.set("post-wipe", "ok")
+
+			expect(await sqlite.kvAsync.get("post-wipe")).toBe("ok")
+		})
+	})
+
 	describe("shrinkMemory", () => {
 		it("executes PRAGMA shrink_memory after db is open", async () => {
 			const sqlite = await createSqlite()

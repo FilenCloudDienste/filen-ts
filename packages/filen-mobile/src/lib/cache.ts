@@ -103,6 +103,14 @@ type MapEntry = {
 	map: PersistentMap<unknown>
 }
 
+// Snapshot of the three dirty sets taken by drainDirty(). Kept around for the lifetime of
+// a persist attempt so a failed batch can re-mark exactly what it drained.
+type DrainedDirty = {
+	clears: Set<string>
+	deletes: Map<string, Set<string>>
+	upserts: Map<string, Set<string>>
+}
+
 /**
  * Value shape for `cameraUploadHashes`. `md5` is the hash of the asset content as it
  * was last uploaded (or last verified against the cache); `verifiedModificationTime`
@@ -175,7 +183,10 @@ export class Cache {
 
 		AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "background") {
-				this.flushNow()
+				// flushNow() resolves only once the batch has actually landed (it never
+				// rejects — failures re-mark their keys dirty internally), so the write is
+				// in flight before the process can be suspended instead of fire-and-forget.
+				void this.flushNow()
 			}
 		})
 	}
@@ -246,15 +257,29 @@ export class Cache {
 	// during the logout window cannot re-INSERT decrypted metadata into the just-emptied plaintext kv.
 	private locked = false
 
-	/**
-	 * Drains (snapshots and clears) the three dirty sets and builds the full
-	 * DELETE/INSERT command list synchronously, without any await or chunking.
-	 * Used by the sync flush path (persistNow). persistAsync keeps its own
-	 * chunked path to preserve the setImmediate yield and generation guard.
-	 */
-	private drainAndBuild(): [string, (string | Uint8Array)[]][] {
-		const commands: [string, (string | Uint8Array)[]][] = []
+	// Serializes ALL SQLite persist work (sync flush + async chunked persist): one writer at a
+	// time. Without this, a flushNow() landing during persistAsync's chunked build could commit
+	// newer values first and then be overwritten when the older batch commits last (stale row
+	// wins until the next mutation). The later writer drains the then-current dirty sets and
+	// reads then-current map values, so the newest value always lands last.
+	private writeChain: Promise<void> = Promise.resolve()
 
+	private enqueueWrite(work: () => Promise<void>): Promise<void> {
+		const next = this.writeChain.then(work)
+
+		// Writers handle their own failures (re-marking their drained keys dirty), but never
+		// let a rejection poison the chain for subsequent writers.
+		this.writeChain = next.catch(() => {})
+
+		return next
+	}
+
+	/**
+	 * Snapshots and empties the three dirty sets. The snapshot shares the inner Sets by
+	 * reference — safe because onMutate only mutates Sets reachable through the (now
+	 * emptied) live maps, never a drained snapshot.
+	 */
+	private drainDirty(): DrainedDirty {
 		const clears = new Set(this.dirtyClears)
 		const deletes = new Map(this.dirtyDeletes)
 		const upserts = new Map(this.dirtyUpserts)
@@ -262,6 +287,21 @@ export class Cache {
 		this.dirtyClears.clear()
 		this.dirtyDeletes.clear()
 		this.dirtyUpserts.clear()
+
+		return {
+			clears,
+			deletes,
+			upserts
+		}
+	}
+
+	/**
+	 * Builds the DELETE/INSERT command list for a drained snapshot synchronously, without
+	 * any await or chunking. Used by the flush path; persistAsync keeps its own chunked
+	 * build to preserve the setImmediate yields.
+	 */
+	private buildCommands({ clears, deletes, upserts }: DrainedDirty): [string, (string | Uint8Array)[]][] {
+		const commands: [string, (string | Uint8Array)[]][] = []
 
 		for (const mapKey of clears) {
 			commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
@@ -293,45 +333,119 @@ export class Cache {
 	}
 
 	/**
-	 * Synchronous persist — used by flushNow() when the app backgrounds.
-	 * Serializes all dirty entries in one go without yielding.
+	 * Re-marks the keys of a failed (never-landed) batch as dirty so the next persist
+	 * retries them instead of silently dropping the drained mutations. Keys a NEWER
+	 * mutation superseded since the drain (delete-over-upsert, upsert-over-delete,
+	 * whole-map clear) are skipped so the retry cannot clobber fresher intent, and the
+	 * whole re-mark is refused after a clear() bumped the generation — re-dirtying
+	 * wiped logout data would leak it into the next session's first persist.
 	 */
-	private persistNow(): void {
-		if (this.locked) {
+	private remarkFailedBatch(generation: number, { clears, deletes, upserts }: DrainedDirty): void {
+		if (generation !== this.clearGeneration || this.locked) {
 			return
 		}
 
-		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
-			return
+		// Dirt present right now arrived AFTER the drain — it is newer than the failed
+		// batch and must win. Snapshot the newer clears BEFORE re-adding the drained ones.
+		const newerClears = new Set(this.dirtyClears)
+
+		for (const mapKey of clears) {
+			// Replaying a drained clear is safe even with newer per-key dirt present:
+			// buildCommands always executes clears before deletes/upserts.
+			this.dirtyClears.add(mapKey)
 		}
 
-		const generation = this.clearGeneration
-		const now = performance.now()
-		const commands = this.drainAndBuild()
+		for (const [mapKey, entryKeys] of deletes) {
+			if (newerClears.has(mapKey)) {
+				continue
+			}
 
-		if (commands.length === 0) {
-			return
+			let target = this.dirtyDeletes.get(mapKey)
+
+			for (const entryKey of entryKeys) {
+				if (this.dirtyUpserts.get(mapKey)?.has(entryKey)) {
+					continue
+				}
+
+				if (!target) {
+					target = new Set()
+
+					this.dirtyDeletes.set(mapKey, target)
+				}
+
+				target.add(entryKey)
+			}
 		}
 
-		console.log(`[Cache] Persisting ${commands.length} changes`)
+		for (const [mapKey, entryKeys] of upserts) {
+			if (newerClears.has(mapKey)) {
+				continue
+			}
 
-		sqlite
-			.openDb()
-			.then(db => {
+			let target = this.dirtyUpserts.get(mapKey)
+
+			for (const entryKey of entryKeys) {
+				if (this.dirtyDeletes.get(mapKey)?.has(entryKey)) {
+					continue
+				}
+
+				if (!target) {
+					target = new Set()
+
+					this.dirtyUpserts.set(mapKey, target)
+				}
+
+				target.add(entryKey)
+			}
+		}
+	}
+
+	/**
+	 * Serialized flush persist — used by flushNow() when the app backgrounds. Drains and
+	 * builds in one go (no chunk yields) and resolves only once the batch has landed (or
+	 * its keys were re-marked dirty after a failure). Never rejects.
+	 */
+	private persistNow(): Promise<void> {
+		return this.enqueueWrite(async () => {
+			if (this.locked) {
+				return
+			}
+
+			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
+				return
+			}
+
+			const generation = this.clearGeneration
+			const now = performance.now()
+			const drained = this.drainDirty()
+
+			try {
+				const commands = this.buildCommands(drained)
+
+				if (commands.length === 0) {
+					return
+				}
+
+				console.log(`[Cache] Persisting ${commands.length} changes`)
+
+				const db = await sqlite.openDb()
+
 				// A clear() that lands between draining the dirty sets and opening the DB must win:
 				// writing the just-drained commands would re-INSERT the wiped rows (logout leak).
 				if (generation !== this.clearGeneration) {
 					return
 				}
 
-				return db.executeBatch(commands)
-			})
-			.catch(err => {
-				console.error("[Cache] Failed to batch persist", err)
-			})
-			.finally(() => {
+				await db.executeBatch(commands)
+
 				console.log(`[Cache] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
-			})
+			} catch (err) {
+				console.error("[Cache] Failed to batch persist", err)
+
+				// The batch never landed — re-mark the drained keys so the next persist retries.
+				this.remarkFailedBatch(generation, drained)
+			}
+		})
 	}
 
 	/**
@@ -345,34 +459,38 @@ export class Cache {
 
 		this.persisting = true
 
+		try {
+			await this.enqueueWrite(() => this.persistAsyncWork())
+		} finally {
+			this.persisting = false
+
+			if (!this.locked && (this.dirtyUpserts.size > 0 || this.dirtyDeletes.size > 0 || this.dirtyClears.size > 0)) {
+				this.persistDirty()
+			}
+		}
+	}
+
+	private async persistAsyncWork(): Promise<void> {
+		if (this.locked) {
+			return
+		}
+
+		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
+			return
+		}
+
 		const generation = this.clearGeneration
+		const now = performance.now()
+		const drained = this.drainDirty()
 
 		try {
-			if (this.locked) {
-				return
-			}
-
-			if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0 && this.dirtyClears.size === 0) {
-				return
-			}
-
-			const now = performance.now()
-
-			const clears = new Set(this.dirtyClears)
-			const deletes = new Map(this.dirtyDeletes)
-			const upserts = new Map(this.dirtyUpserts)
-
-			this.dirtyClears.clear()
-			this.dirtyDeletes.clear()
-			this.dirtyUpserts.clear()
-
 			const commands: [string, (string | Uint8Array)[]][] = []
 
-			for (const mapKey of clears) {
+			for (const mapKey of drained.clears) {
 				commands.push(["DELETE FROM kv WHERE key LIKE ?", [mapKey + ":%"]])
 			}
 
-			for (const [mapKey, entryKeys] of deletes) {
+			for (const [mapKey, entryKeys] of drained.deletes) {
 				for (const entryKey of entryKeys) {
 					commands.push(["DELETE FROM kv WHERE key = ?", [mapKey + ":" + entryKey]])
 				}
@@ -381,7 +499,7 @@ export class Cache {
 			let serialized = 0
 
 			for (const entry of this.registry) {
-				const upsertKeys = upserts.get(entry.key)
+				const upsertKeys = drained.upserts.get(entry.key)
 
 				if (!upsertKeys) {
 					continue
@@ -424,12 +542,9 @@ export class Cache {
 			console.log(`[Cache] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
 		} catch (err) {
 			console.error("[Cache] Failed to persist", err)
-		} finally {
-			this.persisting = false
 
-			if (!this.locked && (this.dirtyUpserts.size > 0 || this.dirtyDeletes.size > 0 || this.dirtyClears.size > 0)) {
-				this.persistDirty()
-			}
+			// The batch never landed — re-mark the drained keys so the next persist retries.
+			this.remarkFailedBatch(generation, drained)
 		}
 	}
 
@@ -493,9 +608,17 @@ export class Cache {
 		this.persistDirty()
 	}
 
-	public flushNow(): void {
+	/**
+	 * Cancels the pending debounce and persists every dirty entry immediately. The
+	 * returned promise settles once the batch has landed on disk (or its keys were
+	 * re-marked dirty after a failure) — the AppState background handler threads it so
+	 * the write is not fire-and-forget while the process is being suspended. Never
+	 * rejects, so callers that cannot await may safely ignore the promise.
+	 */
+	public flushNow(): Promise<void> {
 		this.persistDirty.cancel()
-		this.persistNow()
+
+		return this.persistNow()
 	}
 
 	/**

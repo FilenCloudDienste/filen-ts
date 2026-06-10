@@ -958,18 +958,24 @@ describe("drive.findItemMatchesForName", () => {
 		expect(result).toHaveLength(2)
 	})
 
-	it("normalizes paths in results via normalizeFilePathForSdk", async () => {
-		const sdkResults = [{ item: { tag: "File", inner: [{ uuid: "file-0001", region: "us-east-1" }] }, path: "file:///foo/bar" }]
+	// E3 — the SDK search path is RAW decrypted names: only the outer shape is normalized
+	// (leading "/"); literal %XX escapes must survive verbatim and the percent-DECODING
+	// normalizeFilePathForSdk must NOT touch it.
+	it("keeps result paths raw (leading slash only, literal %XX preserved, no decode)", async () => {
+		const sdkResults = [
+			{ item: { tag: "File", inner: [{ uuid: "file-0001", region: "us-east-1" }] }, path: "foo/Invoice %20 backup.pdf" },
+			{ item: { tag: "File", inner: [{ uuid: "file-0002", region: "us-east-1" }] }, path: "/already/rooted" }
+		]
 
 		mockAuthedSdkClient.findItemMatchesForName.mockResolvedValue(sdkResults)
 		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-0001" } } as any)
 		mockUnwrapFileMeta.mockReturnValue({ uuid: "file-0001" })
-		mockNormalizeFilePathForSdk.mockReturnValueOnce("/foo/bar")
 
 		const result = await drive.findItemMatchesForName({ name: "bar" })
 
-		expect(result[0]!.path).toBe("/foo/bar")
-		expect(mockNormalizeFilePathForSdk).toHaveBeenCalledWith("file:///foo/bar")
+		expect(result[0]!.path).toBe("/foo/Invoice %20 backup.pdf")
+		expect(result[1]!.path).toBe("/already/rooted")
+		expect(mockNormalizeFilePathForSdk).not.toHaveBeenCalled()
 	})
 })
 

@@ -1695,7 +1695,217 @@ describe("Cache", () => {
 				expect(m.size).toBe(0)
 			}
 		})
+	})
 
+	// E4 — persistence must not lose updates: flushNow awaits the write, failed batches
+	// re-mark their keys dirty (unless newer mutations superseded them), and the sync
+	// flush path is serialized against the async chunked persist so an older batch can
+	// never commit after (and overwrite) a newer one.
+	describe("persist reliability (E4)", () => {
+		it("flushNow resolves only after the batch has landed on disk", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("await-key", "await-value")
+
+			await cache.flushNow()
+
+			// No drain loop — the awaited promise itself must guarantee the write landed.
+			expect(deserialize(kvStore.get(kvKey(name, "await-key")) as string)).toBe("await-value")
+		})
+
+		it("a failed batch re-marks its keys dirty and the next flush retries them", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("retry-key", "retry-value")
+
+			mockDb.executeBatch.mockClear()
+			mockDb.executeBatch.mockRejectedValueOnce(new Error("disk io error"))
+
+			await cache.flushNow()
+
+			// The first batch failed — nothing landed, nothing thrown.
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(1)
+			expect(kvStore.has(kvKey(name, "retry-key"))).toBe(false)
+
+			// The drained key was re-marked dirty — a second flush retries and succeeds.
+			await cache.flushNow()
+
+			expect(mockDb.executeBatch).toHaveBeenCalledTimes(2)
+			expect(deserialize(kvStore.get(kvKey(name, "retry-key")) as string)).toBe("retry-value")
+		})
+
+		it("a failed delete is retried too", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("doomed", "value")
+
+			await cache.flushNow()
+
+			expect(kvStore.has(kvKey(name, "doomed"))).toBe(true)
+
+			map.delete("doomed")
+
+			mockDb.executeBatch.mockRejectedValueOnce(new Error("disk io error"))
+
+			await cache.flushNow()
+
+			// Failed — row still present.
+			expect(kvStore.has(kvKey(name, "doomed"))).toBe(true)
+
+			await cache.flushNow()
+
+			// Retried — row gone.
+			expect(kvStore.has(kvKey(name, "doomed"))).toBe(false)
+		})
+
+		it("does not resurrect a key whose newer mutation arrived after the failed drain", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("superseded", "old")
+
+			// Hold the first batch in flight so a newer mutation can land mid-persist.
+			let rejectFirstBatch!: (err: Error) => void
+
+			mockDb.executeBatch.mockClear()
+			mockDb.executeBatch.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						rejectFirstBatch = reject
+					})
+			)
+
+			const flushPromise = cache.flushNow()
+
+			await drainUntilExecuteBatch()
+
+			// Newer intent while the (about to fail) batch is in flight: delete the key.
+			map.delete("superseded")
+
+			rejectFirstBatch(new Error("boom"))
+
+			await flushPromise
+
+			// Retry must honor the newer delete — the key may not be re-INSERTed.
+			await cache.flushNow()
+
+			expect(kvStore.has(kvKey(name, "superseded"))).toBe(false)
+		})
+
+		it("does not re-mark a failed batch after clear() bumped the generation (logout leak guard)", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			map.set("leak-key", "decrypted-meta")
+
+			let rejectFirstBatch!: (err: Error) => void
+
+			mockDb.executeBatch.mockClear()
+			mockDb.executeBatch.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						rejectFirstBatch = reject
+					})
+			)
+
+			const flushPromise = cache.flushNow()
+
+			await drainUntilExecuteBatch()
+
+			// Logout wipe lands while the batch is in flight, then the batch fails.
+			cache.clear()
+
+			rejectFirstBatch(new Error("boom"))
+
+			await flushPromise
+
+			// The failed keys must NOT have been re-marked — nothing may persist them again.
+			await cache.flushNow()
+
+			expect(kvStore.has(kvKey(name, "leak-key"))).toBe(false)
+		})
+
+		it("a flushNow landing during an in-flight persistAsync is serialized after it (newest value wins on disk)", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+
+			const { name, map } = getFirstMap(cache)
+
+			let resolveFirstBatch!: () => void
+			const firstBatchGate = new Promise<void>(resolve => {
+				resolveFirstBatch = resolve
+			})
+			let batchCalls = 0
+
+			mockDb.executeBatch.mockClear()
+			mockDb.executeBatch.mockImplementation(async (cmds: [string, unknown[]][]) => {
+				batchCalls++
+
+				if (batchCalls === 1) {
+					await firstBatchGate
+				}
+
+				for (const [query, params] of cmds) {
+					if (query.startsWith("INSERT OR REPLACE")) {
+						kvStore.set(params[0] as string, params[1] as string)
+					}
+				}
+
+				return { rowsAffected: cmds.length }
+			})
+
+			map.set("race-key", "old")
+
+			// Fire the debounced persistAsync; it drains "old" and blocks inside executeBatch.
+			cache.flush()
+			vi.advanceTimersByTime(2000)
+			await drainUntilExecuteBatch()
+
+			expect(batchCalls).toBe(1)
+
+			// Newer value + an immediate flush (the AppState background path).
+			map.set("race-key", "new")
+
+			const flushPromise = cache.flushNow()
+
+			// Give the flush every chance to (incorrectly) jump the queue.
+			for (let i = 0; i < 10; i++) {
+				await Promise.resolve()
+			}
+
+			// Serialized writers: the flush must NOT have written while the older batch is in flight.
+			expect(batchCalls).toBe(1)
+
+			resolveFirstBatch()
+
+			await flushPromise
+
+			// Both batches landed in order — the newest value is what's on disk.
+			expect(batchCalls).toBe(2)
+			expect(deserialize(kvStore.get(kvKey(name, "race-key")) as string)).toBe("new")
+		})
+	})
+
+	describe("logout wipe lock (#1) — re-arm", () => {
 		it("restore() re-arms maps (ready=true) so the next session persists normally", async () => {
 			const cache = createCache()
 
