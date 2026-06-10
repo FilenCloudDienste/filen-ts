@@ -5,6 +5,7 @@ import { chatsQueryGet, chatsQueryUpdate } from "@/features/chats/queries/useCha
 import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
 import cache from "@/lib/cache"
+import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 
 export type ChatSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Chat }>
 
@@ -236,6 +237,12 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 
 		case ChatEvent_Tags.ConversationDeleted: {
 			const [inner] = eventInner.inner.inner
+
+			// Purge the deleted chat's queued unsent messages, send errors and input drafts
+			// immediately (D4b/M5) — the sync must never retry into a deleted conversation, and a
+			// disk-restored queue could reference a chat the query cache doesn't even know about,
+			// so this runs unconditionally before the cache lookup below. Best-effort (never throws).
+			await purgeChatInflightState(inner.uuid)
 
 			const chats = chatsQueryGet()
 			const chat = chats?.find(c => c.uuid === inner.uuid)

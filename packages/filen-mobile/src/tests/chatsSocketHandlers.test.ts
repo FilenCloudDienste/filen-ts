@@ -13,7 +13,8 @@ const {
 	mockChatMessagesQueryGet,
 	mockEventsEmit,
 	mockSetTyping,
-	mockSetSelectedChats
+	mockSetSelectedChats,
+	mockPurgeChatInflightState
 } = vi.hoisted(() => {
 	const capturedChatsUpdaters: Array<(prev: unknown[]) => unknown[]> = []
 	const capturedMessagesUpdaters: Array<(prev: unknown[]) => unknown[]> = []
@@ -35,7 +36,8 @@ const {
 		mockChatMessagesQueryGet: vi.fn().mockReturnValue([]),
 		mockEventsEmit: vi.fn(),
 		mockSetTyping: vi.fn(),
-		mockSetSelectedChats: vi.fn()
+		mockSetSelectedChats: vi.fn(),
+		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined)
 	}
 })
 
@@ -80,6 +82,12 @@ vi.mock("@/lib/cache", () => ({
 	default: {
 		chatUuidToChat: new Map<string, unknown>()
 	}
+}))
+
+// The ConversationDeleted handler purges the chat's inflight queue/errors/drafts (D4b/M5) —
+// the purge itself is covered by chatsInflight.test.ts; here we only assert the wiring.
+vi.mock("@/features/chats/chatsInflight", () => ({
+	purgeChatInflightState: mockPurgeChatInflightState
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -219,6 +227,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		mockEventsEmit.mockClear()
 		mockSetTyping.mockClear()
 		mockSetSelectedChats.mockClear()
+		mockPurgeChatInflightState.mockClear()
 		// Clear any pending timeouts
 		for (const key of Object.keys(chatTypingTimeoutsRef)) {
 			clearTimeout(chatTypingTimeoutsRef[Number(key)])
@@ -679,6 +688,33 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			await handleChatEvent({ event, userId: USER_ID })
 
 			expect(mockSetSelectedChats).not.toHaveBeenCalled()
+		})
+
+		// D4b/M5 — the deleted chat's inflight queue, send errors and input drafts must be purged
+		// immediately (not deferred behind the 3s timeout) so the sync never retries into it.
+		it("purges the chat's inflight state immediately (before the 3s timeout)", async () => {
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-gone" }])
+
+			const event = makeConversationDeletedEvent("chat-gone")
+
+			await handleChatEvent({ event, userId: USER_ID })
+
+			// Called without any timer advance.
+			expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
+			expect(mockPurgeChatInflightState).toHaveBeenCalledWith("chat-gone")
+		})
+
+		it("purges the inflight state even when the chat is not in the chats query cache", async () => {
+			// A disk-restored inflight queue can reference a chat the query cache doesn't know
+			// about — the purge must not be gated on the cache lookup.
+			mockChatsQueryGet.mockReturnValue([{ uuid: "chat-other" }])
+
+			const event = makeConversationDeletedEvent("chat-gone")
+
+			await handleChatEvent({ event, userId: USER_ID })
+
+			expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
+			expect(mockPurgeChatInflightState).toHaveBeenCalledWith("chat-gone")
 		})
 
 		it("does NOT emit when the chat is not found", async () => {
