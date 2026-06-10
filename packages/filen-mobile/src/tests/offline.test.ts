@@ -387,6 +387,36 @@ function mockListing({ files = [], dirs = [] }: { files?: unknown[]; dirs?: unkn
 	} as any)
 }
 
+// Queues a one-shot SDK client whose recursive listing fires a scan error before returning the
+// given dirs/files — a DEGRADED listing (entries can be silently absent from it).
+function mockDegradedListing({ files = [], dirs = [] }: { files?: unknown[]; dirs?: unknown[] }): void {
+	vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
+		authedSdkClient: {
+			listDirRecursiveWithPaths: vi
+				.fn()
+				.mockImplementation(async (_dir: unknown, _progress: unknown, errorCb: { onErrors: (e: unknown[]) => void }) => {
+					errorCb.onErrors([new Error("could not decrypt nested meta")])
+
+					return { files, dirs }
+				})
+		}
+	} as any)
+}
+
+// A listed file whose meta cannot be decoded (the unwrapFileMeta stub yields meta: null) — the
+// reconcile must drop it from the remote map AND degrade the pass.
+function makeListingFileUndecodable(uuid: string, path: string) {
+	return {
+		file: {
+			uuid,
+			meta: {
+				tag: "Undecodable"
+			}
+		},
+		path
+	}
+}
+
 function writeIndex(index: Index): void {
 	fs.set(INDEX_FILE_URI, new Uint8Array(new TextEncoder().encode(serialize(index))))
 }
@@ -1508,6 +1538,43 @@ describe("Offline", () => {
 
 			// Index should be updated
 			expect(fs.get(INDEX_FILE_URI)).toBeInstanceOf(Uint8Array)
+		})
+
+		// Fix: a degraded listing (permanent scan error) must not make the initial store fail
+		// forever — the pass commits the union (= the listing, on a first store) and SUCCEEDS.
+		it("succeeds without throwing when the initial store's listing is degraded — meta committed from the listing", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const dirItem = makeDirItem(uuid, "Degraded")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+			const dataDirectoryUri = `${DIRECTORIES_DIR_URI}/${uuid}`
+
+			mockDegradedListing({
+				files: [makeListingFile(fileUuid, "a.txt", "a.txt", 2n)]
+			})
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				fs.set(`${(destination as { uri: string }).uri}/a.txt`, new Uint8Array([1, 2]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const offline = await createOffline()
+
+			await expect(offline.storeDirectory({ directory: dirItem, parent })).resolves.toBeUndefined()
+
+			const metaUri = `${dataDirectoryUri}/${uuid}.filenmeta`
+
+			expect(fs.get(metaUri)).toBeInstanceOf(Uint8Array)
+
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as DirectoryOfflineMeta
+
+			expect(meta.entries[fileUuid]?.path).toBe("/a.txt")
+			expect(fs.has(`${dataDirectoryUri}/a.txt`)).toBe(true)
 		})
 
 		it("throws if item is not a directory type", async () => {
@@ -3266,9 +3333,11 @@ describe("Offline", () => {
 
 			await offline.storeDirectory({ directory: dirItem, parent, skipIndexUpdate: true })
 
-			// Nothing is committed on an aborted download — no meta, no index.
+			// Nothing is committed on an aborted download — no meta, no index, and the partial
+			// tree dir is cleaned up (an aborted initial store leaves zero residue).
 			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)).toBe(false)
 			expect(fs.has(INDEX_FILE_URI)).toBe(false)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(false)
 		})
 
 		it("listFiles skips entries where meta file is missing but data file exists", async () => {
@@ -4400,7 +4469,7 @@ describe("Offline", () => {
 			expect(meta.entries[fileAUuid]?.path).toBe("/keep.txt")
 		})
 
-		it("skips deletions and fails the pass when the listing reports scan errors", async () => {
+		it("skips deletions and returns a degraded marker when the listing reports scan errors (fixed point, no download)", async () => {
 			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
 			const goneItem = makeFileItemWithSize(fileBUuid, "undecryptable.txt", 1n)
 			const { dirItem, parent } = seedTree({
@@ -4418,26 +4487,148 @@ describe("Offline", () => {
 			const offline = await createOffline()
 
 			// The undecryptable entry is silently absent from the listing AND a scan error fires.
-			vi.mocked(auth.getSdkClients).mockResolvedValueOnce({
-				authedSdkClient: {
-					listDirRecursiveWithPaths: vi
-						.fn()
-						.mockImplementation(async (_dir: unknown, _progress: unknown, errorCb: { onErrors: (e: unknown[]) => void }) => {
-							errorCb.onErrors([new Error("could not decrypt nested meta")])
-
-							return { files: [makeListingFile(fileAUuid, "keep.txt", "keep.txt", 1n)], dirs: [] }
-						})
-				}
-			} as any)
+			mockDegradedListing({ files: [makeListingFile(fileAUuid, "keep.txt", "keep.txt", 1n)] })
 
 			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
 
-			// One listing-kind error, the local copy survives, the meta does not advance.
+			// One DEGRADED listing marker, the local copy survives. With nothing else changed the
+			// committed union is byte-identical to the existing meta — a fixed point: zero writes,
+			// zero downloads, meta untouched.
 			expect(errors).toHaveLength(1)
 			expect(errors[0]?.kind).toBe("listing")
+			expect(errors[0]?.degraded).toBe(true)
 			expect(errors[0]?.topLevelUuid).toBe(treeUuid)
 			expect(fs.has(`${treeUri}/undecryptable.txt`)).toBe(true)
 			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaBefore)
+			expect(transfers.download).not.toHaveBeenCalled()
+		})
+
+		// Fix: a PERMANENT scan error (e.g. a legacy undecryptable nested meta) must not block the
+		// commit forever — that regime re-downloaded/re-hashed the whole tree every pass while new
+		// files never entered the meta (an eternal-resync relative).
+		it("commits the verified union on a degraded pass — new remote file enters the meta, the unlisted local entry survives the sweep, second pass is a no-op", async () => {
+			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
+			const unlistedItem = makeFileItemWithSize(subDirUuid, "undecryptable.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({
+					"/keep.txt": keepItem,
+					"/undecryptable.txt": unlistedItem
+				}),
+				disk: {
+					"/keep.txt": new Uint8Array([1]),
+					"/undecryptable.txt": new Uint8Array([2])
+				}
+			})
+
+			const offline = await createOffline()
+
+			// Degraded listing: the undecryptable entry is silently absent, a NEW remote file appears.
+			mockDegradedListing({
+				files: [makeListingFile(fileAUuid, "keep.txt", "keep.txt", 1n), makeListingFile(fileBUuid, "new.txt", "new.txt", 1n)]
+			})
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				fs.set(`${(destination as { uri: string }).uri}/new.txt`, new Uint8Array([3]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const firstErrors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			// Only the degraded marker — the pass verified clean and COMMITTED.
+			expect(firstErrors).toHaveLength(1)
+			expect(firstErrors[0]?.kind).toBe("listing")
+			expect(firstErrors[0]?.degraded).toBe(true)
+			expect(transfers.download).toHaveBeenCalledTimes(1)
+
+			// Union meta: both remote entries AND the preserved unlisted entry (existing item + path).
+			const meta = readTreeMeta()
+
+			expect(meta.entries[fileAUuid]?.path).toBe("/keep.txt")
+			expect(meta.entries[fileBUuid]?.path).toBe("/new.txt")
+			expect(meta.entries[subDirUuid]?.path).toBe("/undecryptable.txt")
+			expect(meta.entries[subDirUuid]?.item.data.uuid).toBe(subDirUuid)
+
+			// The orphan sweep ran (a download happened) — the preserved entry's bytes are
+			// sweep-protected via the committed-union keep-set.
+			expect(fs.has(`${treeUri}/undecryptable.txt`)).toBe(true)
+			expect(Array.from(fs.get(`${treeUri}/undecryptable.txt`) as Uint8Array)).toEqual([2])
+
+			const metaAfterFirst = fs.get(`${treeUri}/${treeUuid}.filenmeta`)
+
+			// Treadmill regression: a second degraded pass over unchanged state must be a TRUE
+			// no-op — the union meta now lists the new file, so nothing is missing, nothing
+			// downloads, and the meta is not rewritten.
+			mockDegradedListing({
+				files: [makeListingFile(fileAUuid, "keep.txt", "keep.txt", 1n), makeListingFile(fileBUuid, "new.txt", "new.txt", 1n)]
+			})
+
+			const secondErrors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(secondErrors).toHaveLength(1)
+			expect(secondErrors[0]?.degraded).toBe(true)
+			expect(transfers.download).toHaveBeenCalledTimes(1)
+			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaAfterFirst)
+		})
+
+		it("still blocks the commit when a degraded pass also collects a non-degraded error (verify failure)", async () => {
+			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/keep.txt": keepItem }),
+				disk: { "/keep.txt": new Uint8Array([1]) }
+			})
+
+			const metaBefore = fs.get(`${treeUri}/${treeUuid}.filenmeta`)
+			const offline = await createOffline()
+
+			// Degraded listing with a new remote file whose download never materializes → verify error.
+			mockDegradedListing({
+				files: [makeListingFile(fileAUuid, "keep.txt", "keep.txt", 1n), makeListingFile(fileBUuid, "ghost.txt", "ghost.txt", 1n)]
+			})
+
+			vi.mocked(transfers.download).mockImplementationOnce(async (): Promise<any> => {
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors.some((e: { kind: string }) => e.kind === "verify")).toBe(true)
+			expect(errors.some((e: { degraded?: boolean }) => e.degraded === true)).toBe(true)
+			// The non-degraded verify error blocks the commit — meta untouched.
+			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaBefore)
+		})
+
+		it("treats listed files with unreadable metas as degradation — local bytes survive, no deletions", async () => {
+			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/keep.txt": keepItem }),
+				disk: { "/keep.txt": new Uint8Array([1]) }
+			})
+
+			const metaBefore = fs.get(`${treeUri}/${treeUuid}.filenmeta`)
+			const offline = await createOffline()
+
+			// The same file IS listed but its meta cannot be decoded, so it drops out of the remote
+			// map. Without degradation that would classify keep.txt as only-local and DELETE it.
+			mockListing({ files: [makeListingFileUndecodable(fileAUuid, "keep.txt")] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toHaveLength(1)
+			expect(errors[0]?.kind).toBe("listing")
+			expect(errors[0]?.degraded).toBe(true)
+			expect(fs.has(`${treeUri}/keep.txt`)).toBe(true)
+			// The union (= the preserved entry alone) is byte-identical to the existing meta — fixed point.
+			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaBefore)
+			expect(transfers.download).not.toHaveBeenCalled()
 		})
 
 		it("returns a listing error and leaves state untouched when the remote listing fails", async () => {
@@ -4756,7 +4947,7 @@ describe("Offline", () => {
 			expect((fs.get(`${treeUri}/a.txt`) as Uint8Array).length).toBe(3)
 		})
 
-		it("returns collected errors without committing when the signal aborts before the download", async () => {
+		it("returns collected errors without committing when the signal aborts before the download — committed tree untouched", async () => {
 			const { dirItem, parent } = seedTree({
 				entries: {},
 				disk: {}
@@ -4780,7 +4971,86 @@ describe("Offline", () => {
 
 			expect(errors).toEqual([])
 			expect(transfers.download).not.toHaveBeenCalled()
+			// A sync-pass abort over an existing committed meta keeps the tree fully intact.
+			expect(fs.has(treeUri)).toBe(true)
 			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaBefore)
+		})
+
+		// Fix: an aborted INITIAL store used to strand an invisible meta-less directories/{uuid}/
+		// partial forever (no meta → listed nowhere). The abort stays silent (no throw, no errors)
+		// but must delete the partial tree.
+		it("deletes the partial tree when an initial store aborts mid-download (no throw)", async () => {
+			const dirItem = makeDirItem(treeUuid, "Tree")
+			const parent = makeParent(parentUuid)
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 1n)] })
+
+			// transfers.download resolving null = aborted download.
+			vi.mocked(transfers.download).mockResolvedValueOnce(null as any)
+
+			const errors = await offline.reconcileTree({
+				directory: dirItem,
+				parent,
+				skipIndexUpdate: true,
+				initialStore: true
+			})
+
+			expect(errors).toEqual([])
+			expect(fs.has(treeUri)).toBe(false)
+			expect(fs.has(`${treeUri}/${treeUuid}.filenmeta`)).toBe(false)
+		})
+
+		it("deletes the partial tree when an initial store's signal is aborted before the download (no throw)", async () => {
+			const dirItem = makeDirItem(treeUuid, "Tree")
+			const parent = makeParent(parentUuid)
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 1n)] })
+
+			const controller = new AbortController()
+
+			controller.abort()
+
+			const errors = await offline.reconcileTree({
+				directory: dirItem,
+				parent,
+				skipIndexUpdate: true,
+				initialStore: true,
+				signal: controller.signal
+			})
+
+			expect(errors).toEqual([])
+			expect(transfers.download).not.toHaveBeenCalled()
+			expect(fs.has(treeUri)).toBe(false)
+		})
+
+		it("threads the abort signal into the recursive listing call (4th asyncOpts arg)", async () => {
+			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/a.txt": fileItem }),
+				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }
+			})
+
+			const offline = await createOffline()
+			const listMock = vi.fn().mockResolvedValue({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 3n)], dirs: [] })
+
+			vi.mocked(auth.getSdkClients).mockResolvedValue({
+				authedSdkClient: {
+					listDirRecursiveWithPaths: listMock
+				}
+			} as any)
+
+			const controller = new AbortController()
+
+			await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true, signal: controller.signal })
+			await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(listMock).toHaveBeenCalledTimes(2)
+			// With a signal: asyncOpts { signal } as the 4th arg (generated-bindings contract).
+			expect(listMock.mock.calls[0]?.[3]?.signal).toBe(controller.signal)
+			// Without: undefined.
+			expect(listMock.mock.calls[1]?.[3]).toBeUndefined()
 		})
 
 		it("throws on non-directory items and missing decrypted meta", async () => {
@@ -4972,6 +5242,169 @@ describe("Offline", () => {
 			const offline = await createOffline()
 
 			expect(await offline.listBrokenStandaloneUuids()).toEqual([])
+		})
+	})
+
+	describe("listBrokenTreeUuids", () => {
+		it("reports uuid tree dirs with missing, empty, undecodable, or entries-less metas — and only those", async () => {
+			const healthyUuid = "11111111-1111-1111-1111-111111111111"
+			const missingMetaUuid = "22222222-2222-2222-2222-222222222222"
+			const emptyMetaUuid = "33333333-3333-3333-3333-333333333333"
+			const corruptMetaUuid = "44444444-4444-4444-4444-444444444444"
+			const entriesLessUuid = "55555555-5555-5555-5555-555555555555"
+			const parent = makeParent("99999999-9999-9999-9999-999999999999")
+
+			// Healthy committed tree.
+			writeDirectoryMeta(healthyUuid, {
+				item: makeDirItem(healthyUuid, "Healthy"),
+				parent,
+				entries: {}
+			})
+
+			// Meta-less partial (crash residue) — invisible to listDirectories, must be reported.
+			fs.set(`${DIRECTORIES_DIR_URI}/${missingMetaUuid}`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${missingMetaUuid}/orphan.txt`, new Uint8Array([1]))
+
+			// Zero-byte meta.
+			fs.set(`${DIRECTORIES_DIR_URI}/${emptyMetaUuid}`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${emptyMetaUuid}/${emptyMetaUuid}.filenmeta`, new Uint8Array([]))
+
+			// Undecodable meta bytes.
+			fs.set(`${DIRECTORIES_DIR_URI}/${corruptMetaUuid}`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${corruptMetaUuid}/${corruptMetaUuid}.filenmeta`, new Uint8Array([0xff, 0xfe]))
+
+			// Directory-item meta without an entries field (legacy corrupt write) — rejected by
+			// readDirectoryMeta, so it is broken for every tree reader.
+			fs.set(`${DIRECTORIES_DIR_URI}/${entriesLessUuid}`, "dir")
+			fs.set(
+				`${DIRECTORIES_DIR_URI}/${entriesLessUuid}/${entriesLessUuid}.filenmeta`,
+				new Uint8Array(
+					new TextEncoder().encode(
+						serialize({
+							item: makeDirItem(entriesLessUuid, "Legacy"),
+							parent
+						})
+					)
+				)
+			)
+
+			// Non-uuid dirs are ignored entirely.
+			fs.set(`${DIRECTORIES_DIR_URI}/not-a-uuid`, "dir")
+
+			const offline = await createOffline()
+			const broken = (await offline.listBrokenTreeUuids()) as string[]
+
+			expect(broken.sort()).toEqual([missingMetaUuid, emptyMetaUuid, corruptMetaUuid, entriesLessUuid].sort())
+		})
+
+		it("returns an empty array when everything is healthy", async () => {
+			writeDirectoryMeta("11111111-1111-1111-1111-111111111111", {
+				item: makeDirItem("11111111-1111-1111-1111-111111111111", "Healthy"),
+				parent: makeParent("99999999-9999-9999-9999-999999999999"),
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			expect(await offline.listBrokenTreeUuids()).toEqual([])
+		})
+	})
+
+	describe("removeTreeDirectory", () => {
+		it("deletes directories/{uuid} recursively without touching the index", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/orphan.txt`, new Uint8Array([1]))
+
+			const offline = await createOffline()
+
+			await offline.removeTreeDirectory(uuid)
+
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(false)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/orphan.txt`)).toBe(false)
+			// NO index update — broken trees were never indexed; callers batch one per pass.
+			expect(fs.has(INDEX_FILE_URI)).toBe(false)
+		})
+
+		it("is a no-op for a uuid with no tree dir", async () => {
+			const offline = await createOffline()
+
+			await expect(offline.removeTreeDirectory("22222222-2222-2222-2222-222222222222")).resolves.toBeUndefined()
+		})
+	})
+
+	describe("removeItem per-uuid lock", () => {
+		// Fix: without the per-uuid lock, a removeItem racing a same-uuid reconcileTree could
+		// delete the tree mid-download and then be resurrected by that pass's meta commit.
+		it("waits for an in-flight same-uuid reconcile, so the removal lands after the commit (no resurrection)", async () => {
+			const treeUuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const parent = makeParent("99999999-9999-9999-9999-999999999999")
+			const dirItem = makeDirItem(treeUuid, "Tree")
+			const treeUri = `${DIRECTORIES_DIR_URI}/${treeUuid}`
+
+			// Committed tree on disk so removeItem's listDirectories sees it.
+			writeDirectoryMeta(treeUuid, {
+				item: dirItem,
+				parent,
+				entries: {}
+			})
+
+			const offline = await createOffline()
+
+			let releaseDownload!: () => void
+			const downloadGate = new Promise<void>(resolve => {
+				releaseDownload = resolve
+			})
+
+			let downloadStarted!: () => void
+			const downloadStartedPromise = new Promise<void>(resolve => {
+				downloadStarted = resolve
+			})
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				downloadStarted()
+
+				await downloadGate
+
+				fs.set(`${(destination as { uri: string }).uri}/a.txt`, new Uint8Array([1]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			mockListing({ files: [makeListingFile(fileUuid, "a.txt", "a.txt", 1n)] })
+
+			const reconcile = offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			await downloadStartedPromise
+
+			// removeItem for the SAME uuid must park on the per-uuid lock, not interleave.
+			let removed = false
+			const removal = (offline.removeItem(dirItem) as Promise<void>).then(() => {
+				removed = true
+			})
+
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			expect(removed).toBe(false)
+			expect(fs.has(treeUri)).toBe(true)
+
+			releaseDownload()
+
+			await expect(reconcile).resolves.toEqual([])
+			await removal
+
+			// The removal ran strictly AFTER the commit — final state is removed, not resurrected.
+			expect(removed).toBe(true)
+			expect(fs.has(treeUri)).toBe(false)
+			expect(fs.has(`${treeUri}/${treeUuid}.filenmeta`)).toBe(false)
 		})
 	})
 })

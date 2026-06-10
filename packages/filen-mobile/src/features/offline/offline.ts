@@ -18,9 +18,9 @@ import {
 	atomicWrite,
 	parentCacheKey,
 	directoryDriveItemToAnyDirWithContext,
+	makeSyncError,
 	type OfflineParent,
-	type OfflineSyncError,
-	type OfflineSyncErrorKind
+	type OfflineSyncError
 } from "@/features/offline/offlineHelpers"
 import { planTreeReconcile, isSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { validateUuid } from "@/lib/uuid"
@@ -133,15 +133,9 @@ export class Offline {
 	private directoriesEnsured = false
 	private readonly directoryMetaCache = new Map<string, DirectoryOfflineMeta>()
 	private uuidToTopLevelCache: Map<string, string> | null = null
-	private abortController: AbortController = new AbortController()
 
 	public constructor() {
 		this.ensureDirectories()
-	}
-
-	public cancel(): void {
-		this.abortController.abort()
-		this.abortController = new AbortController()
 	}
 
 	private ensureDirectories(): void {
@@ -671,6 +665,31 @@ export class Offline {
 		return broken
 	}
 
+	// Scans DIRECTORIES_DIRECTORY for uuid-named tree dirs whose meta file is missing, empty, or
+	// undecodable while the tree dir itself still exists (readDirectoryMeta is the canonical
+	// brokenness test — it is what every tree reader uses, incl. its entries-less rejection).
+	// Used by the sync top-level pass to rebuild (own cloud, alive) or remove (trashed/deleted)
+	// broken trees that nothing else lists: listDirectories skips meta-less dirs, so without this
+	// scan an aborted/crashed partial tree would stay invisible on disk forever. No hasDataFile
+	// distinction — reconcileTree's hash-idempotent download skips healthy bytes either way.
+	public async listBrokenTreeUuids(): Promise<string[]> {
+		this.ensureDirectories()
+
+		const broken: string[] = []
+
+		for (const entry of DIRECTORIES_DIRECTORY.list()) {
+			if (!(entry instanceof FileSystem.Directory) || !validateUuid(entry.name)) {
+				continue
+			}
+
+			if ((await this.readDirectoryMeta(entry.name)) === null) {
+				broken.push(entry.name)
+			}
+		}
+
+		return broken
+	}
+
 	// Rewrites a stored tree root's meta {item, parent} while preserving its entries. Used by the
 	// sync top-level pass for remote renames (meta item refresh) and moves (parent re-anchor) — the
 	// on-disk tree itself is uuid-named and therefore name/location independent.
@@ -741,6 +760,41 @@ export class Offline {
 
 				if (standaloneDir.exists) {
 					standaloneDir.delete()
+				}
+
+				this.invalidateCaches()
+			},
+			{
+				throw: true
+			}
+		)
+	}
+
+	// Deletes a stored tree's directories/{uuid} directly by uuid. Used by the sync top-level pass
+	// for BROKEN trees (meta missing/undecodable) whose remote uuid turned out trashed or
+	// permanently deleted — such dirs cannot be addressed as a DriveItem through removeItem.
+	// NO index update — broken trees were never indexed; callers batch one at the end of their pass.
+	public async removeTreeDirectory(uuid: string): Promise<void> {
+		await run(
+			async defer => {
+				await this.clearBarrier.enter()
+
+				defer(() => {
+					this.clearBarrier.leave()
+				})
+
+				const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
+
+				defer(() => {
+					releaseStoreItemLock()
+				})
+
+				this.ensureDirectories()
+
+				const treeDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, uuid))
+
+				if (treeDir.exists) {
+					treeDir.delete()
 				}
 
 				this.invalidateCaches()
@@ -823,33 +877,6 @@ export class Offline {
 		)
 	}
 
-	private makeSyncError({
-		itemUuid,
-		topLevelUuid,
-		name,
-		itemType,
-		kind,
-		message
-	}: {
-		itemUuid: string
-		topLevelUuid: string | null
-		name: string
-		itemType: DriveItem["type"]
-		kind: OfflineSyncErrorKind
-		message: string
-	}): OfflineSyncError {
-		return {
-			id: `${itemUuid}:${kind}`,
-			itemUuid,
-			topLevelUuid,
-			name,
-			itemType,
-			kind,
-			message,
-			timestamp: Date.now()
-		}
-	}
-
 	// Converges one stored directory tree onto its remote listing IN PLACE. Also the initial-store
 	// path (storeDirectory delegates here with initialStore: true).
 	//
@@ -861,18 +888,31 @@ export class Offline {
 	//      skipped while the listing is degraded by scan errors) — then execute.
 	//   5. One in-place hash-idempotent directory download for missing uuids; per-entry download
 	//      errors fail the pass.
-	//   6. Verify every remote entry on disk, then commit meta + index ONLY when the pass collected
-	//      zero errors. A rebuilt meta identical to the existing file skips the meta write/index
-	//      update; a TRUE no-op pass (no download, readable meta) performs zero writes and no sweep.
+	//   6. Verify every remote entry on disk, then commit meta + index ONLY when every collected
+	//      error is a DEGRADED-listing marker (see below) — verify and download errors always
+	//      block. A rebuilt meta identical to the existing file skips the meta write/index update;
+	//      a TRUE no-op pass (no download, readable meta) performs zero writes and no sweep.
 	//   7. After a verified pass that downloaded or started with an unreadable meta — including a
 	//      pure self-heal pass whose rebuilt meta is byte-identical — orphan sweep deletes physical
 	//      paths the meta does not claim (incl. crashed .filendl partials).
 	//
+	// Degraded listings (scan errors, or listed files whose metas are unreadable): affected entries
+	// are silently absent from the listing, so the delete phase is skipped AND the commit writes
+	// the VERIFIED UNION — remote entries plus the still-on-disk existing-meta entries the skipped
+	// delete phase preserved. Without the union, a PERMANENT scan error (e.g. a legacy
+	// undecryptable nested meta) would block the commit forever: new files would re-download and
+	// re-hash every pass yet never enter the meta (an eternal-resync relative). Degraded markers
+	// carry `degraded: true` and bubble to the caller on every pass, commit or not.
+	//
 	// Failure policy: no deletions on errors, meta/index never advance on a failed pass. The one
-	// exception is an initial store with NO readable prior meta — its partial tree is deleted and the
-	// first error is thrown (UI alerts). An initial store over a readable committed meta (e.g. a
-	// concurrent store that lost the per-uuid lock race) keeps state and returns the errors like a
-	// sync pass; storeDirectory surfaces them by throwing without deleting.
+	// exception is an initial store with NO readable prior meta — its partial tree is deleted and
+	// the first NON-degraded error is thrown (UI alerts); a degraded-only initial store commits and
+	// succeeds. An initial store over a readable committed meta (e.g. a concurrent store that lost
+	// the per-uuid lock race) keeps state and returns the errors like a sync pass; storeDirectory
+	// surfaces non-degraded ones by throwing without deleting. Aborts are silent (no throw, no
+	// error entries beyond already-collected degraded markers) and keep committed state — except an
+	// aborted initial store with no readable prior meta, whose meta-less partial tree is deleted so
+	// it is not stranded as a broken tree the next sync pass would pointlessly resurrect.
 	public async reconcileTree({
 		directory,
 		parent,
@@ -956,23 +996,44 @@ export class Offline {
 			const currentMetaText = metaFile.exists && metaFile.size > 0 ? await metaFile.text() : null
 
 			// Initial-store failure policy: a user-initiated FIRST store (no readable prior meta) has
-			// no prior state worth keeping, so a failed pass deletes the partial tree and throws (UI
-			// alerts as today). When a readable meta exists, this pass runs over a COMMITTED tree —
-			// e.g. a concurrent initial store that passed the read-only guards, then lost the per-uuid
-			// lock race against a pass that already committed — and deleting would destroy it. Such
-			// failures keep state and return the collected errors like a sync pass instead.
+			// no prior state worth keeping, so a FATALLY failed pass (any non-degraded error) deletes
+			// the partial tree and throws (UI alerts as today). Degraded-only error sets do not count
+			// as failure — they commit below and the store succeeds. When a readable meta exists, this
+			// pass runs over a COMMITTED tree — e.g. a concurrent initial store that passed the
+			// read-only guards, then lost the per-uuid lock race against a pass that already committed
+			// — and deleting would destroy it. Such failures keep state and return the collected
+			// errors like a sync pass instead.
 			const finish = (collected: OfflineSyncError[]): OfflineSyncError[] => {
-				if (initialStore && collected.length > 0 && existingMeta === null) {
+				const fatal = collected.filter(error => error.degraded !== true)
+
+				if (initialStore && fatal.length > 0 && existingMeta === null) {
 					if (liveDir.exists) {
 						liveDir.delete()
 					}
 
 					this.invalidateCaches()
 
-					throw new Error(collected[0]?.message ?? "Storing directory offline failed")
+					throw new Error(fatal[0]?.message ?? "Storing directory offline failed")
 				}
 
 				return collected
+			}
+
+			// Abort policy: silent — no throw, never an error entry, committed state untouched. The
+			// one cleanup: an aborted INITIAL store with no readable prior meta deletes its partial
+			// tree, otherwise the invisible meta-less directories/{uuid}/ would linger as a broken
+			// tree that the next sync pass needlessly re-downloads (and effectively resurrects a
+			// store the user chose to abort).
+			const finishAborted = (): OfflineSyncError[] => {
+				if (initialStore && existingMeta === null) {
+					if (liveDir.exists) {
+						liveDir.delete()
+					}
+
+					this.invalidateCaches()
+				}
+
+				return errors
 			}
 
 			// Remote listing — one bulk recursive metadata fetch. Listing paths are RAW root-relative
@@ -998,13 +1059,24 @@ export class Offline {
 						onErrors(errs) {
 							scanErrors.push(...errs)
 						}
-					}
+					},
+					signal
+						? {
+								signal
+							}
+						: undefined
 				)
 			)
 
 			if (!listingResult.success) {
+				if (signal?.aborted) {
+					// The threaded signal aborted the listing itself — same silent-abort policy as
+					// the ops/download abort paths below, not a listing failure.
+					return finishAborted()
+				}
+
 				pushError(
-					this.makeSyncError({
+					makeSyncError({
 						itemUuid: topLevelUuid,
 						topLevelUuid,
 						name: directoryName,
@@ -1039,10 +1111,17 @@ export class Offline {
 				})
 			}
 
+			// Listed files whose metas cannot be read are dropped from the remote map (no readable
+			// name/size to verify against) — but their LOCAL copies must not be deleted because of
+			// it, so any drop degrades the pass exactly like a scan error.
+			let unreadableListedFiles = 0
+
 			for (const { file, path } of listingResult.data.files) {
 				const unwrapped = unwrapFileMeta(file)
 
 				if (!unwrapped.meta) {
+					unreadableListedFiles++
+
 					continue
 				}
 
@@ -1085,24 +1164,38 @@ export class Offline {
 				}
 			}
 
-			// Scan errors mean entries can be silently absent from the listing — deleting on that
-			// basis would destroy good local copies, so the plan skips deletions for this pass
-			// (moves and downloads still apply; deletions resume once the listing is clean).
+			// Scan errors and unreadable listed file metas mean entries can be silently absent from
+			// the listing — deleting on that basis would destroy good local copies, so the plan skips
+			// deletions for this pass (moves and downloads still apply; deletions resume once the
+			// listing is clean). The pass is marked DEGRADED: the commit below still advances using
+			// the verified union so a permanent scan error can never block the meta forever.
+			const listingDegraded = scanErrors.length > 0 || unreadableListedFiles > 0
 			const plan = planTreeReconcile({
 				remote,
 				local,
-				allowDeletes: scanErrors.length === 0
+				allowDeletes: !listingDegraded
 			})
 
-			if (scanErrors.length > 0) {
+			if (listingDegraded) {
+				const reasons: string[] = []
+
+				if (scanErrors.length > 0) {
+					reasons.push(`${scanErrors.length} scan error(s)`)
+				}
+
+				if (unreadableListedFiles > 0) {
+					reasons.push(`${unreadableListedFiles} listed file(s) with unreadable metadata`)
+				}
+
 				pushError(
-					this.makeSyncError({
+					makeSyncError({
 						itemUuid: topLevelUuid,
 						topLevelUuid,
 						name: directoryName,
 						itemType: directory.type,
 						kind: "listing",
-						message: `Remote listing degraded (${scanErrors.length} scan error(s)) — skipped deletions for this pass`
+						degraded: true,
+						message: `Remote listing degraded (${reasons.join(", ")}) — skipped deletions for this pass`
 					})
 				)
 			}
@@ -1169,7 +1262,7 @@ export class Offline {
 
 			if (!opsResult.success) {
 				pushError(
-					this.makeSyncError({
+					makeSyncError({
 						itemUuid: topLevelUuid,
 						topLevelUuid,
 						name: directoryName,
@@ -1184,7 +1277,7 @@ export class Offline {
 
 			if (!opsResult.data) {
 				// Aborted mid-ops — leftover temps are cleaned up on the next pass's entry.
-				return finish(errors)
+				return finishAborted()
 			}
 
 			// Download missing/changed entries — at most ONE in-place directory download per pass.
@@ -1194,7 +1287,7 @@ export class Offline {
 
 			if (plan.missingUuids.length > 0) {
 				if (signal?.aborted) {
-					return finish(errors)
+					return finishAborted()
 				}
 
 				downloadRan = true
@@ -1222,7 +1315,7 @@ export class Offline {
 
 				if (!downloadResult.success) {
 					pushError(
-						this.makeSyncError({
+						makeSyncError({
 							itemUuid: topLevelUuid,
 							topLevelUuid,
 							name: directoryName,
@@ -1239,7 +1332,7 @@ export class Offline {
 
 				if (!transferred) {
 					// Aborted — nothing committed; the next pass picks this tree up again.
-					return finish(errors)
+					return finishAborted()
 				}
 
 				if ("errors" in transferred && transferred.errors.length > 0) {
@@ -1260,7 +1353,7 @@ export class Offline {
 						const errorMessage = await run(async () => downloadError.error.message())
 
 						pushError(
-							this.makeSyncError({
+							makeSyncError({
 								itemUuid: matched?.uuid ?? topLevelUuid,
 								topLevelUuid,
 								name: matched?.item.data.decryptedMeta?.name ?? directoryName,
@@ -1279,7 +1372,7 @@ export class Offline {
 				if (remoteEntry.isDirectory) {
 					if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, remoteEntry.path)).exists) {
 						pushError(
-							this.makeSyncError({
+							makeSyncError({
 								itemUuid: uuid,
 								topLevelUuid,
 								name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
@@ -1298,7 +1391,7 @@ export class Offline {
 
 				if (!dataFile.exists || dataFile.size !== expectedSize) {
 					pushError(
-						this.makeSyncError({
+						makeSyncError({
 							itemUuid: uuid,
 							topLevelUuid,
 							name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
@@ -1310,32 +1403,117 @@ export class Offline {
 				}
 			}
 
-			// Commit — ONLY a fully-verified pass advances meta/index.
-			if (errors.length > 0) {
+			// Commit — advances ONLY when the pass verified clean apart from degraded-listing
+			// markers (verify and download errors are never degraded, so they always block here).
+			if (errors.some(error => error.degraded !== true)) {
 				return finish(errors)
+			}
+
+			// Committed entries: every remote entry, plus — on a degraded pass only — the VERIFIED
+			// UNION's preserved entries: existing-meta entries absent from the degraded listing
+			// (exactly the uuids the skipped delete phase kept on disk). They were verified by the
+			// pass that originally committed them; each is included with its existing item only when
+			// its bytes are still present right now.
+			const committedEntries = new Map<
+				string,
+				{
+					item: DriveItem
+					path: string
+				}
+			>()
+
+			for (const [uuid, remoteEntry] of remote) {
+				committedEntries.set(uuid, {
+					item: remoteEntry.item,
+					path: remoteEntry.path
+				})
+			}
+
+			if (listingDegraded) {
+				const remotePaths = new Set<string>()
+
+				for (const remoteEntry of remote.values()) {
+					remotePaths.add(remoteEntry.path)
+				}
+
+				const localStatByUuid = new Map<string, boolean>()
+
+				for (const localEntry of local) {
+					localStatByUuid.set(localEntry.uuid, localEntry.existsOnDisk)
+				}
+
+				for (const uuid in existingEntries) {
+					const entry = existingEntries[uuid]
+
+					if (!entry || remote.has(uuid)) {
+						continue
+					}
+
+					// Drop preserved entries whose pre-pass stat said missing — an unlisted entry
+					// whose bytes are gone has nothing verified to preserve (it re-enters via the
+					// listing + download once the listing reads clean again).
+					if (localStatByUuid.get(uuid) !== true) {
+						continue
+					}
+
+					// The move phase may have carried an unlisted entry along inside a moved/renamed
+					// ancestor directory — replay the planner's prefix rewrites (both temp phases are
+					// in plan.ops) so the union records the entry's CURRENT on-disk path.
+					let path = entry.path
+
+					for (const op of plan.ops) {
+						if (op.type !== "move") {
+							continue
+						}
+
+						if (path === op.from) {
+							path = op.to
+						} else if (path.startsWith(`${op.from}/`)) {
+							path = `${op.to}${path.slice(op.from.length)}`
+						}
+					}
+
+					// A remote entry now claims this exact path (e.g. the file was re-created under a
+					// new uuid): the downloaded bytes own it — aliasing the stale uuid onto the same
+					// path would lie about what is on disk. Drop the preserved entry; cleanup happens
+					// once the listing is clean.
+					if (remotePaths.has(path)) {
+						continue
+					}
+
+					// Verified union: re-stat the final path so the committed meta only ever claims
+					// bytes that are actually present.
+					if (isDirectoryItem(entry.item)) {
+						if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, path)).exists) {
+							continue
+						}
+					} else {
+						const preservedFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, path))
+
+						if (!preservedFile.exists || preservedFile.size !== Number(entry.item.data.decryptedMeta?.size ?? -1)) {
+							continue
+						}
+					}
+
+					committedEntries.set(uuid, {
+						item: entry.item,
+						path
+					})
+				}
 			}
 
 			const serialized = serialize({
 				item: directory,
 				parent,
-				entries: Object.fromEntries(
-					[...remote.entries()]
-						.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-						.map(([uuid, remoteEntry]) => [
-							uuid,
-							{
-								item: remoteEntry.item,
-								path: remoteEntry.path
-							}
-						])
-				)
+				entries: Object.fromEntries([...committedEntries.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 			} satisfies DirectoryOfflineMeta)
 
 			const metaUnchanged = currentMetaText !== null && serialized === currentMetaText
 
 			if (metaUnchanged && !downloadRan && !metaWasUnreadable) {
 				// Fixed point: nothing changed — a TRUE no-op pass performs zero writes and no sweep.
-				return []
+				// Degraded markers (if any) still surface to the caller every pass.
+				return errors
 			}
 
 			if (metaUnchanged) {
@@ -1349,10 +1527,11 @@ export class Offline {
 			} else {
 				atomicWrite(metaFile, serialized)
 
-				// Overlap dedup: entries of this tree subsume their standalone copies.
+				// Overlap dedup: entries of this tree (incl. degraded-pass preserved ones) subsume
+				// their standalone copies.
 				const currentIndex = await this.readIndex()
 
-				for (const entryUuid of remote.keys()) {
+				for (const entryUuid of committedEntries.keys()) {
 					if (currentIndex.files[entryUuid]) {
 						const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, entryUuid))
 
@@ -1379,13 +1558,15 @@ export class Offline {
 			}
 
 			// Orphan sweep — only after a verified pass that ran a download or started with an
-			// unreadable meta: delete physical paths the meta does not claim (this also cleans
-			// crashed .filendl partials). Never runs on true no-op passes.
+			// unreadable meta: delete physical paths the COMMITTED meta does not claim (this also
+			// cleans crashed .filendl partials). The keep-set is built from committedEntries, so a
+			// degraded pass's preserved entries (and their ancestors) are sweep-protected. Never
+			// runs on true no-op passes.
 			if (downloadRan || metaWasUnreadable) {
 				const claimed = new Set<string>()
 
-				for (const remoteEntry of remote.values()) {
-					let current = remoteEntry.path
+				for (const committedEntry of committedEntries.values()) {
+					let current = committedEntry.path
 
 					while (current !== "" && current !== "/") {
 						claimed.add(current)
@@ -1423,7 +1604,9 @@ export class Offline {
 				sweep(liveDir, "")
 			}
 
-			return []
+			// Committed. Degraded markers (if any) still bubble so the caller's error surface keeps
+			// reporting the listing degradation until it clears.
+			return errors
 		})
 
 		if (!result.success) {
@@ -1722,11 +1905,15 @@ export class Offline {
 			signal
 		})
 
-		// reconcileTree only returns a non-empty error array for an initial store when a readable
+		// reconcileTree returns non-degraded errors for an initial store only when a readable
 		// committed meta already existed at pass start (it deletes the partial tree and throws
-		// otherwise). Surface the failure to the caller WITHOUT deleting the committed tree.
-		if (errors.length > 0) {
-			throw new Error(errors[0]?.message ?? "Storing directory offline failed")
+		// otherwise). Surface such failures to the caller WITHOUT deleting the committed tree.
+		// Degraded-only error sets mean the pass COMMITTED (verified union) — the store succeeded;
+		// the next sync pass keeps surfacing the listing degradation through its own reconciles.
+		const fatal = errors.filter(error => error.degraded !== true)
+
+		if (fatal.length > 0) {
+			throw new Error(fatal[0]?.message ?? "Storing directory offline failed")
 		}
 	}
 
@@ -2286,6 +2473,17 @@ export class Offline {
 
 			defer(() => {
 				this.clearBarrier.leave()
+			})
+
+			// Per-UUID lock: a removal must not interleave with a same-uuid reconcile/redownload
+			// mid-pass — without it the delete can land between that pass's download and commit,
+			// whose meta/index write then resurrects the item. Callers never hold this lock when
+			// calling removeItem and the lock order matches every other store method
+			// (clearBarrier → per-uuid → storeMutex), so no deadlock is possible.
+			const releaseStoreItemLock = await this.acquireStoreItemLock(item.data.uuid)
+
+			defer(() => {
+				releaseStoreItemLock()
 			})
 
 			await this.storeMutex.acquire()

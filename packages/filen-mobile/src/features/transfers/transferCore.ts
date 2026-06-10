@@ -243,9 +243,10 @@ export type DownloadParams = {
 	signal?: AbortSignal
 	// When true, a directory download must NOT pre-delete an existing populated destination before the
 	// recursive download starts (nor delete it again on a non-abort failure). Used by the offline layer's
-	// stage-then-atomic-swap path, where the destination IS the staging dir and a populated live tree must
-	// survive a transient download error. Defaults to false → the original destructive behavior is preserved
-	// for every other (non-offline) caller, which downloads into a fresh/disposable destination.
+	// in-place tree reconcile, where the destination IS the live stored tree: the Rust downloader is
+	// hash-idempotent per file, so existing healthy bytes are skipped and any failure must leave them
+	// intact for the next reconcile pass. Defaults to false → the original destructive behavior is
+	// preserved for every other (non-offline) caller, which downloads into a fresh/disposable destination.
 	preserveDestinationOnStart?: boolean
 }
 
@@ -1084,9 +1085,9 @@ export async function downloadCore(
 		})
 
 		if (!result.success) {
-			// When the offline layer owns the destination (staging dir), it cleans up on failure and must
-			// keep the live tree intact — so don't delete here. Every other caller downloads into a fresh
-			// destination and relies on this cleanup.
+			// When the offline layer owns the destination (in-place reconcile of a live stored tree), a
+			// failed pass must leave the existing bytes for the next reconcile — so don't delete here.
+			// Every other caller downloads into a fresh destination and relies on this cleanup.
 			if (!preserveDestinationOnStart && destination.exists) {
 				destination.delete()
 			}

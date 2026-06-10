@@ -93,11 +93,10 @@ vi.mock("@/features/notes/components/sync", () => ({
 	SyncHost: vi.fn()
 }))
 
+// The Offline storage layer has no cancel() — nothing reads an abort signal there anymore; the
+// sync orchestrator (offlineSync.cancel) owns in-flight cancellation.
 vi.mock("@/features/offline/offline", () => ({
 	default: {
-		cancel: vi.fn(() => {
-			callLog.push("offline.cancel")
-		}),
 		clearAll: vi.fn(async () => {
 			callLog.push("offline.clearAll")
 		})
@@ -240,21 +239,19 @@ describe("auth.logout", () => {
 		const transfersIdx = callLog.indexOf("transfers.cancelAll")
 		const chatsIdx = callLog.indexOf("chatsSync.cancel")
 		const notesIdx = callLog.indexOf("notesSync.cancel")
-		const offlineIdx = callLog.indexOf("offline.cancel")
 		const offlineSyncIdx = callLog.indexOf("offlineSync.cancel")
 
 		expect(transfersIdx).toBeGreaterThan(phase1End)
 		expect(chatsIdx).toBeGreaterThan(transfersIdx)
 		expect(notesIdx).toBeGreaterThan(chatsIdx)
-		expect(offlineIdx).toBeGreaterThan(notesIdx)
 
-		// The sync orchestrator's in-flight pass is aborted right after the storage layer's cancel.
-		expect(offlineSyncIdx).toBeGreaterThan(offlineIdx)
+		// The offline sync orchestrator's in-flight pass is aborted last in the cancel block.
+		expect(offlineSyncIdx).toBeGreaterThan(notesIdx)
 
 		// Phase 3: storage clear — must follow all cancels
 		const secureClearIdx = callLog.indexOf("secureStore.clear")
 
-		expect(secureClearIdx).toBeGreaterThan(offlineIdx)
+		expect(secureClearIdx).toBeGreaterThan(offlineSyncIdx)
 
 		// Phase 4: reload — must follow storage clear (fire-and-forget, but mock is sync)
 		const reloadIdx = callLog.indexOf("reloadAppAsync")
@@ -299,9 +296,9 @@ describe("auth.logout", () => {
 
 		expect(notesCancelCalls.length).toBe(1)
 
-		const offlineCancelCalls = callLog.filter(c => c === "offline.cancel")
+		const offlineSyncCancelCalls = callLog.filter(c => c === "offlineSync.cancel")
 
-		expect(offlineCancelCalls.length).toBe(1)
+		expect(offlineSyncCancelCalls.length).toBe(1)
 	})
 
 	it("after a logout settles, a subsequent logout is allowed to run fresh", async () => {
@@ -320,7 +317,7 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("secureStore.clear")
 		expect(callLog).toContain("chatsSync.cancel")
 		expect(callLog).toContain("notesSync.cancel")
-		expect(callLog).toContain("offline.cancel")
+		expect(callLog).toContain("offlineSync.cancel")
 	})
 
 	it("continues even when audio.stop throws", async () => {
@@ -338,7 +335,7 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("transfers.cancelAll")
 		expect(callLog).toContain("chatsSync.cancel")
 		expect(callLog).toContain("notesSync.cancel")
-		expect(callLog).toContain("offline.cancel")
+		expect(callLog).toContain("offlineSync.cancel")
 		expect(callLog).toContain("secureStore.clear")
 		expect(callLog).toContain("sqlite.clearAsync")
 		expect(callLog).toContain("reloadAppAsync")
@@ -359,7 +356,7 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("transfers.cancelAll")
 		expect(callLog).toContain("chatsSync.cancel")
 		expect(callLog).toContain("notesSync.cancel")
-		expect(callLog).toContain("offline.cancel")
+		expect(callLog).toContain("offlineSync.cancel")
 		expect(callLog).toContain("secureStore.clear")
 		expect(callLog).toContain("sqlite.clearAsync")
 		expect(callLog).toContain("reloadAppAsync")
@@ -380,7 +377,7 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("transfers.cancelAll")
 		expect(callLog).toContain("chatsSync.cancel")
 		expect(callLog).toContain("notesSync.cancel")
-		expect(callLog).toContain("offline.cancel")
+		expect(callLog).toContain("offlineSync.cancel")
 		expect(callLog).toContain("secureStore.clear")
 		expect(callLog).toContain("sqlite.clearAsync")
 		expect(callLog).toContain("reloadAppAsync")
@@ -454,11 +451,11 @@ describe("auth.logout", () => {
 		await vi.runAllTimersAsync()
 		await promise
 
-		const offlineCancelIdx = callLog.indexOf("offline.cancel")
+		const offlineSyncCancelIdx = callLog.indexOf("offlineSync.cancel")
 		const destroyIdx = callLog.indexOf("authedClient.uniffiDestroy")
 		const cacheClearIdx = callLog.indexOf("cache.clear")
 
-		expect(destroyIdx).toBeGreaterThan(offlineCancelIdx)
+		expect(destroyIdx).toBeGreaterThan(offlineSyncCancelIdx)
 		expect(cacheClearIdx).toBeGreaterThan(destroyIdx)
 	})
 

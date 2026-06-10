@@ -52,6 +52,38 @@ function resolveUri(...uris: (string | File | Directory)[]): string {
 		.join("/")
 }
 
+/** Delete a single fs entry — recursively when it is a directory (mirrors native removeItem). */
+function deleteEntryRecursive(uri: string): void {
+	if (fs.get(uri) === "dir") {
+		const prefix = uri.endsWith("/") ? uri : `${uri}/`
+
+		for (const key of [...fs.keys()]) {
+			if (key.startsWith(prefix)) {
+				fs.delete(key)
+			}
+		}
+	}
+
+	fs.delete(uri)
+}
+
+/**
+ * Native move semantics shared by File/Directory move (verified in expo-file-system v56 sources,
+ * both platforms): moving onto an EXISTING destination throws unless RelocationOptions
+ * `overwrite: true` is passed, in which case the destination is removed first.
+ */
+function applyMoveOverwriteSemantics(destUri: string, options?: { overwrite?: boolean }): void {
+	if (!fs.has(destUri)) {
+		return
+	}
+
+	if (options?.overwrite !== true) {
+		throw new Error(`Destination already exists: ${destUri}`)
+	}
+
+	deleteEntryRecursive(destUri)
+}
+
 export class File {
 	uri: string
 
@@ -183,19 +215,23 @@ export class File {
 		fs.set(destUri, new Uint8Array(entry))
 	}
 
-	move(destination: File | Directory): void {
+	move(destination: File | Directory, options?: { overwrite?: boolean }): void {
+		const destUri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
+
+		applyMoveOverwriteSemantics(destUri, options)
+
 		this.copy(destination)
 		this.delete()
 
-		this.uri = destination instanceof File ? destination.uri : Paths.join(destination.uri, this.name)
+		this.uri = destUri
 	}
 
 	copySync(destination: File | Directory): void {
 		this.copy(destination)
 	}
 
-	moveSync(destination: File | Directory): void {
-		this.move(destination)
+	moveSync(destination: File | Directory, options?: { overwrite?: boolean }): void {
+		this.move(destination, options)
 	}
 
 	rename(newName: string): void {
@@ -474,12 +510,27 @@ export class Directory {
 		}
 	}
 
-	move(destination: Directory | File): void {
+	move(destination: Directory | File, options?: { overwrite?: boolean }): void {
 		const destUri = this.resolveCopyOrMoveDestination(destination)
 
-		this.copy(destination)
-		this.delete()
+		applyMoveOverwriteSemantics(destUri, options)
 
+		// Inline the subtree transfer against the pre-resolved destUri (instead of delegating to
+		// copy()) so the destination resolution cannot shift after an overwrite removed it.
+		const prefix = this.uri.endsWith("/") ? this.uri : `${this.uri}/`
+
+		fs.set(destUri, "dir")
+
+		for (const [key, value] of [...fs.entries()]) {
+			if (key.startsWith(prefix)) {
+				const relative = key.slice(this.uri.length)
+
+				fs.set(`${destUri}${relative}`, value)
+				fs.delete(key)
+			}
+		}
+
+		fs.delete(this.uri)
 		this.uri = destUri
 	}
 
@@ -487,8 +538,8 @@ export class Directory {
 		this.copy(destination)
 	}
 
-	moveSync(destination: Directory | File): void {
-		this.move(destination)
+	moveSync(destination: Directory | File, options?: { overwrite?: boolean }): void {
+		this.move(destination, options)
 	}
 
 	rename(newName: string): void {

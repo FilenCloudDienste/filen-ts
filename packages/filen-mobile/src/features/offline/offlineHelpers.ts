@@ -21,7 +21,10 @@ export type OfflineParent = AnyDirWithContext | "sharedInRoot"
 
 /**
  * Write data to a file atomically using write-to-temp-then-move.
- * Prevents corruption from crashes mid-write.
+ * Prevents corruption from crashes mid-write: the destination is replaced by a SINGLE
+ * overwriting move (expo-file-system v56 `moveSync` honors RelocationOptions `overwrite`
+ * natively on both platforms) — never a delete-then-move pair, which had a window where
+ * a crash between the two steps left the destination missing entirely.
  */
 export function atomicWrite(file: FileSystem.File, data: string | Uint8Array): FileSystem.File {
 	const tmp = newTmpFile(`.tmp-${randomUUID()}`)
@@ -29,11 +32,9 @@ export function atomicWrite(file: FileSystem.File, data: string | Uint8Array): F
 	tmp.write(data)
 
 	try {
-		if (file.exists) {
-			file.delete()
-		}
-
-		tmp.moveSync(file)
+		tmp.moveSync(file, {
+			overwrite: true
+		})
 
 		return file
 	} catch (e) {
@@ -118,7 +119,43 @@ export type OfflineSyncError = {
 	itemType: DriveItem["type"]
 	kind: OfflineSyncErrorKind
 	message: string
+	// A degraded-listing marker (scan errors / undecodable listed metas): the reconcile pass
+	// skipped its delete phase but is otherwise trustworthy, so a pass whose errors are ALL
+	// degraded still commits (verified-union meta). Verify/download failures are never degraded.
+	degraded?: boolean
 	timestamp: number
+}
+
+// Single OfflineSyncError constructor shared by the storage layer (offline.ts reconcileTree) and
+// the sync orchestrator (offlineSync.ts) so the id/dedup shape can never drift between the two.
+export function makeSyncError({
+	itemUuid,
+	topLevelUuid,
+	name,
+	itemType,
+	kind,
+	message,
+	degraded
+}: {
+	itemUuid: string
+	topLevelUuid: string | null
+	name: string
+	itemType: DriveItem["type"]
+	kind: OfflineSyncErrorKind
+	message: string
+	degraded?: boolean
+}): OfflineSyncError {
+	return {
+		id: `${itemUuid}:${kind}`,
+		itemUuid,
+		topLevelUuid,
+		name,
+		itemType,
+		kind,
+		message,
+		degraded,
+		timestamp: Date.now()
+	}
 }
 
 // Converts a directory DriveItem directly into an AnyDirWithContext (or OfflineParent) for SDK calls.
