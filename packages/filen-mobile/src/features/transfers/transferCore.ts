@@ -660,8 +660,11 @@ export async function uploadCore(
 			{
 				parent,
 				name: name ?? localFileOrDir.name ?? undefined,
-				created: created ? BigInt(created) : undefined,
-				modified: modified ? BigInt(modified) : undefined,
+				// Null-guard (NOT falsy): 0 is a valid epoch timestamp — camera upload
+				// relies on created=0 surviving for assets without any usable timestamp,
+				// or its dedup identity diverges from the remote listing.
+				created: created != null ? BigInt(created) : undefined,
+				modified: modified != null ? BigInt(modified) : undefined,
 				mime: mime ?? undefined,
 				noExif: false,
 				noExifOverride: false

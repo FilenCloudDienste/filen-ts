@@ -2,7 +2,8 @@ import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
-import { applyAfterActivationToggle } from "@/features/cameraUpload/cameraUploadHelpers"
+import { applyAfterActivationToggle, CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY } from "@/features/cameraUpload/cameraUploadHelpers"
+import { useSecureStore } from "@/lib/secureStore"
 import View from "@/components/ui/view"
 import { Fragment, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
@@ -28,6 +29,7 @@ type BooleanConfigKey = {
 const CameraUpload = () => {
 	const { t } = useTranslation()
 	const { config, setConfig } = useCameraUploadConfig()
+	const [reuploadDeleted, setReuploadDeleted] = useSecureStore<boolean>(CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY, false)
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -263,7 +265,19 @@ const CameraUpload = () => {
 											field: "afterActivation",
 											title: t("after_activation"),
 											subTitle: t("after_activation_description")
-										})
+										}),
+										{
+											icon: "time-outline",
+											title: t("reupload_deleted"),
+											subTitle: t("reupload_deleted_description"),
+											rightItem: {
+												type: "switch",
+												value: reuploadDeleted,
+												onValueChange: () => {
+													setReuploadDeleted(prev => !prev)
+												}
+											}
+										}
 									]}
 								/>
 							</Fragment>

@@ -103,6 +103,22 @@ type MapEntry = {
 	map: PersistentMap<unknown>
 }
 
+/**
+ * Value shape for `cameraUploadHashes`. `md5` is the hash of the asset content as it
+ * was last uploaded (or last verified against the cache); `verifiedModificationTime`
+ * is the asset's modificationTime at the moment that md5 was last verified, letting
+ * camera upload skip re-hashing (and re-downloading iCloud-offloaded assets) when the
+ * mtime is unchanged. `-1` means "never verified" and always forces one hash.
+ *
+ * Entries persisted before this shape existed are plain md5 strings — readers treat a
+ * string value as `{ md5: <string>, verifiedModificationTime: -1 }` and upgrade it in
+ * place on the next write (lazy migration; no version bump / cache wipe needed).
+ */
+export type CameraUploadHashEntry = {
+	md5: string
+	verifiedModificationTime: number
+}
+
 export class Cache {
 	private readonly registry: MapEntry[] = []
 	private readonly dirtyUpserts = new Map<string, Set<string>>()
@@ -125,7 +141,9 @@ export class Cache {
 	public readonly directoryUuidToAnyNormalDir: PersistentMap<AnyNormalDir>
 	public readonly directoryUuidToAnyDirWithContext: PersistentMap<AnyDirWithContext>
 	public readonly availableThumbnails: PersistentMap<boolean>
-	public readonly cameraUploadHashes: PersistentMap<string>
+	// The string arm of the union is the LEGACY persisted shape (bare md5) — see
+	// CameraUploadHashEntry. Writers must always write the object shape.
+	public readonly cameraUploadHashes: PersistentMap<CameraUploadHashEntry | string>
 	public readonly chatAttachmentLayouts: PersistentMap<{
 		width: number
 		height: number
@@ -145,7 +163,7 @@ export class Cache {
 		this.directoryUuidToAnyNormalDir = this.createMap<AnyNormalDir>("directoryUuidToAnyNormalDir")
 		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
 		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
-		this.cameraUploadHashes = this.createMap<string>("cameraUploadHashes")
+		this.cameraUploadHashes = this.createMap<CameraUploadHashEntry | string>("cameraUploadHashes")
 		this.chatAttachmentLayouts = this.createMap<{
 			width: number
 			height: number

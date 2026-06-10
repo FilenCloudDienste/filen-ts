@@ -64,6 +64,11 @@ export const media = {
 	after_activation: "After activation",
 	/** Camera upload settings — subtitle under the after-activation toggle */
 	after_activation_description: "Only upload media captured after camera upload was first activated.",
+	/** Camera upload settings — row title for the re-upload-deleted toggle (mirror semantics) */
+	reupload_deleted: "Re-upload deleted photos",
+	/** Camera upload settings — subtitle under the re-upload-deleted toggle */
+	reupload_deleted_description:
+		"Mirror your library: items removed from the cloud directory are uploaded again on the next sync. When off, deleted items stay deleted.",
 
 	// ── Camera upload albums picker ───────────────────────────────────────────
 	/** Albums picker screen — header title (same key reused from settings row) */
