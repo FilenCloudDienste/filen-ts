@@ -6,7 +6,10 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const { mockCopyToMediaStore, mockTransfersDownload, mockNewTmpDir } = vi.hoisted(() => ({
 	mockCopyToMediaStore: vi.fn().mockResolvedValue(undefined),
-	mockTransfersDownload: vi.fn().mockResolvedValue(true),
+	// transfers.download resolves an object ({ files, directories[, errors] }) or null (abort) —
+	// never a bare boolean. The realistic shape matters: the code under test narrows the result
+	// with `"errors" in result`, which throws on primitives.
+	mockTransfersDownload: vi.fn().mockResolvedValue({ files: [], directories: [] }),
 	mockNewTmpDir: vi.fn()
 }))
 
@@ -228,7 +231,7 @@ beforeEach(() => {
 	fs.clear()
 	mockCopyToMediaStore.mockClear()
 	mockTransfersDownload.mockReset()
-	mockTransfersDownload.mockResolvedValue(true)
+	mockTransfersDownload.mockResolvedValue({ files: [], directories: [] })
 	mockNewTmpDir.mockReset()
 	mockNewTmpDir.mockImplementation(() => new FileSystem.Directory(`${TMP_BASE}/${crypto.randomUUID()}`))
 	setOS("ios")
@@ -457,7 +460,7 @@ describe("downloadDriveItemToDevice — segment-decode pipeline (Android directo
 
 			fs.set(`${destUri}/${subPath}`, new Uint8Array([1]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockImplementation(({ parentFolder }: { parentFolder: string }) => {
@@ -503,7 +506,7 @@ describe("downloadDriveItemToDevice — segment-decode pipeline (Android directo
 			fs.set(subDirUri, "dir")
 			fs.set(`${subDirUri}/file.txt`, new Uint8Array([1]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockImplementation(({ parentFolder }: { parentFolder: string }) => {
@@ -541,7 +544,7 @@ describe("downloadDriveItemToDevice — segment-decode pipeline (Android directo
 			fs.set(subDirUri, "dir")
 			fs.set(`${subDirUri}/file.txt`, new Uint8Array([1]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockImplementation(({ parentFolder }: { parentFolder: string }) => {
@@ -580,7 +583,7 @@ describe("downloadDriveItemToDevice — segment-decode pipeline (Android directo
 			fs.set(subDirUri, "dir")
 			fs.set(`${subDirUri}/file.txt`, new Uint8Array([1]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockImplementation(({ parentFolder }: { parentFolder: string }) => {
@@ -629,7 +632,7 @@ describe("downloadDriveItemToDevice — segment-decode pipeline (Android directo
 			fs.set(`${destUri}/a/b/c`, "dir")
 			fs.set(`${destUri}/a/b/c/leaf.bin`, new Uint8Array([1]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockImplementation(({ parentFolder }: { parentFolder: string }) => {
@@ -694,7 +697,7 @@ describe("downloadDriveItemToDevice — Android defer cleanup", () => {
 		const item = makeFileItem({ name: dirName })
 
 		// downloads succeed, returning a truthy result triggers MediaStore copy
-		mockTransfersDownload.mockResolvedValue(true)
+		mockTransfersDownload.mockResolvedValue({ files: [], directories: [] })
 		mockCopyToMediaStore.mockResolvedValue(undefined)
 
 		await downloadDriveItemToDevice({ item })
@@ -770,7 +773,7 @@ describe("downloadDriveItemToDevice — #24 Android single-file URI decoding", (
 
 		const capturedSrc: string[] = []
 
-		mockTransfersDownload.mockResolvedValue(true)
+		mockTransfersDownload.mockResolvedValue({ files: [], directories: [] })
 
 		mockCopyToMediaStore.mockImplementation((_meta: unknown, _type: string, src: string) => {
 			capturedSrc.push(src)
@@ -803,7 +806,7 @@ describe("downloadDriveItemToDevice — #24 Android single-file URI decoding", (
 
 		const capturedSrc: string[] = []
 
-		mockTransfersDownload.mockResolvedValue(true)
+		mockTransfersDownload.mockResolvedValue({ files: [], directories: [] })
 
 		mockCopyToMediaStore.mockImplementation((_meta: unknown, _type: string, src: string) => {
 			capturedSrc.push(src)
@@ -851,7 +854,7 @@ describe("downloadDriveItemToDevice — #23 Android directory partial-failure ag
 			fs.set(`${destUri}/a.txt`, new Uint8Array([1]))
 			fs.set(`${destUri}/b.txt`, new Uint8Array([2]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockResolvedValue(undefined)
@@ -879,7 +882,7 @@ describe("downloadDriveItemToDevice — #23 Android directory partial-failure ag
 			fs.set(`${destUri}/fail.txt`, new Uint8Array([2]))
 			fs.set(`${destUri}/also-ok.txt`, new Uint8Array([3]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		// fail.txt copy rejects; the other two succeed
@@ -917,7 +920,7 @@ describe("downloadDriveItemToDevice — #23 Android directory partial-failure ag
 			fs.set(`${destUri}/bad1.txt`, new Uint8Array([2]))
 			fs.set(`${destUri}/bad2.txt`, new Uint8Array([3]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockImplementation(({ name }: { name: string }) => {
@@ -959,7 +962,7 @@ describe("downloadDriveItemToDevice — #23 Android directory partial-failure ag
 			fs.set(destUri, "dir")
 			fs.set(`${destUri}/file.txt`, new Uint8Array([1]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		// Verify that tmpBase exists at the time copyToMediaStore is called
@@ -1010,7 +1013,7 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			fs.set(`${destUri1}/fail.txt`, new Uint8Array([2]))
 			fs.set(`${destUri1}/also-ok.txt`, new Uint8Array([3]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		// fail.txt copy rejects on first attempt; the other two succeed.
@@ -1048,7 +1051,7 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			fs.set(`${destUri2}/fail.txt`, new Uint8Array([2]))
 			fs.set(`${destUri2}/also-ok.txt`, new Uint8Array([3]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		const secondResult = await downloadDriveItemToDevice({ item })
@@ -1088,7 +1091,7 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			fs.set(`${destUri1}/a.txt`, new Uint8Array([1]))
 			fs.set(`${destUri1}/b.txt`, new Uint8Array([2]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		mockCopyToMediaStore.mockResolvedValue(undefined)
@@ -1113,7 +1116,7 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			fs.set(`${destUri2}/a.txt`, new Uint8Array([1]))
 			fs.set(`${destUri2}/b.txt`, new Uint8Array([2]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		const secondResult = await downloadDriveItemToDevice({ item })
@@ -1144,7 +1147,7 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			fs.set(destUriA, "dir")
 			fs.set(`${destUriA}/file.txt`, new Uint8Array([1]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		await downloadDriveItemToDevice({ item: itemA })
@@ -1167,12 +1170,385 @@ describe("downloadDriveItemToDevice — #23 Android directory retry idempotency"
 			fs.set(destUriB, "dir")
 			fs.set(`${destUriB}/file.txt`, new Uint8Array([2]))
 
-			return true
+			return { files: [], directories: [] }
 		})
 
 		await downloadDriveItemToDevice({ item: itemB })
 
 		// item-B's file.txt must NOT be suppressed by item-A's cache entry.
 		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+	})
+})
+
+// ------------------------------------------------------------------
+// 7. C1 — SDK per-entry download failures surface as a localized error
+// ------------------------------------------------------------------
+
+describe("downloadDriveItemToDevice — C1 per-entry download failures (download_missing_files)", () => {
+	it("Android directory: surfaces download_missing_files AND still copies what downloaded", async () => {
+		setOS("android")
+
+		const tmpBase = `${TMP_BASE}/missing-files-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		// Two files never downloaded (per-entry errors), one did.
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri, "dir")
+			fs.set(`${destUri}/downloaded.txt`, new Uint8Array([1]))
+
+			return {
+				files: [],
+				directories: [],
+				errors: [
+					{ path: "/missing-1.txt", error: new Error("entry failed") },
+					{ path: "/missing-2.txt", error: new Error("entry failed") }
+				]
+			}
+		})
+
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		// The partial download is NOT presented as a success…
+		expect(result.success).toBe(false)
+
+		const err = (result as { success: false; error: Error }).error
+
+		expect(err.message).toContain("download_missing_files")
+		expect(err.message).toContain('"count":2')
+
+		// …but the file that DID download was still copied to Downloads first.
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+	})
+
+	it("Android: download errors take precedence over a MediaStore copy failure (one alert, root cause first)", async () => {
+		setOS("android")
+
+		const tmpBase = `${TMP_BASE}/missing-plus-copy-fail-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(destUri, "dir")
+			fs.set(`${destUri}/downloaded.txt`, new Uint8Array([1]))
+
+			return {
+				files: [],
+				directories: [],
+				errors: [{ path: "/missing.txt", error: new Error("entry failed") }]
+			}
+		})
+
+		// The copy of the one downloaded file also fails.
+		mockCopyToMediaStore.mockRejectedValue(new Error("OEM copy error"))
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(false)
+
+		const err = (result as { success: false; error: Error }).error
+
+		// Single error per run: the never-downloaded files are the root cause and win
+		// over the (secondary) copy failure; a retry surfaces whatever class remains.
+		expect(err.message).toContain("download_missing_files")
+		expect(err.message).not.toContain("download_partial_failure")
+
+		// The copy was still attempted before the throw.
+		expect(mockCopyToMediaStore).toHaveBeenCalledTimes(1)
+	})
+
+	it("iOS directory: surfaces download_missing_files (no MediaStore phase)", async () => {
+		setOS("ios")
+
+		const destBase = "file:///document/Downloads"
+
+		fs.set(destBase, "dir")
+
+		const item = makeDirItem({ name: "mydir" })
+
+		mockTransfersDownload.mockImplementation(async () => {
+			fs.set(`${destBase}/mydir`, "dir")
+
+			return {
+				files: [],
+				directories: [],
+				errors: [{ path: "/missing.txt", error: new Error("entry failed") }]
+			}
+		})
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(false)
+		expect((result as { success: false; error: Error }).error.message).toContain("download_missing_files")
+		expect(mockCopyToMediaStore).not.toHaveBeenCalled()
+	})
+
+	it("empty errors array stays a clean success", async () => {
+		setOS("ios")
+
+		const destBase = "file:///document/Downloads"
+
+		fs.set(destBase, "dir")
+
+		const item = makeDirItem({ name: "mydir" })
+
+		mockTransfersDownload.mockResolvedValue({ files: [], directories: [], errors: [] })
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(true)
+	})
+})
+
+// ------------------------------------------------------------------
+// 8. WIP — completion promise resolves on EVERY exit path
+// ------------------------------------------------------------------
+
+// Settles to "resolved" when the promise is already (or promptly) resolved, "pending" when it
+// is still hanging after the grace window — lets tests assert resolution without risking a
+// vitest timeout on a promise that never settles.
+function promiseState(promise: Promise<unknown>, timeoutMs = 25): Promise<"resolved" | "pending"> {
+	return Promise.race([
+		promise.then(() => "resolved" as const),
+		new Promise<"pending">(resolve => setTimeout(() => resolve("pending"), timeoutMs))
+	])
+}
+
+describe("downloadDriveItemToDevice — completion promise (notification persists until MediaStore settles)", () => {
+	beforeEach(() => {
+		setOS("android")
+	})
+
+	type CapturedAwaitExternal = (() => Promise<void>) | undefined
+
+	it("is pending while the download resolves and resolves after the MediaStore copies settle (success)", async () => {
+		const tmpBase = `${TMP_BASE}/completion-success-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		let awaitExternal: CapturedAwaitExternal
+		let stateAtDownloadResolution: "resolved" | "pending" | null = null
+
+		mockTransfersDownload.mockImplementation(
+			async ({
+				awaitExternalCompletionBeforeMarkingAsFinished
+			}: {
+				awaitExternalCompletionBeforeMarkingAsFinished: () => Promise<void>
+			}) => {
+				awaitExternal = awaitExternalCompletionBeforeMarkingAsFinished
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/a.txt`, new Uint8Array([1]))
+
+				// At download-resolution time the MediaStore copies have not run yet — the gate
+				// must still be CLOSED (this is the whole point of the WIP: the transfer entry /
+				// notification outlives the download until the copies settle).
+				stateAtDownloadResolution = await promiseState(awaitExternalCompletionBeforeMarkingAsFinished())
+
+				return { files: [], directories: [] }
+			}
+		)
+
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(true)
+		expect(stateAtDownloadResolution).toBe("pending")
+		expect(awaitExternal).toBeDefined()
+
+		// After the copies settled, the gate must be open.
+		await expect(promiseState((awaitExternal as () => Promise<void>)())).resolves.toBe("resolved")
+	})
+
+	it("resolves when the MediaStore copy phase partially fails (error exit)", async () => {
+		const tmpBase = `${TMP_BASE}/completion-copy-fail-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		let awaitExternal: CapturedAwaitExternal
+
+		mockTransfersDownload.mockImplementation(
+			async ({
+				awaitExternalCompletionBeforeMarkingAsFinished
+			}: {
+				awaitExternalCompletionBeforeMarkingAsFinished: () => Promise<void>
+			}) => {
+				awaitExternal = awaitExternalCompletionBeforeMarkingAsFinished
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/fail.txt`, new Uint8Array([1]))
+
+				return { files: [], directories: [] }
+			}
+		)
+
+		mockCopyToMediaStore.mockRejectedValue(new Error("OEM copy error"))
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(false)
+		expect(awaitExternal).toBeDefined()
+		await expect(promiseState((awaitExternal as () => Promise<void>)())).resolves.toBe("resolved")
+	})
+
+	it("resolves when the download is aborted (null result skips the MediaStore block)", async () => {
+		const tmpBase = `${TMP_BASE}/completion-abort-test`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeFileItem({ name: "file.txt" })
+
+		let awaitExternal: CapturedAwaitExternal
+
+		mockTransfersDownload.mockImplementation(
+			async ({
+				awaitExternalCompletionBeforeMarkingAsFinished
+			}: {
+				awaitExternalCompletionBeforeMarkingAsFinished: () => Promise<void>
+			}) => {
+				awaitExternal = awaitExternalCompletionBeforeMarkingAsFinished
+
+				return null
+			}
+		)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(true)
+		expect(awaitExternal).toBeDefined()
+
+		// The outer safety-net defer must have resolved the gate even though the
+		// MediaStore block (whose defer normally resolves it) never ran.
+		await expect(promiseState((awaitExternal as () => Promise<void>)())).resolves.toBe("resolved")
+	})
+
+	it("resolves when transfers.download throws (download-error exit)", async () => {
+		const tmpBase = `${TMP_BASE}/completion-throw-test`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeFileItem({ name: "file.txt" })
+
+		let awaitExternal: CapturedAwaitExternal
+
+		mockTransfersDownload.mockImplementation(
+			async ({
+				awaitExternalCompletionBeforeMarkingAsFinished
+			}: {
+				awaitExternalCompletionBeforeMarkingAsFinished: () => Promise<void>
+			}) => {
+				awaitExternal = awaitExternalCompletionBeforeMarkingAsFinished
+
+				throw new Error("download failed")
+			}
+		)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(false)
+		expect(awaitExternal).toBeDefined()
+		await expect(promiseState((awaitExternal as () => Promise<void>)())).resolves.toBe("resolved")
+	})
+
+	it("resolves when the result carries per-entry download errors (missing-files exit)", async () => {
+		const tmpBase = `${TMP_BASE}/completion-missing-test`
+		const dirName = "mydir"
+		const destUri = `${tmpBase}/${dirName}`
+
+		fs.set(tmpBase, "dir")
+
+		mockNewTmpDir.mockReturnValue(new FileSystem.Directory(tmpBase))
+
+		const item = makeDirItem({ name: dirName })
+
+		let awaitExternal: CapturedAwaitExternal
+
+		mockTransfersDownload.mockImplementation(
+			async ({
+				awaitExternalCompletionBeforeMarkingAsFinished
+			}: {
+				awaitExternalCompletionBeforeMarkingAsFinished: () => Promise<void>
+			}) => {
+				awaitExternal = awaitExternalCompletionBeforeMarkingAsFinished
+
+				fs.set(destUri, "dir")
+				fs.set(`${destUri}/a.txt`, new Uint8Array([1]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: [{ path: "/missing.txt", error: new Error("entry failed") }]
+				}
+			}
+		)
+
+		mockCopyToMediaStore.mockResolvedValue(undefined)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(false)
+		expect(awaitExternal).toBeDefined()
+		await expect(promiseState((awaitExternal as () => Promise<void>)())).resolves.toBe("resolved")
+	})
+
+	it("iOS: the callback yields an immediately-resolved promise (Platform.select default)", async () => {
+		setOS("ios")
+
+		const destBase = "file:///document/Downloads"
+
+		fs.set(destBase, "dir")
+
+		const item = makeFileItem({ name: "file.txt" })
+
+		let stateDuringDownload: "resolved" | "pending" | null = null
+
+		mockTransfersDownload.mockImplementation(
+			async ({
+				awaitExternalCompletionBeforeMarkingAsFinished
+			}: {
+				awaitExternalCompletionBeforeMarkingAsFinished: () => Promise<void>
+			}) => {
+				// On iOS there is no MediaStore phase — the gate must never block.
+				stateDuringDownload = await promiseState(awaitExternalCompletionBeforeMarkingAsFinished())
+
+				return { files: [], directories: [] }
+			}
+		)
+
+		const result = await downloadDriveItemToDevice({ item })
+
+		expect(result.success).toBe(true)
+		expect(stateDuringDownload).toBe("resolved")
 	})
 })

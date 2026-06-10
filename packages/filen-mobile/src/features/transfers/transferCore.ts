@@ -15,7 +15,8 @@ import {
 	AnyNormalDir_Tags,
 	AnyFile,
 	type SharedFile,
-	type DownloadError
+	type DownloadError,
+	type UploadError
 } from "@filen/sdk-rs"
 import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
@@ -90,6 +91,19 @@ export function shouldRemoveSettledTransfer(args: { succeeded: boolean; aborted:
 	return args.succeeded || args.aborted || args.hasErrors
 }
 
+// Total number of per-entry errors accumulated on a live transfer entry across all error
+// buckets (upload/download + scan + unknown). Directory transfers can resolve Ok while
+// individual entries failed — the SDK surfaces those ONLY via the error callbacks
+// (onUploadErrors/onDownloadErrors), so the settle path must read the accumulated state
+// instead of trusting resolution alone.
+export function countTransferErrors(transfer: Transfer): number {
+	if (transfer.type === "uploadDirectory" || transfer.type === "uploadFile") {
+		return transfer.errors.upload.length + transfer.errors.scan.length + transfer.errors.unknown.length
+	}
+
+	return transfer.errors.download.length + transfer.errors.scan.length + transfer.errors.unknown.length
+}
+
 // Display name for a settled transfer, matching the transfers screen row exactly:
 // uploads use the local file/directory name, downloads use the drive item's decrypted name.
 function finishedTransferName(transfer: Transfer): string {
@@ -125,7 +139,8 @@ function buildFinishedSnapshot(args: {
 		startedAt: liveEntry.startedAt,
 		finishedAt: Date.now(),
 		outcome,
-		errorMessage
+		errorMessage,
+		errorCount: countTransferErrors(liveEntry)
 	}
 }
 
@@ -208,15 +223,25 @@ function registerCompletionCleanup(args: {
 		const didSucceed = succeeded()
 		const wasAborted = aborted()
 
-		if (!shouldRemoveSettledTransfer({ succeeded: didSucceed, aborted: wasAborted, hasErrors: false })) {
+		// Settle honesty: a directory transfer resolves Ok even when individual entries failed
+		// (the SDK reports those only via onUploadErrors/onDownloadErrors), so read the LIVE
+		// entry's accumulated errors at settle time instead of stamping "succeeded" on resolution
+		// alone. Only the resolved-non-aborted case reads them — the thrown case must keep
+		// errorCount 0 here so the predicate below stays false and the post-`run` error blocks
+		// own that settle (see function docstring), and aborted transfers stay silently dropped.
+		const liveEntry =
+			didSucceed && !wasAborted ? useTransfersStore.getState().transfers.find(t => t.id === id && t.type === type) : undefined
+		const errorCount = liveEntry ? countTransferErrors(liveEntry) : 0
+
+		if (!shouldRemoveSettledTransfer({ succeeded: didSucceed, aborted: wasAborted, hasErrors: errorCount > 0 })) {
 			return
 		}
 
-		// User-aborted/cancelled transfers are dropped silently — only a genuine success is kept in the
-		// finished list. (Abort wins over success if both are somehow true.)
+		// User-aborted/cancelled transfers are dropped silently — only a genuine settle is kept in
+		// the finished list. (Abort wins over success if both are somehow true.)
 		removeSettledTransfer(id, type, {
 			awaitExternal,
-			outcome: didSucceed && !wasAborted ? "succeeded" : undefined
+			outcome: didSucceed && !wasAborted ? (errorCount > 0 ? "completedWithErrors" : "succeeded") : undefined
 		})
 	})
 }
@@ -268,10 +293,18 @@ export async function uploadCore(
 		modified,
 		mime
 	}: UploadParams
-): Promise<{
-	files: File[]
-	directories: Dir[]
-} | null> {
+): Promise<
+	| {
+			files: File[]
+			directories: Dir[]
+			errors: UploadError[]
+	  }
+	| {
+			files: File[]
+			directories: Dir[]
+	  }
+	| null
+> {
 	const id = randomUUID()
 	const { authedSdkClient } = await auth.getSdkClients()
 	const transferAbortController = new AbortController()
@@ -372,9 +405,11 @@ export async function uploadCore(
 			const transferred: {
 				files: File[]
 				directories: Dir[]
+				errors: UploadError[]
 			} = {
 				files: [],
-				directories: []
+				directories: [],
+				errors: []
 			}
 
 			await authedSdkClient.uploadDirRecursively(
@@ -437,6 +472,10 @@ export async function uploadCore(
 									: t
 							)
 						)
+						// The SDK resolves Ok despite per-entry failures — thread them into the resolved
+						// value (mirrors downloadCore's directory branch) so callers can act on partial
+						// uploads instead of trusting resolution alone.
+						transferred.errors.push(...errors)
 					},
 					onUploadUpdate(uploadedDirs, uploadedFiles, uploadedBytes) {
 						useTransfersStore.getState().setTransfers(prev =>

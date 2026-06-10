@@ -350,6 +350,24 @@ export const drive = {
 	/** Toast shown when a directory download succeeds for some files but fails for others.
 	 *  {{failed}} = number of files that failed, {{total}} = total files attempted */
 	download_partial_failure: "{{failed}} of {{total}} files could not be saved to Downloads",
+	/** Error shown when a directory download-to-device resolved but the SDK reported per-entry
+	 *  failures — the saved directory is missing {{count}} file (singular) */
+	download_missing_files_one: "Downloaded with {{count}} missing file",
+	/** Error shown when a directory download-to-device resolved but the SDK reported per-entry
+	 *  failures — the saved directory is missing {{count}} files (plural) */
+	download_missing_files_other: "Downloaded with {{count}} missing files",
+
+	// ── Import partial-failure errors (menuActionsDownload.ts) ────────────────
+	/** Error shown when the Import flow's download step left {{count}} file missing — the
+	 *  re-upload is skipped and the local staging copy is kept (singular) */
+	import_partial_download_one: "Import cancelled: {{count}} file could not be downloaded",
+	/** Error shown when the Import flow's download step left {{count}} files missing (plural) */
+	import_partial_download_other: "Import cancelled: {{count}} files could not be downloaded",
+	/** Error shown when the Import flow's upload step failed for {{count}} file — the local
+	 *  staging copy is kept (singular) */
+	import_partial_upload_one: "Import incomplete: {{count}} file could not be uploaded",
+	/** Error shown when the Import flow's upload step failed for {{count}} files (plural) */
+	import_partial_upload_other: "Import incomplete: {{count}} files could not be uploaded",
 
 	// ── Bottom tab labels (routes/tabs/_layout.tsx) ───────────────────────────
 	/** Bottom tab label for the drive (files) tab */

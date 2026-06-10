@@ -8,6 +8,7 @@ const {
 	mockDownloadFileToPath,
 	mockDownloadDirRecursively,
 	mockSetTransfers,
+	mockAddFinishedTransfer,
 	mockDriveItemsQueryUpdate,
 	mockGetSdkClients,
 	mockTransfersState,
@@ -47,6 +48,8 @@ const {
 			downloadDirRecursively: mockDownloadDirRecursively
 		}
 	})
+
+	const mockAddFinishedTransfer = vi.fn()
 
 	const mockDriveItemsQueryUpdate = vi.fn()
 
@@ -142,6 +145,7 @@ const {
 		mockDownloadFileToPath,
 		mockDownloadDirRecursively,
 		mockSetTransfers,
+		mockAddFinishedTransfer,
 		mockDriveItemsQueryUpdate,
 		mockGetSdkClients,
 		mockTransfersState: state,
@@ -249,7 +253,8 @@ vi.mock("@/features/transfers/store/useTransfers.store", () => ({
 	default: {
 		getState: () => ({
 			setTransfers: mockSetTransfers,
-			transfers: mockTransfersState.transfers
+			transfers: mockTransfersState.transfers,
+			addFinishedTransfer: mockAddFinishedTransfer
 		})
 	}
 }))
@@ -1005,6 +1010,32 @@ describe("Transfers", () => {
 				expect(result!.files).toHaveLength(1)
 			})
 
+			// Pins the directory-branch resolved-value contract (parity with downloadCore): per-entry
+			// failures arrive ONLY via the onUploadErrors callback (the SDK call still resolves Ok)
+			// and MUST be included in the resolved value so callers can act on partial uploads.
+			it("resolves { files, directories, errors } with callback-fed upload errors included", async () => {
+				const dir = new FsDirectory("file:///document/testdir")
+				fs.set(dir.uri, "dir")
+				const parent = makeParentDir("parent-uuid")
+				const entryError = { error: { message: () => "entry failed" }, path: "/document/testdir/f.txt" }
+				const uploadedFile = { uuid: "file-1", parent: { tag: "Uuid", inner: ["parent-uuid"] } }
+
+				mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onUploadErrors([entryError])
+					callbacks.onUploadUpdate([], [uploadedFile], 256n)
+				})
+
+				const result = await transfers.upload({
+					localFileOrDir: dir,
+					parent,
+					hideProgress: true
+				})
+
+				expect(result).not.toBeNull()
+				expect(result && "errors" in result ? result.errors : null).toEqual([entryError])
+				expect(result!.files).toEqual([uploadedFile])
+			})
+
 			it("returns null (not a rejected promise or unexpected value) when directory upload is aborted", async () => {
 				const dir = new FsDirectory("file:///document/testdir")
 				fs.set(dir.uri, "dir")
@@ -1732,6 +1763,130 @@ describe("Transfers", () => {
 
 			// Both events must have fired exactly once in order.
 			expect(received).toEqual(["paused", "resumed"])
+		})
+	})
+
+	// C1 settle honesty: a directory transfer that RESOLVES while having accumulated per-entry
+	// errors (via the SDK error callbacks) must settle as "completedWithErrors", not "succeeded" —
+	// and a clean resolution stays "succeeded" with errorCount 0.
+	describe("settle honesty (completedWithErrors)", () => {
+		it("settles a resolved directory download with accumulated entry errors as completedWithErrors", async () => {
+			const dest = new FsDirectory("file:///document/destdir")
+			const item = makeDirItem("dir-uuid")
+			const entryError = { error: { message: () => "entry failed" }, path: "/document/destdir/f.txt" }
+
+			mockDownloadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+				callbacks.onDownloadErrors([entryError])
+			})
+
+			const result = await transfers.download({
+				item,
+				destination: dest,
+				hideProgress: false
+			})
+
+			expect(result).not.toBeNull()
+
+			// Let the deferred removal/append .then() microtask flush.
+			await new Promise(res => setTimeout(res, 0))
+
+			expect(mockAddFinishedTransfer).toHaveBeenCalledTimes(1)
+			expect(mockAddFinishedTransfer).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "downloadDirectory",
+					outcome: "completedWithErrors",
+					errorCount: 1
+				})
+			)
+
+			// The settled entry is still removed from the active store (no floating-bar leak).
+			const finalEntry = (mockTransfersState.transfers as { type: string }[]).find(t => t.type === "downloadDirectory")
+
+			expect(finalEntry).toBeUndefined()
+		})
+
+		it("settles a resolved directory upload with accumulated entry errors as completedWithErrors", async () => {
+			const dir = new FsDirectory("file:///document/testdir")
+			fs.set(dir.uri, "dir")
+			const parent = makeParentDir("parent-uuid")
+			const entryError = { error: { message: () => "entry failed" }, path: "/document/testdir/f.txt" }
+
+			mockUploadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+				callbacks.onUploadErrors([entryError])
+			})
+
+			const result = await transfers.upload({
+				localFileOrDir: dir,
+				parent,
+				hideProgress: false
+			})
+
+			expect(result).not.toBeNull()
+
+			await new Promise(res => setTimeout(res, 0))
+
+			expect(mockAddFinishedTransfer).toHaveBeenCalledTimes(1)
+			expect(mockAddFinishedTransfer).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "uploadDirectory",
+					outcome: "completedWithErrors",
+					errorCount: 1
+				})
+			)
+
+			const finalEntry = (mockTransfersState.transfers as { type: string }[]).find(t => t.type === "uploadDirectory")
+
+			expect(finalEntry).toBeUndefined()
+		})
+
+		it("settles a cleanly resolved directory download as succeeded with errorCount 0", async () => {
+			const dest = new FsDirectory("file:///document/destdir")
+			const item = makeDirItem("dir-uuid")
+
+			const result = await transfers.download({
+				item,
+				destination: dest,
+				hideProgress: false
+			})
+
+			expect(result).not.toBeNull()
+
+			await new Promise(res => setTimeout(res, 0))
+
+			expect(mockAddFinishedTransfer).toHaveBeenCalledTimes(1)
+			expect(mockAddFinishedTransfer).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "downloadDirectory",
+					outcome: "succeeded",
+					errorCount: 0
+				})
+			)
+		})
+
+		it("does not append a finished snapshot for an aborted directory download (dropped silently)", async () => {
+			const dest = new FsDirectory("file:///document/destdir")
+			const item = makeDirItem("dir-uuid")
+			const controller = new AbortController()
+
+			mockDownloadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+				// Accumulate an entry error, then abort — abort wins, no snapshot.
+				callbacks.onDownloadErrors([{ error: { message: () => "entry failed" }, path: "/x" }])
+				controller.abort()
+
+				throw new Error("Aborted")
+			})
+
+			const result = await transfers.download({
+				item,
+				destination: dest,
+				signal: controller.signal
+			})
+
+			expect(result).toBeNull()
+
+			await new Promise(res => setTimeout(res, 0))
+
+			expect(mockAddFinishedTransfer).not.toHaveBeenCalled()
 		})
 	})
 

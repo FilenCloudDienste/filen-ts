@@ -35,7 +35,8 @@ vi.mock("@/features/drive/components/item/thumbnail", () => ({ default: "Thumbna
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: "Ionicons" }))
 
 import { useTransfersStore, MAX_FINISHED_TRANSFERS, type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
-import { buildTransfersDisplayList } from "@/features/transfers/screens/transfers"
+import { buildTransfersDisplayList, finishedTransferSubtitle } from "@/features/transfers/screens/transfers"
+import { type TFunction } from "i18next"
 
 function makeFinished(id: string, finishedAt: number, overrides: Partial<FinishedTransfer> = {}): FinishedTransfer {
 	return {
@@ -48,6 +49,7 @@ function makeFinished(id: string, finishedAt: number, overrides: Partial<Finishe
 		finishedAt,
 		outcome: "succeeded",
 		errorMessage: null,
+		errorCount: 0,
 		...overrides
 	}
 }
@@ -238,5 +240,48 @@ describe("buildTransfersDisplayList", () => {
 
 		expect(transfers).toEqual(transfersCopy)
 		expect(finishedTransfers).toEqual(finishedCopy)
+	})
+})
+
+describe("finishedTransferSubtitle", () => {
+	// A t spy that records key + params so plural/count interpolation can be asserted.
+	const makeT = () => {
+		const calls: { key: string; params: Record<string, unknown> | undefined }[] = []
+		const t = ((key: string, params?: Record<string, unknown>) => {
+			calls.push({ key, params })
+
+			return params ? `${key}:${JSON.stringify(params)}` : key
+		}) as unknown as TFunction
+
+		return { t, calls }
+	}
+
+	it("renders the captured error message for an errored transfer", () => {
+		const { t } = makeT()
+		const finished = makeFinished("a", 100, { outcome: "errored", errorMessage: "boom" })
+
+		expect(finishedTransferSubtitle(finished, t)).toBe("boom")
+	})
+
+	it("falls back to transfer_failed for an errored transfer without a message", () => {
+		const { t } = makeT()
+		const finished = makeFinished("a", 100, { outcome: "errored", errorMessage: null })
+
+		expect(finishedTransferSubtitle(finished, t)).toBe("transfer_failed")
+	})
+
+	it("renders the localized error count for a completedWithErrors transfer (C1 settle honesty)", () => {
+		const { t, calls } = makeT()
+		const finished = makeFinished("a", 100, { outcome: "completedWithErrors", errorCount: 3 })
+
+		expect(finishedTransferSubtitle(finished, t)).toBe('transfer_completed_with_errors:{"count":3}')
+		expect(calls).toEqual([{ key: "transfer_completed_with_errors", params: { count: 3 } }])
+	})
+
+	it("renders transfer_completed for a clean success", () => {
+		const { t } = makeT()
+		const finished = makeFinished("a", 100, { outcome: "succeeded" })
+
+		expect(finishedTransferSubtitle(finished, t)).toBe("transfer_completed")
 	})
 })
