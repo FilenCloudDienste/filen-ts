@@ -676,6 +676,125 @@ describe("offlineSync — normal trees (own cloud)", () => {
 		expect(syncErrors()[0]?.itemUuid).toBe("tree-1")
 		expect(syncErrors()[0]?.topLevelUuid).toBe("tree-1")
 	})
+
+	// One-level trash containment (A1): trashed dirs vanish from listings but getDirOptional keeps
+	// resolving their CHILDREN as alive with a normal Uuid parent-tag — only the parent dir's own
+	// parent-tag reveals the trash. Without the gate such trees were kept (and reconciled) forever.
+	it("6b. alive tree whose CONTAINING directory is trashed → removeItem, no reconcile, no meta update", async () => {
+		const item = makeTreeItem("tree-1", "Tree", "parent-1")
+
+		givenTrees([
+			{
+				item,
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "tree-1") {
+				return makeRemoteDir("tree-1", "Tree", uuidParent("parent-1"))
+			}
+
+			if (uuid === "parent-1") {
+				// The parent dir itself sits in trash.
+				return makeRemoteDir("parent-1", "Parent", trashParent)
+			}
+
+			return undefined
+		})
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledWith(item)
+		expect(vi.mocked(offline.reconcileTree)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.updateTreeRootMeta)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
+	})
+
+	it("6c. parent lookup network-fails → listing error, NOTHING removed, no reconcile", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "tree-1") {
+				return makeRemoteDir("tree-1", "Tree", uuidParent("parent-1"))
+			}
+
+			if (uuid === "parent-1") {
+				throw new Error("network down")
+			}
+
+			return undefined
+		})
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.reconcileTree)).not.toHaveBeenCalled()
+		expect(syncErrors()).toHaveLength(1)
+		expect(syncErrors()[0]?.kind).toBe("listing")
+		expect(syncErrors()[0]?.itemUuid).toBe("tree-1")
+		expect(syncErrors()[0]?.message).toBe("network down")
+	})
+
+	it("6d. account-root-parented tree → NO extra parent lookup (exactly one getDirOptional, for the tree itself)", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", ROOT_UUID),
+				parent: makeNormalParent(ROOT_UUID)
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "tree-1" ? makeRemoteDir("tree-1", "Tree", uuidParent(ROOT_UUID)) : undefined
+		)
+
+		await runManualPass()
+
+		// The account root can never be trashed — the gate must not spend a request on it.
+		expect(client.getDirOptional).toHaveBeenCalledTimes(1)
+		expect(client.getDirOptional).toHaveBeenCalledWith("tree-1", expect.anything())
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
+	})
+
+	it("6e. two trees sharing a trashed parent → ONE parent lookup (per-pass cache), both removed", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree one", "parent-shared"),
+				parent: makeNormalParent("parent-shared")
+			},
+			{
+				item: makeTreeItem("tree-2", "Tree two", "parent-shared"),
+				parent: makeNormalParent("parent-shared")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "tree-1") {
+				return makeRemoteDir("tree-1", "Tree one", uuidParent("parent-shared"))
+			}
+
+			if (uuid === "tree-2") {
+				return makeRemoteDir("tree-2", "Tree two", uuidParent("parent-shared"))
+			}
+
+			if (uuid === "parent-shared") {
+				return makeRemoteDir("parent-shared", "Parent", trashParent)
+			}
+
+			return undefined
+		})
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(offline.reconcileTree)).not.toHaveBeenCalled()
+		expect(client.getDirOptional.mock.calls.filter(call => call[0] === "parent-shared")).toHaveLength(1)
+		expect(syncErrors()).toEqual([])
+	})
 })
 
 describe("offlineSync — shared trees (listing-based)", () => {
@@ -1014,6 +1133,37 @@ describe("offlineSync — standalone files", () => {
 		expect(renameArgs.item.data.uuid).toBe("file-1")
 		expect(renameArgs.parent.tag).toBe("Normal")
 		expect(renameArgs.parent.inner[0].inner[0].uuid).toBe("parent-other")
+	})
+
+	// One-level trash containment (A1): a file moved INTO a directory that itself sits in trash
+	// must be removed like any trashed item — re-anchoring it to a trash-contained parent would
+	// keep the copy (and the re-anchor) forever.
+	it("11b. moved standalone whose NEW parent is trash-contained → removeItem, NOT re-anchored", async () => {
+		const movedItem = makeFileItem("file-1", "doc.txt")
+
+		givenFiles([
+			{
+				item: movedItem,
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.listDir.mockResolvedValue({
+			dirs: [],
+			files: []
+		})
+		client.getFileOptional.mockImplementation(async (uuid: string) =>
+			uuid === "file-1" ? makeRemoteFile("file-1", "doc.txt", uuidParent("parent-trashed")) : undefined
+		)
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "parent-trashed" ? makeRemoteDir("parent-trashed", "Trashed dir", trashParent) : undefined
+		)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledWith(movedItem)
+		expect(vi.mocked(offline.renameStandaloneFile)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
 	})
 
 	it("12. trashed/deleted (getFileOptional → trash parent / undefined) → removeItem", async () => {
@@ -1414,15 +1564,19 @@ describe("offlineSync — gates & coalescing", () => {
 })
 
 describe("offlineSync — broken standalone metas", () => {
-	it("19. own-cloud alive WITH data file → renameStandaloneFile rebuild; undefined → removeStandaloneDirectory", async () => {
+	// makeRemoteFile defaults to size 100n — dataFileSize: 100 is the RIGHT-size case, so the
+	// cheap meta rewrite is allowed to bless the existing bytes (A2).
+	it("19. own-cloud alive WITH right-size data file → renameStandaloneFile rebuild; undefined → removeStandaloneDirectory", async () => {
 		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
 			{
 				uuid: "broken-alive",
-				hasDataFile: true
+				hasDataFile: true,
+				dataFileSize: 100
 			},
 			{
 				uuid: "broken-gone",
-				hasDataFile: true
+				hasDataFile: true,
+				dataFileSize: 100
 			}
 		])
 		client.getFileOptional.mockImplementation(async (uuid: string) =>
@@ -1451,7 +1605,8 @@ describe("offlineSync — broken standalone metas", () => {
 		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
 			{
 				uuid: "broken-1",
-				hasDataFile: true
+				hasDataFile: true,
+				dataFileSize: 100
 			}
 		])
 		client.getFileOptional.mockRejectedValue(new Error("network down"))
@@ -1469,7 +1624,8 @@ describe("offlineSync — broken standalone metas", () => {
 		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
 			{
 				uuid: "broken-no-data",
-				hasDataFile: false
+				hasDataFile: false,
+				dataFileSize: null
 			}
 		])
 		client.getFileOptional.mockImplementation(async (uuid: string) =>
@@ -1509,6 +1665,61 @@ describe("offlineSync — broken standalone metas", () => {
 		expect(healArgs.parent.inner[0].inner[0].uuid).toBe("parent-1")
 		expect(healArgs.signal).toBeInstanceOf(AbortSignal)
 		expect(vi.mocked(offline.removeStandaloneDirectory)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
+	})
+
+	// A2 — the heal must not bless wrong-size bytes: a meta rewrite around a partial/stale data
+	// file would commit a standalone whose bytes never matched the remote meta.
+	it("19d. broken dir with data file at the WRONG size → redownloadStandaloneFile, NOT rename-bless", async () => {
+		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
+			{
+				uuid: "broken-wrong-size",
+				hasDataFile: true,
+				dataFileSize: 42
+			}
+		])
+		client.getFileOptional.mockImplementation(async (uuid: string) =>
+			uuid === "broken-wrong-size" ? makeRemoteFile("broken-wrong-size", "rescued.txt", uuidParent("parent-1"), 100n) : undefined
+		)
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "parent-1" ? makeRemoteDir("parent-1", "Parent", uuidParent(ROOT_UUID)) : undefined
+		)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.renameStandaloneFile)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.redownloadStandaloneFile)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.redownloadStandaloneFile).mock.calls[0]?.[0]?.item.data.uuid).toBe("broken-wrong-size")
+		expect(vi.mocked(offline.removeStandaloneDirectory)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
+	})
+
+	// A1 — one-level trash containment also applies to the broken-standalone rebuild: a parent dir
+	// that itself sits in trash means the file is trash-contained — remove the leftover dir
+	// instead of rebuilding a meta anchored inside trash.
+	it("19e. broken dir whose resolved parent is trash-contained → removeStandaloneDirectory, no rebuild", async () => {
+		vi.mocked(offline.listBrokenStandaloneUuids).mockResolvedValue([
+			{
+				uuid: "broken-trash-contained",
+				hasDataFile: true,
+				dataFileSize: 100
+			}
+		])
+		client.getFileOptional.mockImplementation(async (uuid: string) =>
+			uuid === "broken-trash-contained"
+				? makeRemoteFile("broken-trash-contained", "doc.txt", uuidParent("parent-trashed"), 100n)
+				: undefined
+		)
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "parent-trashed" ? makeRemoteDir("parent-trashed", "Trashed dir", trashParent) : undefined
+		)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeStandaloneDirectory)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.removeStandaloneDirectory)).toHaveBeenCalledWith("broken-trash-contained")
+		expect(vi.mocked(offline.renameStandaloneFile)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.redownloadStandaloneFile)).not.toHaveBeenCalled()
 		expect(syncErrors()).toEqual([])
 	})
 })
@@ -1607,6 +1818,30 @@ describe("offlineSync — broken tree metas", () => {
 		expect(syncErrors()[0]?.kind).toBe("listing")
 		expect(syncErrors()[0]?.itemUuid).toBe("broken-tree")
 		expect(syncErrors()[0]?.topLevelUuid).toBe("broken-tree")
+	})
+
+	// A1 — one-level trash containment for the broken-tree rebuild: rebuilding a tree whose parent
+	// dir sits in trash would re-download bytes for a trashed tree every pass.
+	it("20d. broken tree whose resolved parent is trash-contained → removeTreeDirectory, no reconcile", async () => {
+		vi.mocked(offline.listBrokenTreeUuids).mockResolvedValue(["broken-tree"])
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "broken-tree") {
+				return makeRemoteDir("broken-tree", "Tree", uuidParent("parent-trashed"))
+			}
+
+			if (uuid === "parent-trashed") {
+				return makeRemoteDir("parent-trashed", "Trashed dir", trashParent)
+			}
+
+			return undefined
+		})
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.removeTreeDirectory)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.removeTreeDirectory)).toHaveBeenCalledWith("broken-tree")
+		expect(vi.mocked(offline.reconcileTree)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
 	})
 })
 
