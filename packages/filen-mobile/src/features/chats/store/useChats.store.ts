@@ -25,6 +25,19 @@ export type InflightChatMessages = Record<
 	}
 >
 
+// Per-inflightId send-failure record. `permanentRejections` counts CONSECUTIVE non-network,
+// non-auth SDK rejections (the chats sync drops the message from the queue once it reaches its
+// bound — see MAX_NON_RETRYABLE_REJECTIONS in features/chats/components/sync). `message` is the
+// snapshot kept so a dropped (no longer queued) failed send stays renderable in the message list
+// until the user retries/removes it, and so purges can match errors to their chat.
+export type InflightChatMessageError = {
+	error: Error | FilenSdkError
+	permanentRejections: number
+	message: ChatMessageWithInflightId
+}
+
+export type InflightChatMessageErrors = Record<string, InflightChatMessageError>
+
 export type ChatsStore = {
 	inputViewLayout: InputViewLayout
 	inputSelection: {
@@ -35,15 +48,13 @@ export type ChatsStore = {
 	inputFocused: boolean
 	typing: Record<string, Typing>
 	inflightMessages: InflightChatMessages
-	inflightErrors: Record<string, Error | FilenSdkError>
+	inflightErrors: InflightChatMessageErrors
 	selectedChats: Chat[]
 	setSelectedChats: (fn: Chat[] | ((prev: Chat[]) => Chat[])) => void
 	toggleSelectedChat: (chat: Chat) => void
 	clearSelectedChats: () => void
 	selectAllChats: (chats: Chat[]) => void
-	setInflightErrors: (
-		fn: Record<string, Error | FilenSdkError> | ((prev: Record<string, Error | FilenSdkError>) => Record<string, Error | FilenSdkError>)
-	) => void
+	setInflightErrors: (fn: InflightChatMessageErrors | ((prev: InflightChatMessageErrors) => InflightChatMessageErrors)) => void
 	setInflightMessages: (fn: InflightChatMessages | ((prev: InflightChatMessages) => InflightChatMessages)) => void
 	setTyping: (fn: Record<string, Typing> | ((prev: Record<string, Typing>) => Record<string, Typing>)) => void
 	setInputFocused: (fn: boolean | ((prev: boolean) => boolean)) => void

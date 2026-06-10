@@ -51,7 +51,7 @@ const Message = ({
 }) => {
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
-	const isInflightError = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""]))
+	const isInflightError = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""] !== undefined))
 
 	const isMessageOnlyLink = computeIsMessageOnlyLink(info.item.inner.message)
 

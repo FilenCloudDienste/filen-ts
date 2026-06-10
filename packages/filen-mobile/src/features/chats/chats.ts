@@ -10,6 +10,7 @@ import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import * as FileSystem from "expo-file-system"
 import cache from "@/lib/cache"
+import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
@@ -300,6 +301,10 @@ class Chats {
 				: undefined
 		)
 
+		// Purge the chat's queued unsent messages, send errors and input drafts immediately —
+		// the sync must never retry into a chat we just left. Best-effort (never throws).
+		await purgeChatInflightState(chat.uuid)
+
 		// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
 		setTimeout(() => {
 			chatsQueryUpdate({
@@ -326,6 +331,10 @@ class Chats {
 					}
 				: undefined
 		)
+
+		// Purge the chat's queued unsent messages, send errors and input drafts immediately —
+		// the sync must never retry into a deleted chat. Best-effort (never throws).
+		await purgeChatInflightState(chat.uuid)
 
 		// We have to set a timeout here, otherwise the main chat _layout redirect kicks in too early and which feels janky and messes with the navigation stack
 		setTimeout(() => {

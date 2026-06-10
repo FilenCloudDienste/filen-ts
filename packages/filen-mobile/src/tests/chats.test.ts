@@ -7,7 +7,8 @@ const {
 	mockChatsQueryGet,
 	mockChatsQueryFetch,
 	mockChatMessagesQueryFetch,
-	mockSdkClient
+	mockSdkClient,
+	mockPurgeChatInflightState
 } = vi.hoisted(() => {
 	const mockSdkClient = {
 		editMessage: vi.fn(),
@@ -38,7 +39,8 @@ const {
 		mockChatsQueryGet: vi.fn().mockReturnValue([]),
 		mockChatsQueryFetch: vi.fn().mockResolvedValue([]),
 		mockChatMessagesQueryFetch: vi.fn().mockResolvedValue([]),
-		mockChatMessagesQueryUpdate: vi.fn()
+		mockChatMessagesQueryUpdate: vi.fn(),
+		mockPurgeChatInflightState: vi.fn().mockResolvedValue(undefined)
 	}
 })
 
@@ -99,6 +101,12 @@ vi.mock("@/lib/cache", () => ({
 	default: {
 		chatUuidToChat: new Map<string, unknown>()
 	}
+}))
+
+// chats.ts purges the removed chat's inflight queue/errors/drafts on delete + leave (D4b/M5) —
+// the purge itself is covered by chatsInflight.test.ts; here we only assert the wiring.
+vi.mock("@/features/chats/chatsInflight", () => ({
+	purgeChatInflightState: mockPurgeChatInflightState
 }))
 
 import chats from "@/features/chats/chats"
@@ -763,6 +771,7 @@ describe("chats.leave", () => {
 		mockChatsQueryUpdate.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockSdkClient.leaveChat.mockClear()
+		mockPurgeChatInflightState.mockClear()
 		vi.useFakeTimers()
 	})
 
@@ -821,6 +830,30 @@ describe("chats.leave", () => {
 		expect(updated).toHaveLength(1)
 		expect(updated[0]!.uuid).toBe("other")
 	})
+
+	// D4b/M5: leaving a chat must purge its inflight queue, send errors and input drafts —
+	// IMMEDIATELY, not behind the deferred (3s) query-cache removal.
+	it("purges the chat's inflight state immediately after leaving (before the deferred cache removal)", async () => {
+		const chat = makeChat({ uuid: "chat-leave-purge" })
+
+		mockSdkClient.leaveChat.mockResolvedValueOnce(undefined)
+
+		await chats.leave({ chat })
+
+		// Purged before any timer ran.
+		expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
+		expect(mockPurgeChatInflightState).toHaveBeenCalledWith("chat-leave-purge")
+	})
+
+	it("does not purge inflight state when leaveChat rejects", async () => {
+		const chat = makeChat({ uuid: "chat-leave-fail" })
+
+		mockSdkClient.leaveChat.mockRejectedValueOnce(new Error("network"))
+
+		await expect(chats.leave({ chat })).rejects.toThrow("network")
+
+		expect(mockPurgeChatInflightState).not.toHaveBeenCalled()
+	})
 })
 
 describe("chats.delete", () => {
@@ -829,6 +862,7 @@ describe("chats.delete", () => {
 		mockChatsQueryUpdate.mockClear()
 		mockChatMessagesQueryUpdate.mockClear()
 		mockSdkClient.deleteChat.mockClear()
+		mockPurgeChatInflightState.mockClear()
 		vi.useFakeTimers()
 	})
 
@@ -884,6 +918,30 @@ describe("chats.delete", () => {
 		const updated = msgUpdater([msg])
 
 		expect(updated).toHaveLength(0)
+	})
+
+	// D4b/M5: deleting a chat must purge its inflight queue, send errors and input drafts —
+	// IMMEDIATELY, not behind the deferred (3s) query-cache removal.
+	it("purges the chat's inflight state immediately after deletion (before the deferred cache removal)", async () => {
+		const chat = makeChat({ uuid: "chat-del-purge" })
+
+		mockSdkClient.deleteChat.mockResolvedValueOnce(undefined)
+
+		await chats.delete({ chat })
+
+		// Purged before any timer ran.
+		expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
+		expect(mockPurgeChatInflightState).toHaveBeenCalledWith("chat-del-purge")
+	})
+
+	it("does not purge inflight state when deleteChat rejects", async () => {
+		const chat = makeChat({ uuid: "chat-del-fail" })
+
+		mockSdkClient.deleteChat.mockRejectedValueOnce(new Error("network"))
+
+		await expect(chats.delete({ chat })).rejects.toThrow("network")
+
+		expect(mockPurgeChatInflightState).not.toHaveBeenCalled()
 	})
 })
 

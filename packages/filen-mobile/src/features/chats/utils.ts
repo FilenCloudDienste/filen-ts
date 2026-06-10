@@ -1,9 +1,67 @@
 import { AnyFile, MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
 import { type LinkResult } from "@/features/chats/queries/useChatMessageLinks.query"
+import { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import alerts from "@/lib/alerts"
 import { t as i18nT } from "@/lib/i18n"
+
+// D4c: pure composition of the rendered message list. The messages query is replaced wholesale
+// by every refetch, so a list rendered from query data alone loses optimistic pending bubbles on
+// any refetch and never shows failed sends that only live in the inflight queue / error state.
+// Layers, first-wins dedupe:
+//   1. query data (server truth incl. reconciled optimistic copies — keyed by inner.uuid AND
+//      inflightId so a committed message also shadows its queued twin),
+//   2. older paginated pages (fetchedMessages),
+//   3. the chat's inflight queue (pending sends) + failed-send snapshots (error entries whose
+//      message was dropped from the queue), skipped when already present by uuid or inflightId.
+// Sorted by sentTimestamp descending (inverted list — newest first), which also slots pending
+// bubbles into their correct chronological position (they are the newest messages).
+export function composeMessageList({
+	queryMessages,
+	fetchedMessages,
+	inflightMessages,
+	failedMessages
+}: {
+	queryMessages: ChatMessageWithInflightId[]
+	fetchedMessages: ChatMessageWithInflightId[]
+	inflightMessages: ChatMessageWithInflightId[]
+	failedMessages: ChatMessageWithInflightId[]
+}): ChatMessageWithInflightId[] {
+	const byUuid = new Map<string, ChatMessageWithInflightId>()
+	const seenInflightIds = new Set<string>()
+
+	for (const message of queryMessages) {
+		byUuid.set(message.inner.uuid, message)
+
+		if (message.inflightId) {
+			seenInflightIds.add(message.inflightId)
+		}
+	}
+
+	for (const message of fetchedMessages) {
+		if (byUuid.has(message.inner.uuid)) {
+			continue
+		}
+
+		byUuid.set(message.inner.uuid, message)
+
+		if (message.inflightId) {
+			seenInflightIds.add(message.inflightId)
+		}
+	}
+
+	for (const message of [...inflightMessages, ...failedMessages]) {
+		if (byUuid.has(message.inner.uuid) || seenInflightIds.has(message.inflightId)) {
+			continue
+		}
+
+		byUuid.set(message.inner.uuid, message)
+		seenInflightIds.add(message.inflightId)
+	}
+
+	return [...byUuid.values()].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
+}
 
 /**
  * Resolves the best available display name for the sender of a reply-to message

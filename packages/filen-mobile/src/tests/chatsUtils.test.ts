@@ -37,7 +37,8 @@ vi.mock("@/lib/i18n", () => ({ default: { t: (k: string) => k }, t: (k: string) 
 // ─── Actual imports ─────────────────────────────────────────────────────────────
 
 import { MaybeEncryptedUniffi_Tags } from "@filen/sdk-rs"
-import { resolveLinkMedia, resolveReplySenderDisplayName, type SuccessfulLink } from "@/features/chats/utils"
+import { resolveLinkMedia, resolveReplySenderDisplayName, composeMessageList, type SuccessfulLink } from "@/features/chats/utils"
+import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -210,5 +211,126 @@ describe("resolveReplySenderDisplayName", () => {
 
 	it("prefers nickName over email even when both are non-empty", () => {
 		expect(resolveReplySenderDisplayName("Bob", "bob@example.com", "Unknown")).toBe("Bob")
+	})
+})
+
+// ─── composeMessageList (D4c) ───────────────────────────────────────────────────
+
+// Server messages carry a server uuid and an empty inflightId; optimistic/inflight messages use
+// their inflightId as inner.uuid (see input/index.tsx send()).
+function serverMessage(uuid: string, sentTimestamp: number, inflightId = ""): ChatMessageWithInflightId {
+	return {
+		inflightId,
+		chat: "chat-1",
+		inner: { uuid, message: `server ${uuid}` },
+		sentTimestamp: BigInt(sentTimestamp)
+	} as unknown as ChatMessageWithInflightId
+}
+
+function inflightMessage(inflightId: string, sentTimestamp: number): ChatMessageWithInflightId {
+	return {
+		inflightId,
+		chat: "chat-1",
+		inner: { uuid: inflightId, message: `inflight ${inflightId}` },
+		sentTimestamp: BigInt(sentTimestamp)
+	} as unknown as ChatMessageWithInflightId
+}
+
+describe("composeMessageList", () => {
+	it("keeps the pre-overlay behavior: dedupes query data and paginated pages by inner.uuid, newest first", () => {
+		const shared = serverMessage("msg-2", 2000)
+		const result = composeMessageList({
+			queryMessages: [serverMessage("msg-1", 1000), shared],
+			fetchedMessages: [serverMessage("msg-2", 2000), serverMessage("msg-0", 500)],
+			inflightMessages: [],
+			failedMessages: []
+		})
+
+		expect(result.map(m => m.inner.uuid)).toEqual(["msg-2", "msg-1", "msg-0"])
+		// The query copy wins over the paginated copy of the same uuid.
+		expect(result[0]).toBe(shared)
+	})
+
+	it("a pending bubble survives a refetch that replaced the query data (no optimistic copy in it)", () => {
+		// The refetch replaced the cache wholesale with server truth — the optimistic copy is
+		// gone from query data but still queued in the inflight store.
+		const pending = inflightMessage("ifl-1", 3000)
+		const result = composeMessageList({
+			queryMessages: [serverMessage("msg-1", 1000), serverMessage("msg-2", 2000)],
+			fetchedMessages: [],
+			inflightMessages: [pending],
+			failedMessages: []
+		})
+
+		expect(result).toHaveLength(3)
+		expect(result.some(m => m.inflightId === "ifl-1")).toBe(true)
+		// Newest message → first in the inverted list (correct chronological position).
+		expect(result[0]).toBe(pending)
+	})
+
+	it("a failed send dropped from the queue stays visible via its error snapshot", () => {
+		const failed = inflightMessage("ifl-failed", 4000)
+		const result = composeMessageList({
+			queryMessages: [serverMessage("msg-1", 1000)],
+			fetchedMessages: [],
+			inflightMessages: [],
+			failedMessages: [failed]
+		})
+
+		expect(result).toHaveLength(2)
+		expect(result[0]).toBe(failed)
+	})
+
+	it("does NOT duplicate a committed message still present in the queue (deduped by inflightId)", () => {
+		// chats.sendMessage reconciled the optimistic copy into the cache under the server uuid
+		// (keeping its inflightId) — the queue still briefly holds the optimistic twin.
+		const committed = serverMessage("server-uuid-1", 3000, "ifl-1")
+		const queuedTwin = inflightMessage("ifl-1", 3000)
+		const result = composeMessageList({
+			queryMessages: [committed],
+			fetchedMessages: [],
+			inflightMessages: [queuedTwin],
+			failedMessages: []
+		})
+
+		expect(result).toHaveLength(1)
+		expect(result[0]).toBe(committed)
+	})
+
+	it("does NOT duplicate a failed message present in both the queue and the error snapshots", () => {
+		// A failed-but-not-yet-dropped message lives in the queue AND in the error state.
+		const queued = inflightMessage("ifl-1", 3000)
+		const result = composeMessageList({
+			queryMessages: [],
+			fetchedMessages: [],
+			inflightMessages: [queued],
+			failedMessages: [inflightMessage("ifl-1", 3000)]
+		})
+
+		expect(result).toHaveLength(1)
+		// The queue copy wins (listed before the failed snapshots).
+		expect(result[0]).toBe(queued)
+	})
+
+	it("slots multiple pending messages into chronological (sent) order among server messages", () => {
+		const result = composeMessageList({
+			queryMessages: [serverMessage("msg-1", 1000), serverMessage("msg-3", 3000)],
+			fetchedMessages: [],
+			inflightMessages: [inflightMessage("ifl-2", 2000), inflightMessage("ifl-4", 4000)],
+			failedMessages: []
+		})
+
+		expect(result.map(m => Number(m.sentTimestamp))).toEqual([4000, 3000, 2000, 1000])
+	})
+
+	it("renders pending and failed messages even when the query data is empty", () => {
+		const result = composeMessageList({
+			queryMessages: [],
+			fetchedMessages: [],
+			inflightMessages: [inflightMessage("ifl-1", 1000)],
+			failedMessages: [inflightMessage("ifl-2", 2000)]
+		})
+
+		expect(result.map(m => m.inflightId)).toEqual(["ifl-2", "ifl-1"])
 	})
 })

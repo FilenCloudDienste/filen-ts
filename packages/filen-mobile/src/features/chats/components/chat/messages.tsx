@@ -21,8 +21,11 @@ import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
+import { composeMessageList } from "@/features/chats/utils"
 
 const SCROLL_THRESHOLD = 300
+
+const EMPTY_MESSAGES: ChatMessageWithInflightId[] = []
 
 const Messages = ({ chat }: { chat: TChat }) => {
 	const { t } = useTranslation()
@@ -63,28 +66,30 @@ const Messages = ({ chat }: { chat: TChat }) => {
 		}
 	)
 
-	const messages = (() => {
-		if (chatMessagesQuery.status !== "success") {
-			return []
-		}
+	// D4c: the chat's pending sends (inflight queue) and failed-send snapshots (error entries,
+	// incl. messages already dropped from the queue by the 3-strike bound) — narrow per-chat
+	// selectors so unrelated chats' inflight churn never re-renders this list.
+	const inflightQueueMessages = useChatsStore(useShallow(state => state.inflightMessages[chat.uuid]?.messages ?? EMPTY_MESSAGES))
+	const failedMessages = useChatsStore(
+		useShallow(state =>
+			Object.values(state.inflightErrors)
+				.filter(entry => entry.message.chat === chat.uuid)
+				.map(entry => entry.message)
+		)
+	)
 
-		// Dedupe by message uuid before rendering: fetchedMessages (older paginated
-		// pages) can overlap chatMessagesQuery.data at the listBefore page boundary,
-		// and keyExtractor uses inner.uuid, so duplicate keys would corrupt FlashList.
-		const byUuid = new Map<string, ChatMessageWithInflightId>()
-
-		for (const message of chatMessagesQuery.data) {
-			byUuid.set(message.inner.uuid, message)
-		}
-
-		for (const message of fetchedMessages) {
-			if (!byUuid.has(message.inner.uuid)) {
-				byUuid.set(message.inner.uuid, message)
-			}
-		}
-
-		return [...byUuid.values()].sort((a, b) => Number(b.sentTimestamp) - Number(a.sentTimestamp))
-	})()
+	// Compose query data (replaced wholesale by every refetch), older paginated pages and the
+	// inflight overlay — pending/failed bubbles must survive refetches (D4c). Dedupe by
+	// inner.uuid + inflightId; sorted newest-first (see composeMessageList).
+	const messages =
+		chatMessagesQuery.status !== "success"
+			? EMPTY_MESSAGES
+			: composeMessageList({
+					queryMessages: chatMessagesQuery.data,
+					fetchedMessages,
+					inflightMessages: inflightQueueMessages,
+					failedMessages
+				})
 
 	const headerStyle = useAnimatedStyle(() => {
 		const standardHeight = insets.bottom + inputViewLayout.height + 16
