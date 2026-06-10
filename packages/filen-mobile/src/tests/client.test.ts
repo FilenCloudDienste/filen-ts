@@ -661,6 +661,14 @@ describe("QueryUpdater.set", () => {
 		expect(mockSetQueryData).toHaveBeenCalledWith(["testKey"], expect.any(Function), { updatedAt: fixedTimestamp })
 	})
 
+	it("honors a dataUpdatedAt of 0 (typeof-number guard, not truthiness) — notes sync relies on this to keep the editor remount key frozen", () => {
+		const updater = queryUpdater
+
+		updater.set<string>(["testKey"], "value", 0)
+
+		expect(mockSetQueryData).toHaveBeenCalledWith(["testKey"], expect.any(Function), { updatedAt: 0 })
+	})
+
 	it("falls back to Date.now() when dataUpdatedAt is undefined", () => {
 		const before = Date.now()
 		const updater = queryUpdater

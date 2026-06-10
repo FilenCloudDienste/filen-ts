@@ -571,6 +571,36 @@ describe("Sync (Notes)", () => {
 			})
 		})
 
+		it("preserves a dataUpdatedAt of 0 (never-fetched offline-opened editor) — a falsy-number regression here would remount the editor on first push", async () => {
+			const sync = await createSync()
+
+			notesState.inflightContent = {
+				"note-1": [{ timestamp: 1000, content: "typed text", note: mockNote("note-1") }]
+			}
+
+			mockNotesSetContent.mockResolvedValue({ editedTimestamp: BigInt(2000) })
+			mockNoteContentQueryDataUpdatedAt.mockReturnValue(0)
+
+			mockCreateExecutableTimeout.mockImplementation((cb: () => void) => ({
+				id: null,
+				execute: vi.fn(() => cb()),
+				cancel: vi.fn()
+			}))
+
+			sync.syncDebounced()
+			sync.executeNow()
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(mockNoteContentQueryUpdate).toHaveBeenCalledWith({
+				params: {
+					uuid: "note-1"
+				},
+				updater: "typed text",
+				dataUpdatedAt: 0
+			})
+		})
+
 		it("does NOT touch the note content query cache when the push fails", async () => {
 			const sync = await createSync()
 
