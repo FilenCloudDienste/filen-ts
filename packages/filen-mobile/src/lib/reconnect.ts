@@ -1,5 +1,5 @@
 import { onlineManager } from "@tanstack/react-query"
-import offline from "@/features/offline/offline"
+import offlineSync from "@/features/offline/offlineSync"
 import { sync as notesSync } from "@/features/notes/components/sync"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
@@ -17,7 +17,7 @@ let started = false
  *   per query key so there's no thunder-herd risk.
  *
  * What it DOES do on every false → true transition:
- * - offline.sync(): reconciles the offline-files store against current
+ * - offlineSync.sync(): reconciles the offline-files store against current
  *   server state (renames, deletes, modifications). The library-level
  *   gate inside sync() means cold-start in airplane mode no-ops; this
  *   listener catches reconnect mid-session.
@@ -50,7 +50,7 @@ export function startReconnectListener(): void {
 		}
 
 		cameraUpload.sync().catch(console.error)
-		offline.sync().catch(console.error)
+		offlineSync.sync().catch(console.error)
 		notesSync.executeNow()
 		chatsSync.syncNow()
 	})

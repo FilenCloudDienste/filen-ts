@@ -561,11 +561,6 @@ export class Offline {
 		}
 	}
 
-	// TEMPORARY: replaced by offlineSync.sync() in the follow-up commit — see offlineSync.ts (Task 5).
-	public async sync(): Promise<void> {
-		// Noop
-	}
-
 	public async listFiles(): Promise<
 		{
 			item: DriveItem
@@ -713,6 +708,41 @@ export class Offline {
 						entries: existingMeta.entries
 					} satisfies DirectoryOfflineMeta)
 				)
+
+				this.invalidateCaches()
+			},
+			{
+				throw: true
+			}
+		)
+	}
+
+	// Deletes a standalone files/{uuid} directory directly by uuid. Used by the sync top-level pass
+	// for BROKEN standalone entries (meta missing/undecodable) whose remote uuid turned out trashed
+	// or permanently deleted — such dirs cannot be addressed as a DriveItem through removeItem.
+	// NO index update — broken dirs were never indexed; callers batch one at the end of their pass.
+	public async removeStandaloneDirectory(uuid: string): Promise<void> {
+		await run(
+			async defer => {
+				await this.clearBarrier.enter()
+
+				defer(() => {
+					this.clearBarrier.leave()
+				})
+
+				const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
+
+				defer(() => {
+					releaseStoreItemLock()
+				})
+
+				this.ensureDirectories()
+
+				const standaloneDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, uuid))
+
+				if (standaloneDir.exists) {
+					standaloneDir.delete()
+				}
 
 				this.invalidateCaches()
 			},

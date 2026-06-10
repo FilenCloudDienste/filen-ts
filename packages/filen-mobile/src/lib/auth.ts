@@ -15,6 +15,7 @@ import fileProvider from "@/features/settings/fileProvider"
 import sqlite from "@/lib/sqlite"
 import audio from "@/features/audio/audio"
 import offline from "@/features/offline/offline"
+import offlineSync from "@/features/offline/offlineSync"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import { sync as notesSync } from "@/features/notes/components/sync"
 import cache from "@/lib/cache"
@@ -263,6 +264,7 @@ class Auth {
 			chatsSync.cancel()
 			notesSync.cancel()
 			offline.cancel()
+			offlineSync.cancel()
 		} catch (e) {
 			console.error(e)
 		}

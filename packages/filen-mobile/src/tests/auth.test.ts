@@ -104,6 +104,14 @@ vi.mock("@/features/offline/offline", () => ({
 	}
 }))
 
+vi.mock("@/features/offline/offlineSync", () => ({
+	default: {
+		cancel: vi.fn(() => {
+			callLog.push("offlineSync.cancel")
+		})
+	}
+}))
+
 vi.mock("@/features/cameraUpload/backgroundTask", () => ({
 	unregisterBackgroundSync: vi.fn(async () => {
 		callLog.push("unregisterBackgroundSync")
