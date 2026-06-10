@@ -4667,6 +4667,124 @@ describe("Offline", () => {
 			expect(meta.entries[fileAUuid]?.path).toBe("/keep.txt")
 		})
 
+		// Crash convergence: a previous pass deleted the bytes, then crashed BEFORE the meta
+		// rewrite. The stale meta still lists the uuid and the remote also lacks it — an
+		// INDEX-ONLY pass trusts the meta, plans the delete again, the executor's exists-guard
+		// silently no-ops on the already-gone target, and the commit rewrites the meta without
+		// the uuid. No download, no errors — the tree converges instead of erroring forever.
+		it("converges a crashed delete on an INDEX-ONLY pass — stale meta entry with no bytes and no remote is dropped via a no-op delete", async () => {
+			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
+			const goneItem = makeFileItemWithSize(fileBUuid, "gone.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({
+					"/keep.txt": keepItem,
+					"/gone.txt": goneItem
+				}),
+				// The crashed pass already deleted /gone.txt — only the meta still claims it.
+				disk: { "/keep.txt": new Uint8Array([1]) }
+			})
+
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, "keep.txt", "keep.txt", 1n)] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toEqual([])
+			expect(transfers.download).not.toHaveBeenCalled()
+			expect(fs.has(`${treeUri}/keep.txt`)).toBe(true)
+
+			const meta = readTreeMeta()
+
+			expect(meta.entries[fileBUuid]).toBeUndefined()
+			expect(meta.entries[fileAUuid]?.path).toBe("/keep.txt")
+		})
+
+		// Crash convergence: a previous pass MOVED the bytes /old.txt → /new.txt, then crashed
+		// before the meta rewrite (both move phases completed — no .sync-tmp residue). The stale
+		// meta still says /old.txt, so an INDEX-ONLY pass plans the same move again; the executor
+		// finds the move SOURCE missing and silently skips both phases (the occupied destination
+		// is never touched — no throw), and the commit records the remote path. Pins the
+		// exists-guard executor semantics the design's crash-anywhere convergence relies on.
+		it("converges a crashed move on an INDEX-ONLY pass — re-planned move no-ops on the missing source and the meta lands on the remote path", async () => {
+			const fileItem = makeFileItemWithSize(fileAUuid, "old.txt", 3n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/old.txt": fileItem }),
+				// The crashed pass already placed the bytes at the destination.
+				disk: { "/new.txt": new Uint8Array([1, 2, 3]) }
+			})
+
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, "new.txt", "new.txt", 3n)] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toEqual([])
+			expect(transfers.download).not.toHaveBeenCalled()
+			// Bytes untouched at the destination, no source resurrection, no temp residue.
+			expect(Array.from(fs.get(`${treeUri}/new.txt`) as Uint8Array)).toEqual([1, 2, 3])
+			expect(fs.has(`${treeUri}/old.txt`)).toBe(false)
+			expect(fs.has(`${treeUri}/.sync-tmp-${fileAUuid}`)).toBe(false)
+
+			const meta = readTreeMeta()
+
+			expect(meta.entries[fileAUuid]?.path).toBe("/new.txt")
+		})
+
+		// Crash convergence for an interrupted SWAP (a.bin ↔ b.bin, different sizes): phase 2
+		// placed A's bytes at /b.bin, then the pass crashed before placing B and B's extraction
+		// temp was cleaned. The stale meta still claims the pre-swap paths. A THOROUGH pass stats
+		// both meta paths — A's old path is empty and /b.bin size-mismatches B — so the planner
+		// classifies BOTH uuids as missing (neither is physically present at its meta path: no
+		// move ops at all) and ONE hash-idempotent download heals the tree: A's correct bytes at
+		// /b.bin are skipped untouched, only B transfers to /a.bin.
+		it("converges a crashed swap (different sizes) on a THOROUGH pass — both entries classified missing, exactly one download, meta lands on the swapped remote paths", async () => {
+			const itemA = makeFileItemWithSize(fileAUuid, "a.bin", 3n)
+			const itemB = makeFileItemWithSize(fileBUuid, "b.bin", 5n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({
+					"/a.bin": itemA,
+					"/b.bin": itemB
+				}),
+				// Crash state: A's 3 bytes already sit at /b.bin, nothing at /a.bin, no temps.
+				disk: { "/b.bin": new Uint8Array([1, 2, 3]) }
+			})
+
+			const offline = await createOffline()
+
+			// Remote: the swap — A now lives at /b.bin (3 bytes), B at /a.bin (5 bytes).
+			mockListing({
+				files: [makeListingFile(fileAUuid, "b.bin", "b.bin", 3n), makeListingFile(fileBUuid, "a.bin", "a.bin", 5n)]
+			})
+
+			// Hash-idempotent downloader: /b.bin already holds A's correct bytes (skipped, never
+			// rewritten); only B's bytes are written to /a.bin.
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				fs.set(`${(destination as { uri: string }).uri}/a.bin`, new Uint8Array([9, 9, 9, 9, 9]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true, thorough: true })
+
+			// End state: both entries at their remote paths with correct sizes, exactly one
+			// download, meta committed.
+			expect(errors).toEqual([])
+			expect(transfers.download).toHaveBeenCalledTimes(1)
+			expect(Array.from(fs.get(`${treeUri}/b.bin`) as Uint8Array)).toEqual([1, 2, 3])
+			expect(Array.from(fs.get(`${treeUri}/a.bin`) as Uint8Array)).toEqual([9, 9, 9, 9, 9])
+
+			const meta = readTreeMeta()
+
+			expect(meta.entries[fileAUuid]?.path).toBe("/b.bin")
+			expect(meta.entries[fileBUuid]?.path).toBe("/a.bin")
+		})
+
 		it("skips deletions and returns a degraded marker when the listing reports scan errors (fixed point, no download)", async () => {
 			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
 			const goneItem = makeFileItemWithSize(fileBUuid, "undecryptable.txt", 1n)
@@ -4829,6 +4947,85 @@ describe("Offline", () => {
 			expect(transfers.download).not.toHaveBeenCalled()
 		})
 
+		// INDEX-ONLY + degraded coherence: the union's pre-pass gate trusts the all-true index
+		// view, so the commit-time RE-STAT is the only presence guard — a preserved (unlisted)
+		// entry whose bytes are externally gone is dropped from the union, and the committed meta
+		// never claims absent bytes. (Once the listing reads clean again the entry re-enters via
+		// the normal listing → download path if it is still alive remotely.)
+		it("degraded INDEX-ONLY pass drops a preserved entry whose bytes are gone at the commit re-stat — the committed meta never claims absent bytes", async () => {
+			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
+			const unlistedItem = makeFileItemWithSize(fileBUuid, "u.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({
+					"/keep.txt": keepItem,
+					"/u.txt": unlistedItem
+				}),
+				// The unlisted entry's bytes are externally gone — invisible to the index-only
+				// pre-pass view, caught only by the union's commit re-stat.
+				disk: { "/keep.txt": new Uint8Array([1]) }
+			})
+
+			const offline = await createOffline()
+
+			mockDegradedListing({ files: [makeListingFile(fileAUuid, "keep.txt", "keep.txt", 1n)] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			// Degraded marker only — the union commit still advances.
+			expect(errors).toHaveLength(1)
+			expect(errors[0]?.kind).toBe("listing")
+			expect(errors[0]?.degraded).toBe(true)
+			expect(transfers.download).not.toHaveBeenCalled()
+			expect(fs.has(`${treeUri}/keep.txt`)).toBe(true)
+
+			const meta = readTreeMeta()
+
+			expect(meta.entries[fileAUuid]?.path).toBe("/keep.txt")
+			expect(meta.entries[fileBUuid]).toBeUndefined()
+		})
+
+		// Degraded-union move-replay: an unlisted (scan-error-hidden) child rides inside its
+		// renamed parent directory through the two-phase move; the union must record the entry at
+		// its CURRENT on-disk path (the planner's prefix rewrites replayed over both temp phases),
+		// not the stale pre-move path — otherwise the committed meta would lie about the disk.
+		it("replays planner moves on the degraded union — an unlisted child carried inside a renamed directory commits at its current path", async () => {
+			const subDirItem = makeDirItem(subDirUuid, "sub")
+			const unlistedItem = makeFileItemWithSize(fileAUuid, "u.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({
+					"/sub": subDirItem,
+					"/sub/u.txt": unlistedItem
+				}),
+				disk: {
+					"/sub": "dir",
+					"/sub/u.txt": new Uint8Array([7])
+				}
+			})
+
+			const offline = await createOffline()
+
+			// Degraded listing: the directory was renamed sub → renamed; the child is hidden by
+			// the scan error and would be only-local (delete phase is skipped while degraded).
+			mockDegradedListing({ dirs: [makeListingDir(subDirUuid, "renamed", "renamed")] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toHaveLength(1)
+			expect(errors[0]?.degraded).toBe(true)
+			expect(transfers.download).not.toHaveBeenCalled()
+
+			// The child physically travelled inside the renamed directory.
+			expect(Array.from(fs.get(`${treeUri}/renamed/u.txt`) as Uint8Array)).toEqual([7])
+			expect(fs.has(`${treeUri}/sub`)).toBe(false)
+			expect(fs.has(`${treeUri}/sub/u.txt`)).toBe(false)
+			expect(fs.has(`${treeUri}/.sync-tmp-${subDirUuid}`)).toBe(false)
+
+			const meta = readTreeMeta()
+
+			expect(meta.entries[subDirUuid]?.path).toBe("/renamed")
+			expect(meta.entries[fileAUuid]?.path).toBe("/renamed/u.txt")
+		})
+
 		it("returns a listing error and leaves state untouched when the remote listing fails", async () => {
 			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
 			const { dirItem, parent } = seedTree({
@@ -4976,6 +5173,39 @@ describe("Offline", () => {
 			expect(errors).toEqual([])
 			expect(transfers.download).toHaveBeenCalledTimes(1)
 			expect(Array.from(fs.get(`${treeUri}/a.txt`) as Uint8Array)).toEqual([1, 2, 3])
+		})
+
+		// THOROUGH counterpart of the no-op fixed point: the disk-verified pass stats every entry
+		// and runs the verify loop even without a download, but a fully healthy unchanged tree
+		// must still write nothing, download nothing, and NOT sweep — the orphan sweep requires a
+		// download or an unreadable meta, never a clean thorough no-op.
+		it("THOROUGH no-op pass over a healthy unchanged tree: stats verify clean, zero writes, no download, no orphan sweep", async () => {
+			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/a.txt": fileItem }),
+				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }
+			})
+
+			const offline = await createOffline()
+
+			// First pass establishes the canonical serialized meta.
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 3n)] })
+			await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			const metaAfterFirst = fs.get(`${treeUri}/${treeUuid}.filenmeta`)
+
+			// A stray the meta does not claim — a sweep would delete it, a true no-op must not.
+			fs.set(`${treeUri}/stray.txt`, new Uint8Array([9]))
+
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 3n)] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true, thorough: true })
+
+			expect(errors).toEqual([])
+			expect(transfers.download).not.toHaveBeenCalled()
+			// Same meta bytes by reference — never rewritten.
+			expect(fs.get(`${treeUri}/${treeUuid}.filenmeta`)).toBe(metaAfterFirst)
+			expect(fs.has(`${treeUri}/stray.txt`)).toBe(true)
 		})
 
 		it("fails the pass (no commit) when the download reports per-entry errors, resolving the entry by path suffix", async () => {
@@ -5187,6 +5417,76 @@ describe("Offline", () => {
 			expect(transfers.download).toHaveBeenCalledTimes(1)
 			expect(fs.has(`${treeUri}/.sync-tmp-deadbeef`)).toBe(false)
 			expect(Array.from(fs.get(`${treeUri}/gone.txt`) as Uint8Array)).toEqual([2])
+		})
+
+		// Rescue requires a META CLAIM: with the tree meta unreadable there is no claimed path to
+		// rescue a /.sync-tmp-{uuid} back to, so the temp is deleted, the empty local view
+		// downloads the listing, and the meta is rebuilt — double crash residue (move temp +
+		// corrupt meta) converges in a single pass.
+		it("deletes a rescuable-looking temp when the meta is ALSO unreadable, then rebuilds via download (no rescue without a meta claim)", async () => {
+			const dirItem = makeDirItem(treeUuid, "Tree")
+			const parent = makeParent(parentUuid)
+
+			// Corrupt meta + a temp whose uuid a READABLE meta would have rescued.
+			fs.set(treeUri, "dir")
+			fs.set(`${treeUri}/${treeUuid}.filenmeta`, new Uint8Array([0xff, 0xfe]))
+			fs.set(`${treeUri}/.sync-tmp-${fileAUuid}`, new Uint8Array([1, 2, 3]))
+
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 3n)] })
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				fs.set(`${(destination as { uri: string }).uri}/a.txt`, new Uint8Array([1, 2, 3]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toEqual([])
+			expect(transfers.download).toHaveBeenCalledTimes(1)
+			expect(fs.has(`${treeUri}/.sync-tmp-${fileAUuid}`)).toBe(false)
+			expect(Array.from(fs.get(`${treeUri}/a.txt`) as Uint8Array)).toEqual([1, 2, 3])
+
+			const meta = readTreeMeta()
+
+			expect(meta.entries[fileAUuid]?.path).toBe("/a.txt")
+		})
+
+		// Mixed crash residue in ONE pass: a claimed temp whose meta path is free is rescued
+		// (bytes preserved), an unknown temp is deleted, and — since the rescue restored the only
+		// entry — the escalated disk-verified view finds the tree whole, so nothing downloads.
+		it("handles multiple temps in one pass — rescues the claimed-free one, deletes the unknown one, no download needed", async () => {
+			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({ "/a.txt": fileItem }),
+				// The crashed move phase extracted the entry — its meta path is free.
+				disk: {}
+			})
+
+			fs.set(`${treeUri}/.sync-tmp-${fileAUuid}`, new Uint8Array([1, 2, 3]))
+			fs.set(`${treeUri}/.sync-tmp-deadbeef`, new Uint8Array([9]))
+
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, "a.txt", "a.txt", 3n)] })
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(errors).toEqual([])
+			expect(transfers.download).not.toHaveBeenCalled()
+			expect(fs.has(`${treeUri}/.sync-tmp-${fileAUuid}`)).toBe(false)
+			expect(fs.has(`${treeUri}/.sync-tmp-deadbeef`)).toBe(false)
+			expect(Array.from(fs.get(`${treeUri}/a.txt`) as Uint8Array)).toEqual([1, 2, 3])
+
+			const meta = readTreeMeta()
+
+			expect(meta.entries[fileAUuid]?.path).toBe("/a.txt")
 		})
 
 		it("sweeps unclaimed orphans after a committed pass that downloaded", async () => {

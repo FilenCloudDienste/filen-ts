@@ -256,14 +256,14 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-import { OfflineSync } from "@/features/offline/offlineSync"
+import { OfflineSync, AUTO_SYNC_MIN_INTERVAL_MS } from "@/features/offline/offlineSync"
 import offline from "@/features/offline/offline"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
 import NetInfo from "@react-native-community/netinfo"
 import { onlineManager } from "@tanstack/react-query"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
-import { type OfflineParent } from "@/features/offline/offlineHelpers"
+import { type OfflineParent, type OfflineSyncError } from "@/features/offline/offlineHelpers"
 import type { DriveItem } from "@/types"
 
 const ROOT_UUID = "root-uuid"
@@ -1276,6 +1276,112 @@ describe("offlineSync — gates & coalescing", () => {
 		expect(vi.mocked(offline.listFiles)).toHaveBeenCalledTimes(2)
 	})
 
+	// Documented coalescing trade (design §4.2 / offlineSync.ts): a manual sync() arriving while
+	// an AUTO pass is in flight JOINS that index-only pass — no queued second pass, no mid-flight
+	// thorough upgrade. The user's next explicit trigger gets its own thorough pass.
+	it("17b. a MANUAL sync joining an in-flight AUTO pass awaits it WITHOUT upgrading it to thorough (one pass, thorough: false)", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "tree-1" ? makeRemoteDir("tree-1", "Tree", uuidParent("parent-1")) : undefined
+		)
+
+		let release: () => void = () => undefined
+		const gate = new Promise<void>(resolve => {
+			release = resolve
+		})
+
+		vi.mocked(offline.listFiles).mockImplementation(async () => {
+			await gate
+
+			return []
+		})
+
+		const sync = new OfflineSync()
+		const auto = sync.sync()
+		const manual = sync.sync({
+			manual: true
+		})
+
+		// The joiner is parked on the in-flight pass — not resolved early, not starting its own.
+		let manualSettled = false
+		const manualTracked = manual.then(() => {
+			manualSettled = true
+		})
+
+		await Promise.resolve()
+		await Promise.resolve()
+		await Promise.resolve()
+
+		expect(manualSettled).toBe(false)
+
+		release()
+
+		await Promise.all([auto, manualTracked])
+
+		// Exactly ONE pass ran for both callers…
+		expect(vi.mocked(offline.listFiles)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(1)
+		// …and the joined pass kept its AUTO mode — no mid-flight thorough upgrade.
+		expect(vi.mocked(offline.reconcileTree).mock.calls[0]?.[0]?.thorough).toBe(false)
+	})
+
+	it("17c. cancel() mid-pass: an aborted AUTO pass leaves syncErrors untouched and does NOT stamp completion — the next auto sync runs immediately", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "tree-1" ? makeRemoteDir("tree-1", "Tree", uuidParent("parent-1")) : undefined
+		)
+
+		// Stale error surface from a previous pass — an aborted pass must NOT replace it.
+		const sentinel: OfflineSyncError = {
+			id: "sentinel:listing",
+			itemUuid: "sentinel",
+			topLevelUuid: null,
+			name: "sentinel",
+			itemType: "file",
+			kind: "listing",
+			message: "stale",
+			timestamp: Date.now()
+		}
+
+		useOfflineStore.setState({
+			syncErrors: [sentinel]
+		})
+
+		const sync = new OfflineSync()
+
+		vi.mocked(offline.listFiles).mockImplementationOnce(async () => {
+			sync.cancel()
+
+			return []
+		})
+
+		await sync.sync()
+
+		// Aborted mid-pass: per-item work skipped, no index commit, error surface untouched.
+		expect(vi.mocked(offline.reconcileTree)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.updateIndex)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([sentinel])
+
+		// No lastCompletedAt bump — an immediate AUTO retry is NOT blocked by the min-interval,
+		// and the completed retry replaces the stale error surface as usual.
+		await sync.sync()
+
+		expect(vi.mocked(offline.listFiles)).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.updateIndex)).toHaveBeenCalledTimes(1)
+		expect(syncErrors()).toEqual([])
+	})
+
 	it("18. errors land in useOfflineStore.syncErrors and REPLACE the previous array", async () => {
 		givenTrees([
 			{
@@ -1566,5 +1672,89 @@ describe("offlineSync — pass modes (manual ⟹ thorough, design §4.2)", () =>
 		}
 
 		expect(syncErrors()).toEqual([])
+	})
+
+	// Escalation independence: `thorough` is derived per-call from the trigger (manual === true),
+	// never from instance state — a completed MANUAL pass must not leak thorough-ness into the
+	// next AUTOMATIC pass on the SAME OfflineSync instance. (Tmp-rescue crash escalation lives
+	// INSIDE reconcileTree and is pinned by offline.test.ts.)
+	it("22. thorough never sticks: an AUTO pass after a completed MANUAL pass on the same instance still gets thorough: false", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "tree-1" ? makeRemoteDir("tree-1", "Tree", uuidParent("parent-1")) : undefined
+		)
+
+		const sync = new OfflineSync()
+
+		await sync.sync({
+			manual: true
+		})
+
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.reconcileTree).mock.calls[0]?.[0]?.thorough).toBe(true)
+
+		// Jump past the auto min-interval so the AUTO pass actually runs on the SAME instance.
+		const later = Date.now() + AUTO_SYNC_MIN_INTERVAL_MS + 1_000
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(later)
+
+		await sync.sync()
+
+		nowSpy.mockRestore()
+
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(offline.reconcileTree).mock.calls[1]?.[0]?.thorough).toBe(false)
+	})
+})
+
+describe("offlineSync — per-item failure isolation", () => {
+	// runGuarded: an unexpected REJECTION from an offline method (lock/setup errors — distinct
+	// from the OfflineSyncError arrays reconcileTree RETURNS) is converted into a `store` error
+	// for that item, and the rest of the pass still completes and commits its index update.
+	it("23. a reconcileTree rejection becomes a store error for that tree while the rest of the pass completes", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			},
+			{
+				item: makeTreeItem("tree-2", "Other tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "tree-1") {
+				return makeRemoteDir("tree-1", "Tree", uuidParent("parent-1"))
+			}
+
+			if (uuid === "tree-2") {
+				return makeRemoteDir("tree-2", "Other tree", uuidParent("parent-1"))
+			}
+
+			return undefined
+		})
+		vi.mocked(offline.reconcileTree).mockImplementation(async ({ directory }) => {
+			if (directory.data.uuid === "tree-1") {
+				throw new Error("lock acquisition failed")
+			}
+
+			return []
+		})
+
+		await runManualPass()
+
+		// Both trees were attempted, the pass completed and committed its single index update.
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(offline.updateIndex)).toHaveBeenCalledTimes(1)
+
+		expect(syncErrors()).toHaveLength(1)
+		expect(syncErrors()[0]?.kind).toBe("store")
+		expect(syncErrors()[0]?.itemUuid).toBe("tree-1")
+		expect(syncErrors()[0]?.topLevelUuid).toBe("tree-1")
+		expect(syncErrors()[0]?.message).toBe("lock acquisition failed")
 	})
 })
