@@ -23,6 +23,7 @@ import chats from "@/features/chats/chats"
 import { sync } from "@/features/chats/components/sync"
 import useIsOnline from "@/hooks/useIsOnline"
 import alerts from "@/lib/alerts"
+import i18n from "@/lib/i18n"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import events from "@/lib/events"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/useChatMessages.query"
@@ -115,6 +116,20 @@ const ChatTextInput = ({
 			</View>
 		</CrossGlassContainerView>
 	)
+}
+
+// M3: sync.flushToDisk never throws — persistence failure comes back as `false`
+// (sync-internal callers ignore it; their next pass re-flushes). HERE it must surface:
+// a failed SQLite write means the message the user just sent survives in memory only and
+// would die with the process, with zero signal otherwise. Exported so the test exercises
+// the live helper (T5 pattern). Callers still proceed to kick the send — getting the
+// message to the server is the best remaining chance of not losing it.
+export async function flushInflightMessagesWithAlert(): Promise<void> {
+	const flushed = await sync.flushToDisk(useChatsStore.getState().inflightMessages)
+
+	if (!flushed) {
+		alerts.error(i18n.t("chat_message_not_saved_to_device"))
+	}
 }
 
 const Input = ({ chat }: { chat: Chat }) => {
@@ -316,16 +331,9 @@ const Input = ({ chat }: { chat: Chat }) => {
 				}
 			}))
 
-			const result = await run(async () => {
-				await sync.flushToDisk(useChatsStore.getState().inflightMessages)
-			})
-
-			if (!result.success) {
-				console.error(result.error)
-				alerts.error(result.error)
-
-				return
-			}
+			// M3: alerts when the SQLite write fails (the message is memory-only) but never
+			// bails — the sync kick below is the best remaining chance of delivering it.
+			await flushInflightMessagesWithAlert()
 
 			sync.syncNow()
 		} finally {

@@ -1,13 +1,25 @@
 import { useEffect } from "react"
 import { run, Semaphore, createExecutableTimeout } from "@filen/utils"
 import { onlineManager } from "@tanstack/react-query"
+import { xxHash32 } from "js-xxhash"
 import notes from "@/features/notes/notes"
 import alerts from "@/lib/alerts"
+import i18n from "@/lib/i18n"
+import { noteDisplayTitle } from "@/lib/decryption"
 import { AppState } from "react-native"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesWithContentQueryFetch, notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
+import { noteContentQueryUpdate, noteContentQueryDataUpdatedAt } from "@/features/notes/queries/useNoteContent.query"
 import { unwrapSdkError, isNetworkClassError, isRetryableAuthError } from "@/lib/sdkErrors"
+
+// D3: cheap stable content hash used for overwrite-conflict DETECTION (same xxHash32 the
+// fileCache/cameraUpload dedup paths use). Persisted inside inflight entries as
+// `baseContentHash`, so the algorithm must stay stable across app versions — changing it
+// only costs a one-pass grace (entries fall back to the legacy no-hash path), never data.
+export function hashNoteContent(content: string): string {
+	return xxHash32(content).toString(16)
+}
 
 // #40 / VC3: a genuine read-only/permission rejection (the server replies with a non-network,
 // non-auth error) must eventually DROP so the wedged content query re-enables — but a TRANSIENT
@@ -189,7 +201,11 @@ export class Sync {
 		}
 	}
 
-	public async flushToDisk(inflightContent: InflightContent): Promise<void> {
+	// M3: reports persistence failure as `false` instead of throwing (it still never
+	// throws). Sync-internal callers ignore the return (the next pass re-flushes);
+	// COMPONENT call sites must surface a `false` — a failing SQLite write means the
+	// user's edit survives in memory only and would otherwise die with zero signal.
+	public async flushToDisk(inflightContent: InflightContent): Promise<boolean> {
 		await this.initPromise
 
 		const result = await run(async () => {
@@ -205,6 +221,8 @@ export class Sync {
 		if (!result.success) {
 			console.error("Error flushing note sync to disk:", result.error)
 		}
+
+		return result.success
 	}
 
 	private async sync(): Promise<void> {
@@ -241,6 +259,11 @@ export class Sync {
 				}
 			}
 
+			// D3: one overwrite toast per note per pass. Each note is pushed at most once per
+			// pass anyway (only its most recent entry goes out), so this is belt-and-braces
+			// against ever stacking duplicate toasts for the same note.
+			const toastedConflicts = new Set<string>()
+
 			const results = await Promise.allSettled(
 				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
 					if (signal.aborted) {
@@ -276,6 +299,30 @@ export class Sync {
 					// time). Comparing local-vs-local preserves those edits for the
 					// rescheduled debounce and is immune to device-clock skew.
 					const syncedUpTo = mostRecentContent.timestamp
+
+					// D3: conflict DETECTION, never prevention — local edits always win and the
+					// push below is unconditional (user decision: no prompts, no blocking). When
+					// the entry carries its session's base hash, peek at the note's current cloud
+					// content first: if the cloud moved past our base AND past what we are about
+					// to write, this push buries someone else's newer work in the note's history,
+					// and the user must hear about it once — a silent overwrite ("users won't
+					// know history has it") is the failure being prevented. Entries WITHOUT a
+					// base hash (persisted by older app versions) push unchecked — a one-time
+					// grace instead of migration machinery. A failed peek also pushes unchecked:
+					// availability beats the toast.
+					let overwritesNewerRemoteContent = false
+
+					if (mostRecentContent.baseContentHash !== undefined) {
+						try {
+							const cloudContent = (await notes.getContent({ note: liveNote, signal })) ?? ""
+
+							overwritesNewerRemoteContent =
+								hashNoteContent(cloudContent) !== mostRecentContent.baseContentHash &&
+								cloudContent !== mostRecentContent.content
+						} catch {
+							// Availability beats the toast — push without the check, add no errors.
+						}
+					}
 
 					try {
 						await notes.setContent({
@@ -351,21 +398,68 @@ export class Sync {
 					// A successful push clears any accumulated rejection count for this note.
 					this.nonRetryableRejections.delete(noteUuid)
 
+					// The pushed content IS the cloud content now — write it into the per-note
+					// content query cache so any editor reseed after the inflight queue drains
+					// paints exactly what the user typed, never the stale pre-edit cache (the
+					// query is disabled while inflight and staleTime: Infinity, so nothing else
+					// refreshes it after a push). dataUpdatedAt is PRESERVED: the editor's
+					// remount key is this timestamp, so advancing it would remount the WebView
+					// (cursor reset) after every push — preserving it updates the data invisibly.
+					// A never-fetched note has no mounted editor keyed on it, so the fresh
+					// timestamp fallback there is safe.
+					noteContentQueryUpdate({
+						params: {
+							uuid: noteUuid
+						},
+						updater: mostRecentContent.content,
+						dataUpdatedAt: noteContentQueryDataUpdatedAt({
+							uuid: noteUuid
+						})
+					})
+
+					// D3: the content we just pushed IS the cloud content now, so it becomes the
+					// base for every entry typed during the round trip (they survive the prune
+					// below). Without this refresh the next pass would compare those entries
+					// against their stale session base and flag our OWN push as a conflict.
+					const pushedContentHash = hashNoteContent(mostRecentContent.content)
+
 					useNotesInflightStore.getState().setInflightContent(prev => {
 						const updated = {
 							...prev
 						}
 
-						if (updated[noteUuid]) {
-							updated[noteUuid] = updated[noteUuid].filter(c => c.timestamp > syncedUpTo)
+						const entries = updated[noteUuid]
 
-							if (updated[noteUuid].length === 0) {
+						if (entries) {
+							const remaining = entries
+								.filter(c => c.timestamp > syncedUpTo)
+								.map(c => ({
+									...c,
+									baseContentHash: pushedContentHash
+								}))
+
+							if (remaining.length === 0) {
 								delete updated[noteUuid]
+							} else {
+								updated[noteUuid] = remaining
 							}
 						}
 
 						return updated
 					})
+
+					// D3: toast only AFTER the push landed (a failed push overwrites nothing and
+					// is retried — the next pass re-detects), once per note per pass, and never
+					// for an aborted pass (logout must stay silent).
+					if (overwritesNewerRemoteContent && !signal.aborted && !toastedConflicts.has(noteUuid)) {
+						toastedConflicts.add(noteUuid)
+
+						alerts.normal(
+							i18n.t("note_overwrote_newer_remote_changes", {
+								name: noteDisplayTitle(liveNote)
+							})
+						)
+					}
 				})
 			)
 
@@ -375,7 +469,13 @@ export class Sync {
 				}
 			}
 
-			await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
+			// D2: never flush after an aborted pass. Logout aborts in-flight sync (Phase 2)
+			// and later wipes SQLite (Phase 6) — a late flush here would resurrect the
+			// previous account's plaintext queue onto disk after the wipe. Mirrors the
+			// chats sync fix.
+			if (!signal.aborted) {
+				await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
+			}
 		})
 
 		if (!result.success) {

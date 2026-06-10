@@ -476,7 +476,7 @@ describe("Sync (Chats)", () => {
 	})
 
 	describe("flushToDisk", () => {
-		it("writes filtered messages to sqlite", async () => {
+		it("writes filtered messages to sqlite and reports success (M3)", async () => {
 			const sync = await createSync()
 			const data = {
 				"chat-1": {
@@ -485,8 +485,9 @@ describe("Sync (Chats)", () => {
 				}
 			}
 
-			await sync.flushToDisk(data)
+			const flushed = await sync.flushToDisk(data)
 
+			expect(flushed).toBe(true)
 			expect(kvStore.get(KV_KEY)).toEqual(data)
 		})
 
@@ -549,20 +550,23 @@ describe("Sync (Chats)", () => {
 			expect(Object.keys(stored)).toEqual(["chat-1"])
 		})
 
-		it("catches write errors — console.error is called and the promise resolves", async () => {
+		it("M3: catches write errors — console.error is called, the promise resolves with `false`", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			const sync = await createSync()
 
 			vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
 
-			await sync.flushToDisk({
+			const flushed = await sync.flushToDisk({
 				"chat-1": {
 					chat: mockChat("chat-1"),
 					messages: [mockMessage("msg-1", "hello", 1000)]
 				}
 			})
 
+			// Failure is reported as `false` so component call sites can alert
+			// (sync-internal callers ignore it).
+			expect(flushed).toBe(false)
 			expect(consoleErrorSpy).toHaveBeenCalled()
 
 			consoleErrorSpy.mockRestore()

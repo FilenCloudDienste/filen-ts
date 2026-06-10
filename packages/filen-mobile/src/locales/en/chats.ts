@@ -106,6 +106,8 @@ export const chats = {
 	add_files: "Add files",
 	/** Attachment-picker menu item: attach items from the Filen drive */
 	add_drive_items: "Add from Filen drive",
+	/** Error banner when an outgoing message could not be persisted to device storage (it survives in memory only until sent) */
+	chat_message_not_saved_to_device: "Your message could not be saved on this device. Keep the app open until it has been sent.",
 
 	// ── Chat participants screen ─────────────────────────────────────────────
 	/** Header title for the chat participants management screen */

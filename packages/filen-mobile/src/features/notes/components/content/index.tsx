@@ -1,7 +1,7 @@
 import { NoteType, type NoteContentEdited } from "@filen/sdk-rs"
 import { type Note, type NoteHistory } from "@/types"
 import View from "@/components/ui/view"
-import useNoteContentQuery from "@/features/notes/queries/useNoteContent.query"
+import useNoteContentQuery, { noteContentQueryGet } from "@/features/notes/queries/useNoteContent.query"
 import { notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
 import Checklist from "@/features/notes/components/content/checklist"
 import { noteTypeToEditorType } from "@/features/notes/utils"
@@ -11,15 +11,16 @@ import { ActivityIndicator, Text, TouchableOpacity } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
-import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
+import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
-import { useEffect, useCallback } from "react"
+import { useEffect, useCallback, useRef, useMemo } from "react"
 import { runEffect, run } from "@filen/utils"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
+import i18n from "@/lib/i18n"
 import prompts from "@/lib/prompts"
-import { sync } from "@/features/notes/components/sync"
+import { sync, hashNoteContent } from "@/features/notes/components/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
@@ -53,6 +54,67 @@ export function computeNoteLoading({
 // surface is suppressed for a (read-only) history view.
 export function computeNoteFetchError({ history, isError }: { history: boolean; isError: boolean }): boolean {
 	return !history && isError
+}
+
+// M1 + D3: pure builder for a note's inflight entry list after a keystroke. Exported so the
+// standalone test exercises the live derivation (T5 pattern).
+//
+// M1: the author timestamp is PER-NOTE MONOTONIC — `max(Date.now(), newest existing + 1)` —
+// so a backward clock step (NTP correction mid-editing) can never leave an OLDER entry
+// outranking the text just typed: sync's max-timestamp pick would push the stale entry and
+// its `> syncedUpTo` prune would then discard the newest text. All comparisons stay
+// local-vs-local; server clocks are never consulted.
+//
+// D3: an ongoing session CARRIES its existing base hash forward unchanged (including the
+// legacy no-hash grace for entries persisted by older app versions — stamping a fresh base
+// mid-session would claim a sync point the session never had). Only a FRESH session (no
+// existing entries) stamps `sessionBaseHash` — the hash of the synced/loaded content the
+// editor was seeded from, or none when nothing synced is known.
+export function buildInflightEntries({
+	previous,
+	note,
+	content,
+	now,
+	sessionBaseHash
+}: {
+	previous: InflightContent[string] | undefined
+	note: Note
+	content: string
+	now: number
+	sessionBaseHash: string | null
+}): InflightContent[string] {
+	const entries = previous ?? []
+	const newestExisting = entries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
+	const timestamp = entries.length > 0 ? Math.max(now, newestExisting + 1) : now
+	const newestEntry = entries.find(c => c.timestamp === newestExisting)
+	const baseContentHash = entries.length > 0 ? newestEntry?.baseContentHash : (sessionBaseHash ?? undefined)
+
+	return [
+		{
+			timestamp,
+			note,
+			content,
+			baseContentHash
+		},
+		// The new keystroke strictly supersedes every existing entry (its timestamp is the
+		// monotonic maximum), so this keeps nothing in practice — retained purely as a guard
+		// against an exotic concurrent writer racing this functional update.
+		...entries.filter(c => c.timestamp > timestamp)
+	]
+}
+
+// M3: sync.flushToDisk never throws — persistence failure comes back as `false`
+// (sync-internal callers ignore it; their next pass re-flushes). HERE it must surface:
+// a failed SQLite write means the edit the user just typed survives in memory only and
+// would die with the process, with zero signal otherwise. Exported so the test exercises
+// the live helper (T5 pattern). Callers still proceed to schedule the push — getting the
+// edit to the server is the best remaining chance of not losing it.
+export async function flushInflightContentWithAlert(): Promise<void> {
+	const flushed = await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
+
+	if (!flushed) {
+		alerts.error(i18n.t("note_edit_not_saved_to_device"))
+	}
 }
 
 const Loading = ({ children, loading, noteType }: { children: React.ReactNode; loading?: boolean; noteType: NoteType }) => {
@@ -90,29 +152,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	const insets = useSafeAreaInsets()
 	const isOnline = useIsOnline()
 	const hasInflightContent = useNotesInflightStore(useShallow(state => (state.inflightContent[note.uuid] ?? []).length > 0))
-	// #38 fix: read the freshest unsynced edit reactively so it can SEED the editor
-	// (not just gate the query). Selecting the max-timestamp content string keeps
-	// this a primitive, so the component only re-renders when the latest in-flight
-	// body actually changes.
-	const inflightLatest = useNotesInflightStore(
-		useShallow(state => {
-			const entries = state.inflightContent[note.uuid]
-
-			if (!entries || entries.length === 0) {
-				return null
-			}
-
-			let latest: (typeof entries)[number] | null = null
-
-			for (const entry of entries) {
-				if (!latest || entry.timestamp > latest.timestamp) {
-					latest = entry
-				}
-			}
-
-			return latest ? latest.content : null
-		})
-	)
 	const [hideCompleted] = useChecklistHideCompleted(note.uuid)
 
 	// Gate the query on three conditions to make editing race-free:
@@ -147,27 +186,53 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		}
 	)
 
-	// #38 fix: seed the editor from the FRESHEST source. The inflight store holds
-	// the user's most recent unsynced edit and must win over server/list content so
-	// a reseed (or a cold open while edits are queued) never repaints stale
-	// pre-edit content. The list query (notesWithContentQueryGet → note.content)
-	// is the offline / never-individually-fetched fallback: the note list is
-	// persisted to SQLite, so its content is available even when the deliberately
-	// disabled per-note query never resolves. Order: history → inflight → server →
-	// list fallback.
-	const listContent = (() => {
+	// The editor seed is FROZEN per (note, fetch generation). The editors OWN their text
+	// after mount — mirroring the inflight store's latest content back into this prop
+	// created an echo loop (keystroke → store write → prop change → Checklist re-hydration
+	// / DOM prop churn → focus + cursor loss on every keystroke). So the seed recomputes
+	// ONLY on a real reseed event: a different note or a completed fetch (dataUpdatedAt —
+	// the same signal that drives the TextEditor remount key). Sources are read
+	// NON-reactively inside, freshest first (#38 semantics preserved): unsynced inflight
+	// edit wins (cold open with a restored queue must never paint stale pre-edit content)
+	// → per-note content cache (kept truthful by sync's post-push write, so a reseed after
+	// a drain paints exactly what was typed) → persisted list copy (offline fallback —
+	// the note list is in SQLite even when the disabled per-note query never resolved).
+	const editorSeed = useMemo(() => {
 		if (history) {
-			return null
+			return history.content
+		}
+
+		const entries = useNotesInflightStore.getState().inflightContent[note.uuid]
+
+		if (entries && entries.length > 0) {
+			let latest: (typeof entries)[number] | null = null
+
+			for (const entry of entries) {
+				if (!latest || entry.timestamp > latest.timestamp) {
+					latest = entry
+				}
+			}
+
+			if (latest) {
+				return latest.content
+			}
+		}
+
+		const cached = noteContentQueryGet({
+			uuid: note.uuid
+		})
+
+		if (typeof cached === "string") {
+			return cached
 		}
 
 		const fromList = notesWithContentQueryGet()?.find(n => n.uuid === note.uuid)
 
 		return fromList ? fromList.content : null
-	})()
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- non-reactive getState/cache reads by design; dataUpdatedAt is the deliberate reseed signal
+	}, [history, note.uuid, noteContentQuery.dataUpdatedAt])
 
-	const initialValue = history
-		? history.content
-		: (inflightLatest ?? (noteContentQuery.status === "success" ? noteContentQuery.data : listContent))
+	const initialValue = editorSeed
 
 	// #38 fix: decouple loading from the deliberately-disabled query. The query is
 	// disabled while offline or while inflight content exists (enabled gate below),
@@ -189,6 +254,71 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	})
 
 	const { refetch } = noteContentQuery
+
+	// D3: hash of the synced/loaded content the CURRENT editing session is based on. A
+	// "session" starts when the editor loads synced content and renews after a successful
+	// push — `buildInflightEntries` stamps this onto the FIRST entry of a session and
+	// carries it forward for the rest (so the ref is only consulted while no inflight
+	// entries exist for this note).
+	const sessionBaseHashRef = useRef<string | null>(null)
+	// The freshest in-flight content typed/restored for this note — on a full drain this
+	// equals the content sync just pushed (any keystroke landing mid-push survives the
+	// prune, so the queue would NOT have drained). Written by onValueChange (every typed
+	// value) and seeded once at mount for a disk-restored queue.
+	const lastSeenInflightRef = useRef<string | null>(null)
+
+	useEffect(() => {
+		const entries = useNotesInflightStore.getState().inflightContent[note.uuid]
+
+		if (!entries || entries.length === 0) {
+			return
+		}
+
+		let latest: (typeof entries)[number] | null = null
+
+		for (const entry of entries) {
+			if (!latest || entry.timestamp > latest.timestamp) {
+				latest = entry
+			}
+		}
+
+		if (latest) {
+			lastSeenInflightRef.current = latest.content
+		}
+	}, [note.uuid])
+
+	// D3 session boundary 1 — "editor loaded": whenever a fresh seed generation arrives
+	// (mount, the refetchOnMount fetch, the post-reload refetch), it becomes the base for
+	// the NEXT session. Skipped while a session is ongoing (its base lives in the entries
+	// and must not move under it) and for read-only history views. `editorSeed` is the
+	// exact content the editor was seeded with, so the base is what the user actually sees.
+	useEffect(() => {
+		if (history) {
+			return
+		}
+
+		const entries = useNotesInflightStore.getState().inflightContent[note.uuid] ?? []
+
+		if (entries.length > 0) {
+			return
+		}
+
+		sessionBaseHashRef.current = typeof editorSeed === "string" ? hashNoteContent(editorSeed) : null
+	}, [history, note.uuid, editorSeed])
+
+	// D3 session boundary 2 — "queue drained": after sync fully drains this note (a
+	// successful push of the latest text), the pushed content IS the cloud content and
+	// seeds the next session's base. Without this, typing again after a 3s debounce push
+	// would diff against the pre-push base and flag our own push as a conflict.
+	useEffect(() => {
+		if (history) {
+			return
+		}
+
+		if (!hasInflightContent && lastSeenInflightRef.current !== null) {
+			sessionBaseHashRef.current = hashNoteContent(lastSeenInflightRef.current)
+		}
+	}, [history, hasInflightContent])
 
 	const hasWriteAccess = (() => {
 		if (!stringifiedClient || history) {
@@ -213,28 +343,25 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 		const now = Date.now()
 
+		// Feeds D3 session boundary 2: on a full drain the last typed value IS the pushed
+		// (= cloud) content and seeds the next session's base.
+		lastSeenInflightRef.current = value
+
 		useNotesInflightStore.getState().setInflightContent(prev => ({
 			...prev,
-			[note.uuid]: [
-				{
-					timestamp: now,
-					note,
-					content: value
-				},
-				...(prev[note.uuid] ?? []).filter(c => c.timestamp > now)
-			]
+			// M1: per-note monotonic timestamp + D3: session base hash — see buildInflightEntries.
+			[note.uuid]: buildInflightEntries({
+				previous: prev[note.uuid],
+				note,
+				content: value,
+				now,
+				sessionBaseHash: sessionBaseHashRef.current
+			})
 		}))
 
-		const result = await run(async () => {
-			await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
-		}
+		// M3: alerts when the SQLite write fails (the edit is memory-only) but never bails —
+		// the debounced push below is the best remaining chance of preserving it.
+		await flushInflightContentWithAlert()
 
 		sync.syncDebounced()
 	}

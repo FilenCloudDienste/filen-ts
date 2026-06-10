@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
@@ -51,6 +51,20 @@ export function useNoteContentQuery(
 	})
 
 	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
+}
+
+// Current dataUpdatedAt of the cached per-note content query, or undefined when the note
+// was never fetched. The editor's remount key is this timestamp — callers that update the
+// cached content WITHOUT wanting an editor remount (sync's post-push truth write) pass it
+// back into noteContentQueryUpdate to keep the key stable.
+export function noteContentQueryDataUpdatedAt(params: UseNoteContentQueryParams): number | undefined {
+	return queryClient.getQueryState([BASE_QUERY_KEY, sortParams(params)])?.dataUpdatedAt
+}
+
+// Non-reactive read of the cached per-note content (undefined when never fetched/written).
+// Used by the editor's frozen-seed derivation, which must read sources without subscribing.
+export function noteContentQueryGet(params: UseNoteContentQueryParams): Awaited<ReturnType<typeof fetchData>> {
+	return queryClient.getQueryData([BASE_QUERY_KEY, sortParams(params)])
 }
 
 export function noteContentQueryUpdate({

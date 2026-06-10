@@ -157,7 +157,11 @@ export class Sync {
 		}
 	}
 
-	public async flushToDisk(inflightChatMessages: InflightChatMessages): Promise<void> {
+	// M3: reports persistence failure as `false` instead of throwing (it still never
+	// throws). Sync-internal callers ignore the return (the next pass re-flushes);
+	// COMPONENT call sites must surface a `false` — a failing SQLite write means the
+	// user's message survives in memory only and would otherwise die with zero signal.
+	public async flushToDisk(inflightChatMessages: InflightChatMessages): Promise<boolean> {
 		await this.initPromise
 
 		const result = await run(async () => {
@@ -175,6 +179,8 @@ export class Sync {
 		if (!result.success) {
 			console.error("Error flushing chat sync to disk:", result.error)
 		}
+
+		return result.success
 	}
 
 	private async sync(): Promise<void> {

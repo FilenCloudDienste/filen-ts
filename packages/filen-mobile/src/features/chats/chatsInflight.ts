@@ -41,6 +41,9 @@ export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 		return Object.fromEntries(remaining)
 	})
 
+	// Best-effort: flushToDisk reports failure as `false` and logs internally (M3); the
+	// run() guard additionally keeps even an unexpected throw from failing a succeeded
+	// removal (defense-in-depth — this purge must never reject).
 	const flushResult = await run(async () => {
 		await sync.flushToDisk(useChatsStore.getState().inflightMessages)
 	})
