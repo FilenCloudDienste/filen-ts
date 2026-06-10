@@ -68,9 +68,12 @@ export type Transfer = {
 )
 
 // A flat, monomorphic snapshot of a transfer that has reached a terminal,
-// user-visible state (succeeded or errored). Holds NO closures (no abort/pause/
-// resume) and NO SDK handles, so retaining one is cheap and never leaks a uniffi
-// resource. User-aborted/cancelled transfers are intentionally NOT kept here.
+// user-visible state (succeeded, completed with per-entry errors, or errored).
+// Holds NO closures (no abort/pause/resume) and NO SDK handles, so retaining one
+// is cheap and never leaks a uniffi resource. User-aborted/cancelled transfers are
+// intentionally NOT kept here. "completedWithErrors" covers directory transfers
+// that resolved Ok while individual entries failed — the SDK surfaces those only
+// via the error callbacks, so resolution alone is not proof of full success.
 export type FinishedTransfer = {
 	id: string
 	type: Transfer["type"]
@@ -79,8 +82,12 @@ export type FinishedTransfer = {
 	bytesTransferred: number
 	startedAt: number
 	finishedAt: number
-	outcome: "succeeded" | "errored"
+	outcome: "succeeded" | "completedWithErrors" | "errored"
 	errorMessage: string | null
+	// Number of per-entry errors accumulated on the live entry at settle time (all
+	// buckets: upload/download + scan + unknown). 0 for clean successes; drives the
+	// "Completed with N errors" row label for completedWithErrors.
+	errorCount: number
 }
 
 // The most finished transfers retained for the current session. Beyond this the

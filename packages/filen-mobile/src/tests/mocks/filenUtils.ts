@@ -22,6 +22,10 @@ export class Semaphore {
 	release(): void {}
 }
 
+// Faithful to @filen/utils run(): ALWAYS resolves the full Result object on success —
+// `throw: true` only changes the failure path (rethrow instead of a Failure result) —
+// and runs deferred cleanups in REVERSE registration order (LIFO) inside a finally,
+// exactly like the real implementation.
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export async function run(fn: (defer: (cleanup: () => void) => void) => Promise<any>, opts?: { throw?: boolean }): Promise<any> {
 	const cleanups: (() => void)[] = []
@@ -33,23 +37,19 @@ export async function run(fn: (defer: (cleanup: () => void) => void) => Promise<
 	try {
 		const data = await fn(defer)
 
-		for (const cleanup of cleanups) {
-			cleanup()
-		}
-
-		return opts?.throw ? data : { success: true, data }
+		return { success: true, data, error: null }
 	} catch (error) {
-		for (const cleanup of cleanups) {
-			try {
-				cleanup()
-			} catch {}
-		}
-
 		if (opts?.throw) {
 			throw error
 		}
 
-		return { success: false, error }
+		return { success: false, data: null, error }
+	} finally {
+		for (let i = cleanups.length - 1; i >= 0; i--) {
+			try {
+				await cleanups[i]?.()
+			} catch {}
+		}
 	}
 }
 

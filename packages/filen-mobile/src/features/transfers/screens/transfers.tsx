@@ -1,4 +1,5 @@
 import { Fragment } from "react"
+import { type TFunction } from "i18next"
 import Text from "@/components/ui/text"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -52,6 +53,22 @@ export function buildTransfersDisplayList(args: { transfers: TTransfer[]; finish
 		}))
 
 	return [...active, ...finished]
+}
+
+// Pure, unit-testable subtitle for a finished-transfer row. Errored rows prefer the captured
+// error message; completedWithErrors rows (resolved Ok but with per-entry failures) render the
+// localized error count so a partially-failed directory transfer is never presented as a clean
+// success; everything else is a plain "Completed".
+export function finishedTransferSubtitle(finished: TFinishedTransfer, t: TFunction): string {
+	if (finished.outcome === "errored") {
+		return finished.errorMessage ?? t("transfer_failed")
+	}
+
+	if (finished.outcome === "completedWithErrors") {
+		return t("transfer_completed_with_errors", { count: finished.errorCount })
+	}
+
+	return t("transfer_completed")
 }
 
 const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: ListRenderItemInfo<TransfersListItem>["target"] }) => {
@@ -221,11 +238,7 @@ const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>
-							{finished.outcome === "errored" && finished.errorMessage
-								? finished.errorMessage
-								: finished.outcome === "errored"
-									? t("transfer_failed")
-									: t("transfer_completed")}
+							{finishedTransferSubtitle(finished, t)}
 						</Text>
 					</View>
 				</View>

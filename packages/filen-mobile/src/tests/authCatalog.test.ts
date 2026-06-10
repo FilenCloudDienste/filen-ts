@@ -73,6 +73,14 @@ const INTENTIONAL_PLURAL_KEYS = new Set([
 	"upload_complete_other",
 	"upload_complete_with_failures_one",
 	"upload_complete_with_failures_other",
+	"transfer_completed_with_errors_one",
+	"transfer_completed_with_errors_other",
+	"download_missing_files_one",
+	"download_missing_files_other",
+	"import_partial_download_one",
+	"import_partial_download_other",
+	"import_partial_upload_one",
+	"import_partial_upload_other",
 	"events_undecryptable_one",
 	"events_undecryptable_other"
 ])

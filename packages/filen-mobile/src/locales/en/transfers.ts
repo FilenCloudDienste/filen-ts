@@ -36,6 +36,10 @@ export const transfers = {
 	transfers_progress_other: "{{count}} transfers · {{percent}}% · {{speed}}",
 	/** Finished-transfer row outcome label shown when a transfer completed successfully */
 	transfer_completed: "Completed",
+	/** Finished-transfer row outcome label: directory transfer resolved but {{count}} entries failed (singular) */
+	transfer_completed_with_errors_one: "Completed with {{count}} error",
+	/** Finished-transfer row outcome label: directory transfer resolved but {{count}} entries failed (plural) */
+	transfer_completed_with_errors_other: "Completed with {{count}} errors",
 	/** Finished-transfer row outcome label shown when a transfer failed with an error */
 	transfer_failed: "Failed",
 	/** Finished-transfer row menu action: remove this single finished entry from the transfers list */

@@ -327,8 +327,13 @@ export function buildDownloadSubButtons({
 						? new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 						: new FileSystem.Directory(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
 
+					// On a partial download/upload the staging copy is deliberately kept (filen-tmp/
+					// is reclaimed by the tmp lifecycle anyway) — deleting it would discard the bytes
+					// that DID transfer while the alert tells the user something is missing.
+					let keepStagingForRetry = false
+
 					defer(() => {
-						if (destination.parentDirectory.exists) {
+						if (!keepStagingForRetry && destination.parentDirectory.exists) {
 							destination.parentDirectory.delete()
 						}
 					})
@@ -353,6 +358,15 @@ export function buildDownloadSubButtons({
 						return
 					}
 
+					// Directory downloads resolve Ok while per-entry failures arrive only via the SDK's
+					// error callbacks — re-uploading an incomplete tree would silently import a hollowed-out
+					// copy, so bail before the upload and keep the staging copy.
+					if ("errors" in downloadResult && downloadResult.errors.length > 0) {
+						keepStagingForRetry = true
+
+						throw new Error(t("import_partial_download", { count: downloadResult.errors.length }))
+					}
+
 					const uploadResult = await transfers.upload({
 						localFileOrDir: destination,
 						parent: remoteDir,
@@ -365,6 +379,14 @@ export function buildDownloadSubButtons({
 
 					if (!uploadResult) {
 						return
+					}
+
+					// Same honesty for the upload leg: a resolved directory upload can still carry
+					// per-entry failures.
+					if ("errors" in uploadResult && uploadResult.errors.length > 0) {
+						keepStagingForRetry = true
+
+						throw new Error(t("import_partial_upload", { count: uploadResult.errors.length }))
 					}
 				})
 

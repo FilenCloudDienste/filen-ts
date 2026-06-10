@@ -29,6 +29,40 @@ export type UseDriveUpload = {
 	createTextFile: () => Promise<void>
 }
 
+// Pure, unit-testable tally of a settled upload fan-out. `transfers.upload` resolves `null`
+// when the transfer was aborted/cancelled — that is neither a success nor a failure, so
+// aborted entries are excluded from BOTH counts (an all-aborted batch must not produce an
+// "Upload complete" toast, and aborts must not inflate the "{{failed}} failed" suffix).
+export function summarizeTransferResults(results: PromiseSettledResult<Result<unknown>>[]): {
+	succeeded: number
+	failed: number
+	aborted: number
+	errors: unknown[]
+} {
+	let succeeded = 0
+	let aborted = 0
+	const errors: unknown[] = []
+
+	for (const r of results) {
+		if (r.status === "rejected") {
+			errors.push(r.reason)
+		} else if (!r.value.success) {
+			errors.push(r.value.error)
+		} else if (r.value.data === null) {
+			aborted++
+		} else {
+			succeeded++
+		}
+	}
+
+	return {
+		succeeded,
+		failed: errors.length,
+		aborted,
+		errors
+	}
+}
+
 /**
  * The four near-identical "add content" upload flows surfaced in the Drive
  * header's Upload menu: document picker, photo-library picker, camera capture,
@@ -51,28 +85,20 @@ export function useDriveUpload({
 }): UseDriveUpload {
 	// Shared tail: surface rejected fan-out entries + failed uploads, then a success
 	// toast summarizing the batch. Per-failure errors are still shown above; the toast
-	// only appears when at least one upload succeeded (an all-failed batch is already
-	// fully covered by the error banners, so a "success" toast there would be noise).
+	// only appears when at least one upload ACTUALLY succeeded (an all-failed batch is
+	// already fully covered by the error banners, and an all-aborted batch was cancelled
+	// by the user — a "success" toast in either case would be a lie).
 	const reportTransferResults = (results: PromiseSettledResult<Result<unknown>>[]): void => {
-		let succeeded = 0
+		const { succeeded, failed, errors } = summarizeTransferResults(results)
 
-		for (const r of results) {
-			if (r.status === "rejected") {
-				console.error(r.reason)
-				alerts.error(r.reason)
-			} else if (!r.value.success) {
-				console.error(r.value.error)
-				alerts.error(r.value.error)
-			} else {
-				succeeded++
-			}
+		for (const error of errors) {
+			console.error(error)
+			alerts.error(error)
 		}
 
 		if (succeeded === 0) {
 			return
 		}
-
-		const failed = results.length - succeeded
 
 		alerts.normal(
 			failed > 0

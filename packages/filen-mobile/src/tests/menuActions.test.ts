@@ -5,8 +5,16 @@ import { type TFunction } from "i18next"
 // Hoisted mocks (must be hoisted before imports so vi.mock factories can use them)
 // ---------------------------------------------------------------------------
 
-const { mockConfirmedAction } = vi.hoisted(() => ({
-	mockConfirmedAction: vi.fn((_opts: unknown) => async () => {})
+const { mockConfirmedAction, fsMockInstances } = vi.hoisted(() => ({
+	mockConfirmedAction: vi.fn((_opts: unknown) => async () => {}),
+	// Every File/Directory the code under test constructs, in creation order — lets tests
+	// reach the staging destination created inside an onPress closure (e.g. to flip
+	// parentDirectory.exists or assert on its delete spy).
+	fsMockInstances: [] as {
+		uri: string
+		exists: boolean
+		parentDirectory: { exists: boolean; create: () => void; delete: () => void }
+	}[]
 }))
 
 vi.mock("@/lib/confirmedAction", () => ({
@@ -90,6 +98,8 @@ vi.mock("expo-file-system", () => ({
 			}
 
 			this.delete = vi.fn()
+
+			fsMockInstances.push(this)
 		}
 
 		delete = vi.fn()
@@ -109,6 +119,8 @@ vi.mock("expo-file-system", () => ({
 			}
 
 			this.delete = vi.fn()
+
+			fsMockInstances.push(this)
 		}
 
 		delete = vi.fn()
@@ -171,6 +183,9 @@ vi.mock("@/lib/serializer", () => ({
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
 import { buildDownloadSubButtons } from "@/features/drive/components/item/menuActionsDownload"
+import { selectDriveItems } from "@/features/drive/screens/driveSelect"
+import transfers from "@/features/transfers/transfers"
+import alerts from "@/lib/alerts"
 import type { DriveItem } from "@/types"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { PreviewType } from "@/lib/previewType"
@@ -848,5 +863,160 @@ describe("buildDownloadSubButtons (#35)", () => {
 
 			expect(btn?.requiresOnline).toBe(true)
 		})
+	})
+})
+
+// ---------------------------------------------------------------------------
+// C1 — Import flow honesty: partial download / partial upload keep the staging
+// copy, alert, and never silently import an incomplete tree.
+// ---------------------------------------------------------------------------
+
+describe("import flow partial-transfer honesty (C1)", () => {
+	type DownloadResult = Awaited<ReturnType<typeof transfers.download>>
+	type UploadResult = Awaited<ReturnType<typeof transfers.upload>>
+
+	const importArgs = {
+		drivePath: makeDrivePath("drive"),
+		isStoredOffline: false,
+		parentForOfflineStorage: null as OfflineParent | null,
+		previewType: null as PreviewType | null,
+		isOwner: false,
+		t
+	}
+
+	// The staging destination is the only FS node the import onPress constructs.
+	const stagingDestination = () => fsMockInstances[fsMockInstances.length - 1]
+
+	async function runImport(item: DriveItem): Promise<void> {
+		const buttons = buildDownloadSubButtons({
+			...importArgs,
+			item
+		})
+		const importButton = buttons.find(b => b.id === "import")
+
+		expect(importButton).toBeDefined()
+
+		await (importButton?.onPress as () => Promise<void>)()
+	}
+
+	beforeEach(() => {
+		fsMockInstances.length = 0
+		vi.mocked(alerts.error).mockClear()
+		vi.mocked(transfers.download).mockReset()
+		vi.mocked(transfers.upload).mockReset()
+		vi.mocked(selectDriveItems).mockReset()
+		vi.mocked(selectDriveItems).mockResolvedValue({
+			cancelled: false,
+			selectedItems: [{ type: "root", data: { uuid: "root-dir" } }]
+		} as never)
+	})
+
+	it("partial download: alerts import_partial_download, skips the upload and keeps the staging copy", async () => {
+		vi.mocked(transfers.download).mockImplementation(async () => {
+			const destination = stagingDestination()
+
+			if (destination) {
+				// Simulate the download having materialized the staging tree.
+				destination.parentDirectory.exists = true
+			}
+
+			return {
+				files: [],
+				directories: [],
+				errors: [{ path: "/missing.txt", error: new Error("entry failed") }]
+			} as unknown as DownloadResult
+		})
+
+		await runImport(makeDirectory({ name: "dir" }))
+
+		// The incomplete tree was NOT re-uploaded.
+		expect(transfers.upload).not.toHaveBeenCalled()
+
+		// The user was told (t stub returns the bare key).
+		expect(alerts.error).toHaveBeenCalledTimes(1)
+
+		const alerted = vi.mocked(alerts.error).mock.calls[0]?.[0] as Error
+
+		expect(alerted.message).toBe("import_partial_download")
+
+		// The staging copy survived for retry/recovery.
+		expect(stagingDestination()?.parentDirectory.delete).not.toHaveBeenCalled()
+	})
+
+	it("partial upload: alerts import_partial_upload and keeps the staging copy", async () => {
+		vi.mocked(transfers.download).mockImplementation(async () => {
+			const destination = stagingDestination()
+
+			if (destination) {
+				destination.parentDirectory.exists = true
+			}
+
+			return {
+				files: [],
+				directories: [],
+				errors: []
+			} as unknown as DownloadResult
+		})
+
+		vi.mocked(transfers.upload).mockResolvedValue({
+			files: [],
+			directories: [],
+			errors: [{ path: "/failed-upload.txt", error: new Error("entry failed") }]
+		} as unknown as UploadResult)
+
+		await runImport(makeDirectory({ name: "dir" }))
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(alerts.error).toHaveBeenCalledTimes(1)
+
+		const alerted = vi.mocked(alerts.error).mock.calls[0]?.[0] as Error
+
+		expect(alerted.message).toBe("import_partial_upload")
+		expect(stagingDestination()?.parentDirectory.delete).not.toHaveBeenCalled()
+	})
+
+	it("clean run: no alert, staging copy deleted", async () => {
+		vi.mocked(transfers.download).mockImplementation(async () => {
+			const destination = stagingDestination()
+
+			if (destination) {
+				destination.parentDirectory.exists = true
+			}
+
+			return {
+				files: [],
+				directories: [],
+				errors: []
+			} as unknown as DownloadResult
+		})
+
+		vi.mocked(transfers.upload).mockResolvedValue({
+			files: [],
+			directories: [],
+			errors: []
+		} as unknown as UploadResult)
+
+		await runImport(makeDirectory({ name: "dir" }))
+
+		expect(alerts.error).not.toHaveBeenCalled()
+		expect(stagingDestination()?.parentDirectory.delete).toHaveBeenCalledTimes(1)
+	})
+
+	it("aborted download (null result): no alert, staging cleaned up as before", async () => {
+		vi.mocked(transfers.download).mockImplementation(async () => {
+			const destination = stagingDestination()
+
+			if (destination) {
+				destination.parentDirectory.exists = true
+			}
+
+			return null
+		})
+
+		await runImport(makeDirectory({ name: "dir" }))
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(alerts.error).not.toHaveBeenCalled()
+		expect(stagingDestination()?.parentDirectory.delete).toHaveBeenCalledTimes(1)
 	})
 })
