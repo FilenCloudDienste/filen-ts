@@ -23,7 +23,13 @@ import {
 	type OfflineParent,
 	type OfflineSyncError
 } from "@/features/offline/offlineHelpers"
-import { planTreeReconcile, isSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
+import {
+	planTreeReconcile,
+	isSyncTmpName,
+	uuidFromSyncTmpName,
+	type LocalTreeEntry,
+	type RemoteTreeEntry
+} from "@/features/offline/offlineSyncPlanner"
 import { validateUuid } from "@/lib/uuid"
 import {
 	driveItemStoredOfflineQueryUpdate,
@@ -100,9 +106,12 @@ export const INDEX_FILE = OFFLINE_INDEX_FILE
 //     pure uuid set-diff — there are NO timestamp comparisons anywhere.
 //   - reconcileTree() converges one stored tree onto its remote listing IN PLACE: rename/move/delete
 //     local entries per the pure planner (offlineSyncPlanner), run at most ONE hash-idempotent
-//     directory download for missing entries, verify everything, and only then commit meta + index.
-//     No staging, no swap — a failed pass leaves disk state untouched, returns OfflineSyncErrors,
-//     and the next pass re-converges. A no-op pass writes nothing (serialized-meta fixed point).
+//     directory download for missing entries, verify (after downloads, and end-to-end on thorough
+//     passes), and only then commit meta + index. The LOCAL view is index-only by default
+//     (automatic passes trust the meta — no per-entry stats) and disk-verified when thorough: true
+//     (user-explicit passes) or when leftover .sync-tmp-* temps prove a crashed pass. No staging,
+//     no swap — a failed pass leaves disk state untouched, returns OfflineSyncErrors, and the next
+//     pass re-converges. A no-op pass writes nothing (serialized-meta fixed point).
 //   - The Index is the source of truth for "is this item offline?" queries and is rebuilt atomically.
 //   - Standalone copies that overlap a stored tree (same UUID inside the tree) are removed on commit
 //     (overlap dedup).
@@ -897,15 +906,26 @@ export class Offline {
 	// Converges one stored directory tree onto its remote listing IN PLACE. Also the initial-store
 	// path (storeDirectory delegates here with initialStore: true).
 	//
-	//   1. Clean leftover /.sync-tmp-* move temps (crash recovery).
+	//   1. Read the existing meta, then crash recovery with RESCUE: a leftover /.sync-tmp-{uuid}
+	//      move temp whose uuid the current meta still claims and whose meta path is free on disk is
+	//      moved back into place (bytes preserved — no re-download); occupied or unknown temps are
+	//      deleted. ANY temp found is proof of a crashed mutation pass and escalates this pass to
+	//      the disk-verified local view regardless of `thorough`.
 	//   2. One bulk recursive remote listing → uuid → {item, raw path} map (Linked dirs excluded).
-	//   3. Local view from the existing meta, stat-checked (file size mismatch counts as missing —
-	//      truncation self-heal).
+	//   3. Local view from the existing meta, two modes (design §4.2):
+	//      - INDEX-ONLY (default — automatic passes): every meta entry is trusted as present on
+	//        disk; zero per-entry stats. External deletion/corruption is detected only on thorough
+	//        passes or at file-access time (accepted trade).
+	//      - DISK-VERIFIED (thorough: true — user-explicit passes — or crash escalation): every
+	//        entry stat-checked (file size mismatch counts as missing — truncation self-heal).
 	//   4. Pure plan (offlineSyncPlanner): two-phase moves via tree-root temps + deletes (deletes are
 	//      skipped while the listing is degraded by scan errors) — then execute.
 	//   5. One in-place hash-idempotent directory download for missing uuids; per-entry download
 	//      errors fail the pass.
-	//   6. Verify every remote entry on disk, then commit meta + index ONLY when every collected
+	//   6. Verify-after-download — stat every remote entry on disk. Runs after EVERY download
+	//      regardless of pass mode (it is what makes a committed meta trustworthy at write time) and
+	//      on disk-verified passes even without one; an index-only pass that downloaded nothing
+	//      changed no bytes and skips the stats. Then commit meta + index ONLY when every collected
 	//      error is a DEGRADED-listing marker (see below) — verify and download errors always
 	//      block. A rebuilt meta identical to the existing file skips the meta write/index update;
 	//      a TRUE no-op pass (no download, readable meta) performs zero writes and no sweep.
@@ -936,6 +956,7 @@ export class Offline {
 		hideProgress,
 		skipIndexUpdate,
 		initialStore,
+		thorough,
 		signal
 	}: {
 		directory: DriveItem
@@ -943,6 +964,7 @@ export class Offline {
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		initialStore?: boolean
+		thorough?: boolean
 		signal?: AbortSignal
 	}): Promise<OfflineSyncError[]> {
 		const result = await run(async defer => {
@@ -994,23 +1016,66 @@ export class Offline {
 				})
 			}
 
-			// Crash recovery: a previous pass that died mid-move can leave /.sync-tmp-* extraction
-			// temps at the tree root. Delete them — their bytes are restored below by the
-			// hash-idempotent download.
-			for (const entry of liveDir.list()) {
-				if (isSyncTmpName(entry.name)) {
-					entry.delete()
-				}
-			}
-
-			// Prior state, captured at pass start. The existing meta is both the local-view source and
-			// the failure-policy discriminator: a readable meta means a committed tree exists on disk.
+			// Prior state, captured at pass entry — BEFORE tmp crash recovery, whose rescue needs the
+			// meta's claimed paths. The existing meta is both the local-view source and the
+			// failure-policy discriminator: a readable meta means a committed tree exists on disk.
 			// An unreadable meta yields an empty local view — the hash-idempotent download skips
 			// healthy bytes and the meta is rebuilt from the listing (near-free repair).
 			const existingMeta = await this.readDirectoryMeta(topLevelUuid)
 			const metaWasUnreadable = existingMeta === null && !initialStore
 			const metaFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, `${topLevelUuid}.filenmeta`))
 			const currentMetaText = metaFile.exists && metaFile.size > 0 ? await metaFile.text() : null
+			const existingEntries = existingMeta?.entries ?? {}
+
+			// Crash recovery with RESCUE: a previous pass that died mid-move can leave /.sync-tmp-{uuid}
+			// extraction temps at the tree root. A temp whose uuid the CURRENT meta still claims and
+			// whose meta path is free on disk is moved back into place (bytes preserved — no
+			// re-download); occupied or unknown temps are deleted (the hash-idempotent download
+			// restores their bytes). ANY temp is proof of a crashed mutation pass, so the meta cannot
+			// be trusted — escalate this pass to the disk-verified local view below.
+			let crashEscalation = false
+
+			for (const entry of liveDir.list()) {
+				if (!isSyncTmpName(entry.name)) {
+					continue
+				}
+
+				crashEscalation = true
+
+				const tmpUuid = uuidFromSyncTmpName(entry.name)
+				const claimedEntry = tmpUuid !== null ? existingEntries[tmpUuid] : undefined
+
+				if (claimedEntry) {
+					const destinationUri = FileSystem.Paths.join(liveDir.uri, claimedEntry.path)
+
+					if (!new FileSystem.File(destinationUri).exists && !new FileSystem.Directory(destinationUri).exists) {
+						const destinationParent = new FileSystem.Directory(FileSystem.Paths.dirname(destinationUri))
+
+						if (!destinationParent.exists) {
+							destinationParent.create({
+								intermediates: true,
+								idempotent: true
+							})
+						}
+
+						if (entry instanceof FileSystem.Directory) {
+							entry.move(new FileSystem.Directory(destinationUri))
+						} else {
+							entry.move(new FileSystem.File(destinationUri))
+						}
+
+						continue
+					}
+				}
+
+				entry.delete()
+			}
+
+			if (crashEscalation) {
+				// The physical tree changed (rescued moves) or at minimum held crash residue — drop
+				// derived caches.
+				this.invalidateCaches()
+			}
 
 			// Initial-store failure policy: a user-initiated FIRST store (no readable prior meta) has
 			// no prior state worth keeping, so a FATALLY failed pass (any non-degraded error) deletes
@@ -1150,15 +1215,32 @@ export class Offline {
 				})
 			}
 
-			// Local view from the existing meta (read at pass start above). A file whose on-disk size
-			// diverges from its meta size counts as missing so the download heals truncation for free.
-			const existingEntries = existingMeta?.entries ?? {}
+			// Local view from the existing meta (read at pass entry above), two modes (design §4.2):
+			//   - INDEX-ONLY (default — automatic passes): every meta entry is TRUSTED as present on
+			//     disk. Zero per-entry File/Directory constructions in this phase — the dominant
+			//     local cost for big trees. Externally deleted/corrupted bytes are detected only on
+			//     thorough passes or at file-access time (accepted trade).
+			//   - DISK-VERIFIED (thorough passes — user-explicit triggers — or crash escalation):
+			//     every entry is stat-checked; a file whose on-disk size diverges from its meta size
+			//     counts as missing so the download heals truncation for free.
+			const thoroughLocalView = thorough === true || crashEscalation
 			const local: LocalTreeEntry[] = []
 
 			for (const uuid in existingEntries) {
 				const entry = existingEntries[uuid]
 
 				if (!entry) {
+					continue
+				}
+
+				if (!thoroughLocalView) {
+					local.push({
+						uuid,
+						path: entry.path,
+						isDirectory: isDirectoryItem(entry.item),
+						existsOnDisk: true
+					})
+
 					continue
 				}
 
@@ -1383,11 +1465,35 @@ export class Offline {
 				}
 			}
 
-			// Verify — every remote entry must be present on disk (files at their exact size) before
-			// anything advances.
-			for (const [uuid, remoteEntry] of remote) {
-				if (remoteEntry.isDirectory) {
-					if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, remoteEntry.path)).exists) {
+			// Verify-after-download — every remote entry must be present on disk (files at their
+			// exact size) before anything advances. Runs after EVERY download regardless of pass
+			// mode (it is what makes a committed meta trustworthy at write time) and on
+			// disk-verified passes even without one. An index-only pass that downloaded nothing
+			// changed no bytes — it skips these stats entirely (external damage is detected on
+			// thorough passes or at file-access time, the design's accepted trade).
+			if (downloadRan || thoroughLocalView) {
+				for (const [uuid, remoteEntry] of remote) {
+					if (remoteEntry.isDirectory) {
+						if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, remoteEntry.path)).exists) {
+							pushError(
+								makeSyncError({
+									itemUuid: uuid,
+									topLevelUuid,
+									name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
+									itemType: remoteEntry.item.type,
+									kind: "verify",
+									message: `Missing on disk after sync: ${remoteEntry.path}`
+								})
+							)
+						}
+
+						continue
+					}
+
+					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, remoteEntry.path))
+					const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
+
+					if (!dataFile.exists || dataFile.size !== expectedSize) {
 						pushError(
 							makeSyncError({
 								itemUuid: uuid,
@@ -1395,28 +1501,10 @@ export class Offline {
 								name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
 								itemType: remoteEntry.item.type,
 								kind: "verify",
-								message: `Missing on disk after sync: ${remoteEntry.path}`
+								message: `Missing or incomplete on disk after sync: ${remoteEntry.path}`
 							})
 						)
 					}
-
-					continue
-				}
-
-				const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, remoteEntry.path))
-				const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
-
-				if (!dataFile.exists || dataFile.size !== expectedSize) {
-					pushError(
-						makeSyncError({
-							itemUuid: uuid,
-							topLevelUuid,
-							name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
-							itemType: remoteEntry.item.type,
-							kind: "verify",
-							message: `Missing or incomplete on disk after sync: ${remoteEntry.path}`
-						})
-					)
 				}
 			}
 
@@ -1468,7 +1556,9 @@ export class Offline {
 
 					// Drop preserved entries whose pre-pass stat said missing — an unlisted entry
 					// whose bytes are gone has nothing verified to preserve (it re-enters via the
-					// listing + download once the listing reads clean again).
+					// listing + download once the listing reads clean again). Index-only passes
+					// trust the meta here (the view is all-true); the re-stat below still guards
+					// every path the union actually commits.
 					if (localStatByUuid.get(uuid) !== true) {
 						continue
 					}

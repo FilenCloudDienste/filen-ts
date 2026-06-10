@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { planTreeReconcile, tmpPathForUuid, type RemoteTreeEntry, type LocalTreeEntry } from "@/features/offline/offlineSyncPlanner"
+import {
+	planTreeReconcile,
+	tmpPathForUuid,
+	isSyncTmpName,
+	uuidFromSyncTmpName,
+	type RemoteTreeEntry,
+	type LocalTreeEntry
+} from "@/features/offline/offlineSyncPlanner"
 
 function remote(entries: [string, string, boolean?][]): Map<string, RemoteTreeEntry> {
 	return new Map(entries.map(([uuid, path, isDirectory]) => [uuid, { uuid, path, isDirectory: isDirectory ?? false }]))
@@ -167,5 +174,23 @@ describe("planTreeReconcile", () => {
 			{ type: "delete", uuid: "f1", path: `${tmpPathForUuid("d1")}/gone.txt`, isDirectory: false },
 			{ type: "move", uuid: "d1", from: tmpPathForUuid("d1"), to: "/new", isDirectory: true }
 		])
+	})
+})
+
+describe("sync-tmp name helpers", () => {
+	it("round-trips a uuid through tmpPathForUuid → name → uuidFromSyncTmpName (the crash-rescue contract)", () => {
+		const uuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+		const tmpName = tmpPathForUuid(uuid).slice(1)
+
+		expect(isSyncTmpName(tmpName)).toBe(true)
+		expect(uuidFromSyncTmpName(tmpName)).toBe(uuid)
+	})
+
+	it("returns null for non-temp and malformed names", () => {
+		expect(uuidFromSyncTmpName("a.txt")).toBeNull()
+		expect(uuidFromSyncTmpName(".filenmeta")).toBeNull()
+		// A bare prefix with no uuid suffix is malformed — never rescuable.
+		expect(uuidFromSyncTmpName(".sync-tmp-")).toBeNull()
+		expect(isSyncTmpName("a.txt")).toBe(false)
 	})
 })

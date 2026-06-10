@@ -498,6 +498,12 @@ async function runManualPass(): Promise<void> {
 	})
 }
 
+// Automatic trigger (app start / foreground / reconnect): no manual flag. A fresh instance has
+// lastCompletedAt = 0, so the auto min-interval never blocks the pass here.
+async function runAutoPass(): Promise<void> {
+	await new OfflineSync().sync()
+}
+
 describe("offlineSync — normal trees (own cloud)", () => {
 	it("1. alive & unchanged → reconcileTree with stored uuid/parent, no removeItem, no meta update", async () => {
 		const parent = makeNormalParent("parent-1")
@@ -853,6 +859,36 @@ describe("offlineSync — standalone files", () => {
 
 		expect(vi.mocked(offline.redownloadStandaloneFile)).toHaveBeenCalledTimes(1)
 		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+	})
+
+	// Pass modes (design §4.2): the standalone heal stat is disk verification — THOROUGH (manual)
+	// passes only. Tests 9/9b above pin that it runs on manual; this pins that an automatic pass
+	// skips it entirely while the listing-driven decisions (rename here) still apply.
+	it("9c. AUTOMATIC pass skips the standalone heal stat (no getLocalFile, no redownload for a missing-on-disk file); listing-driven rename still applies", async () => {
+		const normalParent = makeNormalParent("parent-1")
+
+		givenFiles([
+			{
+				item: makeFileItem("file-1", "old.txt"),
+				parent: normalParent
+			}
+		])
+		client.listDir.mockResolvedValue({
+			dirs: [],
+			files: [makeRemoteFile("file-1", "new.txt", uuidParent("parent-1"))]
+		})
+		// Missing on disk — a thorough pass would heal this (test 9); the automatic pass must not
+		// even stat.
+		vi.mocked(offline.getLocalFile).mockResolvedValue(null)
+
+		await runAutoPass()
+
+		expect(vi.mocked(offline.getLocalFile)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.redownloadStandaloneFile)).not.toHaveBeenCalled()
+		expect(vi.mocked(offline.renameStandaloneFile)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.renameStandaloneFile).mock.calls[0]?.[0]?.item.data.decryptedMeta?.name).toBe("new.txt")
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+		expect(syncErrors()).toEqual([])
 	})
 
 	it("10. versioned (byName match, different uuid) → storeFile(new) THEN removeItem(old); storeFile failure → old kept + download error", async () => {
@@ -1465,5 +1501,70 @@ describe("offlineSync — broken tree metas", () => {
 		expect(syncErrors()[0]?.kind).toBe("listing")
 		expect(syncErrors()[0]?.itemUuid).toBe("broken-tree")
 		expect(syncErrors()[0]?.topLevelUuid).toBe("broken-tree")
+	})
+})
+
+describe("offlineSync — pass modes (manual ⟹ thorough, design §4.2)", () => {
+	// Drives all three reconcileTree call sites in one pass: a normal own-cloud tree, a shared
+	// (listed) tree, and a broken-meta tree heal.
+	function givenAllThreeTreeKinds(): void {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			},
+			{
+				item: makeSharedTreeItem("stree-1", "Shared tree"),
+				parent: makeSharedParent("sparent-1")
+			}
+		])
+		client.listSharedDir.mockResolvedValue({
+			dirs: [makeRemoteDir("stree-1", "Shared tree", uuidParent("sparent-1"))],
+			files: []
+		})
+		vi.mocked(offline.listBrokenTreeUuids).mockResolvedValue(["broken-1"])
+		client.getDirOptional.mockImplementation(async (uuid: string) => {
+			if (uuid === "tree-1") {
+				return makeRemoteDir("tree-1", "Tree", uuidParent("parent-1"))
+			}
+
+			if (uuid === "broken-1") {
+				return makeRemoteDir("broken-1", "Broken tree", uuidParent("parent-1"))
+			}
+
+			if (uuid === "parent-1") {
+				return makeRemoteDir("parent-1", "Parent", uuidParent(ROOT_UUID))
+			}
+
+			return undefined
+		})
+	}
+
+	it("21. every reconcileTree call receives thorough: true on a manual pass and thorough: false on an automatic pass", async () => {
+		givenAllThreeTreeKinds()
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(3)
+
+		for (const call of vi.mocked(offline.reconcileTree).mock.calls) {
+			expect(call[0]?.thorough).toBe(true)
+		}
+
+		expect(syncErrors()).toEqual([])
+
+		// Same shape on an AUTOMATIC trigger → index-only.
+		client = primeDefaults()
+		givenAllThreeTreeKinds()
+
+		await runAutoPass()
+
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(3)
+
+		for (const call of vi.mocked(offline.reconcileTree).mock.calls) {
+			expect(call[0]?.thorough).toBe(false)
+		}
+
+		expect(syncErrors()).toEqual([])
 	})
 })
