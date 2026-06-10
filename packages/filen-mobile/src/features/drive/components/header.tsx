@@ -18,7 +18,7 @@ import drive from "@/features/drive/drive"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useStringifiedClient } from "@/lib/auth"
 import cache from "@/lib/cache"
-import offline from "@/features/offline/offline"
+import offlineSync from "@/features/offline/offlineSync"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { aggregateDriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { resolveDriveHeaderTitle } from "@/features/drive/utils"
@@ -258,12 +258,13 @@ const Header = ({
 					id: "syncNow",
 					title: offlineSyncing ? t("syncing") : t("sync_now"),
 					icon: "restore",
-					// offline.sync() silently no-ops when offline; gate the button so
+					// offlineSync.sync() silently no-ops when offline; gate the button so
 					// the user gets a disabled affordance instead of zero feedback.
+					// manual: true — the user-initiated trigger bypasses the auto min-interval.
 					requiresOnline: true,
 					disabled: offlineSyncing,
 					onPress: () => {
-						offline.sync().catch(console.error)
+						offlineSync.sync({ manual: true }).catch(console.error)
 					}
 				})
 			}
