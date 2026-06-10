@@ -19,6 +19,8 @@ import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, filterDriveItemsBySearchQuery, mergeByUuid } from "@/features/drive/utils"
+import offlineSync from "@/features/offline/offlineSync"
+import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
 
 const Drive = () => {
 	const drivePath = useDrivePath()
@@ -79,6 +81,10 @@ const Drive = () => {
 						return item.data.uuid
 					}}
 					data={items}
+					// Offline VIRTUAL ROOT only (nested offline dirs have a uuid): surfaces
+					// the last sync pass's error count as a pressable row above the listing.
+					// The row hides itself while there are no errors.
+					headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
 					renderItem={(info: ListRenderItemInfo<DriveItem>) => {
 						return (
 							<Item
@@ -94,6 +100,13 @@ const Drive = () => {
 						// work while offline. Every other variant hits the network.
 						if (!onlineManager.isOnline() && drivePath.type !== "offline") {
 							return
+						}
+
+						// Manual offline-cache sync on pull-to-refresh — fire-and-forget
+						// so the gesture resolves with the local listing refetch;
+						// offlineSync gates connectivity/Wi-Fi-only internally.
+						if (drivePath.type === "offline") {
+							offlineSync.sync({ manual: true }).catch(console.error)
 						}
 
 						const result = await run(async () => {

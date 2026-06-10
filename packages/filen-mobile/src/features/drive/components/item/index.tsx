@@ -25,6 +25,8 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
+import useOfflineStore from "@/features/offline/store/useOffline.store"
+import { useTranslation } from "react-i18next"
 
 const Item = ({
 	info,
@@ -35,6 +37,7 @@ const Item = ({
 	drivePath: DrivePath
 	getListItems: () => DriveItem[]
 }) => {
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
 	const textGreen500 = useResolveClassNames("text-green-500")
@@ -56,6 +59,15 @@ const Item = ({
 		uuid: info.item.data.uuid,
 		type: info.item.type
 	})
+
+	// Offline listing only: whether the last sync pass recorded an error for this item —
+	// either directly (itemUuid) or for anything nested inside it (topLevelUuid). Surfaced
+	// as a textual indicator line (rows already carry a file/dir icon, so no second icon).
+	const hasOfflineSyncError = useOfflineStore(
+		state =>
+			drivePath.type === "offline" &&
+			state.syncErrors.some(e => e.itemUuid === info.item.data.uuid || e.topLevelUuid === info.item.data.uuid)
+	)
 
 	const disabled = isDriveItemDisabled({
 		item: info.item,
@@ -269,6 +281,15 @@ const Item = ({
 										drivePath={drivePath}
 									/>
 								</Text>
+								{hasOfflineSyncError && (
+									<Text
+										className="text-xs text-red-500"
+										numberOfLines={1}
+										ellipsizeMode="middle"
+									>
+										{t("offline_sync_failed")}
+									</Text>
+								)}
 							</View>
 							{Platform.OS === "android" && !drivePath.selectOptions && (
 								<View className="flex-row items-center shrink-0 bg-transparent pl-4">

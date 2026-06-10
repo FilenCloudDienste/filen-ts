@@ -281,6 +281,10 @@ const RootLayout = () => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="offlineSyncErrors"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="advanced"
 												options={modalOptions}
 											/>

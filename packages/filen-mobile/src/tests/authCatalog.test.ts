@@ -63,6 +63,8 @@ const INTENTIONAL_PLURAL_KEYS = new Set([
 	"offline_files_count_other",
 	"offline_dirs_count_one",
 	"offline_dirs_count_other",
+	"offline_sync_errors_count_one",
+	"offline_sync_errors_count_other",
 	"transfers_active_one",
 	"transfers_active_other",
 	"transfers_progress_one",
