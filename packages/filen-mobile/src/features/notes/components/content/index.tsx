@@ -14,7 +14,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import useNotesInflightStore, { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
-import { useEffect, useCallback, useRef, useMemo } from "react"
+import { useEffect, useCallback, useRef } from "react"
 import { runEffect, run } from "@filen/utils"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
@@ -146,6 +146,12 @@ const Loading = ({ children, loading, noteType }: { children: React.ReactNode; l
 	)
 }
 
+function getInflightContentForNote(noteUuid: string): InflightContent[string] | undefined {
+	const inflightContent = useNotesInflightStore.getState().inflightContent
+
+	return inflightContent[noteUuid]
+}
+
 const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
@@ -197,12 +203,12 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// → per-note content cache (kept truthful by sync's post-push write, so a reseed after
 	// a drain paints exactly what was typed) → persisted list copy (offline fallback —
 	// the note list is in SQLite even when the disabled per-note query never resolved).
-	const editorSeed = useMemo(() => {
+	const editorSeed = (() => {
 		if (history) {
 			return history.content
 		}
 
-		const entries = useNotesInflightStore.getState().inflightContent[note.uuid]
+		const entries = getInflightContentForNote(note.uuid)
 
 		if (entries && entries.length > 0) {
 			let latest: (typeof entries)[number] | null = null
@@ -229,8 +235,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		const fromList = notesWithContentQueryGet()?.find(n => n.uuid === note.uuid)
 
 		return fromList ? fromList.content : null
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- non-reactive getState/cache reads by design; dataUpdatedAt is the deliberate reseed signal
-	}, [history, note.uuid, noteContentQuery.dataUpdatedAt])
+	})()
 
 	const initialValue = editorSeed
 
@@ -461,6 +466,15 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		>
 			{note.noteType === NoteType.Checklist ? (
 				<Checklist
+					// Needs a key to reset the editor when the note changes.
+					// #38 fix: this key stays STABLE across the inflight window — while
+					// inflight content exists the per-note query is disabled (enabled gate
+					// above) so `dataUpdatedAt` never advances, so the editor is not
+					// remounted mid-edit. It only changes when a fresh fetch completes
+					// (no inflight in the way), which is the intended fresh-content reseed —
+					// and `initialValue` now seeds from inflight first, so even that reseed
+					// can never repaint stale pre-edit content over in-progress work.
+					key={history ? undefined : noteContentQuery.dataUpdatedAt}
 					initialValue={initialValue ?? ""}
 					onChange={onValueChange}
 					readOnly={!hasWriteAccess}
