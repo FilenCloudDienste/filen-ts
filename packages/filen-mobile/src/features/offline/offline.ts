@@ -649,12 +649,13 @@ export class Offline {
 	// Scans FILES_DIRECTORY for standalone uuid-named directories whose meta file is missing, empty,
 	// or undecodable while the directory itself still exists. Used by the sync top-level pass to
 	// rebuild (own cloud) or remove (undecidable) broken standalone entries. hasDataFile reports
-	// whether any non-.filenmeta file is present — it decides rebuild (cheap meta rewrite around the
-	// existing bytes) vs redownload (no bytes, e.g. crash or aborted-adoption residue) in the heal.
-	public async listBrokenStandaloneUuids(): Promise<{ uuid: string; hasDataFile: boolean }[]> {
+	// whether any non-.filenmeta file is present and dataFileSize its on-disk byte size (null when
+	// absent) — together they decide rebuild (cheap meta rewrite, only around bytes at the EXPECTED
+	// size) vs redownload (no bytes, or wrong-size residue that must never be blessed) in the heal.
+	public async listBrokenStandaloneUuids(): Promise<{ uuid: string; hasDataFile: boolean; dataFileSize: number | null }[]> {
 		this.ensureDirectories()
 
-		const broken: { uuid: string; hasDataFile: boolean }[] = []
+		const broken: { uuid: string; hasDataFile: boolean; dataFileSize: number | null }[] = []
 
 		for (const entry of FILES_DIRECTORY.list()) {
 			if (!(entry instanceof FileSystem.Directory) || !validateUuid(entry.name)) {
@@ -682,9 +683,20 @@ export class Offline {
 				continue
 			}
 
+			let dataFileSize: number | null = null
+
+			for (const inner of entry.list()) {
+				if (inner instanceof FileSystem.File && !inner.name.endsWith(".filenmeta")) {
+					dataFileSize = inner.size
+
+					break
+				}
+			}
+
 			broken.push({
 				uuid: entry.name,
-				hasDataFile: entry.list().some(inner => inner instanceof FileSystem.File && !inner.name.endsWith(".filenmeta"))
+				hasDataFile: dataFileSize !== null,
+				dataFileSize
 			})
 		}
 
@@ -832,8 +844,11 @@ export class Offline {
 	}
 
 	// Renames a standalone stored file's data file in place (remote rename, same uuid ⟹ same bytes)
-	// and rewrites its meta. The current data file is located as the single non-.filenmeta file in
-	// files/{uuid}/ so a stale on-disk name from an older meta still gets corrected.
+	// and rewrites its meta {item, parent}. The current data file is located as the single
+	// non-.filenmeta file in files/{uuid}/ so a stale on-disk name from an older meta still gets
+	// corrected. The meta rewrite does NOT require a data file: a bytes-missing standalone that was
+	// moved/renamed remotely must still converge (meta parent/item updated; the heal redownloads
+	// the bytes later) — requiring bytes here made the re-anchor no-op forever.
 	public async renameStandaloneFile({ item, parent }: { item: DriveItem; parent: OfflineParent }): Promise<void> {
 		await run(
 			async defer => {
@@ -877,11 +892,9 @@ export class Offline {
 					}
 				}
 
-				if (!dataFile) {
-					return
-				}
-
-				if (dataFile.name !== newName) {
+				// The data-file rename is best-effort on whatever bytes exist; the meta rewrite
+				// below is the actual convergence contract and runs either way.
+				if (dataFile && dataFile.name !== newName) {
 					dataFile.rename(newName)
 				}
 
@@ -1275,6 +1288,46 @@ export class Offline {
 				allowDeletes: !listingDegraded
 			})
 
+			// Replays the planned move ops' prefix rewrites over an existing meta path — yields the
+			// entry's CURRENT on-disk location after this pass's mutations (both temp phases are in
+			// plan.ops). Used by the degraded verified union and by deferred-move handling.
+			const replayMoves = (path: string): string => {
+				let current = path
+
+				for (const op of plan.ops) {
+					if (op.type !== "move") {
+						continue
+					}
+
+					if (current === op.from) {
+						current = op.to
+					} else if (current.startsWith(`${op.from}/`)) {
+						current = `${op.to}${current.slice(op.from.length)}`
+					}
+				}
+
+				return current
+			}
+
+			// Expected ON-DISK path for a remote entry this pass. With deferred moves (degraded
+			// destination collisions — plan.deferredMoves) an entry's disk location is its existing
+			// meta path with the executed move ops replayed: deferred movers and the subtrees riding
+			// inside them stayed put, so their REMOTE paths would lie about the disk in both the
+			// verify stats and the committed meta. Entries the plan classified MISSING are exempt —
+			// the download places them at their remote paths regardless of any stale meta path.
+			// Without deferrals every surviving entry's replay lands exactly on its remote path, so
+			// the remote path is used directly.
+			const missingSet = new Set(plan.missingUuids)
+			const expectedDiskPath = (uuid: string, remotePath: string): string => {
+				if (plan.deferredMoves.length === 0 || missingSet.has(uuid)) {
+					return remotePath
+				}
+
+				const existing = existingEntries[uuid]
+
+				return existing ? replayMoves(existing.path) : remotePath
+			}
+
 			if (listingDegraded) {
 				const reasons: string[] = []
 
@@ -1473,8 +1526,12 @@ export class Offline {
 			// thorough passes or at file-access time, the design's accepted trade).
 			if (downloadRan || thoroughLocalView) {
 				for (const [uuid, remoteEntry] of remote) {
+					// Deferred movers (and entries riding inside them) knowingly sit at their CURRENT
+					// paths, not their remote ones — stat where the bytes actually are.
+					const expectedPath = expectedDiskPath(uuid, remoteEntry.path)
+
 					if (remoteEntry.isDirectory) {
-						if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, remoteEntry.path)).exists) {
+						if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, expectedPath)).exists) {
 							pushError(
 								makeSyncError({
 									itemUuid: uuid,
@@ -1482,7 +1539,7 @@ export class Offline {
 									name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
 									itemType: remoteEntry.item.type,
 									kind: "verify",
-									message: `Missing on disk after sync: ${remoteEntry.path}`
+									message: `Missing on disk after sync: ${expectedPath}`
 								})
 							)
 						}
@@ -1490,7 +1547,7 @@ export class Offline {
 						continue
 					}
 
-					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, remoteEntry.path))
+					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, expectedPath))
 					const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
 
 					if (!dataFile.exists || dataFile.size !== expectedSize) {
@@ -1501,7 +1558,7 @@ export class Offline {
 								name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
 								itemType: remoteEntry.item.type,
 								kind: "verify",
-								message: `Missing or incomplete on disk after sync: ${remoteEntry.path}`
+								message: `Missing or incomplete on disk after sync: ${expectedPath}`
 							})
 						)
 					}
@@ -1514,11 +1571,12 @@ export class Offline {
 				return finish(errors)
 			}
 
-			// Committed entries: every remote entry, plus — on a degraded pass only — the VERIFIED
-			// UNION's preserved entries: existing-meta entries absent from the degraded listing
-			// (exactly the uuids the skipped delete phase kept on disk). They were verified by the
-			// pass that originally committed them; each is included with its existing item only when
-			// its bytes are still present right now.
+			// Committed entries: every remote entry — deferred movers (and their riders) at their
+			// CURRENT disk path rather than the remote one — plus, on a degraded pass only, the
+			// VERIFIED UNION's preserved entries: existing-meta entries absent from the degraded
+			// listing (exactly the uuids the skipped delete phase kept on disk). They were verified
+			// by the pass that originally committed them; each is included with its existing item
+			// only when its bytes are still present right now.
 			const committedEntries = new Map<
 				string,
 				{
@@ -1530,15 +1588,15 @@ export class Offline {
 			for (const [uuid, remoteEntry] of remote) {
 				committedEntries.set(uuid, {
 					item: remoteEntry.item,
-					path: remoteEntry.path
+					path: expectedDiskPath(uuid, remoteEntry.path)
 				})
 			}
 
 			if (listingDegraded) {
-				const remotePaths = new Set<string>()
+				const committedPaths = new Set<string>()
 
-				for (const remoteEntry of remote.values()) {
-					remotePaths.add(remoteEntry.path)
+				for (const committedEntry of committedEntries.values()) {
+					committedPaths.add(committedEntry.path)
 				}
 
 				const localStatByUuid = new Map<string, boolean>()
@@ -1566,25 +1624,13 @@ export class Offline {
 					// The move phase may have carried an unlisted entry along inside a moved/renamed
 					// ancestor directory — replay the planner's prefix rewrites (both temp phases are
 					// in plan.ops) so the union records the entry's CURRENT on-disk path.
-					let path = entry.path
+					const path = replayMoves(entry.path)
 
-					for (const op of plan.ops) {
-						if (op.type !== "move") {
-							continue
-						}
-
-						if (path === op.from) {
-							path = op.to
-						} else if (path.startsWith(`${op.from}/`)) {
-							path = `${op.to}${path.slice(op.from.length)}`
-						}
-					}
-
-					// A remote entry now claims this exact path (e.g. the file was re-created under a
-					// new uuid): the downloaded bytes own it — aliasing the stale uuid onto the same
-					// path would lie about what is on disk. Drop the preserved entry; cleanup happens
-					// once the listing is clean.
-					if (remotePaths.has(path)) {
+					// A committed entry already claims this exact path (e.g. the file was re-created
+					// under a new uuid): the downloaded bytes own it — aliasing the stale uuid onto
+					// the same path would lie about what is on disk. Drop the preserved entry;
+					// cleanup happens once the listing is clean.
+					if (committedPaths.has(path)) {
 						continue
 					}
 

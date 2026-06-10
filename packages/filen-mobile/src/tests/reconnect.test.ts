@@ -35,7 +35,8 @@ vi.mock("@tanstack/react-query", () => ({
 	}
 }))
 
-vi.mock("@/features/offline/offlineSync", () => ({ default: { sync: () => mockOfflineSync() } }))
+// Forward the args so tests can pin HOW offlineSync.sync() is invoked (auto vs manual trigger).
+vi.mock("@/features/offline/offlineSync", () => ({ default: { sync: (...args: unknown[]) => mockOfflineSync(...args) } }))
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: { sync: () => mockCameraUploadSync() } }))
 vi.mock("@/features/notes/components/sync", () => ({ sync: { executeNow: () => mockNotesExecuteNow() } }))
 vi.mock("@/features/chats/components/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
@@ -65,6 +66,16 @@ describe("startReconnectListener", () => {
 		expect(mockOfflineSync).toHaveBeenCalledTimes(1)
 		expect(mockNotesExecuteNow).toHaveBeenCalledTimes(1)
 		expect(mockChatsSyncNow).toHaveBeenCalledTimes(1)
+	})
+
+	it("calls offlineSync.sync() as an AUTOMATIC trigger (no manual flag) on the offline->online transition", async () => {
+		const { startReconnectListener } = await import("@/lib/reconnect")
+		startReconnectListener()
+		fireOnlineEvent(true)
+		expect(mockOfflineSync).toHaveBeenCalledTimes(1)
+		// Zero args = auto pass: the AUTO_SYNC_MIN_INTERVAL coalescing applies (a reconnect storm
+		// must not hammer the backend), and the pass stays index-only per design §4.2.
+		expect(mockOfflineSync).toHaveBeenCalledWith()
 	})
 
 	it("does not fire syncs when the device goes offline (online->offline transition)", async () => {

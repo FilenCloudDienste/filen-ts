@@ -175,6 +175,146 @@ describe("planTreeReconcile", () => {
 			{ type: "move", uuid: "d1", from: tmpPathForUuid("d1"), to: "/new", isDirectory: true }
 		])
 	})
+
+	// A3 — dir D (d1) deleted remotely, same-name dir D' (d2) created, child f1 still exists
+	// remotely at the same relative path. Without the rescue, the recursive delete of d1 destroys
+	// f1's bytes and forces a full re-transfer.
+	describe("rescues remote-kept entries riding inside a deleted directory", () => {
+		it("extracts the kept child before the delete and places it at its remote path (D→D' recreate) — never in missingUuids", () => {
+			const plan = planTreeReconcile({
+				remote: remote([["d2", "/D", true], ["f1", "/D/f.txt"]]),
+				local: local([["d1", "/D", true], ["f1", "/D/f.txt"]]),
+				allowDeletes: true
+			})
+
+			expect(plan.ops).toEqual([
+				{ type: "move", uuid: "f1", from: "/D/f.txt", to: tmpPathForUuid("f1"), isDirectory: false },
+				{ type: "delete", uuid: "d1", path: "/D", isDirectory: true },
+				{ type: "move", uuid: "f1", from: tmpPathForUuid("f1"), to: "/D/f.txt", isDirectory: false }
+			])
+			// f1 is physically present — it must be rescued, not re-downloaded.
+			expect(plan.missingUuids).toEqual(["d2"])
+			expect(plan.deferredMoves).toEqual([])
+		})
+
+		it("rescues a file two levels deep under nested deleted directories", () => {
+			const plan = planTreeReconcile({
+				remote: remote([["d2", "/D", true], ["s2", "/D/sub", true], ["f1", "/D/sub/f.txt"]]),
+				local: local([["d1", "/D", true], ["s1", "/D/sub", true], ["f1", "/D/sub/f.txt"]]),
+				allowDeletes: true
+			})
+
+			expect(plan.ops).toEqual([
+				{ type: "move", uuid: "f1", from: "/D/sub/f.txt", to: tmpPathForUuid("f1"), isDirectory: false },
+				{ type: "delete", uuid: "s1", path: "/D/sub", isDirectory: true },
+				{ type: "delete", uuid: "d1", path: "/D", isDirectory: true },
+				{ type: "move", uuid: "f1", from: tmpPathForUuid("f1"), to: "/D/sub/f.txt", isDirectory: false }
+			])
+			expect(plan.missingUuids.sort()).toEqual(["d2", "s2"])
+		})
+
+		it("does not rescue an entry that already escapes inside an explicit-mover ancestor", () => {
+			// d1 is deleted; M (kept) moves out of it and carries f1 along — f1 needs no extra ops.
+			const plan = planTreeReconcile({
+				remote: remote([["m1", "/M", true], ["f1", "/M/f.txt"]]),
+				local: local([["d1", "/D", true], ["m1", "/D/M", true], ["f1", "/D/M/f.txt"]]),
+				allowDeletes: true
+			})
+
+			expect(plan.ops).toEqual([
+				{ type: "move", uuid: "m1", from: "/D/M", to: tmpPathForUuid("m1"), isDirectory: true },
+				{ type: "delete", uuid: "d1", path: "/D", isDirectory: true },
+				{ type: "move", uuid: "m1", from: tmpPathForUuid("m1"), to: "/M", isDirectory: true }
+			])
+			expect(plan.missingUuids).toEqual([])
+		})
+
+		it("rescues a kept entry nested under an only-local directory that itself rides inside a rescued directory", () => {
+			// D and x both recreated under new uuids (d2/x2); u and y keep their uuids and relative
+			// paths. u (kept) rides out of doomed d1; x1 (only-local dir) rides inside u's temp and
+			// is deleted there — y (kept) under x1 must be rescued out of it first.
+			const plan = planTreeReconcile({
+				remote: remote([["d2", "/D", true], ["u1", "/D/u", true], ["x2", "/D/u/x", true], ["y1", "/D/u/x/y.txt"]]),
+				local: local([
+					["d1", "/D", true],
+					["u1", "/D/u", true],
+					["x1", "/D/u/x", true],
+					["y1", "/D/u/x/y.txt"]
+				]),
+				allowDeletes: true
+			})
+
+			expect(plan.ops).toEqual([
+				// u1 (shallower) is rescued first; x1 and y1 ride into its temp.
+				{ type: "move", uuid: "u1", from: "/D/u", to: tmpPathForUuid("u1"), isDirectory: true },
+				// y1 is still doomed (under x1's temp-prefixed path) — rescued out of x1.
+				{ type: "move", uuid: "y1", from: `${tmpPathForUuid("u1")}/x/y.txt`, to: tmpPathForUuid("y1"), isDirectory: false },
+				{ type: "delete", uuid: "x1", path: `${tmpPathForUuid("u1")}/x`, isDirectory: true },
+				{ type: "delete", uuid: "d1", path: "/D", isDirectory: true },
+				{ type: "move", uuid: "u1", from: tmpPathForUuid("u1"), to: "/D/u", isDirectory: true },
+				{ type: "move", uuid: "y1", from: tmpPathForUuid("y1"), to: "/D/u/x/y.txt", isDirectory: false }
+			])
+			expect(plan.missingUuids.sort()).toEqual(["d2", "x2"])
+		})
+	})
+
+	// A4 — degraded passes (allowDeletes: false) must not livelock: a phase-2 destination occupied
+	// by a kept only-local entry would make the executor's move throw every pass (the delete phase
+	// that would clear the occupant is skipped while the listing is degraded).
+	describe("defers moves onto kept occupants when deletes are skipped (degraded listing)", () => {
+		it("returns the colliding mover in deferredMoves with NO ops for it — the entry stays at its current path", () => {
+			const plan = planTreeReconcile({
+				remote: remote([["f1", "/new.txt"]]),
+				local: local([["f1", "/old.txt"], ["f2", "/new.txt"]]),
+				allowDeletes: false
+			})
+
+			expect(plan.ops).toEqual([])
+			expect(plan.deferredMoves).toEqual(["f1"])
+			expect(plan.missingUuids).toEqual([])
+		})
+
+		it("still plans the move when deletes are allowed — the occupant is deleted before placement", () => {
+			const plan = planTreeReconcile({
+				remote: remote([["f1", "/new.txt"]]),
+				local: local([["f1", "/old.txt"], ["f2", "/new.txt"]]),
+				allowDeletes: true
+			})
+
+			expect(plan.ops).toEqual([
+				{ type: "move", uuid: "f1", from: "/old.txt", to: tmpPathForUuid("f1"), isDirectory: false },
+				{ type: "delete", uuid: "f2", path: "/new.txt", isDirectory: false },
+				{ type: "move", uuid: "f1", from: tmpPathForUuid("f1"), to: "/new.txt", isDirectory: false }
+			])
+			expect(plan.deferredMoves).toEqual([])
+		})
+
+		it("cascades: a deferred mover is itself a stay that defers movers targeting ITS path", () => {
+			// o (only-local) blocks m1's destination; deferred m1 stays at /a, blocking m2 → /a.
+			const plan = planTreeReconcile({
+				remote: remote([["m1", "/x.txt"], ["m2", "/a.txt"]]),
+				local: local([["m1", "/a.txt"], ["m2", "/b.txt"], ["o1", "/x.txt"]]),
+				allowDeletes: false
+			})
+
+			expect(plan.ops).toEqual([])
+			expect(plan.deferredMoves.sort()).toEqual(["m1", "m2"])
+		})
+
+		it("keeps non-colliding movers planned while deferring only the colliding one", () => {
+			const plan = planTreeReconcile({
+				remote: remote([["f1", "/blocked.txt"], ["f3", "/free.txt"]]),
+				local: local([["f1", "/a.txt"], ["f3", "/c.txt"], ["o1", "/blocked.txt"]]),
+				allowDeletes: false
+			})
+
+			expect(plan.ops).toEqual([
+				{ type: "move", uuid: "f3", from: "/c.txt", to: tmpPathForUuid("f3"), isDirectory: false },
+				{ type: "move", uuid: "f3", from: tmpPathForUuid("f3"), to: "/free.txt", isDirectory: false }
+			])
+			expect(plan.deferredMoves).toEqual(["f1"])
+		})
+	})
 })
 
 describe("sync-tmp name helpers", () => {

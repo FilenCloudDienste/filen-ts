@@ -45,6 +45,40 @@ export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
 // pass (deduped by parentCacheKey). A parent that is remotely gone/revoked (FolderNotFound /
 // WrongPassword) is positive evidence its stored children are gone; any other listing failure is
 // inconclusive — affected items are skipped with a `listing` error and retried next pass.
+// Resolution of an own-cloud parent uuid into the AnyDirWithContext the offline metas store, plus
+// the ONE-LEVEL trash-containment signal (user decision: one level, not an ancestor walk). The
+// backend keeps resolving items INSIDE a trashed directory as alive with a normal Uuid parent-tag
+// — only the parent dir's OWN parent-tag reveals the trash — so checking just the item used to
+// keep trash-contained offline copies forever.
+//   resolved       — parent context built (the account root needs no request and can never be
+//                    trashed; any other uuid resolves via ONE getDirOptional, cached per pass)
+//   trashContained — the parent dir itself resolved with a Trash parent-tag: the item lives
+//                    inside a trashed directory ⇒ trash policy applies (remove the local copy)
+//   unresolvable   — no parent uuid, or the parent resolved to undefined (permanently deleted
+//                    while the child still resolves — undecidable): callers keep their stored
+//                    parent / previous behavior, never guess and never delete
+//   failed         — the lookup request itself failed (network): inconclusive, `listing` error,
+//                    retried next pass
+type OwnParentResolution =
+	| {
+			status: "resolved"
+			parent: OfflineParent
+	  }
+	| {
+			status: "trashContained"
+	  }
+	| {
+			status: "unresolvable"
+	  }
+	| {
+			status: "failed"
+			message: string
+	  }
+
+// One-per-pass dedup of parent lookups (several trees/standalones can share a parent). Keyed by
+// parent uuid; promise-valued so concurrently syncing items share the in-flight request.
+type ParentContextCache = Map<string, Promise<OwnParentResolution>>
+
 type ParentListingState =
 	| {
 			status: "ok"
@@ -128,8 +162,12 @@ function isGoneListingError(error: unknown): boolean {
 // One pass (runPass):
 //   1. Gates: abort signal, onlineManager, Wi-Fi-only setting (all passes incl. manual).
 //   2. Normal trees (own cloud): one getDirOptional per tree root. undefined/trashed → remove;
-//      renamed/moved → updateTreeRootMeta (move re-anchors the parent context); alive → one
-//      hash-idempotent reconcileTree (thorough follows the pass mode).
+//      alive → ONE-LEVEL trash-containment gate (the tree's parent dir resolved via a per-pass
+//      cached getDirOptional; a trash-tagged parent ⇒ the tree lives inside a trashed folder ⇒
+//      remove — items inside trashed dirs keep resolving alive, so the item's own parent-tag
+//      alone misses this); renamed/moved → updateTreeRootMeta (the move re-anchor reuses the
+//      gate's parent lookup); then one hash-idempotent reconcileTree (thorough follows the pass
+//      mode).
 //   3. Shared trees + ALL standalone-file parents: ONE deduped listing per unique parent
 //      (listDir/listSharedDir/listInSharedRoot). FolderNotFound/WrongPassword ⇒ children removed;
 //      other failures ⇒ `listing` errors, items skipped (NO deletions on errors).
@@ -137,12 +175,14 @@ function isGoneListingError(error: unknown): boolean {
 //      place; THOROUGH passes only — automatic passes trust the meta and skip the stat) then
 //      rename; vanished → byName version adoption (store new uuid FIRST, remove old only once
 //      storeFile reports the new copy durably stored — an aborted store keeps the old copy, no
-//      error) → own-cloud getFileOptional move-follow/trash/delete → shared ⇒ remove.
+//      error) → own-cloud getFileOptional move-follow/trash/delete (a move INTO a trash-contained
+//      parent counts as trashed) → shared ⇒ remove.
 //   5. Broken standalone metas: rebuild own-cloud alive items via getFileOptional (meta rewrite
-//      when the data file exists, redownload when it does not), remove trashed/deleted leftovers.
+//      only when the data file exists at the remote meta's exact size, redownload otherwise —
+//      wrong-size bytes are never blessed), remove trashed/deleted/trash-contained leftovers.
 //      Broken TREE metas analogously via getDirOptional: alive → one reconcileTree rebuilds the
 //      meta around the existing bytes (an unreadable meta yields an empty local view in BOTH
-//      modes); trashed/deleted/undecidable → removeTreeDirectory.
+//      modes); trashed/deleted/trash-contained/undecidable → removeTreeDirectory.
 //   6. Finish: one updateIndex, replace useOfflineStore.syncErrors, stamp lastCompletedAt.
 //
 // Coalescing: concurrent sync() calls join the in-flight pass; auto passes within
@@ -186,39 +226,80 @@ export class OfflineSync {
 	}
 
 	// Resolves an own-cloud parent uuid into the AnyDirWithContext the offline metas store: the
-	// account root builds the Root context exactly like the drive feature does, any other uuid
-	// resolves via ONE getDirOptional. Returns null when the parent cannot be resolved (callers
-	// keep their previously stored parent or record an error — never guess).
+	// account root builds the Root context exactly like the drive feature does (no request), any
+	// other uuid resolves via ONE getDirOptional — deduped per pass through parentContextCache.
+	// The same lookup doubles as the one-level trash-containment check: a parent dir whose OWN
+	// parent-tag is Trash means the item lives inside a trashed directory (see OwnParentResolution).
 	private async resolveOwnParentContext({
 		parentUuid,
 		authedSdkClient,
+		parentContextCache,
 		signal
 	}: {
 		parentUuid: string | null
 		authedSdkClient: AuthedSdkClient
+		parentContextCache: ParentContextCache
 		signal: AbortSignal
-	}): Promise<OfflineParent | null> {
+	}): Promise<OwnParentResolution> {
 		if (!parentUuid) {
-			return null
+			return {
+				status: "unresolvable"
+			}
 		}
 
 		const root = authedSdkClient.root()
 
 		if (parentUuid === root.uuid) {
-			return new AnyDirWithContext.Normal(new AnyNormalDir.Root(root))
+			// The account root can never be trashed — no request needed.
+			return {
+				status: "resolved",
+				parent: new AnyDirWithContext.Normal(new AnyNormalDir.Root(root))
+			}
 		}
 
-		const parentLookup = await run(async () =>
-			authedSdkClient.getDirOptional(parentUuid, {
-				signal
-			})
-		)
+		const cached = parentContextCache.get(parentUuid)
 
-		if (!parentLookup.success || !parentLookup.data) {
-			return null
+		if (cached) {
+			return cached
 		}
 
-		return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(parentLookup.data))
+		const resolution = (async (): Promise<OwnParentResolution> => {
+			const parentLookup = await run(async () =>
+				authedSdkClient.getDirOptional(parentUuid, {
+					signal
+				})
+			)
+
+			if (!parentLookup.success) {
+				return {
+					status: "failed",
+					message: errorMessage(parentLookup.error)
+				}
+			}
+
+			const parentDir = parentLookup.data
+
+			if (parentDir === undefined) {
+				return {
+					status: "unresolvable"
+				}
+			}
+
+			if (isTrashParent(parentDir.parent)) {
+				return {
+					status: "trashContained"
+				}
+			}
+
+			return {
+				status: "resolved",
+				parent: new AnyDirWithContext.Normal(new AnyNormalDir.Dir(parentDir))
+			}
+		})()
+
+		parentContextCache.set(parentUuid, resolution)
+
+		return resolution
 	}
 
 	// Fetches ONE listing per unique parent (deduped by parentCacheKey) using the SDK call that
@@ -339,12 +420,17 @@ export class OfflineSync {
 	}
 
 	// One stored own-cloud tree root: by-uuid lookup decides deleted/trashed/renamed/moved, then a
-	// single reconcileTree converges the tree contents. A failed lookup is inconclusive — record a
-	// `listing` error and keep everything (NO deletions on errors).
+	// single reconcileTree converges the tree contents. The alive path additionally resolves the
+	// tree's REMOTE parent once (cached per pass; the account root needs no request) — both the
+	// one-level trash-containment gate (a tree whose CONTAINING dir was trashed vanishes from
+	// listings while still resolving alive itself) and the move re-anchor reuse that single lookup.
+	// A failed lookup (tree or parent) is inconclusive — record a `listing` error and keep
+	// everything (NO deletions on errors).
 	private async syncNormalTree({
 		item,
 		parent,
 		authedSdkClient,
+		parentContextCache,
 		thorough,
 		signal,
 		pushError,
@@ -353,6 +439,7 @@ export class OfflineSync {
 		item: DriveItem
 		parent: OfflineParent
 		authedSdkClient: AuthedSdkClient
+		parentContextCache: ParentContextCache
 		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
@@ -391,6 +478,42 @@ export class OfflineSync {
 			return
 		}
 
+		// One-level trash containment: the tree itself resolves alive, but its parent dir may sit
+		// in trash (trashed dirs keep resolving their children as alive). At most one extra request
+		// per tree per pass (deduped via parentContextCache; trees are few — acceptable).
+		const remoteParentUuid = unwrapParentUuid(remoteDir.parent)
+		const parentResolution = await this.resolveOwnParentContext({
+			parentUuid: remoteParentUuid,
+			authedSdkClient,
+			parentContextCache,
+			signal
+		})
+
+		if (parentResolution.status === "trashContained") {
+			// The containing directory was trashed ⇒ the tree is trash-contained. Trash policy:
+			// remove the local copy, exactly like a trashed tree root. No reconcile.
+			await offline.removeItem(item)
+
+			return
+		}
+
+		if (parentResolution.status === "failed") {
+			// The parent's trash state could not be determined — inconclusive, like a failed tree
+			// lookup: record a `listing` error, keep everything, retry next pass.
+			pushError(
+				makeSyncError({
+					itemUuid: item.data.uuid,
+					topLevelUuid: item.data.uuid,
+					name: item.data.decryptedMeta?.name ?? item.data.uuid,
+					itemType: item.type,
+					kind: "listing",
+					message: parentResolution.message
+				})
+			)
+
+			return
+		}
+
 		const unwrapped = unwrapDirMeta(remoteDir)
 		let currentItem: DriveItem = item
 		let resolvedParent = parent
@@ -401,21 +524,16 @@ export class OfflineSync {
 			const updated = unwrappedDirIntoDriveItem(unwrapped)
 			const nameChanged = item.data.decryptedMeta?.name !== unwrapped.meta.name
 			const storedParentUuid = unwrapParentUuid(item.data.parent)
-			const remoteParentUuid = unwrapParentUuid(remoteDir.parent)
 			const parentChanged = storedParentUuid !== remoteParentUuid
 
 			currentItem = updated
 
 			if (nameChanged || parentChanged) {
-				if (parentChanged) {
-					// Move-following: re-anchor the stored parent context. On any parent-resolve
-					// failure keep the OLD stored parent — the next pass retries the re-anchor.
-					resolvedParent =
-						(await this.resolveOwnParentContext({
-							parentUuid: remoteParentUuid,
-							authedSdkClient,
-							signal
-						})) ?? parent
+				if (parentChanged && parentResolution.status === "resolved") {
+					// Move-following: re-anchor the stored parent context (reusing the trash-gate
+					// lookup — no second request). An unresolvable parent keeps the OLD stored
+					// parent — the next pass retries the re-anchor.
+					resolvedParent = parentResolution.parent
 				}
 
 				await offline.updateTreeRootMeta({
@@ -526,18 +644,22 @@ export class OfflineSync {
 	// (absent from a clean listing, or the parent itself is gone): ONE getFileOptional decides.
 	// Moved to another own-cloud directory → re-anchor the stored parent context and keep the copy
 	// (renameStandaloneFile rewrites the meta incl. parent and renames the data file when the name
-	// changed too). Trashed/deleted → remove. Lookup failure → `listing` error, keep everything
-	// (retried next pass). Alive but undecryptable → never a deletion signal; keep untouched.
+	// changed too) — unless the NEW parent dir itself sits in trash (one-level containment), which
+	// means the file was moved into a trashed folder ⇒ remove like any trashed item. Trashed/
+	// deleted → remove. Lookup failure → `listing` error, keep everything (retried next pass).
+	// Alive but undecryptable → never a deletion signal; keep untouched.
 	private async followStandaloneFileByUuid({
 		item,
 		parent,
 		authedSdkClient,
+		parentContextCache,
 		signal,
 		pushError
 	}: {
 		item: DriveItem
 		parent: OfflineParent
 		authedSdkClient: AuthedSdkClient
+		parentContextCache: ParentContextCache
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 	}): Promise<void> {
@@ -577,19 +699,27 @@ export class OfflineSync {
 			return
 		}
 
-		// Re-anchor the stored parent context; on any parent-resolve failure keep the OLD stored
-		// parent — the next pass retries.
 		const updated = unwrappedFileIntoDriveItem(unwrappedRemote)
-		const newParent =
-			(await this.resolveOwnParentContext({
-				parentUuid: unwrapParentUuid(remoteFile.parent),
-				authedSdkClient,
-				signal
-			})) ?? parent
+		const parentResolution = await this.resolveOwnParentContext({
+			parentUuid: unwrapParentUuid(remoteFile.parent),
+			authedSdkClient,
+			parentContextCache,
+			signal
+		})
 
+		if (parentResolution.status === "trashContained") {
+			// Moved INTO a trashed directory: the file vanished from listings for good — remove the
+			// local copy instead of re-anchoring it to a parent that lives in trash.
+			await offline.removeItem(item)
+
+			return
+		}
+
+		// Re-anchor the stored parent context; on an unresolvable/failed parent keep the OLD stored
+		// parent — the next pass retries.
 		await offline.renameStandaloneFile({
 			item: updated,
-			parent: newParent
+			parent: parentResolution.status === "resolved" ? parentResolution.parent : parent
 		})
 	}
 
@@ -602,6 +732,7 @@ export class OfflineSync {
 		parent,
 		listingState,
 		authedSdkClient,
+		parentContextCache,
 		thorough,
 		signal,
 		pushError
@@ -610,6 +741,7 @@ export class OfflineSync {
 		parent: OfflineParent
 		listingState: ParentListingState | undefined
 		authedSdkClient: AuthedSdkClient
+		parentContextCache: ParentContextCache
 		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
@@ -648,6 +780,7 @@ export class OfflineSync {
 					item,
 					parent,
 					authedSdkClient,
+					parentContextCache,
 					signal,
 					pushError
 				})
@@ -770,28 +903,32 @@ export class OfflineSync {
 			item,
 			parent,
 			authedSdkClient,
+			parentContextCache,
 			signal,
 			pushError
 		})
 	}
 
 	// Standalone files/{uuid} dirs whose meta is missing/undecodable: rebuild own-cloud alive items
-	// from getFileOptional — a meta rewrite when the data file still exists, a full redownload when
-	// it does not (crash/aborted-adoption residue, where renameStandaloneFile would no-op forever);
-	// remove trashed/deleted/undecidable leftovers; leave lookup failures for the next pass.
+	// from getFileOptional — a meta rewrite when the data file still exists AT the remote meta's
+	// exact size, a full redownload otherwise (no bytes: crash/aborted-adoption residue; wrong-size
+	// bytes: partial/stale residue that must never be blessed with a fresh meta); remove trashed/
+	// deleted/trash-contained/undecidable leftovers; leave lookup failures for the next pass.
 	private async healBrokenStandalones({
 		authedSdkClient,
+		parentContextCache,
 		signal,
 		pushError
 	}: {
 		authedSdkClient: AuthedSdkClient
+		parentContextCache: ParentContextCache
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 	}): Promise<void> {
 		const brokenStandalones = await offline.listBrokenStandaloneUuids()
 
 		await Promise.all(
-			brokenStandalones.map(async ({ uuid, hasDataFile }) => {
+			brokenStandalones.map(async ({ uuid, hasDataFile, dataFileSize }) => {
 				if (signal.aborted) {
 					return
 				}
@@ -842,13 +979,23 @@ export class OfflineSync {
 					resolvedName = unwrappedRemote.meta.name
 
 					const rebuilt = unwrappedFileIntoDriveItem(unwrappedRemote)
-					const resolvedParent = await this.resolveOwnParentContext({
+					const parentResolution = await this.resolveOwnParentContext({
 						parentUuid: unwrapParentUuid(remoteFile.parent),
 						authedSdkClient,
+						parentContextCache,
 						signal
 					})
 
-					if (!resolvedParent) {
+					if (parentResolution.status === "trashContained") {
+						// The file's parent dir sits in trash (one-level containment): the item is
+						// trash-contained — remove the leftover dir instead of rebuilding a meta
+						// anchored inside trash.
+						await offline.removeStandaloneDirectory(uuid)
+
+						return
+					}
+
+					if (parentResolution.status !== "resolved") {
 						// A broken meta has no stored parent to fall back to — leave the dir for the
 						// next pass instead of writing a meta with a guessed parent.
 						pushError(
@@ -865,18 +1012,22 @@ export class OfflineSync {
 						return
 					}
 
-					if (hasDataFile) {
-						// Bytes exist — rewrites the meta (and corrects a stale on-disk name) in place.
+					const expectedSize = isFileItem(rebuilt) ? Number(rebuilt.data.decryptedMeta?.size ?? -1) : -1
+
+					if (hasDataFile && dataFileSize === expectedSize) {
+						// Bytes exist at the EXPECTED size — the cheap meta rewrite blesses them in
+						// place (and corrects a stale on-disk name).
 						await offline.renameStandaloneFile({
 							item: rebuilt,
-							parent: resolvedParent
+							parent: parentResolution.parent
 						})
 					} else {
-						// No bytes on disk: renameStandaloneFile would no-op without a data file, so
-						// the dir would stay broken forever. Redownload writes bytes AND meta.
+						// No bytes on disk (crash/aborted-adoption residue), or bytes whose size
+						// diverges from the remote meta (partial download residue) — never bless
+						// wrong-size bytes with a fresh meta. Redownload writes bytes AND meta.
 						await offline.redownloadStandaloneFile({
 							item: rebuilt,
-							parent: resolvedParent,
+							parent: parentResolution.parent,
 							signal
 						})
 					}
@@ -904,16 +1055,18 @@ export class OfflineSync {
 	// parent context, and run ONE reconcileTree over the existing bytes (the unreadable-meta path:
 	// empty local view in BOTH pass modes, hash-idempotent download skips healthy bytes, meta
 	// rebuilt from the listing — near-free; `thorough` simply follows the pass mode).
-	// Trashed/deleted/undecidable → removeTreeDirectory. Lookup failure → `listing` error, dir left
-	// for the next pass. Mirrors healBrokenStandalones.
+	// Trashed/deleted/trash-contained/undecidable → removeTreeDirectory. Lookup failure →
+	// `listing` error, dir left for the next pass. Mirrors healBrokenStandalones.
 	private async healBrokenTrees({
 		authedSdkClient,
+		parentContextCache,
 		thorough,
 		signal,
 		pushError,
 		pushErrors
 	}: {
 		authedSdkClient: AuthedSdkClient
+		parentContextCache: ParentContextCache
 		thorough: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
@@ -973,13 +1126,23 @@ export class OfflineSync {
 					resolvedName = unwrappedRemote.meta.name
 
 					const rebuilt = unwrappedDirIntoDriveItem(unwrappedRemote)
-					const resolvedParent = await this.resolveOwnParentContext({
+					const parentResolution = await this.resolveOwnParentContext({
 						parentUuid: unwrapParentUuid(remoteDir.parent),
 						authedSdkClient,
+						parentContextCache,
 						signal
 					})
 
-					if (!resolvedParent) {
+					if (parentResolution.status === "trashContained") {
+						// The tree's parent dir sits in trash (one-level containment): the tree is
+						// trash-contained — remove the leftover dir instead of rebuilding it inside
+						// trash (would re-download bytes for a trashed tree every pass).
+						await offline.removeTreeDirectory(uuid)
+
+						return
+					}
+
+					if (parentResolution.status !== "resolved") {
 						// A broken meta has no stored parent to fall back to — leave the dir for the
 						// next pass instead of writing a meta with a guessed parent.
 						pushError(
@@ -999,7 +1162,7 @@ export class OfflineSync {
 					pushErrors(
 						await offline.reconcileTree({
 							directory: rebuilt,
-							parent: resolvedParent,
+							parent: parentResolution.parent,
 							hideProgress: true,
 							skipIndexUpdate: true,
 							thorough,
@@ -1096,6 +1259,10 @@ export class OfflineSync {
 					signal
 				})
 
+				// ONE deduped getDirOptional per unique parent uuid for the trash-containment gate /
+				// re-anchor lookups (several trees and standalones can share a parent).
+				const parentContextCache: ParentContextCache = new Map()
+
 				// Unexpected per-item failures (lock/setup errors thrown by the offline methods) are
 				// converted into `store` errors so one bad item never aborts the whole pass.
 				const runGuarded = async ({
@@ -1137,6 +1304,7 @@ export class OfflineSync {
 									item,
 									parent,
 									authedSdkClient,
+									parentContextCache,
 									thorough,
 									signal,
 									pushError,
@@ -1170,6 +1338,7 @@ export class OfflineSync {
 									parent,
 									listingState: parentListings.get(parentCacheKey(parent)),
 									authedSdkClient,
+									parentContextCache,
 									thorough,
 									signal,
 									pushError
@@ -1181,11 +1350,13 @@ export class OfflineSync {
 				await Promise.all([
 					this.healBrokenStandalones({
 						authedSdkClient,
+						parentContextCache,
 						signal,
 						pushError
 					}),
 					this.healBrokenTrees({
 						authedSdkClient,
+						parentContextCache,
 						thorough,
 						signal,
 						pushError,

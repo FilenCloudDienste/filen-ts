@@ -1305,6 +1305,140 @@ describe("Transfers", () => {
 				expect(result!.directories).toHaveLength(0)
 			})
 
+			// Pins the directory-branch resolved-value contract the offline reconcile depends on:
+			// per-entry failures arrive ONLY via the onDownloadErrors callback (the SDK call still
+			// resolves Ok) and MUST be included in the resolved value — offline treats a non-empty
+			// errors array as pass failure for that tree.
+			it("resolves { files, directories, errors } with callback-fed download errors and updates included", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				const item = makeDirItem("dir-uuid")
+				const entryError = { error: { message: () => "entry failed" }, path: "/private/destdir/sub/f.txt" }
+				const downloadedDir = { path: "/private/destdir/sub", dir: {} }
+				const downloadedFile = { path: "/private/destdir/sub/g.txt", file: {} }
+
+				mockDownloadDirRecursively.mockImplementationOnce(async (_path: string, callbacks: any) => {
+					callbacks.onDownloadErrors([entryError])
+					callbacks.onDownloadUpdate([downloadedDir], [downloadedFile], 128n)
+				})
+
+				const result = await transfers.download({
+					item,
+					destination: dest,
+					hideProgress: true
+				})
+
+				expect(result).not.toBeNull()
+				expect(result && "errors" in result ? result.errors : null).toEqual([entryError])
+				expect(result!.files).toEqual([downloadedFile])
+				expect(result!.directories).toEqual([downloadedDir])
+			})
+
+			// Offline's in-place tree reconcile contract: the destination IS the live stored tree.
+			// preserveDestinationOnStart: true must never delete it — not at start, not on failure,
+			// not on abort — while the default destructive behavior stays for every other caller.
+			it("preserveDestinationOnStart: true keeps an existing destination intact at start and on a non-abort failure", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				fs.set(dest.uri, "dir")
+				fs.set(`${dest.uri}/keep.txt`, new Uint8Array([1]))
+				const item = makeDirItem("dir-uuid")
+				let existedAtSdkCall: boolean | null = null
+
+				mockDownloadDirRecursively.mockImplementationOnce(async () => {
+					existedAtSdkCall = fs.has(`${dest.uri}/keep.txt`)
+				})
+
+				await transfers.download({
+					item,
+					destination: dest,
+					hideProgress: true,
+					preserveDestinationOnStart: true
+				})
+
+				// The SDK saw the existing bytes (hash-idempotency depends on them)…
+				expect(existedAtSdkCall).toBe(true)
+				expect(fs.has(`${dest.uri}/keep.txt`)).toBe(true)
+
+				// …and a failed pass leaves them for the next reconcile.
+				mockDownloadDirRecursively.mockRejectedValueOnce(new Error("dir download failed"))
+
+				await expect(
+					transfers.download({
+						item,
+						destination: dest,
+						hideProgress: true,
+						preserveDestinationOnStart: true
+					})
+				).rejects.toThrow("dir download failed")
+
+				expect(fs.has(`${dest.uri}/keep.txt`)).toBe(true)
+			})
+
+			it("preserveDestinationOnStart: true keeps the destination intact when the download is aborted (resolves null)", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				fs.set(dest.uri, "dir")
+				fs.set(`${dest.uri}/keep.txt`, new Uint8Array([1]))
+				const item = makeDirItem("dir-uuid")
+				const controller = new AbortController()
+
+				mockDownloadDirRecursively.mockImplementationOnce(async () => {
+					controller.abort()
+
+					throw new Error("Aborted")
+				})
+
+				const result = await transfers.download({
+					item,
+					destination: dest,
+					hideProgress: true,
+					signal: controller.signal,
+					preserveDestinationOnStart: true
+				})
+
+				expect(result).toBeNull()
+				expect(fs.has(`${dest.uri}/keep.txt`)).toBe(true)
+			})
+
+			it("default (no preserveDestinationOnStart) deletes an existing destination before the SDK call and again on a non-abort failure", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				fs.set(dest.uri, "dir")
+				fs.set(`${dest.uri}/keep.txt`, new Uint8Array([1]))
+				const item = makeDirItem("dir-uuid")
+				let existedAtSdkCall: boolean | null = null
+
+				mockDownloadDirRecursively.mockImplementationOnce(async () => {
+					existedAtSdkCall = fs.has(`${dest.uri}/keep.txt`)
+				})
+
+				await transfers.download({
+					item,
+					destination: dest,
+					hideProgress: true
+				})
+
+				expect(existedAtSdkCall).toBe(false)
+				expect(fs.has(`${dest.uri}/keep.txt`)).toBe(false)
+
+				// Failure-path cleanup: partial bytes the SDK wrote before failing are deleted too
+				// (non-offline callers download into a disposable destination).
+				mockDownloadDirRecursively.mockImplementationOnce(async () => {
+					fs.set(dest.uri, "dir")
+					fs.set(`${dest.uri}/partial.txt`, new Uint8Array([1]))
+
+					throw new Error("dir download failed")
+				})
+
+				await expect(
+					transfers.download({
+						item,
+						destination: dest,
+						hideProgress: true
+					})
+				).rejects.toThrow("dir download failed")
+
+				expect(fs.has(`${dest.uri}/partial.txt`)).toBe(false)
+				expect(fs.has(dest.uri)).toBe(false)
+			})
+
 			it("returns null (not a non-null result) when directory download is aborted", async () => {
 				const dest = new FsDirectory("file:///document/destdir")
 				const item = makeDirItem("dir-uuid")

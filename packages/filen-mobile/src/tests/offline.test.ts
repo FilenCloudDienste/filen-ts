@@ -5026,6 +5026,163 @@ describe("Offline", () => {
 			expect(meta.entries[fileAUuid]?.path).toBe("/renamed/u.txt")
 		})
 
+		// A4 — degraded move-destination collision: with deletes skipped, the mover's destination
+		// stays occupied by a kept only-local entry, so the executor's never-overwrite move would
+		// throw a non-degraded store error and block the commit EVERY pass (livelock). The planner
+		// defers the move instead; the meta commits at the CURRENT path and the next clean pass
+		// (deletes allowed) completes the move.
+		it("defers a degraded-pass move onto a kept occupant — commits at the old path without a store error; the follow-up clean pass completes the move", async () => {
+			const moverItem = makeFileItemWithSize(fileAUuid, "old.txt", 3n)
+			const occupantItem = makeFileItemWithSize(fileBUuid, "new.txt", 2n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({
+					"/old.txt": moverItem,
+					"/new.txt": occupantItem
+				}),
+				disk: {
+					"/old.txt": new Uint8Array([1, 2, 3]),
+					"/new.txt": new Uint8Array([9, 9])
+				}
+			})
+
+			const offline = await createOffline()
+
+			// Degraded listing: the occupant is hidden by a scan error (so it is kept), while the
+			// mover's remote path is exactly the occupant's spot.
+			mockDegradedListing({ files: [makeListingFile(fileAUuid, "new.txt", "new.txt", 3n)] })
+
+			const firstErrors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			// ONLY the degraded marker — no store error from a throwing move; the pass COMMITTED.
+			expect(firstErrors).toHaveLength(1)
+			expect(firstErrors[0]?.kind).toBe("listing")
+			expect(firstErrors[0]?.degraded).toBe(true)
+			expect(transfers.download).not.toHaveBeenCalled()
+
+			// Nothing moved on disk: both files still at their original paths.
+			expect(Array.from(fs.get(`${treeUri}/old.txt`) as Uint8Array)).toEqual([1, 2, 3])
+			expect(Array.from(fs.get(`${treeUri}/new.txt`) as Uint8Array)).toEqual([9, 9])
+
+			const firstMeta = readTreeMeta()
+
+			// The deferred mover commits at its CURRENT path; the occupant survives via the union.
+			expect(firstMeta.entries[fileAUuid]?.path).toBe("/old.txt")
+			expect(firstMeta.entries[fileBUuid]?.path).toBe("/new.txt")
+
+			// The listing heals: the clean pass deletes the occupant and completes the move.
+			mockListing({ files: [makeListingFile(fileAUuid, "new.txt", "new.txt", 3n)] })
+
+			const secondErrors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			expect(secondErrors).toEqual([])
+			expect(transfers.download).not.toHaveBeenCalled()
+			expect(fs.has(`${treeUri}/old.txt`)).toBe(false)
+			expect(Array.from(fs.get(`${treeUri}/new.txt`) as Uint8Array)).toEqual([1, 2, 3])
+
+			const secondMeta = readTreeMeta()
+
+			expect(secondMeta.entries[fileAUuid]?.path).toBe("/new.txt")
+			expect(secondMeta.entries[fileBUuid]).toBeUndefined()
+		})
+
+		// Deferred-pass + download interplay: an entry the plan classified MISSING is downloaded to
+		// its REMOTE path even when its stale meta path differs — the deferred-pass verify/commit
+		// must expect it there (replaying the stale meta path would block the commit forever).
+		it("verifies and commits a missing renamed entry at its REMOTE path on a deferred-move pass", async () => {
+			const moverItem = makeFileItemWithSize(fileAUuid, "old.txt", 3n)
+			const occupantItem = makeFileItemWithSize(fileBUuid, "new.txt", 2n)
+			const renamedMissingItem = makeFileItemWithSize(subDirUuid, "r-old.txt", 1n)
+			const { dirItem, parent } = seedTree({
+				entries: makeEntries({
+					"/old.txt": moverItem,
+					"/new.txt": occupantItem,
+					"/r-old.txt": renamedMissingItem
+				}),
+				// r's bytes are missing on disk — the THOROUGH stat detects it.
+				disk: {
+					"/old.txt": new Uint8Array([1, 2, 3]),
+					"/new.txt": new Uint8Array([9, 9])
+				}
+			})
+
+			const offline = await createOffline()
+
+			// Degraded listing hides the occupant; m's move collides (deferred); r was renamed
+			// remotely while its local bytes are gone (missing → downloaded at the remote path).
+			mockDegradedListing({
+				files: [makeListingFile(fileAUuid, "new.txt", "new.txt", 3n), makeListingFile(subDirUuid, "r-new.txt", "r-new.txt", 1n)]
+			})
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				fs.set(`${(destination as { uri: string }).uri}/r-new.txt`, new Uint8Array([7]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true, thorough: true })
+
+			// Only the degraded marker — the verify must NOT fail on r's stale meta path.
+			expect(errors).toHaveLength(1)
+			expect(errors[0]?.degraded).toBe(true)
+			expect(transfers.download).toHaveBeenCalledTimes(1)
+
+			const meta = readTreeMeta()
+
+			// Deferred mover at its current path, downloaded entry at its remote path, occupant
+			// preserved via the union.
+			expect(meta.entries[fileAUuid]?.path).toBe("/old.txt")
+			expect(meta.entries[subDirUuid]?.path).toBe("/r-new.txt")
+			expect(meta.entries[fileBUuid]?.path).toBe("/new.txt")
+			expect(Array.from(fs.get(`${treeUri}/r-new.txt`) as Uint8Array)).toEqual([7])
+		})
+
+		// A3 + downloads — pinning the dedup contract too: two per-entry download errors that
+		// resolve to the SAME remote entry (same `${itemUuid}:${kind}` id) surface as ONE error.
+		it("dedups same-id errors within a pass — two download errors resolving to the same entry surface once", async () => {
+			const { dirItem, parent } = seedTree({
+				entries: {},
+				disk: {}
+			})
+
+			const offline = await createOffline()
+
+			mockListing({ files: [makeListingFile(fileAUuid, "big.bin", "big.bin", 4n)] })
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				const base = `${(destination as { uri: string }).uri.replace(/^file:\/+/, "/private/")}/big.bin`
+
+				return {
+					files: [],
+					directories: [],
+					errors: [
+						{
+							error: { message: () => "chunk 1 failed", kind: () => "IO" },
+							path: base,
+							item: {}
+						},
+						{
+							error: { message: () => "chunk 2 failed", kind: () => "IO" },
+							path: base,
+							item: {}
+						}
+					]
+				}
+			})
+
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, skipIndexUpdate: true })
+
+			const downloadErrors = errors.filter((e: { kind: string }) => e.kind === "download")
+
+			expect(downloadErrors).toHaveLength(1)
+			expect(downloadErrors[0]?.id).toBe(`${fileAUuid}:download`)
+			// First error wins; the duplicate id is dropped.
+			expect(downloadErrors[0]?.message).toBe("chunk 1 failed")
+		})
+
 		it("returns a listing error and leaves state untouched when the remote listing fails", async () => {
 			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
 			const { dirItem, parent } = seedTree({
@@ -5806,6 +5963,38 @@ describe("Offline", () => {
 			expect(fs.has(`${FILES_DIR_URI}/${uuid}/corrected.txt`)).toBe(true)
 		})
 
+		// A5 — the meta rewrite must not require a data file: a bytes-missing standalone that was
+		// MOVED remotely must converge (meta parent re-anchored), otherwise the sync re-anchor
+		// no-ops every pass forever and the heal never gets a meta pointing at the new parent.
+		it("rewrites the meta {item, parent} even when no data file exists (bytes-missing standalone converges on a remote move)", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const oldParent = makeParent("22222222-2222-2222-2222-222222222222")
+			const newParent = makeParent("33333333-3333-3333-3333-333333333333")
+			const movedItem = makeFileItem(uuid, "moved.txt")
+
+			// Meta only — the data file is gone (deleted bytes / crash residue).
+			writeFileMeta(uuid, { item: makeFileItem(uuid, "doc.txt"), parent: oldParent })
+
+			const offline = await createOffline()
+
+			await offline.renameStandaloneFile({ item: movedItem, parent: newParent })
+
+			const metaUri = `${FILES_DIR_URI}/${uuid}/${uuid}.filenmeta`
+			const meta = deserialize(new TextDecoder().decode(fs.get(metaUri) as Uint8Array)) as FileOrDirectoryOfflineMeta
+
+			// Meta converged: refreshed item + re-anchored parent — the subsequent heal path can
+			// now redownload the bytes into the right place.
+			expect(meta.item.data.decryptedMeta?.name).toBe("moved.txt")
+			expect((meta.parent as InstanceType<typeof AnyDirWithContext.Normal>).inner[0]).toMatchObject({
+				inner: [{ uuid: "33333333-3333-3333-3333-333333333333" }]
+			})
+
+			// No data file was conjured up — only the meta exists in the standalone dir.
+			const standaloneEntries = [...fs.keys()].filter(key => key.startsWith(`${FILES_DIR_URI}/${uuid}/`))
+
+			expect(standaloneEntries).toEqual([metaUri])
+		})
+
 		it("is a no-op when the standalone directory does not exist", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
 			const item = makeFileItem(uuid, "nowhere.txt")
@@ -5868,19 +6057,25 @@ describe("Offline", () => {
 			fs.set(`${FILES_DIR_URI}/not-a-uuid`, "dir")
 
 			const offline = await createOffline()
-			const broken = (await offline.listBrokenStandaloneUuids()) as { uuid: string; hasDataFile: boolean }[]
+			const broken = (await offline.listBrokenStandaloneUuids()) as {
+				uuid: string
+				hasDataFile: boolean
+				dataFileSize: number | null
+			}[]
 
 			expect(broken.map(entry => entry.uuid).sort()).toEqual(
 				[missingMetaUuid, emptyMetaUuid, corruptMetaUuid, noDataUuid].sort()
 			)
 
-			const byUuid = new Map(broken.map(entry => [entry.uuid, entry.hasDataFile]))
+			const byUuid = new Map(broken.map(entry => [entry.uuid, entry]))
 
-			// hasDataFile = any non-.filenmeta file present — drives rebuild vs redownload in the heal.
-			expect(byUuid.get(missingMetaUuid)).toBe(true)
-			expect(byUuid.get(emptyMetaUuid)).toBe(true)
-			expect(byUuid.get(corruptMetaUuid)).toBe(true)
-			expect(byUuid.get(noDataUuid)).toBe(false)
+			// hasDataFile = any non-.filenmeta file present, dataFileSize = its on-disk byte size
+			// (null without one) — together they drive rebuild vs redownload in the heal (a meta
+			// rewrite is only allowed around bytes at the remote meta's exact size).
+			expect(byUuid.get(missingMetaUuid)).toMatchObject({ hasDataFile: true, dataFileSize: 3 })
+			expect(byUuid.get(emptyMetaUuid)).toMatchObject({ hasDataFile: true, dataFileSize: 3 })
+			expect(byUuid.get(corruptMetaUuid)).toMatchObject({ hasDataFile: true, dataFileSize: 3 })
+			expect(byUuid.get(noDataUuid)).toMatchObject({ hasDataFile: false, dataFileSize: null })
 		})
 
 		it("returns an empty array when everything is healthy", async () => {
