@@ -92,7 +92,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 				parent: parent.inner[0],
 				name: itemToUse.data.decryptedMeta.name,
 				modified: Date.now(),
-				created: itemToUse.data.decryptedMeta.created ? Number(itemToUse.data.decryptedMeta.created) : undefined,
+				created: itemToUse.data.decryptedMeta.created != null ? Number(itemToUse.data.decryptedMeta.created) : undefined,
 				mime: itemToUse.data.decryptedMeta.mime
 			})
 		})

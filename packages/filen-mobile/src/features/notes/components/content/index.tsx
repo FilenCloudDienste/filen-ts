@@ -266,37 +266,17 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 	// carries it forward for the rest (so the ref is only consulted while no inflight
 	// entries exist for this note).
 	const sessionBaseHashRef = useRef<string | null>(null)
-	// The freshest in-flight content typed/restored for this note — on a full drain this
-	// equals the content sync just pushed (any keystroke landing mid-push survives the
-	// prune, so the queue would NOT have drained). Written by onValueChange (every typed
-	// value) and seeded once at mount for a disk-restored queue.
-	const lastSeenInflightRef = useRef<string | null>(null)
 
-	useEffect(() => {
-		const entries = useNotesInflightStore.getState().inflightContent[note.uuid]
-
-		if (!entries || entries.length === 0) {
-			return
-		}
-
-		let latest: (typeof entries)[number] | null = null
-
-		for (const entry of entries) {
-			if (!latest || entry.timestamp > latest.timestamp) {
-				latest = entry
-			}
-		}
-
-		if (latest) {
-			lastSeenInflightRef.current = latest.content
-		}
-	}, [note.uuid])
-
-	// D3 session boundary 1 — "editor loaded": whenever a fresh seed generation arrives
-	// (mount, the refetchOnMount fetch, the post-reload refetch), it becomes the base for
-	// the NEXT session. Skipped while a session is ongoing (its base lives in the entries
-	// and must not move under it) and for read-only history views. `editorSeed` is the
-	// exact content the editor was seeded with, so the base is what the user actually sees.
+	// D3 session boundary — the base renews whenever a fresh seed value arrives with no
+	// session ongoing (its base lives in the entries and must not move under it; history
+	// views are read-only). This single boundary covers every drain type because the seed
+	// sources are kept truthful: after a successful PUSH, sync writes the pushed content
+	// into the per-note query cache, so `editorSeed` advances to exactly what was pushed
+	// (typing again after a 3s debounce push never false-flags our own push as a conflict);
+	// after a 3-STRIKE DROP nothing was pushed, the cache still holds the cloud content,
+	// and the base correctly stays/returns there — stamping the dropped text instead (the
+	// old "queue drained" boundary) produced a false "overwrote newer changes" toast on the
+	// next successful session.
 	useEffect(() => {
 		if (history) {
 			return
@@ -310,20 +290,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 		sessionBaseHashRef.current = typeof editorSeed === "string" ? hashNoteContent(editorSeed) : null
 	}, [history, note.uuid, editorSeed])
-
-	// D3 session boundary 2 — "queue drained": after sync fully drains this note (a
-	// successful push of the latest text), the pushed content IS the cloud content and
-	// seeds the next session's base. Without this, typing again after a 3s debounce push
-	// would diff against the pre-push base and flag our own push as a conflict.
-	useEffect(() => {
-		if (history) {
-			return
-		}
-
-		if (!hasInflightContent && lastSeenInflightRef.current !== null) {
-			sessionBaseHashRef.current = hashNoteContent(lastSeenInflightRef.current)
-		}
-	}, [history, hasInflightContent])
 
 	const hasWriteAccess = (() => {
 		if (!stringifiedClient || history) {
@@ -347,10 +313,6 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 		}
 
 		const now = Date.now()
-
-		// Feeds D3 session boundary 2: on a full drain the last typed value IS the pushed
-		// (= cloud) content and seeds the next session's base.
-		lastSeenInflightRef.current = value
 
 		useNotesInflightStore.getState().setInflightContent(prev => ({
 			...prev,

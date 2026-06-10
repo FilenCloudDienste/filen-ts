@@ -71,6 +71,13 @@ const RichTextEditorDom = ({
 	const editorRef = useRef<HTMLDivElement | null>(null)
 	const quillThemeRef = useRef<QuillThemeCustomizer | null>(null)
 	const quillFormatsRef = useRef<QuillFormats>({})
+	// Mirrors the readOnly prop for the initial-seed effect, which must NOT depend on
+	// readOnly (re-running it re-pastes the mount-frozen seed over typed content).
+	const readOnlyRef = useRef(readOnly)
+
+	useEffect(() => {
+		readOnlyRef.current = readOnly
+	}, [readOnly])
 
 	const postFormatUpdates = useCallback((postMessage: (message: TextEditorEvents) => void) => {
 		if (!quillRef.current) {
@@ -314,12 +321,17 @@ const RichTextEditorDom = ({
 			quillRef.current.clipboard.dangerouslyPasteHTML(sanitized, "silent")
 
 			// #40 fix: never focus / place a caret in a read-only editor.
-			if (autoFocus && !readOnly) {
+			if (autoFocus && !readOnlyRef.current) {
 				quillRef.current.setSelection(sanitized.length, 0)
 				quillRef.current.focus()
 			}
 		}
-	}, [initialValue, autoFocus, readOnly])
+		// readOnly is read via a ref ON PURPOSE: re-running this effect re-pastes the
+		// (mount-frozen) initialValue, so a mid-session readOnly flip (e.g. a permission
+		// change arriving over the socket) would visually revert everything typed since
+		// mount while the inflight store still holds the real text. Re-seeding is the
+		// remount key's job; readOnly changes are applied by the theme effect above.
+	}, [initialValue, autoFocus])
 
 	const readyEmittedRef = useRef(false)
 
