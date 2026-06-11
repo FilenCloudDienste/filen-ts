@@ -216,7 +216,14 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	}, [onAppStateChange])
 
 	useEffectOnce(() => {
-		onAppStateChange("active").catch(console.error)
+		// Mount ≠ foreground: an iOS cold background launch (BGProcessingTask) mounts the
+		// tree with AppState "background" — connecting the socket there would burn the
+		// background run's budget on event traffic. When mount happens before "active"
+		// (cold launch pre-becomeActive, or a background launch), the AppState listener
+		// registered above handles the real transition instead.
+		if (AppState.currentState === "active") {
+			onAppStateChange("active").catch(console.error)
+		}
 	})
 
 	return null

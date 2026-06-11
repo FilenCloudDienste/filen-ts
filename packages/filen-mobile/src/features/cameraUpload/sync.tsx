@@ -46,7 +46,13 @@ const CameraUploadSync = () => {
 	const remoteDirUuid = config.remoteDir?.inner[0].uuid
 
 	useEffect(() => {
-		cameraUpload.sync().catch(console.error)
+		// Mount ≠ foreground: an iOS cold background launch (BGProcessingTask) mounts the
+		// tree with AppState "background" — this unbudgeted sync would race the budgeted
+		// background-task sync (maxUploads: 1) for the engine's syncing flag. The listener
+		// below covers the deferred first sync on the real "active" transition.
+		if (AppState.currentState === "active") {
+			cameraUpload.sync().catch(console.error)
+		}
 
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "active") {
@@ -62,7 +68,10 @@ const CameraUploadSync = () => {
 	}, [])
 
 	useEffect(() => {
-		if (shouldSync) {
+		// Same mount-vs-foreground guard as above: the initial run of this effect must not
+		// fire an unbudgeted sync during a background launch. Genuine config changes only
+		// happen from foreground UI, so the guard never skips a real change.
+		if (shouldSync && AppState.currentState === "active") {
 			syncDebounced()
 		}
 	}, [shouldSync, albumIdsKey, remoteDirUuid, config.afterActivation, config.activationTimestamp, config.includeVideos])

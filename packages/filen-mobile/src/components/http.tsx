@@ -100,7 +100,13 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	}, [onAppStateChange])
 
 	useEffectOnce(() => {
-		onAppStateChange("active").catch(console.error)
+		// Mount ≠ foreground: an iOS cold background launch (BGProcessingTask) mounts the
+		// tree with AppState "background" — starting the HTTP provider there holds a TCP
+		// port for nothing during the background window. The AppState listener above
+		// starts it on the real "active" transition instead.
+		if (AppState.currentState === "active") {
+			onAppStateChange("active").catch(console.error)
+		}
 	})
 
 	return null

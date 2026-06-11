@@ -10,6 +10,9 @@
  */
 
 export const AppState = {
+	// Foregrounded-app default — host-component suites simulate foreground mounts.
+	// Suites testing background launches override this per-test.
+	currentState: "active" as string,
 	addEventListener: (_type: string, _handler: (state: string) => void) => ({
 		remove: () => {}
 	})
