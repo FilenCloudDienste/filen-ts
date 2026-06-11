@@ -40,15 +40,14 @@ class SecureStore {
 
 	public readonly fallbackMmkvId: string = "securestore.fallback.mmkv"
 	public readonly secureStoreFileName: string = "securestore.bin"
-	public readonly secureStoreKeyEncryptionKey: string = "encryptionKey"
-	// AFU-named keychain item (audit B1 revision, 2026-06-12). A same-key class rewrite is a
-	// SILENT NO-OP: expo-secure-store's duplicate-item path is a SecItemUpdate whose update
-	// dictionary carries ONLY kSecValueData (SecureStoreModule.swift update()), so attributes
-	// never change — proven on-device (item stayed kSecAttrAccessibleWhenUnlocked, mdat bumped).
-	// The migration therefore COPIES the legacy key under this new name (fresh SecItemAdd →
-	// class applied); the AFU item's existence is the migration marker, the legacy item stays
-	// (stricter class — harmless; crash-safe at every instruction, downgrade-safe).
-	public readonly secureStoreKeyEncryptionKeyAfu: string = "encryptionKeyAfu"
+	// Renamed from "encryptionKey" ONCE (2026-06-12): keychain items keep their accessibility
+	// class forever — expo-secure-store's duplicate-item path is a SecItemUpdate whose update
+	// dictionary carries ONLY kSecValueData (SecureStoreModule.swift update()), so a same-name
+	// item written under the old kSecAttrAccessibleWhenUnlocked default could never be moved to
+	// AFTER_FIRST_UNLOCK (proven on-device). A fresh name guarantees every install's key is
+	// born with the right class via SecItemAdd. Pre-prod: installs with the old item simply
+	// re-login; no migration.
+	public readonly secureStoreKeyEncryptionKey: string = "encryptionKeyAfu"
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
 		Platform.select({
 			ios: FileSystem.Paths.join(
@@ -223,48 +222,15 @@ class SecureStore {
 				return this.encryptionKey
 			}
 
-			const afu = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKeyAfu)
+			this.encryptionKey = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
 
-			if (afu) {
-				this.encryptionKey = afu
+			if (!this.encryptionKey) {
+				this.encryptionKey = crypto.randomBytes(32).toString("hex")
 
-				return afu
+				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, this.encryptionKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 			}
 
-			const legacy = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
-
-			if (legacy) {
-				// Copy-forward migration (see secureStoreKeyEncryptionKeyAfu). Read-back verify
-				// before trusting the new item; the keychain READ query never filters on the
-				// accessibility class, so the value round-trips regardless of either item's
-				// class. Failure must never break auth: the legacy item still works while
-				// unlocked, and the AFU item's absence makes the next boot retry.
-				const migrate = await run(async () => {
-					await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKeyAfu, legacy, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
-
-					const verify = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKeyAfu)
-
-					if (verify !== legacy) {
-						throw new Error("AFU encryption key read-back mismatch")
-					}
-				})
-
-				if (!migrate.success) {
-					console.error("[SecureStore] Failed to migrate encryption key accessibility class", migrate.error)
-				}
-
-				this.encryptionKey = legacy
-
-				return legacy
-			}
-
-			const fresh = crypto.randomBytes(32).toString("hex")
-
-			await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKeyAfu, fresh, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
-
-			this.encryptionKey = fresh
-
-			return fresh
+			return this.encryptionKey
 		})
 
 		if (!result.success) {

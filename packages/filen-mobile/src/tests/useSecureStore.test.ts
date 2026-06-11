@@ -266,9 +266,9 @@ describe("SecureStore", () => {
 			await resetSecureStore()
 
 			// A key must be present in MMKV after init runs the MMKV path
-			expect(mockMmkvStore.has("encryptionKey")).toBe(true)
+			expect(mockMmkvStore.has("encryptionKeyAfu")).toBe(true)
 
-			const storedKey = mockMmkvStore.get("encryptionKey")
+			const storedKey = mockMmkvStore.get("encryptionKeyAfu")
 
 			// 32 random bytes → 64-char hex string
 			expect(typeof storedKey).toBe("string")
@@ -278,13 +278,13 @@ describe("SecureStore", () => {
 		it("reuses an existing MMKV key rather than generating a new one", async () => {
 			const existingKey = "a".repeat(64)
 
-			mockMmkvStore.set("encryptionKey", existingKey)
+			mockMmkvStore.set("encryptionKeyAfu", existingKey)
 			vi.mocked(expoSecureStoreMock.isAvailableAsync).mockResolvedValue(false)
 
 			await resetSecureStore()
 
 			// Should not have overwritten the pre-existing key
-			expect(mockMmkvStore.get("encryptionKey")).toBe(existingKey)
+			expect(mockMmkvStore.get("encryptionKeyAfu")).toBe(existingKey)
 		})
 
 		it("can write and read values when using the MMKV fallback encryption key", async () => {
