@@ -20,6 +20,7 @@ const {
 	mockSecureStoreGet,
 	mockCacheFlushNow,
 	mockKvFlushNow,
+	mockRunLogAppend,
 	capturedTaskCallback
 } = vi.hoisted(() => {
 	const mockRemoveListener = vi.fn()
@@ -53,6 +54,8 @@ const {
 
 	const mockKvFlushNow = vi.fn(async () => undefined)
 
+	const mockRunLogAppend = vi.fn(async () => undefined)
+
 	return {
 		mockTaskManager,
 		mockBackgroundTask,
@@ -63,6 +66,7 @@ const {
 		mockSecureStoreGet,
 		mockCacheFlushNow,
 		mockKvFlushNow,
+		mockRunLogAppend,
 		capturedTaskCallback
 	}
 })
@@ -103,6 +107,12 @@ vi.mock("@/queries/client", () => ({
 	}
 }))
 
+vi.mock("@/features/cameraUpload/backgroundRunLog", () => ({
+	default: {
+		append: mockRunLogAppend
+	}
+}))
+
 import "@/features/cameraUpload/backgroundTask"
 import { BACKGROUND_RUN_BUDGET_MS } from "@/features/cameraUpload/backgroundTask"
 import { Platform } from "react-native"
@@ -124,6 +134,7 @@ beforeEach(() => {
 	mockSecureStoreGet.mockResolvedValue(null)
 	mockCacheFlushNow.mockResolvedValue(undefined)
 	mockKvFlushNow.mockResolvedValue(undefined)
+	mockRunLogAppend.mockResolvedValue(undefined)
 	;(Platform as { OS: string }).OS = "ios"
 })
 
@@ -354,6 +365,99 @@ describe("hardening — persist-before-suspend flushes", () => {
 
 		expect(mockCacheFlushNow).toHaveBeenCalledTimes(1)
 		expect(mockKvFlushNow).toHaveBeenCalledTimes(1)
+	})
+
+	it("writes exactly one run-log breadcrumb per run, after the phases (healthy authed run)", async () => {
+		// Audit B6 (2026-06-11): release builds no-op console.* and BOTH OS schedulers
+		// discard the returned result (expo-background-task always reports success to the
+		// OS) — the persisted breadcrumb is the only field-diagnosable trace of a run.
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(true)
+
+		await runTask()
+
+		expect(mockRunLogAppend).toHaveBeenCalledTimes(1)
+		expect(mockRunLogAppend).toHaveBeenCalledWith(
+			expect.objectContaining({
+				v: 1,
+				phase: "done",
+				cancelled: false,
+				result: "success"
+			})
+		)
+
+		const offlineOrder = mockOfflineSync.sync.mock.invocationCallOrder[0] as number
+		const appendOrder = mockRunLogAppend.mock.invocationCallOrder[0] as number
+
+		expect(appendOrder).toBeGreaterThan(offlineOrder)
+	})
+
+	it("breadcrumb for an unauthed run records phase 'setup' with result 'success'", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: false })
+
+		await runTask()
+
+		expect(mockRunLogAppend).toHaveBeenCalledTimes(1)
+		expect(mockRunLogAppend).toHaveBeenCalledWith(
+			expect.objectContaining({
+				phase: "setup",
+				cancelled: false,
+				result: "success"
+			})
+		)
+	})
+
+	it("breadcrumb for a setup failure records result 'failed' with the error message", async () => {
+		mockSetup.setup.mockRejectedValue(new Error("sqlite open failed"))
+
+		const result = await runTask()
+
+		expect(result).toBe(mockBackgroundTask.BackgroundTaskResult.Failed)
+		expect(mockRunLogAppend).toHaveBeenCalledTimes(1)
+		expect(mockRunLogAppend).toHaveBeenCalledWith(
+			expect.objectContaining({
+				phase: "setup",
+				result: "failed",
+				errorMessage: "sqlite open failed"
+			})
+		)
+	})
+
+	it("breadcrumb for an expiration during the camera phase records phase 'camera' + cancelled", async () => {
+		;(Platform as { OS: string }).OS = "ios"
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(true)
+
+		let expirationCallback: (() => void) | null = null
+
+		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
+			expirationCallback = cb
+
+			return { remove: mockRemoveListener }
+		})
+
+		mockCameraUpload.sync.mockImplementation(async () => {
+			expirationCallback?.()
+		})
+
+		await runTask()
+
+		expect(mockRunLogAppend).toHaveBeenCalledWith(
+			expect.objectContaining({
+				phase: "camera",
+				cancelled: true,
+				result: "success"
+			})
+		)
+	})
+
+	it("a breadcrumb write failure never flips a healthy run's result", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockRunLogAppend.mockRejectedValue(new Error("kv write failed"))
+
+		const result = await runTask()
+
+		expect(result).toBe(mockBackgroundTask.BackgroundTaskResult.Success)
 	})
 
 	it("does not report completion until the flush promises settle (the OS may suspend immediately after)", async () => {

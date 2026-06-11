@@ -82,6 +82,12 @@ vi.mock("@/queries/client", () => ({
 	}
 }))
 
+vi.mock("@/features/cameraUpload/backgroundRunLog", () => ({
+	default: {
+		append: vi.fn(async () => undefined)
+	}
+}))
+
 // ─── Static import of module under test ──────────────────────────────────────
 // Must be a static import so the module-level defineTask call is intercepted by
 // mockTaskManager.defineTask, which captures the callback into capturedTaskCallback.
