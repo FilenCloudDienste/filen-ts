@@ -122,13 +122,18 @@ export class QueryPersisterKv {
 		this.persistDirty()
 	}
 
-	public flushNow(): void {
+	/**
+	 * Cancels the pending debounce and persists every dirty entry immediately. The
+	 * returned promise settles once the batch has landed (or failed and was re-marked
+	 * dirty) — the background task threads it through its persist-before-suspend defer
+	 * because a headless process may be suspended the moment the task returns. Never
+	 * rejects, so callers that cannot await (the AppState handler) may safely ignore it.
+	 */
+	public flushNow(): Promise<void> {
 		this.persistDirty.cancel()
 
 		if (!this.persisting) {
-			this.persistNow()
-
-			return
+			return this.persistNow()
 		}
 
 		// A persistAsync() run is already in flight. Entries added after its dirty-set
@@ -138,19 +143,24 @@ export class QueryPersisterKv {
 		// killed during backgrounding. Chain an immediate persist onto the in-flight
 		// run so those entries are flushed without waiting for the debounce window.
 		if (this.inFlight) {
-			this.inFlight.finally(() => {
-				this.persistDirty.cancel()
-				this.persistNow()
-			})
+			return this.inFlight
+				.catch(() => undefined)
+				.then(() => {
+					this.persistDirty.cancel()
+
+					return this.persistNow()
+				})
 		}
+
+		return Promise.resolve()
 	}
 
 	private persisting = false
 	private inFlight: Promise<void> | null = null
 
-	private persistNow(): void {
+	private persistNow(): Promise<void> {
 		if (this.dirtyUpserts.size === 0 && this.dirtyDeletes.size === 0) {
-			return
+			return Promise.resolve()
 		}
 
 		const now = performance.now()
@@ -162,12 +172,15 @@ export class QueryPersisterKv {
 		const commands = this.buildCommands()
 
 		if (commands.length === 0) {
-			return
+			return Promise.resolve()
 		}
 
 		console.log(`[QueryPersisterKv] Persisting ${commands.length} changes`)
 
-		sqlite
+		// Chain depth is pinned by client.test.ts (openDb → executeBatch → catch → finally,
+		// one microtask each) — the void-normalizing .then must come AFTER the catch so the
+		// dirty-set restore still lands on the third hop.
+		return sqlite
 			.openDb()
 			.then(db => db.executeBatch(commands))
 			.catch(err => {
@@ -190,6 +203,7 @@ export class QueryPersisterKv {
 
 				this.persistDirty()
 			})
+			.then(() => undefined)
 			.finally(() => {
 				console.log(`[QueryPersisterKv] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
 			})

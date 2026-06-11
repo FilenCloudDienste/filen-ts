@@ -209,7 +209,10 @@ export class OfflineSync {
 			// Coalescing join (accepted, do NOT queue): a manual sync() arriving while an AUTO pass
 			// is in flight joins that index-only pass without upgrading it to thorough — the user's
 			// next explicit trigger runs its own thorough pass. lastCompletedAt semantics are
-			// unchanged: the joined pass stamps completion exactly like the pass it is.
+			// unchanged: the joined pass stamps completion exactly like the pass it is. This extends
+			// to BACKGROUND passes (rare — needs an active user during an OS background window, e.g.
+			// foregrounding mid-run): a joined manual sync gets that budgeted partial pass, which
+			// does NOT stamp lastCompletedAt, so the next auto/manual trigger is not suppressed.
 			return this.inFlight
 		}
 
