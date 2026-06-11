@@ -14,6 +14,7 @@ import { wrapAbortSignalForSdk } from "@/lib/signals"
 import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
+import { convertBigInts } from "@/lib/utils"
 
 export type LoopMode = "none" | "track" | "queue"
 
@@ -1001,13 +1002,15 @@ export class Audio {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const playlistsDir = await this.getPlaylistsDirectory(signal)
 
-		// Strip runtime-only `item` fields from playlist files and serialize any
-		// residual BigInt values as numbers so JSON.stringify doesn't throw when
+		// Strip runtime-only `item` fields from playlist files and convert any residual
+		// BigInt values to numbers so the stock JSON.stringify doesn't throw when
 		// addFilesToPlaylist appends files that carry the DriveItemFileExtracted shape.
-		const playlistToSerialize = {
+		// Plain JSON is deliberate here: playlist files are read back with plain
+		// JSON.parse + arktype validation, never through the envelope serializer.
+		const playlistToSerialize = convertBigInts({
 			...playlist,
 			files: playlist.files.map(({ item: _item, ...rest }: PlaylistFile & { item?: unknown }) => rest)
-		}
+		})
 
 		await authedSdkClient.uploadFileFromBytes(Buffer.from(JSON.stringify(playlistToSerialize), "utf-8").buffer, {
 			fileBuilderParams: {

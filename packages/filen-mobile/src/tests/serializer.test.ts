@@ -1226,4 +1226,128 @@ describe("serializer", () => {
 			expect(() => deserialize("{not valid json}")).toThrow(SyntaxError)
 		})
 	})
+
+	describe("global JSON stays stock (no prototype patches)", () => {
+		it("JSON.stringify throws on BigInt", () => {
+			expect(() => JSON.stringify(1n)).toThrow(TypeError)
+		})
+
+		it("JSON.stringify serializes TypedArrays as index objects", () => {
+			expect(JSON.stringify(new Uint8Array([1, 2]))).toBe('{"0":1,"1":2}')
+		})
+
+		it("JSON.stringify uses Buffer's own verbose toJSON", () => {
+			expect(JSON.parse(JSON.stringify(Buffer.from([1, 2])))).toEqual({ type: "Buffer", data: [1, 2] })
+		})
+
+		it("JSON.stringify does not emit envelopes for UniffiEnum instances", () => {
+			const json = JSON.stringify(new MockVariant("x"))
+
+			expect(json).not.toContain("__ue")
+			expect(JSON.parse(json)).toEqual({ tag: "Variant1", inner: ["x"] })
+		})
+
+		it("JSON.stringify of ArrayBuffer is {} (stock)", () => {
+			expect(JSON.stringify(new ArrayBuffer(2))).toBe("{}")
+		})
+
+		it("JSON.stringify of DataView is {} (stock)", () => {
+			expect(JSON.stringify(new DataView(new ArrayBuffer(2)))).toBe("{}")
+		})
+	})
+
+	describe("serialize envelope format", () => {
+		it("encodes standalone BigInt as __bi envelope", () => {
+			expect(serialize(5n)).toBe('{"__bi":1,"v":"5"}')
+		})
+
+		it("encodes unit UniffiEnum as __ue envelope without i", () => {
+			expect(serialize(new MockUnitVariant())).toBe('{"__ue":1,"tn":"TestType","t":"UnitTag"}')
+		})
+
+		it("encodes data UniffiEnum as __ue envelope with i", () => {
+			expect(serialize(new MockVariant("x"))).toBe('{"__ue":1,"tn":"TestType","t":"Variant1","i":["x"]}')
+		})
+
+		it("encodes binary views as __bin envelopes", () => {
+			const parsed = JSON.parse(serialize(new Uint8Array([1, 2, 3])))
+
+			expect(parsed.__bin).toBe(1)
+			expect(parsed.k).toBe("Uint8Array")
+			expect(parsed.d).toBe(Buffer.from([1, 2, 3]).toString("base64"))
+		})
+
+		it("does not mutate the input when encoding", () => {
+			const frozenInner = Object.freeze([1n])
+			const obj = {
+				size: 42n,
+				meta: new MockVariant("m"),
+				list: frozenInner,
+				plain: { name: "untouched" }
+			}
+
+			serialize(obj)
+
+			expect(typeof obj.size).toBe("bigint")
+			expect(obj.size).toBe(42n)
+			expect(obj.meta instanceof UniffiEnum).toBe(true)
+			expect(obj.list).toBe(frozenInner)
+			expect(obj.list[0]).toBe(1n)
+		})
+
+		it("serializes Date to ISO string via its own toJSON (stock pass-through)", () => {
+			const result = roundtrip({ d: new Date(0) })
+
+			expect(result.d).toBe("1970-01-01T00:00:00.000Z")
+		})
+
+		it("objects with custom toJSON keep stock semantics", () => {
+			const value = {
+				custom: {
+					toJSON: () => ({ replaced: true })
+				}
+			}
+			const result = roundtrip(value)
+
+			expect(result.custom).toEqual({ replaced: true })
+		})
+
+		it("Date nested next to envelope-needing siblings still uses its toJSON", () => {
+			const result = roundtrip({ size: 7n, when: new Date(0) })
+
+			expect(result.size).toBe(7n)
+			expect(result.when).toBe("1970-01-01T00:00:00.000Z")
+		})
+	})
+
+	describe("deserialize fast path", () => {
+		it("leaves literal __-marker text inside string values untouched", () => {
+			const obj = { note: 'contains "__ue" and "__bi" and "__bin" as text' }
+
+			expect(roundtrip(obj)).toEqual(obj)
+		})
+
+		it("plain objects with __-prefixed keys are not envelopes", () => {
+			const obj = { __custom: 2, __bin: "not-one", value: 1 }
+
+			expect(roundtrip(obj)).toEqual(obj)
+		})
+
+		it("envelope-free payloads round-trip identically (native fast path)", () => {
+			const obj = {
+				names: ["a", "b", "c"],
+				nested: { count: 3, flag: true, missing: null }
+			}
+
+			expect(roundtrip(obj)).toEqual(obj)
+		})
+
+		it("envelope-shaped plain data is revived (bug-compatible with the old reviver)", () => {
+			const result = roundtrip({ x: { __ue: 1, tn: "T", t: "Tag" } })
+
+			expect(result.x[uniffiTypeNameSymbol]).toBe("T")
+			expect(result.x.tag).toBe("Tag")
+			expect(result.x instanceof UniffiEnum).toBe(true)
+		})
+	})
 })
