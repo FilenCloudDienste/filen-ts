@@ -41,10 +41,14 @@ class SecureStore {
 	public readonly fallbackMmkvId: string = "securestore.fallback.mmkv"
 	public readonly secureStoreFileName: string = "securestore.bin"
 	public readonly secureStoreKeyEncryptionKey: string = "encryptionKey"
-	// MMKV flag marking that the keychain item carries kSecAttrAccessibleAfterFirstUnlock.
-	// Keys written before audit B1 (2026-06-11) carry the expo-secure-store default
-	// (kSecAttrAccessibleWhenUnlocked) and get a one-time class rewrite on first read.
-	public readonly secureStoreKeyEncryptionKeyClassFlag: string = "encryptionKeyAfuMigrated"
+	// AFU-named keychain item (audit B1 revision, 2026-06-12). A same-key class rewrite is a
+	// SILENT NO-OP: expo-secure-store's duplicate-item path is a SecItemUpdate whose update
+	// dictionary carries ONLY kSecValueData (SecureStoreModule.swift update()), so attributes
+	// never change — proven on-device (item stayed kSecAttrAccessibleWhenUnlocked, mdat bumped).
+	// The migration therefore COPIES the legacy key under this new name (fresh SecItemAdd →
+	// class applied); the AFU item's existence is the migration marker, the legacy item stays
+	// (stricter class — harmless; crash-safe at every instruction, downgrade-safe).
+	public readonly secureStoreKeyEncryptionKeyAfu: string = "encryptionKeyAfu"
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
 		Platform.select({
 			ios: FileSystem.Paths.join(
@@ -219,40 +223,48 @@ class SecureStore {
 				return this.encryptionKey
 			}
 
-			const stored = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
+			const afu = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKeyAfu)
 
-			if (!stored) {
-				const fresh = crypto.randomBytes(32).toString("hex")
+			if (afu) {
+				this.encryptionKey = afu
 
-				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, fresh, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
-
-				this.mmkv.set(this.secureStoreKeyEncryptionKeyClassFlag, true)
-
-				this.encryptionKey = fresh
-
-				return fresh
+				return afu
 			}
 
-			if (!this.mmkv.getBoolean(this.secureStoreKeyEncryptionKeyClassFlag)) {
-				// One-time class rewrite for keys written before ENCRYPTION_KEY_KEYCHAIN_OPTIONS
-				// existed. The keychain READ query never filters on the accessibility class, so
-				// the value round-trips unchanged — only the item's class attribute moves to
-				// AfterFirstUnlock. A failed rewrite must never break auth: the key still works
-				// while unlocked, the flag stays unset, and the rewrite retries next boot.
-				const rewrite = await run(async () => {
-					await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, stored, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+			const legacy = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
+
+			if (legacy) {
+				// Copy-forward migration (see secureStoreKeyEncryptionKeyAfu). Read-back verify
+				// before trusting the new item; the keychain READ query never filters on the
+				// accessibility class, so the value round-trips regardless of either item's
+				// class. Failure must never break auth: the legacy item still works while
+				// unlocked, and the AFU item's absence makes the next boot retry.
+				const migrate = await run(async () => {
+					await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKeyAfu, legacy, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+
+					const verify = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKeyAfu)
+
+					if (verify !== legacy) {
+						throw new Error("AFU encryption key read-back mismatch")
+					}
 				})
 
-				if (rewrite.success) {
-					this.mmkv.set(this.secureStoreKeyEncryptionKeyClassFlag, true)
-				} else {
-					console.error("[SecureStore] Failed to migrate encryption key accessibility class", rewrite.error)
+				if (!migrate.success) {
+					console.error("[SecureStore] Failed to migrate encryption key accessibility class", migrate.error)
 				}
+
+				this.encryptionKey = legacy
+
+				return legacy
 			}
 
-			this.encryptionKey = stored
+			const fresh = crypto.randomBytes(32).toString("hex")
 
-			return stored
+			await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKeyAfu, fresh, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+
+			this.encryptionKey = fresh
+
+			return fresh
 		})
 
 		if (!result.success) {
