@@ -45,8 +45,10 @@ import { type DriveItem, type Note } from "@/types"
 const BENCH = process.env["SORT_BENCH"] === "1"
 const SAMPLES = Number(process.env["SORT_BENCH_SAMPLES"] ?? 5)
 const WARMUP = Number(process.env["SORT_BENCH_WARMUP"] ?? 2)
-const SCALES = (process.env["SORT_BENCH_SCALES"] ?? "10000,100000")
-	.split(",")
+// Explicitly typed: CI runs without the gitignored expo-env.d.ts, where process.env
+// indexing degrades to `any` and the chain below trips noImplicitAny.
+const SCALES_ENV: string = process.env["SORT_BENCH_SCALES"] ?? "10000,100000"
+const SCALES = SCALES_ENV.split(",")
 	.map(value => Number(value.trim()))
 	.filter(value => Number.isFinite(value) && value > 0)
 const OUT_FILE = process.env["SORT_BENCH_OUT"] ?? "/tmp/sortBench-out.txt"
