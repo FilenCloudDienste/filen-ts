@@ -50,6 +50,7 @@ export class QueryPersisterKv {
 	private readonly buffer = new Map<string, unknown>()
 	private readonly dirtyUpserts = new Set<string>()
 	private readonly dirtyDeletes = new Set<string>()
+	private restoredOnce = false
 
 	public constructor() {
 		AppState.addEventListener("change", nextAppState => {
@@ -91,6 +92,7 @@ export class QueryPersisterKv {
 		this.buffer.clear()
 		this.dirtyUpserts.clear()
 		this.dirtyDeletes.clear()
+		this.restoredOnce = false
 
 		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
 			console.error("[QueryPersisterKv] Failed to clear", err)
@@ -98,6 +100,15 @@ export class QueryPersisterKv {
 	}
 
 	public async restore(): Promise<void> {
+		// Once per instance (audit B2b, 2026-06-11): setup() can run more than once in a
+		// process. The buffer leads the disk by up to the persist debounce, so re-reading
+		// rows here would overwrite newer in-memory entries with stale disk state. A failed
+		// restore leaves the flag unset so the next setup() retries; logout ends in a full
+		// JS reload, which resets the instance anyway.
+		if (this.restoredOnce) {
+			return
+		}
+
 		const now = performance.now()
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 		const db = await sqlite.openDb()
@@ -114,6 +125,8 @@ export class QueryPersisterKv {
 				console.error("[QueryPersisterKv] Failed to deserialize row, skipping", err)
 			}
 		}
+
+		this.restoredOnce = true
 
 		console.log(`[QueryPersisterKv] Restored ${this.buffer.size} rows in ${(performance.now() - now).toFixed(2)}ms`)
 	}

@@ -259,6 +259,7 @@ export class Cache {
 	// the persist paths refuse to write so a stray mutation, debounce, or AppState-background flush
 	// during the logout window cannot re-INSERT decrypted metadata into the just-emptied plaintext kv.
 	private locked = false
+	private restored = false
 
 	// Serializes ALL SQLite persist work (sync flush + async chunked persist): one writer at a
 	// time. Without this, a flushNow() landing during persistAsync's chunked build could commit
@@ -604,6 +605,17 @@ export class Cache {
 	 * Call during app setup before first render.
 	 */
 	public async restore(): Promise<void> {
+		// Once per session (audit B2b, 2026-06-11): setup() can run more than once in a
+		// process (iOS cold background launch runs the task body's setup AND RootLayout's;
+		// a warm Android process re-runs setup per WorkManager fire). Re-restoring would
+		// redo full-table scans over every registered map and clobber newer in-memory
+		// entries with older disk rows (disk lags the maps by the persist debounce).
+		// clear() (logout) re-arms; a failed restore leaves the flag unset so the next
+		// setup() retries.
+		if (this.restored) {
+			return
+		}
+
 		const now = performance.now()
 		const rowCounts: string[] = []
 
@@ -648,6 +660,7 @@ export class Cache {
 
 		// A fresh authenticated session has hydrated — re-enable persistence after a prior logout lock.
 		this.locked = false
+		this.restored = true
 
 		console.log(`[Cache] Restored in ${(performance.now() - now).toFixed(2)}ms (${rowCounts.join(", ")})`)
 	}
@@ -738,6 +751,7 @@ export class Cache {
 		this.persistDirty.cancel()
 		this.clearGeneration++
 		this.locked = true
+		this.restored = false
 
 		this.secureStore.clear()
 

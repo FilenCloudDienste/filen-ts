@@ -358,6 +358,27 @@ describe("QueryPersisterKv", () => {
 			expect(mockDb.executeBatch).not.toHaveBeenCalled()
 		})
 
+		it("restore() is once-per-instance — a repeat skips the scan and never clobbers live buffer entries (audit B2b)", async () => {
+			// setup() can run more than once per process. The buffer leads the disk by up to
+			// the persist debounce, so a second restore re-reading rows would overwrite newer
+			// in-memory entries with stale disk state.
+			seedKvStore("query-1", "disk-value")
+
+			const kv = new QueryPersisterKv()
+
+			await kv.restore()
+
+			const scansAfterFirst = mockDb.executeRaw.mock.calls.length
+
+			// A live write after the first restore — newer than the seeded disk row.
+			kv.setItem("query-1", "live-value")
+
+			await kv.restore()
+
+			expect(mockDb.executeRaw.mock.calls.length).toBe(scansAfterFirst)
+			expect(kv.getItem("query-1")).toBe("live-value")
+		})
+
 		it("skips a corrupt row and still restores the remaining rows", async () => {
 			seedKvStore("query-good-1", { queryKey: ["a"], state: { data: "hello" } })
 			// Inject a corrupt raw value directly so deserialize() throws on this row

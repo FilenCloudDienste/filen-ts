@@ -187,6 +187,7 @@ type AuthInternals = {
 	unauthedClient: unknown
 	clientsReady: Promise<void>
 	clientsReadyResolve: (() => void) | null
+	lastStringifiedClient: unknown
 }
 
 function authInternals(): AuthInternals {
@@ -199,6 +200,7 @@ function resetAuthClients(): void {
 	internals.authedClient = null
 	internals.unauthedClient = null
 	internals.logoutPromise = null
+	internals.lastStringifiedClient = null
 	// Reset the clientsReady promise so getSdkClients can wait on a fresh one
 	let resolve: (() => void) | null = null
 	internals.clientsReady = new Promise<void>(r => {
@@ -589,6 +591,62 @@ describe("auth.setSdkClients", () => {
 
 		expect(priorAuthedDestroy).toHaveBeenCalledTimes(1)
 		expect(priorUnauthedDestroy).toHaveBeenCalledTimes(1)
+	})
+
+	// Audit B2b (2026-06-11) — a second setup() in the same process (iOS cold background
+	// launch runs the task body's setup AND RootLayout's; warm Android re-runs setup per
+	// WorkManager fire) reads the SAME stored blob. Reconstructing would uniffiDestroy
+	// handles that in-flight work captured via getSdkClients().
+	it("same-input second call keeps the live clients — no destroy, no reconstruction", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		vi.mocked(secureStore.default.set).mockResolvedValue(undefined)
+
+		const authedDestroy = vi.fn()
+
+		mockFromStringified.mockReturnValue({ toStringified: vi.fn(), uniffiDestroy: authedDestroy })
+
+		const first = await auth.setSdkClients({ apiKey: "ak-same", email: "x@y.z" } as any)
+
+		const fromConfigCallsAfterFirst = mockFromConfig.mock.calls.length
+
+		// Structurally-equal clone — exactly what a second setup() passes after re-reading
+		// the stored client from secureStore.
+		const second = await auth.setSdkClients({ apiKey: "ak-same", email: "x@y.z" } as any)
+
+		expect(second.authedClient).toBe(first.authedClient)
+		expect(second.unauthedClient).toBe(first.unauthedClient)
+		expect(authedDestroy).not.toHaveBeenCalled()
+		expect(mockFromConfig.mock.calls.length).toBe(fromConfigCallsAfterFirst)
+	})
+
+	it("changed input still reconstructs and destroys the prior handles", async () => {
+		const secureStore = await import("@/lib/secureStore")
+
+		vi.mocked(secureStore.default.set).mockResolvedValue(undefined)
+
+		const firstAuthedDestroy = vi.fn()
+		const firstUnauthedDestroy = vi.fn()
+
+		mockFromConfig.mockReturnValueOnce({
+			fromStringified: mockFromStringified,
+			login: mockLogin,
+			register: mockRegister,
+			startPasswordReset: mockStartPasswordReset,
+			resendRegistrationConfirmation: mockResendRegistrationConfirmation,
+			uniffiDestroy: firstUnauthedDestroy
+		} as unknown as ReturnType<typeof mockFromConfig>)
+		mockFromStringified.mockReturnValueOnce({ toStringified: vi.fn(), uniffiDestroy: firstAuthedDestroy })
+
+		const first = await auth.setSdkClients({ apiKey: "ak-one" } as any)
+
+		mockFromStringified.mockReturnValueOnce({ toStringified: vi.fn(), uniffiDestroy: vi.fn() })
+
+		const second = await auth.setSdkClients({ apiKey: "ak-two" } as any)
+
+		expect(firstAuthedDestroy).toHaveBeenCalledTimes(1)
+		expect(firstUnauthedDestroy).toHaveBeenCalledTimes(1)
+		expect(second.authedClient).not.toBe(first.authedClient)
 	})
 
 	it("calls saveStringifiedClientToSecureStorage with correct spread", async () => {
