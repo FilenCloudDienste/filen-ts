@@ -50,8 +50,13 @@ vi.mock("@/lib/paths", () => ({
 
 import secureStore from "@/lib/secureStore"
 import { fs, File, setMtime, clearMtimes } from "@/tests/mocks/expoFileSystem"
-import { isAvailableAsync, getItemAsync, setItemAsync } from "@/tests/mocks/expoSecureStore"
+import { isAvailableAsync, getItemAsync, setItemAsync, AFTER_FIRST_UNLOCK } from "@/tests/mocks/expoSecureStore"
 import { mockMmkv } from "@/tests/mocks/reactNativeMMKV"
+
+// Audit B1 (2026-06-11): every keychain WRITE of the encryption key must carry
+// kSecAttrAccessibleAfterFirstUnlock — the expo-secure-store default (WhenUnlocked) made the
+// key unreadable while the device is locked, killing every locked-device background run.
+const ENCRYPTION_KEY_KEYCHAIN_OPTIONS = { keychainAccessible: AFTER_FIRST_UNLOCK }
 
 type SecureStoreInstance = any
 
@@ -92,6 +97,7 @@ beforeEach(() => {
 	getItemAsync.mockClear().mockResolvedValue(null)
 	setItemAsync.mockClear().mockResolvedValue(undefined)
 	mockMmkv.getString.mockClear().mockReturnValue(undefined)
+	mockMmkv.getBoolean.mockClear().mockReturnValue(undefined)
 	mockMmkv.set.mockClear()
 })
 
@@ -124,7 +130,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.any(String))
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.any(String), ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 		})
 
 		it("reads existing data from file and populates cache", async () => {
@@ -209,7 +215,49 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.stringMatching(/^[0-9a-f]{64}$/))
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.stringMatching(/^[0-9a-f]{64}$/), ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+			// Fresh keys are born with the right class — the migration flag is set so the
+			// rewrite path never fires for them.
+			expect(mockMmkv.set).toHaveBeenCalledWith("encryptionKeyAfuMigrated", true)
+		})
+
+		it("rewrites a pre-existing key ONCE with AFTER_FIRST_UNLOCK (locked-device background migration)", async () => {
+			const existingKey = "b".repeat(64)
+
+			getItemAsync.mockResolvedValue(existingKey)
+			mockMmkv.getBoolean.mockReturnValue(undefined)
+
+			const store = createSecureStore()
+
+			await store.init()
+
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", existingKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+			expect(mockMmkv.set).toHaveBeenCalledWith("encryptionKeyAfuMigrated", true)
+		})
+
+		it("does NOT rewrite when the migration flag is already set", async () => {
+			getItemAsync.mockResolvedValue("c".repeat(64))
+			mockMmkv.getBoolean.mockReturnValue(true)
+
+			const store = createSecureStore()
+
+			await store.init()
+
+			expect(setItemAsync).not.toHaveBeenCalled()
+		})
+
+		it("a failed migration rewrite never breaks auth — key still usable, flag unset for retry next boot", async () => {
+			const existingKey = "d".repeat(64)
+
+			getItemAsync.mockResolvedValue(existingKey)
+			mockMmkv.getBoolean.mockReturnValue(undefined)
+			setItemAsync.mockRejectedValue(new Error("keychain busy"))
+
+			const store = createSecureStore()
+
+			await expect(store.init()).resolves.not.toThrow()
+
+			expect(mockMmkv.set).not.toHaveBeenCalledWith("encryptionKeyAfuMigrated", true)
 		})
 
 		it("reuses cached key on subsequent calls", async () => {
