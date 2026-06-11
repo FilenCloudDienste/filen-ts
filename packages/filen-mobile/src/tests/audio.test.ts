@@ -115,7 +115,10 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 vi.mock("@/lib/utils", () => ({
-	wrapAbortSignalForSdk: vi.fn((signal: unknown) => signal)
+	wrapAbortSignalForSdk: vi.fn((signal: unknown) => signal),
+	convertBigInts: vi.fn((value: unknown) =>
+		JSON.parse(JSON.stringify(value, (_key, child) => (typeof child === "bigint" ? Number(child) : child)))
+	)
 }))
 
 vi.mock("@/features/audio/queries/usePlaylists.query", () => ({
