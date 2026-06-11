@@ -3,7 +3,7 @@ import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
-import { unwrapFileMeta } from "@/lib/sdkUnwrap"
+import { type UnwrapFileMetaResult, unwrapFileMeta } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
@@ -114,11 +114,28 @@ export const MAX_UPLOAD_FAILURES = 3
 // (see CameraUploadHashEntry / normalizeCameraUploadHashEntry).
 export const VERSION = 1
 
+// Width of the per-album asset-info worker pool in listLocal. Bounds concurrent
+// native getInfo round trips without a Semaphore: a shared semaphore queued ONE
+// pending acquire per asset beyond the width, and its FIFO waiter array shift()s
+// per release — O(n²) churn at camera-roll scale.
+const LOCAL_ASSET_INFO_CONCURRENCY = 32
+
+// Width of the per-delta upload worker pool in sync(). Bounds the pre-staging
+// probes (getUri/md5) and keeps the stagingMutex(4) waiter queue at O(width)
+// instead of O(deltas) — the mutex itself remains the binding bound for
+// staged-on-disk bytes (#B5).
+const UPLOAD_PIPELINE_CONCURRENCY = 16
+
+// listRemote unwraps every listed file once for its pre-sort pass; deltas() needs
+// the same unwrap again for every matched path. Cache the result per file object
+// so the diff loop reuses it instead of re-unwrapping O(n) times — entries die
+// with the listing objects.
+const remoteFileMetaCache = new WeakMap<object, UnwrapFileMetaResult>()
+
 class CameraUpload {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
 	private syncing: boolean = false
-	private readonly getLocalAssetInfoSemaphore = new Semaphore(32)
 	// stagingMutex(4): bounds how many deltas may stage their asset bytes in filen-tmp
 	// concurrently (copy → optional compress → upload → deferred cleanup). The SDK already
 	// bounds network/memory concurrency internally; this bounds app-side DISK usage so a
@@ -375,24 +392,38 @@ class CameraUpload {
 
 				const assets = await query.exe()
 
-				// Phase 1.5: fetch asset infos concurrently (rate-limited by semaphore).
-				const infoResults = await Promise.allSettled(
-					assets.map(async asset => {
-						const result = await run(async defer => {
-							if (signal.aborted) {
-								throw new Error("Aborted")
+				// Phase 1.5: fetch asset infos concurrently, bounded by an index-cursor
+				// worker pool (LOCAL_ASSET_INFO_CONCURRENCY workers pulling the next
+				// index). Results land in a slot per asset, so the array stays aligned
+				// with `assets` exactly like the previous Promise.allSettled shape —
+				// the failure-surfacing loop below depends on that alignment. Aborts
+				// reject with the same Error("Aborted") the old path threw.
+				const infoResults: PromiseSettledResult<{
+					asset: MediaLibrary.Asset
+					info: LocalFile["info"]
+				}>[] = new Array(assets.length)
+				let nextAssetIndex = 0
+
+				const infoWorker = async (): Promise<void> => {
+					while (true) {
+						const index = nextAssetIndex++
+
+						if (index >= assets.length) {
+							return
+						}
+
+						const asset = assets[index] as MediaLibrary.Asset
+
+						if (signal.aborted) {
+							infoResults[index] = {
+								status: "rejected",
+								reason: new Error("Aborted")
 							}
 
-							await this.getLocalAssetInfoSemaphore.acquire()
+							continue
+						}
 
-							defer(() => {
-								this.getLocalAssetInfoSemaphore.release()
-							})
-
-							if (signal.aborted) {
-								throw new Error("Aborted")
-							}
-
+						try {
 							const [filename, creationTime, modificationTime, mediaType] = await Promise.all([
 								asset.getFilename(),
 								asset.getCreationTime(),
@@ -400,27 +431,55 @@ class CameraUpload {
 								asset.getMediaType()
 							])
 
-							return {
-								asset,
-								info: {
-									id: asset.id,
-									filename,
-									creationTime,
-									modificationTime,
-									mediaType
+							infoResults[index] = {
+								status: "fulfilled",
+								value: {
+									asset,
+									info: {
+										id: asset.id,
+										filename,
+										creationTime,
+										modificationTime,
+										mediaType
+									}
 								}
 							}
-						})
-
-						if (!result.success) {
-							throw result.error
+						} catch (error) {
+							infoResults[index] = {
+								status: "rejected",
+								reason: error
+							}
 						}
+					}
+				}
 
-						return result.data
-					})
-				)
+				const infoWorkers: Promise<void>[] = []
+				const infoWorkerCount = Math.min(LOCAL_ASSET_INFO_CONCURRENCY, assets.length)
 
-				const infos = infoResults.filter(result => result.status === "fulfilled").map(result => result.value)
+				for (let workerIndex = 0; workerIndex < infoWorkerCount; workerIndex++) {
+					infoWorkers.push(infoWorker())
+				}
+
+				await Promise.all(infoWorkers)
+
+				// Single pass over the settled results, precomputing each entry's
+				// floored-seconds sort key once — the comparator below otherwise
+				// recomputes it O(n log n) times.
+				const infos: {
+					asset: MediaLibrary.Asset
+					info: LocalFile["info"]
+					sortSec: number
+				}[] = []
+
+				for (const result of infoResults) {
+					if (result.status === "fulfilled") {
+						infos.push({
+							asset: result.value.asset,
+							info: result.value.info,
+							sortSec: Math.floor(effectiveCreationTimestamp(result.value.info) / 1000)
+						})
+					}
+				}
 
 				// Surface per-asset enumeration failures (once per asset per pass) into the
 				// error store, then keep them out of the tree below. Abort-driven rejections
@@ -477,9 +536,7 @@ class CameraUpload {
 				// the collision suffix AND the upload's `created` parameter — so the remote
 				// side's `meta.created`-based sort mirrors this ordering exactly.
 				infos.sort((a, b) => {
-					const tA = Math.floor(effectiveCreationTimestamp(a.info) / 1000)
-					const tB = Math.floor(effectiveCreationTimestamp(b.info) / 1000)
-					const timeDiff = tA - tB
+					const timeDiff = a.sortSec - b.sortSec
 
 					if (timeDiff !== 0) {
 						return timeDiff
@@ -489,7 +546,7 @@ class CameraUpload {
 				})
 
 				// Phase 3: build tree sequentially so collision resolution is deterministic.
-				for (const { asset, info } of infos) {
+				for (const { asset, info, sortSec } of infos) {
 					// #E2: keys are composed from RAW segments (plain "/" joins) — Paths.join
 					// percent-ENCODES segments and normalizeFilePathForSdk percent-DECODES
 					// them, corrupting literal %XX sequences in real filenames (the eternal
@@ -501,23 +558,30 @@ class CameraUpload {
 					// and symmetrically on the remote side. The collision-suffix name is
 					// likewise stripped of its extension so the suffix path stays symmetric.
 					const fullPath = originalPath.toLowerCase()
-					let path = dedupTreeKey({ path: fullPath, compress: config.compress })
-					const collisionName = config.compress ? stripFilenameExtension(info.filename) : info.filename
+					let path = config.compress ? dedupTreeKey({ path: fullPath, compress: true }) : fullPath
 					let iteration = 0
 					// #B2: remember the suffix the winning slot carries so the upload can
 					// reproduce it in the uploaded filename ("" = base slot, plain name).
 					let collisionSuffixApplied = ""
 
-					// Use a seconds-floored creation timestamp as the collision identity.
+					// Collision-only inputs, computed lazily on the first occupied slot.
+					// The collision identity is the seconds-floored creation timestamp.
 					// Flooring to seconds absorbs sub-second drift from EXIF-override or
 					// network round-trips, keeping local and remote trees symmetric without
 					// any per-asset file read at listing time. #B7: the identity is
 					// effectiveCreationTimestamp — the exact value the upload sends as
 					// `created` — so the remote `meta.created`-derived hash mirrors it
-					// (including the null-creationTime → modificationTime fallback).
-					const localContentHash = String(Math.floor(effectiveCreationTimestamp(info) / 1000))
+					// (including the null-creationTime → modificationTime fallback);
+					// sortSec IS that value, floored once during the pre-sort pass.
+					let collisionName: string | null = null
+					let localContentHash: string | null = null
 
 					while (tree[path]) {
+						if (collisionName === null || localContentHash === null) {
+							collisionName = config.compress ? stripFilenameExtension(info.filename) : info.filename
+							localContentHash = String(sortSec)
+						}
+
 						const collisionAsset = {
 							name: collisionName,
 							contentHash: localContentHash
@@ -654,23 +718,34 @@ class CameraUpload {
 		// including for null-creationTime assets. Null meta falls back to 0, matching
 		// the local side's both-null fallback (the upload sends created=0 for those).
 		const sortedFiles = files
-			.map(file => ({
-				file,
-				meta: unwrapFileMeta(file.file).meta
-			}))
+			.map(file => {
+				const unwrapped = unwrapFileMeta(file.file)
+
+				remoteFileMetaCache.set(file.file, unwrapped)
+
+				const meta = unwrapped.meta
+
+				return {
+					file,
+					meta,
+					// Floored-seconds sort key + tiebreak name, precomputed ONCE per
+					// file — the comparator otherwise pays Number(bigint) twice per
+					// comparison, O(n log n) times.
+					sortSec: Math.floor(Number(meta?.created ?? 0) / 1000),
+					sortName: meta?.name ?? ""
+				}
+			})
 			.sort((a, b) => {
-				const tA = Math.floor(Number(a.meta?.created ?? 0) / 1000)
-				const tB = Math.floor(Number(b.meta?.created ?? 0) / 1000)
-				const timeDiff = tA - tB
+				const timeDiff = a.sortSec - b.sortSec
 
 				if (timeDiff !== 0) {
 					return timeDiff
 				}
 
-				return fastLocaleCompare(a.meta?.name ?? "", b.meta?.name ?? "")
+				return fastLocaleCompare(a.sortName, b.sortName)
 			})
 
-		for (const { file, meta } of sortedFiles) {
+		for (const { file, meta, sortSec } of sortedFiles) {
 			// #E2: `file.path` is the RAW decrypted path — never percent-encoded. It must
 			// NOT be percent-decoded (a literal "%20" in a name would corrupt and a
 			// literal "%2F" would gain a phantom "/" separator), or the key diverges from
@@ -681,16 +756,24 @@ class CameraUpload {
 			// so the dedup key is made extension-agnostic and the collision-suffix name is
 			// stripped of its extension. This keeps the remote key symmetric with the local
 			// stem-based key for the same physical asset.
-			let path = dedupTreeKey({ path: fullPath, compress })
-			const remoteName = meta?.name ?? FileSystem.Paths.basename(fullPath)
-			const collisionName = compress ? stripFilenameExtension(remoteName) : remoteName
+			let path = compress ? dedupTreeKey({ path: fullPath, compress: true }) : fullPath
 			let iteration = 0
 
-			// Use a seconds-floored creation timestamp as the contentHash, matching
-			// the local listLocal computation exactly for symmetric collision resolution.
-			const remoteContentHash = String(Math.floor(Number(meta?.created ?? 0) / 1000))
+			// Collision-only inputs, computed lazily on the first occupied slot. The
+			// contentHash is the seconds-floored creation timestamp, matching the local
+			// listLocal computation exactly for symmetric collision resolution — sortSec
+			// IS that value, floored once during the pre-sort pass.
+			let collisionName: string | null = null
+			let remoteContentHash: string | null = null
 
 			while (tree[path]) {
+				if (collisionName === null || remoteContentHash === null) {
+					const remoteName = meta?.name ?? FileSystem.Paths.basename(fullPath)
+
+					collisionName = compress ? stripFilenameExtension(remoteName) : remoteName
+					remoteContentHash = String(sortSec)
+				}
+
 				path =
 					modifyAssetPathOnCollision({
 						iteration,
@@ -750,18 +833,34 @@ class CameraUpload {
 
 		for (const path in localTree) {
 			const localFile = localTree[path]
+
+			if (!localFile) {
+				continue
+			}
+
 			const remoteFile = remoteTree[path]
-			const remoteFileMeta = remoteFile ? unwrapFileMeta(remoteFile.file) : null
+
+			if (!remoteFile) {
+				deltas.push({
+					type: "upload",
+					file: localFile
+				})
+
+				continue
+			}
+
+			// Reuse the unwrap listRemote already performed for this exact file object —
+			// the fallback covers nothing in practice (every tree entry was unwrapped
+			// during the pre-sort pass) but keeps the loop total.
+			const remoteFileMeta = remoteFileMetaCache.get(remoteFile.file) ?? unwrapFileMeta(remoteFile.file)
+			const remoteModified = remoteFileMeta.meta?.modified
+			const localModified = localFile.info.modificationTime
 
 			if (
-				(!remoteFile && localFile) ||
-				(remoteFile &&
-					localFile &&
-					remoteFileMeta &&
-					remoteFileMeta.meta?.modified != null &&
-					localFile.info.modificationTime != null &&
-					normalizeModificationTimestampForComparison(Number(remoteFileMeta.meta.modified)) <
-						normalizeModificationTimestampForComparison(localFile.info.modificationTime))
+				remoteModified != null &&
+				localModified != null &&
+				normalizeModificationTimestampForComparison(Number(remoteModified)) <
+					normalizeModificationTimestampForComparison(localModified)
 			) {
 				deltas.push({
 					type: "upload",
@@ -807,7 +906,15 @@ class CameraUpload {
 			throw new Error("Remote directory is not set in config")
 		}
 
-		const slashCount = originalPath.split("/").length - 1
+		// Count separators without split()'s per-call array allocation — this runs
+		// once per uploading delta.
+		let slashCount = 0
+
+		for (let charIndex = 0; charIndex < originalPath.length; charIndex++) {
+			if (originalPath.charCodeAt(charIndex) === 47) {
+				slashCount++
+			}
+		}
 
 		if (slashCount <= 1) {
 			return config.remoteDir
@@ -988,37 +1095,52 @@ class CameraUpload {
 						.slice(0, params.maxUploads)
 				: allDeltas
 
-			await Promise.allSettled(
-				deltas.map(async delta => {
+			// Per-delta pipelines run through an index-cursor worker pool instead of one
+			// async closure per delta inside Promise.allSettled: beyond the pool width,
+			// the old shape queued every remaining delta on the staging Semaphore, whose
+			// FIFO waiter array shift()s per release — O(n²) churn at camera-roll scale.
+			let nextDeltaIndex = 0
+
+			const uploadWorker = async (): Promise<void> => {
+				while (true) {
+					const index = nextDeltaIndex++
+
+					if (index >= deltas.length || abortController.signal.aborted) {
+						return
+					}
+
+					const delta = deltas[index] as Delta
 					const assetId = delta.file.info.id
 
 					if ((this.uploadFailures.get(assetId) ?? 0) >= MAX_UPLOAD_FAILURES) {
 						useCameraUploadStore.getState().addSkippedAsset(assetId)
 
-						return
+						continue
+					}
+
+					// #B6 fast path: iOS bumps asset modificationTime on mere VIEWING,
+					// so this delta fires every sync for view-touched photos. When the
+					// mtime equals the one we last verified the md5 against, skip
+					// immediately — no getUri() (which re-downloads iCloud-offloaded
+					// originals) and no md5 hash. -1 is the "never verified" sentinel
+					// (legacy string entries migrate through it) and never matches.
+					// Hoisted out of the run() wrapper: pure cache reads that cannot
+					// throw, so the steady-state skip pays no run/defer machinery.
+					const cachedEntry = normalizeCameraUploadHashEntry(cache.cameraUploadHashes.get(delta.file.path))
+					const modificationTime = delta.file.info.modificationTime
+
+					if (
+						cachedEntry &&
+						modificationTime != null &&
+						cachedEntry.verifiedModificationTime !== -1 &&
+						cachedEntry.verifiedModificationTime === modificationTime
+					) {
+						continue
 					}
 
 					const result = await run(async defer => {
 						switch (delta.type) {
 							case "upload": {
-								const cachedEntry = normalizeCameraUploadHashEntry(cache.cameraUploadHashes.get(delta.file.path))
-								const modificationTime = delta.file.info.modificationTime
-
-								// #B6 fast path: iOS bumps asset modificationTime on mere VIEWING,
-								// so this delta fires every sync for view-touched photos. When the
-								// mtime equals the one we last verified the md5 against, skip
-								// immediately — no getUri() (which re-downloads iCloud-offloaded
-								// originals) and no md5 hash. -1 is the "never verified" sentinel
-								// (legacy string entries migrate through it) and never matches.
-								if (
-									cachedEntry &&
-									modificationTime != null &&
-									cachedEntry.verifiedModificationTime !== -1 &&
-									cachedEntry.verifiedModificationTime === modificationTime
-								) {
-									break
-								}
-
 								const uri = await delta.file.asset.getUri()
 
 								if (!uri) {
@@ -1167,11 +1289,18 @@ class CameraUpload {
 								asset: delta.file.asset
 							}
 						])
-
-						return
 					}
-				})
-			)
+				}
+			}
+
+			const uploadWorkers: Promise<void>[] = []
+			const uploadWorkerCount = Math.min(UPLOAD_PIPELINE_CONCURRENCY, deltas.length)
+
+			for (let workerIndex = 0; workerIndex < uploadWorkerCount; workerIndex++) {
+				uploadWorkers.push(uploadWorker())
+			}
+
+			await Promise.all(uploadWorkers)
 		})
 
 		if (!result.success) {
