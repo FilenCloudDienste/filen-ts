@@ -23,6 +23,7 @@ import fileCache from "@/lib/fileCache"
 import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
 import { reloadAppAsync } from "expo"
+import { isEqual } from "es-toolkit"
 
 const RELOAD_RETRY_DELAY = 1000
 const RELOAD_MAX_ATTEMPTS = 5
@@ -31,6 +32,10 @@ class Auth {
 	private authedClient: JsClientInterface | null = null
 	public readonly stringifiedClientStorageKey: string = "stringifiedClient"
 	private unauthedClient: UnauthJsClientInterface | null = null
+	// The stringified config the CURRENT clients were built from — setSdkClients' same-input
+	// fast path. null whenever the clients were replaced outside setSdkClients (login) or torn
+	// down (logout), so the next setSdkClients always reconstructs.
+	private lastStringifiedClient: StringifiedClient | null = null
 	private logoutPromise: Promise<void> | null = null
 	private clientsReadyResolve: (() => void) | null = null
 	private clientsReady: Promise<void> = new Promise(resolve => {
@@ -110,6 +115,19 @@ class Auth {
 		authedClient: JsClientInterface
 		unauthedClient: UnauthJsClientInterface
 	}> {
+		// Same-input fast path (audit B2b, 2026-06-11): a second setup() in the same process
+		// (an iOS cold background launch runs the task body's setup AND RootLayout's; a warm
+		// Android process re-runs setup per WorkManager fire) re-reads the SAME stored blob.
+		// Reconstructing would uniffiDestroy handles that in-flight work captured via
+		// getSdkClients() mid-call. Reconstruction is only needed when the credentials
+		// actually changed (login / changePassword persist a new blob).
+		if (this.authedClient && this.unauthedClient && this.lastStringifiedClient !== null && isEqual(this.lastStringifiedClient, stringifiedClient)) {
+			return {
+				authedClient: this.authedClient,
+				unauthedClient: this.unauthedClient
+			}
+		}
+
 		// Destroy any handles we are about to orphan so the native Arcs (reqwest pool,
 		// rate limiter, tokio resources, socket) are reclaimed deterministically instead
 		// of leaning on GC finalization. Mirrors the guarded pattern register() uses.
@@ -122,6 +140,7 @@ class Auth {
 			maxIoMemoryUsage: this.maxIoMemoryUsage,
 			maxParallelRequests: this.maxParallelRequests
 		})
+		this.lastStringifiedClient = stringifiedClient
 
 		// On launch this runs with the value just read from secureStore, and the only fields this write
 		// would change are the two overrides below — which nothing reads back from disk (the SDK re-injects
@@ -182,6 +201,7 @@ class Auth {
 		this.destroyClient(this.unauthedClient)
 
 		this.authedClient = null
+		this.lastStringifiedClient = null
 
 		const unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
 
@@ -276,6 +296,7 @@ class Auth {
 
 		this.authedClient = null
 		this.unauthedClient = null
+		this.lastStringifiedClient = null
 
 		this.armClientsReady()
 

@@ -11,6 +11,15 @@ import { initTheme } from "@/lib/theme"
 
 // Serializes setup() so a concurrent invocation (e.g. background task overlapping the
 // foreground launch) can't run the init flow twice. No other instance state -> plain object.
+//
+// Idempotency contract (audit B2b, 2026-06-11): setup() itself holds NO once-flag — every
+// step is idempotent where its state lives, so repeat calls (iOS cold background launch runs
+// the task body's setup AND RootLayout's; a warm Android process re-runs setup per WorkManager
+// fire) are cheap and never destructive: auth.setSdkClients same-input fast path (no destroy
+// of live handles), sqlite.init/secureStore.init initDone guards, cache.restore once-per-
+// session, QueryPersisterKv.restore once-per-instance, startReconnectListener started guard,
+// initI18n/initTheme re-init no-ops. auth.isAuthed() is re-evaluated EVERY call by design —
+// the result must track login/logout transitions within a process.
 const setupMutex = new Semaphore(1)
 
 async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {

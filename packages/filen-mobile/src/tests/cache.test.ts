@@ -598,6 +598,35 @@ describe("Cache", () => {
 			expect(() => map.set("key", "value")).not.toThrow()
 		})
 
+		it("restore() is once-per-session — a second call skips the SQLite scans (audit B2b)", async () => {
+			// setup() can run more than once per process (iOS cold background launch runs the
+			// task's setup AND RootLayout's; warm Android re-runs setup per WorkManager fire).
+			// Re-restoring would redo full-table scans over every registered map and clobber
+			// newer in-memory entries with older disk rows.
+			const cache = createCache()
+
+			await cache.restore()
+
+			const scansAfterFirst = mockDb.executeRaw.mock.calls.length
+
+			await cache.restore()
+
+			expect(mockDb.executeRaw.mock.calls.length).toBe(scansAfterFirst)
+		})
+
+		it("clear() re-arms restore() for the next session", async () => {
+			const cache = createCache()
+
+			await cache.restore()
+			cache.clear()
+
+			const scansAfterClear = mockDb.executeRaw.mock.calls.length
+
+			await cache.restore()
+
+			expect(mockDb.executeRaw.mock.calls.length).toBeGreaterThan(scansAfterClear)
+		})
+
 		it("restores all PersistentMap fields from separate SQLite keys", async () => {
 			const cache = createCache()
 			const maps = getPersistentMaps(cache)
