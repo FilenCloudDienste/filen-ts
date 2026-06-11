@@ -1179,9 +1179,14 @@ export class Offline {
 			}
 
 			const liveDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY_URI, topLevelUuid))
-			// Entry paths are RAW root-relative with a leading "/" and liveDirUri never ends with
-			// one, so `liveDirUri + path` equals Paths.join(liveDirUri, path) — without paying the
-			// join helper once per entry in the loops below.
+			// CRITICAL encoding contract: every disk access that carries a RAW entry path MUST pass
+			// that path as a SEPARATE Paths.join / File / Directory constructor argument. expo's
+			// (patched — see patches/expo-file-system+56.0.7.patch) encodePathChars runs ONLY on
+			// rest arguments; pre-joining a raw name into one string bypasses it, so names with
+			// `[ ] ^ |` reach the native layer raw and every stat misses ("Missing on disk after
+			// sync" — regression 2026-06-11, guarded by offlineUriEncoding.test.ts). Direct
+			// concatenation with liveDirUri is only allowed for provably URI-safe segments
+			// (uuids + fixed ASCII suffixes), where encoding is the identity.
 			const liveDirUri = liveDir.uri
 
 			if (!liveDir.exists) {
@@ -1220,7 +1225,7 @@ export class Offline {
 				const claimedEntry = tmpUuid !== null ? existingEntries[tmpUuid] : undefined
 
 				if (claimedEntry) {
-					const destinationUri = liveDirUri + claimedEntry.path
+					const destinationUri = FileSystem.Paths.join(liveDirUri, claimedEntry.path)
 
 					if (!new FileSystem.File(destinationUri).exists && !new FileSystem.Directory(destinationUri).exists) {
 						const destinationParent = new FileSystem.Directory(FileSystem.Paths.dirname(destinationUri))
@@ -1500,11 +1505,11 @@ export class Offline {
 						uuid,
 						path: entry.path,
 						isDirectory: true,
-						existsOnDisk: new FileSystem.Directory(liveDirUri + entry.path).exists
+						existsOnDisk: new FileSystem.Directory(liveDirUri, entry.path).exists
 					})
 				} else {
 					// One info() call per file — exists + size in a single native hop instead of two.
-					const dataFileInfo = new FileSystem.File(liveDirUri + entry.path).info()
+					const dataFileInfo = new FileSystem.File(liveDirUri, entry.path).info()
 					// Compare against the recorded delivered size when the entry carries one — for
 					// meta-size-drifted remotes the meta size can NEVER match disk, and comparing
 					// against it would re-mark the entry missing (and re-download it) every
@@ -1582,8 +1587,8 @@ export class Offline {
 					}
 
 					if (op.type === "move") {
-						const destinationUri = liveDirUri + op.to
-						const destinationParent = new FileSystem.Directory(destinationUri.slice(0, destinationUri.lastIndexOf("/")))
+						const destinationUri = FileSystem.Paths.join(liveDirUri, op.to)
+						const destinationParent = new FileSystem.Directory(FileSystem.Paths.dirname(destinationUri))
 
 						if (!destinationParent.exists) {
 							destinationParent.create({
@@ -1593,13 +1598,13 @@ export class Offline {
 						}
 
 						if (op.isDirectory) {
-							const from = new FileSystem.Directory(liveDirUri + op.from)
+							const from = new FileSystem.Directory(liveDirUri, op.from)
 
 							if (from.exists) {
 								from.move(new FileSystem.Directory(destinationUri))
 							}
 						} else {
-							const from = new FileSystem.File(liveDirUri + op.from)
+							const from = new FileSystem.File(liveDirUri, op.from)
 
 							if (from.exists) {
 								from.move(new FileSystem.File(destinationUri))
@@ -1610,13 +1615,13 @@ export class Offline {
 					}
 
 					if (op.isDirectory) {
-						const target = new FileSystem.Directory(liveDirUri + op.path)
+						const target = new FileSystem.Directory(liveDirUri, op.path)
 
 						if (target.exists) {
 							target.delete()
 						}
 					} else {
-						const target = new FileSystem.File(liveDirUri + op.path)
+						const target = new FileSystem.File(liveDirUri, op.path)
 
 						if (target.exists) {
 							target.delete()
@@ -1781,7 +1786,7 @@ export class Offline {
 					const expectedPath = expectedDiskPath(uuid, remoteEntry.path)
 
 					if (remoteEntry.isDirectory) {
-						if (!new FileSystem.Directory(liveDirUri + expectedPath).exists) {
+						if (!new FileSystem.Directory(liveDirUri, expectedPath).exists) {
 							pushError(
 								makeSyncError({
 									itemUuid: uuid,
@@ -1798,7 +1803,7 @@ export class Offline {
 					}
 
 					// One info() call per file — exists + size in a single native hop instead of two.
-					const dataFileInfo = new FileSystem.File(liveDirUri + expectedPath).info()
+					const dataFileInfo = new FileSystem.File(liveDirUri, expectedPath).info()
 
 					if (!dataFileInfo.exists) {
 						pushError(
@@ -1968,11 +1973,11 @@ export class Offline {
 					// bytes that are actually present. Size compares against the recorded delivered
 					// size when present (same drift rule as the local view above).
 					if (isDirectoryItem(entry.item)) {
-						if (!new FileSystem.Directory(liveDirUri + path).exists) {
+						if (!new FileSystem.Directory(liveDirUri, path).exists) {
 							continue
 						}
 					} else {
-						const preservedInfo = new FileSystem.File(liveDirUri + path).info()
+						const preservedInfo = new FileSystem.File(liveDirUri, path).info()
 						const expectedSize = entry.diskSize ?? Number(entry.item.data.decryptedMeta?.size ?? -1)
 
 						if (!preservedInfo.exists || (preservedInfo.size ?? 0) !== expectedSize) {
@@ -3202,8 +3207,8 @@ export class Offline {
 		const entryMeta = directoryMeta?.entries[item.data.uuid]
 
 		if (entryMeta && isFileItem(entryMeta.item)) {
-			// Raw entry paths lead with "/" — direct concat equals Paths.join here.
-			const foundFile = new FileSystem.File(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}${entryMeta.path}`)
+			// Raw name-bearing path → separate constructor args, so expo's encoder runs on it.
+			const foundFile = new FileSystem.File(DIRECTORIES_DIRECTORY_URI, topLevelUuid, entryMeta.path)
 
 			if (foundFile.exists) {
 				this.getLocalFileCache.set(item.data.uuid, foundFile)
@@ -3254,14 +3259,15 @@ export class Offline {
 			}
 		}
 
-		// Nested entries are uuid-keyed — direct lookup, then concat the raw leading-"/" path.
+		// Nested entries are uuid-keyed — direct lookup, then the raw name-bearing path goes in
+		// as a separate constructor arg so expo's encoder runs on it.
 		const entryMeta = directoryMeta.entries[item.data.uuid]
 
 		if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 			return null
 		}
 
-		const foundDirectory = new FileSystem.Directory(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}${entryMeta.path}`)
+		const foundDirectory = new FileSystem.Directory(DIRECTORIES_DIRECTORY_URI, topLevelUuid, entryMeta.path)
 
 		if (foundDirectory.exists) {
 			this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
