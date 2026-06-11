@@ -44,6 +44,28 @@ vi.mock("@/lib/setup", () => ({ default: mockSetup }))
 
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: mockCameraUpload }))
 
+// backgroundTask.ts gained the budgeted offline phase (2026-06-11): mock its three new
+// imports so this suite's import graph stays cut at the same boundary as before. The
+// offline branch's behavior is pinned in backgroundTaskHardening.test.ts — these mocks
+// only keep the module loadable; the default (setting absent → null) keeps every
+// existing assertion's flow identical (offline phase skipped).
+vi.mock("@/features/offline/offlineSync", () => ({
+	default: {
+		sync: vi.fn(async () => undefined),
+		cancel: vi.fn()
+	}
+}))
+
+vi.mock("@/lib/secureStore", () => ({
+	default: {
+		get: vi.fn(async () => null)
+	}
+}))
+
+vi.mock("@/features/offline/offlineHelpers", () => ({
+	OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY: "offlineBackgroundSync"
+}))
+
 // ─── Static import of module under test ──────────────────────────────────────
 // Must be a static import so the module-level defineTask call is intercepted by
 // mockTaskManager.defineTask, which captures the callback into capturedTaskCallback.
