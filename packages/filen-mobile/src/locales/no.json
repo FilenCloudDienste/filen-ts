@@ -724,6 +724,8 @@
 	"sub_directory_created": "Underkatalog opprettet",
 	"submit": "Send inn",
 	"sync_now": "Synkroniser nå",
+	"sync_offline_in_background": "Synkroniser i bakgrunnen",
+	"sync_offline_in_background_description": "Synkroniser dine frakoblede filer jevnlig mens appen er i bakgrunnen. Store mapper hoppes over og synkroniseres når du åpner appen, for å spare batteri og data.",
 	"sync_offline_on_wifi_only": "Synkroniser kun på Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Synkroniser bare offline-filene dine når du er koblet til Wi-Fi.",
 	"syncing": "Synkroniserer…",

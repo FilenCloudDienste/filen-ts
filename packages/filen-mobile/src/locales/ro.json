@@ -736,6 +736,8 @@
 	"sub_directory_created": "Subdirector creat",
 	"submit": "Trimite",
 	"sync_now": "Sincronizează acum",
+	"sync_offline_in_background": "Sincronizare în fundal",
+	"sync_offline_in_background_description": "Sincronizează periodic fișierele offline cât timp aplicația este în fundal. Directoarele mari sunt omise și se sincronizează când deschizi aplicația, pentru a economisi bateria și datele.",
 	"sync_offline_on_wifi_only": "Sincronizează doar prin Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Sincronizează fișierele offline doar când ești conectat la Wi-Fi.",
 	"syncing": "Se sincronizează…",

@@ -724,6 +724,8 @@
 	"sub_directory_created": "Alkönyvtár létrehozva",
 	"submit": "Küldés",
 	"sync_now": "Szinkronizálás most",
+	"sync_offline_in_background": "Szinkronizálás a háttérben",
+	"sync_offline_in_background_description": "Az offline fájlok időszakos szinkronizálása, amíg az alkalmazás a háttérben fut. A nagy könyvtárak kimaradnak, és az alkalmazás megnyitásakor szinkronizálódnak, hogy kíméljük az akkumulátort és az adatforgalmat.",
 	"sync_offline_on_wifi_only": "Szinkronizálás csak Wi-Fi-n",
 	"sync_offline_on_wifi_only_description": "Az offline fájljaid szinkronizálása csak Wi-Fi-kapcsolat esetén.",
 	"syncing": "Szinkronizálás…",
