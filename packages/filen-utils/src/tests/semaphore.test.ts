@@ -209,4 +209,147 @@ describe("Semaphore", () => {
 			expect(sem.count()).toBe(1)
 		})
 	})
+
+	describe("waiter-queue scaling (O(1) dequeue regression)", () => {
+		it(
+			"drains 150k queued waiters in FIFO order without quadratic queue cost",
+			{ timeout: 60_000 },
+			async () => {
+				const sem = new Semaphore(2)
+
+				await sem.acquire()
+				await sem.acquire()
+
+				const queued = 150_000
+				const order: number[] = []
+				const all: Promise<void>[] = []
+
+				for (let i = 0; i < queued; i++) {
+					all.push(
+						sem.acquire().then(() => {
+							order.push(i)
+
+							sem.release()
+						})
+					)
+				}
+
+				const start = performance.now()
+
+				sem.release()
+				sem.release()
+
+				await Promise.all(all)
+
+				const elapsed = performance.now() - start
+
+				expect(order.length).toBe(queued)
+				expect(order[0]).toBe(0)
+				expect(order[queued - 1]).toBe(queued - 1)
+
+				// Spot-check strict FIFO across the whole drain.
+				for (let i = 1; i < queued; i += 997) {
+					expect(order[i]).toBe(i)
+				}
+
+				// A shift()-based queue drains 150k waiters with O(queue²) element moves
+				// (~7s measured); the head-indexed queue is linear (~150ms). The bound
+				// sits ~13× above the linear cost so CI variance cannot flake it, while
+				// the quadratic implementation exceeds it several times over.
+				expect(elapsed).toBeLessThan(2000)
+			}
+		)
+
+		it("purge rejects exactly the still-queued waiters after a partial drain", async () => {
+			const sem = new Semaphore(1)
+
+			await sem.acquire()
+
+			const total = 1000
+			const drained = 400
+			const errors: unknown[] = []
+			let resolved = 0
+
+			const all: Promise<void>[] = []
+
+			for (let i = 0; i < total; i++) {
+				all.push(
+					sem.acquire().then(
+						() => {
+							resolved++
+						},
+						error => {
+							errors.push(error)
+						}
+					)
+				)
+			}
+
+			// Each release admits exactly one waiter (it stays holding; we drive
+			// externally), consuming the queue head 400 deep before the purge.
+			for (let i = 0; i < drained; i++) {
+				sem.release()
+			}
+
+			const purged = sem.purge()
+
+			await new Promise(resolve => setTimeout(resolve, 10))
+
+			expect(purged).toBe(total - drained)
+			expect(resolved).toBe(drained)
+			expect(errors.length).toBe(total - drained)
+			expect(errors.every(error => error === "Task has been purged")).toBe(true)
+		})
+
+		it(
+			"keeps FIFO order across a deep partial drain followed by new arrivals",
+			{ timeout: 60_000 },
+			async () => {
+				const sem = new Semaphore(1)
+
+				await sem.acquire()
+
+				const firstWave = 6000
+				const secondWave = 1000
+				const order: number[] = []
+				const all: Promise<void>[] = []
+
+				for (let i = 0; i < firstWave; i++) {
+					all.push(
+						sem.acquire().then(() => {
+							order.push(i)
+						})
+					)
+				}
+
+				// Drain deep into the first wave (past any internal compaction
+				// threshold), then enqueue a second wave and drain everything.
+				for (let i = 0; i < 5000; i++) {
+					sem.release()
+				}
+
+				for (let i = 0; i < secondWave; i++) {
+					const id = firstWave + i
+
+					all.push(
+						sem.acquire().then(() => {
+							order.push(id)
+						})
+					)
+				}
+
+				for (let i = 0; i < firstWave + secondWave - 5000; i++) {
+					sem.release()
+				}
+
+				await Promise.all(all)
+
+				expect(order.length).toBe(firstWave + secondWave)
+
+				for (let i = 0; i < firstWave + secondWave; i++) {
+					expect(order[i]).toBe(i)
+				}
+			}
+		)
+	})
 })
