@@ -29,14 +29,6 @@ class SecureStore {
 	private readonly mmkv: MMKV
 
 	private available: boolean | null = null
-	// True when getEncryptionKey() GENERATED the key this session because none existed
-	// (key renamed or keychain/MMKV lost the item). Provenance discriminator for the
-	// orphaned-store heal in loadFromDisk(): a fresh random key provably cannot decrypt
-	// any pre-existing payload, so a present store + generated key = permanently dead.
-	// Generation only happens on a clean "not found" — keychain read ERRORS (e.g. a
-	// locked device's errSecInteractionNotAllowed) throw before reaching it, so a
-	// transient read failure can never false-trigger the heal.
-	private encryptionKeyWasGenerated = false
 	private encryptionKey: string | null = null
 	private readCache: Record<string, unknown> | null = null
 	private initDone: boolean = false
@@ -56,12 +48,6 @@ class SecureStore {
 	// born with the right class via SecItemAdd. Pre-prod: installs with the old item simply
 	// re-login; no migration.
 	public readonly secureStoreKeyEncryptionKey: string = "encryptionKeyAfu"
-	// Durable MMKV marker: set when a key is GENERATED, cleared the moment that key proves
-	// itself (successful store decrypt or write). Closes the cross-boot orphan window the
-	// in-session flag cannot see: a boot that generates + persists the key but dies before
-	// healing leaves the NEXT boot finding the key in the keychain — only this marker still
-	// knows the key never established against any payload.
-	public readonly secureStoreKeyEncryptionKeyUnestablishedFlag: string = "encryptionKeyUnestablished"
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
 		Platform.select({
 			ios: FileSystem.Paths.join(
@@ -165,9 +151,10 @@ class SecureStore {
 
 			this.ensureDirectories()
 
-			// init() uses the STRICT readExisting() (not the degrading read()) so a present-but-unreadable
-			// store propagates the failure through this run() wrapper and init() rejects — auth/setup can
-			// then prompt re-authentication instead of the app silently booting with an empty store.
+			// init() uses the STRICT readExisting() (not the degrading read()) so a transient IO
+			// failure propagates through this run() wrapper and init() rejects (retry next launch
+			// against the intact file). An UNDECRYPTABLE store no longer rejects — loadFromDisk's
+			// recovery ladder restores a valid backup or resets to empty (logged-out boot).
 			const [encryptionKey, current] = await Promise.all([this.getEncryptionKey(), (await this.readExisting()) ?? {}])
 
 			for (const key in current) {
@@ -229,11 +216,7 @@ class SecureStore {
 
 				if (!this.encryptionKey) {
 					this.encryptionKey = crypto.randomBytes(32).toString("hex")
-					this.encryptionKeyWasGenerated = true
 
-					// Marker BEFORE the key persist: a crash between the two regenerates next
-					// boot and rewrites the marker — never a persisted key without its marker.
-					this.mmkv.set(this.secureStoreKeyEncryptionKeyUnestablishedFlag, true)
 					this.mmkv.set(this.secureStoreKeyEncryptionKey, this.encryptionKey)
 				}
 
@@ -244,9 +227,6 @@ class SecureStore {
 
 			if (!this.encryptionKey) {
 				this.encryptionKey = crypto.randomBytes(32).toString("hex")
-				this.encryptionKeyWasGenerated = true
-
-				this.mmkv.set(this.secureStoreKeyEncryptionKeyUnestablishedFlag, true)
 
 				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, this.encryptionKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 			}
@@ -384,11 +364,13 @@ class SecureStore {
 	}
 
 	// Shared destination loader. Returns the decrypted store (caching it) on a present+valid
-	// destination, attempts cross-process backup recovery when the destination is missing/zero-
-	// length, and returns null ONLY when the store is genuinely absent (no destination and no
-	// recoverable backup). THROWS when a destination payload is present but cannot be decrypted/
-	// deserialized — that is a read failure, not an empty store. Callers decide whether to swallow
-	// (read() → get()) or propagate (readExisting() → set()/remove()/init()).
+	// destination; on an UNDECRYPTABLE destination runs the recovery ladder (drop dead file →
+	// promote newest valid same-key .bak → reset to empty); attempts the same backup recovery
+	// when the destination is missing/zero-length. Returns null when the store is empty after
+	// the ladder (genuinely absent, or reset — caller proceeds logged-out). THROWS only on
+	// transient IO read failures — the surviving core of finding 51, so set()'s merge base
+	// never collapses on a hiccup. Callers decide whether to swallow (read() → get()) or
+	// propagate (readExisting() → set()/remove()/init()).
 	private loadFromDisk(encryptionKey: string): Record<string, unknown> | null {
 		this.ensureDirectories()
 
@@ -396,52 +378,54 @@ class SecureStore {
 
 		if (destinationPresent) {
 			// IO read failures stay OUTSIDE the try below: they are transient and must keep
-			// throwing (finding 51) — only crypto verdicts participate in the orphan heal.
+			// throwing — the surviving core of finding 51 (set()'s read-modify-write merge
+			// base must never collapse to {} on a hiccup). Only the deterministic crypto
+			// verdict participates in the recovery ladder.
 			const bytes = this.secureStoreFile.bytesSync()
 
 			try {
-				// Prefer a present+valid destination. An ESTABLISHED-key decrypt failure is a
-				// genuine read failure and MUST throw — never silently treat a present file
-				// as empty.
 				const data = this.decryptStorePayload(bytes, encryptionKey)
 
 				this.readCache = data
-
-				// The key has proven itself against the live store — clear a stale
-				// un-established marker (crash window between first write and marker delete)
-				// so later corruption follows finding-51, never the heal.
-				if (this.mmkv.getBoolean(this.secureStoreKeyEncryptionKeyUnestablishedFlag) === true) {
-					this.mmkv.remove(this.secureStoreKeyEncryptionKeyUnestablishedFlag)
-				}
-
-				this.encryptionKeyWasGenerated = false
 
 				// Destination is confirmed valid — now safe to discard stale tmp/bak siblings.
 				this.cleanupStaleSiblings()
 
 				return data
 			} catch (e) {
-				// ORPHANED-STORE HEAL (2026-06-12): fires ONLY when the key never established
-				// — generated this session, or the durable marker from a generation boot that
-				// died before healing. A fresh random key provably cannot decrypt any
-				// pre-existing payload, so without the heal init()/set() throw forever and
-				// the app bricks until reinstall (any key rename, keychain wipe, or
-				// restore-without-keychain). NOT a finding-51 violation: established-key
-				// failures (corruption under a healthy key) still throw and preserve the file.
-				const neverEstablished =
-					this.encryptionKeyWasGenerated ||
-					this.mmkv.getBoolean(this.secureStoreKeyEncryptionKeyUnestablishedFlag) === true
+				// RECOVERY LADDER (2026-06-12, supersedes the old throw-forever): a GCM
+				// auth-tag failure is deterministic — the payload is cryptographically dead
+				// under the live key (renamed/lost key, disk corruption, restore mixing) and
+				// no retry can ever succeed; the old reject path was a permanent brick
+				// (setup-failed retry loop). Ladder: (1) drop the dead destination,
+				// (2) promote the newest valid same-key .bak — an interrupted write's backup
+				// is the freshest committed state, zero loss for the crash case, (3) reset to
+				// a fresh empty store: the cloud is the source of truth and everything in
+				// here is restored by re-login. A failed delete keeps the old conservative
+				// throw (cannot recover safely this boot — retry next launch).
+				console.error("[SecureStore] Destination payload undecryptable — attempting backup recovery", e)
 
-				if (!neverEstablished) {
+				try {
+					this.secureStoreFile.delete()
+				} catch {
 					throw e
 				}
 
-				console.error("[SecureStore] Orphaned store detected (un-established key, undecryptable payload) — resetting to empty")
+				const recovered = this.recoverDestinationFromBackup(encryptionKey)
 
-				this.secureStoreFile.delete()
+				if (recovered !== null) {
+					const data = this.decryptStorePayload(recovered, encryptionKey)
+
+					this.readCache = data
+
+					this.cleanupStaleSiblings()
+
+					return data
+				}
+
+				console.error("[SecureStore] No recoverable backup — resetting to an empty store (re-login)")
+
 				this.cleanupStaleSiblings()
-				this.mmkv.remove(this.secureStoreKeyEncryptionKeyUnestablishedFlag)
-				this.encryptionKeyWasGenerated = false
 
 				return null
 			}
@@ -598,12 +582,6 @@ class SecureStore {
 				// destination, so from here the catch block must NOT delete tmpFile.
 				promoted = true
 				this.readCache = data
-				// A fresh-generated key has now successfully written the store — the on-disk
-				// payload is OURS. Provenance flips to "established" (session flag + durable
-				// marker) so the orphaned-store heal in loadFromDisk() can never fire against
-				// data this key wrote (e.g. a later cache-evicted read, or the next boot).
-				this.encryptionKeyWasGenerated = false
-				this.mmkv.remove(this.secureStoreKeyEncryptionKeyUnestablishedFlag)
 
 				// Best-effort: discard the backup now that the new payload is live. A failure
 				// here only orphans the backup (harmless) and must never surface as a write

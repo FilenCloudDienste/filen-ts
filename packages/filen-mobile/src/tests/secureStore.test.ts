@@ -979,86 +979,77 @@ describe("SecureStore", () => {
 		})
 	})
 
-	describe("present-but-unreadable file does not clobber the store (finding 51)", () => {
+	describe("undecryptable store: recover from backup, else reset — never brick (supersedes the finding-51 throw-forever)", () => {
 		const fileUri = "file:///shared/group.io.filen.app/secureStore/v1/securestore.bin"
 
-		it("set() rejects and leaves the encrypted file untouched (does not shrink it to one key)", async () => {
-			// Write a multi-key store and capture the real encryption key.
+		// Spec change (2026-06-12, user-approved): a GCM auth-tag failure is DETERMINISTIC —
+		// retrying can never succeed, so the old reject-forever behavior was a permanent
+		// brick (setup-failed retry loop) for disk corruption, key rotation, or restore
+		// mixing. The recovery ladder is: newest valid same-key .bak (zero loss for the
+		// interrupted-write case) → fresh empty store (one-time re-login; the cloud is the
+		// source of truth). Only TRANSIENT IO failures still throw and preserve the file —
+		// that is the surviving core of finding 51 (see the IO test below).
+
+		it("a corrupt destination with a VALID same-key backup recovers the newest good state (zero loss)", async () => {
 			const store1 = createSecureStore()
 			const keyCapture = captureEncryptionKey()
 
 			await store1.init()
 			await store1.set("client", "stringified-client-with-master-keys")
 			await store1.set("fileProvider", true)
-			await store1.set("biometric", "fallback")
 
 			const encryptionKey = await keyCapture
-
-			// Snapshot the intact encrypted blob, then corrupt it so AES-256-GCM auth-tag verification
-			// fails — a present-but-unreadable file (transient IO/decrypt error or partial corruption).
 			const intactBytes = fs.get(fileUri) as Uint8Array
 
 			expect(intactBytes).toBeInstanceOf(Uint8Array)
 
+			// An interrupted write's surviving backup holds the intact payload...
+			fs.set("file:///shared/group.io.filen.app/secureStore/v1/.securestore.bak.recovery", intactBytes)
+
+			// ...while the destination got corrupted (flip a ciphertext byte → auth tag fails).
 			const corruptedBytes = new Uint8Array(intactBytes)
 
-			// Flip a byte inside the ciphertext region (after the 12-byte IV) so the auth tag fails.
 			corruptedBytes[20] = (corruptedBytes[20] ?? 0) ^ 0xff
 			fs.set(fileUri, corruptedBytes)
 
-			// A fresh instance with the CORRECT key cannot decrypt the corrupt file.
 			getItemAsync.mockResolvedValue(encryptionKey)
 
 			const store2 = createSecureStore()
 
-			// set() must REJECT — never silently treat the unreadable file as empty.
-			await expect(store2.set("attacker", "single-key")).rejects.toThrow()
+			await expect(store2.init()).resolves.not.toThrow()
 
-			// The on-disk file must be byte-for-byte unchanged: it was NOT overwritten with a brand-new
-			// single-key payload. The other secrets are preserved on disk.
-			const afterBytes = fs.get(fileUri) as Uint8Array
-
-			expect(afterBytes).toEqual(corruptedBytes)
-			expect(afterBytes.length).toBe(corruptedBytes.length)
-
-			// Restore the intact bytes (simulating the transient failure clearing) and prove every
-			// original key is still recoverable — nothing was destroyed.
-			fs.set(fileUri, intactBytes)
-
-			const store3 = createSecureStore()
-
-			await store3.init()
-
-			expect(await store3.get("client")).toBe("stringified-client-with-master-keys")
-			expect(await store3.get("fileProvider")).toBe(true)
-			expect(await store3.get("biometric")).toBe("fallback")
+			// Every secret recovered from the backup; the destination is the intact payload again.
+			expect(await store2.get("client")).toBe("stringified-client-with-master-keys")
+			expect(await store2.get("fileProvider")).toBe(true)
+			expect(fs.get(fileUri)).toEqual(intactBytes)
 		})
 
-		it("remove() rejects on a present-but-unreadable file and leaves it untouched", async () => {
+		it("set() on a corrupt store with NO valid backup heals and writes a fresh store (no reject-forever)", async () => {
 			const store1 = createSecureStore()
 			const keyCapture = captureEncryptionKey()
 
 			await store1.init()
-			await store1.set("client", "stringified-client")
-			await store1.set("theme", "dark")
+			await store1.set("client", "stringified-client-with-master-keys")
 
 			const encryptionKey = await keyCapture
 			const intactBytes = fs.get(fileUri) as Uint8Array
 			const corruptedBytes = new Uint8Array(intactBytes)
 
-			corruptedBytes[15] = (corruptedBytes[15] ?? 0) ^ 0xff
+			corruptedBytes[20] = (corruptedBytes[20] ?? 0) ^ 0xff
 			fs.set(fileUri, corruptedBytes)
 
 			getItemAsync.mockResolvedValue(encryptionKey)
 
 			const store2 = createSecureStore()
 
-			await expect(store2.remove("theme")).rejects.toThrow()
+			await expect(store2.set("fresh", "value")).resolves.not.toThrow()
 
-			expect(fs.get(fileUri)).toEqual(corruptedBytes)
+			expect(await store2.get("fresh")).toBe("value")
+			// The dead payload is gone — the store was rebuilt fresh, not merged with garbage.
+			expect(await store2.get("client")).toBeNull()
 		})
 
-		it("init() rejects on a present-but-unreadable file rather than initializing empty", async () => {
+		it("init() on a corrupt store with NO valid backup initializes empty and deletes the dead file (re-login, not brick)", async () => {
 			const store1 = createSecureStore()
 			const keyCapture = captureEncryptionKey()
 
@@ -1077,20 +1068,48 @@ describe("SecureStore", () => {
 
 			const store2 = createSecureStore()
 
-			await expect(store2.init()).rejects.toThrow()
+			await expect(store2.init()).resolves.not.toThrow()
 
-			// It must NOT have emitted an empty-store init (no secureStoreChange events).
+			// Empty init: no stored keys to re-emit, dead file removed from disk.
 			const changeEmits = mockEvents.emit.mock.calls.filter(([event]) => event === "secureStoreChange")
 
 			expect(changeEmits).toHaveLength(0)
+			expect(fs.get(fileUri)).toBeUndefined()
 		})
 
-		it("ORPHANED store (fresh-generated key + pre-existing payload) self-heals to empty instead of bricking", async () => {
+		it("a TRANSIENT IO read failure still throws and leaves the file untouched (the surviving finding-51 core)", async () => {
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client")
+
+			const encryptionKey = await keyCapture
+			const intactBytes = fs.get(fileUri) as Uint8Array
+
+			getItemAsync.mockResolvedValue(encryptionKey)
+
+			const bytesSyncSpy = vi.spyOn(File.prototype, "bytesSync").mockImplementationOnce(() => {
+				throw new Error("EIO: transient read failure")
+			})
+
+			try {
+				const store2 = createSecureStore()
+
+				// IO failures are not crypto verdicts — no heal, no recovery, just propagate so
+				// the next attempt retries against the intact file.
+				await expect(store2.init()).rejects.toThrow("EIO")
+
+				expect(fs.get(fileUri)).toEqual(intactBytes)
+			} finally {
+				bytesSyncSpy.mockRestore()
+			}
+		})
+
+		it("ORPHANED store (key renamed/lost → fresh generation) self-heals to empty instead of bricking", async () => {
 			// A key rename or keychain loss means getEncryptionKey() generates a FRESH key —
-			// which provably can never decrypt any pre-existing payload. Without the heal,
-			// init()/set() throw forever and the app bricks until reinstall. The heal must
-			// only fire on fresh GENERATION (keychain returned "not found"), never on a
-			// keychain read ERROR (locked device throws and never reaches generation).
+			// which provably can never decrypt any pre-existing payload (and no backup
+			// validates either). The recovery ladder lands on the empty-store reset.
 			const store1 = createSecureStore()
 			const keyCapture = captureEncryptionKey()
 
@@ -1117,10 +1136,12 @@ describe("SecureStore", () => {
 			expect(await store2.get("fresh")).toBe("value")
 		})
 
-		it("ORPHANED store heals ACROSS BOOTS via the durable marker (key generated by a prior boot that died before healing)", async () => {
-			// The dangerous shape: boot N generates + persists the key but the process dies
-			// before the heal runs; boot N+1 FINDS the key (no in-session generation), so
-			// only the durable MMKV marker can prove the key never decrypted/wrote anything.
+		it("ORPHANED store heals ACROSS BOOTS (key FOUND in the keychain but from a different era)", async () => {
+			// The cross-boot brick that was hit live: a prior boot generated + persisted a
+			// fresh key, then failed before anything was rewritten — the next boot FINDS
+			// that key, and the store from the old era can never decrypt under it. The
+			// recovery ladder needs no provenance tracking: decrypt fails, no backup
+			// validates, reset to empty.
 			const store1 = createSecureStore()
 			const keyCapture = captureEncryptionKey()
 
@@ -1129,56 +1150,15 @@ describe("SecureStore", () => {
 
 			await keyCapture
 
-			// Boot N: a DIFFERENT fresh key was generated + persisted; marker written; then
-			// the process "died" — simulate by discarding that instance entirely.
-			const orphanKey = "f".repeat(64)
+			const foreignKey = "f".repeat(64)
 
-			getItemAsync.mockResolvedValue(orphanKey)
-			mockMmkv.getBoolean.mockImplementation((k: string) => (k === "encryptionKeyUnestablished" ? true : undefined))
+			getItemAsync.mockResolvedValue(foreignKey)
 
-			// Boot N+1: key is FOUND (not generated), marker still set, store undecryptable.
 			const store2 = createSecureStore()
 
 			await expect(store2.init()).resolves.not.toThrow()
 			expect(fs.get(fileUri)).toBeUndefined()
 			expect(await store2.get("client")).toBeNull()
-		})
-
-		it("the durable marker is cleared once the key successfully decrypts the store (no heal on later corruption)", async () => {
-			// A successful decrypt ESTABLISHES the key: even with a stale marker present, the
-			// store proves readable → marker cleared → a later corruption falls back to the
-			// finding-51 path (throw, preserve) instead of healing away recoverable data.
-			const store1 = createSecureStore()
-			const keyCapture = captureEncryptionKey()
-
-			await store1.init()
-			await store1.set("client", "stringified-client")
-
-			const encryptionKey = await keyCapture
-			const intactBytes = fs.get(fileUri) as Uint8Array
-
-			getItemAsync.mockResolvedValue(encryptionKey)
-			mockMmkv.getBoolean.mockImplementation((k: string) => (k === "encryptionKeyUnestablished" ? true : undefined))
-
-			const store2 = createSecureStore()
-
-			await store2.init()
-
-			// The successful decrypt must clear the stale marker.
-			expect(mockMmkv.remove).toHaveBeenCalledWith("encryptionKeyUnestablished")
-
-			// Later corruption with the (established) key: finding-51 semantics — reject, preserve.
-			mockMmkv.getBoolean.mockReturnValue(undefined)
-
-			const corruptedBytes = new Uint8Array(intactBytes)
-
-			corruptedBytes[20] = (corruptedBytes[20] ?? 0) ^ 0xff
-			fs.set(fileUri, corruptedBytes)
-
-			const store3 = createSecureStore()
-
-			await expect(store3.init()).rejects.toThrow()
-			expect(fs.get(fileUri)).toEqual(corruptedBytes)
 		})
 
 		it("ORPHANED store heals on the MMKV-fallback path too (fresh fallback key + pre-existing payload)", async () => {
@@ -1239,11 +1219,12 @@ describe("SecureStore", () => {
 			fs.set(fileUri, corruptedBytes)
 			store2.readCache = null
 
-			// get() never throws — it degrades to null. (It does not corrupt the file either.)
+			// get() never throws — under the recovery ladder the corrupt, backup-less store
+			// heals to empty during the read, so the value is null and the dead file is gone.
 			const value = await store2.get("client")
 
 			expect(value).toBeNull()
-			expect(fs.get(fileUri)).toEqual(corruptedBytes)
+			expect(fs.get(fileUri)).toBeUndefined()
 		})
 	})
 
