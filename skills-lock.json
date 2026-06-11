@@ -19,11 +19,23 @@
       "skillPath": "plugins/expo/skills/add-app-clip/SKILL.md",
       "computedHash": "6bbeeae2814231780a4ee1bbd89e6916e35803a78a9a57778dc883cc3113c6fc"
     },
+    "agent-device": {
+      "source": "callstackincubator/agent-device",
+      "sourceType": "github",
+      "skillPath": "skills/agent-device/SKILL.md",
+      "computedHash": "a09ff3456969a416fb35de14484a933e70df307bc11ba77bf3b0a9ea2f723c07"
+    },
     "building-native-ui": {
       "source": "expo/skills",
       "sourceType": "github",
       "skillPath": "plugins/expo/skills/building-native-ui/SKILL.md",
       "computedHash": "342df93f481a0dba919f372d6c7b40d2b4bf5b51dd24363aea2e5d0bae27a6fa"
+    },
+    "dogfood": {
+      "source": "callstackincubator/agent-device",
+      "sourceType": "github",
+      "skillPath": "skills/dogfood/SKILL.md",
+      "computedHash": "8e6dfbff0633e355210ce7ae109cb39a3e1347946b6e92aaa607271154526b6b"
     },
     "eas-update-insights": {
       "source": "expo/skills",
