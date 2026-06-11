@@ -23,13 +23,23 @@ const INIT_QUERIES: string[] = [
 	"PRAGMA synchronous = NORMAL",
 	"PRAGMA busy_timeout = 15000",
 	"PRAGMA cache_size = -4000",
-	"PRAGMA mmap_size = 0",
+	// Memory-mapped reads cover the boot restore's full-table range scans (file-backed
+	// clean pages — evictable, not dirty RSS). INVARIANT: safe only while THIS app is
+	// the sole process opening sqlite.db — an mmap'd file truncated by ANOTHER process
+	// (our incremental_vacuum / post-wipe vacuum truncate the main file) can SIGBUS its
+	// readers; same-process/same-connection truncation is handled by SQLite itself. The
+	// FP extension consumes auth.json + its own rusqlite DB, never this file. Revisit
+	// before ever pointing a second process at the kv.
+	"PRAGMA mmap_size = 134217728",
 	"PRAGMA temp_store = MEMORY",
 	"PRAGMA wal_autocheckpoint = 500",
 	"PRAGMA journal_size_limit = 16777216",
 	"PRAGMA auto_vacuum = INCREMENTAL",
 	"PRAGMA trusted_schema = OFF",
-	"PRAGMA secure_delete = OFF",
+	// FAST zeroes freed pages whenever it costs no extra I/O — near-free insurance that
+	// ordinary deletes of decrypted metadata don't linger in free pages. The logout wipe
+	// additionally runs a full vacuum + WAL truncate (reclaimAfterWipe).
+	"PRAGMA secure_delete = FAST",
 	"PRAGMA cell_size_check = OFF",
 	"PRAGMA max_page_count = 2147483646",
 	"PRAGMA encoding = 'UTF-8'",
@@ -155,6 +165,22 @@ class Sqlite {
 		await this.db.execute("PRAGMA shrink_memory")
 	}
 
+	// Reclaim disk + scrub residue after a kv wipe (logout): the DELETE moves every page
+	// of decrypted metadata to the freelist, where the bytes otherwise LINGER on disk
+	// until the slow background drip (incremental_vacuum(64) per app-backgrounding)
+	// happens to reach them — and up to journal_size_limit of pre-wipe frames stay
+	// readable in the WAL. An unbounded incremental_vacuum returns every free page to
+	// the OS; wal_checkpoint(TRUNCATE) resets the WAL to zero bytes. Failures are
+	// logged, never thrown — the wipe itself already succeeded.
+	private async reclaimAfterWipe(db: DB): Promise<void> {
+		try {
+			await db.execute("PRAGMA incremental_vacuum")
+			await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+		} catch (err) {
+			console.error("[Sqlite] Post-wipe reclaim failed", err)
+		}
+	}
+
 	public async clearAsync(): Promise<void> {
 		// Bump BEFORE the wipe so any write that captured its generation earlier is already
 		// superseded — even one landing while the DELETE is still executing.
@@ -163,6 +189,8 @@ class Sqlite {
 		const db = await this.openDb()
 
 		await db.execute("DELETE FROM kv")
+
+		await this.reclaimAfterWipe(db)
 	}
 
 	public kvAsync = {
@@ -209,6 +237,8 @@ class Sqlite {
 			const db = await this.openDb()
 
 			await db.execute("DELETE FROM kv")
+
+			await this.reclaimAfterWipe(db)
 		},
 		contains: async (key: string): Promise<boolean> => {
 			const db = await this.openDb()
