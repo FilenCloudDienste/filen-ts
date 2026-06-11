@@ -55,7 +55,9 @@ vi.mock("expo-secure-store", async () => await import("@/tests/mocks/expoSecureS
 vi.mock("react-native-mmkv", () => ({
 	createMMKV: vi.fn(() => ({
 		getString: (key: string) => mockMmkvStore.get(key),
-		set: (key: string, value: string) => mockMmkvStore.set(key, value)
+		getBoolean: (key: string) => (mockMmkvStore.has(key) ? mockMmkvStore.get(key) === "true" : undefined),
+		set: (key: string, value: string | boolean) => mockMmkvStore.set(key, String(value)),
+		remove: (key: string) => mockMmkvStore.delete(key)
 	}))
 }))
 

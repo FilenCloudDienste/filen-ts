@@ -56,6 +56,12 @@ class SecureStore {
 	// born with the right class via SecItemAdd. Pre-prod: installs with the old item simply
 	// re-login; no migration.
 	public readonly secureStoreKeyEncryptionKey: string = "encryptionKeyAfu"
+	// Durable MMKV marker: set when a key is GENERATED, cleared the moment that key proves
+	// itself (successful store decrypt or write). Closes the cross-boot orphan window the
+	// in-session flag cannot see: a boot that generates + persists the key but dies before
+	// healing leaves the NEXT boot finding the key in the keychain — only this marker still
+	// knows the key never established against any payload.
+	public readonly secureStoreKeyEncryptionKeyUnestablishedFlag: string = "encryptionKeyUnestablished"
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
 		Platform.select({
 			ios: FileSystem.Paths.join(
@@ -225,6 +231,9 @@ class SecureStore {
 					this.encryptionKey = crypto.randomBytes(32).toString("hex")
 					this.encryptionKeyWasGenerated = true
 
+					// Marker BEFORE the key persist: a crash between the two regenerates next
+					// boot and rewrites the marker — never a persisted key without its marker.
+					this.mmkv.set(this.secureStoreKeyEncryptionKeyUnestablishedFlag, true)
 					this.mmkv.set(this.secureStoreKeyEncryptionKey, this.encryptionKey)
 				}
 
@@ -236,6 +245,8 @@ class SecureStore {
 			if (!this.encryptionKey) {
 				this.encryptionKey = crypto.randomBytes(32).toString("hex")
 				this.encryptionKeyWasGenerated = true
+
+				this.mmkv.set(this.secureStoreKeyEncryptionKeyUnestablishedFlag, true)
 
 				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, this.encryptionKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 			}
@@ -384,35 +395,56 @@ class SecureStore {
 		const destinationPresent = this.secureStoreFile.exists && this.secureStoreFile.size > 0
 
 		if (destinationPresent) {
-			// ORPHANED-STORE HEAL (2026-06-12): the key was generated fresh this session, so
-			// this payload (and every same-era backup) is permanently undecryptable — without
-			// the heal, init()/set() would throw forever and brick the app until reinstall
-			// (any future key rename, keychain wipe, or restore-without-keychain would do it).
-			// This is NOT a finding-51 violation: that guard protects recoverable failures,
-			// and an existing-key decrypt failure below still throws and preserves the file.
-			if (this.encryptionKeyWasGenerated) {
-				console.error("[SecureStore] Orphaned store detected (fresh key, pre-existing payload) — resetting to empty")
+			// IO read failures stay OUTSIDE the try below: they are transient and must keep
+			// throwing (finding 51) — only crypto verdicts participate in the orphan heal.
+			const bytes = this.secureStoreFile.bytesSync()
+
+			try {
+				// Prefer a present+valid destination. An ESTABLISHED-key decrypt failure is a
+				// genuine read failure and MUST throw — never silently treat a present file
+				// as empty.
+				const data = this.decryptStorePayload(bytes, encryptionKey)
+
+				this.readCache = data
+
+				// The key has proven itself against the live store — clear a stale
+				// un-established marker (crash window between first write and marker delete)
+				// so later corruption follows finding-51, never the heal.
+				if (this.mmkv.getBoolean(this.secureStoreKeyEncryptionKeyUnestablishedFlag) === true) {
+					this.mmkv.remove(this.secureStoreKeyEncryptionKeyUnestablishedFlag)
+				}
+
+				this.encryptionKeyWasGenerated = false
+
+				// Destination is confirmed valid — now safe to discard stale tmp/bak siblings.
+				this.cleanupStaleSiblings()
+
+				return data
+			} catch (e) {
+				// ORPHANED-STORE HEAL (2026-06-12): fires ONLY when the key never established
+				// — generated this session, or the durable marker from a generation boot that
+				// died before healing. A fresh random key provably cannot decrypt any
+				// pre-existing payload, so without the heal init()/set() throw forever and
+				// the app bricks until reinstall (any key rename, keychain wipe, or
+				// restore-without-keychain). NOT a finding-51 violation: established-key
+				// failures (corruption under a healthy key) still throw and preserve the file.
+				const neverEstablished =
+					this.encryptionKeyWasGenerated ||
+					this.mmkv.getBoolean(this.secureStoreKeyEncryptionKeyUnestablishedFlag) === true
+
+				if (!neverEstablished) {
+					throw e
+				}
+
+				console.error("[SecureStore] Orphaned store detected (un-established key, undecryptable payload) — resetting to empty")
 
 				this.secureStoreFile.delete()
 				this.cleanupStaleSiblings()
-
-				// One-shot: the dead payload is gone; everything on disk from here on is
-				// written by the current key (write() also flips this on first persist).
+				this.mmkv.remove(this.secureStoreKeyEncryptionKeyUnestablishedFlag)
 				this.encryptionKeyWasGenerated = false
 
 				return null
 			}
-
-			// Prefer a present+valid destination. A decrypt failure here is a genuine read failure
-			// and MUST throw — never silently treat a present file as empty.
-			const data = this.decryptStorePayload(this.secureStoreFile.bytesSync(), encryptionKey)
-
-			this.readCache = data
-
-			// Destination is confirmed valid — now safe to discard stale tmp/bak siblings.
-			this.cleanupStaleSiblings()
-
-			return data
 		}
 
 		// Destination is missing/zero-length. Before concluding the store is empty, attempt to
@@ -567,10 +599,11 @@ class SecureStore {
 				promoted = true
 				this.readCache = data
 				// A fresh-generated key has now successfully written the store — the on-disk
-				// payload is OURS. Provenance flips to "established" so the orphaned-store heal
-				// in loadFromDisk() can never fire against data this key wrote (e.g. a later
-				// cache-evicted read in the same session).
+				// payload is OURS. Provenance flips to "established" (session flag + durable
+				// marker) so the orphaned-store heal in loadFromDisk() can never fire against
+				// data this key wrote (e.g. a later cache-evicted read, or the next boot).
 				this.encryptionKeyWasGenerated = false
+				this.mmkv.remove(this.secureStoreKeyEncryptionKeyUnestablishedFlag)
 
 				// Best-effort: discard the backup now that the new payload is live. A failure
 				// here only orphans the backup (harmless) and must never surface as a write
