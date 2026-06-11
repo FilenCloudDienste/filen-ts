@@ -1,7 +1,7 @@
 # filen-mobile
 
-Encrypted cloud storage mobile app — Expo 55 / React Native 0.83.6 / React 19 / Hermes.
-All server communication, encryption, and auth handled by Rust SDK (`@filen/sdk-rs@^0.4.21`).
+Encrypted cloud storage mobile app — Expo 56 / React Native 0.85.3 (bridgeless/new-arch) / React 19 / Hermes.
+All server communication, encryption, and auth handled by Rust SDK (`@filen/sdk-rs@0.4.22`, exact pin).
 
 ## Architecture
 
@@ -196,7 +196,7 @@ all MOVED into their features. What remains is infrastructure shared across feat
 | `storageRoots.ts`         | Single source of truth for on-disk storage paths + version constants. Anchors all cache/offline/tmp dirs.                                                                                                                   |
 | `tmp.ts`                  | Transient staging directory (filen-tmp/) for in-flight uploads, exports, and decode targets. `newTmpFile(name)`/`newTmpDir(name)`.                                                                                          |
 | `secureStore.ts`          | Encrypted KV (expo-secure-store + MMKV fallback), AES-256-GCM encryption, event-driven cache invalidation. Exports `useSecureStore<T>(key, initialValue)` hook.                                                             |
-| `sqlite.ts`               | SQLite KV for query persistence, WAL mode, 32MB mmap, 8MB cache, app group directory (iOS).                                                                                                                                 |
+| `sqlite.ts`               | SQLite KV (single WITHOUT-ROWID `kv` table) for query/cache persistence — 8KB pages, WAL + synchronous NORMAL, 4MB cache, 128MB mmap (single-process invariant — see INIT_QUERIES comment), incremental autovacuum, secure_delete FAST, background maintenance (passive checkpoint + drip vacuum + optimize), post-logout full vacuum + WAL-truncate scrub, app group directory (iOS).  |
 | `serializer.ts`           | Shared JSON serializer setup (UniffiEnum, BigInt, TypedArray) used by sqlite/cache/route params.                                                                                                                            |
 | `utils.ts`                | SDK type unwrapping, path normalization (SDK/Expo/BlobUtil), sanitizeFileName, getPreviewType, PauseSignal, composite signals.                                                                                              |
 | `exif.ts`                 | EXIF date parsing (DateTimeOriginal/Digitized/DateTime + SubSec + Offset) + orientation from raw bytes (JPEG/TIFF/HEIC/WebP).                                                                                               |
