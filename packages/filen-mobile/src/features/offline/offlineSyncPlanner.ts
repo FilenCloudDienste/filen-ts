@@ -27,6 +27,10 @@ export type TreeReconcilePlan = {
 	// entries keep their current paths; reconcileTree commits them with their CURRENT meta path
 	// and the move proceeds on the next clean pass (deletes run, the occupant goes).
 	deferredMoves: string[]
+	// uuid → FINAL planned on-disk path after every op in `ops` has run, for each entry that was
+	// physically present at plan time and not deleted. Lets reconcileTree resolve an entry's
+	// post-pass disk location in O(1) instead of replaying the move ops per path.
+	finalPaths: Map<string, string>
 }
 
 const TMP_NAME_PREFIX = ".sync-tmp-"
@@ -52,8 +56,18 @@ export function uuidFromSyncTmpName(name: string): string | null {
 	return uuid.length > 0 ? uuid : null
 }
 
+// Segment depth without the per-call array allocation of path.split("/").length —
+// equal to slash count + 1 for the leading-"/" paths this module works on.
 function depth(path: string): number {
-	return path.split("/").length
+	let segments = 1
+
+	for (let i = 0; i < path.length; i++) {
+		if (path.charCodeAt(i) === 47) {
+			segments++
+		}
+	}
+
+	return segments
 }
 
 // Rewrite the simulated location of `from` and everything under it to live under `to`.
@@ -69,13 +83,35 @@ function rewritePrefix(paths: Map<string, string>, from: string, to: string): vo
 	}
 }
 
+// Apply one mover's rewrite. A FILE mover has no subtree in a coherent tree, so only its own
+// entry moves — O(1) instead of rewritePrefix's full-map scan. Directory movers (whose subtree
+// genuinely rides along) keep the full scan. This is what turns "10k renamed files" from
+// O(movers × entries) into O(movers).
+function rewriteMover(paths: Map<string, string>, uuid: string, from: string, to: string, isDirectory: boolean): void {
+	if (!isDirectory) {
+		if (paths.get(uuid) === from) {
+			paths.set(uuid, to)
+		}
+
+		return
+	}
+
+	rewritePrefix(paths, from, to)
+}
+
 // Replays the full two-phase move plan for a candidate mover set on a COPY of the simulated map
 // and returns every uuid's FINAL path (non-movers ride along via the prefix rewrites). Used by
 // the degraded-pass deferral check to know where kept entries will actually sit when phase 2
 // runs — a mover's destination colliding with any such stay would make the executor throw.
 function simulateMoves(simulated: Map<string, string>, movers: string[], remote: Map<string, RemoteTreeEntry>): Map<string, string> {
 	const projected = new Map(simulated)
-	const phase1 = [...movers].sort((a, b) => depth(projected.get(b) ?? "") - depth(projected.get(a) ?? ""))
+	const phase1Depths = new Map<string, number>()
+
+	for (const uuid of movers) {
+		phase1Depths.set(uuid, depth(projected.get(uuid) ?? ""))
+	}
+
+	const phase1 = [...movers].sort((a, b) => (phase1Depths.get(b) as number) - (phase1Depths.get(a) as number))
 
 	for (const uuid of phase1) {
 		const from = projected.get(uuid)
@@ -84,10 +120,16 @@ function simulateMoves(simulated: Map<string, string>, movers: string[], remote:
 			continue
 		}
 
-		rewritePrefix(projected, from, tmpPathForUuid(uuid))
+		rewriteMover(projected, uuid, from, tmpPathForUuid(uuid), remote.get(uuid)?.isDirectory === true)
 	}
 
-	const phase2 = [...movers].sort((a, b) => depth(remote.get(a)?.path ?? "") - depth(remote.get(b)?.path ?? ""))
+	const phase2Depths = new Map<string, number>()
+
+	for (const uuid of movers) {
+		phase2Depths.set(uuid, depth(remote.get(uuid)?.path ?? ""))
+	}
+
+	const phase2 = [...movers].sort((a, b) => (phase2Depths.get(a) as number) - (phase2Depths.get(b) as number))
 
 	for (const uuid of phase2) {
 		const from = projected.get(uuid)
@@ -97,7 +139,7 @@ function simulateMoves(simulated: Map<string, string>, movers: string[], remote:
 			continue
 		}
 
-		rewritePrefix(projected, from, to)
+		rewriteMover(projected, uuid, from, to, remote.get(uuid)?.isDirectory === true)
 	}
 
 	return projected
@@ -114,16 +156,30 @@ export function planTreeReconcile({
 }): TreeReconcilePlan {
 	const ops: TreeOp[] = []
 	const missingUuids: string[] = []
-	const localByUuid = new Map<string, LocalTreeEntry>()
 	// Simulated on-disk location per uuid; only physically present entries participate in moves/deletes.
 	const simulated = new Map<string, string>()
 
 	for (const entry of local) {
-		localByUuid.set(entry.uuid, entry)
-
 		if (entry.existsOnDisk) {
 			simulated.set(entry.uuid, entry.path)
 		}
+	}
+
+	// uuid → LocalTreeEntry, built LAZILY: only the rider/delete phases consult it, and only for
+	// local-only (remote-gone) entries — a fixed-point pass (the common case) never pays the
+	// whole-map build.
+	let localByUuidLazy: Map<string, LocalTreeEntry> | null = null
+
+	const localByUuid = (): Map<string, LocalTreeEntry> => {
+		if (localByUuidLazy === null) {
+			localByUuidLazy = new Map<string, LocalTreeEntry>()
+
+			for (const entry of local) {
+				localByUuidLazy.set(entry.uuid, entry)
+			}
+		}
+
+		return localByUuidLazy
 	}
 
 	for (const uuid of remote.keys()) {
@@ -135,38 +191,50 @@ export function planTreeReconcile({
 	// Reduction pass: find EXPLICIT movers — entries whose path change is not already explained by a
 	// moving ancestor directory. Processing shallowest-local-first and rewriting a scratch map after
 	// each prospective dir move collapses "10k children of a renamed dir" into one explicit mover.
-	const scratch = new Map(simulated)
 	const explicit: string[] = []
-	const candidates = [...scratch.keys()]
-		.filter(uuid => {
-			const r = remote.get(uuid)
+	const candidates: string[] = []
+	// Depth + kind per candidate, computed once — the sort below would otherwise recompute
+	// depth O(n log n) times.
+	const candidateDepths = new Map<string, number>()
+	const candidateIsDir = new Map<string, boolean>()
 
-			return r !== undefined && r.path !== scratch.get(uuid)
-		})
-		.sort((a, b) => {
-			const depthDiff = depth(scratch.get(a) ?? "") - depth(scratch.get(b) ?? "")
+	for (const [uuid, p] of simulated) {
+		const r = remote.get(uuid)
+
+		if (r !== undefined && r.path !== p) {
+			candidates.push(uuid)
+			candidateDepths.set(uuid, depth(p))
+			candidateIsDir.set(uuid, r.isDirectory)
+		}
+	}
+
+	if (candidates.length > 0) {
+		candidates.sort((a, b) => {
+			const depthDiff = (candidateDepths.get(a) as number) - (candidateDepths.get(b) as number)
 
 			if (depthDiff !== 0) {
 				return depthDiff
 			}
 
 			// Dirs before files at equal depth so their rewrites apply first.
-			const aDir = remote.get(a)?.isDirectory === true ? 0 : 1
-			const bDir = remote.get(b)?.isDirectory === true ? 0 : 1
-
-			return aDir - bDir
+			return (candidateIsDir.get(a) === true ? 0 : 1) - (candidateIsDir.get(b) === true ? 0 : 1)
 		})
 
-	for (const uuid of candidates) {
-		const current = scratch.get(uuid)
-		const want = remote.get(uuid)?.path
+		// The scratch copy of the whole map is only needed once there is anything to reduce —
+		// fixed-point passes (zero candidates) skip it entirely.
+		const scratch = new Map(simulated)
 
-		if (current === undefined || want === undefined || current === want) {
-			continue
+		for (const uuid of candidates) {
+			const current = scratch.get(uuid)
+			const want = remote.get(uuid)?.path
+
+			if (current === undefined || want === undefined || current === want) {
+				continue
+			}
+
+			explicit.push(uuid)
+			rewriteMover(scratch, uuid, current, want, candidateIsDir.get(uuid) === true)
 		}
-
-		explicit.push(uuid)
-		rewritePrefix(scratch, current, want)
 	}
 
 	// Degraded-pass deferral (allowDeletes: false): a mover whose REMOTE destination is occupied
@@ -183,35 +251,93 @@ export function planTreeReconcile({
 	if (!allowDeletes && explicit.length > 0) {
 		movers = [...explicit]
 
-		while (movers.length > 0) {
-			const finalPaths = simulateMoves(simulated, movers, remote)
-			const moverSet = new Set(movers)
-			const occupiedStays = new Set<string>()
+		let hasDirMover = false
 
-			for (const [uuid, path] of finalPaths) {
-				if (!moverSet.has(uuid)) {
-					occupiedStays.add(path)
-				}
+		for (const uuid of movers) {
+			if (candidateIsDir.get(uuid) === true) {
+				hasDirMover = true
+
+				break
 			}
+		}
 
-			const kept: string[] = []
-			let deferredThisRound = false
+		if (!hasDirMover) {
+			// File-only movers: nobody rides along, so every non-mover's projected final path IS
+			// its current simulated path. Maintain the occupied-stay set incrementally across
+			// fixpoint rounds instead of re-simulating the whole map each round.
+			const occupiedStays = new Set<string>(simulated.values())
 
 			for (const uuid of movers) {
-				const destination = remote.get(uuid)?.path
+				const moverPath = simulated.get(uuid)
 
-				if (destination !== undefined && occupiedStays.has(destination)) {
-					deferredMoves.push(uuid)
-					deferredThisRound = true
-				} else {
-					kept.push(uuid)
+				if (moverPath !== undefined) {
+					occupiedStays.delete(moverPath)
 				}
 			}
 
-			movers = kept
+			while (movers.length > 0) {
+				const kept: string[] = []
+				const deferredThisRoundPaths: string[] = []
 
-			if (!deferredThisRound) {
-				break
+				for (const uuid of movers) {
+					const destination = remote.get(uuid)?.path
+
+					if (destination !== undefined && occupiedStays.has(destination)) {
+						deferredMoves.push(uuid)
+
+						const stayPath = simulated.get(uuid)
+
+						if (stayPath !== undefined) {
+							deferredThisRoundPaths.push(stayPath)
+						}
+					} else {
+						kept.push(uuid)
+					}
+				}
+
+				movers = kept
+
+				if (deferredThisRoundPaths.length === 0) {
+					break
+				}
+
+				// Deferred movers become stays at their current paths — visible to checks from
+				// the NEXT round on, exactly like the re-simulated variant below.
+				for (const stayPath of deferredThisRoundPaths) {
+					occupiedStays.add(stayPath)
+				}
+			}
+		} else {
+			while (movers.length > 0) {
+				const finalPaths = simulateMoves(simulated, movers, remote)
+				const moverSet = new Set(movers)
+				const occupiedStays = new Set<string>()
+
+				for (const [uuid, path] of finalPaths) {
+					if (!moverSet.has(uuid)) {
+						occupiedStays.add(path)
+					}
+				}
+
+				const kept: string[] = []
+				let deferredThisRound = false
+
+				for (const uuid of movers) {
+					const destination = remote.get(uuid)?.path
+
+					if (destination !== undefined && occupiedStays.has(destination)) {
+						deferredMoves.push(uuid)
+						deferredThisRound = true
+					} else {
+						kept.push(uuid)
+					}
+				}
+
+				movers = kept
+
+				if (!deferredThisRound) {
+					break
+				}
 			}
 		}
 	}
@@ -219,7 +345,13 @@ export function planTreeReconcile({
 	// Phase 1 — extract explicit movers to root-level temps, deepest CURRENT path first so an
 	// independently moving child leaves its moving ancestor before the ancestor is extracted.
 	// Non-moving children ride along inside moved directories.
-	const phase1 = [...movers].sort((a, b) => depth(simulated.get(b) ?? "") - depth(simulated.get(a) ?? ""))
+	const phase1Depths = new Map<string, number>()
+
+	for (const uuid of movers) {
+		phase1Depths.set(uuid, depth(simulated.get(uuid) ?? ""))
+	}
+
+	const phase1 = [...movers].sort((a, b) => (phase1Depths.get(b) as number) - (phase1Depths.get(a) as number))
 
 	for (const uuid of phase1) {
 		const from = simulated.get(uuid)
@@ -238,7 +370,7 @@ export function planTreeReconcile({
 			to,
 			isDirectory: remoteEntry.isDirectory
 		})
-		rewritePrefix(simulated, from, to)
+		rewriteMover(simulated, uuid, from, to, remoteEntry.isDirectory)
 	}
 
 	// Rider rescue — remote-KEPT entries still sitting inside an only-local directory at this
@@ -254,16 +386,59 @@ export function planTreeReconcile({
 		const doomedDirUuids: string[] = []
 
 		for (const [uuid] of simulated) {
-			if (!remote.has(uuid) && localByUuid.get(uuid)?.isDirectory === true) {
+			if (!remote.has(uuid) && localByUuid().get(uuid)?.isDirectory === true) {
 				doomedDirUuids.push(uuid)
 			}
 		}
 
 		if (doomedDirUuids.length > 0) {
 			const moverSet = new Set(allMovers)
-			const riderCandidates = [...simulated.keys()]
-				.filter(uuid => remote.has(uuid) && !moverSet.has(uuid))
-				.sort((a, b) => depth(simulated.get(a) ?? "") - depth(simulated.get(b) ?? ""))
+			const riderCandidates: string[] = []
+			const riderDepths = new Map<string, number>()
+
+			for (const [uuid, p] of simulated) {
+				if (remote.has(uuid) && !moverSet.has(uuid)) {
+					riderCandidates.push(uuid)
+					riderDepths.set(uuid, depth(p))
+				}
+			}
+
+			riderCandidates.sort((a, b) => (riderDepths.get(a) as number) - (riderDepths.get(b) as number))
+
+			// "Is some doomed dir's CURRENT path a proper slash-aligned prefix of `from`?" —
+			// answered by walking `from`'s ancestor paths against a set instead of scanning every
+			// doomed dir per candidate. Doomed paths only change when a DIRECTORY rider is rescued
+			// (its subtree rewrite can carry doomed dirs riding inside it), so the set is rebuilt
+			// only on that rare event; file-rider rescues cannot move directories.
+			let doomedPathSet = new Set<string>()
+
+			const rebuildDoomedPathSet = (): void => {
+				doomedPathSet = new Set<string>()
+
+				for (const doomedUuid of doomedDirUuids) {
+					const doomedPath = simulated.get(doomedUuid)
+
+					if (doomedPath !== undefined) {
+						doomedPathSet.add(doomedPath)
+					}
+				}
+			}
+
+			rebuildDoomedPathSet()
+
+			const isUnderDoomedDir = (from: string): boolean => {
+				let end = from.lastIndexOf("/")
+
+				while (end > 0) {
+					if (doomedPathSet.has(from.slice(0, end))) {
+						return true
+					}
+
+					end = from.lastIndexOf("/", end - 1)
+				}
+
+				return false
+			}
 
 			for (const uuid of riderCandidates) {
 				const from = simulated.get(uuid)
@@ -273,13 +448,7 @@ export function planTreeReconcile({
 					continue
 				}
 
-				const doomed = doomedDirUuids.some(doomedUuid => {
-					const doomedPath = simulated.get(doomedUuid)
-
-					return doomedPath !== undefined && from.startsWith(`${doomedPath}/`)
-				})
-
-				if (!doomed) {
+				if (!isUnderDoomedDir(from)) {
 					continue
 				}
 
@@ -292,24 +461,38 @@ export function planTreeReconcile({
 					to,
 					isDirectory: remoteEntry.isDirectory
 				})
-				rewritePrefix(simulated, from, to)
+				rewriteMover(simulated, uuid, from, to, remoteEntry.isDirectory)
 				allMovers.push(uuid)
+
+				if (remoteEntry.isDirectory) {
+					rebuildDoomedPathSet()
+				}
 			}
 		}
 	}
 
 	// Deletes — only-local entries at their simulated (possibly temp-prefixed) locations, deepest first.
 	if (allowDeletes) {
-		const deletes = [...simulated.entries()]
-			.filter(([uuid]) => !remote.has(uuid))
-			.sort((a, b) => depth(b[1]) - depth(a[1]))
+		const deletes: { uuid: string; path: string; pathDepth: number }[] = []
 
-		for (const [uuid, path] of deletes) {
+		for (const [uuid, path] of simulated) {
+			if (!remote.has(uuid)) {
+				deletes.push({
+					uuid,
+					path,
+					pathDepth: depth(path)
+				})
+			}
+		}
+
+		deletes.sort((a, b) => b.pathDepth - a.pathDepth)
+
+		for (const { uuid, path } of deletes) {
 			ops.push({
 				type: "delete",
 				uuid,
 				path,
-				isDirectory: localByUuid.get(uuid)?.isDirectory === true
+				isDirectory: localByUuid().get(uuid)?.isDirectory === true
 			})
 			simulated.delete(uuid)
 		}
@@ -318,7 +501,13 @@ export function planTreeReconcile({
 	// Phase 2 — place movers (incl. rescued riders) at their remote paths, shallowest destination
 	// first so moving parent dirs land before children move into them. Executor creates missing
 	// destination parents.
-	const phase2 = [...allMovers].sort((a, b) => depth(remote.get(a)?.path ?? "") - depth(remote.get(b)?.path ?? ""))
+	const phase2Depths = new Map<string, number>()
+
+	for (const uuid of allMovers) {
+		phase2Depths.set(uuid, depth(remote.get(uuid)?.path ?? ""))
+	}
+
+	const phase2 = [...allMovers].sort((a, b) => (phase2Depths.get(a) as number) - (phase2Depths.get(b) as number))
 
 	for (const uuid of phase2) {
 		const from = simulated.get(uuid)
@@ -335,12 +524,14 @@ export function planTreeReconcile({
 			to: remoteEntry.path,
 			isDirectory: remoteEntry.isDirectory
 		})
-		rewritePrefix(simulated, from, remoteEntry.path)
+		rewriteMover(simulated, uuid, from, remoteEntry.path, remoteEntry.isDirectory)
 	}
 
+	// After phase 2, `simulated` holds every surviving entry's FINAL planned path.
 	return {
 		ops,
 		missingUuids,
-		deferredMoves
+		deferredMoves,
+		finalPaths: simulated
 	}
 }

@@ -331,6 +331,112 @@ export function serialize(value: unknown): string {
 	return JSON.stringify(encodeValue(value))
 }
 
+// Structural "would serialize to equal content" check WITHOUT building either string — used by
+// hot fixed-point detection (e.g. offline reconcile no-op passes over 100k-entry metas). It can
+// early-exit on the first difference and allocates nothing.
+//
+// Contract: a `true` result means both values hold the same serializable content (same plain
+// object keys/values, same array elements, same primitives/bigints, same UniffiEnum
+// typeName/tag/inner). Anything this walk does not fully understand (objects with their own
+// toJSON like Date, binary views, Maps/Sets, foreign class instances) conservatively returns
+// `false` — callers fall back to their full serialize comparison, so false negatives only cost
+// time while false positives are impossible.
+export function serializeEquals(a: unknown, b: unknown): boolean {
+	if (a === b) {
+		return true
+	}
+
+	if (a === null || b === null) {
+		return false
+	}
+
+	const typeOfA = typeof a
+
+	if (typeOfA !== typeof b || typeOfA !== "object") {
+		// Distinct primitives (incl. bigint) — `a === b` above already ruled out equality.
+		return false
+	}
+
+	const aIsArray = Array.isArray(a)
+
+	if (aIsArray !== Array.isArray(b)) {
+		return false
+	}
+
+	if (aIsArray) {
+		const arrayA = a as unknown[]
+		const arrayB = b as unknown[]
+
+		if (arrayA.length !== arrayB.length) {
+			return false
+		}
+
+		for (let i = 0; i < arrayA.length; i++) {
+			if (!serializeEquals(arrayA[i], arrayB[i])) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	const aIsEnum = a instanceof UniffiEnum
+	const bIsEnum = b instanceof UniffiEnum
+
+	if (aIsEnum !== bIsEnum) {
+		return false
+	}
+
+	if (aIsEnum) {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const enumA = a as any
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const enumB = b as any
+
+		return (
+			enumA[uniffiTypeNameSymbol] === enumB[uniffiTypeNameSymbol] &&
+			enumA.tag === enumB.tag &&
+			serializeEquals(enumA.inner, enumB.inner)
+		)
+	}
+
+	const constructorA = (a as object).constructor
+	const constructorB = (b as object).constructor
+
+	if ((constructorA !== Object && constructorA !== undefined) || (constructorB !== Object && constructorB !== undefined)) {
+		// Non-plain object (Date, binary view, Map, foreign instance) — bail conservatively.
+		return false
+	}
+
+	if (typeof (a as { toJSON?: unknown }).toJSON === "function" || typeof (b as { toJSON?: unknown }).toJSON === "function") {
+		return false
+	}
+
+	const keysA = Object.keys(a as object)
+	const keysB = Object.keys(b as object)
+
+	if (keysA.length !== keysB.length) {
+		return false
+	}
+
+	const objectA = a as Record<string, unknown>
+	const objectB = b as Record<string, unknown>
+
+	for (let i = 0; i < keysA.length; i++) {
+		const key = keysA[i] as string
+
+		if (!Object.prototype.hasOwnProperty.call(objectB, key)) {
+			return false
+		}
+
+		if (!serializeEquals(objectA[key], objectB[key])) {
+			return false
+		}
+	}
+
+	return true
+}
+
 export function deserialize<T>(input: string | ArrayBuffer | Uint8Array): T {
 	const json = typeof input === "string" ? input : utf8Decoder.decode(input)
 	const parsed: unknown = JSON.parse(json)
