@@ -70,13 +70,14 @@ function createSecureStore(): SecureStoreInstance {
  * Captures the encryption key written to ExpoSecureStore during a store.init() call.
  * More robust than indexing mock.calls[0] because it captures the key at call time,
  * insulating the test from any previous calls that may not have been fully cleared.
+ * Fresh keys are generated under the AFU-named item (audit B1 revision).
  */
 function captureEncryptionKey(): Promise<string> {
 	return new Promise(resolve => {
 		const original = setItemAsync.getMockImplementation()
 
 		setItemAsync.mockImplementationOnce(async (k: string, v: string) => {
-			if (k === "encryptionKey") {
+			if (k === "encryptionKeyAfu") {
 				resolve(v)
 			}
 
@@ -130,7 +131,7 @@ describe("SecureStore", () => {
 
 			await store.init()
 
-			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.any(String), ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKeyAfu", expect.any(String), ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 		})
 
 		it("reads existing data from file and populates cache", async () => {
@@ -208,36 +209,50 @@ describe("SecureStore", () => {
 	})
 
 	describe("getEncryptionKey", () => {
-		it("generates a key if none exists in ExpoSecureStore", async () => {
-			getItemAsync.mockResolvedValue(null)
+		// Audit B1 REVISION (2026-06-12, on-device finding): an in-place same-key rewrite is a
+		// silent no-op — expo-secure-store's duplicate-item path is a SecItemUpdate whose update
+		// dictionary carries ONLY kSecValueData (SecureStoreModule.swift update()), so the
+		// accessibility class never changes. The migration must COPY-FORWARD to a new key name
+		// ("encryptionKeyAfu", fresh SecItemAdd → class applied); the legacy item stays put.
+		function seedKeychain(entries: Record<string, string>): Map<string, string> {
+			const keychain = new Map<string, string>(Object.entries(entries))
+
+			getItemAsync.mockImplementation(async (k: string) => keychain.get(k) ?? null)
+			setItemAsync.mockImplementation(async (k: string, v: string) => {
+				keychain.set(k, v)
+			})
+
+			return keychain
+		}
+
+		it("generates a key under the AFU name if none exists in ExpoSecureStore", async () => {
+			seedKeychain({})
 
 			const store = createSecureStore()
 
 			await store.init()
 
-			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", expect.stringMatching(/^[0-9a-f]{64}$/), ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
-			// Fresh keys are born with the right class — the migration flag is set so the
-			// rewrite path never fires for them.
-			expect(mockMmkv.set).toHaveBeenCalledWith("encryptionKeyAfuMigrated", true)
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKeyAfu", expect.stringMatching(/^[0-9a-f]{64}$/), ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 		})
 
-		it("rewrites a pre-existing key ONCE with AFTER_FIRST_UNLOCK (locked-device background migration)", async () => {
-			const existingKey = "b".repeat(64)
-
-			getItemAsync.mockResolvedValue(existingKey)
-			mockMmkv.getBoolean.mockReturnValue(undefined)
+		it("migrates a legacy key by copy-forward to the AFU name and keeps the legacy item", async () => {
+			const legacyKey = "b".repeat(64)
+			const keychain = seedKeychain({ encryptionKey: legacyKey })
 
 			const store = createSecureStore()
 
 			await store.init()
 
-			expect(setItemAsync).toHaveBeenCalledWith("encryptionKey", existingKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
-			expect(mockMmkv.set).toHaveBeenCalledWith("encryptionKeyAfuMigrated", true)
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKeyAfu", legacyKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+			// The legacy item is never rewritten or deleted (stricter class — harmless; keeps
+			// the migration crash-safe at every instruction and downgrade-safe).
+			expect(setItemAsync).not.toHaveBeenCalledWith("encryptionKey", expect.anything(), expect.anything())
+			expect(keychain.get("encryptionKey")).toBe(legacyKey)
+			expect(keychain.get("encryptionKeyAfu")).toBe(legacyKey)
 		})
 
-		it("does NOT rewrite when the migration flag is already set", async () => {
-			getItemAsync.mockResolvedValue("c".repeat(64))
-			mockMmkv.getBoolean.mockReturnValue(true)
+		it("skips migration when the AFU item already exists", async () => {
+			seedKeychain({ encryptionKey: "c".repeat(64), encryptionKeyAfu: "c".repeat(64) })
 
 			const store = createSecureStore()
 
@@ -246,18 +261,29 @@ describe("SecureStore", () => {
 			expect(setItemAsync).not.toHaveBeenCalled()
 		})
 
-		it("a failed migration rewrite never breaks auth — key still usable, flag unset for retry next boot", async () => {
-			const existingKey = "d".repeat(64)
+		it("a failed migration write never breaks auth — legacy key still used, retried next boot", async () => {
+			const legacyKey = "d".repeat(64)
 
-			getItemAsync.mockResolvedValue(existingKey)
-			mockMmkv.getBoolean.mockReturnValue(undefined)
+			getItemAsync.mockImplementation(async (k: string) => (k === "encryptionKey" ? legacyKey : null))
 			setItemAsync.mockRejectedValue(new Error("keychain busy"))
 
 			const store = createSecureStore()
 
 			await expect(store.init()).resolves.not.toThrow()
+		})
 
-			expect(mockMmkv.set).not.toHaveBeenCalledWith("encryptionKeyAfuMigrated", true)
+		it("a copy that fails read-back verification is treated as failed (legacy key still used)", async () => {
+			const legacyKey = "e".repeat(64)
+
+			// The write "succeeds" but the stored value comes back wrong — must not be trusted.
+			getItemAsync.mockImplementation(async (k: string) => (k === "encryptionKey" ? legacyKey : k === "encryptionKeyAfu" ? null : null))
+			setItemAsync.mockResolvedValue(undefined)
+
+			const store = createSecureStore()
+
+			await expect(store.init()).resolves.not.toThrow()
+
+			expect(setItemAsync).toHaveBeenCalledWith("encryptionKeyAfu", legacyKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 		})
 
 		it("reuses cached key on subsequent calls", async () => {
