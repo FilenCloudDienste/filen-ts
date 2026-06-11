@@ -111,6 +111,25 @@ class Auth {
 		}
 	}
 
+	/**
+	 * Quiesce the SDK clients right before an intentional JS reload (login flow's
+	 * reloadAppAsync). uniffi handles have no GC — the reload kills the JS proxies but
+	 * leaks the Rust Arcs (reqwest pool, rate limiter, tokio resources) unless they are
+	 * destroyed first; the post-reload boot constructs fresh clients from the persisted
+	 * config. clientsReady is re-armed so any straggler getSdkClients() in the doomed
+	 * pre-reload window parks quietly instead of throwing. Mirrors doLogout's teardown.
+	 */
+	public prepareForReload(): void {
+		this.destroyClient(this.authedClient)
+		this.destroyClient(this.unauthedClient)
+
+		this.authedClient = null
+		this.unauthedClient = null
+		this.lastStringifiedClient = null
+
+		this.armClientsReady()
+	}
+
 	public async setSdkClients(stringifiedClient: StringifiedClient): Promise<{
 		authedClient: JsClientInterface
 		unauthedClient: UnauthJsClientInterface
