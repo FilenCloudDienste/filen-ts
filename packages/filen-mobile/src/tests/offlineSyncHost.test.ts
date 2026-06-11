@@ -19,6 +19,7 @@ vi.mock("@/lib/alerts", () => ({ default: mockAlerts }))
 vi.mock("@/hooks/useIsAppActive", () => ({ default: () => appActive.value }))
 
 import OfflineSync from "@/features/offline/sync"
+import { AppState } from "react-native"
 import { render } from "@testing-library/react"
 import React from "react"
 
@@ -42,6 +43,27 @@ describe("OfflineSync host", () => {
 
 		expect(mockOffline.updateIndex).toHaveBeenCalledOnce()
 		expect(mockOfflineSync.sync).toHaveBeenCalledOnce()
+	})
+
+	it("does NOT fire the mount sync when the tree mounts in background (iOS cold BGTask launch)", async () => {
+		// Audit B2a (2026-06-11): an iOS cold background launch mounts the layout with
+		// AppState "background" — the unbudgeted mount sync must not race the budgeted
+		// background pass for offlineSync's inFlight coalescing.
+		const appStateMock = AppState as unknown as { currentState: string }
+		const previous = appStateMock.currentState
+
+		appStateMock.currentState = "background"
+		appActive.value = false
+
+		try {
+			render(React.createElement(OfflineSync))
+			await flushMicrotasks()
+
+			expect(mockOffline.updateIndex).not.toHaveBeenCalled()
+			expect(mockOfflineSync.sync).not.toHaveBeenCalled()
+		} finally {
+			appStateMock.currentState = previous
+		}
 	})
 
 	it("surfaces an initial-sync failure via alerts.error", async () => {
