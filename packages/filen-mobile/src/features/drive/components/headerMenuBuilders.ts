@@ -15,6 +15,7 @@ import transfers from "@/features/transfers/transfers"
 import { newTmpDir } from "@/lib/tmp"
 import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import offline from "@/features/offline/offline"
+import { appendOfflineSyncErrors } from "@/features/offline/store/useOffline.store"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { runBulk } from "@/lib/bulkOps"
 import { type DriveSelectionFlags } from "@/features/drive/driveSelectors"
@@ -417,7 +418,11 @@ export function buildBulkActionMenu({
 						if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
 							await offline.storeFile({ file: item, parent })
 						} else {
-							await offline.storeDirectory({ directory: item, parent })
+							// Degraded warnings mean the store committed — surface them via the offline
+							// error badge/list (sync passes won't re-warn an already-recorded observation).
+							const storeErrors = await offline.storeDirectory({ directory: item, parent })
+
+							appendOfflineSyncErrors(storeErrors.filter(error => error.degraded === true))
 						}
 					}
 				})

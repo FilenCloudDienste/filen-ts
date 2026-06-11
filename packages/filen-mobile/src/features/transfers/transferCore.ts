@@ -16,7 +16,8 @@ import {
 	AnyFile,
 	type SharedFile,
 	type DownloadError,
-	type UploadError
+	type UploadError,
+	type FilenSdkErrorInterface
 } from "@filen/sdk-rs"
 import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/features/transfers/store/useTransfers.store"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
@@ -860,6 +861,7 @@ export async function downloadCore(
 			})[]
 			directories: DirWithPath[]
 			errors: DownloadError[]
+			scanErrors: FilenSdkErrorInterface[]
 	  }
 	| {
 			files: (Omit<FileWithPath, "file"> & {
@@ -961,10 +963,15 @@ export async function downloadCore(
 				files: (Omit<FileWithPath, "file"> & { file: File | SharedFile })[]
 				directories: DirWithPath[]
 				errors: DownloadError[]
+				// SDK-side tree-scan errors. A failed scan silently DROPS the affected subtree from
+				// the download set while the call still resolves Ok — callers that verify
+				// completeness (the offline layer) need these to tell "scan-degraded" from "done".
+				scanErrors: FilenSdkErrorInterface[]
 			} = {
 				files: [],
 				directories: [],
-				errors: []
+				errors: [],
+				scanErrors: []
 			}
 
 			const targetDir: AnyDirWithContext = (() => {
@@ -1082,6 +1089,8 @@ export async function downloadCore(
 						)
 					},
 					onScanErrors(errors) {
+						transferred.scanErrors.push(...errors)
+
 						useTransfersStore.getState().setTransfers(prev =>
 							prev.map(t =>
 								t.id === id && t.type === "downloadDirectory"

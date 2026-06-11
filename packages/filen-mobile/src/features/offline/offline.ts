@@ -51,6 +51,13 @@ export type Uuid = string
 export type FileOrDirectoryOfflineMeta = {
 	item: DriveItem
 	parent: OfflineParent
+	// Observed on-disk byte size, recorded ONLY when it diverged from the item's meta size at
+	// verification time. Meta sizes are client-supplied at upload and untrustworthy (same class
+	// as lastModified) — remote content can genuinely be shorter than its claimed size (e.g. a
+	// crashed upload). The SDK downloads whatever chunks exist and reports success; this records
+	// what it actually delivered so heals compare against delivered truth instead of
+	// re-downloading (and re-failing) such files on every pass forever.
+	diskSize?: number
 }
 
 export type DirectoryOfflineMeta = FileOrDirectoryOfflineMeta & {
@@ -61,6 +68,9 @@ export type DirectoryOfflineMeta = FileOrDirectoryOfflineMeta & {
 			// Raw root-relative listing path with leading "/" — original decrypted names,
 			// NEVER decoded or encoded. Disk access is Paths.join(treeDir.uri, path).
 			path: string
+			// Same contract as FileOrDirectoryOfflineMeta.diskSize — present only for files
+			// whose verified on-disk size diverges from their meta size.
+			diskSize?: number
 		}
 	>
 }
@@ -290,6 +300,38 @@ export class Offline {
 		this.directoryMetaCache.set(topLevelUuid, readResult.data)
 
 		return readResult.data
+	}
+
+	// Reads a standalone files/{uuid}/{uuid}.filenmeta — null when missing, empty, or undecodable.
+	// Callers treat null as "no usable meta"; broken-entry handling lives in listBrokenStandaloneUuids.
+	private async readStandaloneMeta(uuid: string): Promise<FileOrDirectoryOfflineMeta | null> {
+		const metaFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, uuid, `${uuid}.filenmeta`))
+
+		if (!metaFile.exists || metaFile.size === 0) {
+			return null
+		}
+
+		const readResult = await run(async () => {
+			const meta: FileOrDirectoryOfflineMeta = deserialize(await metaFile.text())
+
+			if (Object.keys(meta).length === 0) {
+				throw new Error("Standalone meta file is empty")
+			}
+
+			return meta
+		})
+
+		return readResult.success ? readResult.data : null
+	}
+
+	// Recorded delivered size for a stored standalone file (see FileOrDirectoryOfflineMeta.diskSize) —
+	// null when the entry carries no record (no meta, or the size matched at verification time). The
+	// sync heal consults this ONLY for files whose on-disk size already failed the meta-size compare,
+	// so the extra meta read never lands on the healthy-file hot path.
+	public async getStandaloneRecordedDiskSize(uuid: string): Promise<number | null> {
+		const meta = await this.readStandaloneMeta(uuid)
+
+		return meta?.diskSize ?? null
 	}
 
 	/**
@@ -893,18 +935,29 @@ export class Offline {
 				}
 
 				// The data-file rename is best-effort on whatever bytes exist; the meta rewrite
-				// below is the actual convergence contract and runs either way.
-				if (dataFile && dataFile.name !== newName) {
+				// below is the actual convergence contract and runs either way. NFC compare — iOS
+				// lists names in NFD, and a raw compare would re-"rename" an umlaut-named file on
+				// every pass.
+				if (dataFile && dataFile.name.normalize("NFC") !== newName.normalize("NFC")) {
 					dataFile.rename(newName)
 				}
 
 				const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, `${item.data.uuid}.filenmeta`))
 
+				// A rename never changes bytes (same uuid ⟹ same content) — carry the delivered-size
+				// record so a meta-size-drifted file doesn't lose its blessing on rename.
+				const priorDiskSize = (await this.readStandaloneMeta(item.data.uuid))?.diskSize
+
 				atomicWrite(
 					metaFile,
 					serialize({
 						item,
-						parent
+						parent,
+						...(priorDiskSize !== undefined
+							? {
+									diskSize: priorDiskSize
+								}
+							: {})
 					} satisfies FileOrDirectoryOfflineMeta)
 				)
 
@@ -1266,12 +1319,17 @@ export class Offline {
 					})
 				} else {
 					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, entry.path))
+					// Compare against the recorded delivered size when the entry carries one — for
+					// meta-size-drifted remotes the meta size can NEVER match disk, and comparing
+					// against it would re-mark the entry missing (and re-download it) every
+					// thorough pass forever.
+					const expectedSize = entry.diskSize ?? Number(entry.item.data.decryptedMeta?.size ?? -1)
 
 					local.push({
 						uuid,
 						path: entry.path,
 						isDirectory: false,
-						existsOnDisk: dataFile.exists && dataFile.size === Number(entry.item.data.decryptedMeta?.size ?? -1)
+						existsOnDisk: dataFile.exists && dataFile.size === expectedSize
 					})
 				}
 			}
@@ -1487,6 +1545,25 @@ export class Offline {
 					return finishAborted()
 				}
 
+				// SDK-side tree-scan errors: the downloader's own remote scan failed somewhere, so
+				// part of the tree was silently absent from its download set while the call still
+				// resolved Ok. The dropped entries surface as fatal verify-missing errors below —
+				// this degraded marker only records WHY, so the user sees the cause instead of a
+				// bare "missing on disk".
+				if ("scanErrors" in transferred && transferred.scanErrors.length > 0) {
+					pushError(
+						makeSyncError({
+							itemUuid: topLevelUuid,
+							topLevelUuid,
+							name: directoryName,
+							itemType: directory.type,
+							kind: "listing",
+							degraded: true,
+							message: `Download tree scan reported ${transferred.scanErrors.length} error(s) — entries it dropped are reported missing below`
+						})
+					)
+				}
+
 				if ("errors" in transferred && transferred.errors.length > 0) {
 					for (const downloadError of transferred.errors) {
 						// Resolve the failed entry by matching the error's absolute local path against the
@@ -1518,12 +1595,23 @@ export class Offline {
 				}
 			}
 
-			// Verify-after-download — every remote entry must be present on disk (files at their
-			// exact size) before anything advances. Runs after EVERY download regardless of pass
-			// mode (it is what makes a committed meta trustworthy at write time) and on
-			// disk-verified passes even without one. An index-only pass that downloaded nothing
-			// changed no bytes — it skips these stats entirely (external damage is detected on
-			// thorough passes or at file-access time, the design's accepted trade).
+			// Verify-after-download — every remote entry must be PRESENT on disk before anything
+			// advances. Runs after EVERY download regardless of pass mode (it is what makes a
+			// committed meta trustworthy at write time) and on disk-verified passes even without
+			// one. An index-only pass that downloaded nothing changed no bytes — it skips these
+			// stats entirely (external damage is detected on thorough passes or at file-access
+			// time, the design's accepted trade).
+			//
+			// Absence is FATAL (blocks the commit). A size that diverges from the item's meta size
+			// is NOT — meta sizes are client-supplied and remote content can genuinely be shorter
+			// than claimed (crashed uploads); the SDK downloads every chunk that exists and reports
+			// success. Treating the divergence as fatal would block the whole tree forever (the SDK
+			// can never produce different bytes for the same uuid). Instead the delivered size is
+			// recorded on the committed entry (so heals stop re-downloading it) and a DEGRADED
+			// warning surfaces the likely-corrupt remote once per fresh observation.
+			const verifiedFileUuids = new Set<string>()
+			const observedSizeMismatches = new Map<string, number>()
+
 			if (downloadRan || thoroughLocalView) {
 				for (const [uuid, remoteEntry] of remote) {
 					// Deferred movers (and entries riding inside them) knowingly sit at their CURRENT
@@ -1548,9 +1636,8 @@ export class Offline {
 					}
 
 					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, expectedPath))
-					const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
 
-					if (!dataFile.exists || dataFile.size !== expectedSize) {
+					if (!dataFile.exists) {
 						pushError(
 							makeSyncError({
 								itemUuid: uuid,
@@ -1558,9 +1645,37 @@ export class Offline {
 								name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
 								itemType: remoteEntry.item.type,
 								kind: "verify",
-								message: `Missing or incomplete on disk after sync: ${expectedPath}`
+								message: `Missing on disk after sync: ${expectedPath}`
 							})
 						)
+
+						continue
+					}
+
+					const observedSize = dataFile.size ?? 0
+					const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
+
+					verifiedFileUuids.add(uuid)
+
+					if (observedSize !== expectedSize) {
+						observedSizeMismatches.set(uuid, observedSize)
+
+						// Warn only when this divergence is a fresh observation — an entry already
+						// committed at this exact delivered size has warned before, and re-nagging on
+						// every manual sync of an otherwise-clean tree helps nobody.
+						if (existingEntries[uuid]?.diskSize !== observedSize) {
+							pushError(
+								makeSyncError({
+									itemUuid: uuid,
+									topLevelUuid,
+									name: remoteEntry.item.data.decryptedMeta?.name ?? uuid,
+									itemType: remoteEntry.item.type,
+									kind: "verify",
+									degraded: true,
+									message: `Stored with a size mismatch: ${expectedPath} holds ${observedSize} bytes but its metadata claims ${expectedSize} — the remote file content is likely incomplete`
+								})
+							)
+						}
 					}
 				}
 			}
@@ -1582,13 +1697,24 @@ export class Offline {
 				{
 					item: DriveItem
 					path: string
+					diskSize?: number
 				}
 			>()
 
 			for (const [uuid, remoteEntry] of remote) {
+				// Delivered-size record: a freshly verified mismatch records its observed size; an
+				// entry this pass did NOT stat (index-only commit) carries its existing record; a
+				// verified entry whose size matches its meta drops any stale record.
+				const diskSize = verifiedFileUuids.has(uuid) ? observedSizeMismatches.get(uuid) : existingEntries[uuid]?.diskSize
+
 				committedEntries.set(uuid, {
 					item: remoteEntry.item,
-					path: expectedDiskPath(uuid, remoteEntry.path)
+					path: expectedDiskPath(uuid, remoteEntry.path),
+					...(diskSize !== undefined
+						? {
+								diskSize
+							}
+						: {})
 				})
 			}
 
@@ -1635,22 +1761,29 @@ export class Offline {
 					}
 
 					// Verified union: re-stat the final path so the committed meta only ever claims
-					// bytes that are actually present.
+					// bytes that are actually present. Size compares against the recorded delivered
+					// size when present (same drift rule as the local view above).
 					if (isDirectoryItem(entry.item)) {
 						if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, path)).exists) {
 							continue
 						}
 					} else {
 						const preservedFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, path))
+						const expectedSize = entry.diskSize ?? Number(entry.item.data.decryptedMeta?.size ?? -1)
 
-						if (!preservedFile.exists || preservedFile.size !== Number(entry.item.data.decryptedMeta?.size ?? -1)) {
+						if (!preservedFile.exists || preservedFile.size !== expectedSize) {
 							continue
 						}
 					}
 
 					committedEntries.set(uuid, {
 						item: entry.item,
-						path
+						path,
+						...(entry.diskSize !== undefined
+							? {
+									diskSize: entry.diskSize
+								}
+							: {})
 					})
 				}
 			}
@@ -1715,6 +1848,13 @@ export class Offline {
 			// cleans crashed .filendl partials). The keep-set is built from committedEntries, so a
 			// degraded pass's preserved entries (and their ancestors) are sweep-protected. Never
 			// runs on true no-op passes.
+			//
+			// Membership is compared in NFC: iOS Foundation reports directory listings with
+			// DECOMPOSED (NFD) Unicode names while listing/meta paths carry whatever form was
+			// uploaded (usually NFC) — raw-string comparison made the sweep treat every file under
+			// an umlaut-named directory as an orphan and delete the verified, just-committed
+			// subtree. Disk operations still use the raw entry handles; only the comparison keys
+			// are normalized.
 			if (downloadRan || metaWasUnreadable) {
 				const claimed = new Set<string>()
 
@@ -1722,7 +1862,7 @@ export class Offline {
 					let current = committedEntry.path
 
 					while (current !== "" && current !== "/") {
-						claimed.add(current)
+						claimed.add(current.normalize("NFC"))
 
 						const lastSlash = current.lastIndexOf("/")
 
@@ -1740,7 +1880,7 @@ export class Offline {
 
 						const relPath = `${relPrefix}/${entry.name}`
 
-						if (claimed.has(relPath)) {
+						if (claimed.has(relPath.normalize("NFC"))) {
 							if (entry instanceof FileSystem.Directory) {
 								sweep(entry, relPath)
 							}
@@ -1865,11 +2005,22 @@ export class Offline {
 					return false
 				}
 
+				// Record the delivered size when it diverges from the (client-supplied, possibly
+				// wrong) meta size, so thorough heals bless these bytes instead of re-downloading
+				// the same shortfall forever.
+				const observedSize = dataFile.exists ? (dataFile.size ?? 0) : null
+				const expectedSize = Number(file.data.decryptedMeta?.size ?? -1)
+
 				atomicWrite(
 					metaFile,
 					serialize({
 						item: file,
-						parent
+						parent,
+						...(observedSize !== null && observedSize !== expectedSize
+							? {
+									diskSize: observedSize
+								}
+							: {})
 					} satisfies FileOrDirectoryOfflineMeta)
 				)
 
@@ -1969,9 +2120,11 @@ export class Offline {
 			let deletedStaleData = false
 
 			// Drop stale data files from an older name (the heal may follow a remote rename) — never
-			// the meta, never the current data file (the download overwrites it in place).
+			// the meta, never the current data file (the download overwrites it in place). Names
+			// compare in NFC: iOS Foundation lists names in NFD, and a raw compare would classify
+			// the CURRENT umlaut-named data file as stale, deleting it on every heal.
 			for (const entry of standaloneDir.list()) {
-				if (entry.name === metaFileName || entry.name === dataFileName) {
+				if (entry.name.normalize("NFC") === metaFileName.normalize("NFC") || entry.name.normalize("NFC") === dataFileName.normalize("NFC")) {
 					continue
 				}
 
@@ -2004,11 +2157,21 @@ export class Offline {
 
 			const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, metaFileName))
 
+			// Same delivered-size record as storeFile — without it a meta-size-drifted remote
+			// would be re-healed (re-downloaded at the same shortfall) on every thorough pass.
+			const observedSize = dataFile.exists ? (dataFile.size ?? 0) : null
+			const expectedSize = Number(item.data.decryptedMeta.size ?? -1)
+
 			atomicWrite(
 				metaFile,
 				serialize({
 					item,
-					parent
+					parent,
+					...(observedSize !== null && observedSize !== expectedSize
+						? {
+								diskSize: observedSize
+							}
+						: {})
 				} satisfies FileOrDirectoryOfflineMeta)
 			)
 
@@ -2036,9 +2199,9 @@ export class Offline {
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		signal?: AbortSignal
-	}): Promise<void> {
+	}): Promise<OfflineSyncError[]> {
 		if (await this.isItemStored(directory)) {
-			return
+			return []
 		}
 
 		// Skip if this dir is already nested inside another stored directory (but not if it IS a top-level entry).
@@ -2046,7 +2209,7 @@ export class Offline {
 		const topLevelUuid = uuidToTopLevel.get(directory.data.uuid)
 
 		if (topLevelUuid && topLevelUuid !== directory.data.uuid) {
-			return
+			return []
 		}
 
 		const errors = await this.reconcileTree({
@@ -2062,12 +2225,14 @@ export class Offline {
 		// committed meta already existed at pass start (it deletes the partial tree and throws
 		// otherwise). Surface such failures to the caller WITHOUT deleting the committed tree.
 		// Degraded-only error sets mean the pass COMMITTED (verified union) — the store succeeded;
-		// the next sync pass keeps surfacing the listing degradation through its own reconciles.
+		// they are RETURNED so the caller can surface them (sync passes re-surface their own).
 		const fatal = errors.filter(error => error.degraded !== true)
 
 		if (fatal.length > 0) {
 			throw new Error(fatal[0]?.message ?? "Storing directory offline failed")
 		}
+
+		return errors
 	}
 
 	// Converts a directory DriveItem at the given path into an AnyDirWithContext for SDK calls.

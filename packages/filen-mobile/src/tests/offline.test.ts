@@ -459,6 +459,16 @@ function writeDirectoryMeta(uuid: string, meta: DirectoryOfflineMeta): void {
 	fs.set(metaUri, new Uint8Array(new TextEncoder().encode(serialize(meta))))
 }
 
+function readDirectoryMetaFromDisk(uuid: string): DirectoryOfflineMeta | null {
+	const raw = fs.get(`${DIRECTORIES_DIR_URI}/${uuid}/${uuid}.filenmeta`)
+
+	if (!(raw instanceof Uint8Array)) {
+		return null
+	}
+
+	return deserialize(new TextDecoder().decode(raw)) as DirectoryOfflineMeta
+}
+
 async function createOffline(): Promise<OfflineInstance> {
 	const mod = await import("@/features/offline/offline")
 
@@ -1573,7 +1583,11 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await expect(offline.storeDirectory({ directory: dirItem, parent })).resolves.toBeUndefined()
+			// Resolves (no throw) and RETURNS the degraded markers so the caller can surface them.
+			const storeErrors = await offline.storeDirectory({ directory: dirItem, parent })
+
+			expect(storeErrors).toHaveLength(1)
+			expect(storeErrors[0]?.degraded).toBe(true)
 
 			const metaUri = `${dataDirectoryUri}/${uuid}.filenmeta`
 
@@ -1700,9 +1714,85 @@ describe("Offline", () => {
 
 			const offline = await createOffline()
 
-			await expect(offline.storeDirectory({ directory: dirItem, parent })).rejects.toThrow("Missing or incomplete on disk")
+			await expect(offline.storeDirectory({ directory: dirItem, parent })).rejects.toThrow("Missing on disk after sync")
 
 			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}`)).toBe(false)
+		})
+
+		// Meta sizes are client-supplied and can drift from the actual remote content (e.g. a
+		// crashed upload left fewer chunks than the meta claims). The SDK downloads what exists and
+		// reports success — such files must COMMIT (recording the delivered size) with a degraded
+		// warning instead of failing the whole tree forever.
+		it("commits a size-drifted file with a recorded diskSize and a degraded warning (initial store)", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const dirItem = makeDirItem(uuid, "Drifted")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			// Meta claims 10 bytes; the SDK delivers 4 (everything the server has).
+			mockListing({
+				files: [makeListingFile(fileUuid, "short.exe", "short.exe", 10n)]
+			})
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }): Promise<any> => {
+				fs.set(`${(destination as { uri: string }).uri}/short.exe`, new Uint8Array([1, 2, 3, 4]))
+
+				return {
+					files: [],
+					directories: [],
+					errors: []
+				}
+			})
+
+			const offline = await createOffline()
+			const errors = await offline.storeDirectory({ directory: dirItem, parent })
+
+			// Store succeeded — degraded warning only, no throw, tree committed.
+			expect(errors).toHaveLength(1)
+			expect(errors[0]?.degraded).toBe(true)
+			expect(errors[0]?.message).toContain("size mismatch")
+
+			const meta = readDirectoryMetaFromDisk(uuid)
+
+			expect(meta?.entries?.[fileUuid]?.diskSize).toBe(4)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${uuid}/short.exe`)).toBe(true)
+		})
+
+		// The recorded delivered size must BLESS the bytes on later thorough passes: no re-download,
+		// no repeated warning — the loop the record exists to break.
+		it("does not re-download or re-warn a recorded size-drifted file on a thorough reconcile", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			const dirItem = makeDirItem(uuid, "Drifted")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+			const fileItem = makeFileItemWithSize(fileUuid, "short.exe", 10n)
+
+			writeDirectoryMeta(uuid, {
+				item: dirItem,
+				parent,
+				entries: {
+					[fileUuid]: {
+						item: fileItem,
+						path: "/short.exe",
+						diskSize: 4
+					}
+				}
+			})
+			fs.set(`${DIRECTORIES_DIR_URI}/${uuid}/short.exe`, new Uint8Array([1, 2, 3, 4]))
+
+			mockListing({
+				files: [makeListingFile(fileUuid, "short.exe", "short.exe", 10n)]
+			})
+
+			const offline = await createOffline()
+			const errors = await offline.reconcileTree({ directory: dirItem, parent, thorough: true })
+
+			expect(errors).toHaveLength(0)
+			expect(transfers.download).not.toHaveBeenCalled()
+
+			const meta = readDirectoryMetaFromDisk(uuid)
+
+			expect(meta?.entries?.[fileUuid]?.diskSize).toBe(4)
 		})
 
 		// Regression: two concurrent storeDirectory calls for the same uuid both pass the read-only

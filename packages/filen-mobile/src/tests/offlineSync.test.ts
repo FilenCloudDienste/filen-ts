@@ -25,6 +25,7 @@ vi.mock("@/features/offline/offline", () => ({
 		removeItem: vi.fn(),
 		storeFile: vi.fn(),
 		getLocalFile: vi.fn(),
+		getStandaloneRecordedDiskSize: vi.fn(),
 		removeStandaloneDirectory: vi.fn(),
 		removeTreeDirectory: vi.fn()
 	}
@@ -455,6 +456,7 @@ function primeDefaults(): MockClient {
 	vi.mocked(offline.removeItem).mockResolvedValue(undefined)
 	vi.mocked(offline.storeFile).mockResolvedValue(true)
 	vi.mocked(offline.getLocalFile).mockResolvedValue(null)
+	vi.mocked(offline.getStandaloneRecordedDiskSize).mockResolvedValue(null)
 	vi.mocked(offline.removeStandaloneDirectory).mockResolvedValue(undefined)
 	vi.mocked(offline.removeTreeDirectory).mockResolvedValue(undefined)
 	vi.mocked(auth.getSdkClients).mockImplementation(
@@ -977,6 +979,35 @@ describe("offlineSync — standalone files", () => {
 		await runManualPass()
 
 		expect(vi.mocked(offline.redownloadStandaloneFile)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
+	})
+
+	// Meta sizes are client-supplied and can drift from the actual remote content. Bytes matching
+	// the RECORDED delivered size (FileOrDirectoryOfflineMeta.diskSize) are blessed: re-downloading
+	// can only reproduce the same shortfall, so the heal must NOT fire — that loop is exactly what
+	// the record exists to break.
+	it("9b2. meta-size mismatch matching the recorded delivered size is blessed → no redownload", async () => {
+		const normalParent = makeNormalParent("parent-1")
+
+		givenFiles([
+			{
+				item: makeFileItem("file-1", "doc.txt"),
+				parent: normalParent
+			}
+		])
+		client.listDir.mockResolvedValue({
+			dirs: [],
+			files: [makeRemoteFile("file-1", "doc.txt", uuidParent("parent-1"), 100n)]
+		})
+		vi.mocked(offline.getLocalFile).mockResolvedValue({
+			size: 42
+		} as never)
+		vi.mocked(offline.getStandaloneRecordedDiskSize).mockResolvedValue(42)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.getStandaloneRecordedDiskSize)).toHaveBeenCalledWith("file-1")
+		expect(vi.mocked(offline.redownloadStandaloneFile)).not.toHaveBeenCalled()
 		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
 	})
 

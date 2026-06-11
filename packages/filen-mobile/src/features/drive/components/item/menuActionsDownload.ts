@@ -13,6 +13,7 @@ import { newTmpDir } from "@/lib/tmp"
 import * as MediaLibrary from "expo-media-library/legacy"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import offline from "@/features/offline/offline"
+import { appendOfflineSyncErrors } from "@/features/offline/store/useOffline.store"
 import { resolveMimeType } from "@/lib/utils"
 import { shareTmpFile } from "@/lib/share"
 import cache from "@/lib/cache"
@@ -105,6 +106,12 @@ export function buildDownloadSubButtons({
 
 						return
 					}
+
+					// Degraded warnings (e.g. a remote file whose content is shorter than its
+					// metadata claims) mean the store COMMITTED — surface them via the offline
+					// error badge/list, since sync passes won't re-warn for an already-recorded
+					// observation.
+					appendOfflineSyncErrors(result.data.filter(error => error.degraded === true))
 				}
 			}
 		})

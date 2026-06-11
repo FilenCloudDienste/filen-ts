@@ -811,7 +811,17 @@ export class OfflineSync {
 				const localFile = await offline.getLocalFile(item)
 				const expectedSize = Number(currentItem.data.decryptedMeta?.size ?? -1)
 
-				if (localFile === null || localFile.size !== expectedSize) {
+				// A meta-size mismatch alone is not damage: meta sizes are client-supplied and the
+				// remote content can genuinely be shorter than claimed. Bytes matching the RECORDED
+				// delivered size (written at store/heal time) are blessed — re-downloading them can
+				// only ever produce the same shortfall again, forever. The record read only runs on
+				// the already-mismatched path, never for healthy files.
+				const needsHeal =
+					localFile === null ||
+					(localFile.size !== expectedSize &&
+						localFile.size !== (await offline.getStandaloneRecordedDiskSize(item.data.uuid)))
+
+				if (needsHeal) {
 					const heal = await run(async () =>
 						offline.redownloadStandaloneFile({
 							item: currentItem,
