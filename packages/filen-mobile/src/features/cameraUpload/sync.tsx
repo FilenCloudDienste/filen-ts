@@ -64,6 +64,14 @@ const CameraUploadSync = () => {
 		lastShouldRegisterBackground = shouldRegisterBackground
 
 		updateBackgroundTask()
+
+		return () => {
+			// Cancel the pending debounced register/unregister on unmount (and between
+			// re-runs): a register left pending across logout would fire AFTER
+			// auth.logout()'s unregisterBackgroundSync and re-register the task for a
+			// logged-out app.
+			updateBackgroundTask.cancel()
+		}
 	}, [shouldRegisterBackground])
 
 	return null
