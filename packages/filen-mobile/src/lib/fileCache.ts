@@ -1,6 +1,8 @@
 import * as FileSystem from "expo-file-system"
+import { AppState } from "react-native"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import { Semaphore, run } from "@filen/utils"
+import { debounce } from "es-toolkit/function"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
 import { atomicWrite } from "@/lib/fsAtomic"
@@ -33,6 +35,7 @@ export type Metadata = (
 export const VERSION = FILE_CACHE_VERSION
 
 const DEFAULT_GC_AGE_MS = 24 * 60 * 60 * 1000
+const GC_DEBOUNCE_MS = 30 * 1000
 export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
 
 /**
@@ -95,8 +98,33 @@ export class FileCache {
 		this.directoryEnsured = true
 	}
 
+	// Debounced gc after fresh downloads + immediate gc on app-background:
+	// reclamation runs where growth happens instead of competing with startup.
+	// Log-only on failure — gc hygiene isn't user-actionable.
+	private readonly scheduleGc = debounce(
+		() => {
+			this.gc().catch(err => {
+				console.error("[FileCache] gc failed", err)
+			})
+		},
+		GC_DEBOUNCE_MS,
+		{
+			edges: ["trailing"]
+		}
+	)
+
 	public constructor() {
 		this.ensureDirectory()
+
+		AppState.addEventListener("change", nextAppState => {
+			if (nextAppState === "background") {
+				this.scheduleGc.cancel()
+
+				this.gc().catch(err => {
+					console.error("[FileCache] gc failed", err)
+				})
+			}
+		})
 	}
 
 	private getMutexForKey(key: string): Semaphore {
@@ -329,6 +357,8 @@ export class FileCache {
 						} satisfies Metadata)
 					)
 				}
+
+				this.scheduleGc()
 
 				return file
 			} catch (e) {

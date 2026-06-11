@@ -18,6 +18,11 @@ import offline from "@/features/offline/offline"
 import useCacheSizesQuery, { invalidateCacheSizesQuery } from "@/features/settings/queries/useCacheSizes.query"
 import { useTranslation } from "react-i18next"
 import i18n from "@/lib/i18n"
+import { sweepTmpDir } from "@/lib/tmp"
+import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
+import useTransfersStore from "@/features/transfers/store/useTransfers.store"
+import useOfflineStore from "@/features/offline/store/useOffline.store"
+import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useSecureStore } from "@/lib/secureStore"
 import {
 	TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
@@ -25,6 +30,18 @@ import {
 } from "@/features/transfers/foregroundService"
 
 const SIZE_LOADING_PLACEHOLDER = "…"
+
+// The sweeps delete live .filendl partials and staging files if allowed to race a
+// download/sync — gate on every store that can put one in flight. fileCache preview
+// fills don't surface here; they are seconds-long and re-derivable, an accepted
+// residual of the store-gated design.
+function transfersOrSyncsActive(): boolean {
+	return (
+		useTransfersStore.getState().transfers.length > 0 ||
+		useOfflineStore.getState().syncing ||
+		useCameraUploadStore.getState().syncing
+	)
+}
 
 function formatSize(value: number | undefined): string {
 	if (typeof value !== "number") {
@@ -245,6 +262,39 @@ function Advanced() {
 											}
 										},
 										successMessage: t("all_disk_caches_cleared")
+									})
+								}
+							}
+						]}
+					/>
+					<Group
+						className="bg-background-tertiary"
+						buttons={[
+							{
+								icon: "sparkles-outline",
+								title: t("clean_temporary_files"),
+								subTitle: t("clean_temporary_files_description"),
+								onPress: () => {
+									if (transfersOrSyncsActive()) {
+										alerts.normal(t("clean_temporary_files_unavailable"))
+
+										return
+									}
+
+									confirmAndRun({
+										title: t("clean_temporary_files"),
+										message: t("clean_temporary_files_confirmation"),
+										action: async () => {
+											// Re-check after the confirm prompt — a transfer or sync may
+											// have started while the dialog was open.
+											if (transfersOrSyncsActive()) {
+												throw new Error(i18n.t("clean_temporary_files_unavailable"))
+											}
+
+											sweepTmpDir()
+											sweepStrayDownloadFiles()
+										},
+										successMessage: t("temporary_files_cleaned")
 									})
 								}
 							}
