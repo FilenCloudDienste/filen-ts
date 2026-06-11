@@ -724,6 +724,8 @@
 	"sub_directory_created": "子目录已创建",
 	"submit": "提交",
 	"sync_now": "立即同步",
+	"sync_offline_in_background": "后台同步",
+	"sync_offline_in_background_description": "当应用在后台运行时定期同步您的离线文件。大型目录将被跳过，并在您打开应用时同步，以节省电量和流量。",
 	"sync_offline_on_wifi_only": "仅在 Wi-Fi 下同步",
 	"sync_offline_on_wifi_only_description": "仅在连接 Wi-Fi 时同步您的离线文件。",
 	"syncing": "正在同步…",

@@ -724,6 +724,8 @@
 	"sub_directory_created": "하위 디렉터리 생성됨",
 	"submit": "제출",
 	"sync_now": "지금 동기화",
+	"sync_offline_in_background": "백그라운드에서 동기화",
+	"sync_offline_in_background_description": "앱이 백그라운드에 있는 동안 오프라인 파일을 주기적으로 동기화합니다. 대용량 디렉터리는 배터리와 데이터를 절약하기 위해 건너뛰며 앱을 열 때 동기화됩니다.",
 	"sync_offline_on_wifi_only": "Wi-Fi에서만 동기화",
 	"sync_offline_on_wifi_only_description": "Wi-Fi에 연결되어 있을 때만 오프라인 파일을 동기화합니다.",
 	"syncing": "동기화 중…",

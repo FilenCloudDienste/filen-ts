@@ -724,6 +724,8 @@
 	"sub_directory_created": "Sous-répertoire créé",
 	"submit": "Valider",
 	"sync_now": "Synchroniser maintenant",
+	"sync_offline_in_background": "Synchroniser en arrière-plan",
+	"sync_offline_in_background_description": "Synchronise régulièrement vos fichiers hors ligne lorsque l'application est en arrière-plan. Les grands répertoires sont ignorés et synchronisés à l'ouverture de l'application, pour économiser la batterie et les données.",
 	"sync_offline_on_wifi_only": "Synchroniser en Wi-Fi uniquement",
 	"sync_offline_on_wifi_only_description": "Synchroniser vos fichiers hors ligne uniquement en connexion Wi-Fi.",
 	"syncing": "Synchronisation…",

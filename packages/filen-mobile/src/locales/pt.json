@@ -724,6 +724,8 @@
 	"sub_directory_created": "Subdiretório criado",
 	"submit": "Enviar",
 	"sync_now": "Sincronizar agora",
+	"sync_offline_in_background": "Sincronizar em segundo plano",
+	"sync_offline_in_background_description": "Sincronize periodicamente os seus ficheiros offline enquanto a aplicação está em segundo plano. Os diretórios grandes são ignorados e sincronizam quando abre a aplicação, para poupar bateria e dados.",
 	"sync_offline_on_wifi_only": "Sincronizar apenas no Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Sincronize seus arquivos offline apenas quando conectado ao Wi-Fi.",
 	"syncing": "A sincronizar…",
