@@ -564,6 +564,9 @@ export class Cache {
 	 * Call during app setup before first render.
 	 */
 	public async restore(): Promise<void> {
+		const now = performance.now()
+		const rowCounts: string[] = []
+
 		const db = await sqlite.openDb()
 
 		const results = await Promise.allSettled(
@@ -579,6 +582,8 @@ export class Cache {
 
 					Map.prototype.set.call(map, entryKey, deserialize(row[1] as string))
 				}
+
+				rowCounts.push(`${key}=${rows.length}`)
 			})
 		)
 
@@ -602,6 +607,8 @@ export class Cache {
 
 		// A fresh authenticated session has hydrated — re-enable persistence after a prior logout lock.
 		this.locked = false
+
+		console.log(`[Cache] Restored in ${(performance.now() - now).toFixed(2)}ms (${rowCounts.join(", ")})`)
 	}
 
 	public flush(): void {

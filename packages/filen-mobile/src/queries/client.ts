@@ -1,4 +1,4 @@
-import { QueryClient, QueryCache, onlineManager, type UseQueryOptions } from "@tanstack/react-query"
+import { QueryClient, QueryCache, onlineManager, notifyManager, type UseQueryOptions } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite, { prefixUpperBound } from "@/lib/sqlite"
 import { run } from "@filen/utils"
@@ -98,6 +98,7 @@ export class QueryPersisterKv {
 	}
 
 	public async restore(): Promise<void> {
+		const now = performance.now()
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 		const db = await sqlite.openDb()
 		const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
@@ -113,6 +114,8 @@ export class QueryPersisterKv {
 				console.error("[QueryPersisterKv] Failed to deserialize row, skipping", err)
 			}
 		}
+
+		console.log(`[QueryPersisterKv] Restored ${this.buffer.size} rows in ${(performance.now() - now).toFixed(2)}ms`)
 	}
 
 	public flush(): void {
@@ -345,27 +348,43 @@ export const queryClientPersister = experimental_createQueryPersister({
 
 export async function restoreQueries(): Promise<void> {
 	try {
+		const now = performance.now()
+
 		await queryClientPersisterKv.restore()
 
-		for (const key of queryClientPersisterKv.keys()) {
-			const persistedQuery = queryClientPersisterKv.getItem<PersistedQuery>(key)
+		let restored = 0
+		let dropped = 0
 
-			if (
-				!persistedQuery ||
-				!persistedQuery.state ||
-				!shouldPersistQuery(persistedQuery) ||
-				persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now() ||
-				persistedQuery.state.status !== "success"
-			) {
-				queryClientPersisterKv.removeItem(key)
+		// One notification batch for the whole loop: setQueryData notifies cache
+		// subscribers per call otherwise — thousands of persisted queries would pay
+		// that once each during boot.
+		notifyManager.batch(() => {
+			for (const key of queryClientPersisterKv.keys()) {
+				const persistedQuery = queryClientPersisterKv.getItem<PersistedQuery>(key)
 
-				continue
+				if (
+					!persistedQuery ||
+					!persistedQuery.state ||
+					!shouldPersistQuery(persistedQuery) ||
+					persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now() ||
+					persistedQuery.state.status !== "success"
+				) {
+					queryClientPersisterKv.removeItem(key)
+
+					dropped++
+
+					continue
+				}
+
+				queryClient.setQueryData(persistedQuery.queryKey, persistedQuery.state.data, {
+					updatedAt: persistedQuery.state.dataUpdatedAt
+				})
+
+				restored++
 			}
+		})
 
-			queryClient.setQueryData(persistedQuery.queryKey, persistedQuery.state.data, {
-				updatedAt: persistedQuery.state.dataUpdatedAt
-			})
-		}
+		console.log(`[QueryClient] Restored ${restored} queries (${dropped} dropped) in ${(performance.now() - now).toFixed(2)}ms`)
 	} catch (e) {
 		console.error(e)
 		alerts.error(e)

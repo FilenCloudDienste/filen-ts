@@ -71,6 +71,7 @@ vi.mock("@tanstack/react-query", () => ({
 		constructor(_config?: unknown) {}
 	},
 	onlineManager: { isOnline: vi.fn().mockReturnValue(true) },
+	notifyManager: { batch: (fn: () => unknown) => fn() },
 	useQuery: vi.fn()
 }))
 
