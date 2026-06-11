@@ -175,15 +175,14 @@ class Sqlite {
 				return null
 			}
 
-			return await new Promise<T>((resolve, reject) => {
-				queueMicrotask(() => {
-					try {
-						resolve(deserialize(row[0] as string) as T)
-					} catch (err) {
-						reject(err)
-					}
-				})
-			})
+			try {
+				return deserialize(row[0] as string) as T
+			} catch (e) {
+				// Defensive: catch and log deserialization errors to prevent a single bad row from breaking the whole read. The caller can handle a null return as needed; returning null is better than throwing and returning nothing.
+				console.error(`[Sqlite] Failed to deserialize value for key ${key}`, e)
+
+				return null
+			}
 		},
 		set: async <T>(key: string, value: T): Promise<number | null> => {
 			if (value == null) {
@@ -191,16 +190,16 @@ class Sqlite {
 			}
 
 			const generation = this.clearGeneration
+			let serialized: string
 
-			const serialized = await new Promise<string>((resolve, reject) => {
-				queueMicrotask(() => {
-					try {
-						resolve(serialize(value))
-					} catch (err) {
-						reject(err)
-					}
-				})
-			})
+			try {
+				serialized = serialize(value)
+			} catch (e) {
+				// Defensive: catch and log serialization errors to prevent a single bad value from breaking the whole write. The caller can handle failed writes as needed; failing silently is better than throwing and leaving the store in an inconsistent state.
+				console.error(`[Sqlite] Failed to serialize value for key ${key}`, e)
+
+				return null
+			}
 
 			const db = await this.openDb()
 
@@ -255,22 +254,14 @@ class Sqlite {
 			const result = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
 			const map = new Map<string, T>()
 
-			await Promise.allSettled(
-				result.map(
-					row =>
-						new Promise<void>((resolve, reject) => {
-							queueMicrotask(() => {
-								try {
-									map.set(row[0] as string, deserialize(row[1] as string) as T)
-
-									resolve()
-								} catch (err) {
-									reject(err)
-								}
-							})
-						})
-				)
-			)
+			try {
+				for (const row of result) {
+					map.set(row[0] as string, deserialize(row[1] as string) as T)
+				}
+			} catch (e) {
+				// Defensive: catch and log deserialization errors to prevent a single bad row from breaking the whole prefix read. The caller can handle missing keys as needed; returning a partial map is better than throwing and returning nothing.
+				console.error(`[Sqlite] Failed to deserialize value for prefix ${prefix}`, e)
+			}
 
 			return map
 		}
