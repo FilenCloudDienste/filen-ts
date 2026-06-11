@@ -1,10 +1,8 @@
 import { QueryClient, QueryCache, onlineManager, notifyManager, type UseQueryOptions } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite, { prefixUpperBound } from "@/lib/sqlite"
-import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
-import { debounce } from "es-toolkit/function"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
@@ -30,20 +28,22 @@ const UNCACHED_QUERY_KEYS = new Map<string, true>([
 	["useFileProviderCacheBudget", true]
 ])
 
+// Hoisted .some predicates — shouldPersistQuery runs per persisted row at restore and
+// per persistQueryByKey; inline arrows allocated two closures per call.
+function isUncachedKeyString(part: unknown): boolean {
+	return typeof part === "string" && UNCACHED_QUERY_KEYS.has(part)
+}
+
+function isUncachedKeyPart(part: unknown): boolean {
+	if (typeof part === "string" && UNCACHED_QUERY_KEYS.has(part)) {
+		return true
+	}
+
+	return Array.isArray(part) && part.some(isUncachedKeyString)
+}
+
 export const shouldPersistQuery = (query: PersistedQuery): boolean => {
-	const shouldNotPersist = (query.queryKey as unknown[]).some(queryKey => {
-		if (typeof queryKey === "string" && UNCACHED_QUERY_KEYS.has(queryKey)) {
-			return true
-		}
-
-		if (Array.isArray(queryKey) && queryKey.some(k => typeof k === "string" && UNCACHED_QUERY_KEYS.has(k))) {
-			return true
-		}
-
-		return false
-	})
-
-	return !shouldNotPersist && query.state.status === "success"
+	return !(query.queryKey as unknown[]).some(isUncachedKeyPart) && query.state.status === "success"
 }
 
 export class QueryPersisterKv {
@@ -316,15 +316,51 @@ export class QueryPersisterKv {
 		return commands
 	}
 
-	private persistDirty = debounce(
-		() => {
+	// Trailing-debounce scheduler with O(1) re-arms (same shape as src/lib/cache.ts): a
+	// generic debounce clears and re-creates a timer on EVERY call — two timer syscalls
+	// per setItem/removeItem, i.e. per persistQueryByKey of every query update. Here only
+	// the FIRST mutation of an idle window arms a timer; later mutations bump
+	// `lastMutationAt`; an early fire re-arms once for the remainder, so the persist
+	// still runs exactly PERSIST_DEBOUNCE after the LAST mutation (window-extension
+	// semantics pinned by the hardening suite).
+	private persistTimer: ReturnType<typeof setTimeout> | null = null
+	private lastMutationAt = 0
+
+	private readonly persistDirty: (() => void) & { cancel: () => void } = (() => {
+		const onTimer = (): void => {
+			this.persistTimer = null
+
+			const elapsed = performance.now() - this.lastMutationAt
+
+			if (elapsed < PERSIST_DEBOUNCE) {
+				this.persistTimer = setTimeout(onTimer, PERSIST_DEBOUNCE - elapsed)
+
+				return
+			}
+
 			this.persistAsync()
-		},
-		PERSIST_DEBOUNCE,
-		{
-			edges: ["trailing"]
 		}
-	)
+
+		const trigger = (): void => {
+			this.lastMutationAt = performance.now()
+
+			if (this.persistTimer === null) {
+				this.persistTimer = setTimeout(onTimer, PERSIST_DEBOUNCE)
+			}
+		}
+
+		const fn = trigger as (() => void) & { cancel: () => void }
+
+		fn.cancel = (): void => {
+			if (this.persistTimer !== null) {
+				clearTimeout(this.persistTimer)
+
+				this.persistTimer = null
+			}
+		}
+
+		return fn
+	})()
 }
 
 export const queryClientPersisterKv = new QueryPersisterKv()
@@ -357,7 +393,10 @@ export async function restoreQueries(): Promise<void> {
 
 		// One notification batch for the whole loop: setQueryData notifies cache
 		// subscribers per call otherwise — thousands of persisted queries would pay
-		// that once each during boot.
+		// that once each during boot. One expiry instant for the whole loop too —
+		// Date.now() per row is a needless native hop ×rows.
+		const expiryNow = Date.now()
+
 		notifyManager.batch(() => {
 			for (const key of queryClientPersisterKv.keys()) {
 				const persistedQuery = queryClientPersisterKv.getItem<PersistedQuery>(key)
@@ -366,7 +405,7 @@ export async function restoreQueries(): Promise<void> {
 					!persistedQuery ||
 					!persistedQuery.state ||
 					!shouldPersistQuery(persistedQuery) ||
-					persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < Date.now() ||
+					persistedQuery.state.dataUpdatedAt + QUERY_CLIENT_CACHE_TIME < expiryNow ||
 					persistedQuery.state.status !== "success"
 				) {
 					queryClientPersisterKv.removeItem(key)
@@ -539,8 +578,27 @@ export const queryUpdater = {
 			}
 		)
 
-		run(async () => {
-			await queryClientPersister.persistQueryByKey(queryKey, queryClient)
+		// persistQueryByKey resolves its query via `getQueryCache().find({queryKey})` —
+		// query-core's find() materializes getAll() and LINEAR-SCANS it, re-running
+		// hashQueryKeyByOptions (our serialize-based hash) against the searched key for
+		// EVERY candidate (each candidate carries its own options). One update against a
+		// cache of N queries costs N key serializations; socket bursts multiply that by
+		// their fan-out. Every query in this app uses the single global queryKeyHashFn
+		// (client.ts — the only assignment in src/), so the O(1) equivalent is a direct
+		// hash lookup. The facade below narrows ONLY find() to that lookup while still
+		// routing the persist through queryClientPersister.persistQueryByKey — the
+		// persisted shape, storage key format, and gating stay the persister's own.
+		// (Version-pinned third-party surface: persistQueryByKey touches nothing else of
+		// the client — re-verify on @tanstack/query-persist-client-core upgrades.)
+		const queryHash = serialize(queryKey)
+		const lookupFacade = {
+			getQueryCache: () => ({
+				find: () => queryClient.getQueryCache().get(queryHash)
+			})
+		} as unknown as QueryClient
+
+		queryClientPersister.persistQueryByKey(queryKey, lookupFacade).catch(err => {
+			console.error("[QueryClient] persistQueryByKey failed", err)
 		})
 	}
 }
