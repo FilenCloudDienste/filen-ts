@@ -33,6 +33,11 @@ export const settings = {
 	sync_offline_on_wifi_only: "Sync on Wi-Fi only",
 	/** Offline settings — subtitle under the Wi-Fi-only toggle */
 	sync_offline_on_wifi_only_description: "Only sync your offline files when connected to Wi-Fi.",
+	/** Offline settings — toggle title: periodic background syncing of offline files */
+	sync_offline_in_background: "Sync in background",
+	/** Offline settings — subtitle under the background-sync toggle */
+	sync_offline_in_background_description:
+		"Periodically sync your offline files while the app is in the background. Large directories are skipped and sync when you open the app, to save battery and data.",
 
 	// ── File / Documents Provider (platform-conditional) ──────────────────────
 	/** iOS-only feature name: integration with the system Files app (File Provider extension) */

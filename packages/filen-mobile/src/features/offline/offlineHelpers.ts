@@ -12,6 +12,8 @@ import { type DriveItem } from "@/types"
 import cache from "@/lib/cache"
 import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
+import * as FileSystem from "expo-file-system"
+import { OFFLINE_DIRECTORIES_DIRECTORY } from "@/lib/storageRoots"
 
 // atomicWrite moved to shared infra (@/lib/fsAtomic) so lib modules (fileCache, audioCache
 // sidecars) can use it without a lib→features import. Re-exported here so existing offline
@@ -188,6 +190,88 @@ export function directoryDriveItemToAnyDirWithContext(item: DriveItem): OfflineP
 // preserves the prior always-sync behavior. Read in offlineSync.sync(); written by the offline
 // settings screen via useSecureStore.
 export const OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY = "offlineSyncWifiOnly"
+
+// secureStore key for the "Sync offline files in the background" setting. Boolean; absent/false →
+// background task runs camera upload only (the prior behavior). Read by the background task;
+// written by the offline settings screen via useSecureStore.
+export const OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY = "offlineBackgroundSync"
+
+// Background-pass budgets. The expensive unit of offline sync is the PER-TREE recursive listing —
+// all-or-nothing per tree (a 10k-entry tree pays its full uniffi lift + meta parse the moment it
+// is touched), so background passes gate WHICH trees run rather than aborting mid-tree. The
+// tree-size metric is the .filenmeta FILE SIZE (one native stat per tree, zero parsing): the meta
+// embeds the full flattened entries map, so its byte size is a faithful entry-count proxy
+// (~1MB ≈ ~1k entries; campaign-measured 10k entries ≈ 6–12MB).
+export const OFFLINE_BACKGROUND_TREE_META_SIZE_CAP_BYTES = 1_048_576
+export const OFFLINE_BACKGROUND_CUMULATIVE_META_SIZE_CAP_BYTES = 4 * 1_048_576
+export const OFFLINE_BACKGROUND_STANDALONE_FILE_CAP = 50
+
+// One native stat for a stored tree's .filenmeta size — the background tree-selection metric.
+// null when the meta is missing/unreadable (broken trees are left to the foreground heal pass).
+// Plain concat is safe: both segments are uuid-derived ASCII (the encoding contract allows concat
+// only for provably URI-safe segments).
+export function getTreeMetaSize(topLevelUuid: string): number | null {
+	try {
+		const info = new FileSystem.File(`${OFFLINE_DIRECTORIES_DIRECTORY.uri}/${topLevelUuid}/${topLevelUuid}.filenmeta`).info()
+
+		if (!info.exists || typeof info.size !== "number") {
+			return null
+		}
+
+		return info.size
+	} catch {
+		return null
+	}
+}
+
+// Pure background tree selection: smallest metas first, per-tree size cap, cumulative budget.
+// Trees with an unknown size (null — missing/unreadable meta) are NEVER selected in background;
+// the foreground heal pass owns broken metas. Returns the SET of selected top-level uuids so the
+// caller can filter its existing tree arrays without reordering them.
+export function selectBackgroundTrees(
+	trees: readonly {
+		uuid: string
+		metaSize: number | null
+	}[],
+	limits: {
+		perTreeCapBytes: number
+		cumulativeCapBytes: number
+	} = {
+		perTreeCapBytes: OFFLINE_BACKGROUND_TREE_META_SIZE_CAP_BYTES,
+		cumulativeCapBytes: OFFLINE_BACKGROUND_CUMULATIVE_META_SIZE_CAP_BYTES
+	}
+): Set<string> {
+	const eligible: {
+		uuid: string
+		metaSize: number
+	}[] = []
+
+	for (const tree of trees) {
+		if (tree.metaSize !== null && tree.metaSize <= limits.perTreeCapBytes) {
+			eligible.push({
+				uuid: tree.uuid,
+				metaSize: tree.metaSize
+			})
+		}
+	}
+
+	eligible.sort((a, b) => a.metaSize - b.metaSize)
+
+	const selected = new Set<string>()
+	let cumulative = 0
+
+	for (const tree of eligible) {
+		if (cumulative + tree.metaSize > limits.cumulativeCapBytes && selected.size > 0) {
+			break
+		}
+
+		selected.add(tree.uuid)
+
+		cumulative += tree.metaSize
+	}
+
+	return selected
+}
 
 // Whether offlineSync.sync() should bail for the current connection given the "Wi-Fi only" setting.
 // Mirrors camera upload: only a metered cellular connection is blocked — wifi/ethernet/vpn/unknown

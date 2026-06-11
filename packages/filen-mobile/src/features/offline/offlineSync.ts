@@ -18,7 +18,10 @@ import {
 	parentCacheKey,
 	shouldSkipOfflineSyncForConnection,
 	makeSyncError,
+	getTreeMetaSize,
+	selectBackgroundTrees,
 	OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY,
+	OFFLINE_BACKGROUND_STANDALONE_FILE_CAP,
 	type OfflineParent,
 	type OfflineSyncError
 } from "@/features/offline/offlineHelpers"
@@ -201,7 +204,7 @@ export class OfflineSync {
 		this.abortController = new AbortController()
 	}
 
-	public async sync({ manual }: { manual?: boolean } = {}): Promise<void> {
+	public async sync({ manual, background }: { manual?: boolean; background?: boolean } = {}): Promise<void> {
 		if (this.inFlight) {
 			// Coalescing join (accepted, do NOT queue): a manual sync() arriving while an AUTO pass
 			// is in flight joins that index-only pass without upgrading it to thorough — the user's
@@ -210,14 +213,19 @@ export class OfflineSync {
 			return this.inFlight
 		}
 
+		// Background passes count as automatic for the min-interval gate: an OS wake-up shortly
+		// after a completed foreground pass has nothing new to do.
 		if (!manual && Date.now() - this.lastCompletedAt < AUTO_SYNC_MIN_INTERVAL_MS) {
 			return
 		}
 
 		// manual ⟹ thorough (design §4.2): user-explicit passes are disk-verified, automatic
-		// passes trust the metas.
+		// passes trust the metas. background ⟹ BUDGETED (see runPass): tree selection is gated
+		// by meta size and standalone files are capped, so an OS background window never pays a
+		// deep tree's full listing.
 		this.inFlight = this.runPass({
-			thorough: manual === true
+			thorough: manual === true,
+			background: background === true
 		}).finally(() => {
 			this.inFlight = null
 		})
@@ -1197,7 +1205,7 @@ export class OfflineSync {
 		)
 	}
 
-	private async runPass({ thorough }: { thorough: boolean }): Promise<void> {
+	private async runPass({ thorough, background = false }: { thorough: boolean; background?: boolean }): Promise<void> {
 		await run(
 			async defer => {
 				await this.syncMutex.acquire()
@@ -1259,9 +1267,9 @@ export class OfflineSync {
 				])
 
 				// Single-pass partition (was four .filter passes over the same arrays).
-				const syncableFiles: typeof files = []
-				const normalTrees: typeof trees = []
-				const listedTrees: typeof trees = []
+				let syncableFiles: typeof files = []
+				let normalTrees: typeof trees = []
+				let listedTrees: typeof trees = []
 				const listingParents: OfflineParent[] = []
 
 				for (const file of files) {
@@ -1280,6 +1288,25 @@ export class OfflineSync {
 					} else {
 						listedTrees.push(tree)
 					}
+				}
+
+				// BACKGROUND budgets: the per-tree recursive listing is all-or-nothing, so
+				// the pass gates WHICH trees run — smallest .filenmeta first (one native
+				// stat per tree, no parsing) under a per-tree size cap and a cumulative
+				// budget — and caps standalone files. Skipped items simply wait for the
+				// next foreground pass; updateIndex below is a full-state rebuild from the
+				// on-disk metas, so a partial pass still commits a consistent index.
+				if (background) {
+					const selected = selectBackgroundTrees(
+						[...normalTrees, ...listedTrees].map(tree => ({
+							uuid: tree.item.data.uuid,
+							metaSize: getTreeMetaSize(tree.item.data.uuid)
+						}))
+					)
+
+					normalTrees = normalTrees.filter(tree => selected.has(tree.item.data.uuid))
+					listedTrees = listedTrees.filter(tree => selected.has(tree.item.data.uuid))
+					syncableFiles = syncableFiles.slice(0, OFFLINE_BACKGROUND_STANDALONE_FILE_CAP)
 				}
 
 				for (const tree of listedTrees) {
@@ -1386,22 +1413,27 @@ export class OfflineSync {
 					)
 				])
 
-				await Promise.all([
-					this.healBrokenStandalones({
-						authedSdkClient,
-						parentContextCache,
-						signal,
-						pushError
-					}),
-					this.healBrokenTrees({
-						authedSdkClient,
-						parentContextCache,
-						thorough,
-						signal,
-						pushError,
-						pushErrors
-					})
-				])
+				// Heals are FOREGROUND work: a broken tree's repair runs a full reconcileTree
+				// on it regardless of size (the meta is unreadable, so the size gate can't
+				// see it) — exactly the unbounded cost a background window must not pay.
+				if (!background) {
+					await Promise.all([
+						this.healBrokenStandalones({
+							authedSdkClient,
+							parentContextCache,
+							signal,
+							pushError
+						}),
+						this.healBrokenTrees({
+							authedSdkClient,
+							parentContextCache,
+							thorough,
+							signal,
+							pushError,
+							pushErrors
+						})
+					])
+				}
 
 				if (signal.aborted) {
 					// Aborted mid-pass (logout/teardown): removeItem already reindexed its own
@@ -1414,10 +1446,16 @@ export class OfflineSync {
 				// commits the pass.
 				await offline.updateIndex()
 
-				// Session error surface is rebuilt every pass (stale errors clear on success).
-				useOfflineStore.getState().setSyncErrors(errors)
+				// Background passes are PARTIAL by design: replacing the session error surface
+				// would clear foreground-surfaced errors for items the pass never touched, and
+				// stamping lastCompletedAt would suppress the next foreground auto pass's full
+				// run. Both are foreground-pass semantics only.
+				if (!background) {
+					// Session error surface is rebuilt every pass (stale errors clear on success).
+					useOfflineStore.getState().setSyncErrors(errors)
 
-				this.lastCompletedAt = Date.now()
+					this.lastCompletedAt = Date.now()
+				}
 			},
 			{
 				throw: true
