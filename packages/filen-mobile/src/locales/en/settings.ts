@@ -230,6 +230,17 @@ export const settings = {
 		"This removes all files saved for offline access from this device. They remain available in the cloud.",
 	/** Toast after offline files were cleared */
 	offline_files_cleared: "Offline files cleared",
+	/** Advanced — row title: remove leftover temporary/staging files and partial downloads */
+	clean_temporary_files: "Clean up temporary files",
+	/** Advanced — row subtitle describing what the temporary-file cleanup removes */
+	clean_temporary_files_description: "Removes leftover staging files and partial downloads from interrupted sessions",
+	/** Advanced — confirm message before cleaning temporary files */
+	clean_temporary_files_confirmation:
+		"This removes leftover staging files and partial downloads from interrupted sessions. Nothing stored in the cloud is affected.",
+	/** Advanced — shown when temporary-file cleanup is blocked because transfers or syncs are running */
+	clean_temporary_files_unavailable: "Not available while transfers or syncs are running",
+	/** Toast after temporary files were cleaned up */
+	temporary_files_cleaned: "Temporary files cleaned up",
 
 	// ── Events log + event details ────────────────────────────────────────────
 	/** Events screen — empty-state title when there is no account activity */

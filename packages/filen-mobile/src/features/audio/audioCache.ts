@@ -1,5 +1,7 @@
 import * as FileSystem from "expo-file-system"
+import { AppState } from "react-native"
 import { Semaphore, run } from "@filen/utils"
+import { debounce } from "es-toolkit/function"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -26,6 +28,8 @@ export type Metadata = {
 // Critical: When changing anything related to storage index/store/persistence format, bump AUDIO_CACHE_VERSION in storageRoots.ts to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = AUDIO_CACHE_VERSION
 export const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
+
+const GC_DEBOUNCE_MS = 30 * 1000
 
 function parseMetadata(raw: string): Metadata {
 	const result = deserialize<unknown>(raw)
@@ -66,8 +70,33 @@ export class AudioCache {
 		}
 	}
 
+	// Debounced gc after metadata writes + immediate gc on app-background:
+	// reclamation runs where growth happens instead of competing with startup.
+	// Log-only on failure — gc hygiene isn't user-actionable.
+	private readonly scheduleGc = debounce(
+		() => {
+			this.gc().catch(err => {
+				console.error("[AudioCache] gc failed", err)
+			})
+		},
+		GC_DEBOUNCE_MS,
+		{
+			edges: ["trailing"]
+		}
+	)
+
 	public constructor() {
 		this.ensureDirectory()
+
+		AppState.addEventListener("change", nextAppState => {
+			if (nextAppState === "background") {
+				this.scheduleGc.cancel()
+
+				this.gc().catch(err => {
+					console.error("[AudioCache] gc failed", err)
+				})
+			}
+		})
 	}
 
 	private getMutexForKey(key: string): Semaphore {
@@ -288,6 +317,8 @@ export class AudioCache {
 						this.ensureDirectory()
 
 						atomicWrite(metadataFile, serialize(metadata))
+
+						this.scheduleGc()
 					} else if (metadataFile.exists && metadataFile.size > 0) {
 						metadata = parseMetadata(await metadataFile.text())
 

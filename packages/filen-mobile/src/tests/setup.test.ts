@@ -165,14 +165,11 @@ describe("setup.setup", () => {
 		expect(mockStartReconnectListener).toHaveBeenCalledOnce()
 	})
 
-	it("calls sweepTmpDir and sweepStrayDownloadFiles on foreground setup", async () => {
+	// The crash-orphan sweeps were removed from boot entirely — the stray-file walk
+	// scales with the offline store (~1.9s measured). They live behind the Settings →
+	// Advanced "Clean up temporary files" action now.
+	it("never calls sweepTmpDir or sweepStrayDownloadFiles during setup", async () => {
 		await setup.setup()
-
-		expect(mockSweepTmpDir).toHaveBeenCalledOnce()
-		expect(mockSweepStrayDownloadFiles).toHaveBeenCalledOnce()
-	})
-
-	it("skips sweepTmpDir and sweepStrayDownloadFiles in background mode", async () => {
 		await setup.setup({ background: true })
 
 		expect(mockSweepTmpDir).not.toHaveBeenCalled()
@@ -233,35 +230,41 @@ describe("setup.setup", () => {
 		expect(mockSemaphoreRelease).toHaveBeenCalledOnce()
 	})
 
-	it("calls foregroundService.init, fileCache.gc, and audioCache.gc when isAuthed and not background", async () => {
+	it("calls foregroundService.init when isAuthed and not background", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
 
 		await setup.setup()
 		await flushMicrotasks()
 
 		expect(mockForegroundService.init).toHaveBeenCalledOnce()
-		expect(mockFileCache.gc).toHaveBeenCalledOnce()
-		expect(mockAudioCache.gc).toHaveBeenCalledOnce()
 	})
 
-	it("does not call foregroundService.init, fileCache.gc, or audioCache.gc when isAuthed is false (foreground)", async () => {
+	it("does not call foregroundService.init when isAuthed is false (foreground)", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: false })
 
 		await setup.setup()
 		await flushMicrotasks()
 
 		expect(mockForegroundService.init).not.toHaveBeenCalled()
-		expect(mockFileCache.gc).not.toHaveBeenCalled()
-		expect(mockAudioCache.gc).not.toHaveBeenCalled()
 	})
 
-	it("skips foregroundService.init, fileCache.gc, and audioCache.gc in background mode even when authenticated", async () => {
+	it("skips foregroundService.init in background mode even when authenticated", async () => {
 		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
 
 		await setup.setup({ background: true })
 		await flushMicrotasks()
 
 		expect(mockForegroundService.init).not.toHaveBeenCalled()
+	})
+
+	// Boot-time gc was removed: fileCache/audioCache schedule their own gc after
+	// writes and on app-background instead of competing with startup.
+	it("never calls fileCache.gc or audioCache.gc during setup", async () => {
+		mockAuth.isAuthed.mockResolvedValue({ isAuthed: true, stringifiedClient: STRINGIFIED_CLIENT })
+
+		await setup.setup()
+		await flushMicrotasks()
+
 		expect(mockFileCache.gc).not.toHaveBeenCalled()
 		expect(mockAudioCache.gc).not.toHaveBeenCalled()
 	})

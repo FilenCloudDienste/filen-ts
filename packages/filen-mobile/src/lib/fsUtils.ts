@@ -90,7 +90,10 @@ function strayDownloadRoots(): FileSystem.Directory[] {
 
 // Best-effort sweep: per-entry failures are swallowed so an unreadable orphan
 // doesn't block the others. Safe to call only when no transfers can be in
-// flight (i.e., once at app start, alongside sweepTmpDir()).
+// flight — the Settings → Advanced "Clean up temporary files" action that
+// invokes this (alongside sweepTmpDir()) gates on the transfers/sync stores.
+// NOTE: walks the entire offline store; measured ~1.9s with a heavily
+// offline-marked drive — never put this back on the boot path.
 export function sweepStrayDownloadFiles(): void {
 	for (const root of strayDownloadRoots()) {
 		if (!root.exists) {

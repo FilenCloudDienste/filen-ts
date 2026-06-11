@@ -5,11 +5,7 @@ import { run, Semaphore } from "@filen/utils"
 import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 import foregroundService from "@/features/transfers/foregroundService"
-import { sweepTmpDir } from "@/lib/tmp"
-import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
 import { startReconnectListener } from "@/lib/reconnect"
-import fileCache from "@/lib/fileCache"
-import audioCache from "@/features/audio/audioCache"
 import { initI18n } from "@/lib/i18n"
 import { initTheme } from "@/lib/theme"
 
@@ -39,17 +35,11 @@ const setup = {
 
 			const now = performance.now()
 
-			// Wipe filen-tmp/ orphans and stray .filendl partial downloads from crashed
-			// sessions. Safe only because no transfers can be in flight before setup()
-			// completes.
-			if (!options?.background) {
-				const sweepsStart = performance.now()
-
-				sweepTmpDir()
-				sweepStrayDownloadFiles()
-
-				console.log(`[Setup] Sweeps in ${(performance.now() - sweepsStart).toFixed(2)}ms`)
-			}
+			// Crash-orphan sweeps (filen-tmp/ staging + stray .filendl partials) are NOT run
+			// at boot — the stray-file walk scales with the offline store (measured 1.9s with
+			// a heavily offline-marked drive). They live in Settings → Advanced ("Clean up
+			// temporary files"), gated on the transfers/sync stores so they can't race
+			// in-flight downloads.
 
 			const isAuthed = await timed("auth.isAuthed", () => auth.isAuthed())
 			const stringifiedClient = isAuthed.isAuthed && isAuthed.stringifiedClient ? isAuthed.stringifiedClient : null
@@ -91,15 +81,11 @@ const setup = {
 			// Idempotent — only attaches the onlineManager subscription on first call.
 			startReconnectListener()
 
+			// fileCache/audioCache gc no longer runs at boot — both caches schedule a
+			// debounced gc after writes and gc on app-background, so reclamation happens
+			// where growth happens instead of competing with startup.
 			if (isAuthed.isAuthed && !options?.background) {
 				foregroundService.init().catch(console.error)
-
-				// Reclaim disk space from caches that grow unbounded today.
-				// Idempotent; running on an empty cache directory is a no-op.
-				// Log-only on failure — gc hygiene isn't user-actionable, so we
-				// don't fire a toast (would be noise on every cold start).
-				fileCache.gc().catch(console.error)
-				audioCache.gc().catch(console.error)
 			}
 
 			const duration = performance.now() - now
