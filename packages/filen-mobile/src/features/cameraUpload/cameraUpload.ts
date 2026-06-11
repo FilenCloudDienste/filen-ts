@@ -107,6 +107,9 @@ type AlbumEntry = {
 }
 
 export const MAX_UPLOAD_FAILURES = 3
+// Background runs skip assets with this many persisted budget-aborts (audit B4) — they
+// upload on the next FOREGROUND sync, which has no run budget. Cleared on success.
+export const MAX_BACKGROUND_UPLOAD_ABORTS = 2
 // Critical: When changing the config type/object, increment the version to invalidate old
 // CONFIGS (the secureStore key below rotates with it). Note this does NOT touch
 // `cache.cameraUploadHashes` — that map lives under cache.ts's own versioned prefix and is
@@ -1005,6 +1008,14 @@ class CameraUpload {
 				return
 			}
 
+			// Respect a pause left armed in the foreground (audit B5, 2026-06-11): sync()
+			// captures the live globalPauseSignal below, so a background upload would park
+			// on it until the run-budget deadline — a whole OS window wasted, reported as
+			// Success. The user asked for uploads to pause; skip, never auto-resume.
+			if (params?.background && this.globalPauseSignal.isPaused()) {
+				return
+			}
+
 			const [netState, permissions] = await Promise.all([NetInfo.fetch(), hasAllNeededMediaPermissions({ library: "all", needCamera: false })])
 
 			if (!permissions) {
@@ -1085,8 +1096,18 @@ class CameraUpload {
 			// When maxUploads is set (e.g. background sync), sort newest-modified files first so the most
 			// recently captured media is prioritised within the limited OS execution window, then cap the
 			// list. Without maxUploads (foreground sync) we use the full delta set as-is.
+			//
+			// Background picks also skip assets whose uploads already burned >= MAX_BACKGROUND_UPLOAD_ABORTS
+			// run budgets (audit B4): without the persisted skip, an asset too large for the OS window is
+			// re-picked every run forever — partial-upload data + battery with zero forward progress. The
+			// skip is silent and background-only; the asset uploads on the next unbudgeted foreground sync.
 			const deltas = params?.maxUploads
 				? allDeltas
+						.filter(
+							delta =>
+								!params?.background ||
+								(cache.cameraUploadBackgroundAborts.get(delta.file.info.id) ?? 0) < MAX_BACKGROUND_UPLOAD_ABORTS
+						)
 						.sort(
 							(a, b) =>
 								(b.file.info.modificationTime ?? b.file.info.creationTime ?? 0) -
@@ -1254,6 +1275,14 @@ class CameraUpload {
 								})
 
 								if (!transferResult) {
+									// Null ⇔ the upload was aborted mid-flight. In a background run
+									// that means the budget deadline / OS expiration killed it —
+									// count it persistently (audit B4): cancel() wipes the in-memory
+									// failure counter and the next run may be a fresh process.
+									if (params?.background && abortController.signal.aborted) {
+										cache.cameraUploadBackgroundAborts.set(assetId, (cache.cameraUploadBackgroundAborts.get(assetId) ?? 0) + 1)
+									}
+
 									break
 								}
 
@@ -1261,6 +1290,9 @@ class CameraUpload {
 									md5,
 									verifiedModificationTime: modificationTime ?? -1
 								})
+								// Any completed upload proves the asset fits a window — forget its
+								// background-abort history (audit B4).
+								cache.cameraUploadBackgroundAborts.delete(assetId)
 
 								break
 							}
@@ -1273,6 +1305,13 @@ class CameraUpload {
 
 					if (!result.success) {
 						if (abortController.signal.aborted) {
+							// Thrown-abort surface (staging copy / parent-dir creation aborted
+							// before transfers.upload resolved null) — same persistent counting
+							// as the null-return surface above (audit B4).
+							if (params?.background) {
+								cache.cameraUploadBackgroundAborts.set(assetId, (cache.cameraUploadBackgroundAborts.get(assetId) ?? 0) + 1)
+							}
+
 							return
 						}
 

@@ -151,6 +151,13 @@ export class Cache {
 	// The string arm of the union is the LEGACY persisted shape (bare md5) — see
 	// CameraUploadHashEntry. Writers must always write the object shape.
 	public readonly cameraUploadHashes: PersistentMap<CameraUploadHashEntry | string>
+	// assetId → count of BACKGROUND uploads of this asset aborted by the run budget /
+	// OS expiration (audit B4, 2026-06-11). Persisted because each background run may be
+	// a fresh headless process and cancel() clears the in-memory failure counter — without
+	// this, an asset that can never finish inside the OS window is re-picked every run
+	// forever. Background delta picks skip counts >= MAX_BACKGROUND_UPLOAD_ABORTS
+	// (cameraUpload.ts); any successful upload of the asset deletes its entry.
+	public readonly cameraUploadBackgroundAborts: PersistentMap<number>
 	public readonly chatAttachmentLayouts: PersistentMap<{
 		width: number
 		height: number
@@ -171,6 +178,7 @@ export class Cache {
 		this.directoryUuidToAnyDirWithContext = this.createMap<AnyDirWithContext>("directoryUuidToAnyDirWithContext")
 		this.availableThumbnails = this.createMap<boolean>("availableThumbnails")
 		this.cameraUploadHashes = this.createMap<CameraUploadHashEntry | string>("cameraUploadHashes")
+		this.cameraUploadBackgroundAborts = this.createMap<number>("cameraUploadBackgroundAborts")
 		this.chatAttachmentLayouts = this.createMap<{
 			width: number
 			height: number

@@ -155,7 +155,8 @@ vi.mock("@/lib/events", () => ({
 
 vi.mock("@/lib/cache", () => ({
 	default: {
-		cameraUploadHashes: new Map()
+		cameraUploadHashes: new Map(),
+		cameraUploadBackgroundAborts: new Map()
 	}
 }))
 
@@ -197,9 +198,24 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 vi.mock("@/lib/signals", () => ({
+	// Faithful to src/lib/signals.ts: pause()/resume() flip state, isPaused() reads it
+	// (sync's B5 background gate calls isPaused() — a mock without it throws into the
+	// run() wrapper and silently kills every background sync).
 	PauseSignal: class {
-		pause() {}
-		resume() {}
+		private paused = false
+
+		pause() {
+			this.paused = true
+		}
+
+		resume() {
+			this.paused = false
+		}
+
+		isPaused() {
+			return this.paused
+		}
+
 		dispose() {}
 	}
 }))
@@ -287,6 +303,7 @@ beforeEach(() => {
 	ml.clear()
 	fs.clear()
 	cache.cameraUploadHashes.clear()
+	cache.cameraUploadBackgroundAborts.clear()
 	cameraUpload.cancel()
 	// The parent-directory cache lives on the singleton and survives cancel(),
 	// so clear it explicitly between tests to avoid stale dir refs from earlier
@@ -993,6 +1010,107 @@ describe("sync flow", () => {
 				modified: 2000
 			})
 		)
+	})
+
+	// ─── Audit B4 (2026-06-11): persisted background-abort counter ────────────────
+	// A budget/expiration abort never reaches the in-memory failure counter (cancel()
+	// clears it, and each background run may be a fresh process) — without persistence,
+	// an asset that can never finish inside the OS window is re-picked every run forever.
+
+	it("B4: a background run skips an asset with >= 2 persisted budget-aborts and picks the next delta", async () => {
+		setupLocalAssets([
+			{ id: "a1", filename: "photo1.jpg", modificationTime: 5000 },
+			{ id: "a2", filename: "photo2.jpg", modificationTime: 4000 }
+		])
+
+		// a1 is newest (would win the maxUploads sort) but burned the budget twice already.
+		cache.cameraUploadBackgroundAborts.set("a1", 2)
+
+		await cameraUpload.sync({ background: true, maxUploads: 1 })
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+		expect(transfers.upload).toHaveBeenCalledWith(expect.objectContaining({ name: "photo2.jpg" }))
+	})
+
+	it("B4: a deadline abort during a background upload increments the persisted counter (null-return abort surface)", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		vi.mocked(transfers.upload).mockImplementationOnce(async () => {
+			// The run-budget deadline fires cancelBackgroundWork() -> cameraUpload.cancel()
+			// while the upload is in flight; the aborted upload resolves null.
+			cameraUpload.cancel()
+
+			return null as any
+		})
+
+		await cameraUpload.sync({ background: true, maxUploads: 1 })
+
+		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBe(1)
+	})
+
+	it("B4: a thrown abort during a background upload increments the persisted counter (throw abort surface)", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		vi.mocked(transfers.upload).mockImplementationOnce(async () => {
+			cameraUpload.cancel()
+
+			throw new Error("aborted mid-staging")
+		})
+
+		await cameraUpload.sync({ background: true, maxUploads: 1 })
+
+		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBe(1)
+	})
+
+	it("B4: a foreground abort never touches the persisted counter", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		vi.mocked(transfers.upload).mockImplementationOnce(async () => {
+			cameraUpload.cancel()
+
+			return null as any
+		})
+
+		await cameraUpload.sync()
+
+		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBeUndefined()
+	})
+
+	it("B4: a successful upload clears the asset's persisted counter", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		cache.cameraUploadBackgroundAborts.set("a1", 1)
+
+		await cameraUpload.sync()
+
+		expect(cache.cameraUploadBackgroundAborts.get("a1")).toBeUndefined()
+	})
+
+	// ─── Audit B5 (2026-06-11): foreground pause must not bleed into background ───
+	// sync() captures the live globalPauseSignal; a pause left armed in the foreground
+	// would park the background upload until the deadline — a whole OS window wasted,
+	// reported as Success. Respect the user's pause: skip the run, don't auto-resume.
+
+	it("B5: a background sync is skipped (before any work starts) while the global pause signal is paused", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		cameraUpload.pause()
+
+		await cameraUpload.sync({ background: true, maxUploads: 1 })
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+	})
+
+	it("B5: resume() re-enables background sync", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg" }])
+
+		cameraUpload.pause()
+		cameraUpload.resume()
+
+		await cameraUpload.sync({ background: true, maxUploads: 1 })
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
 	})
 
 	it("upload returns null (abort) does not update MD5 cache", async () => {
