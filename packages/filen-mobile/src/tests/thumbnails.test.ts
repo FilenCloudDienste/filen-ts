@@ -309,7 +309,7 @@ describe("Thumbnails", () => {
 			})
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
 			expect(mockSaveAsync).toHaveBeenCalledWith({
-				compress: 0.8,
+				compress: 0.9,
 				format: "webp",
 				base64: false
 			})
