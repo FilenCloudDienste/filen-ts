@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system"
 import type { DriveItem } from "@/types"
 import { run, Semaphore } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
-import { serialize, deserialize } from "@/lib/serializer"
+import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"
 import { NonRootDir_Tags } from "@filen/sdk-rs"
 import {
@@ -99,6 +99,33 @@ export const FILES_DIRECTORY = OFFLINE_FILES_DIRECTORY
 export const DIRECTORIES_DIRECTORY = OFFLINE_DIRECTORIES_DIRECTORY
 export const INDEX_FILE = OFFLINE_INDEX_FILE
 
+// Root URIs are stable for the process lifetime — read the (native-backed) uri getters once
+// instead of per call site in entry loops.
+const FILES_DIRECTORY_URI = FILES_DIRECTORY.uri
+const DIRECTORIES_DIRECTORY_URI = DIRECTORIES_DIRECTORY.uri
+
+// NFC-normalize only when non-ASCII is present — String.normalize is expensive on Hermes and
+// nearly all real paths are pure ASCII, for which it is the identity. The charCode scan is
+// ~free by comparison.
+function normalizeNfcFast(value: string): string {
+	for (let i = 0; i < value.length; i++) {
+		if (value.charCodeAt(i) > 127) {
+			return value.normalize("NFC")
+		}
+	}
+
+	return value
+}
+
+// dirname for RAW root-relative entry paths (always lead with "/", never end with one):
+// "/a/b" → "/a", "/a" → "/". Replaces FileSystem.Paths.dirname + the "."/"" normalization in
+// per-entry listing loops.
+function rawPathDirname(path: string): string {
+	const lastSlash = path.lastIndexOf("/")
+
+	return lastSlash <= 0 ? "/" : path.slice(0, lastSlash)
+}
+
 // Manages offline file/directory storage on device.
 //
 // Storage layout (v2):
@@ -154,8 +181,16 @@ export class Offline {
 	private readonly getLocalFileCache = new Map<string, FileSystem.File>()
 	private readonly getLocalDirectoryCache = new Map<string, FileSystem.Directory>()
 	private directoriesEnsured = false
+	private versionSweepDone = false
 	private readonly directoryMetaCache = new Map<string, DirectoryOfflineMeta>()
 	private uuidToTopLevelCache: Map<string, string> | null = null
+	// Monotonic count of cache invalidations — every disk mutation path calls invalidateCaches,
+	// so an unchanged counter proves the store is byte-identical to the last in-process rebuild.
+	private mutationCounter = 0
+	// mutationCounter value captured after the last FULL in-process index rebuild. -1 until the
+	// first rebuild this session: an index loaded from disk is never trusted as rebuild-fresh
+	// (it may be stale from a crashed previous session), so the first updateIndex always runs.
+	private indexRebuildMutationCounter = -1
 
 	public constructor() {
 		this.ensureDirectories()
@@ -172,33 +207,43 @@ export class Offline {
 		// ensureDirectories() calls in storeFile/reconcileTree/updateIndex (which run inside run()) retry and
 		// surface the error via their Result path.
 		try {
-			if (OFFLINE_PARENT_DIRECTORY.exists) {
-				for (const entry of OFFLINE_PARENT_DIRECTORY.list()) {
-					if (entry instanceof FileSystem.Directory && entry.name !== `v${VERSION}`) {
-						entry.delete()
+			// The old-version sweep only ever needs to run once per process — stale v{N-1} dirs
+			// cannot reappear at runtime, so it is deliberately NOT reset by invalidateCaches.
+			if (!this.versionSweepDone) {
+				if (OFFLINE_PARENT_DIRECTORY.exists) {
+					for (const entry of OFFLINE_PARENT_DIRECTORY.list()) {
+						if (entry instanceof FileSystem.Directory && entry.name !== `v${VERSION}`) {
+							entry.delete()
+						}
 					}
 				}
+
+				this.versionSweepDone = true
 			}
 
-			if (!DIRECTORY.exists) {
-				DIRECTORY.create({
-					intermediates: true,
-					idempotent: true
-				})
-			}
+			// Both leaf directories existing implies the whole chain exists — the warm re-check
+			// after every invalidateCaches costs 2 stats instead of stat + list + 3 stats.
+			if (!FILES_DIRECTORY.exists || !DIRECTORIES_DIRECTORY.exists) {
+				if (!DIRECTORY.exists) {
+					DIRECTORY.create({
+						intermediates: true,
+						idempotent: true
+					})
+				}
 
-			if (!FILES_DIRECTORY.exists) {
-				FILES_DIRECTORY.create({
-					intermediates: true,
-					idempotent: true
-				})
-			}
+				if (!FILES_DIRECTORY.exists) {
+					FILES_DIRECTORY.create({
+						intermediates: true,
+						idempotent: true
+					})
+				}
 
-			if (!DIRECTORIES_DIRECTORY.exists) {
-				DIRECTORIES_DIRECTORY.create({
-					intermediates: true,
-					idempotent: true
-				})
+				if (!DIRECTORIES_DIRECTORY.exists) {
+					DIRECTORIES_DIRECTORY.create({
+						intermediates: true,
+						idempotent: true
+					})
+				}
 			}
 
 			this.directoriesEnsured = true
@@ -245,6 +290,7 @@ export class Offline {
 
 	// Called after any mutation to offline storage. Must be aggressive because the filesystem changed.
 	private invalidateCaches(): void {
+		this.mutationCounter++
 		this.listFilesCache = null
 		this.listDirectoriesCache.clear()
 		this.listDirectoriesRecursiveCache = null
@@ -268,9 +314,10 @@ export class Offline {
 			return cached
 		}
 
-		const metaFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, `${topLevelUuid}.filenmeta`))
+		const metaFile = new FileSystem.File(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}/${topLevelUuid}.filenmeta`)
+		const metaInfo = metaFile.info()
 
-		if (!metaFile.exists || metaFile.size === 0) {
+		if (!metaInfo.exists || (metaInfo.size ?? 0) === 0) {
 			return null
 		}
 
@@ -305,9 +352,10 @@ export class Offline {
 	// Reads a standalone files/{uuid}/{uuid}.filenmeta — null when missing, empty, or undecodable.
 	// Callers treat null as "no usable meta"; broken-entry handling lives in listBrokenStandaloneUuids.
 	private async readStandaloneMeta(uuid: string): Promise<FileOrDirectoryOfflineMeta | null> {
-		const metaFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, uuid, `${uuid}.filenmeta`))
+		const metaFile = new FileSystem.File(`${FILES_DIRECTORY_URI}/${uuid}/${uuid}.filenmeta`)
+		const metaInfo = metaFile.info()
 
-		if (!metaFile.exists || metaFile.size === 0) {
+		if (!metaInfo.exists || (metaInfo.size ?? 0) === 0) {
 			return null
 		}
 
@@ -385,6 +433,34 @@ export class Offline {
 					this.indexMutex.release()
 				})
 
+				// Previous in-memory index — the diff base for the query-cache broadcasts and the
+				// fixed-point base for the index write below. It survives invalidateCaches (only
+				// clearAll and readIndex assign indexCache).
+				const previousIndex = this.indexCache
+
+				// NO-MUTATION SKIP: this process is the offline store's only writer and every
+				// disk-mutation path bumps mutationCounter (via invalidateCaches). An unchanged
+				// counter since the last FULL in-process rebuild proves this rebuild would produce
+				// the identical index — skip the meta re-reads, broadcasts and write entirely.
+				// The cheap cross-session ghost healing (stale storedOffline reconciliation) still
+				// runs: it needs only the in-memory index and the query-cache entries. The first
+				// updateIndex of a session never skips (indexRebuildMutationCounter starts -1), so
+				// staleness left by a crashed previous session heals exactly like before.
+				if (previousIndex !== null && this.indexRebuildMutationCounter === this.mutationCounter) {
+					this.ensureDirectories()
+
+					for (const staleEntry of findStaleStoredOfflineEntries(getStoredOfflineQueryCacheEntries(), previousIndex)) {
+						driveItemStoredOfflineQueryUpdate({
+							updater: false,
+							params: staleEntry
+						})
+					}
+
+					await this.buildUuidToTopLevelIndex()
+
+					return
+				}
+
 				this.ensureDirectories()
 				this.invalidateCaches()
 
@@ -392,19 +468,26 @@ export class Offline {
 				const indexFiles: Index["files"] = {}
 				const indexDirectories: Index["directories"] = {}
 
+				// Broadcast only NEWLY indexed uuids when a previous index exists this session: an
+				// already-indexed uuid's storedOffline query value is already true (this lib is the
+				// query's only writer), so re-pushing tens of thousands of unchanged `true`s every
+				// pass is pure overhead. A null previous index (first rebuild this session)
+				// broadcasts everything, healing whatever the persisted query cache holds.
 				for (const { item, parent } of files) {
 					indexFiles[item.data.uuid] = {
 						item,
 						parent
 					}
 
-					driveItemStoredOfflineQueryUpdate({
-						updater: true,
-						params: {
-							uuid: item.data.uuid,
-							type: item.type
-						}
-					})
+					if (!previousIndex || !previousIndex.files[item.data.uuid]) {
+						driveItemStoredOfflineQueryUpdate({
+							updater: true,
+							params: {
+								uuid: item.data.uuid,
+								type: item.type
+							}
+						})
+					}
 				}
 
 				for (const { item, parent } of directories.directories) {
@@ -413,13 +496,15 @@ export class Offline {
 						parent
 					}
 
-					driveItemStoredOfflineQueryUpdate({
-						updater: true,
-						params: {
-							uuid: item.data.uuid,
-							type: item.type
-						}
-					})
+					if (!previousIndex || !previousIndex.directories[item.data.uuid]) {
+						driveItemStoredOfflineQueryUpdate({
+							updater: true,
+							params: {
+								uuid: item.data.uuid,
+								type: item.type
+							}
+						})
+					}
 				}
 
 				for (const { item, parent } of directories.files) {
@@ -428,13 +513,15 @@ export class Offline {
 						parent
 					}
 
-					driveItemStoredOfflineQueryUpdate({
-						updater: true,
-						params: {
-							uuid: item.data.uuid,
-							type: item.type
-						}
-					})
+					if (!previousIndex || !previousIndex.files[item.data.uuid]) {
+						driveItemStoredOfflineQueryUpdate({
+							updater: true,
+							params: {
+								uuid: item.data.uuid,
+								type: item.type
+							}
+						})
+					}
 				}
 
 				const index: Index = {
@@ -442,7 +529,15 @@ export class Offline {
 					directories: indexDirectories
 				}
 
-				atomicWrite(INDEX_FILE, serialize(index satisfies Index))
+				// Skip the (multi-MB at scale) serialize + atomic rewrite when the rebuilt index
+				// structurally equals the previous one and the file is still on disk — it already
+				// holds exactly this content. serializeEquals is conservative: any doubt falls
+				// back to the write.
+				const indexUnchanged = previousIndex !== null && INDEX_FILE.info().exists && serializeEquals(index, previousIndex)
+
+				if (!indexUnchanged) {
+					atomicWrite(INDEX_FILE, serialize(index satisfies Index))
+				}
 
 				this.indexCache = index
 
@@ -466,6 +561,10 @@ export class Offline {
 				// meta but is the price for a clean cache invariant: "indexCache set
 				// ⇒ uuidToTopLevelCache set".
 				await this.buildUuidToTopLevelIndex()
+
+				// Mark this rebuild as current — updateIndex calls with no interleaving mutation
+				// take the no-mutation skip above.
+				this.indexRebuildMutationCounter = this.mutationCounter
 			},
 			{
 				throw: true
@@ -491,7 +590,9 @@ export class Offline {
 
 			this.ensureDirectories()
 
-			if (!INDEX_FILE.exists || INDEX_FILE.size === 0) {
+			const indexInfo = INDEX_FILE.info()
+
+			if (!indexInfo.exists || (indexInfo.size ?? 0) === 0) {
 				return {
 					files: {},
 					directories: {}
@@ -650,9 +751,10 @@ export class Offline {
 					return
 				}
 
-				const metaFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${entry.name}.filenmeta`))
+				const metaFile = new FileSystem.File(`${entry.uri}/${entry.name}.filenmeta`)
+				const metaInfo = metaFile.info()
 
-				if (!metaFile.exists || metaFile.size === 0) {
+				if (!metaInfo.exists || (metaInfo.size ?? 0) === 0) {
 					return
 				}
 
@@ -704,8 +806,9 @@ export class Offline {
 				continue
 			}
 
-			const metaFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${entry.name}.filenmeta`))
-			let brokenMeta = !metaFile.exists || metaFile.size === 0
+			const metaFile = new FileSystem.File(`${entry.uri}/${entry.name}.filenmeta`)
+			const metaInfo = metaFile.info()
+			let brokenMeta = !metaInfo.exists || (metaInfo.size ?? 0) === 0
 
 			if (!brokenMeta) {
 				const readResult = await run(async () => {
@@ -938,7 +1041,7 @@ export class Offline {
 				// below is the actual convergence contract and runs either way. NFC compare — iOS
 				// lists names in NFD, and a raw compare would re-"rename" an umlaut-named file on
 				// every pass.
-				if (dataFile && dataFile.name.normalize("NFC") !== newName.normalize("NFC")) {
+				if (dataFile && normalizeNfcFast(dataFile.name) !== normalizeNfcFast(newName)) {
 					dataFile.rename(newName)
 				}
 
@@ -1066,14 +1169,20 @@ export class Offline {
 			this.ensureDirectories()
 
 			const errors: OfflineSyncError[] = []
+			const errorIds = new Set<string>()
 
 			const pushError = (error: OfflineSyncError): void => {
-				if (!errors.some(existing => existing.id === error.id)) {
+				if (!errorIds.has(error.id)) {
+					errorIds.add(error.id)
 					errors.push(error)
 				}
 			}
 
-			const liveDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid))
+			const liveDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY_URI, topLevelUuid))
+			// Entry paths are RAW root-relative with a leading "/" and liveDirUri never ends with
+			// one, so `liveDirUri + path` equals Paths.join(liveDirUri, path) — without paying the
+			// join helper once per entry in the loops below.
+			const liveDirUri = liveDir.uri
 
 			if (!liveDir.exists) {
 				liveDir.create({
@@ -1089,8 +1198,7 @@ export class Offline {
 			// healthy bytes and the meta is rebuilt from the listing (near-free repair).
 			const existingMeta = await this.readDirectoryMeta(topLevelUuid)
 			const metaWasUnreadable = existingMeta === null && !initialStore
-			const metaFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, `${topLevelUuid}.filenmeta`))
-			const currentMetaText = metaFile.exists && metaFile.size > 0 ? await metaFile.text() : null
+			const metaFile = new FileSystem.File(`${liveDirUri}/${topLevelUuid}.filenmeta`)
 			const existingEntries = existingMeta?.entries ?? {}
 
 			// Crash recovery with RESCUE: a previous pass that died mid-move can leave /.sync-tmp-{uuid}
@@ -1112,7 +1220,7 @@ export class Offline {
 				const claimedEntry = tmpUuid !== null ? existingEntries[tmpUuid] : undefined
 
 				if (claimedEntry) {
-					const destinationUri = FileSystem.Paths.join(liveDir.uri, claimedEntry.path)
+					const destinationUri = liveDirUri + claimedEntry.path
 
 					if (!new FileSystem.File(destinationUri).exists && !new FileSystem.Directory(destinationUri).exists) {
 						const destinationParent = new FileSystem.Directory(FileSystem.Paths.dirname(destinationUri))
@@ -1142,6 +1250,11 @@ export class Offline {
 				// derived caches.
 				this.invalidateCaches()
 			}
+
+			// Local-view mode for this pass (design §4.2): disk-verified on user-explicit thorough
+			// passes and on crash escalation, index-only (meta-trusting) otherwise. Declared here
+			// because the pre-materialization fixed-point check below keys off it.
+			const thoroughLocalView = thorough === true || crashEscalation
 
 			// Initial-store failure policy: a user-initiated FIRST store (no readable prior meta) has
 			// no prior state worth keeping, so a FATALLY failed pass (any non-degraded error) deletes
@@ -1237,6 +1350,79 @@ export class Offline {
 				return finish(errors)
 			}
 
+			// FAST FIXED POINT — the dominant pass in practice (nothing changed remotely): an
+			// index-only, non-degraded pass over a committed tree whose listing matches the
+			// existing meta exactly needs NO remote map, NO local view, NO plan, NO serialize and
+			// NO meta-text read. One walk over the raw listing against the existing entries
+			// decides it; ANY doubt (mismatch, unreadable meta, scan error, thorough/crash pass)
+			// falls through to the full reconcile below. serializeEquals is conservative — false
+			// positives are impossible.
+			if (!initialStore && !metaWasUnreadable && !thoroughLocalView && scanErrors.length === 0) {
+				let matched = 0
+				let mismatch = false
+
+				for (const { dir, path } of listingResult.data.dirs) {
+					if (dir.tag === NonRootDir_Tags.Linked) {
+						// Excluded from the remote view — committed metas never contain Linked
+						// entries either.
+						continue
+					}
+
+					const unwrapped = unwrapDirMeta(dir.inner[0])
+					const existing = existingEntries[unwrapped.uuid]
+
+					// Path compare without the `/${path}` allocation: existing paths carry the
+					// leading "/" the listing paths lack.
+					if (
+						!existing ||
+						existing.path.length !== path.length + 1 ||
+						existing.path.charCodeAt(0) !== 47 ||
+						!existing.path.endsWith(path) ||
+						!serializeEquals(existing.item, unwrappedDirIntoDriveItem(unwrapped))
+					) {
+						mismatch = true
+
+						break
+					}
+
+					matched++
+				}
+
+				if (!mismatch) {
+					for (const { file, path } of listingResult.data.files) {
+						const unwrapped = unwrapFileMeta(file)
+
+						if (!unwrapped.meta) {
+							// Unreadable listed meta degrades the pass — slow path territory.
+							mismatch = true
+
+							break
+						}
+
+						const existing = existingEntries[unwrapped.file.uuid]
+
+						if (
+							!existing ||
+							existing.path.length !== path.length + 1 ||
+							existing.path.charCodeAt(0) !== 47 ||
+							!existing.path.endsWith(path) ||
+							!serializeEquals(existing.item, unwrappedFileIntoDriveItem(unwrapped))
+						) {
+							mismatch = true
+
+							break
+						}
+
+						matched++
+					}
+				}
+
+				if (!mismatch && matched === Object.keys(existingEntries).length) {
+					// True no-op: zero writes, no sweep — same exit as the serialized fixed point.
+					return errors
+				}
+			}
+
 			const remote = new Map<
 				string,
 				RemoteTreeEntry & {
@@ -1289,7 +1475,6 @@ export class Offline {
 			//   - DISK-VERIFIED (thorough passes — user-explicit triggers — or crash escalation):
 			//     every entry is stat-checked; a file whose on-disk size diverges from its meta size
 			//     counts as missing so the download heals truncation for free.
-			const thoroughLocalView = thorough === true || crashEscalation
 			const local: LocalTreeEntry[] = []
 
 			for (const uuid in existingEntries) {
@@ -1315,10 +1500,11 @@ export class Offline {
 						uuid,
 						path: entry.path,
 						isDirectory: true,
-						existsOnDisk: new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, entry.path)).exists
+						existsOnDisk: new FileSystem.Directory(liveDirUri + entry.path).exists
 					})
 				} else {
-					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, entry.path))
+					// One info() call per file — exists + size in a single native hop instead of two.
+					const dataFileInfo = new FileSystem.File(liveDirUri + entry.path).info()
 					// Compare against the recorded delivered size when the entry carries one — for
 					// meta-size-drifted remotes the meta size can NEVER match disk, and comparing
 					// against it would re-mark the entry missing (and re-download it) every
@@ -1329,7 +1515,7 @@ export class Offline {
 						uuid,
 						path: entry.path,
 						isDirectory: false,
-						existsOnDisk: dataFile.exists && dataFile.size === expectedSize
+						existsOnDisk: dataFileInfo.exists && (dataFileInfo.size ?? 0) === expectedSize
 					})
 				}
 			}
@@ -1346,44 +1532,21 @@ export class Offline {
 				allowDeletes: !listingDegraded
 			})
 
-			// Replays the planned move ops' prefix rewrites over an existing meta path — yields the
-			// entry's CURRENT on-disk location after this pass's mutations (both temp phases are in
-			// plan.ops). Used by the degraded verified union and by deferred-move handling.
-			const replayMoves = (path: string): string => {
-				let current = path
-
-				for (const op of plan.ops) {
-					if (op.type !== "move") {
-						continue
-					}
-
-					if (current === op.from) {
-						current = op.to
-					} else if (current.startsWith(`${op.from}/`)) {
-						current = `${op.to}${current.slice(op.from.length)}`
-					}
-				}
-
-				return current
-			}
-
 			// Expected ON-DISK path for a remote entry this pass. With deferred moves (degraded
-			// destination collisions — plan.deferredMoves) an entry's disk location is its existing
-			// meta path with the executed move ops replayed: deferred movers and the subtrees riding
-			// inside them stayed put, so their REMOTE paths would lie about the disk in both the
-			// verify stats and the committed meta. Entries the plan classified MISSING are exempt —
-			// the download places them at their remote paths regardless of any stale meta path.
-			// Without deferrals every surviving entry's replay lands exactly on its remote path, so
-			// the remote path is used directly.
+			// destination collisions — plan.deferredMoves) an entry's disk location is the
+			// planner's finalPath for it: deferred movers and the subtrees riding inside them
+			// stayed put, so their REMOTE paths would lie about the disk in both the verify stats
+			// and the committed meta. Entries the plan classified MISSING are exempt — the
+			// download places them at their remote paths regardless of any stale meta path.
+			// Without deferrals every surviving entry's final path lands exactly on its remote
+			// path, so the remote path is used directly.
 			const missingSet = new Set(plan.missingUuids)
 			const expectedDiskPath = (uuid: string, remotePath: string): string => {
 				if (plan.deferredMoves.length === 0 || missingSet.has(uuid)) {
 					return remotePath
 				}
 
-				const existing = existingEntries[uuid]
-
-				return existing ? replayMoves(existing.path) : remotePath
+				return existingEntries[uuid] ? (plan.finalPaths.get(uuid) ?? remotePath) : remotePath
 			}
 
 			if (listingDegraded) {
@@ -1419,9 +1582,8 @@ export class Offline {
 					}
 
 					if (op.type === "move") {
-						const destinationParent = new FileSystem.Directory(
-							FileSystem.Paths.dirname(FileSystem.Paths.join(liveDir.uri, op.to))
-						)
+						const destinationUri = liveDirUri + op.to
+						const destinationParent = new FileSystem.Directory(destinationUri.slice(0, destinationUri.lastIndexOf("/")))
 
 						if (!destinationParent.exists) {
 							destinationParent.create({
@@ -1431,16 +1593,16 @@ export class Offline {
 						}
 
 						if (op.isDirectory) {
-							const from = new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, op.from))
+							const from = new FileSystem.Directory(liveDirUri + op.from)
 
 							if (from.exists) {
-								from.move(new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, op.to)))
+								from.move(new FileSystem.Directory(destinationUri))
 							}
 						} else {
-							const from = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, op.from))
+							const from = new FileSystem.File(liveDirUri + op.from)
 
 							if (from.exists) {
-								from.move(new FileSystem.File(FileSystem.Paths.join(liveDir.uri, op.to)))
+								from.move(new FileSystem.File(destinationUri))
 							}
 						}
 
@@ -1448,13 +1610,13 @@ export class Offline {
 					}
 
 					if (op.isDirectory) {
-						const target = new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, op.path))
+						const target = new FileSystem.Directory(liveDirUri + op.path)
 
 						if (target.exists) {
 							target.delete()
 						}
 					} else {
-						const target = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, op.path))
+						const target = new FileSystem.File(liveDirUri + op.path)
 
 						if (target.exists) {
 							target.delete()
@@ -1619,7 +1781,7 @@ export class Offline {
 					const expectedPath = expectedDiskPath(uuid, remoteEntry.path)
 
 					if (remoteEntry.isDirectory) {
-						if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, expectedPath)).exists) {
+						if (!new FileSystem.Directory(liveDirUri + expectedPath).exists) {
 							pushError(
 								makeSyncError({
 									itemUuid: uuid,
@@ -1635,9 +1797,10 @@ export class Offline {
 						continue
 					}
 
-					const dataFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, expectedPath))
+					// One info() call per file — exists + size in a single native hop instead of two.
+					const dataFileInfo = new FileSystem.File(liveDirUri + expectedPath).info()
 
-					if (!dataFile.exists) {
+					if (!dataFileInfo.exists) {
 						pushError(
 							makeSyncError({
 								itemUuid: uuid,
@@ -1652,7 +1815,7 @@ export class Offline {
 						continue
 					}
 
-					const observedSize = dataFile.size ?? 0
+					const observedSize = dataFileInfo.size ?? 0
 					const expectedSize = isFileItem(remoteEntry.item) ? Number(remoteEntry.item.data.decryptedMeta?.size ?? -1) : -1
 
 					verifiedFileUuids.add(uuid)
@@ -1684,6 +1847,47 @@ export class Offline {
 			// markers (verify and download errors are never degraded, so they always block here).
 			if (errors.some(error => error.degraded !== true)) {
 				return finish(errors)
+			}
+
+			// THOROUGH FIXED POINT — disk-verified no-op (a manual sync over a healthy committed
+			// tree): the verify stats above ran and confirmed every entry in place at its expected
+			// size. When nothing changed versus the existing meta (incl. per-entry delivered-size
+			// records), skip the committedEntries build, the full meta serialize and the meta-text
+			// read — the slow path below would only conclude metaUnchanged anyway. Mirrors the
+			// index-only fast fixed point before the ops phase.
+			if (
+				thoroughLocalView &&
+				!downloadRan &&
+				!initialStore &&
+				!metaWasUnreadable &&
+				!listingDegraded &&
+				errors.length === 0 &&
+				plan.ops.length === 0 &&
+				plan.missingUuids.length === 0 &&
+				plan.deferredMoves.length === 0 &&
+				remote.size === local.length
+			) {
+				let fixedPoint = true
+
+				for (const [uuid, remoteEntry] of remote) {
+					const existing = existingEntries[uuid]
+					const committedDiskSize = verifiedFileUuids.has(uuid) ? observedSizeMismatches.get(uuid) : existing?.diskSize
+
+					if (
+						!existing ||
+						existing.path !== remoteEntry.path ||
+						committedDiskSize !== existing.diskSize ||
+						!serializeEquals(existing.item, remoteEntry.item)
+					) {
+						fixedPoint = false
+
+						break
+					}
+				}
+
+				if (fixedPoint) {
+					return errors
+				}
 			}
 
 			// Committed entries: every remote entry — deferred movers (and their riders) at their
@@ -1748,9 +1952,9 @@ export class Offline {
 					}
 
 					// The move phase may have carried an unlisted entry along inside a moved/renamed
-					// ancestor directory — replay the planner's prefix rewrites (both temp phases are
-					// in plan.ops) so the union records the entry's CURRENT on-disk path.
-					const path = replayMoves(entry.path)
+					// ancestor directory — the planner's finalPaths already tracked the entry through
+					// every executed move, so the union records its CURRENT on-disk path.
+					const path = plan.finalPaths.get(uuid) ?? entry.path
 
 					// A committed entry already claims this exact path (e.g. the file was re-created
 					// under a new uuid): the downloaded bytes own it — aliasing the stale uuid onto
@@ -1764,14 +1968,14 @@ export class Offline {
 					// bytes that are actually present. Size compares against the recorded delivered
 					// size when present (same drift rule as the local view above).
 					if (isDirectoryItem(entry.item)) {
-						if (!new FileSystem.Directory(FileSystem.Paths.join(liveDir.uri, path)).exists) {
+						if (!new FileSystem.Directory(liveDirUri + path).exists) {
 							continue
 						}
 					} else {
-						const preservedFile = new FileSystem.File(FileSystem.Paths.join(liveDir.uri, path))
+						const preservedInfo = new FileSystem.File(liveDirUri + path).info()
 						const expectedSize = entry.diskSize ?? Number(entry.item.data.decryptedMeta?.size ?? -1)
 
-						if (!preservedFile.exists || preservedFile.size !== expectedSize) {
+						if (!preservedInfo.exists || (preservedInfo.size ?? 0) !== expectedSize) {
 							continue
 						}
 					}
@@ -1788,10 +1992,29 @@ export class Offline {
 				}
 			}
 
+			// Current on-disk meta text, read LAZILY — only passes that reach the commit step pay
+			// the (potentially multi-megabyte) read; fast fixed-point passes above never do.
+			const currentMetaInfo = metaFile.info()
+			const currentMetaText = currentMetaInfo.exists && (currentMetaInfo.size ?? 0) > 0 ? await metaFile.text() : null
+
+			// Canonical entry order: plain lexicographic uuid sort (identical to the previous
+			// tuple-sort comparator), built without the intermediate entries array.
+			const sortedEntryUuids = [...committedEntries.keys()].sort()
+			const committedRecord: DirectoryOfflineMeta["entries"] = {}
+
+			for (let i = 0; i < sortedEntryUuids.length; i++) {
+				const uuid = sortedEntryUuids[i] as string
+				const committedEntry = committedEntries.get(uuid)
+
+				if (committedEntry) {
+					committedRecord[uuid] = committedEntry
+				}
+			}
+
 			const serialized = serialize({
 				item: directory,
 				parent,
-				entries: Object.fromEntries([...committedEntries.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+				entries: committedRecord
 			} satisfies DirectoryOfflineMeta)
 
 			const metaUnchanged = currentMetaText !== null && serialized === currentMetaText
@@ -1814,12 +2037,26 @@ export class Offline {
 				atomicWrite(metaFile, serialized)
 
 				// Overlap dedup: entries of this tree (incl. degraded-pass preserved ones) subsume
-				// their standalone copies.
+				// their standalone copies. The flattened index contains EVERY nested entry of this
+				// tree, so gating on the index alone would degenerate into one existence stat per
+				// committed entry — instead list each storage root once and gate on actual on-disk
+				// top-level uuids (typically a handful).
 				const currentIndex = await this.readIndex()
+				const standaloneFileUuids = new Set<string>()
+
+				for (const entry of FILES_DIRECTORY.list()) {
+					standaloneFileUuids.add(entry.name)
+				}
+
+				const storedTreeUuids = new Set<string>()
+
+				for (const entry of DIRECTORIES_DIRECTORY.list()) {
+					storedTreeUuids.add(entry.name)
+				}
 
 				for (const entryUuid of committedEntries.keys()) {
-					if (currentIndex.files[entryUuid]) {
-						const standaloneFileDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, entryUuid))
+					if (standaloneFileUuids.has(entryUuid) && currentIndex.files[entryUuid]) {
+						const standaloneFileDir = new FileSystem.Directory(`${FILES_DIRECTORY_URI}/${entryUuid}`)
 
 						if (standaloneFileDir.exists) {
 							standaloneFileDir.delete()
@@ -1827,8 +2064,8 @@ export class Offline {
 					}
 
 					// Don't delete ourselves — we're reconciling this tree, not a nested one.
-					if (currentIndex.directories[entryUuid] && entryUuid !== topLevelUuid) {
-						const standaloneDirDir = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, entryUuid))
+					if (storedTreeUuids.has(entryUuid) && entryUuid !== topLevelUuid && currentIndex.directories[entryUuid]) {
+						const standaloneDirDir = new FileSystem.Directory(`${DIRECTORIES_DIRECTORY_URI}/${entryUuid}`)
 
 						if (standaloneDirDir.exists) {
 							standaloneDirDir.delete()
@@ -1859,10 +2096,16 @@ export class Offline {
 				const claimed = new Set<string>()
 
 				for (const committedEntry of committedEntries.values()) {
-					let current = committedEntry.path
+					// ONE normalize per full path: NFC composition never crosses or affects "/"
+					// (solidus participates in no canonical compositions), so slash-aligned slices
+					// of the normalized path equal the normalized slices the old per-ancestor
+					// normalize produced. The walk also stops at the first already-claimed
+					// ancestor — shared parents are claimed exactly once instead of once per
+					// descendant.
+					let current = normalizeNfcFast(committedEntry.path)
 
-					while (current !== "" && current !== "/") {
-						claimed.add(current.normalize("NFC"))
+					while (current !== "" && current !== "/" && !claimed.has(current)) {
+						claimed.add(current)
 
 						const lastSlash = current.lastIndexOf("/")
 
@@ -1880,7 +2123,7 @@ export class Offline {
 
 						const relPath = `${relPrefix}/${entry.name}`
 
-						if (claimed.has(relPath.normalize("NFC"))) {
+						if (claimed.has(normalizeNfcFast(relPath))) {
 							if (entry instanceof FileSystem.Directory) {
 								sweep(entry, relPath)
 							}
@@ -2123,8 +2366,13 @@ export class Offline {
 			// the meta, never the current data file (the download overwrites it in place). Names
 			// compare in NFC: iOS Foundation lists names in NFD, and a raw compare would classify
 			// the CURRENT umlaut-named data file as stale, deleting it on every heal.
+			const metaFileNameNfc = normalizeNfcFast(metaFileName)
+			const dataFileNameNfc = normalizeNfcFast(dataFileName)
+
 			for (const entry of standaloneDir.list()) {
-				if (entry.name.normalize("NFC") === metaFileName.normalize("NFC") || entry.name.normalize("NFC") === dataFileName.normalize("NFC")) {
+				const entryNameNfc = normalizeNfcFast(entry.name)
+
+				if (entryNameNfc === metaFileNameNfc || entryNameNfc === dataFileNameNfc) {
 					continue
 				}
 
@@ -2336,6 +2584,7 @@ export class Offline {
 			}
 		}
 
+		const entryUuids = Object.keys(directoryMeta.entries)
 		const uuidToPath: Record<string, string> = {
 			[topLevelUuid]: "/"
 		}
@@ -2343,8 +2592,8 @@ export class Offline {
 			"/": directoryMeta.item
 		}
 
-		for (const uuid in directoryMeta.entries) {
-			const entryMeta = directoryMeta.entries[uuid]
+		for (let i = 0; i < entryUuids.length; i++) {
+			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
 
 			if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 				continue
@@ -2363,18 +2612,14 @@ export class Offline {
 			}
 		}
 
-		for (const uuid in directoryMeta.entries) {
-			const entryMeta = directoryMeta.entries[uuid]
+		for (let i = 0; i < entryUuids.length; i++) {
+			const entryMeta = directoryMeta.entries[entryUuids[i] as string]
 
 			if (!entryMeta) {
 				continue
 			}
 
-			let dirname = FileSystem.Paths.dirname(entryMeta.path)
-
-			if (dirname === "." || dirname === "") {
-				dirname = "/"
-			}
+			const dirname = rawPathDirname(entryMeta.path)
 
 			if (dirname !== targetPath) {
 				continue
@@ -2468,12 +2713,13 @@ export class Offline {
 					parent: directoryMeta.parent
 				})
 
+				const entryUuids = Object.keys(directoryMeta.entries)
 				const pathToItem: Record<string, DriveItem> = {
 					"/": directoryMeta.item
 				}
 
-				for (const uuid in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[uuid]
+				for (let i = 0; i < entryUuids.length; i++) {
+					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
 
 					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 						continue
@@ -2482,18 +2728,14 @@ export class Offline {
 					pathToItem[entryMeta.path] = entryMeta.item
 				}
 
-				for (const uuid in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[uuid]
+				for (let i = 0; i < entryUuids.length; i++) {
+					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
 
 					if (!entryMeta) {
 						continue
 					}
 
-					let dirname = FileSystem.Paths.dirname(entryMeta.path)
-
-					if (dirname === "." || dirname === "") {
-						dirname = "/"
-					}
+					const dirname = rawPathDirname(entryMeta.path)
 
 					if (seenUuids.has(entryMeta.item.data.uuid)) {
 						continue
@@ -2615,12 +2857,13 @@ export class Offline {
 					}
 				}
 
+				const entryUuids = Object.keys(directoryMeta.entries)
 				const uuidToPath: Record<string, string> = {
 					[topLevelUuid]: "/"
 				}
 
-				for (const uuid in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[uuid]
+				for (let i = 0; i < entryUuids.length; i++) {
+					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
 
 					if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 						continue
@@ -2642,21 +2885,18 @@ export class Offline {
 				let size = 0
 				let files = 0
 				let dirs = 0
+				const targetPrefix = targetPath === "/" ? "/" : `${targetPath}/`
 
-				for (const uuid in directoryMeta.entries) {
-					const entryMeta = directoryMeta.entries[uuid]
+				for (let i = 0; i < entryUuids.length; i++) {
+					const entryMeta = directoryMeta.entries[entryUuids[i] as string]
 
 					if (!entryMeta) {
 						continue
 					}
 
-					let dirname = FileSystem.Paths.dirname(entryMeta.path)
+					const dirname = rawPathDirname(entryMeta.path)
 
-					if (dirname === "." || dirname === "") {
-						dirname = "/"
-					}
-
-					if (dirname !== targetPath && !dirname.startsWith(targetPath === "/" ? "/" : `${targetPath}/`)) {
+					if (dirname !== targetPath && !dirname.startsWith(targetPrefix)) {
 						continue
 					}
 
@@ -2868,6 +3108,12 @@ export class Offline {
 			}
 
 			if (didDelete) {
+				// The disk changed — drop derived caches (and bump the mutation counter) HERE, like
+				// every other mutator. updateIndex's no-mutation skip relies on mutators owning
+				// their own invalidation; removeItem previously leaned on updateIndex's internal
+				// invalidate for it.
+				this.invalidateCaches()
+
 				await this.updateIndex()
 
 				// Optimistically prune the /offline virtual-root listing so the row
@@ -2924,10 +3170,19 @@ export class Offline {
 
 		const index = await this.readIndex()
 		const fileEntry = index.files[item.data.uuid]
+		// Nested tree entries are flattened into index.files too — consult the uuid→top-level map
+		// FIRST so their guaranteed-miss standalone stat is skipped (same uuid ⟹ same bytes, so
+		// serving the tree copy is equally correct during a transient standalone/tree overlap).
+		const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
+		const topLevelUuid = uuidToTopLevel.get(item.data.uuid)
 
-		if (fileEntry && isFileItem(fileEntry.item)) {
+		const tryStandalone = (): FileSystem.File | null => {
+			if (!fileEntry || !isFileItem(fileEntry.item)) {
+				return null
+			}
+
 			const file = new FileSystem.File(
-				FileSystem.Paths.join(FILES_DIRECTORY.uri, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
+				FileSystem.Paths.join(FILES_DIRECTORY_URI, fileEntry.item.data.uuid, fileEntry.item.data.decryptedMeta?.name ?? "")
 			)
 
 			if (file.exists) {
@@ -2935,41 +3190,31 @@ export class Offline {
 
 				return file
 			}
+
+			return null
 		}
 
-		// Standalone lookup missed (either no index entry or the file isn't on
-		// disk at the standalone path). Fall through to the directory-tree lookup
-		// below — the item may live inside a marked-offline directory rather than
-		// marked standalone, and `buildUuidToTopLevelIndex` includes the uuids of
-		// every nested file entry across all marked-offline directories.
-		const uuidToTopLevel = await this.buildUuidToTopLevelIndex()
-		const topLevelUuid = uuidToTopLevel.get(item.data.uuid)
-
 		if (!topLevelUuid) {
-			return null
+			return tryStandalone()
 		}
 
 		const directoryMeta = await this.readDirectoryMeta(topLevelUuid)
+		const entryMeta = directoryMeta?.entries[item.data.uuid]
 
-		if (!directoryMeta) {
-			return null
+		if (entryMeta && isFileItem(entryMeta.item)) {
+			// Raw entry paths lead with "/" — direct concat equals Paths.join here.
+			const foundFile = new FileSystem.File(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}${entryMeta.path}`)
+
+			if (foundFile.exists) {
+				this.getLocalFileCache.set(item.data.uuid, foundFile)
+
+				return foundFile
+			}
 		}
 
-		const entryMeta = directoryMeta.entries[item.data.uuid]
-
-		if (!entryMeta || !isFileItem(entryMeta.item)) {
-			return null
-		}
-
-		const foundFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, entryMeta.path))
-
-		if (foundFile.exists) {
-			this.getLocalFileCache.set(item.data.uuid, foundFile)
-
-			return foundFile
-		}
-
-		return null
+		// Tree bytes missing (or tree meta unreadable): a standalone copy may still exist — keep
+		// the old standalone-first behavior's reachability as a last resort.
+		return tryStandalone()
 	}
 
 	public async getLocalDirectory(item: DriveItem): Promise<FileSystem.Directory | null> {
@@ -3000,7 +3245,7 @@ export class Offline {
 
 		// Check if this is the top-level directory itself
 		if (directoryMeta.item.data.uuid === item.data.uuid) {
-			const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid))
+			const foundDirectory = new FileSystem.Directory(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}`)
 
 			if (foundDirectory.exists) {
 				this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)
@@ -3009,14 +3254,14 @@ export class Offline {
 			}
 		}
 
-		// Nested entries are uuid-keyed — direct lookup, then join the raw path.
+		// Nested entries are uuid-keyed — direct lookup, then concat the raw leading-"/" path.
 		const entryMeta = directoryMeta.entries[item.data.uuid]
 
 		if (!entryMeta || !isDirectoryItem(entryMeta.item)) {
 			return null
 		}
 
-		const foundDirectory = new FileSystem.Directory(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, topLevelUuid, entryMeta.path))
+		const foundDirectory = new FileSystem.Directory(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}${entryMeta.path}`)
 
 		if (foundDirectory.exists) {
 			this.getLocalDirectoryCache.set(item.data.uuid, foundDirectory)

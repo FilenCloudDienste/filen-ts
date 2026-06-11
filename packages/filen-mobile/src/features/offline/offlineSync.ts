@@ -1237,9 +1237,11 @@ export class OfflineSync {
 				}
 
 				const errors: OfflineSyncError[] = []
+				const errorIds = new Set<string>()
 
 				const pushError = (error: OfflineSyncError): void => {
-					if (!errors.some(existing => existing.id === error.id)) {
+					if (!errorIds.has(error.id)) {
+						errorIds.add(error.id)
 						errors.push(error)
 					}
 				}
@@ -1256,15 +1258,42 @@ export class OfflineSync {
 					auth.getSdkClients()
 				])
 
-				const syncableFiles = files.filter(file => !isLinkedParent(file.parent))
-				const syncableTrees = trees.filter(tree => !isLinkedParent(tree.parent))
-				const normalTrees = syncableTrees.filter(tree => tree.item.type === "directory")
-				const listedTrees = syncableTrees.filter(tree => tree.item.type !== "directory")
+				// Single-pass partition (was four .filter passes over the same arrays).
+				const syncableFiles: typeof files = []
+				const normalTrees: typeof trees = []
+				const listedTrees: typeof trees = []
+				const listingParents: OfflineParent[] = []
+
+				for (const file of files) {
+					if (!isLinkedParent(file.parent)) {
+						syncableFiles.push(file)
+					}
+				}
+
+				for (const tree of trees) {
+					if (isLinkedParent(tree.parent)) {
+						continue
+					}
+
+					if (tree.item.type === "directory") {
+						normalTrees.push(tree)
+					} else {
+						listedTrees.push(tree)
+					}
+				}
+
+				for (const tree of listedTrees) {
+					listingParents.push(tree.parent)
+				}
+
+				for (const file of syncableFiles) {
+					listingParents.push(file.parent)
+				}
 
 				// ONE deduped listing per unique parent, shared by the shared-trees pass and the
 				// standalone-files pass.
 				const parentListings = await this.fetchParentListings({
-					parents: [...listedTrees.map(tree => tree.parent), ...syncableFiles.map(file => file.parent)],
+					parents: listingParents,
 					authedSdkClient,
 					signal
 				})
