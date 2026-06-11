@@ -10,7 +10,6 @@ import {
 import { type DriveItem, type Note, type Chat } from "@/types"
 import sqlite, { prefixUpperBound } from "@/lib/sqlite"
 import { serialize, deserialize } from "@/lib/serializer"
-import { debounce } from "es-toolkit/function"
 import { AppState } from "react-native"
 
 // Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
@@ -207,7 +206,9 @@ export class Cache {
 
 					upserts.add(mutation.entryKey)
 
-					this.dirtyDeletes.get(key)?.delete(mutation.entryKey)
+					if (this.dirtyDeletes.size !== 0) {
+						this.dirtyDeletes.get(key)?.delete(mutation.entryKey)
+					}
 
 					break
 				}
@@ -223,7 +224,9 @@ export class Cache {
 
 					deletes.add(mutation.entryKey)
 
-					this.dirtyUpserts.get(key)?.delete(mutation.entryKey)
+					if (this.dirtyUpserts.size !== 0) {
+						this.dirtyUpserts.get(key)?.delete(mutation.entryKey)
+					}
 
 					break
 				}
@@ -548,15 +551,52 @@ export class Cache {
 		}
 	}
 
-	private persistDirty = debounce(
-		() => {
+	// Trailing-debounce scheduler with O(1) re-arms: a generic debounce clears and
+	// re-creates a timer on EVERY call — two timer syscalls per cache mutation, ~60k
+	// timer ops for one 10k-folder refetch. Here only the FIRST mutation of an idle
+	// window arms a timer; later mutations just bump `lastMutationAt`. When the timer
+	// fires early (mutations extended the window) it re-arms once for the remainder, so
+	// the persist still runs exactly PERSIST_DEBOUNCE after the LAST mutation —
+	// trailing-edge semantics identical to the previous implementation (pinned by the
+	// hardening suite's window-extension test).
+	private persistTimer: ReturnType<typeof setTimeout> | null = null
+	private lastMutationAt = 0
+
+	private readonly persistDirty: (() => void) & { cancel: () => void } = (() => {
+		const onTimer = (): void => {
+			this.persistTimer = null
+
+			const elapsed = performance.now() - this.lastMutationAt
+
+			if (elapsed < PERSIST_DEBOUNCE) {
+				this.persistTimer = setTimeout(onTimer, PERSIST_DEBOUNCE - elapsed)
+
+				return
+			}
+
 			this.persistAsync()
-		},
-		PERSIST_DEBOUNCE,
-		{
-			edges: ["trailing"]
 		}
-	)
+
+		const trigger = (): void => {
+			this.lastMutationAt = performance.now()
+
+			if (this.persistTimer === null) {
+				this.persistTimer = setTimeout(onTimer, PERSIST_DEBOUNCE)
+			}
+		}
+
+		const fn = trigger as (() => void) & { cancel: () => void }
+
+		fn.cancel = (): void => {
+			if (this.persistTimer !== null) {
+				clearTimeout(this.persistTimer)
+
+				this.persistTimer = null
+			}
+		}
+
+		return fn
+	})()
 
 	/**
 	 * Populate maps from SQLite. Uses Map.prototype.set to bypass
@@ -572,13 +612,14 @@ export class Cache {
 		const results = await Promise.allSettled(
 			this.registry.map(async ({ key, map }) => {
 				const prefix = key + ":"
+				const prefixLength = prefix.length
 				const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [
 					prefix,
 					prefixUpperBound(prefix)
 				])
 
 				for (const row of rows) {
-					const entryKey = (row[0] as string).slice(prefix.length)
+					const entryKey = (row[0] as string).slice(prefixLength)
 
 					Map.prototype.set.call(map, entryKey, deserialize(row[1] as string))
 				}
