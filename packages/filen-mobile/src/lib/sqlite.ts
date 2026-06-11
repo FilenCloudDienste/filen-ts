@@ -175,14 +175,7 @@ class Sqlite {
 				return null
 			}
 
-			try {
-				return deserialize(row[0] as string) as T
-			} catch (e) {
-				// Defensive: catch and log deserialization errors to prevent a single bad row from breaking the whole read. The caller can handle a null return as needed; returning null is better than throwing and returning nothing.
-				console.error(`[Sqlite] Failed to deserialize value for key ${key}`, e)
-
-				return null
-			}
+			return deserialize(row[0] as string) as T
 		},
 		set: async <T>(key: string, value: T): Promise<number | null> => {
 			if (value == null) {
@@ -190,17 +183,7 @@ class Sqlite {
 			}
 
 			const generation = this.clearGeneration
-			let serialized: string
-
-			try {
-				serialized = serialize(value)
-			} catch (e) {
-				// Defensive: catch and log serialization errors to prevent a single bad value from breaking the whole write. The caller can handle failed writes as needed; failing silently is better than throwing and leaving the store in an inconsistent state.
-				console.error(`[Sqlite] Failed to serialize value for key ${key}`, e)
-
-				return null
-			}
-
+			const serialized = serialize(value)
 			const db = await this.openDb()
 
 			// A kv wipe (logout) landed after this write started — discard it silently
@@ -254,13 +237,12 @@ class Sqlite {
 			const result = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
 			const map = new Map<string, T>()
 
-			try {
-				for (const row of result) {
+			for (const row of result) {
+				try {
 					map.set(row[0] as string, deserialize(row[1] as string) as T)
+				} catch (e) {
+					console.error(`[Sqlite] Failed to deserialize value for key ${row[0] as string}`, e)
 				}
-			} catch (e) {
-				// Defensive: catch and log deserialization errors to prevent a single bad row from breaking the whole prefix read. The caller can handle missing keys as needed; returning a partial map is better than throwing and returning nothing.
-				console.error(`[Sqlite] Failed to deserialize value for prefix ${prefix}`, e)
 			}
 
 			return map
