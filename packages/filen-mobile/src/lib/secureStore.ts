@@ -16,6 +16,15 @@ import useEffectOnce from "@/hooks/useEffectOnce"
 
 export const VERSION = 1
 
+// kSecAttrAccessibleAfterFirstUnlock — Apple's recommended class for background access. The
+// expo-secure-store default (kSecAttrAccessibleWhenUnlocked) makes the key unreadable the
+// moment the screen locks, which is exactly when BGProcessingTask runs fire — every
+// locked-device background sync died at setup with errSecInteractionNotAllowed. The key
+// stays hardware-protected until the first unlock after boot. Android ignores this option.
+const ENCRYPTION_KEY_KEYCHAIN_OPTIONS: ExpoSecureStore.SecureStoreOptions = {
+	keychainAccessible: ExpoSecureStore.AFTER_FIRST_UNLOCK
+}
+
 class SecureStore {
 	private readonly mmkv: MMKV
 
@@ -32,6 +41,10 @@ class SecureStore {
 	public readonly fallbackMmkvId: string = "securestore.fallback.mmkv"
 	public readonly secureStoreFileName: string = "securestore.bin"
 	public readonly secureStoreKeyEncryptionKey: string = "encryptionKey"
+	// MMKV flag marking that the keychain item carries kSecAttrAccessibleAfterFirstUnlock.
+	// Keys written before audit B1 (2026-06-11) carry the expo-secure-store default
+	// (kSecAttrAccessibleWhenUnlocked) and get a one-time class rewrite on first read.
+	public readonly secureStoreKeyEncryptionKeyClassFlag: string = "encryptionKeyAfuMigrated"
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
 		Platform.select({
 			ios: FileSystem.Paths.join(
@@ -206,15 +219,40 @@ class SecureStore {
 				return this.encryptionKey
 			}
 
-			this.encryptionKey = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
+			const stored = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
 
-			if (!this.encryptionKey) {
-				this.encryptionKey = crypto.randomBytes(32).toString("hex")
+			if (!stored) {
+				const fresh = crypto.randomBytes(32).toString("hex")
 
-				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, this.encryptionKey)
+				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, fresh, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+
+				this.mmkv.set(this.secureStoreKeyEncryptionKeyClassFlag, true)
+
+				this.encryptionKey = fresh
+
+				return fresh
 			}
 
-			return this.encryptionKey
+			if (!this.mmkv.getBoolean(this.secureStoreKeyEncryptionKeyClassFlag)) {
+				// One-time class rewrite for keys written before ENCRYPTION_KEY_KEYCHAIN_OPTIONS
+				// existed. The keychain READ query never filters on the accessibility class, so
+				// the value round-trips unchanged — only the item's class attribute moves to
+				// AfterFirstUnlock. A failed rewrite must never break auth: the key still works
+				// while unlocked, the flag stays unset, and the rewrite retries next boot.
+				const rewrite = await run(async () => {
+					await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, stored, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
+				})
+
+				if (rewrite.success) {
+					this.mmkv.set(this.secureStoreKeyEncryptionKeyClassFlag, true)
+				} else {
+					console.error("[SecureStore] Failed to migrate encryption key accessibility class", rewrite.error)
+				}
+			}
+
+			this.encryptionKey = stored
+
+			return stored
 		})
 
 		if (!result.success) {
