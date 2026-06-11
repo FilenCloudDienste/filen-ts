@@ -10,6 +10,7 @@ import secureStore from "@/lib/secureStore"
 import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
 import cache from "@/lib/cache"
 import { queryClientPersisterKv } from "@/queries/client"
+import backgroundRunLog, { type BackgroundRunPhase } from "@/features/cameraUpload/backgroundRunLog"
 
 const TASK_NAME = "filen-camera-upload-sync"
 
@@ -31,8 +32,15 @@ function cancelBackgroundWork(): void {
 }
 
 TaskManager.defineTask(TASK_NAME, async () => {
+	const startedAt = Date.now()
+
+	// Run-log state, written as ONE breadcrumb after the run settles (audit B6): release
+	// builds no-op console.* and both OS schedulers discard the returned result, so the
+	// persisted entry is the only field-diagnosable trace of this run.
+	let phase: BackgroundRunPhase = "setup"
+	let cancelled = false
+
 	const result = await run(async defer => {
-		const startedAt = Date.now()
 
 		// Persist-before-suspend: the debounced persisters (cache.ts PersistentMaps —
 		// camera-upload hashes; QueryPersisterKv — storedOffline query broadcasts) normally
@@ -52,8 +60,6 @@ TaskManager.defineTask(TASK_NAME, async () => {
 		// a cancel landing between phases aborts nothing, so a not-yet-started phase
 		// would otherwise run un-aborted (e.g. an iOS expiration at t=30s leaves
 		// remaining = 90s > the min-remaining gate). Once cancelled, no phase starts.
-		let cancelled = false
-
 		const cancelRun = (): void => {
 			cancelled = true
 
@@ -82,6 +88,8 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			return
 		}
 
+		phase = "camera"
+
 		await cameraUpload.sync({
 			maxUploads: 1,
 			background: true
@@ -95,27 +103,62 @@ TaskManager.defineTask(TASK_NAME, async () => {
 		// screen). Skipped when the camera phase consumed the run budget.
 		const offlineEnabled = (await secureStore.get<boolean>(OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY)) === true
 
-		if (!offlineEnabled || cancelled) {
+		if (!offlineEnabled) {
+			phase = "done"
+
+			return
+		}
+
+		if (cancelled) {
 			return
 		}
 
 		const remaining = BACKGROUND_RUN_BUDGET_MS - (Date.now() - startedAt)
 
 		if (remaining < OFFLINE_BACKGROUND_MIN_REMAINING_MS) {
+			// Budget consumed by the camera phase — an intended outcome, not a cancel.
+			phase = "done"
+
 			return
 		}
+
+		phase = "offline"
 
 		await offlineSync.sync({
 			background: true
 		})
+
+		if (!cancelled) {
+			phase = "done"
+		}
 	})
+
+	// One breadcrumb per run, after the flush defers settled. Must never flip a healthy
+	// run's outcome — a failed kv write only logs.
+	await backgroundRunLog
+		.append({
+			v: 1,
+			startedAt,
+			finishedAt: Date.now(),
+			phase,
+			cancelled,
+			result: result.success ? "success" : "failed",
+			errorMessage: result.success ? undefined : result.error instanceof Error ? result.error.message : String(result.error)
+		})
+		.catch(err => {
+			console.error("[BackgroundTask] Failed to write run log entry:", err)
+		})
 
 	if (!result.success) {
 		console.error("[BackgroundTask] Background sync run failed:", result.error)
 
-		// The OS schedulers feed this into their retry/budget heuristics — a broken run
-		// (setup failure, sync rejection) must not be reported as a healthy one. An
-		// unauthed run is NOT a failure: it returns Success above by design.
+		// Honest semantics note (audit B3, 2026-06-11): the INSTALLED expo-background-task
+		// discards this value on both platforms — iOS always calls
+		// task.setTaskCompleted(success: true) (BackgroundTaskAppDelegate.swift ignores the
+		// completion result) and Android always returns WorkManager Result.success(). The
+		// distinction is kept for OUR semantics: the test suite pins it and the run-log
+		// breadcrumb above is the real failure record. An unauthed run is NOT a failure:
+		// it returns Success above by design.
 		return BackgroundTaskResult.Failed
 	}
 
