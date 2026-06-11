@@ -99,6 +99,7 @@ async function resetSecureStore() {
 	s.encryptionKey = null
 	s.available = null
 	s.directoriesEnsured = false
+	s.encryptionKeyWasGenerated = false
 
 	await secureStore.init()
 }

@@ -29,6 +29,14 @@ class SecureStore {
 	private readonly mmkv: MMKV
 
 	private available: boolean | null = null
+	// True when getEncryptionKey() GENERATED the key this session because none existed
+	// (key renamed or keychain/MMKV lost the item). Provenance discriminator for the
+	// orphaned-store heal in loadFromDisk(): a fresh random key provably cannot decrypt
+	// any pre-existing payload, so a present store + generated key = permanently dead.
+	// Generation only happens on a clean "not found" — keychain read ERRORS (e.g. a
+	// locked device's errSecInteractionNotAllowed) throw before reaching it, so a
+	// transient read failure can never false-trigger the heal.
+	private encryptionKeyWasGenerated = false
 	private encryptionKey: string | null = null
 	private readCache: Record<string, unknown> | null = null
 	private initDone: boolean = false
@@ -215,6 +223,7 @@ class SecureStore {
 
 				if (!this.encryptionKey) {
 					this.encryptionKey = crypto.randomBytes(32).toString("hex")
+					this.encryptionKeyWasGenerated = true
 
 					this.mmkv.set(this.secureStoreKeyEncryptionKey, this.encryptionKey)
 				}
@@ -226,6 +235,7 @@ class SecureStore {
 
 			if (!this.encryptionKey) {
 				this.encryptionKey = crypto.randomBytes(32).toString("hex")
+				this.encryptionKeyWasGenerated = true
 
 				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, this.encryptionKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
 			}
@@ -374,6 +384,25 @@ class SecureStore {
 		const destinationPresent = this.secureStoreFile.exists && this.secureStoreFile.size > 0
 
 		if (destinationPresent) {
+			// ORPHANED-STORE HEAL (2026-06-12): the key was generated fresh this session, so
+			// this payload (and every same-era backup) is permanently undecryptable — without
+			// the heal, init()/set() would throw forever and brick the app until reinstall
+			// (any future key rename, keychain wipe, or restore-without-keychain would do it).
+			// This is NOT a finding-51 violation: that guard protects recoverable failures,
+			// and an existing-key decrypt failure below still throws and preserves the file.
+			if (this.encryptionKeyWasGenerated) {
+				console.error("[SecureStore] Orphaned store detected (fresh key, pre-existing payload) — resetting to empty")
+
+				this.secureStoreFile.delete()
+				this.cleanupStaleSiblings()
+
+				// One-shot: the dead payload is gone; everything on disk from here on is
+				// written by the current key (write() also flips this on first persist).
+				this.encryptionKeyWasGenerated = false
+
+				return null
+			}
+
 			// Prefer a present+valid destination. A decrypt failure here is a genuine read failure
 			// and MUST throw — never silently treat a present file as empty.
 			const data = this.decryptStorePayload(this.secureStoreFile.bytesSync(), encryptionKey)
@@ -537,6 +566,11 @@ class SecureStore {
 				// destination, so from here the catch block must NOT delete tmpFile.
 				promoted = true
 				this.readCache = data
+				// A fresh-generated key has now successfully written the store — the on-disk
+				// payload is OURS. Provenance flips to "established" so the orphaned-store heal
+				// in loadFromDisk() can never fire against data this key wrote (e.g. a later
+				// cache-evicted read in the same session).
+				this.encryptionKeyWasGenerated = false
 
 				// Best-effort: discard the backup now that the new payload is live. A failure
 				// here only orphans the backup (harmless) and must never surface as a write
