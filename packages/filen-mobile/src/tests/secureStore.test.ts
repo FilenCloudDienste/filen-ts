@@ -1084,6 +1084,57 @@ describe("SecureStore", () => {
 			expect(changeEmits).toHaveLength(0)
 		})
 
+		it("ORPHANED store (fresh-generated key + pre-existing payload) self-heals to empty instead of bricking", async () => {
+			// A key rename or keychain loss means getEncryptionKey() generates a FRESH key —
+			// which provably can never decrypt any pre-existing payload. Without the heal,
+			// init()/set() throw forever and the app bricks until reinstall. The heal must
+			// only fire on fresh GENERATION (keychain returned "not found"), never on a
+			// keychain read ERROR (locked device throws and never reaches generation).
+			const store1 = createSecureStore()
+			const keyCapture = captureEncryptionKey()
+
+			await store1.init()
+			await store1.set("client", "stringified-client")
+
+			await keyCapture
+
+			expect(fs.get(fileUri)).toBeInstanceOf(Uint8Array)
+
+			// New session: the keychain has NO key under the (renamed) name → fresh generation.
+			getItemAsync.mockResolvedValue(null)
+			mockEvents.emit.mockClear()
+
+			const store2 = createSecureStore()
+
+			await expect(store2.init()).resolves.not.toThrow()
+
+			// The dead payload is gone, the store is empty and fully functional again.
+			expect(fs.get(fileUri)).toBeUndefined()
+			expect(await store2.get("client")).toBeNull()
+
+			await expect(store2.set("fresh", "value")).resolves.not.toThrow()
+			expect(await store2.get("fresh")).toBe("value")
+		})
+
+		it("ORPHANED store heals on the MMKV-fallback path too (fresh fallback key + pre-existing payload)", async () => {
+			const store1 = createSecureStore()
+
+			await store1.init()
+			await store1.set("client", "stringified-client")
+
+			expect(fs.get(fileUri)).toBeInstanceOf(Uint8Array)
+
+			// Fallback path with an empty MMKV → fresh generation there.
+			isAvailableAsync.mockResolvedValue(false)
+			mockMmkv.getString.mockReturnValue(undefined)
+
+			const store2 = createSecureStore()
+
+			await expect(store2.init()).resolves.not.toThrow()
+			expect(fs.get(fileUri)).toBeUndefined()
+			expect(await store2.get("client")).toBeNull()
+		})
+
 		it("a genuinely-absent file still initializes empty (absence is not a failure)", async () => {
 			// No prior writes — the destination file never exists.
 			const store = createSecureStore()
