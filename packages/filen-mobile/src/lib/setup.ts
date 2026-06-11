@@ -17,6 +17,15 @@ import { initTheme } from "@/lib/theme"
 // foreground launch) can't run the init flow twice. No other instance state -> plain object.
 const setupMutex = new Semaphore(1)
 
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+	const start = performance.now()
+	const result = await fn()
+
+	console.log(`[Setup] ${label} in ${(performance.now() - start).toFixed(2)}ms`)
+
+	return result
+}
+
 const setup = {
 	async setup(options?: { background?: boolean }): Promise<{
 		isAuthed: boolean
@@ -34,16 +43,19 @@ const setup = {
 			// sessions. Safe only because no transfers can be in flight before setup()
 			// completes.
 			if (!options?.background) {
+				const sweepsStart = performance.now()
+
 				sweepTmpDir()
 				sweepStrayDownloadFiles()
+
+				console.log(`[Setup] Sweeps in ${(performance.now() - sweepsStart).toFixed(2)}ms`)
 			}
 
-			const isAuthed = await auth.isAuthed()
+			const isAuthed = await timed("auth.isAuthed", () => auth.isAuthed())
+			const stringifiedClient = isAuthed.isAuthed && isAuthed.stringifiedClient ? isAuthed.stringifiedClient : null
 
-			if (isAuthed.isAuthed && isAuthed.stringifiedClient) {
-				await auth.setSdkClients(isAuthed.stringifiedClient)
-
-				cache.rootUuid = isAuthed.stringifiedClient.rootUuid
+			if (stringifiedClient) {
+				cache.rootUuid = stringifiedClient.rootUuid
 			}
 
 			// initI18n / initTheme only read the persisted language / theme from secureStore, which
@@ -53,16 +65,25 @@ const setup = {
 			// paint (no flash of raw keys or the wrong theme). initTheme is a no-op when following the
 			// system (uniwind already defaults to it on import).
 			//
+			// auth.setSdkClients only needs the auth result — nothing else in this block touches the SDK
+			// client (the restores only deserialize, and the reconnect listener attaches after the block),
+			// so the Rust client construction overlaps the restores instead of serializing before them.
+			//
 			// cache.restore() is gated on auth: the persistent caches hold decrypted-at-rest metadata, so
 			// hydrating them while logged out would re-surface a prior account's data (the logout wipe
 			// clears them; restoring unconditionally would defeat it). When unauthed the maps stay
 			// un-ready, which is correct — nothing writes the persistent caches before login.
 			await Promise.all([
+				stringifiedClient
+					? timed("auth.setSdkClients", async () => {
+							await auth.setSdkClients(stringifiedClient)
+						})
+					: Promise.resolve(),
 				secureStore.init(),
-				sqlite.init(),
+				timed("sqlite.init", () => sqlite.init()),
 				isAuthed.isAuthed ? cache.restore() : Promise.resolve(),
 				restoreQueries(),
-				initI18n(),
+				timed("initI18n", () => initI18n()),
 				initTheme()
 			])
 
