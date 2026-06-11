@@ -52,43 +52,39 @@ function getNumericParts(str: string): (string | number)[] {
 	if (!cached) {
 		cached = []
 
-		let currentNum = ""
-		let currentText = ""
+		// Run-sliced scan: the previous shape extracted a 1-char string per character
+		// (str[i]) and grew accumulator strings char-by-char — O(length) string
+		// allocations per UNCACHED name. Runs are detected via charCodeAt only and
+		// materialized with ONE slice each; digit runs keep parseInt so numeric
+		// semantics (incl. precision rounding of absurdly long digit runs) stay
+		// byte-identical to the previous implementation.
+		const length = str.length
+		let runStart = 0
+		let runIsDigit = false
+		let hasRun = false
 
-		for (let i = 0; i < str.length; i++) {
-			const char = str[i]
+		for (let i = 0; i < length; i++) {
+			const code = str.charCodeAt(i)
+			const isDigit = code >= 48 && code <= 57
 
-			if (!char) {
+			if (!hasRun) {
+				hasRun = true
+				runIsDigit = isDigit
+				runStart = i
+
 				continue
 			}
 
-			const code = char.charCodeAt(0)
+			if (isDigit !== runIsDigit) {
+				cached.push(runIsDigit ? parseInt(str.slice(runStart, i), 10) : str.slice(runStart, i))
 
-			if (code >= 48 && code <= 57) {
-				if (currentText) {
-					cached.push(currentText)
-
-					currentText = ""
-				}
-
-				currentNum += char
-			} else {
-				if (currentNum) {
-					cached.push(parseInt(currentNum, 10))
-
-					currentNum = ""
-				}
-
-				currentText += char
+				runStart = i
+				runIsDigit = isDigit
 			}
 		}
 
-		if (currentNum) {
-			cached.push(parseInt(currentNum, 10))
-		}
-
-		if (currentText) {
-			cached.push(currentText)
+		if (hasRun) {
+			cached.push(runIsDigit ? parseInt(str.slice(runStart), 10) : str.slice(runStart))
 		}
 
 		numericPartsCache.set(str, cached)
@@ -97,9 +93,7 @@ function getNumericParts(str: string): (string | number)[] {
 	return cached
 }
 
-function compareStringsNumeric(a: string, b: string): number {
-	const aParts = getNumericParts(a)
-	const bParts = getNumericParts(b)
+function comparePartsNumeric(aParts: (string | number)[], bParts: (string | number)[]): number {
 	const minLen = Math.min(aParts.length, bParts.length)
 
 	for (let i = 0; i < minLen; i++) {
@@ -122,193 +116,284 @@ function compareStringsNumeric(a: string, b: string): number {
 	return aParts.length - bParts.length
 }
 
-function compareTypes(aType: string, bType: string): number {
-	const aIsDir = aType === "directory" || aType === "sharedDirectory" || aType === "sharedRootDirectory"
-	const bIsDir = bType === "directory" || bType === "sharedDirectory" || bType === "sharedRootDirectory"
-
-	if (aIsDir && !bIsDir) {
-		return -1
-	}
-
-	if (bIsDir && !aIsDir) {
-		return 1
-	}
-
-	return 0
+function isDirectoryType(type: string): boolean {
+	return type === "directory" || type === "sharedDirectory" || type === "sharedRootDirectory"
 }
 
-const compareName = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
-	const typeComp = compareTypes(a.type, b.type)
+// Per-item sort keys are extracted ONCE per item into parallel key arrays, an index
+// array is sorted with a comparator that only reads keys (and resolves the lazy
+// numeric-uuid tiebreaker on key equality), and the permutation is applied in one
+// write-back pass. The previous shape recomputed keys per COMPARISON — O(n log n)
+// recomputes including Number(bigint) conversions and a fresh getTimestamp closure per
+// comparison — and ran the dirs-before-files type check (up to 6 string comparisons)
+// inside every comparison. Dirs-first is handled by partitioning ONCE instead: for a
+// stable sort whose cross-class order is fully class-determined, [stable-sort(dirs),
+// stable-sort(files)] is exactly equivalent. Index arrays instead of per-item wrapper
+// objects keep the decoration overhead at two flat arrays per sort (cheap enough that
+// the TimSort adaptive case — re-sorting an already-sorted listing — stays fast).
+// Equal-key comparisons return 0 and keep input order (Array.prototype.sort is
+// spec-stable over the index array; stability is pinned by the hardening suite).
 
-	if (typeComp !== 0) {
-		return typeComp
-	}
-
-	const aLower = getLowerName(a.data.decryptedMeta?.name ?? a.data.uuid)
-	const bLower = getLowerName(b.data.decryptedMeta?.name ?? b.data.uuid)
-	const result = compareStringsNumeric(aLower, bLower)
-
-	return isAsc ? result : -result
+function nameSortKey(item: DriveItem): string {
+	return item.data.decryptedMeta?.name ?? item.data.uuid
 }
 
-const compareMime = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
-	const typeComp = compareTypes(a.type, b.type)
-
-	if (typeComp !== 0) {
-		return typeComp
-	}
-
-	const aLower = getLowerName(
-		a.type === "file"
-			? (a.data.decryptedMeta?.mime ?? a.data.decryptedMeta?.name ?? a.data.uuid)
-			: a.type === "sharedFile" || a.type === "sharedRootFile"
-				? (a.data.decryptedMeta?.mime ?? a.data.decryptedMeta?.name ?? a.data.uuid)
-				: (a.data.decryptedMeta?.name ?? a.data.uuid)
-	)
-
-	const bLower = getLowerName(
-		b.type === "file"
-			? (b.data.decryptedMeta?.mime ?? b.data.decryptedMeta?.name ?? b.data.uuid)
-			: b.type === "sharedFile" || b.type === "sharedRootFile"
-				? (b.data.decryptedMeta?.mime ?? b.data.decryptedMeta?.name ?? b.data.uuid)
-				: (b.data.decryptedMeta?.name ?? b.data.uuid)
-	)
-
-	const result = compareStringsNumeric(aLower, bLower)
-
-	return isAsc ? result : -result
+function mimeSortKey(item: DriveItem): string {
+	return item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
+		? (item.data.decryptedMeta?.mime ?? item.data.decryptedMeta?.name ?? item.data.uuid)
+		: (item.data.decryptedMeta?.name ?? item.data.uuid)
 }
 
-const compareSize = (a: DriveItem, b: DriveItem, isAsc: boolean): number => {
-	const typeComp = compareTypes(a.type, b.type)
-
-	if (typeComp !== 0) {
-		return typeComp
-	}
-
-	const cmp = a.data.size > b.data.size ? 1 : a.data.size < b.data.size ? -1 : 0
-
-	return isAsc ? cmp : -cmp
-}
-
-// Shared skeleton for the timestamp-based comparators: dirs-before-files, then compare a
-// per-mode extracted timestamp, with the numeric-uuid tiebreaker and asc/desc flip. Each
-// mode only differs in how it reads the timestamp off an item — passed in as `getTimestamp`.
-const compareByTimestamp = (a: DriveItem, b: DriveItem, isAsc: boolean, getTimestamp: (item: DriveItem) => number): number => {
-	const typeComp = compareTypes(a.type, b.type)
-
-	if (typeComp !== 0) {
-		return typeComp
-	}
-
-	const aTimestamp = getTimestamp(a)
-	const bTimestamp = getTimestamp(b)
-
-	if (aTimestamp === bTimestamp) {
-		const diff = getUuidNumber(a.data.uuid) - getUuidNumber(b.data.uuid)
-
-		return isAsc ? diff : -diff
-	}
-
-	const diff = aTimestamp - bTimestamp
-
-	return isAsc ? diff : -diff
-}
-
-const compareDate = (a: DriveItem, b: DriveItem, isAsc: boolean): number =>
-	compareByTimestamp(a, b, isAsc, item =>
-		Number(
-			item.type === "file"
+function uploadDateSortKey(item: DriveItem): number {
+	return Number(
+		item.type === "file"
+			? item.data.timestamp
+			: item.type === "directory"
 				? item.data.timestamp
-				: item.type === "directory"
-					? item.data.timestamp
-					: item.type === "sharedFile" || item.type === "sharedRootFile"
-						? (item.data.decryptedMeta?.created ?? item.data.decryptedMeta?.modified ?? 0)
-						: (item.data.decryptedMeta?.created ?? 0)
-		)
+				: item.type === "sharedFile" || item.type === "sharedRootFile"
+					? (item.data.decryptedMeta?.created ?? item.data.decryptedMeta?.modified ?? 0)
+					: (item.data.decryptedMeta?.created ?? 0)
 	)
+}
 
-const compareLastModified = (a: DriveItem, b: DriveItem, isAsc: boolean): number =>
-	compareByTimestamp(a, b, isAsc, item =>
-		Number(
-			item.type === "file"
-				? (item.data.decryptedMeta?.modified ?? item.data.timestamp)
-				: item.type === "directory"
-					? (item.data.decryptedMeta?.created ?? item.data.timestamp)
-					: item.type === "sharedFile" || item.type === "sharedRootFile"
-						? (item.data.decryptedMeta?.modified ?? item.data.decryptedMeta?.created ?? 0)
-						: (item.data.decryptedMeta?.created ?? 0)
-		)
-	)
-
-const compareCreation = (a: DriveItem, b: DriveItem, isAsc: boolean): number =>
-	compareByTimestamp(a, b, isAsc, item =>
-		Number(
-			item.type === "file"
+function lastModifiedSortKey(item: DriveItem): number {
+	return Number(
+		item.type === "file"
+			? (item.data.decryptedMeta?.modified ?? item.data.timestamp)
+			: item.type === "directory"
 				? (item.data.decryptedMeta?.created ?? item.data.timestamp)
-				: item.type === "directory"
-					? (item.data.decryptedMeta?.created ?? item.data.timestamp)
-					: item.type === "sharedFile" || item.type === "sharedRootFile"
-						? (item.data.decryptedMeta?.created ?? item.data.decryptedMeta?.modified ?? 0)
-						: (item.data.decryptedMeta?.created ?? 0)
-		)
+				: item.type === "sharedFile" || item.type === "sharedRootFile"
+					? (item.data.decryptedMeta?.modified ?? item.data.decryptedMeta?.created ?? 0)
+					: (item.data.decryptedMeta?.created ?? 0)
 	)
+}
 
-const sortMap: Record<string, (a: DriveItem, b: DriveItem) => number> = {
-	nameAsc: (a, b) => compareName(a, b, true),
-	nameDesc: (a, b) => compareName(a, b, false),
-	sizeAsc: (a, b) => compareSize(a, b, true),
-	sizeDesc: (a, b) => compareSize(a, b, false),
-	mimeAsc: (a, b) => compareMime(a, b, true),
-	mimeDesc: (a, b) => compareMime(a, b, false),
-	lastModifiedAsc: (a, b) => compareLastModified(a, b, true),
-	lastModifiedDesc: (a, b) => compareLastModified(a, b, false),
-	uploadDateAsc: (a, b) => compareDate(a, b, true),
-	uploadDateDesc: (a, b) => compareDate(a, b, false),
-	creationAsc: (a, b) => compareCreation(a, b, true),
-	creationDesc: (a, b) => compareCreation(a, b, false)
+function creationSortKey(item: DriveItem): number {
+	return Number(
+		item.type === "file"
+			? (item.data.decryptedMeta?.created ?? item.data.timestamp)
+			: item.type === "directory"
+				? (item.data.decryptedMeta?.created ?? item.data.timestamp)
+				: item.type === "sharedFile" || item.type === "sharedRootFile"
+					? (item.data.decryptedMeta?.created ?? item.data.decryptedMeta?.modified ?? 0)
+					: (item.data.decryptedMeta?.created ?? 0)
+	)
+}
+
+type SortMode = {
+	kind: "parts" | "size" | "timestamp"
+	isAsc: boolean
+	stringKey?: (item: DriveItem) => string
+	timestampKey?: (item: DriveItem) => number
+}
+
+const sortModes: Record<string, SortMode> = {
+	nameAsc: { kind: "parts", isAsc: true, stringKey: nameSortKey },
+	nameDesc: { kind: "parts", isAsc: false, stringKey: nameSortKey },
+	sizeAsc: { kind: "size", isAsc: true },
+	sizeDesc: { kind: "size", isAsc: false },
+	mimeAsc: { kind: "parts", isAsc: true, stringKey: mimeSortKey },
+	mimeDesc: { kind: "parts", isAsc: false, stringKey: mimeSortKey },
+	lastModifiedAsc: { kind: "timestamp", isAsc: true, timestampKey: lastModifiedSortKey },
+	lastModifiedDesc: { kind: "timestamp", isAsc: false, timestampKey: lastModifiedSortKey },
+	uploadDateAsc: { kind: "timestamp", isAsc: true, timestampKey: uploadDateSortKey },
+	uploadDateDesc: { kind: "timestamp", isAsc: false, timestampKey: uploadDateSortKey },
+	creationAsc: { kind: "timestamp", isAsc: true, timestampKey: creationSortKey },
+	creationDesc: { kind: "timestamp", isAsc: false, timestampKey: creationSortKey }
+}
+
+const FALLBACK_SORT_MODE = sortModes["nameAsc"] as SortMode
+
+function sortPartition<T extends DriveItem>(partition: T[], mode: SortMode): void {
+	const length = partition.length
+
+	if (length <= 1) {
+		return
+	}
+
+	const indices: number[] = new Array(length)
+
+	for (let i = 0; i < length; i++) {
+		indices[i] = i
+	}
+
+	if (mode.kind === "size") {
+		const sizes: bigint[] = new Array(length)
+
+		for (let i = 0; i < length; i++) {
+			sizes[i] = (partition[i] as T).data.size
+		}
+
+		// Sizes stay bigint end-to-end: Number() conversion would collapse values that
+		// differ beyond 2^53 (pinned by the hardening suite).
+		indices.sort(
+			mode.isAsc
+				? (a, b) => {
+						const sizeA = sizes[a] as bigint
+						const sizeB = sizes[b] as bigint
+
+						return sizeA > sizeB ? 1 : sizeA < sizeB ? -1 : 0
+					}
+				: (a, b) => {
+						const sizeA = sizes[a] as bigint
+						const sizeB = sizes[b] as bigint
+
+						return sizeA > sizeB ? -1 : sizeA < sizeB ? 1 : 0
+					}
+		)
+	} else if (mode.kind === "timestamp") {
+		const timestampKey = mode.timestampKey as (item: DriveItem) => number
+		const keys = new Float64Array(length)
+
+		for (let i = 0; i < length; i++) {
+			keys[i] = timestampKey(partition[i] as T)
+		}
+
+		indices.sort(
+			mode.isAsc
+				? (a, b) => {
+						const diff = (keys[a] as number) - (keys[b] as number)
+
+						if (diff !== 0) {
+							return diff
+						}
+
+						return getUuidNumber((partition[a] as T).data.uuid) - getUuidNumber((partition[b] as T).data.uuid)
+					}
+				: (a, b) => {
+						const diff = (keys[b] as number) - (keys[a] as number)
+
+						if (diff !== 0) {
+							return diff
+						}
+
+						return getUuidNumber((partition[b] as T).data.uuid) - getUuidNumber((partition[a] as T).data.uuid)
+					}
+		)
+	} else {
+		const stringKey = mode.stringKey as (item: DriveItem) => string
+		const allParts: (string | number)[][] = new Array(length)
+
+		for (let i = 0; i < length; i++) {
+			allParts[i] = getNumericParts(getLowerName(stringKey(partition[i] as T)))
+		}
+
+		indices.sort(
+			mode.isAsc
+				? (a, b) => comparePartsNumeric(allParts[a] as (string | number)[], allParts[b] as (string | number)[])
+				: (a, b) => -comparePartsNumeric(allParts[a] as (string | number)[], allParts[b] as (string | number)[])
+		)
+	}
+
+	// Apply the permutation: snapshot once, write back by sorted index.
+	const snapshot = partition.slice()
+
+	for (let i = 0; i < length; i++) {
+		partition[i] = snapshot[indices[i] as number] as T
+	}
 }
 
 function sortItems<T extends DriveItem>(items: T[], type: SortByType): T[] {
-	const compareFunction = sortMap[type] ?? sortMap["nameAsc"]
+	const mode = sortModes[type] ?? FALLBACK_SORT_MODE
+	const dirs: T[] = []
+	const files: T[] = []
 
-	return items.slice().sort(compareFunction)
+	for (let i = 0; i < items.length; i++) {
+		const item = items[i] as T
+
+		if (isDirectoryType(item.type)) {
+			dirs.push(item)
+		} else {
+			files.push(item)
+		}
+	}
+
+	sortPartition(dirs, mode)
+	sortPartition(files, mode)
+
+	if (dirs.length === 0) {
+		return files
+	}
+
+	for (let i = 0; i < files.length; i++) {
+		dirs.push(files[i] as T)
+	}
+
+	return dirs
 }
 
 export const itemSorter = { sortItems }
 
-function sort(
-	notes: (
-		| Note
-		| (Note & {
-				content?: string
-		  })
-	)[]
-): (
+type SortableNote =
 	| Note
 	| (Note & {
 			content?: string
 	  })
-)[] {
-	return notes.slice().sort((a, b) => {
-		if (a.pinned !== b.pinned) {
-			return b.pinned ? 1 : -1
+
+type NoteSortEntry = {
+	note: SortableNote
+	// Composite bucket: pinned-first then trash/archive tier, folded into ONE integer —
+	// pinned notes occupy 0..2, unpinned 3..5, tier (none 0 / archive 1 / trash 2) adds
+	// within each half. Ordering ascending by this bucket is EXACTLY the previous
+	// pinned-then-tier branch pair.
+	bucket: number
+	key: number
+	// Raw editedTimestamp for the EQUALITY check: the uuid tiebreaker fires on raw
+	// identity (bigint === bigint, and undefined === undefined for never-edited notes —
+	// pinned by the hardening suite), NOT on Number() equality.
+	raw: bigint | undefined
+}
+
+function compareNoteEntries(a: NoteSortEntry, b: NoteSortEntry): number {
+	if (a.bucket !== b.bucket) {
+		return a.bucket - b.bucket
+	}
+
+	if (a.raw === b.raw) {
+		return getUuidNumber(b.note.uuid) - getUuidNumber(a.note.uuid)
+	}
+
+	return b.key - a.key
+}
+
+function sort(notes: SortableNote[]): SortableNote[] {
+	const length = notes.length
+	const wrapped: NoteSortEntry[] = new Array(length)
+
+	for (let i = 0; i < length; i++) {
+		const note = notes[i] as SortableNote
+
+		// Keys once per note — the previous comparator allocated a `tier` closure and
+		// paid Number(bigint) twice per COMPARISON.
+		wrapped[i] = {
+			note,
+			bucket: (note.pinned ? 0 : 3) + (note.trash ? 2 : note.archive ? 1 : 0),
+			key: Number(note.editedTimestamp),
+			raw: note.editedTimestamp
 		}
+	}
 
-		const tier = (note: { trash: boolean; archive: boolean }): number => (note.trash ? 2 : note.archive ? 1 : 0)
-		const aTier = tier(a)
-		const bTier = tier(b)
+	wrapped.sort(compareNoteEntries)
 
-		if (aTier !== bTier) {
-			return aTier - bTier
-		}
+	const result: SortableNote[] = new Array(length)
 
-		if (b.editedTimestamp === a.editedTimestamp) {
-			return getUuidNumber(b.uuid) - getUuidNumber(a.uuid)
-		}
+	for (let i = 0; i < length; i++) {
+		result[i] = (wrapped[i] as NoteSortEntry).note
+	}
 
-		return Number(b.editedTimestamp) - Number(a.editedTimestamp)
-	})
+	return result
+}
+
+type GroupBucketEntry = {
+	ts: number
+	note: NoteItem
+}
+
+// Hoisted bucket comparator over the precomputed per-note timestamp — the previous
+// per-group() closure recomputed Number(editedTimestamp ?? createdTimestamp) twice per
+// comparison in every bucket sort.
+function sortBucketEntriesDesc(a: GroupBucketEntry, b: GroupBucketEntry): number {
+	return b.ts - a.ts
 }
 
 function group({
@@ -347,16 +432,16 @@ function group({
 	const currentYear = nowDate.getFullYear()
 	const currentMonth = nowDate.getMonth()
 	const twoMonthsAgo = new Date(currentYear, currentMonth - 2, nowDate.getDate()).getTime()
-	const today: NoteItem[] = []
-	const last7Days: NoteItem[] = []
-	const last30Days: NoteItem[] = []
-	const previousMonth: NoteItem[] = []
-	const trashed: NoteItem[] = []
-	const archived: NoteItem[] = []
-	const pinned: NoteItem[] = []
-	const favorited: NoteItem[] = []
+	const today: GroupBucketEntry[] = []
+	const last7Days: GroupBucketEntry[] = []
+	const last30Days: GroupBucketEntry[] = []
+	const previousMonth: GroupBucketEntry[] = []
+	const trashed: GroupBucketEntry[] = []
+	const archived: GroupBucketEntry[] = []
+	const pinned: GroupBucketEntry[] = []
+	const favorited: GroupBucketEntry[] = []
 	const yearBuckets: {
-		[year: number]: NoteItem[]
+		[year: number]: GroupBucketEntry[]
 	} = {}
 
 	const len = notes.length
@@ -368,181 +453,125 @@ function group({
 			continue
 		}
 
+		// One timestamp per note, shared by the bucket thresholds AND the per-bucket
+		// sorts — the previous shape discarded this value after bucketing (and never
+		// computed it for the special buckets) only to recompute it per comparison.
+		const entry: GroupBucketEntry = {
+			ts: Number(note.editedTimestamp ?? note.createdTimestamp),
+			note
+		}
+
 		if (groupTrashed && note.trash) {
-			trashed.push(note)
+			trashed.push(entry)
 
 			continue
 		}
 
 		if (groupArchived && note.archive) {
-			archived.push(note)
+			archived.push(entry)
 
 			continue
 		}
 
 		if (groupPinned && note.pinned) {
-			pinned.push(note)
+			pinned.push(entry)
 
 			continue
 		}
 
 		if (groupFavorited && note.favorite) {
-			favorited.push(note)
+			favorited.push(entry)
 
 			continue
 		}
 
-		const editedTimestamp = Number(note.editedTimestamp ?? note.createdTimestamp)
-
-		if (editedTimestamp >= todayAgo) {
-			today.push(note)
-		} else if (editedTimestamp >= sevenDaysAgo) {
-			last7Days.push(note)
-		} else if (editedTimestamp >= thirtyDaysAgo) {
-			last30Days.push(note)
-		} else if (editedTimestamp >= twoMonthsAgo) {
-			previousMonth.push(note)
+		if (entry.ts >= todayAgo) {
+			today.push(entry)
+		} else if (entry.ts >= sevenDaysAgo) {
+			last7Days.push(entry)
+		} else if (entry.ts >= thirtyDaysAgo) {
+			last30Days.push(entry)
+		} else if (entry.ts >= twoMonthsAgo) {
+			previousMonth.push(entry)
 		} else {
-			const year = new Date(editedTimestamp).getFullYear()
+			const year = new Date(entry.ts).getFullYear()
 
 			if (!yearBuckets[year]) {
 				yearBuckets[year] = []
 			}
 
-			yearBuckets[year].push(note)
+			yearBuckets[year].push(entry)
 		}
 	}
 
-	const sortDesc = (a: NoteItem, b: NoteItem) => {
-		return Number(b.editedTimestamp ?? b.createdTimestamp) - Number(a.editedTimestamp ?? a.createdTimestamp)
+	const emitBucket = (bucket: GroupBucketEntry[], header: NoteListItem): void => {
+		bucket.sort(sortBucketEntriesDesc)
+
+		result.push(header)
+
+		for (let i = 0; i < bucket.length; i++) {
+			const entry = bucket[i]
+
+			if (!entry) {
+				continue
+			}
+
+			result.push({
+				...entry.note,
+				type: "note"
+			})
+		}
 	}
 
 	if (groupPinned && pinned.length > 0) {
-		pinned.sort(sortDesc)
-
-		result.push({
+		emitBucket(pinned, {
 			type: "header",
 			id: "header-pinned",
 			title: i18n.t("pinned"),
 			icon: "pin-outline"
 		})
-
-		for (let i = 0; i < pinned.length; i++) {
-			const notes = pinned[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	if (groupFavorited && favorited.length > 0) {
-		favorited.sort(sortDesc)
-
-		result.push({
+		emitBucket(favorited, {
 			type: "header",
 			id: "header-favorited",
 			title: i18n.t("favorited"),
 			icon: "heart-outline"
 		})
-
-		for (let i = 0; i < favorited.length; i++) {
-			const notes = favorited[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	if (today.length > 0) {
-		today.sort(sortDesc)
-
-		result.push({
+		emitBucket(today, {
 			type: "header",
 			id: "header-today",
 			title: i18n.t("today"),
 			icon: "today-outline"
 		})
-
-		for (let i = 0; i < today.length; i++) {
-			const notes = today[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	if (last7Days.length > 0) {
-		last7Days.sort(sortDesc)
-
-		result.push({
+		emitBucket(last7Days, {
 			type: "header",
 			id: "header-7days",
 			title: i18n.t("previous_7_days"),
 			icon: "calendar-outline"
 		})
-
-		for (let i = 0; i < last7Days.length; i++) {
-			const notes = last7Days[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	if (last30Days.length > 0) {
-		last30Days.sort(sortDesc)
-
-		result.push({
+		emitBucket(last30Days, {
 			type: "header",
 			id: "header-30days",
 			title: i18n.t("previous_30_days"),
 			icon: "calendar-outline"
 		})
-
-		for (let i = 0; i < last30Days.length; i++) {
-			const notes = last30Days[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	if (previousMonth.length > 0) {
-		previousMonth.sort(sortDesc)
-
 		const date = new Date(twoMonthsAgo)
 
-		result.push({
+		emitBucket(previousMonth, {
 			type: "header",
 			id: "header-month",
 			title: new Intl.DateTimeFormat(intlLanguage, {
@@ -550,19 +579,6 @@ function group({
 			}).format(date),
 			icon: "calendar-outline"
 		})
-
-		for (let i = 0; i < previousMonth.length; i++) {
-			const notes = previousMonth[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	const years = Object.keys(yearBuckets)
@@ -582,75 +598,30 @@ function group({
 			continue
 		}
 
-		yearNotes.sort(sortDesc)
-
-		result.push({
+		emitBucket(yearNotes, {
 			type: "header",
 			id: `header-${year}`,
 			title: year.toString(),
 			icon: "calendar-outline"
 		})
-
-		for (let j = 0; j < yearNotes.length; j++) {
-			const notes = yearNotes[j]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	if (archived.length > 0) {
-		archived.sort(sortDesc)
-
-		result.push({
+		emitBucket(archived, {
 			type: "header",
 			id: "header-archived",
 			title: i18n.t("archived"),
 			icon: "archive-outline"
 		})
-
-		for (let i = 0; i < archived.length; i++) {
-			const notes = archived[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	if (trashed.length > 0) {
-		trashed.sort(sortDesc)
-
-		result.push({
+		emitBucket(trashed, {
 			type: "header",
 			id: "header-trashed",
 			title: i18n.t("trashed"),
 			icon: "trash-outline"
 		})
-
-		for (let i = 0; i < trashed.length; i++) {
-			const notes = trashed[i]
-
-			if (!notes) {
-				continue
-			}
-
-			result.push({
-				...notes,
-				type: "note"
-			})
-		}
 	}
 
 	return result
