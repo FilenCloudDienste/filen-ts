@@ -66,6 +66,22 @@ vi.mock("@/features/offline/offlineHelpers", () => ({
 	OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY: "offlineBackgroundSync"
 }))
 
+// The fact-check pass (2026-06-11) added the persist-before-suspend flush defer, so the
+// module now imports the two persisters. Same boundary-cut rationale as above: resolved
+// no-op flushes keep every existing assertion's flow identical, and the flush behavior
+// itself is pinned in backgroundTaskHardening.test.ts.
+vi.mock("@/lib/cache", () => ({
+	default: {
+		flushNow: vi.fn(async () => undefined)
+	}
+}))
+
+vi.mock("@/queries/client", () => ({
+	queryClientPersisterKv: {
+		flushNow: vi.fn(async () => undefined)
+	}
+}))
+
 // ─── Static import of module under test ──────────────────────────────────────
 // Must be a static import so the module-level defineTask call is intercepted by
 // mockTaskManager.defineTask, which captures the callback into capturedTaskCallback.

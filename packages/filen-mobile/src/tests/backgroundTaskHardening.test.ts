@@ -10,8 +10,18 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest"
 
-const { mockTaskManager, mockBackgroundTask, mockRemoveListener, mockSetup, mockCameraUpload, mockOfflineSync, mockSecureStoreGet, capturedTaskCallback } =
-	vi.hoisted(() => {
+const {
+	mockTaskManager,
+	mockBackgroundTask,
+	mockRemoveListener,
+	mockSetup,
+	mockCameraUpload,
+	mockOfflineSync,
+	mockSecureStoreGet,
+	mockCacheFlushNow,
+	mockKvFlushNow,
+	capturedTaskCallback
+} = vi.hoisted(() => {
 	const mockRemoveListener = vi.fn()
 	const capturedTaskCallback: { fn: ((data: unknown) => Promise<unknown>) | null } = { fn: null }
 
@@ -39,6 +49,10 @@ const { mockTaskManager, mockBackgroundTask, mockRemoveListener, mockSetup, mock
 
 	const mockSecureStoreGet = vi.fn(async () => null as unknown)
 
+	const mockCacheFlushNow = vi.fn(async () => undefined)
+
+	const mockKvFlushNow = vi.fn(async () => undefined)
+
 	return {
 		mockTaskManager,
 		mockBackgroundTask,
@@ -47,6 +61,8 @@ const { mockTaskManager, mockBackgroundTask, mockRemoveListener, mockSetup, mock
 		mockCameraUpload,
 		mockOfflineSync,
 		mockSecureStoreGet,
+		mockCacheFlushNow,
+		mockKvFlushNow,
 		capturedTaskCallback
 	}
 })
@@ -75,6 +91,18 @@ vi.mock("@/features/offline/offlineHelpers", () => ({
 	OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY: "offlineBackgroundSync"
 }))
 
+vi.mock("@/lib/cache", () => ({
+	default: {
+		flushNow: mockCacheFlushNow
+	}
+}))
+
+vi.mock("@/queries/client", () => ({
+	queryClientPersisterKv: {
+		flushNow: mockKvFlushNow
+	}
+}))
+
 import "@/features/cameraUpload/backgroundTask"
 import { BACKGROUND_RUN_BUDGET_MS } from "@/features/cameraUpload/backgroundTask"
 import { Platform } from "react-native"
@@ -94,6 +122,8 @@ beforeEach(() => {
 	mockCameraUpload.sync.mockResolvedValue(undefined)
 	mockOfflineSync.sync.mockResolvedValue(undefined)
 	mockSecureStoreGet.mockResolvedValue(null)
+	mockCacheFlushNow.mockResolvedValue(undefined)
+	mockKvFlushNow.mockResolvedValue(undefined)
 	;(Platform as { OS: string }).OS = "ios"
 })
 
@@ -238,5 +268,130 @@ describe("hardening — budgeted offline phase wiring", () => {
 
 		expect(mockCameraUpload.cancel).toHaveBeenCalledTimes(1)
 		expect(mockOfflineSync.cancel).toHaveBeenCalledTimes(1)
+	})
+
+	it("an expiration during the camera phase prevents the offline phase from STARTING (cancel() swaps in a fresh AbortController)", async () => {
+		// Both engines' cancel() abort the CURRENT controller and immediately swap in a
+		// fresh one for the next run — so a cancel landing between phases aborts nothing.
+		// Without a run-local cancelled flag, an iOS expiration at t=30s would leave
+		// remaining = 90s > the 15s gate and the offline pass would start un-aborted
+		// AFTER the OS said stop.
+		;(Platform as { OS: string }).OS = "ios"
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(true)
+
+		let expirationCallback: (() => void) | null = null
+
+		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
+			expirationCallback = cb
+
+			return { remove: mockRemoveListener }
+		})
+
+		mockCameraUpload.sync.mockImplementation(async () => {
+			expirationCallback?.()
+		})
+
+		await runTask()
+
+		expect(mockOfflineSync.cancel).toHaveBeenCalledTimes(1)
+		expect(mockOfflineSync.sync).not.toHaveBeenCalled()
+	})
+
+	it("an expiration during setup prevents the camera phase from STARTING", async () => {
+		;(Platform as { OS: string }).OS = "ios"
+		mockSecureStoreGet.mockResolvedValue(true)
+
+		let expirationCallback: (() => void) | null = null
+
+		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
+			expirationCallback = cb
+
+			return { remove: mockRemoveListener }
+		})
+
+		mockSetup.setup.mockImplementation(async () => {
+			expirationCallback?.()
+
+			return { isAuthed: true }
+		})
+
+		await runTask()
+
+		expect(mockCameraUpload.sync).not.toHaveBeenCalled()
+		expect(mockOfflineSync.sync).not.toHaveBeenCalled()
+	})
+})
+
+describe("hardening — persist-before-suspend flushes", () => {
+	// The debounced persisters (cache.ts PersistentMaps, QueryPersisterKv) normally flush
+	// on the AppState "background" transition — which never fires in a headless task run
+	// (the app is ALREADY backgrounded). The OS may suspend the process the moment the
+	// task callback returns, so the task must flush both and AWAIT the writes landing.
+	it("flushes BOTH debounced persisters after the sync phases (healthy authed run)", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(true)
+
+		await runTask()
+
+		expect(mockCacheFlushNow).toHaveBeenCalledTimes(1)
+		expect(mockKvFlushNow).toHaveBeenCalledTimes(1)
+
+		const cameraOrder = mockCameraUpload.sync.mock.invocationCallOrder[0] as number
+		const offlineOrder = mockOfflineSync.sync.mock.invocationCallOrder[0] as number
+		const cacheFlushOrder = mockCacheFlushNow.mock.invocationCallOrder[0] as number
+		const kvFlushOrder = mockKvFlushNow.mock.invocationCallOrder[0] as number
+
+		expect(cacheFlushOrder).toBeGreaterThan(cameraOrder)
+		expect(cacheFlushOrder).toBeGreaterThan(offlineOrder)
+		expect(kvFlushOrder).toBeGreaterThan(offlineOrder)
+	})
+
+	it("flushes the persisters on the unauthed early return too (defers cover every exit path)", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: false })
+
+		await runTask()
+
+		expect(mockCacheFlushNow).toHaveBeenCalledTimes(1)
+		expect(mockKvFlushNow).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not report completion until the flush promises settle (the OS may suspend immediately after)", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+
+		let releaseFlush!: () => void
+
+		mockCacheFlushNow.mockImplementation(
+			() =>
+				new Promise<undefined>(resolve => {
+					releaseFlush = () => resolve(undefined)
+				})
+		)
+
+		let settled = false
+
+		const taskPromise = runTask().then(result => {
+			settled = true
+
+			return result
+		})
+
+		// Drain the task body's await chain (real timers; two macrotask hops flush all
+		// intermediate microtasks) — the task must still be parked on the flush.
+		await new Promise<void>(resolve => {
+			setTimeout(resolve, 0)
+		})
+		await new Promise<void>(resolve => {
+			setTimeout(resolve, 0)
+		})
+
+		expect(settled).toBe(false)
+
+		releaseFlush()
+
+		const result = await taskPromise
+
+		expect(settled).toBe(true)
+		expect(result).toBe(mockBackgroundTask.BackgroundTaskResult.Success)
 	})
 })

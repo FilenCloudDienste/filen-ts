@@ -708,6 +708,45 @@ describe("QueryPersisterKv", () => {
 			expect(kv.getItem("late-key")).toBe("late-value")
 			expect(readKvStore<string>("late-key")).toBe("late-value")
 		})
+
+		it("returns a promise that settles only after the batch has landed (background task awaits it before the OS suspends)", async () => {
+			let releaseBatch: () => void = () => {}
+
+			mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
+				await new Promise<void>(resolve => {
+					releaseBatch = resolve
+				})
+
+				for (const [query, params] of commands) {
+					if (query.startsWith("INSERT OR REPLACE")) {
+						kvStore.set(params[0] as string, params[1] as string)
+					}
+				}
+
+				return { rowsAffected: commands.length }
+			})
+
+			const kv = new QueryPersisterKv()
+
+			kv.setItem("key-1", "value-1")
+
+			let settled = false
+
+			const flushPromise = Promise.resolve(kv.flushNow()).then(() => {
+				settled = true
+			})
+
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(settled).toBe(false)
+
+			releaseBatch()
+
+			await flushPromise
+
+			expect(settled).toBe(true)
+			expect(readKvStore<string>("key-1")).toBe("value-1")
+		})
 	})
 
 	describe("AppState 'background' listener", () => {

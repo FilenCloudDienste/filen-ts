@@ -8,6 +8,8 @@ import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import offlineSync from "@/features/offline/offlineSync"
 import secureStore from "@/lib/secureStore"
 import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
+import cache from "@/lib/cache"
+import { queryClientPersisterKv } from "@/queries/client"
 
 const TASK_NAME = "filen-camera-upload-sync"
 
@@ -32,18 +34,40 @@ TaskManager.defineTask(TASK_NAME, async () => {
 	const result = await run(async defer => {
 		const startedAt = Date.now()
 
+		// Persist-before-suspend: the debounced persisters (cache.ts PersistentMaps —
+		// camera-upload hashes; QueryPersisterKv — storedOffline query broadcasts) normally
+		// flush on the AppState "background" transition, which never fires in a headless
+		// run (the app is ALREADY backgrounded), and the OS may suspend the process the
+		// moment this callback returns. Registered FIRST so the LIFO defer order runs it
+		// LAST — after the deadline timer is cleared and the expiration listener removed.
+		// Both flushNow()s never reject and no-op when clean, so this covers every exit
+		// path (early returns and failures) for free.
+		defer(async () => {
+			await Promise.all([cache.flushNow(), queryClientPersisterKv.flushNow()])
+		})
+
 		// Both engines abort safely mid-flight (aborted stores keep the old copy; every
-		// pass re-converges on the next run), so the deadline simply cancels them.
-		const deadlineTimer = setTimeout(cancelBackgroundWork, BACKGROUND_RUN_BUDGET_MS)
+		// pass re-converges on the next run), so the deadline simply cancels them. The
+		// flag exists because cancel() swaps in a FRESH AbortController for the next run:
+		// a cancel landing between phases aborts nothing, so a not-yet-started phase
+		// would otherwise run un-aborted (e.g. an iOS expiration at t=30s leaves
+		// remaining = 90s > the min-remaining gate). Once cancelled, no phase starts.
+		let cancelled = false
+
+		const cancelRun = (): void => {
+			cancelled = true
+
+			cancelBackgroundWork()
+		}
+
+		const deadlineTimer = setTimeout(cancelRun, BACKGROUND_RUN_BUDGET_MS)
 
 		defer(() => {
 			clearTimeout(deadlineTimer)
 		})
 
 		if (Platform.OS === "ios") {
-			const expirationListener = BackgroundTask.addExpirationListener(() => {
-				cancelBackgroundWork()
-			})
+			const expirationListener = BackgroundTask.addExpirationListener(cancelRun)
 
 			defer(() => {
 				expirationListener.remove()
@@ -54,7 +78,7 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			background: true
 		})
 
-		if (!isAuthed) {
+		if (!isAuthed || cancelled) {
 			return
 		}
 
@@ -63,11 +87,15 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			background: true
 		})
 
+		if (cancelled) {
+			return
+		}
+
 		// Optional second phase: the budgeted offline pass (default off; offline settings
 		// screen). Skipped when the camera phase consumed the run budget.
 		const offlineEnabled = (await secureStore.get<boolean>(OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY)) === true
 
-		if (!offlineEnabled) {
+		if (!offlineEnabled || cancelled) {
 			return
 		}
 
