@@ -32,7 +32,7 @@ export type ThumbnailParams = {
 }
 
 export const DEFAULT_WIDTH = 128
-export const DEFAULT_QUALITY = 0.8
+export const DEFAULT_QUALITY = 0.9
 export const DEFAULT_VIDEO_TIMESTAMP = 1.0
 export const MAX_CONCURRENT = Platform.select({
 	ios: 3,
