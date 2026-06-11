@@ -620,6 +620,27 @@ describe("auth.setSdkClients", () => {
 		expect(mockFromConfig.mock.calls.length).toBe(fromConfigCallsAfterFirst)
 	})
 
+	it("prepareForReload() destroys both live handles and resets client state (login flow calls it before reloadAppAsync)", async () => {
+		// uniffi handles have no GC: a JS reload kills the proxies but leaks the Rust Arcs
+		// (reqwest pool, tokio resources). The login flow creates a fresh client pair and
+		// then reloads — without this, every login leaks the pair.
+		const authedDestroy = vi.fn()
+		const unauthedDestroy = vi.fn()
+		const internals = authInternals()
+
+		internals.authedClient = { uniffiDestroy: authedDestroy }
+		internals.unauthedClient = { uniffiDestroy: unauthedDestroy }
+		internals.lastStringifiedClient = { apiKey: "ak" }
+
+		;(auth as unknown as { prepareForReload: () => void }).prepareForReload()
+
+		expect(authedDestroy).toHaveBeenCalledTimes(1)
+		expect(unauthedDestroy).toHaveBeenCalledTimes(1)
+		expect(internals.authedClient).toBeNull()
+		expect(internals.unauthedClient).toBeNull()
+		expect(internals.lastStringifiedClient).toBeNull()
+	})
+
 	it("changed input still reconstructs and destroys the prior handles", async () => {
 		const secureStore = await import("@/lib/secureStore")
 

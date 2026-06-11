@@ -48,6 +48,11 @@ const Login = () => {
 
 	const finishLogin = async () => {
 		const result = await runWithLoading(async () => {
+			// The reload kills the JS proxies of the just-created SDK clients but would leak
+			// their Rust Arcs (uniffi handles have no GC) — destroy them first; the
+			// post-reload boot reconstructs from the persisted config.
+			auth.prepareForReload()
+
 			await reloadAppAsync()
 		})
 
