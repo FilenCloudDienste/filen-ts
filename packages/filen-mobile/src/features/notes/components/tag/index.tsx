@@ -18,7 +18,6 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
-import { hairlineBorderBottom } from "@/lib/hairline"
 
 const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
 	const { t } = useTranslation()
@@ -139,9 +138,8 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 							<View
 								className={cn(
 									"gap-1 w-full h-auto bg-transparent flex-col flex-1 py-2.5",
-									isActive && Platform.OS === "ios" ? "" : "border-separator"
+									isActive && Platform.OS === "ios" ? "" : "border-b border-separator"
 								)}
-								style={isActive && Platform.OS === "ios" ? undefined : hairlineBorderBottom}
 							>
 								<View className="flex-1 flex-row gap-1.5 items-center w-full h-auto bg-transparent">
 									<Text

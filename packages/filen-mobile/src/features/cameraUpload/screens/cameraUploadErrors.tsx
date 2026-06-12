@@ -14,7 +14,6 @@ import { useShallow } from "zustand/shallow"
 import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import { useTranslation } from "react-i18next"
-import { hairlineBorderBottom } from "@/lib/hairline"
 
 const Err = ({ error }: { error: CameraUploadError }) => {
 	const { t } = useTranslation()
@@ -43,10 +42,7 @@ const Err = ({ error }: { error: CameraUploadError }) => {
 
 	return (
 		<View className="flex-row items-center px-4 bg-transparent flex-1">
-			<View
-				className="flex-row items-center py-3 border-separator flex-1 bg-transparent"
-				style={hairlineBorderBottom}
-			>
+			<View className="flex-row items-center py-3 border-b border-separator flex-1 bg-transparent">
 				<Text>{errorMessage}</Text>
 			</View>
 		</View>

@@ -27,7 +27,6 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { useTranslation } from "react-i18next"
-import { hairlineBorderBottom } from "@/lib/hairline"
 
 const Item = ({
 	info,
@@ -262,10 +261,7 @@ const Item = ({
 								}}
 							/>
 						</View>
-						<View
-							className="flex-1 flex-row items-center border-separator py-3 bg-transparent"
-							style={hairlineBorderBottom}
-						>
+						<View className="flex-1 flex-row items-center border-b border-separator py-3 bg-transparent">
 							<View className="flex-1 flex-col justify-center gap-0.5 bg-transparent">
 								<Text
 									numberOfLines={1}

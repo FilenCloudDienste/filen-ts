@@ -1,6 +1,5 @@
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import { hairlineBorderBottom } from "@/lib/hairline"
 
 export type DetailRowProps = {
 	title: string
@@ -9,10 +8,7 @@ export type DetailRowProps = {
 
 export const DetailRow = ({ title, value }: DetailRowProps) => {
 	return (
-		<View
-			className="bg-transparent border-separator pb-2 flex-row items-center justify-between gap-4"
-			style={hairlineBorderBottom}
-		>
+		<View className="bg-transparent border-b border-separator pb-2 flex-row items-center justify-between gap-4">
 			<Text
 				className="text-muted-foreground shrink-0"
 				numberOfLines={1}

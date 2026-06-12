@@ -1,7 +1,6 @@
 import { Fragment } from "react"
 import { TextInput, type TextInputProps } from "react-native"
 import { cn } from "@filen/utils"
-import { hairlineHeight } from "@/lib/hairline"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import View from "@/components/ui/view"
 
@@ -30,12 +29,7 @@ const IconTextField = ({
 					className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
 				/>
 			</View>
-			{showDividerBelow && (
-				<View
-					className="bg-separator ml-12"
-					style={hairlineHeight}
-				/>
-			)}
+			{showDividerBelow && <View className="h-px bg-separator ml-12" />}
 		</Fragment>
 	)
 }
