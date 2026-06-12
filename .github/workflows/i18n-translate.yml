@@ -31,14 +31,14 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.repository == github.event.repository.full_name
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # The DELTA baseline is the committed src/locales/.en-snapshot.json, not git history, so a
           # shallow checkout is fine. Kept at 2 (harmless) rather than 1 to avoid disturbing the PR step.
           fetch-depth: 2
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
 
