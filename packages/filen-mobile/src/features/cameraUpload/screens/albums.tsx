@@ -9,12 +9,53 @@ import Header from "@/components/ui/header"
 import { Platform, ActivityIndicator, AppState } from "react-native"
 import { router } from "expo-router"
 import useCameraUploadAlbumsQuery from "@/features/cameraUpload/queries/useCameraUploadAlbums.query"
+import useCameraUploadAlbumLatestPhotoQuery from "@/features/cameraUpload/queries/useCameraUploadAlbumLatestPhoto.query"
+import Image from "@/components/ui/image"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { useTranslation } from "react-i18next"
 import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
+
+const ALBUM_PREVIEW_SIZE = {
+	width: 44,
+	height: 44
+}
+
+// Most-recent photo of the album as the row's leading preview. The fallback
+// (no photos in the album / still resolving) is a blank recessed square —
+// background-secondary, NOT tertiary, because the rows themselves sit on a
+// background-tertiary card and would swallow it.
+const AlbumPreview = ({ albumId }: { albumId: string }) => {
+	const latestPhotoQuery = useCameraUploadAlbumLatestPhotoQuery({
+		albumId
+	})
+
+	if (latestPhotoQuery.status === "success" && latestPhotoQuery.data) {
+		return (
+			<Image
+				className="rounded-lg bg-background-secondary"
+				source={{
+					uri: latestPhotoQuery.data
+				}}
+				contentFit="cover"
+				// Local photo-library URIs — a disk cache would just duplicate
+				// what is already on disk; memory keeps scrolling smooth.
+				cachePolicy="memory"
+				recyclingKey={albumId}
+				style={ALBUM_PREVIEW_SIZE}
+			/>
+		)
+	}
+
+	return (
+		<View
+			className="rounded-lg bg-background-secondary"
+			style={ALBUM_PREVIEW_SIZE}
+		/>
+	)
+}
 
 const Albums = () => {
 	const { t } = useTranslation()
@@ -113,6 +154,7 @@ const Albums = () => {
 									.map(album => {
 										return {
 											title: album.title,
+											leading: <AlbumPreview albumId={album.id} />,
 											badge: album.assetCount.toString(),
 											badgeColor: bgBackgroundSecondary.backgroundColor as string | undefined,
 											rightItem: {
