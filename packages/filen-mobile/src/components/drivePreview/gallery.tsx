@@ -7,8 +7,8 @@ import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType } from "@/lib/previewType"
 import { useWindowDimensions } from "react-native"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
-import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring } from "react-native-reanimated"
-import type { DrivePath } from "@/hooks/useDrivePath"
+import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring, interpolate, Extrapolation } from "react-native-reanimated"
+import { type DrivePath } from "@/hooks/useDrivePath"
 import GalleryHeader from "@/components/drivePreview/header"
 import GalleryItem from "@/components/drivePreview/galleryItem"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
@@ -17,15 +17,27 @@ import { runOnJS } from "react-native-worklets"
 import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
 import ListEmpty from "@/components/ui/listEmpty"
-import type { External } from "@/routes/drivePreview"
+import { type External } from "@/routes/drivePreview"
 import { FlashList, type FlashListRef } from "@shopify/flash-list"
 
-const DISMISS_POSITION_RATIO = 0.25
-const DISMISS_VELOCITY_THRESHOLD = 1000
+const DISMISS_POSITION_RATIO = 0.22
+const DISMISS_VELOCITY_THRESHOLD = 800
+const DISMISS_CANCEL_VELOCITY = -300
+const DISMISS_EXIT_DISTANCE_RATIO = 1.1
+const DISMISS_EXIT_X_PROJECTION = 0.1
+const DISMISS_MIN_SCALE = 0.72
+const PINCH_BG_FADE_END = 0.7
 
 const SPRING_SNAPPY = {
 	duration: 350,
 	dampingRatio: 0.86
+}
+
+// Exit flight after a committed dismiss — critically damped so the content
+// sails offscreen without bouncing back into view.
+const SPRING_EXIT = {
+	duration: 320,
+	dampingRatio: 1
 }
 
 const SPRING_HEADER = {
@@ -51,10 +63,13 @@ async function lockToCurrentOrientation(): Promise<void> {
 
 type DismissSharedValues = {
 	zoomScale: SharedValue<number>
+	dismissTranslateX: SharedValue<number>
 	dismissTranslateY: SharedValue<number>
+	savedDismissTranslateX: SharedValue<number>
 	savedDismissTranslateY: SharedValue<number>
 	startTouchX: SharedValue<number>
 	startTouchY: SharedValue<number>
+	isDismissing: SharedValue<number>
 }
 
 export type InitialItem =
@@ -84,6 +99,16 @@ export function galleryItemKey(item: GalleryItemTagged): string {
 	return item.type === "drive" ? item.data.data.uuid : item.data.url
 }
 
+/**
+ * iOS-Photos-style dismissal: the content follows the finger on both axes,
+ * and background/header/scale all DERIVE from dismissTranslateY so every frame
+ * is continuous — there is no state flip that snaps opacity.
+ *
+ * On a committed dismiss we own the exit animation ourselves (velocity-matched
+ * springs that carry the finger's momentum offscreen) and only then call
+ * router.back(): the navigator's stock pop animation runs on an already
+ * invisible screen, so the two animation systems never visibly overlap.
+ */
 function buildDismissGesture(
 	sv: DismissSharedValues,
 	screenHeight: number,
@@ -93,8 +118,14 @@ function buildDismissGesture(
 ) {
 	return Gesture.Pan()
 		.manualActivation(true)
-		.onTouchesDown((e, _stateManager) => {
+		.onTouchesDown((e, stateManager) => {
 			"worklet"
+
+			if (sv.isDismissing.value === 1) {
+				stateManager.fail()
+
+				return
+			}
 
 			const touch = e.allTouches[0]
 
@@ -132,6 +163,7 @@ function buildDismissGesture(
 		.onStart(() => {
 			"worklet"
 
+			sv.savedDismissTranslateX.value = sv.dismissTranslateX.value
 			sv.savedDismissTranslateY.value = sv.dismissTranslateY.value
 
 			runOnJS(onDismissStart)()
@@ -142,20 +174,52 @@ function buildDismissGesture(
 			const ty = sv.savedDismissTranslateY.value + e.translationY
 
 			sv.dismissTranslateY.value = ty > 0 ? ty : ty * 0.3
+			sv.dismissTranslateX.value = sv.savedDismissTranslateX.value + e.translationX
 		})
 		.onEnd(e => {
 			"worklet"
 
-			if (sv.dismissTranslateY.value > screenHeight * DISMISS_POSITION_RATIO || e.velocityY > DISMISS_VELOCITY_THRESHOLD) {
-				runOnJS(goBack)()
-			} else {
-				sv.dismissTranslateY.value = withSpring(0, {
-					...SPRING_SNAPPY,
-					velocity: e.velocityY
+			const passedDistance = sv.dismissTranslateY.value > screenHeight * DISMISS_POSITION_RATIO
+			const flungDown = e.velocityY > DISMISS_VELOCITY_THRESHOLD
+			const flungUp = e.velocityY < DISMISS_CANCEL_VELOCITY
+
+			if (flungDown || (passedDistance && !flungUp)) {
+				sv.isDismissing.value = 1
+
+				sv.dismissTranslateX.value = withSpring(sv.dismissTranslateX.value + e.velocityX * DISMISS_EXIT_X_PROJECTION, {
+					...SPRING_EXIT,
+					velocity: e.velocityX
 				})
 
-				runOnJS(onDismissCancel)()
+				sv.dismissTranslateY.value = withSpring(
+					screenHeight * DISMISS_EXIT_DISTANCE_RATIO,
+					{
+						...SPRING_EXIT,
+						velocity: e.velocityY
+					},
+					finished => {
+						"worklet"
+
+						if (finished) {
+							runOnJS(goBack)()
+						}
+					}
+				)
+
+				return
 			}
+
+			sv.dismissTranslateY.value = withSpring(0, {
+				...SPRING_SNAPPY,
+				velocity: e.velocityY
+			})
+
+			sv.dismissTranslateX.value = withSpring(0, {
+				...SPRING_SNAPPY,
+				velocity: e.velocityX
+			})
+
+			runOnJS(onDismissCancel)()
 		})
 }
 
@@ -163,19 +227,21 @@ function setHeaderOpacityValue(headerOpacity: SharedValue<number>, visible: bool
 	headerOpacity.value = withSpring(visible ? 1 : 0, SPRING_HEADER)
 }
 
-function back({ isDismissing, headerOpacity }: { isDismissing: SharedValue<number>; headerOpacity: SharedValue<number> }) {
+// didNavigateBack guards against the exit spring's completion callback and the
+// header close button both popping the route.
+function navigateBack({ didNavigateBack, isDismissing }: { didNavigateBack: SharedValue<number>; isDismissing: SharedValue<number> }) {
+	if (didNavigateBack.value === 1) {
+		return
+	}
+
+	didNavigateBack.value = 1
 	isDismissing.value = 1
-	headerOpacity.value = 0
 
 	if (!router.canGoBack()) {
 		return
 	}
 
 	router.back()
-}
-
-function changeZoom(zoomScale: SharedValue<number>, newZoom: number) {
-	zoomScale.value = newZoom
 }
 
 // Resolves the item index to re-anchor on after a rotation. currentIndex is the authoritative "which item
@@ -195,17 +261,21 @@ const Gallery = () => {
 	const { t } = useTranslation()
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
-	const [isDismissGestureActive, setIsDismissGestureActive] = useState<boolean>(false)
 	const headerOpacity = useSharedValue<number>(1)
 	const zoomScale = useSharedValue<number>(1)
+	const dismissTranslateX = useSharedValue<number>(0)
 	const dismissTranslateY = useSharedValue<number>(0)
+	const savedDismissTranslateX = useSharedValue<number>(0)
 	const savedDismissTranslateY = useSharedValue<number>(0)
 	const startTouchX = useSharedValue<number>(0)
 	const startTouchY = useSharedValue<number>(0)
 	const isDismissing = useSharedValue<number>(0)
+	const didNavigateBack = useSharedValue<number>(0)
 	const items = useDrivePreviewStore(useShallow(state => state.items))
 	const initialScrollIndex = useDrivePreviewStore(useShallow(state => state.initialScrollIndex))
 	const listRef = useRef<FlashListRef<GalleryItemTagged> | null>(null)
+	const zoomedInRef = useRef<boolean>(false)
+	const pinchActiveRef = useRef<boolean>(false)
 
 	const fadeRange = dimensions.height * 0.5
 	const width = dimensions.width
@@ -254,32 +324,42 @@ const Gallery = () => {
 
 	const onDismissGestureStart = () => {
 		lockToCurrentOrientation().catch(console.error)
-
-		setIsDismissGestureActive(true)
 	}
 
 	const onDismissGestureEnd = () => {
 		ScreenOrientation.unlockAsync().catch(console.error)
-
-		setIsDismissGestureActive(false)
 	}
 
 	const goBack = () => {
-		back({
-			isDismissing,
-			headerOpacity
+		navigateBack({
+			didNavigateBack,
+			isDismissing
 		})
 	}
 
+	const syncScrollEnabled = () => {
+		setScrollEnabled(!zoomedInRef.current && !pinchActiveRef.current)
+	}
+
 	const onZoomChange = (zoom: number) => {
-		changeZoom(zoomScale, zoom)
-		setScrollEnabled(zoom <= 1)
+		zoomedInRef.current = zoom > 1
+
+		syncScrollEnabled()
 
 		if (zoom > 1) {
 			lockToCurrentOrientation().catch(console.error)
 		} else {
 			ScreenOrientation.unlockAsync().catch(console.error)
 		}
+	}
+
+	// Disable paging the moment a pinch begins (two fingers down) instead of
+	// waiting for the gesture to end — otherwise the horizontal list pans
+	// underneath an active pinch.
+	const onPinchActiveChange = (active: boolean) => {
+		pinchActiveRef.current = active
+
+		syncScrollEnabled()
 	}
 
 	const { isImage, isVideo, isAudio, isExternal } = useDrivePreviewStore(
@@ -317,39 +397,32 @@ const Gallery = () => {
 	const headerAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
 
-		if (zoomScale.value > 1 || isDismissing.value === 1) {
-			return {
-				opacity: 0
-			}
-		}
-
+		const zoomFade = interpolate(zoomScale.value, [1, 1.2], [1, 0], Extrapolation.CLAMP)
 		const panProgress = Math.abs(dismissTranslateY.value) / fadeRange
-		const pinchProgress = zoomScale.value < 1 ? 1 - zoomScale.value : 0
-		const dismissProgress = Math.max(0, Math.min(1, Math.max(panProgress, pinchProgress)))
-
-		if (!isImage) {
-			return {
-				opacity: 1 - dismissProgress
-			}
-		}
+		const pinchProgress = zoomScale.value < 1 ? (1 - zoomScale.value) / (1 - PINCH_BG_FADE_END) : 0
+		const dismissFade = 1 - Math.min(1, Math.max(panProgress, pinchProgress) * 1.5)
+		const base = isImage ? headerOpacity.value : 1
 
 		return {
-			opacity: headerOpacity.value * (1 - dismissProgress)
+			opacity: Math.max(0, base * zoomFade * dismissFade)
 		}
 	})
 
 	const dismissAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
 
-		const progress = Math.max(0, Math.min(1, Math.abs(dismissTranslateY.value) / fadeRange))
+		const progress = Math.min(1, Math.abs(dismissTranslateY.value) / fadeRange)
 
 		return {
 			transform: [
 				{
+					translateX: dismissTranslateX.value
+				},
+				{
 					translateY: dismissTranslateY.value
 				},
 				{
-					scale: 1 - progress * 0.15
+					scale: interpolate(progress, [0, 1], [1, DISMISS_MIN_SCALE], Extrapolation.CLAMP)
 				}
 			]
 		}
@@ -358,28 +431,24 @@ const Gallery = () => {
 	const backgroundAnimatedStyle = useAnimatedStyle(() => {
 		"worklet"
 
-		if (isDismissing.value === 1) {
-			return {
-				opacity: 0
-			}
-		}
-
 		const panProgress = Math.abs(dismissTranslateY.value) / fadeRange
-		const pinchProgress = zoomScale.value < 1 ? 1 - zoomScale.value : 0
-		const gestureProgress = Math.max(0, Math.min(1, Math.max(panProgress, pinchProgress)))
+		const pinchProgress = zoomScale.value < 1 ? (1 - zoomScale.value) / (1 - PINCH_BG_FADE_END) : 0
 
 		return {
-			opacity: 1 - gestureProgress
+			opacity: 1 - Math.min(1, Math.max(panProgress, pinchProgress))
 		}
 	})
 
 	const dismissGesture = buildDismissGesture(
 		{
 			zoomScale,
+			dismissTranslateX,
 			dismissTranslateY,
+			savedDismissTranslateX,
 			savedDismissTranslateY,
 			startTouchX,
-			startTouchY
+			startTouchY,
+			isDismissing
 		},
 		dimensions.height,
 		goBack,
@@ -422,14 +491,15 @@ const Gallery = () => {
 									goBack={goBack}
 									onZoomChange={onZoomChange}
 									onSingleTap={onSingleTap}
+									onPinchActiveChange={onPinchActiveChange}
 								/>
 							)
 						}}
 						drawDistance={dimensions.width}
 						maxItemsInRecyclePool={0}
 						horizontal={true}
-						pagingEnabled={items.length > 1 && !isDismissGestureActive}
-						scrollEnabled={scrollEnabled && !isDismissGestureActive && items.length > 1 && (isImage || isVideo || isAudio)}
+						pagingEnabled={items.length > 1}
+						scrollEnabled={scrollEnabled && items.length > 1 && (isImage || isVideo || isAudio)}
 						bounces={items.length > 1}
 						showsHorizontalScrollIndicator={false}
 						initialScrollIndex={initialScrollIndex >= 0 && initialScrollIndex < items.length ? initialScrollIndex : 0}

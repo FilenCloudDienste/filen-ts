@@ -15,21 +15,23 @@ import PreviewSlot from "@/components/drivePreview/previewSlot"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import type { ListRenderItemInfo } from "@shopify/flash-list"
-import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { type ListRenderItemInfo } from "@shopify/flash-list"
+import { type GalleryItemTagged } from "@/components/drivePreview/gallery"
 
 const GalleryItem = ({
 	info,
 	galleryZoomScale,
 	goBack,
 	onZoomChange,
-	onSingleTap
+	onSingleTap,
+	onPinchActiveChange
 }: {
 	info: ListRenderItemInfo<GalleryItemTagged>
 	galleryZoomScale: SharedValue<number>
 	goBack: () => void
 	onZoomChange?: (zoom: number) => void
 	onSingleTap?: () => void
+	onPinchActiveChange?: (active: boolean) => void
 }) => {
 	const { t } = useTranslation()
 	const dimensions = useWindowDimensions()
@@ -111,6 +113,7 @@ const GalleryItem = ({
 						onPinchDismiss={goBack}
 						onZoomChange={onZoomChange}
 						onSingleTap={onSingleTap}
+						onPinchActiveChange={onPinchActiveChange}
 					/>
 				</View>
 			)
