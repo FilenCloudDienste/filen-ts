@@ -298,6 +298,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				cargoArgs: "-F heif-decoder"
 			}
 		],
+		"./plugins/withAndroidSigning",
 		[
 			"react-native-document-scanner-plugin",
 			{
