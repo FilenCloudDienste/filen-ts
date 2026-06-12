@@ -724,6 +724,8 @@
 	"sub_directory_created": "サブディレクトリを作成しました",
 	"submit": "送信",
 	"sync_now": "今すぐ同期",
+	"sync_offline_in_background": "バックグラウンドで同期",
+	"sync_offline_in_background_description": "アプリがバックグラウンドにある間、オフラインファイルを定期的に同期します。バッテリーとデータを節約するため、大きなディレクトリはスキップされ、アプリを開いたときに同期されます。",
 	"sync_offline_on_wifi_only": "Wi-Fiのみで同期",
 	"sync_offline_on_wifi_only_description": "Wi-Fi接続時のみオフラインファイルを同期します。",
 	"syncing": "同期中…",

@@ -748,6 +748,8 @@
 	"sub_directory_created": "Podkatalog utworzony",
 	"submit": "Wyślij",
 	"sync_now": "Synchronizuj teraz",
+	"sync_offline_in_background": "Synchronizuj w tle",
+	"sync_offline_in_background_description": "Okresowo synchronizuj pliki offline, gdy aplikacja działa w tle. Duże katalogi są pomijane i synchronizowane po otwarciu aplikacji, aby oszczędzać baterię i dane.",
 	"sync_offline_on_wifi_only": "Synchronizuj tylko przez Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Synchronizuj pliki offline tylko po połączeniu z Wi-Fi.",
 	"syncing": "Synchronizowanie…",

@@ -724,6 +724,8 @@
 	"sub_directory_created": "Unterverzeichnis erstellt",
 	"submit": "Bestätigen",
 	"sync_now": "Jetzt synchronisieren",
+	"sync_offline_in_background": "Im Hintergrund synchronisieren",
+	"sync_offline_in_background_description": "Synchronisiert deine Offline-Dateien regelmäßig, während die App im Hintergrund läuft. Große Verzeichnisse werden übersprungen und erst synchronisiert, wenn du die App öffnest, um Akku und Daten zu sparen.",
 	"sync_offline_on_wifi_only": "Nur über WLAN synchronisieren",
 	"sync_offline_on_wifi_only_description": "Offline-Dateien nur synchronisieren, wenn du mit WLAN verbunden bist.",
 	"syncing": "Wird synchronisiert…",

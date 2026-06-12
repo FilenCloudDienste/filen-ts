@@ -724,6 +724,8 @@
 	"sub_directory_created": "สร้างไดเรกทอรีย่อยแล้ว",
 	"submit": "ส่ง",
 	"sync_now": "ซิงค์เดี๋ยวนี้",
+	"sync_offline_in_background": "ซิงค์ในเบื้องหลัง",
+	"sync_offline_in_background_description": "ซิงค์ไฟล์ออฟไลน์ของคุณเป็นระยะในขณะที่แอปทำงานอยู่เบื้องหลัง ไดเรกทอรีขนาดใหญ่จะถูกข้ามและซิงค์เมื่อคุณเปิดแอป เพื่อประหยัดแบตเตอรี่และข้อมูล",
 	"sync_offline_on_wifi_only": "ซิงค์ผ่าน Wi-Fi เท่านั้น",
 	"sync_offline_on_wifi_only_description": "ซิงค์ไฟล์ออฟไลน์ของคุณเฉพาะเมื่อเชื่อมต่อกับ Wi-Fi เท่านั้น",
 	"syncing": "กำลังซิงค์…",
