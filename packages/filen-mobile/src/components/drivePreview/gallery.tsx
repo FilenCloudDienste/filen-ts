@@ -363,6 +363,21 @@ const Gallery = () => {
 		pinchActiveRef.current = active
 
 		syncScrollEnabled()
+
+		// A pinch cancels any in-flight pager scroll natively, which skips the
+		// paging snap and can leave the pager resting between pages. When the
+		// pinch releases with the content back at rest, snap onto the anchored
+		// page (no-op when already aligned).
+		if (!active && zoomScale.value <= 1) {
+			const itemCount = useDrivePreviewStore.getState().items.length
+
+			if (itemCount > 1) {
+				listRef.current?.scrollToOffset({
+					offset: Math.max(0, Math.min(anchorIndex, itemCount - 1)) * width,
+					animated: false
+				})
+			}
+		}
 	}
 
 	const { isImage, isVideo, isAudio, isExternal } = useDrivePreviewStore(
