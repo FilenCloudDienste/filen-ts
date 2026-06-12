@@ -22,7 +22,7 @@ const Banner = ({ status }: { status: Exclude<Status, "online"> }) => {
 			entering={FadeInDown.duration(200)}
 			exiting={FadeOutUp.duration(200)}
 			style={{ paddingTop: insets.top + 8, paddingBottom: 8 }}
-			className={isOffline ? "bg-warning" : "bg-green-600"}
+			className={isOffline ? "bg-warning" : "bg-success"}
 		>
 			<View className="flex-row items-center justify-center bg-transparent">
 				<Ionicons
