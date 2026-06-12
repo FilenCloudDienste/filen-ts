@@ -94,7 +94,7 @@ const CameraUploadErrors = () => {
 							buttons: [
 								{
 									id: "clear",
-									icon: "edit",
+									icon: "trash",
 									title: t("clear_errors"),
 									onPress: () => {
 										useCameraUploadStore.getState().setErrors([])
@@ -104,7 +104,7 @@ const CameraUploadErrors = () => {
 								},
 								{
 									id: "settings",
-									icon: "edit",
+									icon: "gear",
 									title: t("settings"),
 									onPress: () => {
 										router.push("/cameraUpload")

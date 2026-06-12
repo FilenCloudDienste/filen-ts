@@ -45,8 +45,18 @@ const CameraUpload = () => {
 		needCamera: false
 	})
 
-	const makeToggleButton = ({ field, title, subTitle }: { field: BooleanConfigKey; title: string; subTitle?: string }): Button => ({
-		icon: "time-outline",
+	const makeToggleButton = ({
+		field,
+		title,
+		subTitle,
+		icon
+	}: {
+		field: BooleanConfigKey
+		title: string
+		subTitle?: string
+		icon: Button["icon"]
+	}): Button => ({
+		icon,
 		title,
 		subTitle,
 		rightItem: {
@@ -132,7 +142,8 @@ const CameraUpload = () => {
 							buttons={[
 								makeToggleButton({
 									field: "enabled",
-									title: t("enabled")
+									title: t("enabled"),
+									icon: "cloud-upload-outline"
 								})
 							]}
 						/>
@@ -142,7 +153,7 @@ const CameraUpload = () => {
 									className="bg-background-tertiary"
 									buttons={[
 										{
-											icon: "time-outline",
+											icon: "albums-outline",
 											title: t("albums"),
 											subTitle: t("albums_description"),
 											onPress: () => {
@@ -154,7 +165,7 @@ const CameraUpload = () => {
 											}
 										},
 										{
-											icon: "time-outline",
+											icon: "folder-open-outline",
 											title: t("cloud_directory"),
 											disabled: !isOnline,
 											subTitle: config.remoteDir
@@ -239,35 +250,41 @@ const CameraUpload = () => {
 										makeToggleButton({
 											field: "includeVideos",
 											title: t("videos"),
-											subTitle: t("videos_description")
+											subTitle: t("videos_description"),
+											icon: "videocam-outline"
 										}),
 										makeToggleButton({
 											field: "cellular",
 											title: t("cellular"),
-											subTitle: t("cellular_description")
+											subTitle: t("cellular_description"),
+											icon: "cellular-outline"
 										}),
 										makeToggleButton({
 											field: "background",
 											title: t("background"),
-											subTitle: t("background_description")
+											subTitle: t("background_description"),
+											icon: "refresh-outline"
 										}),
 										makeToggleButton({
 											field: "lowBattery",
 											title: t("low_battery"),
-											subTitle: t("low_battery_description")
+											subTitle: t("low_battery_description"),
+											icon: "battery-half-outline"
 										}),
 										makeToggleButton({
 											field: "compress",
 											title: t("compress"),
-											subTitle: t("compress_description")
+											subTitle: t("compress_description"),
+											icon: "contract-outline"
 										}),
 										makeToggleButton({
 											field: "afterActivation",
 											title: t("after_activation"),
-											subTitle: t("after_activation_description")
+											subTitle: t("after_activation_description"),
+											icon: "time-outline"
 										}),
 										{
-											icon: "time-outline",
+											icon: "arrow-undo-outline",
 											title: t("reupload_deleted"),
 											subTitle: t("reupload_deleted_description"),
 											rightItem: {

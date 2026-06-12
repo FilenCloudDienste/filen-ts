@@ -77,7 +77,7 @@ function BiometricComponent() {
 								className="bg-background-tertiary"
 								buttons={[
 									{
-										icon: "time-outline",
+										icon: "finger-print-outline",
 										title: t("biometric_authentication"),
 										subTitle: t("biometric_authentication_description"),
 										rightItem: {
@@ -107,7 +107,7 @@ function BiometricComponent() {
 									className="bg-background-tertiary"
 									buttons={[
 										{
-											icon: "time-outline",
+											icon: "keypad-outline",
 											title: t("pin_only"),
 											subTitle: t("pin_only_description"),
 											rightItem: {

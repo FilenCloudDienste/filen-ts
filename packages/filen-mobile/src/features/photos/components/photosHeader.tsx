@@ -117,35 +117,30 @@ export const Header = ({ items, drivePath }: { items: DriveItemFileExtracted[]; 
 								{
 									id: "gridTiles1",
 									title: "1",
-									icon: "grid",
 									checked: photosGridTiles === 1,
 									onPress: () => setPhotosGridTiles(1)
 								},
 								{
 									id: "gridTiles2",
 									title: "2",
-									icon: "grid",
 									checked: photosGridTiles === 2,
 									onPress: () => setPhotosGridTiles(2)
 								},
 								{
 									id: "gridTiles3",
 									title: "3",
-									icon: "grid",
 									checked: photosGridTiles === 3,
 									onPress: () => setPhotosGridTiles(3)
 								},
 								{
 									id: "gridTiles4",
 									title: "4",
-									icon: "grid",
 									checked: photosGridTiles === 4,
 									onPress: () => setPhotosGridTiles(4)
 								},
 								{
 									id: "gridTiles5",
 									title: "5",
-									icon: "grid",
 									checked: photosGridTiles === 5,
 									onPress: () => setPhotosGridTiles(5)
 								}

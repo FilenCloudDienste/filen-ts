@@ -69,7 +69,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 		bulkButtons.push({
 			id: "bulkSaveToPhotos",
 			title: t("save_to_device_photos_selected"),
-			icon: "archive",
+			icon: "image",
 			requiresOnline: true,
 			onPress: async () => {
 				const permissionsResult = await run(async () => {
@@ -137,7 +137,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 	bulkButtons.push({
 		id: "bulkDownload",
 		title: t("download_selected"),
-		icon: "archive",
+		icon: "download",
 		requiresOnline: true,
 		onPress: async () => {
 			await runBulk({

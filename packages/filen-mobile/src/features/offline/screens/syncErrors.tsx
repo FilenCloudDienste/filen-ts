@@ -109,7 +109,7 @@ const SyncErrors = () => {
 							buttons: [
 								{
 									id: "clear",
-									icon: "edit",
+									icon: "trash",
 									title: t("clear_errors"),
 									onPress: () => {
 										useOfflineStore.getState().setSyncErrors([])
@@ -119,7 +119,7 @@ const SyncErrors = () => {
 								},
 								{
 									id: "settings",
-									icon: "edit",
+									icon: "gear",
 									title: t("settings"),
 									onPress: () => {
 										router.push("/offlineSettings")
