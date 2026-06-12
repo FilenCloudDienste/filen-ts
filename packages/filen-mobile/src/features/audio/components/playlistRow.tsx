@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
+import { hairlineBorderBottom } from "@/lib/hairline"
 
 export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: PlaylistWithItems }): MenuButton[] {
 	return [
@@ -318,7 +319,10 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 						color={textForeground.color}
 					/>
 				</View>
-				<View className="flex-col bg-transparent flex-1 border-b-hairline border-border py-2.5">
+				<View
+					className="flex-col bg-transparent flex-1 border-separator py-2.5"
+					style={hairlineBorderBottom}
+				>
 					<Text
 						numberOfLines={1}
 						ellipsizeMode="middle"

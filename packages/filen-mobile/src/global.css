@@ -1,25 +1,6 @@
 @import "tailwindcss";
 @import "uniwind";
 
-/* One physical pixel (StyleSheet.hairlineWidth) — for list/row separators and
-   divider lines. Container outlines, chips and badges keep the 1 logical px
-   `border` utilities for visual weight. */
-@utility border-hairline {
-	border-width: hairlineWidth();
-}
-@utility border-b-hairline {
-	border-bottom-width: hairlineWidth();
-}
-@utility border-t-hairline {
-	border-top-width: hairlineWidth();
-}
-@utility h-hairline {
-	height: hairlineWidth();
-}
-@utility w-hairline {
-	width: hairlineWidth();
-}
-
 @layer theme {
 	:root {
 		@variant dark {
@@ -45,6 +26,9 @@
 			--color-border-subtle: #2c2c2e;
 			--color-border-hover: #48484a;
 			--color-divider: #38383a;
+			/* Hairline row separators: 1 physical px needs more contrast than the
+			   3-physical-px `border` to stay visible on OLED black. */
+			--color-separator: #48484a;
 			--color-input: #38383a;
 			--color-ring: #0a84ff;
 
@@ -119,6 +103,7 @@
 			--color-border-subtle: #e5e5ea;
 			--color-border-hover: #aeaeb2;
 			--color-divider: #c6c6c8;
+			--color-separator: #c6c6c8;
 			--color-input: #d1d1d6;
 			--color-ring: #007aff;
 

@@ -68,6 +68,10 @@ vi.mock("react-native-reanimated", () => ({
 	FadeOut: {}
 }))
 
+vi.mock("@/lib/hairline", () => ({
+	hairlineBorderBottom: {}
+}))
+
 vi.mock("@/features/audio/queries/useAudioMetadata.query", () => ({
 	default: vi.fn(() => ({ status: "loading", data: null }))
 }))

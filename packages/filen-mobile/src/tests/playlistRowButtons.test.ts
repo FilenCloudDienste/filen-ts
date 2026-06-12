@@ -68,6 +68,10 @@ vi.mock("uniwind", () => ({
 	useUniwind: vi.fn(() => ({ theme: "dark" }))
 }))
 
+vi.mock("@/lib/hairline", () => ({
+	hairlineBorderBottom: {}
+}))
+
 vi.mock("@expo/vector-icons/Ionicons", () => ({
 	default: () => null
 }))

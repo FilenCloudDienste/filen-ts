@@ -20,6 +20,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Avatar from "@/components/ui/avatar"
+import { hairlineBorderBottom } from "@/lib/hairline"
 
 export type Item = TNote & {
 	content?: string
@@ -166,10 +167,11 @@ const NoteRow = ({
 								"flex-1 flex-row gap-4 w-full h-auto bg-transparent py-3",
 								nextNote?.type === "note" &&
 									Platform.select({
-										ios: isActive ? "" : "border-b-hairline border-border",
-										default: "border-b-hairline border-border"
+										ios: isActive ? "" : "border-separator",
+										default: "border-separator"
 									})
 							)}
+							style={nextNote?.type === "note" && !(Platform.OS === "ios" && isActive) ? hairlineBorderBottom : undefined}
 						>
 							{areNotesSelected && (
 								<AnimatedView

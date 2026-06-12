@@ -11,6 +11,7 @@ vi.mock("@/components/ui/pressables", () => ({ PressableScale: () => null }))
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))
 vi.mock("react-native-reanimated", () => ({ FadeIn: {}, FadeOut: {} }))
 vi.mock("uniwind", () => ({ useResolveClassNames: () => ({}) }))
+vi.mock("@/lib/hairline", () => ({ hairlineBorderBottom: {} }))
 
 import { listRowOuterClassName, listRowInnerClassName, LIST_ROW_SELECTED_CLASS_NAME } from "@/components/ui/listRow"
 
@@ -81,9 +82,9 @@ describe("listRowInnerClassName", () => {
 	})
 
 	it("adds the inset separator only when requested", () => {
-		expect(listRowInnerClassName({ separator: true })).toContain("border-border")
-		expect(listRowInnerClassName({ separator: false })).not.toContain("border-border")
-		expect(listRowInnerClassName({})).not.toContain("border-border")
+		expect(listRowInnerClassName({ separator: true })).toContain("border-separator")
+		expect(listRowInnerClassName({ separator: false })).not.toContain("border-separator")
+		expect(listRowInnerClassName({})).not.toContain("border-separator")
 	})
 
 	it("appends a caller innerClassName", () => {

@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next"
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 import { rawUploadTimestamp, pickDisplayTimestamp, directorySizeTypeForDrivePath } from "@/features/drive/utils"
 import { type DrivePathType } from "@/hooks/useDrivePath"
+import { hairlineBorderBottom } from "@/lib/hairline"
 
 function OfflineStatusRow({ uuid, type }: { uuid: string; type: DriveItem["type"] }) {
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -207,7 +208,10 @@ export const Information = ({
 
 	return (
 		<View className="bg-transparent flex-col gap-2">
-			<View className="bg-transparent border-b-hairline border-border pb-2 flex-row items-center justify-between gap-4">
+			<View
+				className="bg-transparent border-separator pb-2 flex-row items-center justify-between gap-4"
+				style={hairlineBorderBottom}
+			>
 				<Text className="text-lg text-muted-foreground font-bold">{t("information")}</Text>
 			</View>
 			{info.map(({ type, value, title }) => (
