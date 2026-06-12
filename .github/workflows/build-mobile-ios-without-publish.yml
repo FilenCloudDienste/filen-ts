@@ -51,6 +51,7 @@ jobs:
             -configuration Release \
             -sdk iphonesimulator \
             -derivedDataPath $RUNNER_TEMP/DerivedData \
+            ARCHS=arm64 \
             build
 
       - name: Upload iOS simulator .app bundle
