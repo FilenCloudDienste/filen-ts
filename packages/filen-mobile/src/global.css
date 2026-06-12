@@ -27,10 +27,12 @@
 			--color-border-hover: #48484a;
 			--color-divider: #38383a;
 			/* Row separators / divider lines, measured against the iOS Files app's
-			   dark-mode list separator (1 logical px at ~#2c2c2c — Apple gets
-			   visibility from width with a dim color, NOT from a brighter hairline;
-			   the regular --color-border reads heavier than Files). */
-			--color-separator: #2c2c2e;
+			   dark-mode list separator (1 logical px at ~#2c2c2c over black — Apple
+			   gets visibility from width with a dim color, NOT a brighter hairline).
+			   TRANSLUCENT like UIColor.separator so it reads on every surface:
+			   an opaque dim gray vanishes on the #2c2c2e settings-group cards.
+			   #545458 at 50% ≈ 42 over black (Files: 44) and ≈ 64 over cards. */
+			--color-separator: #54545880;
 			--color-input: #38383a;
 			--color-ring: #0a84ff;
 
@@ -105,7 +107,8 @@
 			--color-border-subtle: #e5e5ea;
 			--color-border-hover: #aeaeb2;
 			--color-divider: #c6c6c8;
-			--color-separator: #c6c6c8;
+			/* iOS light-mode UIColor.separator (translucent for any surface). */
+			--color-separator: #3c3c435c;
 			--color-input: #d1d1d6;
 			--color-ring: #007aff;
 
