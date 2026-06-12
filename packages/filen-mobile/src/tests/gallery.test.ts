@@ -49,7 +49,13 @@ vi.mock("react-native-reanimated", () => ({
 	useSharedValue: (v: unknown) => ({ value: v }),
 	useAnimatedStyle: (fn: () => unknown) => fn,
 	withSpring: (v: unknown) => v,
-	runOnUI: (fn: unknown) => fn
+	runOnUI: (fn: unknown) => fn,
+	interpolate: (v: unknown) => v,
+	Extrapolation: {
+		CLAMP: "clamp",
+		EXTEND: "extend",
+		IDENTITY: "identity"
+	}
 }))
 
 vi.mock("react-native-worklets", () => ({

@@ -11,21 +11,25 @@ const PreviewImage = ({
 	zoomScale,
 	onPinchDismiss,
 	onZoomChange,
-	onSingleTap
+	onSingleTap,
+	onPinchActiveChange
 }: {
 	fileUrl: string
 	zoomScale: SharedValue<number>
 	onPinchDismiss: () => void
 	onZoomChange?: (zoom: number) => void
 	onSingleTap?: () => void
+	onPinchActiveChange?: (active: boolean) => void
 }) => {
 	const dimensions = useWindowDimensions()
 	const [loadStatus, setLoadStatus] = useState<"loading" | "loaded" | "error">("loading")
+	const [contentSize, setContentSize] = useState<{ width: number; height: number } | null>(null)
 	const [prevFileUrl, setPrevFileUrl] = useState<string>(fileUrl)
 
 	if (fileUrl !== prevFileUrl) {
 		setPrevFileUrl(fileUrl)
 		setLoadStatus("loading")
+		setContentSize(null)
 	}
 
 	const imageStyle = {
@@ -51,6 +55,8 @@ const PreviewImage = ({
 				onPinchDismiss={onPinchDismiss}
 				onZoomChange={onZoomChange}
 				onSingleTap={onSingleTap}
+				onPinchActiveChange={onPinchActiveChange}
+				contentSize={contentSize ?? undefined}
 				maxZoom={10}
 			>
 				<Image
@@ -62,6 +68,12 @@ const PreviewImage = ({
 					cachePolicy="disk"
 					style={imageStyle}
 					recyclingKey={`preview-image-${fileUrl}`}
+					onLoad={e =>
+						setContentSize({
+							width: e.source.width,
+							height: e.source.height
+						})
+					}
 					onDisplay={() => setLoadStatus("loaded")}
 					onError={() => setLoadStatus("error")}
 				/>
