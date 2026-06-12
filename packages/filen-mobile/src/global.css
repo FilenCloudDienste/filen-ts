@@ -58,9 +58,9 @@
 			--color-danger-foreground: #ffffff;
 			--color-danger-hover: #ff3b30;
 
-			--color-success: #32d74b;
+			--color-success: #30d158; /* systemGreen dark */
 			--color-success-foreground: #ffffff;
-			--color-success-hover: #30d158;
+			--color-success-hover: #28b94a;
 
 			--color-warning: #ff9f0a;
 			--color-warning-foreground: #000000;
@@ -139,7 +139,8 @@
 			--color-success-hover: #30b34a;
 
 			--color-warning: #ff9500;
-			--color-warning-foreground: #ffffff;
+			/* Black like the dark variant — white on systemOrange is ~2:1 contrast. */
+			--color-warning-foreground: #000000;
 			--color-warning-hover: #ff8800;
 
 			--color-info: #5ac8fa;
