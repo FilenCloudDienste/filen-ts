@@ -19,8 +19,8 @@ import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 
 const ALBUM_PREVIEW_SIZE = {
-	width: 44,
-	height: 44
+	width: 34,
+	height: 34
 }
 
 // Most-recent photo of the album as the row's leading preview. The fallback
