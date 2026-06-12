@@ -15,7 +15,7 @@ jobs:
         working-directory: packages/filen-mobile
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -25,7 +25,7 @@ jobs:
           xcode-version: latest-stable
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
 
@@ -55,7 +55,7 @@ jobs:
             build
 
       - name: Upload iOS simulator .app bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ios-simulator-app-test-${{ github.run_number }}
           path: ${{ runner.temp }}/DerivedData/Build/Products/Release-iphonesimulator/Filen.app

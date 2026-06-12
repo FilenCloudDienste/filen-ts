@@ -14,9 +14,9 @@ jobs:
     if: contains(github.event.release.tag_name, '@filen/utils') || contains(github.event.release.name, '@filen/utils')
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
       - name: Install dependencies

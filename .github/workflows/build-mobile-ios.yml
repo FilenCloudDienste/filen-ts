@@ -15,7 +15,7 @@ jobs:
         working-directory: packages/filen-mobile
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -25,7 +25,7 @@ jobs:
           xcode-version: latest-stable
 
       - name: Set up distribution certificate
-        uses: apple-actions/import-codesign-certs@v2
+        uses: apple-actions/import-codesign-certs@v6
         with:
           create-keychain: true
           keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
@@ -33,7 +33,7 @@ jobs:
           p12-password: ${{ secrets.APPLE_DISTRIBUTION_CERT_PASS }}
 
       - name: Set up development certificate
-        uses: apple-actions/import-codesign-certs@v2
+        uses: apple-actions/import-codesign-certs@v6
         with:
           create-keychain: false
           keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
@@ -50,7 +50,7 @@ jobs:
           chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
 
@@ -141,21 +141,21 @@ jobs:
           security list-keychains -d user -s login.keychain
 
       - name: Upload iOS archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ios-archive-${{ github.run_number }}
           path: ${{ runner.temp }}/Filen.xcarchive
           retention-days: 90
 
       - name: Upload iOS IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ios-ipa-${{ github.run_number }}
           path: ${{ runner.temp }}/*.ipa
           retention-days: 90
 
       - name: Upload to TestFlight
-        uses: apple-actions/upload-testflight-build@v3
+        uses: apple-actions/upload-testflight-build@v4
         with:
           app-path: ${{ runner.temp }}/Filen.ipa
           issuer-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
