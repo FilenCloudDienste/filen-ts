@@ -10,6 +10,9 @@ export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]
 	iconColor?: string
 	iconSize?: number
+	// Custom leading slot (e.g. an image preview). Takes the icon's place;
+	// when set, `icon` is ignored.
+	leading?: React.ReactNode
 	title: string
 	titleClassName?: string
 	subTitle?: string
@@ -100,6 +103,7 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 						icon,
 						iconSize,
 						iconColor,
+						leading,
 						title,
 						subTitle,
 						subTitleNumberOfLines,
@@ -120,14 +124,18 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 							rippleColor={onPress && !disabled ? undefined : "transparent"}
 							enabled={!!onPress && !disabled}
 						>
-							{icon && (
-								<View className="bg-transparent flex-row items-center">
-									<Ionicons
-										name={icon}
-										size={iconSize ?? 22}
-										color={iconColor ?? textForeground.color}
-									/>
-								</View>
+							{leading ? (
+								<View className="bg-transparent flex-row items-center">{leading}</View>
+							) : (
+								icon && (
+									<View className="bg-transparent flex-row items-center">
+										<Ionicons
+											name={icon}
+											size={iconSize ?? 22}
+											color={iconColor ?? textForeground.color}
+										/>
+									</View>
+								)
 							)}
 							<View
 								className={cn(
