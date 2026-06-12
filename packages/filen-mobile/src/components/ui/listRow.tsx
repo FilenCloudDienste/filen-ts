@@ -9,7 +9,6 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useResolveClassNames } from "uniwind"
 import { cn } from "@filen/utils"
-import { hairlineBorderBottom } from "@/lib/hairline"
 
 // Shared "list row" primitive — the flat avatar-row used across contacts, participants (notes/chats),
 // file versions, note history, events, the chat-input pickers, etc. It is a pure LAYOUT/SLOT shell:
@@ -70,7 +69,7 @@ export function listRowInnerClassName(opts: { separator?: boolean; density?: Lis
 	return cn(
 		"flex-row items-center gap-4 bg-transparent flex-1",
 		DENSITY_PADDING[opts.density ?? "comfortable"],
-		opts.separator && "border-separator",
+		opts.separator && "border-b border-separator",
 		opts.innerClassName
 	)
 }
@@ -169,7 +168,6 @@ export const ListRow = (props: ListRowProps) => {
 					density: props.density,
 					innerClassName: props.innerClassName
 				})}
-				style={props.separator ? hairlineBorderBottom : undefined}
 			>
 				{props.selectable &&
 					(props.animateCheckbox === false ? (

@@ -19,7 +19,6 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
-import { hairlineBorderBottom } from "@/lib/hairline"
 
 type TrackType = PlaylistWithItems["files"][number]
 
@@ -281,10 +280,7 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 					recyclingKey={`toolbar-audio-picture-${track.item.data.uuid}`}
 					className={isSelected ? "bg-background-secondary" : undefined}
 				/>
-				<View
-					className="flex-col bg-transparent flex-1 border-separator py-2.5"
-					style={hairlineBorderBottom}
-				>
+				<View className="flex-col bg-transparent flex-1 border-b border-separator py-2.5">
 					<Text
 						numberOfLines={1}
 						ellipsizeMode="middle"
@@ -308,10 +304,7 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 				</View>
 			</PressableScale>
 			{!areTracksSelected && (
-				<View
-					className="self-stretch shrink-0 flex-row items-center bg-transparent border-separator pl-3"
-					style={hairlineBorderBottom}
-				>
+				<View className="self-stretch shrink-0 flex-row items-center bg-transparent border-b border-separator pl-3">
 					<Menu
 						type="dropdown"
 						isAnchoredToRight={true}

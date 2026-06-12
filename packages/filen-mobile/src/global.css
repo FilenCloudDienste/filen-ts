@@ -26,9 +26,11 @@
 			--color-border-subtle: #2c2c2e;
 			--color-border-hover: #48484a;
 			--color-divider: #38383a;
-			/* Hairline row separators: 1 physical px needs more contrast than the
-			   3-physical-px `border` to stay visible on OLED black. */
-			--color-separator: #48484a;
+			/* Row separators / divider lines, measured against the iOS Files app's
+			   dark-mode list separator (1 logical px at ~#2c2c2c — Apple gets
+			   visibility from width with a dim color, NOT from a brighter hairline;
+			   the regular --color-border reads heavier than Files). */
+			--color-separator: #2c2c2e;
 			--color-input: #38383a;
 			--color-ring: #0a84ff;
 

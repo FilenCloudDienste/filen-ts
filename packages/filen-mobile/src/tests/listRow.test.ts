@@ -11,7 +11,6 @@ vi.mock("@/components/ui/pressables", () => ({ PressableScale: () => null }))
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))
 vi.mock("react-native-reanimated", () => ({ FadeIn: {}, FadeOut: {} }))
 vi.mock("uniwind", () => ({ useResolveClassNames: () => ({}) }))
-vi.mock("@/lib/hairline", () => ({ hairlineBorderBottom: {} }))
 
 import { listRowOuterClassName, listRowInnerClassName, LIST_ROW_SELECTED_CLASS_NAME } from "@/components/ui/listRow"
 

@@ -16,7 +16,6 @@ import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useIsOnline from "@/hooks/useIsOnline"
 import { isValidEmail } from "@/features/auth/utils"
-import { hairlineHeight } from "@/lib/hairline"
 
 type PasswordStrength = ReturnType<typeof ratePasswordStrength>["strength"]
 
@@ -218,10 +217,7 @@ const Register = () => {
 								onChangeText={setEmail}
 							/>
 						</View>
-						<View
-							className="bg-separator ml-12"
-							style={hairlineHeight}
-						/>
+						<View className="h-px bg-separator ml-12" />
 						<View className="flex-row items-center px-4 bg-transparent">
 							<Ionicons
 								name="lock-closed-outline"
@@ -242,10 +238,7 @@ const Register = () => {
 								onChangeText={setPassword}
 							/>
 						</View>
-						<View
-							className="bg-separator ml-12"
-							style={hairlineHeight}
-						/>
+						<View className="h-px bg-separator ml-12" />
 						<View className="flex-row items-center px-4 bg-transparent">
 							<Ionicons
 								name="lock-closed-outline"
