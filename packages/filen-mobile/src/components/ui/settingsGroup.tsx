@@ -59,7 +59,7 @@ export type Button = {
 function BadgePill({ value, color, textClassName }: { value: string | React.ReactNode; color?: string; textClassName?: string }) {
 	return (
 		<View
-			className={cn("rounded-full size-5 flex-row items-center justify-center", !color && "bg-red-500")}
+			className={cn("rounded-full min-h-5 min-w-5 p-1 px-2 flex-row items-center justify-center", !color && "bg-red-500")}
 			style={color ? { backgroundColor: color } : undefined}
 		>
 			{typeof value === "string" ? (
