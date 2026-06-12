@@ -724,6 +724,8 @@
 	"sub_directory_created": "Underkatalog skapad",
 	"submit": "Skicka",
 	"sync_now": "Synka nu",
+	"sync_offline_in_background": "Synkronisera i bakgrunden",
+	"sync_offline_in_background_description": "Synkronisera dina offlinefiler regelbundet medan appen är i bakgrunden. Stora kataloger hoppas över och synkroniseras när du öppnar appen, för att spara batteri och data.",
 	"sync_offline_on_wifi_only": "Synka endast via Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Synka endast dina offlinefiler när du är ansluten till Wi-Fi.",
 	"syncing": "Synkar…",

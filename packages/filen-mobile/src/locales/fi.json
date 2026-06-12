@@ -724,6 +724,8 @@
 	"sub_directory_created": "Alihakemisto luotu",
 	"submit": "Lähetä",
 	"sync_now": "Synkronoi nyt",
+	"sync_offline_in_background": "Synkronoi taustalla",
+	"sync_offline_in_background_description": "Synkronoi offline-tiedostosi ajoittain, kun sovellus on taustalla. Suuret hakemistot ohitetaan ja synkronoidaan, kun avaat sovelluksen, akun ja datan säästämiseksi.",
 	"sync_offline_on_wifi_only": "Synkronoi vain Wi-Fi-yhteydellä",
 	"sync_offline_on_wifi_only_description": "Synkronoi offline-tiedostosi vain Wi-Fi-yhteydellä.",
 	"syncing": "Synkronoidaan…",

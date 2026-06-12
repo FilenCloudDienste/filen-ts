@@ -724,6 +724,8 @@
 	"sub_directory_created": "Subdirectory aangemaakt",
 	"submit": "Verzenden",
 	"sync_now": "Nu synchroniseren",
+	"sync_offline_in_background": "Synchroniseren op achtergrond",
+	"sync_offline_in_background_description": "Synchroniseer periodiek je offline bestanden terwijl de app op de achtergrond draait. Grote mappen worden overgeslagen en gesynchroniseerd wanneer je de app opent, om batterij en data te besparen.",
 	"sync_offline_on_wifi_only": "Alleen synchroniseren via wifi",
 	"sync_offline_on_wifi_only_description": "Synchroniseer je offline bestanden alleen wanneer je met wifi verbonden bent.",
 	"syncing": "Synchroniseren…",

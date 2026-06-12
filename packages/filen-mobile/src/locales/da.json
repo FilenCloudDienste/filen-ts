@@ -724,6 +724,8 @@
 	"sub_directory_created": "Undermappe oprettet",
 	"submit": "Send",
 	"sync_now": "Synkroniser nu",
+	"sync_offline_in_background": "Synkroniser i baggrunden",
+	"sync_offline_in_background_description": "Synkroniser regelmæssigt dine offlinefiler, mens appen kører i baggrunden. Store mapper springes over og synkroniseres, når du åbner appen, for at spare batteri og data.",
 	"sync_offline_on_wifi_only": "Synkroniser kun via Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Synkroniser kun dine offlinefiler, når du er forbundet til Wi-Fi.",
 	"syncing": "Synkroniserer…",

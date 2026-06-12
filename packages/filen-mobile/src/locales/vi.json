@@ -724,6 +724,8 @@
 	"sub_directory_created": "Đã tạo thư mục con",
 	"submit": "Gửi",
 	"sync_now": "Đồng bộ ngay",
+	"sync_offline_in_background": "Đồng bộ trong nền",
+	"sync_offline_in_background_description": "Định kỳ đồng bộ các tệp ngoại tuyến của bạn khi ứng dụng chạy trong nền. Các thư mục lớn được bỏ qua và sẽ đồng bộ khi bạn mở ứng dụng, để tiết kiệm pin và dữ liệu.",
 	"sync_offline_on_wifi_only": "Chỉ đồng bộ qua Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Chỉ đồng bộ các tệp ngoại tuyến khi đã kết nối Wi-Fi.",
 	"syncing": "Đang đồng bộ…",

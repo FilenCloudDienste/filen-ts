@@ -724,6 +724,8 @@
 	"sub_directory_created": "Subdirektori dibuat",
 	"submit": "Kirim",
 	"sync_now": "Sinkronkan sekarang",
+	"sync_offline_in_background": "Sinkronkan di latar belakang",
+	"sync_offline_in_background_description": "Sinkronkan file offline Anda secara berkala saat aplikasi berada di latar belakang. Direktori besar dilewati dan disinkronkan saat Anda membuka aplikasi, untuk menghemat baterai dan data.",
 	"sync_offline_on_wifi_only": "Sinkronkan hanya di Wi-Fi",
 	"sync_offline_on_wifi_only_description": "Hanya sinkronkan file offline Anda saat terhubung ke Wi-Fi.",
 	"syncing": "Menyinkronkan…",

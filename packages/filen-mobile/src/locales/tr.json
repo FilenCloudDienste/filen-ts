@@ -724,6 +724,8 @@
 	"sub_directory_created": "Alt dizin oluşturuldu",
 	"submit": "Gönder",
 	"sync_now": "Şimdi eşitle",
+	"sync_offline_in_background": "Arka planda eşitle",
+	"sync_offline_in_background_description": "Uygulama arka plandayken çevrimdışı dosyalarınızı periyodik olarak eşitler. Pil ve veri tasarrufu için büyük dizinler atlanır ve uygulamayı açtığınızda eşitlenir.",
 	"sync_offline_on_wifi_only": "Yalnızca Wi-Fi'de eşitle",
 	"sync_offline_on_wifi_only_description": "Çevrimdışı dosyalarınızı yalnızca Wi-Fi'ye bağlıyken eşitleyin.",
 	"syncing": "Eşitleniyor…",
