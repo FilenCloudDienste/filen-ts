@@ -56,7 +56,7 @@ function Security() {
 							className="bg-background-tertiary"
 							buttons={[
 								{
-									icon: "time-outline",
+									icon: "key-outline",
 									title: t("change_password"),
 									subTitle: t("change_password_description"),
 									disabled: !isOnline,
@@ -176,7 +176,7 @@ function Security() {
 									}
 								},
 								{
-									icon: "time-outline",
+									icon: "shield-checkmark-outline",
 									title: t("two_factor_authentication"),
 									subTitle: t("two_factor_authentication_description"),
 									onPress: () => {
@@ -184,7 +184,7 @@ function Security() {
 									}
 								},
 								{
-									icon: "time-outline",
+									icon: "finger-print-outline",
 									title: t("biometric_authentication"),
 									subTitle: t("biometric_authentication_description"),
 									onPress: () => {
@@ -204,7 +204,7 @@ function Security() {
 									}
 								},
 								{
-									icon: "time-outline",
+									icon: "save-outline",
 									iconColor: accountQuery.data.didExportMasterKeys ? undefined : (textRed500.color as string),
 									title: t("export_master_keys"),
 									titleClassName: accountQuery.data.didExportMasterKeys ? undefined : "text-red-500",

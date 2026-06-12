@@ -33,7 +33,7 @@ export function buildDangerZoneButtons({
 }): Button[] {
 	return [
 		{
-			icon: "time-outline",
+			icon: "trash-bin-outline",
 			iconColor: textRed500.color as string,
 			title: t("delete_versioned_files"),
 			titleClassName: "text-red-500",
@@ -102,7 +102,7 @@ export function buildDangerZoneButtons({
 			}
 		},
 		{
-			icon: "time-outline",
+			icon: "trash-outline",
 			iconColor: textRed500.color as string,
 			title: t("delete_all_files_and_directories"),
 			titleClassName: "text-red-500",
@@ -171,7 +171,7 @@ export function buildDangerZoneButtons({
 			}
 		},
 		{
-			icon: "time-outline",
+			icon: "person-remove-outline",
 			iconColor: textRed500.color as string,
 			title: t("request_account_deletion"),
 			titleClassName: "text-red-500",
@@ -287,7 +287,7 @@ export function buildProfileButtons({
 }): Button[] {
 	return [
 		{
-			icon: "time-outline",
+			icon: "mail-outline",
 			title: t("change_email_address"),
 			subTitle: accountQuery.data.email,
 			subTitleNumberOfLines: 1,
@@ -394,7 +394,7 @@ export function buildProfileButtons({
 			}
 		},
 		{
-			icon: "time-outline",
+			icon: "person-outline",
 			title: t("change_nickname"),
 			subTitle: accountQuery.data.nickName,
 			subTitleNumberOfLines: 1,
@@ -443,7 +443,7 @@ export function buildProfileButtons({
 			}
 		},
 		{
-			icon: "time-outline",
+			icon: "id-card-outline",
 			title: t("personal_information"),
 			subTitle: t("personal_information_description"),
 			onPress: () => {
@@ -456,7 +456,7 @@ export function buildProfileButtons({
 			}
 		},
 		{
-			icon: "time-outline",
+			icon: "document-text-outline",
 			title: t("gdpr_information"),
 			subTitle: t("gdpr_information_description"),
 			disabled: !isOnline,
@@ -497,7 +497,7 @@ export function buildProfileButtons({
 			}
 		},
 		{
-			icon: "time-outline",
+			icon: "settings-outline",
 			title: t("more_account_settings"),
 			onPress: async () => {
 				const promptResult = await run(async () => {
@@ -564,7 +564,7 @@ export function buildAccountToggleButtons({
 }): Button[] {
 	return [
 		{
-			icon: "time-outline",
+			icon: "layers-outline",
 			title: t("file_versioning"),
 			subTitle: t("file_versioning_description"),
 			disabled: !isOnline,
@@ -589,7 +589,7 @@ export function buildAccountToggleButtons({
 			}
 		},
 		{
-			icon: "time-outline",
+			icon: "notifications-outline",
 			title: t("login_alerts"),
 			subTitle: t("login_alerts_description"),
 			disabled: !isOnline,
@@ -628,7 +628,7 @@ export function buildTwoFactorButtons({
 }): Button[] {
 	return [
 		{
-			icon: "time-outline",
+			icon: "shield-checkmark-outline",
 			title: t("two_factor_authentication"),
 			subTitle: t("two_factor_authentication_description"),
 			disabled: !isOnline,
