@@ -69,7 +69,6 @@ function confirmedNoteAction({
 	promptTitle,
 	promptMessage,
 	promptOkText,
-	promptDestructive = true,
 	action,
 	dismissOnSuccess
 }: {
@@ -77,9 +76,6 @@ function confirmedNoteAction({
 	promptTitle: string
 	promptMessage: string
 	promptOkText: string
-	// The non-owner "leave" prompt is the one site that omits destructive styling on
-	// the alert itself — default true preserves the destructive look everywhere else.
-	promptDestructive?: boolean
 	// Return value is awaited then discarded (matches the original `await notes.X(...)`).
 	action: () => Promise<unknown>
 	dismissOnSuccess: boolean
@@ -88,7 +84,6 @@ function confirmedNoteAction({
 		promptTitle,
 		promptMessage,
 		promptOkText,
-		promptDestructive,
 		action,
 		dismiss: dismissOnSuccess ? () => useAppStore.getState().pathname.startsWith(`/note/${note.uuid}`) : undefined
 	})
@@ -565,7 +560,8 @@ export function createMenuButtons({
 				promptTitle: t("leave_note"),
 				promptMessage: t("are_you_sure_leave_note"),
 				promptOkText: t("leave"),
-				promptDestructive: false,
+				// Leaving is an irreversible loss of access (until re-invited) — styled
+				// destructive like the bulk-leave and undecryptable-leave variants.
 				action: () => notes.leave({ note }),
 				dismissOnSuccess: true
 			})
