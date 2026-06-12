@@ -91,7 +91,7 @@ const Message = ({
 								{t("new")}
 							</Text>
 						</View>
-						<View className="flex-1 bg-red-500 h-[0.5px]" />
+						<View className="flex-1 bg-red-500 h-hairline" />
 					</View>
 				)}
 			{chat.participants.length > 2 && info.item.inner.senderId !== stringifiedClient?.userId && (

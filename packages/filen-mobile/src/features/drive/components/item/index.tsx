@@ -261,7 +261,7 @@ const Item = ({
 								}}
 							/>
 						</View>
-						<View className="flex-1 flex-row items-center border-b border-border py-3 bg-transparent">
+						<View className="flex-1 flex-row items-center border-b-hairline border-border py-3 bg-transparent">
 							<View className="flex-1 flex-col justify-center gap-0.5 bg-transparent">
 								<Text
 									numberOfLines={1}

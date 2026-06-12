@@ -29,7 +29,7 @@ const IconTextField = ({
 					className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
 				/>
 			</View>
-			{showDividerBelow && <View className="h-px bg-border ml-12" />}
+			{showDividerBelow && <View className="h-hairline bg-border ml-12" />}
 		</Fragment>
 	)
 }

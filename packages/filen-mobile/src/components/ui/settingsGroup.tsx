@@ -132,7 +132,7 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 							<View
 								className={cn(
 									"bg-transparent flex-row items-center py-3 justify-between flex-1 gap-4",
-									index !== buttons.length - 1 && "border-b border-border"
+									index !== buttons.length - 1 && "border-b-hairline border-border"
 								)}
 							>
 								{subTitle ? (
