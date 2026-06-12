@@ -14,6 +14,53 @@ import Menu from "@/features/drive/components/item/menu"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useDriveStore from "@/features/drive/store/useDrive.store"
+import { useResolveClassNames } from "uniwind"
+
+function FavoritedIndicator() {
+	const textRed500 = useResolveClassNames("text-red-500")
+
+	return (
+		<View className="bg-transparent flex-row items-center justify-center absolute bottom-0.5 left-0.5 z-10">
+			<View className="bg-white rounded-full p-0.5 flex-row items-center justify-center">
+				<Ionicons
+					name="heart"
+					size={13}
+					color={textRed500.color}
+				/>
+			</View>
+		</View>
+	)
+}
+
+function OfflineIndicator() {
+	const textGreen500 = useResolveClassNames("text-green-500")
+
+	return (
+		<View className="bg-transparent flex-row items-center justify-center absolute top-0.5 right-0.5 z-10">
+			<View className="bg-background-secondary rounded-full p-0.5 flex-row items-center justify-center">
+				<Ionicons
+					name="download-outline"
+					size={13}
+					color={textGreen500.color}
+				/>
+			</View>
+		</View>
+	)
+}
+
+function VideoIndicator() {
+	return (
+		<View className="bg-transparent flex-row items-center justify-center absolute bottom-0.5 right-0.5 z-10">
+			<View className="bg-white rounded-full p-0.5 flex-row items-center justify-center">
+				<Ionicons
+					name="play"
+					size={13}
+					color="black"
+				/>
+			</View>
+		</View>
+	)
+}
 
 export const Photo = ({
 	info,
@@ -82,33 +129,9 @@ export const Photo = ({
 						onPress={onPress}
 						style={viewStyle}
 					>
-						{previewType === "video" && (
-							<View className="size-4 absolute bottom-0.5 right-0.5 z-10 flex-row items-center justify-center bg-white rounded-full p-px">
-								<Ionicons
-									name="play"
-									size={13}
-									color="black"
-								/>
-							</View>
-						)}
-						{info.item.type === "file" && info.item.data.favorited && (
-							<View className="size-4 absolute bottom-0.5 left-0.5 z-10 flex-row items-center justify-center bg-red-500 rounded-full p-px">
-								<Ionicons
-									name="heart"
-									size={13}
-									color="white"
-								/>
-							</View>
-						)}
-						{driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data && (
-							<View className="size-4 absolute top-0.5 right-0.5 z-10 flex-row items-center justify-center bg-green-500 rounded-full p-px">
-								<Ionicons
-									name="checkmark-done"
-									size={13}
-									color="white"
-								/>
-							</View>
-						)}
+						{previewType === "video" && <VideoIndicator />}
+						{info.item.type === "file" && info.item.data.favorited && <FavoritedIndicator />}
+						{driveItemStoredOfflineQuery.status === "success" && driveItemStoredOfflineQuery.data && <OfflineIndicator />}
 						{arePhotosSelected && (
 							<View
 								className={cn(
