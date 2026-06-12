@@ -1,0 +1,76 @@
+name: Build Mobile Android (Without Publish)
+
+on:
+  workflow_dispatch:
+
+env:
+  NODE_ENV: production
+  APP_ENV: production
+
+jobs:
+  build-android-without-publish:
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: packages/filen-mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-08-14
+          components: rust-src
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          # using specific version due to https://github.com/bbqsrc/cargo-ndk/issues/181
+          tool: cargo-ndk@3.5.4
+
+      - name: Install dependencies
+        run: npm install --force --include=dev && npx -y patch-package --patch-dir ./patches
+
+      - name: Set up Expo credentials
+        run: echo "${{ secrets.EXPO_CREDENTIALS }}" | base64 --decode > credentials.json
+
+      - name: Prebuild
+        run: npm run prebuild:ci:android
+
+      - name: Build Android release APK
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew app:assembleRelease
+          cd ..
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f android/app/release.keystore
+          rm -f credentials.json
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk-test-${{ github.run_number }}
+          path: packages/filen-mobile/android/app/build/outputs/apk/release/*.apk
+          retention-days: 90

@@ -1,0 +1,106 @@
+name: Build Mobile Android
+
+on:
+  workflow_dispatch:
+
+env:
+  NODE_ENV: production
+  APP_ENV: production
+
+jobs:
+  build-android:
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: packages/filen-mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-08-14
+          components: rust-src
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          # using specific version due to https://github.com/bbqsrc/cargo-ndk/issues/181
+          tool: cargo-ndk@3.5.4
+
+      - name: Install dependencies
+        run: npm install --force --include=dev && npx -y patch-package --patch-dir ./patches
+
+      - name: Set up Expo credentials
+        run: echo "${{ secrets.EXPO_CREDENTIALS }}" | base64 --decode > credentials.json
+
+      - name: Prebuild
+        run: npm run prebuild:ci:android
+
+      - name: Build Android release APK & AAB
+        run: cd android && chmod +x ./gradlew && ./gradlew app:bundleRelease app:assembleRelease && cd ..
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f android/app/release.keystore
+          rm -f credentials.json
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk-${{ github.run_number }}
+          path: packages/filen-mobile/android/app/build/outputs/apk/release/*.apk
+          retention-days: 90
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-aab-${{ github.run_number }}
+          path: packages/filen-mobile/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 90
+
+      - name: Upload to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          packageName: io.filen.app
+          releaseFiles: packages/filen-mobile/android/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+
+      - name: Build summary
+        run: |
+          echo "## Android Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Built artifacts" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+            APK_SIZE=$(du -h "android/app/build/outputs/apk/release/app-release.apk" | cut -f1)
+            echo "- Release APK (${APK_SIZE})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
+            AAB_SIZE=$(du -h "android/app/build/outputs/bundle/release/app-release.aab" | cut -f1)
+            echo "- Release AAB (${AAB_SIZE})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts from the Actions tab above. Build #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
