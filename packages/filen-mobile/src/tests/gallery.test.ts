@@ -86,6 +86,14 @@ vi.mock("@/components/drivePreview/galleryItem", () => ({
 	default: () => null
 }))
 
+vi.mock("@/components/drivePreview/galleryVideoPlayers", () => ({
+	default: {
+		acquire: vi.fn(),
+		pauseAllExcept: vi.fn(),
+		releaseAll: vi.fn()
+	}
+}))
+
 vi.mock("@/stores/useDrivePreview.store", () => ({
 	default: vi.fn(() => ({}))
 }))
