@@ -5,6 +5,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
 import { cn } from "@filen/utils"
+import { hairlineBorderBottom } from "@/lib/hairline"
 
 export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]
@@ -132,8 +133,9 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 							<View
 								className={cn(
 									"bg-transparent flex-row items-center py-3 justify-between flex-1 gap-4",
-									index !== buttons.length - 1 && "border-b-hairline border-border"
+									index !== buttons.length - 1 && "border-separator"
 								)}
+								style={index !== buttons.length - 1 ? hairlineBorderBottom : undefined}
 							>
 								{subTitle ? (
 									<View className="flex-1 flex-col bg-transparent justify-center">

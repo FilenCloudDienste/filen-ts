@@ -16,6 +16,7 @@ import Menu from "@/features/chats/components/chat/message/menu"
 import { messageDisplayBody } from "@/lib/decryption"
 import Typing from "@/features/chats/components/chat/message/typing"
 import Attachments from "@/features/chats/components/chat/message/attachments"
+import { hairlineHeight } from "@/lib/hairline"
 
 function computeIsMessageOnlyLink(message: string | undefined): boolean {
 	if (!message) {
@@ -91,7 +92,10 @@ const Message = ({
 								{t("new")}
 							</Text>
 						</View>
-						<View className="flex-1 bg-red-500 h-hairline" />
+						<View
+								className="flex-1 bg-red-500"
+								style={hairlineHeight}
+							/>
 					</View>
 				)}
 			{chat.participants.length > 2 && info.item.inner.senderId !== stringifiedClient?.userId && (

@@ -19,6 +19,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
+import { hairlineBorderBottom } from "@/lib/hairline"
 
 const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()
@@ -110,7 +111,10 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 								group={participantsWithoutSelf.length}
 							/>
 						)}
-						<View className="flex-col border-b-hairline border-border w-full py-3 items-start gap-0.5 bg-transparent flex-1">
+						<View
+							className="flex-col border-separator w-full py-3 items-start gap-0.5 bg-transparent flex-1"
+							style={hairlineBorderBottom}
+						>
 							<View className="flex-1 flex-row items-center gap-2 bg-transparent">
 								{info.item.muted && (
 									<Ionicons
