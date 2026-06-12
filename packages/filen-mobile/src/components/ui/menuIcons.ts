@@ -60,6 +60,7 @@ export type Icons =
 	| "headerH"
 	| "checkmark"
 	| "queue"
+	| "block"
 
 export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentPropsWithoutRef<typeof SwiftUiImage>["systemName"] {
 	switch (name) {
@@ -92,7 +93,9 @@ export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentP
 		}
 
 		case "export": {
-			return fill ? "square.and.arrow.up.fill" : "square.and.arrow.up"
+			// NOT square.and.arrow.up — that is "share"; export and share appear in
+			// the same drive item menu and must be distinguishable.
+			return fill ? "arrow.up.doc.fill" : "arrow.up.doc"
 		}
 
 		case "archive": {
@@ -297,6 +300,10 @@ export function iconToSwiftUiIcon(name: Icons, fill?: boolean): React.ComponentP
 
 		case "queue": {
 			return fill ? "text.line.last.and.arrowtriangle.forward" : "text.line.last.and.arrowtriangle.forward"
+		}
+
+		case "block": {
+			return "nosign"
 		}
 	}
 }

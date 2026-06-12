@@ -225,7 +225,7 @@ export const Contact = ({
 				requiresOnline: true,
 				title: t("block"),
 				destructive: true,
-				icon: "delete",
+				icon: "block",
 				onPress: async () => {
 					const promptResponse = await run(async () => {
 						return await prompts.alert({
@@ -278,7 +278,7 @@ export const Contact = ({
 				id: "unblock",
 				requiresOnline: true,
 				title: t("unblock"),
-				icon: "select",
+				icon: "restore",
 				onPress: async () => {
 					const promptResponse = await run(async () => {
 						return await prompts.alert({

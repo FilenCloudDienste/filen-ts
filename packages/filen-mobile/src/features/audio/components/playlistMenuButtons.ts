@@ -43,7 +43,7 @@ export function buildSelectionMenuButtons({
 	buttons.push({
 		id: "bulkAddToQueue",
 		title: t("add_to_queue"),
-		icon: "plus",
+		icon: "queue",
 		onPress: async () => {
 			const playlistUuid = playlist.uuid
 			const queueWasEmpty = audio.getQueue().length === 0
