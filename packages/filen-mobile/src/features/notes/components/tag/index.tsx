@@ -138,7 +138,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 							<View
 								className={cn(
 									"gap-1 w-full h-auto bg-transparent flex-col flex-1 py-2.5",
-									isActive && Platform.OS === "ios" ? "" : "border-b border-border"
+									isActive && Platform.OS === "ios" ? "" : "border-b-hairline border-border"
 								)}
 							>
 								<View className="flex-1 flex-row gap-1.5 items-center w-full h-auto bg-transparent">

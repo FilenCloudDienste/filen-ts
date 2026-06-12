@@ -8,7 +8,7 @@ export type DetailRowProps = {
 
 export const DetailRow = ({ title, value }: DetailRowProps) => {
 	return (
-		<View className="bg-transparent border-b border-border pb-2 flex-row items-center justify-between gap-4">
+		<View className="bg-transparent border-b-hairline border-border pb-2 flex-row items-center justify-between gap-4">
 			<Text
 				className="text-muted-foreground shrink-0"
 				numberOfLines={1}

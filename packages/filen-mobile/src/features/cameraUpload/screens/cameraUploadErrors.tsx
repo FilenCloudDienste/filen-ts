@@ -42,7 +42,7 @@ const Err = ({ error }: { error: CameraUploadError }) => {
 
 	return (
 		<View className="flex-row items-center px-4 bg-transparent flex-1">
-			<View className="flex-row items-center py-3 border-b border-border flex-1 bg-transparent">
+			<View className="flex-row items-center py-3 border-b-hairline border-border flex-1 bg-transparent">
 				<Text>{errorMessage}</Text>
 			</View>
 		</View>

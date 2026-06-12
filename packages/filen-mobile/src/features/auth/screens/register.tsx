@@ -217,7 +217,7 @@ const Register = () => {
 								onChangeText={setEmail}
 							/>
 						</View>
-						<View className="h-px bg-border ml-12" />
+						<View className="h-hairline bg-border ml-12" />
 						<View className="flex-row items-center px-4 bg-transparent">
 							<Ionicons
 								name="lock-closed-outline"
@@ -238,7 +238,7 @@ const Register = () => {
 								onChangeText={setPassword}
 							/>
 						</View>
-						<View className="h-px bg-border ml-12" />
+						<View className="h-hairline bg-border ml-12" />
 						<View className="flex-row items-center px-4 bg-transparent">
 							<Ionicons
 								name="lock-closed-outline"

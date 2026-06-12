@@ -1,6 +1,25 @@
 @import "tailwindcss";
 @import "uniwind";
 
+/* One physical pixel (StyleSheet.hairlineWidth) — for list/row separators and
+   divider lines. Container outlines, chips and badges keep the 1 logical px
+   `border` utilities for visual weight. */
+@utility border-hairline {
+	border-width: hairlineWidth();
+}
+@utility border-b-hairline {
+	border-bottom-width: hairlineWidth();
+}
+@utility border-t-hairline {
+	border-top-width: hairlineWidth();
+}
+@utility h-hairline {
+	height: hairlineWidth();
+}
+@utility w-hairline {
+	width: hairlineWidth();
+}
+
 @layer theme {
 	:root {
 		@variant dark {

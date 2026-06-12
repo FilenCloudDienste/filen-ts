@@ -280,7 +280,7 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 					recyclingKey={`toolbar-audio-picture-${track.item.data.uuid}`}
 					className={isSelected ? "bg-background-secondary" : undefined}
 				/>
-				<View className="flex-col bg-transparent flex-1 border-b border-border py-2.5">
+				<View className="flex-col bg-transparent flex-1 border-b-hairline border-border py-2.5">
 					<Text
 						numberOfLines={1}
 						ellipsizeMode="middle"
@@ -304,7 +304,7 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 				</View>
 			</PressableScale>
 			{!areTracksSelected && (
-				<View className="self-stretch shrink-0 flex-row items-center bg-transparent border-b border-border pl-3">
+				<View className="self-stretch shrink-0 flex-row items-center bg-transparent border-b-hairline border-border pl-3">
 					<Menu
 						type="dropdown"
 						isAnchoredToRight={true}

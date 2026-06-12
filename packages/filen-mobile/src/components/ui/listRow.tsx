@@ -69,7 +69,7 @@ export function listRowInnerClassName(opts: { separator?: boolean; density?: Lis
 	return cn(
 		"flex-row items-center gap-4 bg-transparent flex-1",
 		DENSITY_PADDING[opts.density ?? "comfortable"],
-		opts.separator && "border-b border-border",
+		opts.separator && "border-b-hairline border-border",
 		opts.innerClassName
 	)
 }

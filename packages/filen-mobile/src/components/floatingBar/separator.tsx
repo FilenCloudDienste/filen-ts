@@ -4,7 +4,7 @@ import { AnimatedView } from "@/components/ui/animated"
 const Separator = () => {
 	return (
 		<AnimatedView
-			className="w-px self-stretch bg-border opacity-50"
+			className="w-hairline self-stretch bg-border opacity-50"
 			entering={FadeIn.duration(180)}
 			exiting={FadeOut.duration(120)}
 		/>

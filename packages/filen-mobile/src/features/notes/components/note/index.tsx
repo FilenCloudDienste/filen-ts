@@ -166,8 +166,8 @@ const NoteRow = ({
 								"flex-1 flex-row gap-4 w-full h-auto bg-transparent py-3",
 								nextNote?.type === "note" &&
 									Platform.select({
-										ios: isActive ? "" : "border-b border-border",
-										default: "border-b border-border"
+										ios: isActive ? "" : "border-b-hairline border-border",
+										default: "border-b-hairline border-border"
 									})
 							)}
 						>

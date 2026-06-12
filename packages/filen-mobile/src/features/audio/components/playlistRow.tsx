@@ -318,7 +318,7 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 						color={textForeground.color}
 					/>
 				</View>
-				<View className="flex-col bg-transparent flex-1 border-b border-border py-2.5">
+				<View className="flex-col bg-transparent flex-1 border-b-hairline border-border py-2.5">
 					<Text
 						numberOfLines={1}
 						ellipsizeMode="middle"

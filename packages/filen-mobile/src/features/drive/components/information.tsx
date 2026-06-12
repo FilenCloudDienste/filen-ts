@@ -207,7 +207,7 @@ export const Information = ({
 
 	return (
 		<View className="bg-transparent flex-col gap-2">
-			<View className="bg-transparent border-b border-border pb-2 flex-row items-center justify-between gap-4">
+			<View className="bg-transparent border-b-hairline border-border pb-2 flex-row items-center justify-between gap-4">
 				<Text className="text-lg text-muted-foreground font-bold">{t("information")}</Text>
 			</View>
 			{info.map(({ type, value, title }) => (
