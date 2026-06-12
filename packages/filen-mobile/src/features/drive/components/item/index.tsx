@@ -28,6 +28,38 @@ import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTar
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { useTranslation } from "react-i18next"
 
+function FavoritedIndicator() {
+	const textRed500 = useResolveClassNames("text-red-500")
+
+	return (
+		<View className="bg-transparent flex-row items-center justify-center absolute bottom-1 -right-2.5 z-10">
+			<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
+				<Ionicons
+					name="heart"
+					size={14}
+					color={textRed500.color}
+				/>
+			</View>
+		</View>
+	)
+}
+
+function OfflineIndicator() {
+	const textGreen500 = useResolveClassNames("text-green-500")
+
+	return (
+		<View className="bg-transparent flex-row items-center justify-center absolute bottom-1 -left-2.5 z-10">
+			<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
+				<Ionicons
+					name="download-outline"
+					size={14}
+					color={textGreen500.color}
+				/>
+			</View>
+		</View>
+	)
+}
+
 const Item = ({
 	info,
 	drivePath,
@@ -40,8 +72,6 @@ const Item = ({
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
-	const textGreen500 = useResolveClassNames("text-green-500")
-	const textRed500 = useResolveClassNames("text-red-500")
 	const isSelected = useDriveStore(
 		useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
 	)
@@ -228,30 +258,10 @@ const Item = ({
 						<View className="bg-transparent shrink-0 items-center flex-row">
 							{(info.item.type === "file" || info.item.type === "directory") &&
 								info.item.data.favorited &&
-								drivePath.type !== "favorites" && (
-									<View className="bg-transparent flex-row items-center justify-center absolute bottom-1 -right-2.5 z-10">
-										<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
-											<Ionicons
-												name="heart"
-												size={14}
-												color={textRed500.color}
-											/>
-										</View>
-									</View>
-								)}
+								drivePath.type !== "favorites" && <FavoritedIndicator />}
 							{drivePath.type !== "offline" &&
 								driveItemStoredOfflineQuery.status === "success" &&
-								driveItemStoredOfflineQuery.data && (
-									<View className="bg-transparent flex-row items-center justify-center absolute bottom-1 -left-2.5 z-10">
-										<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
-											<Ionicons
-												name="download-outline"
-												size={14}
-												color={textGreen500.color}
-											/>
-										</View>
-									</View>
-								)}
+								driveItemStoredOfflineQuery.data && <OfflineIndicator />}
 							<Thumbnail
 								item={info.item}
 								target={info.target}
