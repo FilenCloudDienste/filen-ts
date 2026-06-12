@@ -406,7 +406,7 @@ function buildComposedGesture(
 	const panGesture = Gesture.Pan()
 		.enabled(enabled)
 		.manualActivation(true)
-		.onTouchesDown(e => {
+		.onTouchesDown((e, stateManager) => {
 			"worklet"
 
 			if (e.numberOfTouches === 1) {
@@ -427,11 +427,17 @@ function buildComposedGesture(
 				return
 			}
 
-			// Two fingers down = a pinch is possible: lock the pager early so it
-			// cannot pan underneath the pinch. The pan sees the same touch stream,
-			// so this fires before any pinch recognition on both platforms (the
-			// pinch's own onBegin is useless here — on Android it fires for every
-			// single-finger touch, killing scrolling for the whole gallery).
+			// Two fingers down = a pinch is possible. ACTIVATE immediately:
+			// activation is synchronous on the UI thread and cancels the pager's
+			// native scroll right here — the runOnJS scroll-disable below loses
+			// that race, and a pinch with unequal finger speeds reads as a
+			// horizontal drag that scrolls/snaps the pager mid-pinch. While two
+			// pointers are down the pan writes nothing (see onUpdate), so the
+			// activation is purely a native-scroll blocker.
+			stateManager.activate()
+
+			// JS-side lock as the second line of defense (and for the pager
+			// re-align on release in the gallery).
 			if (sv.pinchPointersDown.value === 0) {
 				sv.pinchPointersDown.value = 1
 
@@ -456,6 +462,12 @@ function buildComposedGesture(
 			// UIKit failure arbitration, so staying undecided blocks them forever.
 			// The slop keeps the pan alive through finger-landing jitter so a
 			// pinch→single-finger handoff still works when fingers land together.
+			// Never fail once a pinch happened in this stream — the pan was
+			// deliberately activated as the pinch's native-scroll blocker.
+			if (sv.pinchPointersDown.value === 1) {
+				return
+			}
+
 			const touch = e.allTouches[0]
 
 			if (!touch) {
