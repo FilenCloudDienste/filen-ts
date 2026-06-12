@@ -233,7 +233,7 @@ const Item = ({
 										<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
 											<Ionicons
 												name="heart"
-												size={16}
+												size={14}
 												color={textRed500.color}
 											/>
 										</View>
@@ -246,7 +246,7 @@ const Item = ({
 										<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
 											<Ionicons
 												name="download-outline"
-												size={16}
+												size={14}
 												color={textGreen500.color}
 											/>
 										</View>
