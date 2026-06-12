@@ -86,7 +86,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 				menuButtons.push({
 					id: "bulkUnblock",
 					title: t("bulk_unblock", { count: selectedByType.blocked.length }),
-					icon: "select",
+					icon: "restore",
 					requiresOnline: true,
 					onPress: async () => {
 						await runBulk({
@@ -155,7 +155,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 				menuButtons.push({
 					id: "bulkBlockContacts",
 					title: t("bulk_block", { count: selectedByType.contacts.length }),
-					icon: "delete",
+					icon: "block",
 					destructive: true,
 					requiresOnline: true,
 					onPress: async () => {

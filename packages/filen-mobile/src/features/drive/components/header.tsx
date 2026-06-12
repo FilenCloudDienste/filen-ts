@@ -204,7 +204,7 @@ const Header = ({
 					{
 						id: "uploadFiles",
 						title: t("upload_files"),
-						icon: "upload",
+						icon: "doc",
 						requiresOnline: true,
 						onPress: upload.uploadFiles
 					},

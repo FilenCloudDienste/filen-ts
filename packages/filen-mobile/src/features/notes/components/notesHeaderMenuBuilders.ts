@@ -137,7 +137,7 @@ export function buildNotesHeaderRightItems({
 			menuButtons.push({
 				id: "import",
 				title: t("import_note"),
-				icon: "export",
+				icon: "import",
 				subButtons: NOTE_TYPE_OPTIONS.map(
 					({ type, typeString }) =>
 						({
