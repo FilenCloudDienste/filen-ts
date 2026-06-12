@@ -19,6 +19,7 @@ import * as ScreenOrientation from "expo-screen-orientation"
 import ListEmpty from "@/components/ui/listEmpty"
 import { type External } from "@/routes/drivePreview"
 import { FlashList, type FlashListRef } from "@shopify/flash-list"
+import galleryVideoPlayers from "@/components/drivePreview/galleryVideoPlayers"
 
 const DISMISS_POSITION_RATIO = 0.22
 const DISMISS_VELOCITY_THRESHOLD = 800
@@ -279,10 +280,17 @@ const Gallery = () => {
 			return
 		}
 
-		const itemCount = useDrivePreviewStore.getState().items.length
-		const index = Math.round(e.nativeEvent.contentOffset.x / pageWidth)
+		const storeItems = useDrivePreviewStore.getState().items
+		const index = Math.max(0, Math.min(Math.round(e.nativeEvent.contentOffset.x / pageWidth), Math.max(0, storeItems.length - 1)))
 
-		setAnchorIndex(Math.max(0, Math.min(index, Math.max(0, itemCount - 1))))
+		setAnchorIndex(index)
+
+		// Cached video players keep playing through page transitions (and through
+		// rotation remounts — that is their purpose); stop the ones the pager
+		// settled away from.
+		const settledItem = storeItems[index]
+
+		galleryVideoPlayers.pauseAllExcept(settledItem ? galleryItemKey(settledItem) : null)
 	}
 
 	const listRef = useRef<FlashListRef<GalleryItemTagged> | null>(null)
@@ -454,6 +462,8 @@ const Gallery = () => {
 	useEffect(() => {
 		return () => {
 			useDrivePreviewStore.getState().reset()
+
+			galleryVideoPlayers.releaseAll()
 
 			ScreenOrientation.unlockAsync().catch(console.error)
 		}
