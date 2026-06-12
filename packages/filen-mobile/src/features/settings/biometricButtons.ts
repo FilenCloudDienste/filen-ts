@@ -37,7 +37,10 @@ export async function enableBiometric({
 				title: t("biometric_disables_file_provider_title"),
 				message: t("biometric_disables_file_provider_message"),
 				okText: t("continue"),
-				cancelText: t("cancel")
+				cancelText: t("cancel"),
+				// Continuing disables the file provider — styled destructive like the
+				// symmetric file-provider-disables-biometric prompt.
+				destructive: true
 			})
 		})
 
