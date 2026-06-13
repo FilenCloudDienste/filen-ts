@@ -234,6 +234,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 			transparent={Platform.OS === "ios"}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
+			shadowVisible={false}
 			searchBarOptions={{
 				placement: "integratedButton",
 				placeholder: t("search_chats"),

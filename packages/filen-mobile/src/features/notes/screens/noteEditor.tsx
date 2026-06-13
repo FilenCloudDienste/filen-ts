@@ -62,6 +62,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 						: noteDisplayTitle(note)
 			}
 			backVisible={true}
+			shadowVisible={false}
 			transparent={Platform.OS === "ios"}
 			leftItems={Platform.select({
 				ios: [

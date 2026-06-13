@@ -354,6 +354,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 				ios: undefined,
 				default: bgBackgroundSecondary.backgroundColor as string
 			})}
+			shadowVisible={false}
 			rightItems={headerRightItems}
 			searchBarOptions={{
 				placement: "integratedButton",

@@ -33,6 +33,7 @@ function More() {
 		<Fragment>
 			<Header
 				title={t("more")}
+				shadowVisible={false}
 				transparent={Platform.OS === "ios"}
 			/>
 			<SafeAreaView edges={["left", "right"]}>

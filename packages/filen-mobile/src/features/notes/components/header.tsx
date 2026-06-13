@@ -182,6 +182,7 @@ export const Header = ({
 			title={title}
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
+			shadowVisible={false}
 			searchBarOptions={{
 				placement: "integratedButton",
 				placeholder: viewMode === "notes" ? t("search_notes") : t("search_tags"),
