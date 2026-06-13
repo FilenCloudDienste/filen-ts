@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
-import { router } from "expo-router"
+import { router, useNavigation } from "expo-router"
 import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType } from "@/lib/previewType"
 import { useWindowDimensions, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
@@ -107,8 +107,10 @@ export function galleryItemKey(item: GalleryItemTagged): string {
  *
  * On a committed dismiss we own the exit animation ourselves (velocity-matched
  * springs that carry the finger's momentum offscreen) and only then call
- * router.back(): the navigator's stock pop animation runs on an already
- * invisible screen, so the two animation systems never visibly overlap.
+ * router.back() with the navigator's pop animation disabled: the screen is
+ * already invisible at that point, so animating its removal would only keep
+ * an untouchable transparent overlay over the app for the transition's
+ * duration (500ms on iOS).
  */
 function buildDismissGesture(
 	sv: DismissSharedValues,
@@ -247,6 +249,7 @@ function navigateBack({ didNavigateBack, isDismissing }: { didNavigateBack: Shar
 
 const Gallery = () => {
 	const { t } = useTranslation()
+	const navigation = useNavigation()
 	const dimensions = useWindowDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
 	const headerOpacity = useSharedValue<number>(1)
@@ -337,6 +340,34 @@ const Gallery = () => {
 		navigateBack({
 			didNavigateBack,
 			isDismissing
+		})
+	}
+
+	// Both gesture dismissals (the swipe-down exit flight and the pinch fade)
+	// end with the content offscreen/invisible and the backdrop at zero
+	// opacity, so the navigator's stock pop would animate an invisible screen
+	// that keeps swallowing touches until it unmounts. Disable the pop
+	// animation for these paths only — the override is stored per route
+	// instance and cleared on unmount, so the next push still slides in from
+	// the bottom. The header close button keeps the animated pop because its
+	// content is still fully visible. The options live on the PARENT screen:
+	// drivePreview is a nested stack, and the root stack's "drivePreview"
+	// screen is what gets popped.
+	const goBackFromGestureDismiss = () => {
+		navigation.getParent()?.setOptions({
+			animation: "none"
+		})
+
+		// The override has to reach the native screen in its own commit: when
+		// the setOptions render is batched together with the pop's removal,
+		// Fabric emits no prop update for a subtree deleted in that same
+		// commit, so the native screen still pops with the old animation. One
+		// frame is enough to flush the prop before dispatching the pop.
+		requestAnimationFrame(() => {
+			navigateBack({
+				didNavigateBack,
+				isDismissing
+			})
 		})
 	}
 
@@ -469,7 +500,7 @@ const Gallery = () => {
 			isDismissing
 		},
 		dimensions.height,
-		goBack,
+		goBackFromGestureDismiss,
 		onDismissGestureStart,
 		onDismissGestureEnd
 	).enabled(isImage || isVideo || isAudio || items.length === 0 || (isExternal && (isImage || isVideo || isAudio)))
@@ -520,7 +551,7 @@ const Gallery = () => {
 								<GalleryItem
 									info={info}
 									galleryZoomScale={zoomScale}
-									goBack={goBack}
+									goBack={goBackFromGestureDismiss}
 									onZoomChange={onZoomChange}
 									onSingleTap={onSingleTap}
 									onPinchActiveChange={onPinchActiveChange}
