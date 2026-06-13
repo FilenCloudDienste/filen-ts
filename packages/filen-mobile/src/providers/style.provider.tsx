@@ -1,19 +1,11 @@
 import "@/global.css"
 
-import { useEffect } from "react"
-import * as NavigationBar from "expo-navigation-bar"
-import { Platform } from "react-native"
+import { SystemBars } from "react-native-edge-to-edge"
 import { ThemeProvider, DefaultTheme } from "expo-router/react-navigation"
 import { useUniwind } from "uniwind"
 
 const StyleProvider = ({ children }: { children: React.ReactNode }) => {
 	const { theme } = useUniwind()
-
-	useEffect(() => {
-		if (Platform.OS === "android") {
-			NavigationBar.setStyle(theme === "dark" ? "dark" : "light")
-		}
-	}, [theme])
 
 	return (
 		<ThemeProvider
@@ -26,6 +18,7 @@ const StyleProvider = ({ children }: { children: React.ReactNode }) => {
 				}
 			}}
 		>
+			<SystemBars style={theme === "dark" ? "light" : "dark"} />
 			{children}
 		</ThemeProvider>
 	)
