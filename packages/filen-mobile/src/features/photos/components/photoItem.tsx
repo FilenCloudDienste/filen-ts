@@ -153,7 +153,7 @@ export const Photo = ({
 							target={info.target}
 							contentFit="cover"
 							size={{
-								icon: size - 2,
+								icon: size / 2,
 								thumbnail: size - 2
 							}}
 						/>
