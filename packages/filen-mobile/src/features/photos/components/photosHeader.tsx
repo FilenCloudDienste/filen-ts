@@ -166,6 +166,7 @@ export const Header = ({ items, drivePath }: { items: DriveItemFileExtracted[]; 
 			transparent={Platform.OS === "ios"}
 			leftItems={leftItems}
 			rightItems={rightItems}
+			shadowVisible={false}
 		/>
 	)
 }

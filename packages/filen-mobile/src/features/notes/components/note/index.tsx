@@ -147,7 +147,7 @@ const NoteRow = ({
 				>
 					<View
 						className={cn(
-							"w-full h-auto flex-row px-4 shadow-sm",
+							"w-full h-auto flex-row px-4",
 							roundedCn,
 							isActive
 								? Platform.select({

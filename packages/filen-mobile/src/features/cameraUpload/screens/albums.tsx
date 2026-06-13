@@ -93,6 +93,7 @@ const Albums = () => {
 		<Fragment>
 			<Header
 				title={t("albums")}
+				shadowVisible={false}
 				transparent={Platform.OS === "ios"}
 				backgroundColor={Platform.select({
 					ios: undefined,

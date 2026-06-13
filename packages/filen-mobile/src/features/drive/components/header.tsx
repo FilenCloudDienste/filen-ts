@@ -433,7 +433,7 @@ const Header = ({
 			title={headerTitle}
 			transparent={Platform.OS === "ios"}
 			backVisible={leftItems.length === 0 && selectedDriveItems.length === 0}
-			shadowVisible={Platform.OS === "ios" ? false : undefined}
+			shadowVisible={false}
 			backgroundColor={
 				drivePath.type !== "drive" || drivePath.selectOptions
 					? Platform.select({
