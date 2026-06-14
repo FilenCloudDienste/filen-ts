@@ -23,9 +23,9 @@ export const media = {
 	// favorite_selected, unfavorite_selected, download_selected, make_available_offline_selected
 	// and trash_selected live in common.ts.
 	/** Photos tab bulk action — save all selected photos/videos to the device media library */
-	save_to_device_photos_selected: "Save to device photos",
+	save_to_device_photos_selected: "Save to photos",
 	/** Photos tab bulk confirm dialog — body text for the "trash selected" confirmation */
-	are_you_sure_trash_selected_photos: "Are you sure you want to trash the selected items?",
+	are_you_sure_trash_selected_photos: "Are you sure you want to trash the selected items? You can restore them later.",
 
 	// ── Camera upload settings ─────────────────────────────────────────────────
 	/** Camera upload settings screen — header title */
@@ -55,11 +55,11 @@ export const media = {
 	/** Camera upload settings — row title for the allow-cellular toggle */
 	cellular: "Cellular",
 	/** Camera upload settings — subtitle under the cellular toggle */
-	cellular_description: "Allow uploads over mobile data.",
+	cellular_description: "Allow uploads over mobile data. This can use a lot of data.",
 	/** Camera upload settings — row title for the background-sync toggle */
 	background: "Background",
 	/** Camera upload settings — subtitle under the background toggle */
-	background_description: "Continue syncing when the app is in the background.",
+	background_description: "Continue syncing when the app is in the background. Only photos are uploaded in the background.",
 	/** Camera upload settings — row title for the pause-on-low-battery toggle */
 	low_battery: "Low battery",
 	/** Camera upload settings — subtitle under the low-battery toggle */
@@ -67,7 +67,7 @@ export const media = {
 	/** Camera upload settings — row title for the compress-before-upload toggle */
 	compress: "Compress",
 	/** Camera upload settings — subtitle under the compress toggle */
-	compress_description: "Compress photos before uploading to save storage.",
+	compress_description: "Compress photos before uploading to save storage. This slightly reduces photo quality.",
 	/** Camera upload settings — row title for the only-upload-after-activation toggle */
 	after_activation: "After activation",
 	/** Camera upload settings — subtitle under the after-activation toggle */

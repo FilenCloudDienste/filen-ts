@@ -14,7 +14,7 @@ export const auth = {
 	/** Login screen — link below the form that starts the password-reset flow */
 	forgot_password: "Forgot password?",
 	/** Login screen — split sentence inviting sign-up; <link> wraps the tappable "Create one" that opens registration */
-	dont_have_an_account: "Don't have an account? <link>Create one</link>",
+	dont_have_an_account: "Don't have an account? <link>Sign up</link>",
 	// two_factor_authentication lives in security.ts.
 	/** Two-factor prompt — dialog message asking for the 2FA code or a recovery key */
 	enter_two_factor_code_or_recovery_key: "Enter your two-factor code or recovery key",
@@ -29,7 +29,7 @@ export const auth = {
 	/** Toast shown after a password-reset email has been requested successfully */
 	password_reset_email_sent: "If an account exists for that address, a password reset email has been sent.",
 	/** Registration screen — header title */
-	register: "Register",
+	register: "Sign up",
 	/** Registration screen — large greeting headline shown above the form */
 	create_account_welcome: "Create your account",
 	/** Registration screen — subtitle under the greeting describing the sign-up */
