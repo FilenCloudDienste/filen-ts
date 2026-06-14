@@ -101,6 +101,25 @@ export function sanitizePathSegment(s: string): string {
 	return s.replace(/\//g, "_")
 }
 
+// Compute the server folder name for a camera-upload album. The folder is simply the
+// album's TITLE (trimmed) — same-titled albums deliberately share one folder, matching
+// the legacy app so users migrating from it reuse their existing folders instead of
+// re-uploading into newly-named subfolders. Only "/" is sanitized (it would otherwise
+// split the segment and trip the slashCount check in ensureParentDirectoryExists); the
+// title is otherwise kept verbatim, casing included, so the created folder round-trips
+// byte-for-byte with the remote listing's dedup key. Returns null when the title is
+// empty after trimming — such an album can't form a valid folder segment and the caller
+// must skip it.
+export function albumFolderTitle(title: string): string | null {
+	const trimmed = title.trim()
+
+	if (trimmed.length === 0) {
+		return null
+	}
+
+	return sanitizePathSegment(trimmed)
+}
+
 // Derive the dedup tree-key for a camera-upload asset path so that listLocal and
 // listRemote resolve the SAME asset to the SAME key — even when compression
 // rewrites the extension on upload.

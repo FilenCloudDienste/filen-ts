@@ -1209,7 +1209,7 @@ describe("listLocal filtering", () => {
 
 // ─── Same-title album disambiguation ────────────────────────────────────────
 
-describe("same-title album disambiguation", () => {
+describe("same-title album naming (merge scheme)", () => {
 	type AlbumSpec = {
 		id: string
 		title: string
@@ -1254,7 +1254,7 @@ describe("same-title album disambiguation", () => {
 		return createDir
 	}
 
-	it("two albums with identical titles each map to a distinct remote folder", async () => {
+	it("two albums with identical titles MERGE into one shared remote folder (no id suffix)", async () => {
 		const createDir = installCreateDirSpy()
 
 		vi.mocked(secureStore.get).mockResolvedValue({
@@ -1277,15 +1277,16 @@ describe("same-title album disambiguation", () => {
 
 		await cameraUpload.sync()
 
+		// Both albums' (distinctly-named) assets land in the single "Screenshots" folder,
+		// matching the legacy app — no "(album-id)" suffix, one unique folder name.
 		expect(transfers.upload).toHaveBeenCalledTimes(2)
 
 		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
 
-		expect(createDir.mock.calls.length).toBe(2)
-		expect(createdDirNames.size).toBe(2)
+		expect(createdDirNames).toEqual(new Set(["Screenshots"]))
 	})
 
-	it("alphabetically-earliest album.id keeps the bare title; later siblings get an album-id suffix", async () => {
+	it("the album id is never part of the folder name (no id-based disambiguation)", async () => {
 		const createDir = installCreateDirSpy()
 
 		vi.mocked(secureStore.get).mockResolvedValue({
@@ -1308,10 +1309,12 @@ describe("same-title album disambiguation", () => {
 
 		await cameraUpload.sync()
 
-		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
+		for (const call of createDir.mock.calls) {
+			const name = call[1] as string
 
-		expect(createdDirNames.has("Screenshots")).toBe(true)
-		expect(createdDirNames.has("Screenshots (album-b)")).toBe(true)
+			expect(name).toBe("Screenshots")
+			expect(name).not.toMatch(/album-[ab]/)
+		}
 	})
 
 	it("single selected album with no same-title sibling keeps the bare folder name (preserves cross-device merging)", async () => {
@@ -1337,7 +1340,7 @@ describe("same-title album disambiguation", () => {
 		expect(createdDirNames).toEqual(["Screenshots"])
 	})
 
-	it("same filename across two same-title albums uploads both into distinct remote folders — no silent merge", async () => {
+	it("same filename across two merged same-title albums: one folder, per-file collision keeps both", async () => {
 		const createDir = installCreateDirSpy()
 
 		vi.mocked(secureStore.get).mockResolvedValue({
@@ -1360,14 +1363,17 @@ describe("same-title album disambiguation", () => {
 
 		await cameraUpload.sync()
 
+		// Albums merge into one "Vacation" folder; the two identically-named files are
+		// kept apart by the per-file collision suffix, so neither is lost (only 4+
+		// identical name+second files in one folder would exhaust the resolver — rare).
 		expect(transfers.upload).toHaveBeenCalledTimes(2)
 
 		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
 
-		expect(createdDirNames.size).toBe(2)
+		expect(createdDirNames).toEqual(new Set(["Vacation"]))
 	})
 
-	it("three albums sharing one title produce three distinct remote folders", async () => {
+	it("three albums sharing one title all merge into a single remote folder", async () => {
 		const createDir = installCreateDirSpy()
 
 		vi.mocked(secureStore.get).mockResolvedValue({
@@ -1395,16 +1401,14 @@ describe("same-title album disambiguation", () => {
 
 		await cameraUpload.sync()
 
+		expect(transfers.upload).toHaveBeenCalledTimes(3)
+
 		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
 
-		expect(createDir.mock.calls.length).toBe(3)
-		expect(createdDirNames.size).toBe(3)
-		expect(createdDirNames.has("Pictures")).toBe(true)
-		expect(createdDirNames.has("Pictures (album-b)")).toBe(true)
-		expect(createdDirNames.has("Pictures (album-c)")).toBe(true)
+		expect(createdDirNames).toEqual(new Set(["Pictures"]))
 	})
 
-	it("duplicate detection is case-insensitive; each album keeps its own title casing in its folder name", async () => {
+	it("titles differing only by case merge into one folder (case-insensitive remote)", async () => {
 		const createDir = installCreateDirSpy()
 
 		vi.mocked(secureStore.get).mockResolvedValue({
@@ -1427,16 +1431,14 @@ describe("same-title album disambiguation", () => {
 
 		await cameraUpload.sync()
 
+		// albumFolderTitle preserves casing, but the remote is case-insensitive (and the
+		// parent-dir cache is lowercased to match), so the two casings resolve to a single
+		// folder — both assets upload into it. (Same effective result as the legacy app.)
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+
 		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
 
-		// Two distinct calls, no cache-collision-induced extras.
-		expect(createDir.mock.calls.length).toBe(2)
-		expect(createdDirNames.size).toBe(2)
-		// album-a (lower id) wins bare slot, keeps its own casing.
-		expect(createdDirNames.has("Screenshots")).toBe(true)
-		// album-b is suffixed, and the suffixed name preserves its OWN title's casing,
-		// not the winner's title.
-		expect(createdDirNames.has("SCREENSHOTS (album-b)")).toBe(true)
+		expect(createdDirNames.size).toBe(1)
 	})
 
 	it("two albums with non-colliding titles never get suffixes (negative case)", async () => {
@@ -1468,12 +1470,13 @@ describe("same-title album disambiguation", () => {
 		expect(createdDirNames).toEqual(new Set(["Screenshots", "Vacation"]))
 	})
 
-	it("album.id containing iOS-style '/L0/NNN' suffix is sanitized before being interpolated", async () => {
+	it("an iOS-style album id containing '/' never leaks into the folder name", async () => {
 		const createDir = installCreateDirSpy()
 
 		// Real iOS PHCollection.localIdentifier values look like "<UUID>/L0/<NNN>".
-		// The "/" segments would otherwise blow past slashCount === 2 in
-		// ensureParentDirectoryExists and throw "Unexpected path structure".
+		// They used to be sanitized INTO the folder name as a disambiguation suffix;
+		// under the merge scheme the id is never part of the name at all, so same-title
+		// albums simply merge regardless of how exotic their ids are.
 		const iosAlbumA = "A1B2C3D4-1111-2222-3333-444455556666/L0/020"
 		const iosAlbumB = "Z9Y8X7W6-1111-2222-3333-444455556666/L0/020"
 
@@ -1497,14 +1500,13 @@ describe("same-title album disambiguation", () => {
 
 		await cameraUpload.sync()
 
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
+
 		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
 
-		expect(transfers.upload).toHaveBeenCalledTimes(2)
-		expect(createDir.mock.calls.length).toBe(2)
-		expect(createdDirNames.has("Screenshots")).toBe(true)
-		// Slashes in the id replaced by "_" so the suffix is a single path segment.
-		expect(createdDirNames.has(`Screenshots (${iosAlbumB.replace(/\//g, "_")})`)).toBe(true)
-		// Sanity: no created dir name contains "/" — that would break the path structure.
+		// Merged into one "Screenshots" folder; no id, and no "/" in any created name.
+		expect(createdDirNames).toEqual(new Set(["Screenshots"]))
+
 		for (const name of createdDirNames) {
 			expect(name).not.toMatch(/\//)
 		}
@@ -1614,12 +1616,9 @@ describe("same-title album disambiguation", () => {
 
 		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
 
+		// Both titles trim to "Screenshots" → one shared folder, no suffix.
 		expect(transfers.upload).toHaveBeenCalledTimes(2)
-		expect(createDir.mock.calls.length).toBe(2)
-		// album-a (alphabetically first, has padded title) wins the bare slot — but
-		// the bare slot itself is trimmed, so it ends up as "Screenshots", not " Screenshots ".
-		expect(createdDirNames.has("Screenshots")).toBe(true)
-		expect(createdDirNames.has("Screenshots (album-b)")).toBe(true)
+		expect(createdDirNames).toEqual(new Set(["Screenshots"]))
 	})
 
 	it("duplicate album ids in config are deduped (no double-iteration into the tree)", async () => {
@@ -1647,12 +1646,13 @@ describe("same-title album disambiguation", () => {
 		expect(createDir.mock.calls.map(call => call[1] as string)).toEqual(["Screenshots"])
 	})
 
-	it("an unselected device album with the same title still anchors the bare slot (cross-selection stability)", async () => {
+	it("unselected device albums never affect naming; selected same-title albums merge", async () => {
 		const createDir = installCreateDirSpy()
 
-		// User has 3 same-title albums on the device but only selected 2 of them.
-		// The third (unselected) one wins the bare slot anyway, so selecting/deselecting
-		// it later cannot shift the other two's folder names.
+		// album-a is on the device but NOT selected. Under the merge scheme the folder
+		// name depends only on the selected album's title — never the wider device
+		// catalogue — so album-a is irrelevant and the two selected albums just share
+		// the bare "Screenshots" folder.
 		vi.mocked(secureStore.get).mockResolvedValue({
 			...ENABLED_CONFIG,
 			albumIds: ["album-b", "album-c"]
@@ -1680,13 +1680,9 @@ describe("same-title album disambiguation", () => {
 
 		const createdDirNames = new Set(createDir.mock.calls.map(call => call[1] as string))
 
-		// Only the two selected albums upload — neither uses the bare "Screenshots"
-		// because album-a (unselected, alphabetically earliest) anchors that slot.
+		// Only the two selected albums upload, both into the bare "Screenshots" folder.
 		expect(transfers.upload).toHaveBeenCalledTimes(2)
-		expect(createDir.mock.calls.length).toBe(2)
-		expect(createdDirNames.has("Screenshots")).toBe(false)
-		expect(createdDirNames.has("Screenshots (album-b)")).toBe(true)
-		expect(createdDirNames.has("Screenshots (album-c)")).toBe(true)
+		expect(createdDirNames).toEqual(new Set(["Screenshots"]))
 	})
 
 	it("getAlbumsAsync failure aborts the sync loudly (no silent drop of selected albums)", async () => {

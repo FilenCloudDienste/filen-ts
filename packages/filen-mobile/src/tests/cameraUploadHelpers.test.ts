@@ -10,6 +10,7 @@ import {
 	modifyAssetPathOnCollision,
 	collisionNameSuffix,
 	sanitizePathSegment,
+	albumFolderTitle,
 	applyAfterActivationToggle,
 	dedupTreeKey,
 	stripFilenameExtension,
@@ -234,6 +235,84 @@ describe("sanitizePathSegment", () => {
 
 	it("replaces a trailing slash", () => {
 		expect(sanitizePathSegment("trailing/")).toBe("trailing_")
+	})
+})
+
+// ─── albumFolderTitle (merge scheme: folder = trimmed title; dups share a folder) ──
+
+describe("albumFolderTitle", () => {
+	it("returns a normal album title unchanged", () => {
+		expect(albumFolderTitle("Screenshots")).toBe("Screenshots")
+	})
+
+	it("preserves casing (no lowercasing) so the folder round-trips with the remote key", () => {
+		expect(albumFolderTitle("Camera Roll")).toBe("Camera Roll")
+	})
+
+	it("trims leading and trailing whitespace", () => {
+		expect(albumFolderTitle("  Vacation  ")).toBe("Vacation")
+	})
+
+	it("preserves inner whitespace", () => {
+		expect(albumFolderTitle("Family Trip 2024")).toBe("Family Trip 2024")
+	})
+
+	it("replaces forward slashes with underscores (path-segment safety)", () => {
+		expect(albumFolderTitle("Trips/2024")).toBe("Trips_2024")
+	})
+
+	it("never leaves a forward slash in the result", () => {
+		for (const title of ["a/b", "/leading", "trailing/", "a//b///c", " x/y "]) {
+			expect(albumFolderTitle(title)).not.toContain("/")
+		}
+	})
+
+	it("returns null for an empty title", () => {
+		expect(albumFolderTitle("")).toBeNull()
+	})
+
+	it("returns null for a whitespace-only title (caller must skip it)", () => {
+		expect(albumFolderTitle("   ")).toBeNull()
+	})
+
+	it("a slash-only title is non-empty after trim and sanitizes to underscores (not skipped)", () => {
+		expect(albumFolderTitle("/")).toBe("_")
+	})
+
+	it("preserves unicode / emoji titles verbatim", () => {
+		expect(albumFolderTitle("Sommer ☀️ 2024")).toBe("Sommer ☀️ 2024")
+	})
+
+	it("MERGE: two different albums with the same title resolve to the same folder", () => {
+		// The core of the merge scheme — the name depends only on the title, never the
+		// album id, so same-titled albums deliberately share one server folder.
+		expect(albumFolderTitle("Camera Roll")).toBe(albumFolderTitle("Camera Roll"))
+		expect(albumFolderTitle("Camera Roll")).toBe("Camera Roll")
+	})
+
+	it("MERGE: titles differing only by surrounding whitespace also share a folder", () => {
+		expect(albumFolderTitle(" Camera Roll ")).toBe(albumFolderTitle("Camera Roll"))
+	})
+
+	it("preserves case — does not lowercase the title (the remote handles case-insensitive merging)", () => {
+		expect(albumFolderTitle("Trip")).not.toBe(albumFolderTitle("trip"))
+	})
+
+	it("is deterministic for the same title", () => {
+		expect(albumFolderTitle("Screenshots")).toBe(albumFolderTitle("Screenshots"))
+	})
+
+	it("composes into a clean single-folder tree path", () => {
+		const folderTitle = albumFolderTitle("Camera Roll")
+
+		expect(folderTitle).not.toBeNull()
+
+		if (folderTitle !== null) {
+			const path = composeLocalTreePath({ folderTitle, filename: "IMG_0001.jpg" })
+
+			expect(path).toBe("/Camera Roll/IMG_0001.jpg")
+			expect(path.split("/").length - 1).toBe(2)
+		}
 	})
 })
 

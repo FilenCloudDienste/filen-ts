@@ -25,7 +25,7 @@ import i18n from "@/lib/i18n"
 import {
 	modifyAssetPathOnCollision,
 	collisionNameSuffix,
-	sanitizePathSegment,
+	albumFolderTitle,
 	dedupTreeKey,
 	stripFilenameExtension,
 	effectiveCreationTimestamp,
@@ -290,56 +290,20 @@ class CameraUpload {
 			}
 		}
 
-		// Enumerate ALL device albums up front for two reasons:
-		//   1. We get every (id, title) in one call instead of N getTitle() round trips.
-		//   2. The bare-title winner among same-titled albums is determined over the
-		//      whole device catalogue, not just the currently-selected subset — so
-		//      adding/removing an album from the selection does NOT shift another
-		//      selected album's folder name.
-		// A failure here aborts the whole sync (caller decides). This is intentional:
-		// if we can't enumerate albums we can't safely disambiguate, so we'd rather
-		// fail loudly than silently drop selected albums.
-		// Residual edge cases this approach still cannot stabilize, by design:
-		//   - A newly CREATED device album with the same title and a lower id steals
-		//     the bare slot (iOS uses random UUIDs, so this is possible on creation).
-		//   - Deleting the current bare-title winner from the device lets the next
-		//     album by id take the bare slot, causing a one-time re-upload + orphan.
-		// Truly stable disambiguation would require persisting (albumId -> folderName)
-		// in Config; this implementation does NOT do that.
-		const allDeviceAlbums: AlbumEntry[] = (await MediaLibraryLegacy.getAlbumsAsync({ includeSmartAlbums: true })).map(album => ({
-			id: album.id,
-			title: album.title
-		}))
-
-		// Resolve the bare-title winner per canonical title across ALL device albums.
-		// Canonical form: trimmed (so " Screenshots " and "Screenshots" don't double-create
-		// folders), lowercased (so cross-device casing differences don't split). Empty
-		// titles after trimming cannot safely participate in folder naming and are skipped.
-		const sortedAllDeviceAlbums = allDeviceAlbums.slice().sort((a, b) => fastLocaleCompare(a.id, b.id))
-		const bareTitleWinnerByKey = new Map<string, string>()
-
-		for (const album of sortedAllDeviceAlbums) {
-			const canonical = album.title.trim()
-
-			if (canonical.length === 0) {
-				continue
-			}
-
-			const key = canonical.toLowerCase()
-
-			if (!bareTitleWinnerByKey.has(key)) {
-				bareTitleWinnerByKey.set(key, album.id)
-			}
-		}
-
-		// Project selected ids onto the device catalogue. A selected id that no longer
-		// exists on the device (album deleted in Photos but still in our config) is
-		// silently skipped — the next sync naturally heals when the UI re-saves the
-		// updated selection.
+		// Resolve every device album's (id, title) in one call so selected ids map to
+		// their titles. includeSmartAlbums so a selected smart album resolves too. A
+		// failure here aborts the whole sync (caller decides): if we can't enumerate
+		// albums we can't name folders, so we fail loudly rather than silently drop
+		// selected albums. A selected id no longer on the device (album deleted in Photos
+		// but still in our config) is skipped below; the next sync heals when the UI
+		// re-saves the selection.
 		const deviceAlbumById = new Map<string, AlbumEntry>()
 
-		for (const album of allDeviceAlbums) {
-			deviceAlbumById.set(album.id, album)
+		for (const album of await MediaLibraryLegacy.getAlbumsAsync({ includeSmartAlbums: true })) {
+			deviceAlbumById.set(album.id, {
+				id: album.id,
+				title: album.title
+			})
 		}
 
 		const folderTitleByAlbumId = new Map<string, string>()
@@ -351,17 +315,16 @@ class CameraUpload {
 				continue
 			}
 
-			const canonical = deviceAlbum.title.trim()
+			// Folder = the album's (trimmed) title; same-titled albums deliberately share
+			// one folder (legacy-compatible — see albumFolderTitle). Empty-after-trim
+			// titles can't form a valid segment and are skipped.
+			const folderTitle = albumFolderTitle(deviceAlbum.title)
 
-			if (canonical.length === 0) {
+			if (folderTitle === null) {
 				console.warn(`[cameraUpload] Skipping selected album ${id}: title is empty after trim.`)
 
 				continue
 			}
-
-			const sanitizedTitle = sanitizePathSegment(canonical)
-			const winnerId = bareTitleWinnerByKey.get(canonical.toLowerCase())
-			const folderTitle = winnerId === id ? sanitizedTitle : `${sanitizedTitle} (${sanitizePathSegment(id)})`
 
 			folderTitleByAlbumId.set(id, folderTitle)
 		}
