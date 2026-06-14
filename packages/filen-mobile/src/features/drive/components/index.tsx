@@ -18,16 +18,35 @@ import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
-import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, getDriveEmptyStateDescriptionKey, filterDriveItemsBySearchQuery, mergeByUuid } from "@/features/drive/utils"
+import {
+	getDriveEmptyStateIcon,
+	getDriveEmptyStateTitleKey,
+	getDriveEmptyStateDescriptionKey,
+	filterDriveItemsBySearchQuery,
+	mergeByUuid
+} from "@/features/drive/utils"
 import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
 import { LazyWrapper } from "@/components/lazyWrapper"
+import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
+import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
+import Menu from "@/components/ui/menu"
+import { PressableScale } from "@/components/ui/pressables"
+import Text from "@/components/ui/text"
+import Ionicons from "@expo/vector-icons/Ionicons"
+import { useResolveClassNames } from "uniwind"
 
 const Drive = () => {
 	const drivePath = useDrivePath()
 	const { t } = useTranslation()
 	const { searchQuery, setSearchQuery, globalSearchResult, queryingGlobalSearch } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
+	const parent = getDriveParent(drivePath)
+	const upload = useDriveUpload({ parent, drivePath, t })
+	const primaryColor = useResolveClassNames("bg-primary").backgroundColor as string
+	const driveCreateButtons = canShowDriveCreateMenu({ drivePath, parent, selectionMode: false })
+		? buildDriveCreateMenuButtons({ t, parent, upload })
+		: []
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -153,6 +172,28 @@ const Drive = () => {
 									icon={getDriveEmptyStateIcon(drivePath.type)}
 									title={t(getDriveEmptyStateTitleKey(drivePath.type))}
 									description={t(getDriveEmptyStateDescriptionKey(drivePath.type))}
+									action={
+										driveCreateButtons.length > 0 ? (
+											<Menu
+												type="dropdown"
+												buttons={driveCreateButtons}
+											>
+												<PressableScale className="flex-row items-center gap-1.5 px-4 py-2">
+													<Ionicons
+														name="add"
+														size={20}
+														color={primaryColor}
+													/>
+													<Text
+														style={{ color: primaryColor }}
+														className="text-base font-medium"
+													>
+														{t("add")}
+													</Text>
+												</PressableScale>
+											</Menu>
+										) : undefined
+									}
 								/>
 							)
 						}}
