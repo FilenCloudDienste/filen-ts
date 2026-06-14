@@ -78,6 +78,10 @@ vi.mock("@/components/ui/listEmpty", () => ({
 	default: () => null
 }))
 
+vi.mock("@/components/ui/button", () => ({
+	default: () => null
+}))
+
 vi.mock("@/components/drivePreview/header", () => ({
 	default: () => null
 }))

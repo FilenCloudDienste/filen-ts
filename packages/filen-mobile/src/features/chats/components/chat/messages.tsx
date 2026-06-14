@@ -247,6 +247,7 @@ const Messages = ({ chat }: { chat: TChat }) => {
 							<ListEmpty
 								icon="chatbubble-outline"
 								title={t("no_messages")}
+								description={t("no_messages_description")}
 							/>
 						</View>
 					)}

@@ -40,6 +40,8 @@ export const common = {
 	next: "Next",
 	/** Generic button to proceed past a confirmation or informational prompt */
 	continue: "Continue",
+	/** Generic button to navigate back to the previous screen (e.g. from a dead-end empty state) */
+	go_back: "Go back",
 	/** Generic button to postpone / defer an action (e.g. a reminder) */
 	later: "Later",
 	/** Generic button to clear / dismiss an error or input */
@@ -207,5 +209,13 @@ export const common = {
 	/** Generic label for an item's participants (chat / note collaborators) */
 	participants: "Participants",
 	/** Mention placeholder addressing every participant in a conversation */
-	everyone: "Everyone"
+	everyone: "Everyone",
+
+	// ── Generic error / empty-state subtitles (ListEmpty) ─────────────────────
+	/** Generic error-state subtitle: prompts a connectivity check + retry (shown under "Couldn't load …" empty states) */
+	please_check_connection: "Please check your connection and try again.",
+	/** Generic empty-state title shown when a search/filter returns no matching items */
+	no_results: "No results",
+	/** Generic empty-state subtitle under no_results, hinting to adjust the search */
+	no_results_description: "Try a different search."
 } as const

@@ -281,6 +281,7 @@ const ChatParticipants = () => {
 		<ParticipantList
 			title={inSelectionMode ? t("selected", { count: selectedChatParticipants.length }) : t("chat_participants")}
 			emptyTitle={t("no_chat_participants")}
+			emptyDescription={t("no_chat_participants_description")}
 			participants={participants}
 			keyExtractor={participant => participant.userId.toString()}
 			toRowProps={toRowProps}

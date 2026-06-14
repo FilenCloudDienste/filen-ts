@@ -1,17 +1,12 @@
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
 import { NoteType } from "@filen/sdk-rs"
-import { run } from "@filen/utils"
-import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
-import { router, useLocalSearchParams } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import { useShallow } from "zustand/shallow"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
-import notesLib from "@/features/notes/notes"
 import { useSecureStore } from "@/lib/secureStore"
 import { useStringifiedClient } from "@/lib/auth"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
@@ -19,6 +14,7 @@ import { useTranslation } from "react-i18next"
 import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
 import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import { type NoteTag } from "@/types"
+import { createNoteFlow } from "@/features/notes/components/notesActions"
 
 export const Header = ({
 	setSearchQuery,
@@ -76,48 +72,7 @@ export const Header = ({
 	const viewMode = tag ? "notes" : notesViewMode
 
 	const createNote = async (type: NoteType) => {
-		const result = await run(async () => {
-			return await prompts.input({
-				title: t("create_note"),
-				message: t("enter_note_name"),
-				cancelText: t("cancel"),
-				okText: t("create")
-			})
-		})
-
-		if (!result.success) {
-			console.error(result.error)
-			alerts.error(result.error)
-
-			return
-		}
-
-		if (result.data.cancelled || result.data.type !== "string") {
-			return
-		}
-
-		const title = result.data.value.trim()
-
-		if (title.length === 0) {
-			return
-		}
-
-		const createResult = await runWithLoading(async () => {
-			return await notesLib.createWithOptionalTag({
-				title,
-				type,
-				tag: tag ?? undefined
-			})
-		})
-
-		if (!createResult.success) {
-			console.error(createResult.error)
-			alerts.error(createResult.error)
-
-			return
-		}
-
-		router.push(`/note/${createResult.data.uuid}`)
+		await createNoteFlow({ t, tag, type })
 	}
 
 	const headerRightItems = buildNotesHeaderRightItems({

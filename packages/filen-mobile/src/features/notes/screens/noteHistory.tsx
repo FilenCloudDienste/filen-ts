@@ -156,6 +156,7 @@ const NoteHistory = () => {
 				<ListEmpty
 					icon="alert-circle-outline"
 					title={t("note_history_error")}
+					description={t("please_check_connection")}
 					action={
 						<Button
 							onPress={() => {
@@ -173,6 +174,7 @@ const NoteHistory = () => {
 			<ListEmpty
 				icon="time-outline"
 				title={t("no_note_history")}
+				description={t("no_note_history_description")}
 			/>
 		)
 	}

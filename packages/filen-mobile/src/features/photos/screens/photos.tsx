@@ -167,6 +167,7 @@ const Photos = () => {
 									<ListEmpty
 										icon="images-outline"
 										title={t("no_photos")}
+										description={t("no_photos_description")}
 									/>
 								)}
 							/>

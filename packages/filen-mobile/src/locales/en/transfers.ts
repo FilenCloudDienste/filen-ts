@@ -50,5 +50,7 @@ export const transfers = {
 	background_transfers: "Background transfers",
 	/** Advanced settings (Android only) — subtitle under the background-transfers toggle, explaining the persistent notification trade-off */
 	background_transfers_description:
-		"Keep uploads and downloads running while the app is in the background. Shows a persistent notification while transfers are active."
+		"Keep uploads and downloads running while the app is in the background. Shows a persistent notification while transfers are active.",
+	/** Transfers — empty-state subtitle when there are no active or finished transfers */
+	no_transfers_description: "Your uploads and downloads will appear here."
 } as const

@@ -47,7 +47,8 @@ function Security() {
 				) : accountQuery.status === "error" ? (
 					<ListEmpty
 						icon="warning-outline"
-						title={t("error_generic")}
+						title={t("could_not_load_account")}
+						description={t("please_check_connection")}
 						action={<Button onPress={() => accountQuery.refetch()}>{t("try_again")}</Button>}
 					/>
 				) : (

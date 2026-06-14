@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useCallback, useRef } from "react"
+import { Fragment, useEffect, useCallback, useRef, useState } from "react"
 import { onlineManager } from "@tanstack/react-query"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import VirtualList from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import { Platform } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
@@ -27,8 +28,10 @@ import PlaylistRow from "@/features/audio/components/playlistRow"
 export function Playlists() {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const selectedPlaylists = usePlaylistsStore(useShallow(state => state.selectedPlaylists))
+	const [searchQuery, setSearchQuery] = useState<string>("")
 	const { selectOptions: selectOptionsSerialized } = useLocalSearchParams<{
 		selectOptions?: string
 	}>()
@@ -89,6 +92,68 @@ export function Playlists() {
 	const allPlaylists =
 		playlistsQuery.status === "success" ? [...playlistsQuery.data].sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
 
+	const searchActive = searchQuery.trim().length > 0
+
+	const visiblePlaylists = (() => {
+		if (!searchActive) {
+			return allPlaylists
+		}
+
+		const normalized = searchQuery.trim().toLowerCase()
+
+		return allPlaylists.filter(playlist => playlist.name.toLowerCase().includes(normalized))
+	})()
+
+	const allVisibleSelected =
+		visiblePlaylists.length > 0 &&
+		visiblePlaylists.every(playlist => selectedPlaylists.some(selected => selected.uuid === playlist.uuid))
+
+	const handleCreatePlaylist = async () => {
+		const promptResult = await run(async () => {
+			return await prompts.input({
+				title: t("new_playlist"),
+				message: t("enter_playlist_name"),
+				placeholder: t("playlist_name_placeholder"),
+				cancelText: t("cancel"),
+				okText: t("create")
+			})
+		})
+
+		if (!promptResult.success) {
+			console.error(promptResult.error)
+			alerts.error(promptResult.error)
+
+			return
+		}
+
+		if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+			return
+		}
+
+		const newName = promptResult.data.value.trim()
+
+		if (newName.length === 0) {
+			return
+		}
+
+		const result = await runWithLoading(async () => {
+			await audio.savePlaylist({
+				playlist: {
+					name: newName,
+					files: [],
+					uuid: randomUUID(),
+					updated: Date.now(),
+					created: Date.now()
+				}
+			})
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+		}
+	}
+
 	const headerLeftItems = ((): HeaderItem[] | undefined => {
 		if (selectedPlaylists.length > 0 && !selectOptions) {
 			return [
@@ -134,16 +199,16 @@ export function Playlists() {
 		if (selectedPlaylists.length > 0 && !selectOptions) {
 			menuButtons.push({
 				id: "selectAll",
-				title: selectedPlaylists.length === allPlaylists.length ? t("deselect_all") : t("select_all"),
+				title: allVisibleSelected ? t("deselect_all") : t("select_all"),
 				icon: "select",
 				onPress: () => {
-					if (selectedPlaylists.length === allPlaylists.length) {
+					if (allVisibleSelected) {
 						usePlaylistsStore.getState().clearSelectedPlaylists()
 
 						return
 					}
 
-					usePlaylistsStore.getState().selectAllPlaylists(allPlaylists)
+					usePlaylistsStore.getState().selectAllPlaylists(visiblePlaylists)
 				}
 			})
 
@@ -174,53 +239,7 @@ export function Playlists() {
 				icon: "plus",
 				title: t("create_playlist"),
 				requiresOnline: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.input({
-							title: t("new_playlist"),
-							message: t("enter_playlist_name"),
-							placeholder: t("playlist_name_placeholder"),
-							cancelText: t("cancel"),
-							okText: t("create")
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-						return
-					}
-
-					const newName = promptResult.data.value.trim()
-
-					if (newName.length === 0) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await audio.savePlaylist({
-							playlist: {
-								name: newName,
-								files: [],
-								uuid: randomUUID(),
-								updated: Date.now(),
-								created: Date.now()
-							}
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-				}
+				onPress: handleCreatePlaylist
 			})
 		}
 
@@ -259,6 +278,24 @@ export function Playlists() {
 				})}
 				leftItems={headerLeftItems}
 				rightItems={headerRightItems}
+				searchBarOptions={{
+					placement: "integratedButton",
+					placeholder: t("search_playlists"),
+					onChangeText: e => setSearchQuery(e.nativeEvent.text),
+					onCancelButtonPress: () => setSearchQuery(""),
+					onClose: () => setSearchQuery(""),
+					onOpen: () => setSearchQuery(""),
+					allowToolbarIntegration: false,
+					headerIconColor: textForeground.color,
+					textColor: textForeground.color,
+					barTintColor: "transparent",
+					tintColor: textForeground.color,
+					hintTextColor: textMutedForeground.color,
+					shouldShowHintSearchIcon: true,
+					hideNavigationBar: false,
+					hideWhenScrolling: false,
+					inputType: "text"
+				}}
 			/>
 			<SafeAreaView
 				className="bg-background-secondary"
@@ -266,7 +303,7 @@ export function Playlists() {
 			>
 				<VirtualList
 					className="flex-1 bg-background-secondary"
-					data={allPlaylists}
+					data={visiblePlaylists}
 					loading={playlistsQuery.status !== "success"}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
@@ -286,12 +323,22 @@ export function Playlists() {
 							alerts.error(result.error)
 						}
 					}}
-					emptyComponent={() => (
-						<ListEmpty
-							icon="musical-note-outline"
-							title={t("no_playlists")}
-						/>
-					)}
+					emptyComponent={() =>
+						searchActive ? (
+							<ListEmpty
+								icon="search-outline"
+								title={t("no_results")}
+								description={t("no_results_description")}
+							/>
+						) : (
+							<ListEmpty
+								icon="musical-note-outline"
+								title={t("no_playlists")}
+								description={t("no_playlists_description")}
+								action={<Button onPress={handleCreatePlaylist}>{t("create_playlist")}</Button>}
+							/>
+						)
+					}
 					renderItem={({ item: playlist }) => {
 						return (
 							<PlaylistRow

@@ -143,7 +143,7 @@ export const notes = {
 
 	// ── Note tags screen (add/remove tags to one or many notes) ───────────────
 	/** Tags screen — error-state message when the tags query fails after retries */
-	note_tags_error: "Could not load tags. Please try again.",
+	note_tags_error: "Couldn't load tags",
 	/** Tags screen — header title when tagging a single note */
 	note_tags: "Tags",
 	/** Tags screen — header title when tagging multiple selected notes */
@@ -163,7 +163,7 @@ export const notes = {
 	/** History screen — header title (a note's version history) */
 	note_history: "Note history",
 	/** History screen — error-state message when the history query fails after retries */
-	note_history_error: "Could not load history. Please try again.",
+	note_history_error: "Couldn't load history",
 	/** History screen — empty-state message when a note has no past versions */
 	no_note_history: "No history",
 	/** History row — fallback text when a version has no content preview */
@@ -192,5 +192,15 @@ export const notes = {
 	/** Confirmation dialog message before removing a single participant from a note */
 	remove_participant_confirmation_note: "Are you sure you want to remove this participant from the note?",
 	/** Confirmation dialog message before removing every selected participant from a note */
-	remove_selected_participants_confirmation_note: "Are you sure you want to remove the selected participants from the note?"
+	remove_selected_participants_confirmation_note: "Are you sure you want to remove the selected participants from the note?",
+
+	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
+	/** Notes list — empty-state subtitle when no notes exist yet */
+	no_notes_description: "Create a note to get started.",
+	/** Tags — empty-state subtitle when no tags exist yet */
+	no_tags_description: "Create tags to organize your notes.",
+	/** Note history — empty-state subtitle when the note has no past versions */
+	no_note_history_description: "Edits you make to this note will appear here.",
+	/** Note participants — empty-state subtitle when the note has no other participants */
+	no_note_participants_description: "Add people to collaborate on this note."
 } as const

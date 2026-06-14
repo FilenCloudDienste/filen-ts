@@ -3,10 +3,8 @@ import { useTranslation } from "react-i18next"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
 import { useResolveClassNames } from "uniwind"
-import alerts from "@/lib/alerts"
 import contacts from "@/features/contacts/contacts"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
+import { addContactFlow } from "@/features/contacts/contactsActions"
 import useContactsStore, { type ContactListItem } from "@/features/contacts/store/useContacts.store"
 import { runBulk } from "@/lib/bulkOps"
 import { queryClient } from "@/queries/client"
@@ -14,7 +12,6 @@ import { router, useNavigation } from "expo-router"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import events from "@/lib/events"
 import { useShallow } from "zustand/shallow"
-import { run } from "@filen/utils"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 
 export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
@@ -239,44 +236,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 				icon: "plus",
 				requiresOnline: true,
 				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.input({
-							title: t("add_contact"),
-							message: t("enter_contact_filen_email"),
-							cancelText: t("cancel"),
-							okText: t("add")
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-						return
-					}
-
-					const email = promptResult.data.value.trim()
-
-					if (email.length === 0) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await contacts.sendRequest({
-							email
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
+					await addContactFlow({ t })
 				}
 			})
 		}

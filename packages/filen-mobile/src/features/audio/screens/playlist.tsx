@@ -1,10 +1,11 @@
-import { Fragment, useCallback } from "react"
+import { Fragment, useCallback, useState } from "react"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
 import { Platform, ActivityIndicator } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router"
 import usePlaylistsQuery, { playlistsQueryGet } from "@/features/audio/queries/usePlaylists.query"
 import alerts from "@/lib/alerts"
@@ -15,13 +16,20 @@ import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.sto
 import { useShallow } from "zustand/shallow"
 import { useTranslation } from "react-i18next"
 import Track from "@/features/audio/components/track"
-import { buildSelectionMenuButtons, buildPlaylistMenuButtons } from "@/features/audio/components/playlistMenuButtons"
+import {
+	buildSelectionMenuButtons,
+	buildPlaylistMenuButtons,
+	addTracksToPlaylistFlow
+} from "@/features/audio/components/playlistMenuButtons"
+import { driveItemDisplayName } from "@/lib/decryption"
 
 export function Playlist() {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedTracks = usePlaylistTracksStore(useShallow(state => state.selectedTracks))
+	const [searchQuery, setSearchQuery] = useState<string>("")
 	const { uuid } = useLocalSearchParams<{
 		uuid?: string
 	}>()
@@ -88,6 +96,16 @@ export function Playlist() {
 						<ListEmpty
 							icon="warning-outline"
 							title={t("playlist_not_found")}
+							description={t("playlist_not_found_description")}
+							action={
+								<Button
+									onPress={() => {
+										router.back()
+									}}
+								>
+									{t("go_back")}
+								</Button>
+							}
 						/>
 					)}
 				</SafeAreaView>
@@ -97,12 +115,48 @@ export function Playlist() {
 
 	const tracksInSelectionMode = selectedTracks.length > 0
 
-	const baseRightMenuButtons = tracksInSelectionMode ? buildSelectionMenuButtons({ t, playlist, selectedTracks }) : []
+	const searchActive = searchQuery.trim().length > 0
+
+	const visibleTracks = (() => {
+		if (!searchActive) {
+			return playlist.files
+		}
+
+		const normalized = searchQuery.trim().toLowerCase()
+
+		return playlist.files.filter(track => driveItemDisplayName(track.item).toLowerCase().includes(normalized))
+	})()
+
+	const baseRightMenuButtons = tracksInSelectionMode ? buildSelectionMenuButtons({ t, playlist, selectedTracks, visibleTracks }) : []
+
+	const currentPlaylist = playlist
+
+	async function handleAddTracks() {
+		await addTracksToPlaylistFlow({ playlist: currentPlaylist })
+	}
 
 	return (
 		<Fragment>
 			<Header
 				title={tracksInSelectionMode ? t("selected", { count: selectedTracks.length }) : playlist.name}
+				searchBarOptions={{
+					placement: "integratedButton",
+					placeholder: t("search_tracks"),
+					onChangeText: e => setSearchQuery(e.nativeEvent.text),
+					onCancelButtonPress: () => setSearchQuery(""),
+					onClose: () => setSearchQuery(""),
+					onOpen: () => setSearchQuery(""),
+					allowToolbarIntegration: false,
+					headerIconColor: textForeground.color,
+					textColor: textForeground.color,
+					barTintColor: "transparent",
+					tintColor: textForeground.color,
+					hintTextColor: textMutedForeground.color,
+					shouldShowHintSearchIcon: true,
+					hideNavigationBar: false,
+					hideWhenScrolling: false,
+					inputType: "text"
+				}}
 				transparent={Platform.OS === "ios"}
 				shadowVisible={false}
 				backVisible={Platform.OS === "android"}
@@ -195,23 +249,34 @@ export function Playlist() {
 							return
 						}
 					}}
-					data={playlist.files}
+					data={visibleTracks}
 					contentInsetAdjustmentBehavior="automatic"
 					contentContainerStyle={{
 						paddingBottom: 300,
 						flexGrow: 1
 					}}
-					ListEmptyComponent={() => (
-						<ListEmpty
-							icon="musical-note-outline"
-							title={t("no_tracks")}
-						/>
-					)}
+					ListEmptyComponent={() =>
+						searchActive ? (
+							<ListEmpty
+								icon="search-outline"
+								title={t("no_results")}
+								description={t("no_results_description")}
+							/>
+						) : (
+							<ListEmpty
+								icon="musical-note-outline"
+								title={t("no_tracks")}
+								description={t("no_tracks_description")}
+								action={<Button onPress={handleAddTracks}>{t("add_tracks")}</Button>}
+							/>
+						)
+					}
 					renderItem={({ item: track }) => {
 						return (
 							<Track
 								track={track}
 								playlist={playlist}
+								reorderDisabled={searchActive}
 							/>
 						)
 					}}

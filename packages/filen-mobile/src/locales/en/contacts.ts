@@ -114,5 +114,13 @@ export const contacts = {
 	/** Empty-state label shown when the share extension returned an error while resolving shared files */
 	error_resolving_shares: "Could not resolve the shared files",
 	/** Empty-state label shown while waiting for the OS to finish resolving shared files */
-	no_resolved_shares: "Waiting for shared files…"
+	no_resolved_shares: "Waiting for shared files…",
+
+	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
+	/** Contacts — empty-state subtitle when no contacts exist yet */
+	no_contacts_description: "Add a contact to start sharing and chatting.",
+	/** Incoming share — error-state subtitle when the shared files could not be resolved */
+	error_resolving_shares_description: "Please go back and try sharing again.",
+	/** Incoming share — waiting-state subtitle while the OS resolves shared files */
+	no_resolved_shares_description: "This should only take a moment."
 } as const

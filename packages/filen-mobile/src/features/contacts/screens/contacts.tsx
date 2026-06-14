@@ -6,7 +6,9 @@ import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import alerts from "@/lib/alerts"
+import { addContactFlow } from "@/features/contacts/contactsActions"
 import useContactsStore, { type ContactListItemWithHeader } from "@/features/contacts/store/useContacts.store"
 import { useFocusEffect } from "expo-router"
 import events from "@/lib/events"
@@ -94,12 +96,26 @@ const Contacts = () => {
 		}
 	}
 
-	const emptyComponent = () => (
-		<ListEmpty
-			icon="people-outline"
-			title={t("no_contacts")}
-		/>
-	)
+	const emptyComponent = () => {
+		if (searchQuery.length > 0) {
+			return (
+				<ListEmpty
+					icon="search-outline"
+					title={t("no_results")}
+					description={t("no_results_description")}
+				/>
+			)
+		}
+
+		return (
+			<ListEmpty
+				icon="people-outline"
+				title={t("no_contacts")}
+				description={t("no_contacts_description")}
+				action={<Button onPress={() => void addContactFlow({ t })}>{t("add_contact")}</Button>}
+			/>
+		)
+	}
 
 	// When a search query becomes non-empty the visible list is filtered, so
 	// any already-selected contacts may no longer appear in the list. Keeping

@@ -25,6 +25,7 @@ import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 import { computeTagState } from "@/features/notes/utils"
+import { createTagFlow } from "@/features/notes/components/notesActions"
 
 const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
 	const { t } = useTranslation()
@@ -297,45 +298,8 @@ const NoteTags = () => {
 								size: 20
 							},
 							props: {
-								onPress: async () => {
-									const promptResult = await run(async () => {
-										return await prompts.input({
-											title: t("new_tag_name"),
-											message: t("enter_tag_name"),
-											cancelText: t("cancel"),
-											okText: t("add")
-										})
-									})
-
-									if (!promptResult.success) {
-										console.error(promptResult.error)
-										alerts.error(promptResult.error)
-
-										return
-									}
-
-									if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-										return
-									}
-
-									const newName = promptResult.data.value.trim()
-
-									if (newName.length === 0) {
-										return
-									}
-
-									const result = await runWithLoading(async () => {
-										await notes.createTag({
-											name: newName
-										})
-									})
-
-									if (!result.success) {
-										console.error(result.error)
-										alerts.error(result.error)
-
-										return
-									}
+								onPress: () => {
+									void createTagFlow({ t })
 								}
 							}
 						}
@@ -357,6 +321,7 @@ const NoteTags = () => {
 					<ListEmpty
 						icon="alert-circle-outline"
 						title={t("note_tags_error")}
+						description={t("please_check_connection")}
 						action={
 							<Button
 								onPress={() => {
@@ -371,6 +336,16 @@ const NoteTags = () => {
 					<ListEmpty
 						icon="pricetag-outline"
 						title={t("no_tags")}
+						description={t("no_tags_description")}
+						action={
+							<Button
+								onPress={() => {
+									void createTagFlow({ t })
+								}}
+							>
+								{t("create_tag")}
+							</Button>
+						}
 					/>
 				) : (
 					<GestureHandlerScrollView

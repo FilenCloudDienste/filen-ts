@@ -47,8 +47,10 @@ export const security = {
 		"This is the only time your recovery key will be shown. Copy it and store it somewhere safe — you will need it if you ever lose access to your authenticator app, and it cannot be retrieved again.",
 	/** Recovery-key screen — confirmation button the user must tap to acknowledge they saved the key before the screen closes */
 	two_factor_recovery_key_saved_confirm: "I have saved my recovery key",
-	/** Recovery-key screen — empty state shown if the key is no longer available (e.g. the screen was revisited) */
-	two_factor_recovery_key_unavailable: "Your recovery key is no longer available. It can only be viewed once, right after enabling two-factor authentication.",
+	/** Recovery-key screen — empty-state title shown if the key is no longer available (e.g. the screen was revisited) */
+	two_factor_recovery_key_unavailable: "Your recovery key is no longer available",
+	/** Recovery-key screen — empty-state subtitle explaining the key can only be viewed once */
+	two_factor_recovery_key_unavailable_description: "It can only be viewed once, right after you enable two-factor authentication.",
 	/** Toast shown after the 2FA TOTP secret has been copied to the clipboard */
 	secret_copied_to_clipboard: "Secret copied to clipboard",
 	/** Button label that copies the TOTP secret key to the clipboard */

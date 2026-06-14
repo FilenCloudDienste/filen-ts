@@ -137,6 +137,7 @@ const CameraUploadErrors = () => {
 						<ListEmpty
 							icon="checkmark-outline"
 							title={t("no_camera_upload_errors")}
+							description={t("no_camera_upload_errors_description")}
 						/>
 					)}
 					renderItem={({ item: error }) => {
