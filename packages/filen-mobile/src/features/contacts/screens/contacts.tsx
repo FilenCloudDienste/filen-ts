@@ -16,9 +16,11 @@ import Header from "@/features/contacts/components/contactsHeader"
 import Contact, { ContactSectionHeader } from "@/features/contacts/components/contactRow"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 import useContactSections from "@/features/contacts/hooks/useContactSections"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const Contacts = () => {
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const selectOptions = useSelectOptions()
 	const { items, contactsQuery, contactRequestsQuery } = useContactSections({
@@ -112,7 +114,14 @@ const Contacts = () => {
 				icon="people-outline"
 				title={t("no_contacts")}
 				description={t("no_contacts_description")}
-				action={<Button onPress={() => void addContactFlow({ t })}>{t("add_contact")}</Button>}
+				action={
+					<Button
+						onPress={() => void addContactFlow({ t })}
+						disabled={!isOnline}
+					>
+						{t("add_contact")}
+					</Button>
+				}
 			/>
 		)
 	}

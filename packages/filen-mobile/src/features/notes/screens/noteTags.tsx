@@ -26,6 +26,7 @@ import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 import { computeTagState } from "@/features/notes/utils"
 import { createTagFlow } from "@/features/notes/components/notesActions"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
 	const { t } = useTranslation()
@@ -216,6 +217,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 
 const NoteTags = () => {
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
 	const { notes: notesSerialized } = useLocalSearchParams<{
 		notes?: string
 	}>()
@@ -342,6 +344,7 @@ const NoteTags = () => {
 								onPress={() => {
 									void createTagFlow({ t })
 								}}
+								disabled={!isOnline}
 							>
 								{t("create_tag")}
 							</Button>

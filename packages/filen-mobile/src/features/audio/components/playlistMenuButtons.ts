@@ -13,7 +13,8 @@ import { type TFunction } from "i18next"
 
 /**
  * Shared "add tracks to playlist" flow: opens the drive item picker filtered to audio files,
- * deduplicates against the playlist's current items, then persists the additions.
+ * pre-excluding the playlist's current items from the selectable set, then persists the additions.
+ * Actual deduplication against existing playlist items is handled inside `audio.addFilesToPlaylist`.
  * Called from both the playlist header menu and the empty-state CTA.
  */
 export async function addTracksToPlaylistFlow({ playlist }: { playlist: PlaylistWithItems }): Promise<void> {
@@ -78,6 +79,10 @@ export function buildSelectionMenuButtons({
 		title: allVisibleSelected ? t("deselect_all") : t("select_all"),
 		icon: "select",
 		onPress: () => {
+			if (selectableTracks.length === 0) {
+				return
+			}
+
 			if (allVisibleSelected) {
 				usePlaylistTracksStore.getState().clearSelectedTracks()
 

@@ -22,9 +22,11 @@ import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
 import { filterNoteListItemsBySearchQuery, filterNoteTagsBySearchQuery } from "@/features/notes/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const Notes = () => {
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
 	const notesQuery = useNotesWithContentQuery()
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
 	const { tagUuid } = useLocalSearchParams<{
@@ -220,6 +222,7 @@ const Notes = () => {
 						onPress={() => {
 							void createNoteFlow({ t, tag })
 						}}
+						disabled={!isOnline}
 					>
 						{t("create_note")}
 					</Button>
@@ -249,6 +252,7 @@ const Notes = () => {
 						onPress={() => {
 							void createTagFlow({ t })
 						}}
+						disabled={!isOnline}
 					>
 						{t("create_tag")}
 					</Button>
