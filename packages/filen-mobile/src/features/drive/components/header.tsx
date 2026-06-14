@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
-import { AnyNormalDir } from "@filen/sdk-rs"
 import { run } from "@filen/utils"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
@@ -17,13 +16,13 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useStringifiedClient } from "@/lib/auth"
-import cache from "@/lib/cache"
 import offlineSync from "@/features/offline/offlineSync"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { aggregateDriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { resolveDriveHeaderTitle } from "@/features/drive/utils"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import { buildSortMenuButton, buildBulkActionMenu } from "@/features/drive/components/headerMenuBuilders"
+import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
 
 const Header = ({
 	setSearchQuery,
@@ -82,20 +81,7 @@ const Header = ({
 
 	const driveItems = driveItemsQuery.status === "success" ? driveItemsQuery.data : []
 
-	const parent: AnyNormalDir | null = (() => {
-		// If we're at the root of the drive and we have the root uuid in cache, we can return a AnyNormalDir for the root directory
-		if (drivePath.type === "drive" && drivePath.uuid === null && cache.rootUuid) {
-			return new AnyNormalDir.Root({
-				uuid: cache.rootUuid
-			})
-		}
-
-		// We can check if the parent uuid of the current drive path is in the anyNormalDir cache
-		// If it is, it's a directory that belongs to the user (not shared in)
-		const fromCache = cache.directoryUuidToAnyNormalDir.get(drivePath.uuid ?? "")
-
-		return fromCache ?? null
-	})()
+	const parent = getDriveParent(drivePath)
 
 	const upload = useDriveUpload({ parent, drivePath, t })
 
@@ -140,104 +126,8 @@ const Header = ({
 			}
 		}
 
-		if (
-			parent &&
-			(drivePath.type === "drive" ||
-				drivePath.type === "links" ||
-				drivePath.type === "favorites" ||
-				(drivePath.type === "sharedOut" && drivePath.uuid)) &&
-			!drivePath.selectOptions &&
-			!selectionMode
-		) {
-			menuButtons.push({
-				id: "createFolder",
-				title: t("create_folder"),
-				icon: "plus",
-				requiresOnline: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.input({
-							title: t("create_folder"),
-							message: t("enter_folder_name"),
-							cancelText: t("cancel"),
-							okText: t("create"),
-							placeholder: t("folder_name")
-						})
-					})
-
-					if (!promptResult.success) {
-						console.error(promptResult.error)
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-						return
-					}
-
-					const folderName = promptResult.data.value.trim()
-
-					if (folderName.length === 0) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await drive.createDirectory({
-							name: folderName,
-							parent
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-					}
-				}
-			})
-
-			menuButtons.push({
-				id: "upload",
-				title: t("upload"),
-				icon: "upload",
-				subButtons: [
-					{
-						id: "uploadFiles",
-						title: t("upload_files"),
-						icon: "doc",
-						requiresOnline: true,
-						onPress: upload.uploadFiles
-					},
-					{
-						id: "uploadPhotosOrVideos",
-						requiresOnline: true,
-						title: t("upload_photos_or_videos"),
-						icon: "image",
-						onPress: upload.uploadPhotosOrVideos
-					},
-					{
-						id: "takePhotoOrVideo",
-						title: t("take_photo_or_video"),
-						icon: "camera",
-						requiresOnline: true,
-						onPress: upload.takePhotoOrVideo
-					},
-					{
-						id: "scanDocument",
-						requiresOnline: true,
-						title: t("scan_document"),
-						icon: "scan",
-						onPress: upload.scanDocument
-					},
-					{
-						id: "createTextFile",
-						title: t("create_text_file"),
-						icon: "text",
-						requiresOnline: true,
-						onPress: upload.createTextFile
-					}
-				]
-			})
+		if (canShowDriveCreateMenu({ drivePath, parent, selectionMode })) {
+			menuButtons.push(...buildDriveCreateMenuButtons({ t, parent, upload }))
 		}
 
 		if (!selectionMode) {
