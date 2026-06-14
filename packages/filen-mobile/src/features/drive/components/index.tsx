@@ -21,6 +21,7 @@ import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, filterDriveItemsBySearchQuery, mergeByUuid } from "@/features/drive/utils"
 import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
+import { LazyWrapper } from "@/components/lazyWrapper"
 
 const Drive = () => {
 	const drivePath = useDrivePath()
@@ -70,80 +71,81 @@ const Drive = () => {
 				)}
 				edges={["left", "right"]}
 			>
-				<VirtualList
-					className={cn(
-						"flex-1",
-						drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
-					)}
-					contentInsetAdjustmentBehavior="automatic"
-					contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-					keyExtractor={(item: DriveItem) => {
-						return item.data.uuid
-					}}
-					data={items}
-					// Offline VIRTUAL ROOT only (nested offline dirs have a uuid): surfaces
-					// the last sync pass's error count as a pressable row above the listing.
-					// The row hides itself while there are no errors.
-					headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
-					renderItem={(info: ListRenderItemInfo<DriveItem>) => {
-						return (
-							<Item
-								info={info}
-								drivePath={drivePath}
-								getListItems={() => items}
-							/>
-						)
-					}}
-					onRefresh={async () => {
-						// The offline cache listing reads purely from local storage
-						// (the query is networkMode: "always"), so pull-to-refresh must
-						// work while offline. Every other variant hits the network.
-						if (!onlineManager.isOnline() && drivePath.type !== "offline") {
-							return
-						}
-
-						// Manual offline-cache sync on pull-to-refresh — fire-and-forget
-						// so the gesture resolves with the local listing refetch;
-						// offlineSync gates connectivity/Wi-Fi-only internally.
-						if (drivePath.type === "offline") {
-							offlineSync.sync({ manual: true }).catch(console.error)
-						}
-
-						const result = await run(async () => {
-							return await driveItemsQuery.refetch()
-						})
-
-						if (!result.success) {
-							console.error(result.error)
-							alerts.error(result.error)
-						}
-					}}
-					loading={driveItemsQuery.status === "pending"}
-					emptyComponent={() => {
-						// #26 — distinguish a query error with no retained data (show
-						// error + retry) from a genuinely empty directory (existing empty
-						// state). When data was retained through the error, items.length
-						// will be > 0 and this component is not rendered at all.
-						if (driveItemsQuery.status === "error") {
+				{/*  disabled={!(drivePath.type === "drive" && !drivePath.uuid && !drivePath.selectOptions && !drivePath.linked)} */}
+				<LazyWrapper>
+					<VirtualList
+						className={cn(
+							"flex-1",
+							drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
+						)}
+						contentInsetAdjustmentBehavior="automatic"
+						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+						keyExtractor={(item: DriveItem) => {
+							return item.data.uuid
+						}}
+						data={items}
+						// Offline VIRTUAL ROOT only (nested offline dirs have a uuid): surfaces
+						// the last sync pass's error count as a pressable row above the listing.
+						// The row hides itself while there are no errors.
+						headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
+						renderItem={(info: ListRenderItemInfo<DriveItem>) => {
 							return (
-								<ListEmpty
-									icon="alert-circle-outline"
-									title={t("error_generic")}
-									action={
-										<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>
-									}
+								<Item
+									info={info}
+									drivePath={drivePath}
+									getListItems={() => items}
 								/>
 							)
-						}
+						}}
+						onRefresh={async () => {
+							// The offline cache listing reads purely from local storage
+							// (the query is networkMode: "always"), so pull-to-refresh must
+							// work while offline. Every other variant hits the network.
+							if (!onlineManager.isOnline() && drivePath.type !== "offline") {
+								return
+							}
 
-						return (
-							<ListEmpty
-								icon={getDriveEmptyStateIcon(drivePath.type)}
-								title={t(getDriveEmptyStateTitleKey(drivePath.type))}
-							/>
-						)
-					}}
-				/>
+							// Manual offline-cache sync on pull-to-refresh — fire-and-forget
+							// so the gesture resolves with the local listing refetch;
+							// offlineSync gates connectivity/Wi-Fi-only internally.
+							if (drivePath.type === "offline") {
+								offlineSync.sync({ manual: true }).catch(console.error)
+							}
+
+							const result = await run(async () => {
+								return await driveItemsQuery.refetch()
+							})
+
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
+							}
+						}}
+						loading={driveItemsQuery.status === "pending"}
+						emptyComponent={() => {
+							// #26 — distinguish a query error with no retained data (show
+							// error + retry) from a genuinely empty directory (existing empty
+							// state). When data was retained through the error, items.length
+							// will be > 0 and this component is not rendered at all.
+							if (driveItemsQuery.status === "error") {
+								return (
+									<ListEmpty
+										icon="alert-circle-outline"
+										title={t("error_generic")}
+										action={<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>}
+									/>
+								)
+							}
+
+							return (
+								<ListEmpty
+									icon={getDriveEmptyStateIcon(drivePath.type)}
+									title={t(getDriveEmptyStateTitleKey(drivePath.type))}
+								/>
+							)
+						}}
+					/>
+				</LazyWrapper>
 			</SafeAreaView>
 		</Fragment>
 	)

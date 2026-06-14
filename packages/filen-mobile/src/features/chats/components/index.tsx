@@ -17,6 +17,7 @@ import { selectContacts } from "@/features/contacts/contactsSelect"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread } from "@/features/chats/chatSelectors"
 import { useTranslation } from "react-i18next"
+import { LazyWrapper } from "@/components/lazyWrapper"
 
 const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const { t } = useTranslation()
@@ -274,7 +275,9 @@ export const Chats = () => {
 		<Fragment>
 			<Header setSearchQuery={setSearchQuery} />
 			<SafeAreaView edges={["left", "right"]}>
-				<List searchQuery={searchQuery} />
+				<LazyWrapper>
+					<List searchQuery={searchQuery} />
+				</LazyWrapper>
 			</SafeAreaView>
 		</Fragment>
 	)

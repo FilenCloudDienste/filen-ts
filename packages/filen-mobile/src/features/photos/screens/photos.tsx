@@ -28,6 +28,7 @@ import Header from "@/features/photos/components/photosHeader"
 import Photo from "@/features/photos/components/photoItem"
 import DateRange from "@/features/photos/components/dateRange"
 import { filterPhotoGridItems } from "@/features/photos/utils"
+import { LazyWrapper } from "@/components/lazyWrapper"
 
 const Photos = () => {
 	const { t } = useTranslation()
@@ -83,93 +84,95 @@ const Photos = () => {
 					onLayout={onLayout}
 					className="flex-1"
 				>
-					{config.enabled && config.remoteDir && <DateRange />}
-					{config.enabled && config.remoteDir ? (
-						<VirtualList
-							className="flex-1"
-							contentInsetAdjustmentBehavior="automatic"
-							contentContainerClassName="pb-40"
-							itemHeight={size}
-							grid={true}
-							itemWidth={size}
-							keyExtractor={item => item.data.uuid}
-							viewabilityConfig={{
-								itemVisiblePercentThreshold: 99
-							}}
-							onViewableItemsChanged={info => {
-								const items = info.viewableItems
+					<LazyWrapper>
+						{config.enabled && config.remoteDir && <DateRange />}
+						{config.enabled && config.remoteDir ? (
+							<VirtualList
+								className="flex-1"
+								contentInsetAdjustmentBehavior="automatic"
+								contentContainerClassName="pb-40"
+								itemHeight={size}
+								grid={true}
+								itemWidth={size}
+								keyExtractor={item => item.data.uuid}
+								viewabilityConfig={{
+									itemVisiblePercentThreshold: 99
+								}}
+								onViewableItemsChanged={info => {
+									const items = info.viewableItems
 
-								if (items.length === 0) {
-									return
-								}
+									if (items.length === 0) {
+										return
+									}
 
-								const firstItem = items[0]
-								const lastItem = items[items.length - 1]
+									const firstItem = items[0]
+									const lastItem = items[items.length - 1]
 
-								if (!firstItem || !lastItem) {
-									return
-								}
+									if (!firstItem || !lastItem) {
+										return
+									}
 
-								usePhotosStore.getState().setVisibleDateRange({
-									start: resolveCreatedOrTimestamp({
-										created: firstItem.item.data.decryptedMeta?.created,
-										timestamp: firstItem.item.data.timestamp
-									}),
-									end: resolveCreatedOrTimestamp({
-										created: lastItem.item.data.decryptedMeta?.created,
-										timestamp: lastItem.item.data.timestamp
+									usePhotosStore.getState().setVisibleDateRange({
+										start: resolveCreatedOrTimestamp({
+											created: firstItem.item.data.decryptedMeta?.created,
+											timestamp: firstItem.item.data.timestamp
+										}),
+										end: resolveCreatedOrTimestamp({
+											created: lastItem.item.data.decryptedMeta?.created,
+											timestamp: lastItem.item.data.timestamp
+										})
 									})
-								})
-							}}
-							data={items}
-							renderItem={info => {
-								return (
-									<Photo
-										info={info}
-										size={size}
-										drivePath={drivePath}
-										getListItems={() => items}
+								}}
+								data={items}
+								renderItem={info => {
+									return (
+										<Photo
+											info={info}
+											size={size}
+											drivePath={drivePath}
+											getListItems={() => items}
+										/>
+									)
+								}}
+								onRefresh={async () => {
+									if (!onlineManager.isOnline()) {
+										return
+									}
+
+									const result = await run(async () => {
+										await driveItemsQuery.refetch()
+									})
+
+									if (!result.success) {
+										console.error(result.error)
+										alerts.error(result.error)
+									}
+
+									cameraUpload.sync().catch(console.error)
+								}}
+								loading={driveItemsQuery.status === "pending"}
+								emptyComponent={() => (
+									<ListEmpty
+										icon="images-outline"
+										title={t("no_photos")}
 									/>
-								)
-							}}
-							onRefresh={async () => {
-								if (!onlineManager.isOnline()) {
-									return
-								}
-
-								const result = await run(async () => {
-									await driveItemsQuery.refetch()
-								})
-
-								if (!result.success) {
-									console.error(result.error)
-									alerts.error(result.error)
-								}
-
-								cameraUpload.sync().catch(console.error)
-							}}
-							loading={driveItemsQuery.status === "pending"}
-							emptyComponent={() => (
-								<ListEmpty
-									icon="images-outline"
-									title={t("no_photos")}
-								/>
-							)}
-						/>
-					) : (
-						<View className="flex-1 items-center justify-center">
-							<Ionicons
-								name="camera"
-								size={64}
-								color="gray"
+								)}
 							/>
-							<Text className="mt-2">{t("camera_upload_disabled")}</Text>
-							<Text className="text-xs text-muted-foreground mt-0.5">{t("camera_upload_disabled_description")}</Text>
-							<View className="mt-4">
-								<Button onPress={() => router.push("/cameraUpload")}>{t("enable_camera_upload")}</Button>
+						) : (
+							<View className="flex-1 items-center justify-center">
+								<Ionicons
+									name="camera"
+									size={64}
+									color="gray"
+								/>
+								<Text className="mt-2">{t("camera_upload_disabled")}</Text>
+								<Text className="text-xs text-muted-foreground mt-0.5">{t("camera_upload_disabled_description")}</Text>
+								<View className="mt-4">
+									<Button onPress={() => router.push("/cameraUpload")}>{t("enable_camera_upload")}</Button>
+								</View>
 							</View>
-						</View>
-					)}
+						)}
+					</LazyWrapper>
 				</View>
 			</SafeAreaView>
 		</Fragment>
