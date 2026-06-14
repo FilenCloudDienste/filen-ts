@@ -205,7 +205,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 			undecryptable: unwrapped.meta === null
 		}
 	}),
-	unwrapParentUuid: () => null
+	unwrapParentUuid: () => null,
+	isTrashParent: (parent: unknown) => (parent as { tag?: string } | null)?.tag === "Trash"
 }))
 
 vi.mock("@/lib/sdkErrors", () => ({

@@ -97,6 +97,15 @@ export function unwrapParentUuid(parent: ParentUuid): string | null {
 	}
 }
 
+// The generated bindings model an item's parent as the ParentUuid tagged enum: Uuid(uuid) for a
+// real parent directory plus the unit variants Trash/Recents/Favorites/Links. getDirOptional /
+// getFileOptional return trashed items with parent = ParentUuid.Trash (permanently deleted items
+// resolve to undefined instead), so this single tag check is the trash discriminator for both Dir
+// and File lookup results.
+export function isTrashParent(parent: ParentUuid): boolean {
+	return parent.tag === ParentUuid_Tags.Trash
+}
+
 export type UnwrapDirMetaBase = {
 	meta: DecryptedDirMeta | null
 	uuid: string
