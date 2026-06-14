@@ -1,15 +1,7 @@
 import { run, Semaphore } from "@filen/utils"
 import { onlineManager } from "@tanstack/react-query"
 import NetInfo from "@react-native-community/netinfo"
-import {
-	type ParentUuid,
-	ParentUuid_Tags,
-	ErrorKind,
-	AnyDirWithContext,
-	AnyDirWithContext_Tags,
-	AnyNormalDir,
-	AnySharedDir_Tags
-} from "@filen/sdk-rs"
+import { ErrorKind, AnyDirWithContext, AnyDirWithContext_Tags, AnyNormalDir, AnySharedDir_Tags } from "@filen/sdk-rs"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
 import offline from "@/features/offline/offline"
@@ -31,6 +23,7 @@ import {
 	unwrappedDirIntoDriveItem,
 	unwrappedFileIntoDriveItem,
 	unwrapParentUuid,
+	isTrashParent,
 	type UnwrapDirMetaResult,
 	type UnwrapFileMetaResult
 } from "@/lib/sdkUnwrap"
@@ -105,14 +98,9 @@ type ParentListingState =
 			message: string
 	  }
 
-// The generated bindings model an item's parent as the ParentUuid tagged enum: Uuid(uuid) for a
-// real parent directory plus the unit variants Trash/Recents/Favorites/Links. getDirOptional /
-// getFileOptional return trashed items with parent = ParentUuid.Trash (permanently deleted items
-// resolve to undefined instead), so this single tag check is the trash discriminator for both Dir
-// and File lookup results. Trash policy: trashed ⇒ remove the local copy, same as deleted.
-function isTrashParent(parent: ParentUuid): boolean {
-	return parent.tag === ParentUuid_Tags.Trash
-}
+// Trash policy (shared isTrashParent from @/lib/sdkUnwrap): a getDirOptional / getFileOptional
+// result whose parent tag is Trash means the item is trashed ⇒ remove the local copy, same as a
+// deleted (undefined) result. Permanently deleted items resolve to undefined instead of a Trash tag.
 
 // Linked-context items are excluded from sync entirely (no error spam): linked listings are
 // unsupported for sync and by-uuid lookups only work on user-owned items. Storing from linked

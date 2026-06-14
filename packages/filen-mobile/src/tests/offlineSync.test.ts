@@ -166,7 +166,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 		} | null
 
 		return p?.tag === "Uuid" ? (p.inner?.[0] ?? null) : null
-	}
+	},
+	isTrashParent: (parent: unknown) => (parent as { tag?: string } | null)?.tag === "Trash"
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
