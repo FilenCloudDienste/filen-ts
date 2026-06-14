@@ -21,7 +21,7 @@ const ListEmpty = ({
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	return (
-		<View className="flex-1 items-center justify-center bg-transparent gap-2 px-8">
+		<View className="flex-1 items-center justify-center bg-transparent gap-2 px-16">
 			<Ionicons
 				name={icon}
 				size={64}
