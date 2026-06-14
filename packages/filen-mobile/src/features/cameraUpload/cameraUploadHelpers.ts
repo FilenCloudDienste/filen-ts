@@ -1,6 +1,8 @@
 import * as FileSystem from "expo-file-system"
 import { xxHash32 } from "js-xxhash"
+import { type Dir } from "@filen/sdk-rs"
 import { type CameraUploadHashEntry } from "@/lib/cache"
+import { isTrashParent } from "@/lib/sdkUnwrap"
 
 export type CollisionParams = {
 	iteration: number
@@ -243,4 +245,13 @@ export function applyAfterActivationToggle<T extends { afterActivation: boolean;
 		afterActivation: enabled,
 		activationTimestamp: enabled ? now : 0
 	}
+}
+
+// Whether a camera-upload destination directory is still usable as an upload target, given the
+// result of a `getDirOptional(uuid)` lookup. `undefined` means the directory was permanently
+// deleted on the server; a `Dir` whose parent is the trash means it was moved to the trash. In
+// both cases it can no longer receive uploads, so the sync must exit early and the UI must surface
+// the destination as unavailable. A `Dir` with any real parent is usable.
+export function isDirUsable(dir: Dir | undefined): boolean {
+	return dir !== undefined && !isTrashParent(dir.parent)
 }

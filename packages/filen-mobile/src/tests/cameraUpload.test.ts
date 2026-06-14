@@ -60,6 +60,7 @@ vi.mock("expo-image-manipulator", () => ({
 
 vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir: { Dir: vi.fn() },
+	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
 	AnyDirWithContext: { Normal: vi.fn() }
 }))
 
@@ -172,7 +173,9 @@ vi.mock("@/lib/utils", () => ({
 }))
 
 vi.mock("@/lib/sdkUnwrap", () => ({
-	unwrapFileMeta: vi.fn()
+	unwrapFileMeta: vi.fn(),
+	// isDirUsable (real, via cameraUploadHelpers) delegates the trash check here.
+	isTrashParent: (parent: { tag?: string } | null | undefined) => parent?.tag === "Trash"
 }))
 
 vi.mock("@/lib/paths", () => ({
@@ -277,7 +280,10 @@ function setupDefaultMocks() {
 	vi.mocked(auth.getSdkClients).mockResolvedValue({
 		authedSdkClient: {
 			listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
-			createDir: vi.fn(async () => ({ uuid: "created-dir" }))
+			createDir: vi.fn(async () => ({ uuid: "created-dir" })),
+			// Destination-existence gate default: a usable dir (real Uuid parent) so the sync
+			// proceeds. Individual tests override this to model a deleted / trashed destination.
+			getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 		}
 	} as any)
 	vi.mocked(transfers.upload).mockResolvedValue({ files: [] } as any)
@@ -879,7 +885,8 @@ describe("sync flow", () => {
 						}
 					]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -905,7 +912,8 @@ describe("sync flow", () => {
 						}
 					]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -1124,6 +1132,98 @@ describe("sync flow", () => {
 	})
 })
 
+// ─── Destination-existence gate ──────────────────────────────────────────────
+// Before any listing/uploading, sync() resolves the configured remote dir via getDirOptional.
+// A DEFINITIVE deleted (undefined) or trashed (Trash-parented Dir) verdict exits silently — no
+// setSyncing(true), no upload. A TRANSIENT lookup failure must NOT bail (the normal pipeline
+// already tolerates a degraded remote listing). The account root never needs the lookup.
+
+describe("destination-existence gate", () => {
+	function setupOneLocalAsset(): void {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+
+		const uri = "file:///media/a1"
+
+		ml.addAsset({
+			id: "a1",
+			filename: "photo.jpg",
+			uri,
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+	}
+
+	// Replace the SDK client while keeping an empty remote listing (so the one local asset is a
+	// delta) and a configurable getDirOptional implementation for the gate.
+	function installClient(getDirOptional: ReturnType<typeof vi.fn>): void {
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
+				createDir: vi.fn(async () => ({ uuid: "created-dir" })),
+				getDirOptional
+			}
+		} as any)
+	}
+
+	it("exits silently when the destination was deleted (getDirOptional → undefined)", async () => {
+		setupOneLocalAsset()
+		installClient(vi.fn(async () => undefined))
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+	})
+
+	it("exits silently when the destination is trashed (getDirOptional → Dir with parent Trash)", async () => {
+		setupOneLocalAsset()
+		installClient(vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Trash" } })))
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+		expect(mockSetSyncing).not.toHaveBeenCalled()
+	})
+
+	it("proceeds when the destination is usable (getDirOptional → Dir with a Uuid parent)", async () => {
+		setupOneLocalAsset()
+		installClient(vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } })))
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("proceeds (does not bail) when getDirOptional fails transiently", async () => {
+		setupOneLocalAsset()
+		installClient(vi.fn(async () => Promise.reject(new Error("network"))))
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not call getDirOptional for a Root destination (it can never be deleted/trashed)", async () => {
+		setupOneLocalAsset()
+
+		const getDirOptional = vi.fn(async () => undefined)
+
+		installClient(getDirOptional)
+		vi.mocked(secureStore.get).mockResolvedValue({
+			...ENABLED_CONFIG,
+			remoteDir: { tag: "Root", inner: [{ uuid: "root-uuid" }] } as any
+		})
+
+		await cameraUpload.sync()
+
+		expect(getDirOptional).not.toHaveBeenCalled()
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+})
+
 // ─── listLocal filtering ─────────────────────────────────────────────────────
 
 describe("listLocal filtering", () => {
@@ -1247,7 +1347,8 @@ describe("same-title album naming (merge scheme)", () => {
 		vi.mocked(auth.getSdkClients).mockResolvedValue({
 			authedSdkClient: {
 				listDirRecursiveWithPaths: vi.fn(async () => ({ files: [] })),
-				createDir
+				createDir,
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -2382,7 +2483,8 @@ describe("sync flow — remote collision resolution", () => {
 						{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-2" } }
 					]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -2475,7 +2577,8 @@ describe("falsy-bigint: modified=0n and modificationTime=0 are valid epoch times
 				listDirRecursiveWithPaths: vi.fn(async () => ({
 					files: [{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-1" } }]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -2528,7 +2631,8 @@ describe("falsy-bigint: modified=0n and modificationTime=0 are valid epoch times
 				listDirRecursiveWithPaths: vi.fn(async () => ({
 					files: [{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-1" } }]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -3013,7 +3117,8 @@ describe("#15 regression — compress-rename dedup tree-key symmetry", () => {
 				listDirRecursiveWithPaths: vi.fn(async () => ({
 					files: [{ path, file: { uuid: "remote-1" } }]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -3159,7 +3264,8 @@ describe("#B7 regression — null-creationTime collision key symmetry", () => {
 						{ path: suffixedPath, file: { uuid: "remote-suffixed" } }
 					]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -3293,7 +3399,8 @@ describe("B2 — collision-resolved upload names", () => {
 				listDirRecursiveWithPaths: vi.fn(async () => ({
 					files: [{ path: "/Camera Roll/IMG_0001.jpg", file: { uuid: "remote-1" } }]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -3388,7 +3495,8 @@ describe("E2/B8 — raw dedup keys (literal %XX filenames)", () => {
 				listDirRecursiveWithPaths: vi.fn(async () => ({
 					files: [{ path: `/Camera Roll/${filename}`, file: { uuid: "remote-1" } }]
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 
@@ -3465,7 +3573,8 @@ describe("B4 — md5-cache pruning and mirror mode", () => {
 				listDirRecursiveWithPaths: vi.fn(async () => ({
 					files: paths.map((path, index) => ({ path, file: { uuid: `remote-${index}` } }))
 				})),
-				createDir: vi.fn(async () => ({ uuid: "dir" }))
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 			}
 		} as any)
 

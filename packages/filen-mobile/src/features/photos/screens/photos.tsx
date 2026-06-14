@@ -12,11 +12,10 @@ import alerts from "@/lib/alerts"
 import useViewLayout from "@/hooks/useViewLayout"
 import { resolveCreatedOrTimestamp } from "@/lib/sdkUnwrap"
 import { getPreviewType } from "@/lib/previewType"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import useDrivePath from "@/hooks/useDrivePath"
 import { router, useFocusEffect } from "expo-router"
 import cameraUpload, { DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
-import Text from "@/components/ui/text"
+import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import Button from "@/components/ui/button"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
 import { useSecureStore } from "@/lib/secureStore"
@@ -37,6 +36,7 @@ const Photos = () => {
 	const [config] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
 	const drivePath = useDrivePath()
 	const [photosGridTiles] = useSecureStore<number>("photosGridTiles", 4)
+	const destination = useCameraUploadDestination(config.remoteDir)
 
 	useFocusEffect(
 		useCallback(() => {
@@ -54,11 +54,16 @@ const Photos = () => {
 			path: drivePath
 		},
 		{
-			enabled: drivePath.type !== null && config.enabled && config.remoteDir !== null
+			enabled: drivePath.type !== null && config.enabled && config.remoteDir !== null && destination.usable
 		}
 	)
 
 	const size = !layout ? 0 : layout.width / Math.min(Math.max(1, photosGridTiles), 5)
+
+	// Configured (enabled + a destination set) but the destination dir is gone/trashed on the
+	// server. Hold the empty state until the lookup settles (loading) so it does not flash on first
+	// mount before the destination has been resolved.
+	const destinationUnavailable = config.enabled && config.remoteDir !== null && !destination.loading && !destination.usable
 
 	const items = driveItemsQuery.data
 		? itemSorter.sortItems(
@@ -85,8 +90,15 @@ const Photos = () => {
 					className="flex-1"
 				>
 					<LazyWrapper>
-						{config.enabled && config.remoteDir && <DateRange />}
-						{config.enabled && config.remoteDir ? (
+						{config.enabled && config.remoteDir && !destinationUnavailable && <DateRange />}
+						{config.enabled && config.remoteDir && destinationUnavailable ? (
+							<ListEmpty
+								icon="cloud-offline-outline"
+								title={t("camera_upload_destination_unavailable")}
+								description={t("camera_upload_destination_unavailable_description")}
+								action={<Button onPress={() => router.push("/cameraUpload")}>{t("choose_new_directory")}</Button>}
+							/>
+						) : config.enabled && config.remoteDir ? (
 							<VirtualList
 								className="flex-1"
 								contentInsetAdjustmentBehavior="automatic"
@@ -159,18 +171,12 @@ const Photos = () => {
 								)}
 							/>
 						) : (
-							<View className="flex-1 items-center justify-center">
-								<Ionicons
-									name="camera"
-									size={64}
-									color="gray"
-								/>
-								<Text className="mt-2">{t("camera_upload_disabled")}</Text>
-								<Text className="text-xs text-muted-foreground mt-0.5">{t("camera_upload_disabled_description")}</Text>
-								<View className="mt-4">
-									<Button onPress={() => router.push("/cameraUpload")}>{t("enable_camera_upload")}</Button>
-								</View>
-							</View>
+							<ListEmpty
+								icon="camera"
+								title={t("camera_upload_disabled")}
+								description={t("camera_upload_disabled_description")}
+								action={<Button onPress={() => router.push("/cameraUpload")}>{t("enable_camera_upload")}</Button>}
+							/>
 						)}
 					</LazyWrapper>
 				</View>

@@ -2,6 +2,7 @@ import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
+import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import { applyAfterActivationToggle, CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY } from "@/features/cameraUpload/cameraUploadHelpers"
 import { useSecureStore } from "@/lib/secureStore"
 import View from "@/components/ui/view"
@@ -30,7 +31,9 @@ const CameraUpload = () => {
 	const { t } = useTranslation()
 	const { config, setConfig } = useCameraUploadConfig()
 	const [reuploadDeleted, setReuploadDeleted] = useSecureStore<boolean>(CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY, false)
+	const destination = useCameraUploadDestination(config.remoteDir)
 	const textGreen500 = useResolveClassNames("text-green-500")
+	const textRed500 = useResolveClassNames("text-red-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
@@ -93,6 +96,16 @@ const CameraUpload = () => {
 			}
 		}, [])
 	)
+
+	// Configured (a destination is set) but the dir was deleted/trashed on the server. Root can
+	// never be unavailable. Hold off while the lookup is loading so the warning does not flash.
+	const destinationUnavailable = destination.configured && !destination.loading && !destination.usable
+	const destinationSubTitle = !config.remoteDir
+		? t("cloud_directory_description")
+		: config.remoteDir.tag === AnyNormalDir_Tags.Root
+			? t("cloud_directory_root_description")
+			: // Prefer the fresh name from the lookup; fall back to the stored snapshot while it loads.
+				(destination.name ?? unwrapDirMeta(config.remoteDir).meta?.name ?? t("cloud_directory_description"))
 
 	return (
 		<Fragment>
@@ -160,29 +173,42 @@ const CameraUpload = () => {
 												router.push("/cameraUpload/albums")
 											},
 											rightItem: {
-												type: "text",
-												value: config.albumIds.length.toString()
+												type: "badge",
+												value:
+													config.albumIds.length > 0 ? (
+														config.albumIds.length.toString()
+													) : (
+														<Ionicons
+															name="close"
+															size={15}
+															color="white"
+														/>
+													),
+												color:
+													config.albumIds.length > 0
+														? (textGreen500.color as string | undefined)
+														: (textRed500.color as string | undefined)
 											}
 										},
 										{
 											icon: "folder-open-outline",
 											title: t("cloud_directory"),
 											disabled: !isOnline,
-											subTitle: config.remoteDir
-												? config.remoteDir.tag === AnyNormalDir_Tags.Root
-													? t("cloud_directory_root_description")
-													: (unwrapDirMeta(config.remoteDir).meta?.name ?? t("cloud_directory_description"))
-												: t("cloud_directory_description"),
+											subTitle: destinationSubTitle,
 											rightItem: {
 												type: "badge",
 												value: (
 													<Ionicons
-														name={config.remoteDir ? "checkmark" : "close"}
+														name={config.remoteDir && !destinationUnavailable ? "checkmark" : "close"}
 														size={15}
 														color="white"
 													/>
 												),
-												color: config.remoteDir ? (textGreen500.color as string | undefined) : undefined
+												color: destinationUnavailable
+													? (textRed500.color as string | undefined)
+													: config.remoteDir
+														? (textGreen500.color as string | undefined)
+														: (textRed500.color as string | undefined)
 											},
 											onPress: async () => {
 												const result = await run(async () => {
@@ -244,6 +270,19 @@ const CameraUpload = () => {
 										}
 									]}
 								/>
+								{destinationUnavailable && (
+									<Group
+										className="bg-background-tertiary"
+										buttons={[
+											{
+												icon: "warning-outline",
+												title: t("camera_upload_destination_unavailable"),
+												titleClassName: "text-red-500",
+												subTitle: t("camera_upload_destination_unavailable_description")
+											}
+										]}
+									/>
+								)}
 								<Group
 									className="bg-background-tertiary"
 									buttons={[
