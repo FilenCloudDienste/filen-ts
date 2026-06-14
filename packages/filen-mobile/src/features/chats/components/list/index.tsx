@@ -13,9 +13,11 @@ import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import Button from "@/components/ui/button"
 import { createChatFlow } from "@/features/chats/chatsActions"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const List = ({ searchQuery }: { searchQuery: string }) => {
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
 
@@ -106,7 +108,14 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 				icon="chatbubbles-outline"
 				title={t("no_chats")}
 				description={t("no_chats_description")}
-				action={<Button onPress={() => { void createChatFlow() }}>{t("create_chat")}</Button>}
+				action={
+					<Button
+						onPress={() => void createChatFlow()}
+						disabled={!isOnline}
+					>
+						{t("create_chat")}
+					</Button>
+				}
 			/>
 		)
 

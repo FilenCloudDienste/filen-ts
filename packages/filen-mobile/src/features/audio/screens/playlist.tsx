@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useState } from "react"
+import useIsOnline from "@/hooks/useIsOnline"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
@@ -25,6 +26,7 @@ import { driveItemDisplayName } from "@/lib/decryption"
 
 export function Playlist() {
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -267,7 +269,14 @@ export function Playlist() {
 								icon="musical-note-outline"
 								title={t("no_tracks")}
 								description={t("no_tracks_description")}
-								action={<Button onPress={handleAddTracks}>{t("add_tracks")}</Button>}
+								action={
+									<Button
+										onPress={handleAddTracks}
+										disabled={!isOnline}
+									>
+										{t("add_tracks")}
+									</Button>
+								}
 							/>
 						)
 					}

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useCallback, useRef, useState } from "react"
 import { onlineManager } from "@tanstack/react-query"
+import useIsOnline from "@/hooks/useIsOnline"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import VirtualList from "@/components/ui/virtualList"
@@ -27,6 +28,7 @@ import PlaylistRow from "@/features/audio/components/playlistRow"
 
 export function Playlists() {
 	const { t } = useTranslation()
+	const isOnline = useIsOnline()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -202,6 +204,10 @@ export function Playlists() {
 				title: allVisibleSelected ? t("deselect_all") : t("select_all"),
 				icon: "select",
 				onPress: () => {
+					if (visiblePlaylists.length === 0) {
+						return
+					}
+
 					if (allVisibleSelected) {
 						usePlaylistsStore.getState().clearSelectedPlaylists()
 
@@ -335,7 +341,14 @@ export function Playlists() {
 								icon="musical-note-outline"
 								title={t("no_playlists")}
 								description={t("no_playlists_description")}
-								action={<Button onPress={handleCreatePlaylist}>{t("create_playlist")}</Button>}
+								action={
+									<Button
+										onPress={handleCreatePlaylist}
+										disabled={!isOnline}
+									>
+										{t("create_playlist")}
+									</Button>
+								}
 							/>
 						)
 					}
