@@ -61,6 +61,8 @@ vi.mock("zustand/shallow", () => ({
 // Component / store / lib modules that content/index.tsx imports but which the pure helpers
 // never touch. Stubbed so the module graph resolves without dragging in their own heavy deps.
 vi.mock("@/components/ui/view", () => ({ default: () => null }))
+vi.mock("@/components/ui/listEmpty", () => ({ default: () => null }))
+vi.mock("@/components/ui/button", () => ({ default: () => null }))
 vi.mock("@/components/ui/animated", () => ({ AnimatedView: () => null }))
 vi.mock("@/components/textEditor", () => ({ default: () => null }))
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({ default: () => ({}) }))

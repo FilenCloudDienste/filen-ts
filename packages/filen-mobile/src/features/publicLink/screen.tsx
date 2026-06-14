@@ -13,7 +13,6 @@ import DismissStack from "@/components/dismissStack"
 import { View, GestureHandlerScrollView, CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useDriveItemPublicLinkStatusQuery from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import Button from "@/components/ui/button"
 import useIsOnline from "@/hooks/useIsOnline"
 import drive from "@/features/drive/drive"
@@ -85,7 +84,6 @@ function PublicLink() {
 	}>()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
 	const [edited, setEdited] = useState<{
 		password?: PasswordState
@@ -530,15 +528,11 @@ function PublicLink() {
 										/>
 									</GestureHandlerScrollView>
 								) : (
-									<View className="flex-1 items-center justify-center bg-transparent">
-										<Ionicons
-											name="link-outline"
-											size={64}
-											color={textMutedForeground.color}
-										/>
-										<Text className="mt-2">{t("public_link_disabled")}</Text>
-										<Text className="text-xs text-muted-foreground mt-0.5">{t("public_link_description")}</Text>
-										<View className="mt-4 bg-transparent">
+									<ListEmpty
+										icon="link-outline"
+										title={t("public_link_disabled")}
+										description={t("public_link_description")}
+										action={
 											<Button
 												disabled={!isOnline}
 												onPress={async () => {
@@ -560,22 +554,16 @@ function PublicLink() {
 											>
 												{t("enable_public_link")}
 											</Button>
-										</View>
-									</View>
+										}
+									/>
 								)}
 							</Fragment>
 						) : (
-							<View className="flex-1 items-center justify-center bg-transparent">
-								<Ionicons
-									name="link-outline"
-									size={64}
-									color={textMutedForeground.color}
-								/>
-								<Text className="mt-2">{t("feature_requires_subscription")}</Text>
-								<Text className="text-xs text-muted-foreground mt-0.5">
-									{t("feature_requires_subscription_public_links_description")}
-								</Text>
-							</View>
+							<ListEmpty
+								icon="link-outline"
+								title={t("feature_requires_subscription")}
+								description={t("feature_requires_subscription_public_links_description")}
+							/>
 						)}
 					</Fragment>
 				) : isPublicLinkQueryError(publicLinkStatusQuery.status, accountQuery.status) ? (

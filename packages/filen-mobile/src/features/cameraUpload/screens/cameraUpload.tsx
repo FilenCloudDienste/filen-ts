@@ -17,11 +17,11 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
 import { Platform, ActivityIndicator } from "react-native"
-import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { AnyNormalDir_Tags } from "@filen/sdk-rs"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
+import ListEmpty from "@/components/ui/listEmpty"
 
 type BooleanConfigKey = {
 	[K in keyof Config]: Config[K] extends boolean ? K : never
@@ -35,7 +35,6 @@ const CameraUpload = () => {
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
 	const isOnline = useIsOnline()
 
@@ -327,14 +326,10 @@ const CameraUpload = () => {
 						)}
 					</SettingsScrollView>
 				) : (
-					<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
-						<Ionicons
-							name="lock-closed-outline"
-							size={64}
-							color={textMutedForeground.color}
-						/>
-						<Text>{t("no_permissions_enable_manually")}</Text>
-					</View>
+					<ListEmpty
+						icon="lock-closed-outline"
+						title={t("no_permissions_enable_manually")}
+					/>
 				)}
 			</SafeAreaView>
 		</Fragment>
