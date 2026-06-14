@@ -19,6 +19,7 @@ import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
 import { filterNoteListItemsBySearchQuery, filterNoteTagsBySearchQuery } from "@/features/notes/utils"
+import { LazyWrapper } from "@/components/lazyWrapper"
 
 const Notes = () => {
 	const { t } = useTranslation()
@@ -216,31 +217,33 @@ const Notes = () => {
 				visibleTags={notesTags}
 			/>
 			<SafeAreaView edges={["left", "right"]}>
-				{viewMode === "notes" ? (
-					<VirtualList
-						className="flex-1"
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-						keyExtractor={keyExtractorNotesView}
-						data={notes}
-						renderItem={renderItemNotesView}
-						loading={notesQuery.status !== "success"}
-						onRefresh={onRefresh}
-						emptyComponent={notesEmptyComponent}
-					/>
-				) : (
-					<VirtualList
-						className="flex-1"
-						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
-						keyExtractor={keyExtractorTagsView}
-						data={notesTags}
-						loading={notesTagsQuery.status !== "success"}
-						renderItem={renderItemTagsView}
-						onRefresh={onRefresh}
-						emptyComponent={tagsEmptyComponent}
-					/>
-				)}
+				<LazyWrapper>
+					{viewMode === "notes" ? (
+						<VirtualList
+							className="flex-1"
+							contentInsetAdjustmentBehavior="automatic"
+							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+							keyExtractor={keyExtractorNotesView}
+							data={notes}
+							renderItem={renderItemNotesView}
+							loading={notesQuery.status !== "success"}
+							onRefresh={onRefresh}
+							emptyComponent={notesEmptyComponent}
+						/>
+					) : (
+						<VirtualList
+							className="flex-1"
+							contentInsetAdjustmentBehavior="automatic"
+							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+							keyExtractor={keyExtractorTagsView}
+							data={notesTags}
+							loading={notesTagsQuery.status !== "success"}
+							renderItem={renderItemTagsView}
+							onRefresh={onRefresh}
+							emptyComponent={tagsEmptyComponent}
+						/>
+					)}
+				</LazyWrapper>
 			</SafeAreaView>
 		</Fragment>
 	)
