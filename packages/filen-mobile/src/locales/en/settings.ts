@@ -219,7 +219,7 @@ export const settings = {
 	/** Advanced — confirm message before clearing the sandbox cache */
 	clear_sandbox_cache_description: "This clears temporary files stored in the app cache.",
 	/** Toast after the sandbox cache was cleared */
-	sandbox_cache_cleared: "Sandbox cache cleared",
+	sandbox_cache_cleared: "Temporary cache cleared",
 	/** Advanced — row title: clear every disk cache at once */
 	clear_all_disk_caches: "Clear all disk caches",
 	/** Advanced — subtitle for the clear-all-disk-caches row */
@@ -236,7 +236,7 @@ export const settings = {
 	/** Toast after offline files were cleared */
 	offline_files_cleared: "Offline files cleared",
 	/** Advanced — row title: remove leftover temporary/staging files and partial downloads */
-	clean_temporary_files: "Clean up temporary files",
+	clean_temporary_files: "Clean up leftover files",
 	/** Advanced — row subtitle describing what the temporary-file cleanup removes */
 	clean_temporary_files_description: "Removes leftover staging files and partial downloads from interrupted sessions",
 	/** Advanced — confirm message before cleaning temporary files */
@@ -245,7 +245,7 @@ export const settings = {
 	/** Advanced — shown when temporary-file cleanup is blocked because transfers or syncs are running */
 	clean_temporary_files_unavailable: "Not available while transfers or syncs are running",
 	/** Toast after temporary files were cleaned up */
-	temporary_files_cleaned: "Temporary files cleaned up",
+	temporary_files_cleaned: "Leftover files cleaned up",
 
 	// ── Events log + event details ────────────────────────────────────────────
 	/** Events screen — empty-state title when there is no account activity */

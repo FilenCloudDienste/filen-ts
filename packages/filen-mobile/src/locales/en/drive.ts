@@ -72,7 +72,7 @@ export const drive = {
 	/** Header title for the offline files view */
 	offline: "Offline",
 	/** Header title for the shared-with-me view */
-	shared_with_me: "Shared with me",
+	shared_with_me: "Shared with you",
 	/** Header title for the shared-with-others view */
 	shared_with_others: "Shared with others",
 	/** Header title for the public links view */
@@ -195,7 +195,7 @@ export const drive = {
 	/** Confirmation body for bulk permanent delete */
 	are_you_sure_delete_selected_permanently: "Are you sure you want to permanently delete the selected items? This cannot be undone.",
 	/** Confirmation body for bulk trash */
-	are_you_sure_trash_selected: "Are you sure you want to move the selected items to the trash?",
+	are_you_sure_trash_selected: "Are you sure you want to move the selected items to the trash? You can restore them later.",
 	/** Confirmation body for bulk stop-sharing */
 	are_you_sure_stop_sharing_selected: "Are you sure you want to stop sharing the selected items?",
 	/** Confirmation body for bulk remove-share */
@@ -270,7 +270,7 @@ export const drive = {
 	/** Confirmation dialog title for trashing a single item */
 	trash_item: "Trash",
 	/** Confirmation body for trashing a single item */
-	confirm_trash: "Are you sure you want to move this item to the trash?",
+	confirm_trash: "Are you sure you want to move this item to the trash? You can restore it later.",
 	/** Confirmation dialog title for removing a single item from offline storage */
 	remove_offline_item: "Remove offline",
 	/** Confirmation body for removing a single item from offline storage */

@@ -64,7 +64,7 @@ export const notes = {
 	/** Confirmation dialog title before trashing a single note */
 	trash_note: "Trash note",
 	/** Confirmation dialog message before trashing a single note */
-	are_you_sure_trash_note: "Are you sure you want to move this note to the trash?",
+	are_you_sure_trash_note: "Are you sure you want to move this note to the trash? You can restore it later.",
 	/** Confirmation dialog title before permanently deleting a single note */
 	delete_note: "Delete note",
 	/** Confirmation dialog message before permanently deleting a single note */
@@ -111,7 +111,7 @@ export const notes = {
 	/** Bulk action: leave every selected shared note */
 	leave_selected: "Leave selected",
 	/** Confirmation dialog message before trashing every selected note */
-	are_you_sure_trash_selected_notes: "Are you sure you want to move the selected notes to the trash?",
+	are_you_sure_trash_selected_notes: "Are you sure you want to move the selected notes to the trash? You can restore them later.",
 	/** Confirmation dialog message before permanently deleting every selected note */
 	are_you_sure_delete_selected_notes: "Are you sure you want to permanently delete the selected notes? This cannot be undone.",
 	/** Confirmation dialog message before leaving every selected shared note */
