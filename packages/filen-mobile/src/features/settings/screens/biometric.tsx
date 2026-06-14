@@ -1,12 +1,10 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import View from "@/components/ui/view"
 import { Fragment } from "react"
 import { router } from "expo-router"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { useSecureStore } from "@/lib/secureStore"
 import useLocalAuthenticationQuery from "@/queries/useLocalAuthentication.query"
-import Text from "@/components/ui/text"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
 import { useTranslation } from "react-i18next"
@@ -14,6 +12,7 @@ import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import { disableBiometric, enableBiometric } from "@/features/settings/biometricButtons"
 import { type TFunction } from "i18next"
+import ListEmpty from "@/components/ui/listEmpty"
 
 function getLockAfterLabel(lockAfter: number, t: TFunction): string {
 	switch (lockAfter) {
@@ -187,9 +186,10 @@ function BiometricComponent() {
 							)}
 						</SettingsScrollView>
 					) : (
-						<View className="flex-1 bg-transparent items-center justify-center px-10">
-							<Text className="text-center">{t("biometric_not_supported")}</Text>
-						</View>
+						<ListEmpty
+							icon="finger-print-outline"
+							title={t("biometric_not_supported")}
+						/>
 					)
 				) : (
 					<SettingsLoadingView />

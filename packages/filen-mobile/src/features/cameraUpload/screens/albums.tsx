@@ -3,7 +3,6 @@ import { Group } from "@/components/ui/settingsGroup"
 import { useCameraUploadConfig, DEFAULT_CONFIG } from "@/features/cameraUpload/cameraUpload"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Fragment, useEffect } from "react"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
 import { Platform, ActivityIndicator, AppState } from "react-native"
@@ -12,7 +11,6 @@ import useCameraUploadAlbumsQuery from "@/features/cameraUpload/queries/useCamer
 import useCameraUploadAlbumLatestPhotoQuery from "@/features/cameraUpload/queries/useCameraUploadAlbumLatestPhoto.query"
 import Image from "@/components/ui/image"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import Text from "@/components/ui/text"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { useTranslation } from "react-i18next"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -62,7 +60,6 @@ const Albums = () => {
 	const { config, setConfig } = useCameraUploadConfig()
 	const insets = useSafeAreaInsets()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textForeground = useResolveClassNames("text-foreground")
 
 	// The album picker only enumerates the photo library — it NEVER uses the
@@ -195,24 +192,16 @@ const Albums = () => {
 							action={<Button onPress={() => refetch()}>{t("try_again")}</Button>}
 						/>
 					) : (
-						<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
-							<Ionicons
-								name="albums-outline"
-								size={64}
-								color={textMutedForeground.color}
-							/>
-							<Text>{t("no_albums")}</Text>
-						</View>
+						<ListEmpty
+							icon="albums-outline"
+							title={t("no_albums")}
+						/>
 					)
 				) : (
-					<View className="flex-1 items-center justify-center px-4 bg-transparent gap-2">
-						<Ionicons
-							name="lock-closed-outline"
-							size={64}
-							color={textMutedForeground.color}
-						/>
-						<Text>{t("no_permissions_enable_manually")}</Text>
-					</View>
+					<ListEmpty
+						icon="lock-closed-outline"
+						title={t("no_permissions_enable_manually")}
+					/>
 				)}
 			</SafeAreaView>
 		</Fragment>

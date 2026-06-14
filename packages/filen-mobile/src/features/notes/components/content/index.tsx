@@ -7,7 +7,7 @@ import Checklist from "@/features/notes/components/content/checklist"
 import { noteTypeToEditorType } from "@/features/notes/utils"
 import { FadeOut } from "react-native-reanimated"
 import { AnimatedView } from "@/components/ui/animated"
-import { ActivityIndicator, Text, TouchableOpacity } from "react-native"
+import { ActivityIndicator } from "react-native"
 import { useResolveClassNames } from "uniwind"
 import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
@@ -25,6 +25,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 import { useChecklistHideCompleted } from "@/features/notes/checklistView"
+import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 
 // #38/#13: the blocking loading overlay must show ONLY when there is nothing to render yet AND a
 // fetch is genuinely in flight. The per-note query is deliberately disabled while offline or while
@@ -408,16 +410,19 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 	if (fetchError) {
 		return (
-			<View className="flex-1 items-center justify-center gap-3 p-6">
-				<Text className="text-foreground text-center">{t("error_generic")}</Text>
-				<TouchableOpacity
-					onPress={() => {
-						void refetch()
-					}}
-				>
-					<Text className="text-primary">{t("try_again")}</Text>
-				</TouchableOpacity>
-			</View>
+			<ListEmpty
+				icon="alert-circle-outline"
+				title={t("error_generic")}
+				action={
+					<Button
+						onPress={() => {
+							void refetch()
+						}}
+					>
+						{t("try_again")}
+					</Button>
+				}
+			/>
 		)
 	}
 
