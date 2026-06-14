@@ -270,19 +270,6 @@ const CameraUpload = () => {
 										}
 									]}
 								/>
-								{destinationUnavailable && (
-									<Group
-										className="bg-background-tertiary"
-										buttons={[
-											{
-												icon: "warning-outline",
-												title: t("camera_upload_destination_unavailable"),
-												titleClassName: "text-red-500",
-												subTitle: t("camera_upload_destination_unavailable_description")
-											}
-										]}
-									/>
-								)}
 								<Group
 									className="bg-background-tertiary"
 									buttons={[
