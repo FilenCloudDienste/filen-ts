@@ -17,6 +17,7 @@ import { runOnJS } from "react-native-worklets"
 import { useShallow } from "zustand/shallow"
 import * as ScreenOrientation from "expo-screen-orientation"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import { type External } from "@/routes/drivePreview"
 import { FlashList, type FlashListRef } from "@shopify/flash-list"
 import galleryVideoPlayers from "@/components/drivePreview/galleryVideoPlayers"
@@ -591,6 +592,12 @@ const Gallery = () => {
 								<ListEmpty
 									icon="eye-off-outline"
 									title={t("no_preview")}
+									description={t("no_preview_description")}
+									action={
+										<Button onPress={() => router.back()}>
+											{t("go_back")}
+										</Button>
+									}
 								/>
 							</View>
 						)}

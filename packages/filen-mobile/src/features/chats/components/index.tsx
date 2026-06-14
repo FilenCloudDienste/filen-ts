@@ -7,13 +7,11 @@ import { useShallow } from "zustand/shallow"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import useChatsQuery from "@/features/chats/queries/useChats.query"
 import { useStringifiedClient } from "@/lib/auth"
-import { useFocusEffect, router } from "expo-router"
+import { useFocusEffect } from "expo-router"
 import { useResolveClassNames } from "uniwind"
 import chatsLib from "@/features/chats/chats"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import alerts from "@/lib/alerts"
 import type { MenuButton } from "@/components/ui/menu"
-import { selectContacts } from "@/features/contacts/contactsSelect"
+import { createChatFlow } from "@/features/chats/chatsActions"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread } from "@/features/chats/chatSelectors"
 import { useTranslation } from "react-i18next"
@@ -93,29 +91,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 				icon: "plus",
 				requiresOnline: true,
 				onPress: async () => {
-					const selectContactsResult = await selectContacts({
-						multiple: true,
-						userIdsToExclude: []
-					})
-
-					if (selectContactsResult.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						return await chatsLib.create({
-							contacts: selectContactsResult.selectedContacts
-						})
-					})
-
-					if (!result.success) {
-						console.error(result.error)
-						alerts.error(result.error)
-
-						return
-					}
-
-					router.push(`/chat/${result.data.uuid}`)
+					await createChatFlow()
 				}
 			})
 		}

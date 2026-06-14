@@ -360,5 +360,11 @@ export const settings = {
 	/** Event kind: items you shared with others were removed */
 	removed_shared_out_items: "Removed shared-out items",
 	/** Event kind: an item was favorited or unfavorited */
-	item_favorite: "Favorite status changed"
+	item_favorite: "Favorite status changed",
+
+	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
+	/** Events — empty-state subtitle when there is no account activity yet */
+	no_events_description: "Your account activity will appear here.",
+	/** Account / Security / 2FA — error-state title shown when the account could not be loaded */
+	could_not_load_account: "Couldn't load your account"
 } as const

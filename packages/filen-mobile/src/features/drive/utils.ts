@@ -105,6 +105,39 @@ export function getDriveEmptyStateTitleKey(type: DrivePathType | null): DriveEmp
 	return DRIVE_EMPTY_STATE_TITLE_KEY[type]
 }
 
+type DriveEmptyStateDescriptionKey =
+	| "trash_is_empty_description"
+	| "no_favorites_description"
+	| "no_recents_description"
+	| "no_shared_in_items_description"
+	| "no_shared_out_items_description"
+	| "no_links_description"
+	| "no_offline_items_description"
+	| "folder_is_empty_description"
+
+// Empty-state subtitle key per drive variant — mirrors DRIVE_EMPTY_STATE_TITLE_KEY
+// so the ListEmpty under each Drive variant gets a fitting one-line description.
+export const DRIVE_EMPTY_STATE_DESCRIPTION_KEY: Record<DrivePathType, DriveEmptyStateDescriptionKey> = {
+	trash: "trash_is_empty_description",
+	favorites: "no_favorites_description",
+	recents: "no_recents_description",
+	sharedIn: "no_shared_in_items_description",
+	sharedOut: "no_shared_out_items_description",
+	links: "no_links_description",
+	offline: "no_offline_items_description",
+	drive: "folder_is_empty_description",
+	photos: "folder_is_empty_description",
+	linked: "folder_is_empty_description"
+}
+
+export function getDriveEmptyStateDescriptionKey(type: DrivePathType | null): DriveEmptyStateDescriptionKey {
+	if (type === null) {
+		return DRIVE_EMPTY_STATE_DESCRIPTION_KEY.drive
+	}
+
+	return DRIVE_EMPTY_STATE_DESCRIPTION_KEY[type]
+}
+
 /**
  * Resolves the breadcrumb/header title for a Drive screen. Mirrors the original
  * inline derivation:

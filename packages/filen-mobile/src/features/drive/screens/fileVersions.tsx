@@ -410,6 +410,7 @@ const FileVersions = () => {
 						<ListEmpty
 							icon="time-outline"
 							title={t("no_file_versions")}
+							description={t("no_file_versions_description")}
 						/>
 					)}
 					renderItem={({ item: version }) => {

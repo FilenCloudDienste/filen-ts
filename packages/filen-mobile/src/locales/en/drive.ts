@@ -158,6 +158,8 @@ export const drive = {
 	offline_sync_errors_count_other: "{{count}} sync errors",
 	/** Empty state of the sync errors screen when the last sync pass produced no errors */
 	no_offline_sync_errors: "No sync errors",
+	/** Empty-state subtitle on the offline sync-errors screen when there are no errors (the clean state) */
+	no_offline_sync_errors_description: "All your offline files are up to date.",
 	/** Per-row indicator on the offline listing for an item whose last sync attempt failed */
 	offline_sync_failed: "Sync failed",
 	/** Sync error kind label: downloading the file's content failed */
@@ -232,6 +234,24 @@ export const drive = {
 	no_offline_items: "No offline items",
 	/** Empty state for a directory that contains no items */
 	folder_is_empty: "This directory is empty",
+	/** Empty-state subtitle for an empty directory (ListEmpty) */
+	folder_is_empty_description: "Upload files or create a directory to fill it.",
+	/** Empty-state subtitle for the trash view */
+	trash_is_empty_description: "Items you move to the trash will appear here.",
+	/** Empty-state subtitle for the favorites view */
+	no_favorites_description: "Items you mark as favorites will appear here.",
+	/** Empty-state subtitle for the recents view */
+	no_recents_description: "Files you open will appear here.",
+	/** Empty-state subtitle for the shared-with-you view */
+	no_shared_in_items_description: "Items others share with you will appear here.",
+	/** Empty-state subtitle for the shared-with-others view */
+	no_shared_out_items_description: "Items you share will appear here.",
+	/** Empty-state subtitle for the public-links view */
+	no_links_description: "Public links you create will appear here.",
+	/** Empty-state subtitle for the offline-files view */
+	no_offline_items_description: "Files you make available offline will appear here.",
+	/** Error-state title shown when a directory listing fails to load */
+	could_not_load_directory: "Couldn't load this directory",
 
 	// ── Per-item context menu actions (drive/item/menu.tsx) ───────────────────
 	/** Per-item context menu: download item to the device filesystem */

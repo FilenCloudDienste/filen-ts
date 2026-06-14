@@ -226,7 +226,7 @@ const Events = () => {
 							description={
 								firstPageErrCount > 0
 									? t("events_undecryptable", { count: firstPageErrCount })
-									: undefined
+									: t("no_events_description")
 							}
 						/>
 					)}

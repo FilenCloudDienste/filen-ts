@@ -321,11 +321,13 @@ function IncomingShare() {
 							<ListEmpty
 								icon="warning-outline"
 								title={t("error_resolving_shares")}
+								description={t("error_resolving_shares_description")}
 							/>
 						) : (
 							<ListEmpty
 								icon="time-outline"
 								title={t("no_resolved_shares")}
+								description={t("no_resolved_shares_description")}
 							/>
 						)
 					}

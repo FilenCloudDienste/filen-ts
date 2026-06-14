@@ -97,13 +97,16 @@ export const media = {
 	camera_upload_processing_failed: "This item could not be prepared for upload.",
 	/** Camera upload error: parts of the remote camera upload directory could not be listed,
 	 *  so the sync comparison may be incomplete (backup still continued) */
-	camera_upload_remote_listing_incomplete: "Some remote directories could not be listed. Backup continued, but items may be uploaded again.",
+	camera_upload_remote_listing_incomplete:
+		"Some remote directories could not be listed. Backup continued, but items may be uploaded again.",
 	/** Camera upload error: a device album could not be read during sync. {{album}} is the album title. */
 	camera_upload_album_listing_failed: "Could not read the album {{album}}. Its items were skipped during this sync.",
 
 	// ── Playlists list ────────────────────────────────────────────────────────
 	/** Playlists screen — header title */
 	playlists: "Playlists",
+	/** Playlists screen — search bar placeholder */
+	search_playlists: "Search playlists",
 	/** Playlists — empty state title */
 	no_playlists: "No playlists",
 	/** Playlists — playlist detail: shown when the playlist can't be found (e.g. a stale deep link) */
@@ -140,6 +143,8 @@ export const media = {
 	tracks_updated_other: "{{count}} tracks, updated {{date}}",
 
 	// ── Playlist detail ───────────────────────────────────────────────────────
+	/** Playlist detail — search bar placeholder */
+	search_tracks: "Search tracks",
 	/** Playlist detail — empty state title shown when the playlist has no tracks yet */
 	no_tracks: "No tracks",
 	/** Playlist detail track action-sheet — remove the track from this playlist */
@@ -161,5 +166,19 @@ export const media = {
 	/** Audio player mini-bar — fallback track title when no metadata title is available */
 	unknown_title: "Unknown title",
 	/** Audio player mini-bar — fallback artist name when no metadata artist is available */
-	unknown_artist: "Unknown artist"
+	unknown_artist: "Unknown artist",
+
+	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
+	/** Photos tab — empty-state subtitle when camera upload is on but no photos have backed up yet */
+	no_photos_description: "Photos and videos you back up will appear here.",
+	/** Playlists — empty-state subtitle when no playlists exist yet */
+	no_playlists_description: "Create a playlist to organize your music.",
+	/** Playlist detail — empty-state subtitle when the playlist has no tracks yet */
+	no_tracks_description: "Add tracks to this playlist to start listening.",
+	/** Camera-upload errors — empty-state subtitle when there are no errors (the clean state) */
+	no_camera_upload_errors_description: "All your photos and videos have backed up successfully.",
+	/** Playlist detail — subtitle shown when the playlist can't be found (e.g. a stale deep link) */
+	playlist_not_found_description: "It may have been deleted.",
+	/** Albums picker — error-state title shown when the device albums could not be loaded */
+	could_not_load_albums: "Couldn't load your albums"
 } as const

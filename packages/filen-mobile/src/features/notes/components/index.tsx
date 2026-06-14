@@ -5,8 +5,10 @@ import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithConte
 import { notesSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
+import Button from "@/components/ui/button"
 import { type Note as TNote, type NoteTag } from "@/types"
 import { run, fastLocaleCompare, cn } from "@filen/utils"
+import { createNoteFlow, createTagFlow } from "@/features/notes/components/notesActions"
 import { tagDisplayName } from "@/lib/decryption"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
@@ -195,19 +197,65 @@ const Notes = () => {
 		})
 	}, [liveNoteUuidsKey])
 
-	const notesEmptyComponent = () => (
-		<ListEmpty
-			icon="document-text-outline"
-			title={t("no_notes")}
-		/>
-	)
+	const searchActive = searchQuery.trim().length > 0
 
-	const tagsEmptyComponent = () => (
-		<ListEmpty
-			icon="pricetag-outline"
-			title={t("no_tags")}
-		/>
-	)
+	const notesEmptyComponent = () => {
+		if (searchActive) {
+			return (
+				<ListEmpty
+					icon="search-outline"
+					title={t("no_results")}
+					description={t("no_results_description")}
+				/>
+			)
+		}
+
+		return (
+			<ListEmpty
+				icon="document-text-outline"
+				title={t("no_notes")}
+				description={t("no_notes_description")}
+				action={
+					<Button
+						onPress={() => {
+							void createNoteFlow({ t, tag })
+						}}
+					>
+						{t("create_note")}
+					</Button>
+				}
+			/>
+		)
+	}
+
+	const tagsEmptyComponent = () => {
+		if (searchActive) {
+			return (
+				<ListEmpty
+					icon="search-outline"
+					title={t("no_results")}
+					description={t("no_results_description")}
+				/>
+			)
+		}
+
+		return (
+			<ListEmpty
+				icon="pricetag-outline"
+				title={t("no_tags")}
+				description={t("no_tags_description")}
+				action={
+					<Button
+						onPress={() => {
+							void createTagFlow({ t })
+						}}
+					>
+						{t("create_tag")}
+					</Button>
+				}
+			/>
+		)
+	}
 
 	return (
 		<Fragment>

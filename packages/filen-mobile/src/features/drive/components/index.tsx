@@ -18,7 +18,7 @@ import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
-import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, filterDriveItemsBySearchQuery, mergeByUuid } from "@/features/drive/utils"
+import { getDriveEmptyStateIcon, getDriveEmptyStateTitleKey, getDriveEmptyStateDescriptionKey, filterDriveItemsBySearchQuery, mergeByUuid } from "@/features/drive/utils"
 import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
 import { LazyWrapper } from "@/components/lazyWrapper"
@@ -131,8 +131,19 @@ const Drive = () => {
 								return (
 									<ListEmpty
 										icon="alert-circle-outline"
-										title={t("error_generic")}
+										title={t("could_not_load_directory")}
+										description={t("please_check_connection")}
 										action={<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>}
+									/>
+								)
+							}
+
+							if (searchQuery.trim().length > 0) {
+								return (
+									<ListEmpty
+										icon="search-outline"
+										title={t("no_results")}
+										description={t("no_results_description")}
 									/>
 								)
 							}
@@ -141,6 +152,7 @@ const Drive = () => {
 								<ListEmpty
 									icon={getDriveEmptyStateIcon(drivePath.type)}
 									title={t(getDriveEmptyStateTitleKey(drivePath.type))}
+									description={t(getDriveEmptyStateDescriptionKey(drivePath.type))}
 								/>
 							)
 						}}

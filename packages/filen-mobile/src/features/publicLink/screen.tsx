@@ -581,7 +581,18 @@ function PublicLink() {
 				) : isPublicLinkQueryError(publicLinkStatusQuery.status, accountQuery.status) ? (
 					<ListEmpty
 						icon="warning-outline"
-						title={t("error_generic")}
+						title={t("could_not_load_link")}
+						description={t("please_check_connection")}
+						action={
+							<Button
+								onPress={() => {
+									void publicLinkStatusQuery.refetch()
+									void accountQuery.refetch()
+								}}
+							>
+								{t("try_again")}
+							</Button>
+						}
 					/>
 				) : (
 					<View className="flex-1 items-center justify-center bg-transparent">

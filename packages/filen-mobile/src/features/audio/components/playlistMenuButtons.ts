@@ -12,31 +12,79 @@ import type { MenuButton } from "@/components/ui/menu"
 import { type TFunction } from "i18next"
 
 /**
+ * Shared "add tracks to playlist" flow: opens the drive item picker filtered to audio files,
+ * deduplicates against the playlist's current items, then persists the additions.
+ * Called from both the playlist header menu and the empty-state CTA.
+ */
+export async function addTracksToPlaylistFlow({ playlist }: { playlist: PlaylistWithItems }): Promise<void> {
+	const selectDriveItemsResult = await run(async () => {
+		return await selectDriveItems({
+			type: "multiple",
+			files: true,
+			directories: false,
+			items: playlist.files.map(file => file.item),
+			previewType: "audio"
+		})
+	})
+
+	if (!selectDriveItemsResult.success) {
+		console.error(selectDriveItemsResult.error)
+		alerts.error(selectDriveItemsResult.error)
+
+		return
+	}
+
+	if (selectDriveItemsResult.data.cancelled || selectDriveItemsResult.data.selectedItems.length === 0) {
+		return
+	}
+
+	const result = await runWithLoading(async () => {
+		await audio.addFilesToPlaylist({
+			playlist,
+			items: selectDriveItemsResult.data.cancelled ? [] : selectDriveItemsResult.data.selectedItems
+		})
+	})
+
+	if (!result.success) {
+		console.error(result.error)
+		alerts.error(result.error)
+	}
+}
+
+/**
  * Right-menu buttons shown while tracks are selected (bulk actions).
  */
 export function buildSelectionMenuButtons({
 	t,
 	playlist,
-	selectedTracks
+	selectedTracks,
+	visibleTracks
 }: {
 	t: TFunction
 	playlist: PlaylistWithItems
 	selectedTracks: PlaylistTrack[]
+	visibleTracks?: PlaylistTrack[]
 }): MenuButton[] {
 	const buttons: MenuButton[] = []
 
+	// Select-all operates on the currently visible (search-filtered) set, falling back to
+	// the full playlist when no filter is applied — so "Select all" never reaches hidden tracks.
+	const selectableTracks = visibleTracks ?? playlist.files
+	const allVisibleSelected =
+		selectableTracks.length > 0 && selectableTracks.every(track => selectedTracks.some(st => st.uuid === track.uuid))
+
 	buttons.push({
 		id: "selectAllTracks",
-		title: selectedTracks.length === playlist.files.length ? t("deselect_all") : t("select_all"),
+		title: allVisibleSelected ? t("deselect_all") : t("select_all"),
 		icon: "select",
 		onPress: () => {
-			if (selectedTracks.length === playlist.files.length) {
+			if (allVisibleSelected) {
 				usePlaylistTracksStore.getState().clearSelectedTracks()
 
 				return
 			}
 
-			usePlaylistTracksStore.getState().selectAllTracks(playlist.files)
+			usePlaylistTracksStore.getState().selectAllTracks(selectableTracks)
 		}
 	})
 
@@ -319,40 +367,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 			title: t("add_tracks"),
 			requiresOnline: true,
 			onPress: async () => {
-				const selectDriveItemsResult = await run(async () => {
-					return await selectDriveItems({
-						type: "multiple",
-						files: true,
-						directories: false,
-						items: playlist.files.map(file => file.item),
-						previewType: "audio"
-					})
-				})
-
-				if (!selectDriveItemsResult.success) {
-					console.error(selectDriveItemsResult.error)
-					alerts.error(selectDriveItemsResult.error)
-
-					return
-				}
-
-				if (selectDriveItemsResult.data.cancelled || selectDriveItemsResult.data.selectedItems.length === 0) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await audio.addFilesToPlaylist({
-						playlist,
-						items: selectDriveItemsResult.data.cancelled ? [] : selectDriveItemsResult.data.selectedItems
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
+				await addTracksToPlaylistFlow({ playlist })
 			}
 		},
 		{

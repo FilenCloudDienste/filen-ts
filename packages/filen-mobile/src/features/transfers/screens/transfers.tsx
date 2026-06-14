@@ -477,6 +477,7 @@ const Transfers = () => {
 						<ListEmpty
 							icon="sync-outline"
 							title={t("no_transfers")}
+							description={t("no_transfers_description")}
 						/>
 					)}
 					contentContainerStyle={{

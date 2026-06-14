@@ -99,5 +99,13 @@ export const drivePreview = {
 	/** Confirmation dialog title shown before deleting every past version of the file */
 	delete_all_versions: "Delete all versions",
 	/** Confirmation dialog message shown before deleting every past version of the file */
-	delete_all_versions_confirmation: "Are you sure you want to delete all versions of this file?"
+	delete_all_versions_confirmation: "Are you sure you want to delete all versions of this file?",
+
+	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
+	/** Gallery — empty-state subtitle when there is nothing to preview */
+	no_preview_description: "There's nothing here to preview.",
+	/** File versions — empty-state subtitle when the file has no previous versions */
+	no_file_versions_description: "Older versions of this file will appear here as you change it.",
+	/** Public link — error-state title shown when the link status could not be loaded */
+	could_not_load_link: "Couldn't load this link"
 } as const

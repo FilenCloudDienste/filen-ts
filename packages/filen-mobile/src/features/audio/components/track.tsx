@@ -216,7 +216,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 	]
 }
 
-export function Track({ track, playlist }: { track: TrackType; playlist: PlaylistWithItems }) {
+export function Track({ track, playlist, reorderDisabled }: { track: TrackType; playlist: PlaylistWithItems; reorderDisabled?: boolean }) {
 	const { t } = useTranslation()
 	const drag = useReorderableDrag()
 	const isCurrent = useIsCurrentTrack(track.item.data.uuid)
@@ -248,7 +248,7 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 		<View className={cn("bg-transparent flex-row items-center px-4", isSelected && "bg-background-tertiary")}>
 			<PressableScale
 				className="bg-transparent flex-row items-center gap-3 flex-1"
-				onLongPress={areTracksSelected ? undefined : drag}
+				onLongPress={areTracksSelected || reorderDisabled ? undefined : drag}
 				onPress={() => {
 					if (areTracksSelected) {
 						usePlaylistTracksStore.getState().toggleSelectedTrack(track)
@@ -309,7 +309,9 @@ export function Track({ track, playlist }: { track: TrackType; playlist: Playlis
 						type="dropdown"
 						isAnchoredToRight={true}
 						buttons={
-							undecryptable ? buildUndecryptableTrackButtons({ t, track, playlist }) : buildTrackButtons({ t, track, playlist })
+							undecryptable
+								? buildUndecryptableTrackButtons({ t, track, playlist })
+								: buildTrackButtons({ t, track, playlist })
 						}
 					>
 						<EllipsisMenuTrigger />

@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 export type ParticipantListProps<T> = {
 	title: string
 	emptyTitle: string
+	emptyDescription?: string
 	participants: readonly T[]
 	keyExtractor: (participant: T) => string
 	toRowProps: (participant: T) => ParticipantRowProps
@@ -61,6 +62,7 @@ export const ParticipantList = <T,>(props: ParticipantListProps<T>) => {
 							<ListEmpty
 								icon="people-outline"
 								title={props.emptyTitle}
+								description={props.emptyDescription}
 							/>
 						)}
 						renderItem={({ item: participant }) => {

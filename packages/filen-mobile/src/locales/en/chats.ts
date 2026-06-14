@@ -35,8 +35,6 @@ export const chats = {
 	// ── Chat list empty states ────────────────────────────────────────────────
 	/** Empty-state title shown when the chat list has no chats at all */
 	no_chats: "No chats",
-	/** Empty-state title shown when a search returns no matching chats */
-	no_chats_search: "No chats found",
 
 	// ── Chat list row — last-message preview ─────────────────────────────────
 	/** Placeholder shown in the last-message preview when a chat has no messages yet */
@@ -118,5 +116,13 @@ export const chats = {
 	/** Confirmation dialog message shown before removing a single participant */
 	remove_participant_confirmation: "Are you sure you want to remove this participant?",
 	/** Confirmation dialog message shown before bulk-removing selected participants */
-	remove_selected_participants_confirmation: "Are you sure you want to remove all selected participants?"
+	remove_selected_participants_confirmation: "Are you sure you want to remove all selected participants?",
+
+	// ── Empty-state subtitles (ListEmpty descriptions) ────────────────────────
+	/** Chat list — empty-state subtitle when no chats exist yet */
+	no_chats_description: "Start a conversation with one of your contacts.",
+	/** Conversation — empty-state subtitle when the chat has no messages yet */
+	no_messages_description: "Send a message to start the conversation.",
+	/** Chat participants — empty-state subtitle when the chat has no other participants */
+	no_chat_participants_description: "Add people to start chatting."
 } as const

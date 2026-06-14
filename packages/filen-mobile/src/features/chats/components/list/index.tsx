@@ -11,6 +11,8 @@ import { chatDisplayName } from "@/lib/decryption"
 import { Platform } from "react-native"
 import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import Button from "@/components/ui/button"
+import { createChatFlow } from "@/features/chats/chatsActions"
 
 const List = ({ searchQuery }: { searchQuery: string }) => {
 	const { t } = useTranslation()
@@ -92,12 +94,21 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 		return <Chat info={info} />
 	}
 
-	const emptyComponent = () => (
-		<ListEmpty
-			icon="chatbubbles-outline"
-			title={searchQuery && searchQuery.length > 0 ? t("no_chats_search") : t("no_chats")}
-		/>
-	)
+	const emptyComponent = () =>
+		searchQuery && searchQuery.length > 0 ? (
+			<ListEmpty
+				icon="search-outline"
+				title={t("no_results")}
+				description={t("no_results_description")}
+			/>
+		) : (
+			<ListEmpty
+				icon="chatbubbles-outline"
+				title={t("no_chats")}
+				description={t("no_chats_description")}
+				action={<Button onPress={() => { void createChatFlow() }}>{t("create_chat")}</Button>}
+			/>
+		)
 
 	return (
 		<VirtualList

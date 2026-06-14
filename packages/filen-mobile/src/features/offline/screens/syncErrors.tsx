@@ -152,6 +152,7 @@ const SyncErrors = () => {
 						<ListEmpty
 							icon="checkmark-outline"
 							title={t("no_offline_sync_errors")}
+							description={t("no_offline_sync_errors_description")}
 						/>
 					)}
 					renderItem={({ item: error }) => {

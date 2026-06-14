@@ -348,6 +348,7 @@ const NoteParticipants = () => {
 		<ParticipantList
 			title={inSelectionMode ? t("selected", { count: selectedNoteParticipants.length }) : t("note_participants")}
 			emptyTitle={t("no_note_participants")}
+			emptyDescription={t("no_note_participants_description")}
 			participants={participants}
 			keyExtractor={participant => participant.userId.toString()}
 			toRowProps={toRowProps}

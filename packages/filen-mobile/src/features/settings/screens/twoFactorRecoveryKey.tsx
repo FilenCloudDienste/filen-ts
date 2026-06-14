@@ -38,6 +38,7 @@ function TwoFactorRecoveryKey() {
 					<ListEmpty
 						icon="warning-outline"
 						title={t("two_factor_recovery_key_unavailable")}
+						description={t("two_factor_recovery_key_unavailable_description")}
 					/>
 				) : (
 					<SettingsScrollView>

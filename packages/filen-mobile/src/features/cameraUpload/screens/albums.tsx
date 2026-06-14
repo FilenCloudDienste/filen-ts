@@ -190,7 +190,8 @@ const Albums = () => {
 					) : albumsQuery.status === "error" ? (
 						<ListEmpty
 							icon="warning-outline"
-							title={t("error_generic")}
+							title={t("could_not_load_albums")}
+							description={t("please_check_connection")}
 							action={<Button onPress={() => refetch()}>{t("try_again")}</Button>}
 						/>
 					) : (
