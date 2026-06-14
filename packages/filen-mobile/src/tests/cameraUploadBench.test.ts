@@ -133,6 +133,10 @@ vi.mock("@filen/sdk-rs", () => ({
 			}
 		}
 	},
+	AnyNormalDir_Tags: {
+		Dir: "Dir",
+		Root: "Root"
+	},
 	AnyDirWithContext: {
 		Normal: class {
 			tag = "Normal"
@@ -162,7 +166,8 @@ vi.mock("@/lib/auth", () => ({
 					return {
 						uuid: `created-dir-${H.counters.createDirCalls}`
 					}
-				}
+				},
+				getDirOptional: async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } })
 			}
 		})
 	}
@@ -272,7 +277,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 			file,
 			undecryptable: meta === null
 		}
-	}
+	},
+	isTrashParent: (parent: { tag?: string } | null | undefined) => parent?.tag === "Trash"
 }))
 
 vi.mock("@/lib/paths", () => ({

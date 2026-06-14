@@ -1,7 +1,7 @@
 import * as MediaLibrary from "expo-media-library/next"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import auth from "@/lib/auth"
-import { type FileWithPath, AnyNormalDir, AnyDirWithContext } from "@filen/sdk-rs"
+import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo } from "@/lib/paths"
@@ -32,6 +32,7 @@ import {
 	composeLocalTreePath,
 	rawRemoteTreePath,
 	normalizeCameraUploadHashEntry,
+	isDirUsable,
 	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY
 } from "@/features/cameraUpload/cameraUploadHelpers"
 
@@ -1002,6 +1003,32 @@ class CameraUpload {
 				const lowPowerMode = await Battery.isLowPowerModeEnabledAsync()
 
 				if (lowPowerMode) {
+					return
+				}
+			}
+
+			// Destination-existence gate: if the configured remote directory was deleted or moved
+			// to the trash on the server, every listRemote / createDir / upload below would fail
+			// into the error store and surface banners forever. Exit early and silently — same
+			// shape as the `!config.remoteDir` bail above (the setSyncing-false defer is not armed
+			// yet). Only a DEFINITIVE verdict bails: undefined (deleted) or a Trash-parented Dir.
+			// The account root can never be deleted/trashed, so it needs no request. A TRANSIENT
+			// getDirOptional failure (network) must NOT bail — fall through to the normal pipeline,
+			// which already tolerates a degraded remote listing; the md5 cache shields re-uploads.
+			const remoteDir = config.remoteDir
+
+			if (remoteDir.tag !== AnyNormalDir_Tags.Root) {
+				const destinationCheck = await run(async () => {
+					const { authedSdkClient } = await auth.getSdkClients()
+
+					return isDirUsable(
+						await authedSdkClient.getDirOptional(remoteDir.inner[0].uuid, {
+							signal: abortController.signal
+						})
+					)
+				})
+
+				if (destinationCheck.success && !destinationCheck.data) {
 					return
 				}
 			}

@@ -97,6 +97,10 @@ vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir: {
 		Dir: vi.fn()
 	},
+	AnyNormalDir_Tags: {
+		Dir: "Dir",
+		Root: "Root"
+	},
 	AnyDirWithContext: {
 		Normal: vi.fn()
 	}
@@ -176,7 +180,8 @@ vi.mock("@/lib/utils", () => ({
 }))
 
 vi.mock("@/lib/sdkUnwrap", () => ({
-	unwrapFileMeta: vi.fn()
+	unwrapFileMeta: vi.fn(),
+	isTrashParent: (parent: { tag?: string } | null | undefined) => parent?.tag === "Trash"
 }))
 
 vi.mock("@/lib/paths", () => ({
@@ -246,7 +251,9 @@ function installRemoteListing(files: RemoteFixtureFile[]): void {
 			})),
 			createDir: vi.fn(async () => ({
 				uuid: "created-dir"
-			}))
+			})),
+			// Destination-existence gate: a usable dir so the sync proceeds past the gate.
+			getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
 		}
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	} as any)

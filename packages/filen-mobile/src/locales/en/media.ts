@@ -40,6 +40,14 @@ export const media = {
 	cloud_directory_description: "No directory selected.",
 	/** Camera upload settings — subtitle when the root of the cloud drive is selected as destination */
 	cloud_directory_root_description: "Cloud drive root",
+	/** Camera upload — title shown when the selected cloud directory no longer exists or was trashed.
+	 *  Used both as the settings warning row title and the photos tab empty-state title. */
+	camera_upload_destination_unavailable: "Cloud directory unavailable",
+	/** Camera upload — description for the unavailable-destination warning (settings) / empty state (photos tab) */
+	camera_upload_destination_unavailable_description:
+		"The cloud directory for camera upload was deleted or moved to the trash. Choose a new directory to continue syncing.",
+	/** Camera upload settings — button on the photos tab empty state that opens camera upload settings to pick a new directory */
+	choose_new_directory: "Choose a new directory",
 	/** Camera upload settings — row title for the include-videos toggle */
 	videos: "Videos",
 	/** Camera upload settings — subtitle under the include-videos toggle */

@@ -6,6 +6,17 @@ globalThis.__DEV__ = true
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
+// isDirUsable delegates the trash check to isTrashParent (real impl reads
+// parent.tag === ParentUuid_Tags.Trash). Stub @/lib/sdkUnwrap directly so the
+// helpers test stays light (the real module pulls the whole SDK + cache).
+vi.mock("@/lib/sdkUnwrap", () => ({
+	isTrashParent: (parent: { tag?: string } | null | undefined) => parent?.tag === "Trash"
+}))
+
+// type-only import of Dir from @filen/sdk-rs is erased at runtime, but the module
+// graph still resolves it — stub it to avoid pulling the native SDK into this test.
+vi.mock("@filen/sdk-rs", () => ({}))
+
 import {
 	modifyAssetPathOnCollision,
 	collisionNameSuffix,
@@ -18,6 +29,7 @@ import {
 	composeLocalTreePath,
 	rawRemoteTreePath,
 	normalizeCameraUploadHashEntry,
+	isDirUsable,
 	CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY,
 	type CollisionParams
 } from "@/features/cameraUpload/cameraUploadHelpers"
@@ -830,5 +842,25 @@ describe("#B7 — null-creationTime local/remote key symmetry through the upload
 
 		expect(localHash).toBe("0")
 		expect(remoteHash).toBe("0")
+	})
+})
+
+// ─── isDirUsable (camera-upload destination availability) ────────────────────
+
+describe("isDirUsable", () => {
+	it("returns true for a directory with a real (Uuid) parent", () => {
+		const dir = { uuid: "dir-uuid", parent: { tag: "Uuid", inner: ["parent-uuid"] } } as any
+
+		expect(isDirUsable(dir)).toBe(true)
+	})
+
+	it("returns false when the directory is undefined (permanently deleted on the server)", () => {
+		expect(isDirUsable(undefined)).toBe(false)
+	})
+
+	it("returns false when the directory is in the trash (parent tag Trash)", () => {
+		const dir = { uuid: "dir-uuid", parent: { tag: "Trash" } } as any
+
+		expect(isDirUsable(dir)).toBe(false)
 	})
 })
