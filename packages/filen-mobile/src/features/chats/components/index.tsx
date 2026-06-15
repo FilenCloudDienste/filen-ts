@@ -16,11 +16,14 @@ import { runBulk } from "@/lib/bulkOps"
 import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread } from "@/features/chats/chatSelectors"
 import { useTranslation } from "react-i18next"
 import { LazyWrapper } from "@/components/lazyWrapper"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
 
 const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const { t } = useTranslation()
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
+	const blocked = useBlockedUsers()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
@@ -39,7 +42,11 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 	// Live-list cross-reference: stale selections could carry old `undecryptable`
 	// flags after a refresh. Resolve against `chats` to read the current flag.
 	const liveSelectedChats = selectedChats.map(sel => chats.find(live => live.uuid === sel.uuid) ?? sel)
-	const chatFlags = aggregateChatSelectionFlags(liveSelectedChats, stringigiedClient?.userId)
+	const chatFlags = aggregateChatSelectionFlags(liveSelectedChats, stringigiedClient?.userId, blocked, uuid =>
+		chatMessagesQueryGet({
+			uuid
+		})
+	)
 
 	const headerLeftItems = (() => {
 		if (selectedChats.length === 0) {

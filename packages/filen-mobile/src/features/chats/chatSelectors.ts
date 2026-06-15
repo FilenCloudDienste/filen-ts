@@ -1,4 +1,5 @@
 import { type Chat, type ChatMessage } from "@/types"
+import { type BlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/blockedSelectors"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.
@@ -42,18 +43,24 @@ export const EMPTY_CHAT_FLAGS: ChatSelectionFlags = Object.freeze({
 	includesUndecryptable: false
 }) as ChatSelectionFlags
 
-export function isMessageUnread(message: ChatMessage, chat: Chat, userId: bigint | undefined): boolean {
+export function isMessageUnread(message: ChatMessage, chat: Chat, userId: bigint | undefined, blocked: BlockedUsers = EMPTY_BLOCKED_USERS): boolean {
 	return (
 		chat.lastFocus !== undefined &&
 		chat.lastFocus !== null &&
 		!!chat.lastMessage &&
 		!chat.muted &&
 		message.sentTimestamp > chat.lastFocus &&
-		message.inner.senderId !== userId
+		message.inner.senderId !== userId &&
+		!blocked.userIds.has(message.inner.senderId)
 	)
 }
 
-export function chatHasUnread(c: Chat, userId: bigint): boolean {
+export function chatHasUnread(
+	c: Chat,
+	userId: bigint,
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS,
+	getMessages?: (uuid: string) => readonly ChatMessage[] | undefined
+): boolean {
 	if (c.muted) {
 		return false
 	}
@@ -62,8 +69,24 @@ export function chatHasUnread(c: Chat, userId: bigint): boolean {
 		return false
 	}
 
-	if (c.lastMessage.inner.senderId === userId) {
+	const lastSenderId = c.lastMessage.inner.senderId
+
+	// Last message is our own → not unread.
+	if (lastSenderId === userId) {
 		return false
+	}
+
+	// Last message is from a blocked sender — the cheap last-message check would false-positive.
+	// Scan the cached message list for any unread message from a non-blocked, non-self sender
+	// (false unless we can see the messages).
+	if (blocked.userIds.has(lastSenderId)) {
+		const messages = getMessages?.(c.uuid)
+
+		if (!messages) {
+			return false
+		}
+
+		return messages.some(m => isMessageUnread(m, c, userId, blocked))
 	}
 
 	return c.lastMessage.sentTimestamp > c.lastFocus
@@ -87,7 +110,12 @@ export function allVisibleChatsSelected(visibleChats: readonly Chat[], selectedC
 	return visibleChats.every(c => selectedUuids.has(c.uuid))
 }
 
-export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigint | undefined): ChatSelectionFlags {
+export function aggregateChatSelectionFlags(
+	chats: readonly Chat[],
+	userId: bigint | undefined,
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS,
+	getMessages?: (uuid: string) => readonly ChatMessage[] | undefined
+): ChatSelectionFlags {
 	if (chats.length === 0 || userId === undefined) {
 		return EMPTY_CHAT_FLAGS
 	}
@@ -114,7 +142,7 @@ export function aggregateChatSelectionFlags(chats: readonly Chat[], userId: bigi
 			selfIsParticipantNotOwnerOfEvery = false
 		}
 
-		if (chatHasUnread(c, userId)) {
+		if (chatHasUnread(c, userId, blocked, getMessages)) {
 			includesUnread = true
 		}
 
