@@ -5,6 +5,8 @@ import fileCache from "@/lib/fileCache"
 import audioCache from "@/features/audio/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
 import offline from "@/features/offline/offline"
+import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
+import { SDK_CACHE_DIRECTORY } from "@/lib/storageRoots"
 
 export const BASE_QUERY_KEY = "useCacheSizes"
 
@@ -13,6 +15,9 @@ export type CacheSizes = {
 	fileCache: number
 	audioCache: number
 	sandbox: number
+	// On-disk size of the SDK search index DB. Display-only — never user-clearable
+	// (clearing it just forces a full re-sync), and it's wiped on logout anyway.
+	sdkCache: number
 	offline: {
 		size: number
 		files: number
@@ -46,12 +51,16 @@ export async function fetchData(): Promise<CacheSizes> {
 	await yieldToUI()
 
 	const sandboxSize = sandboxCache.size()
+	await yieldToUI()
+
+	const sdkCacheSize = SDK_CACHE_DIRECTORY.exists ? sumLocalDirectoryFileBytes(SDK_CACHE_DIRECTORY) : 0
 
 	return {
 		thumbnails: thumbnailsSize,
 		fileCache: fileCacheSize,
 		audioCache: audioCacheSize,
 		sandbox: sandboxSize,
+		sdkCache: sdkCacheSize,
 		offline: offlineSize
 	}
 }

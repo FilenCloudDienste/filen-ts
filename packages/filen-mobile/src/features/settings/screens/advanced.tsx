@@ -285,6 +285,13 @@ function Advanced() {
 										successMessage: t("all_disk_caches_cleared")
 									})
 								}
+							},
+							{
+								// Display-only: the SDK search index isn't user-clearable (clearing it
+								// just forces a full re-sync) and is wiped on logout. No onPress.
+								icon: "search-outline",
+								title: t("search_index"),
+								subTitle: formatSize(sizes?.sdkCache)
 							}
 						]}
 					/>

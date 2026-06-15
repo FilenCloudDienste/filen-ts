@@ -233,6 +233,8 @@ export const settings = {
 	clear_all_disk_caches_confirmation: "This clears all disk caches. Cached data will be regenerated or re-downloaded as needed.",
 	/** Toast after all disk caches were cleared */
 	all_disk_caches_cleared: "All disk caches cleared",
+	/** Advanced — display-only row title: on-disk size of the local search index (not clearable) */
+	search_index: "Search index",
 	/** Advanced — row title: remove all files saved for offline access */
 	clear_offline_files: "Clear offline files",
 	/** Advanced — confirm message before clearing offline files (they remain in the cloud) */

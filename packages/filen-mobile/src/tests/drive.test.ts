@@ -33,7 +33,6 @@ const {
 		moveDir: vi.fn(),
 		moveFile: vi.fn(),
 		createDir: vi.fn(),
-		findItemMatchesForName: vi.fn(),
 		emptyTrash: vi.fn(),
 		removeSharedItem: vi.fn(),
 		restoreFileVersion: vi.fn(),
@@ -910,72 +909,6 @@ describe("drive.trash", () => {
 
 		await expect(drive.trash({ item })).rejects.toThrow("Invalid item type")
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
-	})
-})
-
-// ============================================================================
-// Drive.findItemMatchesForName
-// ============================================================================
-
-describe("drive.findItemMatchesForName", () => {
-	beforeEach(() => {
-		vi.clearAllMocks()
-		mockGetSdkClients.mockResolvedValue({ authedSdkClient: mockAuthedSdkClient })
-	})
-
-	it("trims and lowercases search query before SDK call", async () => {
-		mockAuthedSdkClient.findItemMatchesForName.mockResolvedValue([])
-
-		await drive.findItemMatchesForName({ name: "  REPORT  " })
-
-		expect(mockAuthedSdkClient.findItemMatchesForName).toHaveBeenCalledWith("report", undefined)
-	})
-
-	it("returns empty array when SDK returns no results", async () => {
-		mockAuthedSdkClient.findItemMatchesForName.mockResolvedValue([])
-
-		const result = await drive.findItemMatchesForName({ name: "anything" })
-
-		expect(result).toEqual([])
-	})
-
-	it("filters out non-NormalDir and non-File tagged results", async () => {
-		const sdkResults = [
-			{ item: { tag: "LinkedDir", inner: [{}] }, path: "/some/path" },
-			{ item: { tag: "NormalDir", inner: [{ uuid: "dir-0001" }] }, path: "/dir/path" },
-			{ item: { tag: "File", inner: [{ uuid: "file-0001", region: "us-east-1" }] }, path: "/file/path" }
-		]
-
-		mockAuthedSdkClient.findItemMatchesForName.mockResolvedValue(sdkResults)
-		mockUnwrappedDirIntoDriveItem.mockReturnValue({ type: "directory", data: { uuid: "dir-0001" } } as any)
-		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-0001" } } as any)
-		mockUnwrapDirMeta.mockReturnValue({ uuid: "dir-0001" })
-		mockUnwrapFileMeta.mockReturnValue({ uuid: "file-0001" })
-
-		const result = await drive.findItemMatchesForName({ name: "report" })
-
-		// LinkedDir filtered out → only 2 results
-		expect(result).toHaveLength(2)
-	})
-
-	// E3 — the SDK search path is RAW decrypted names: only the outer shape is normalized
-	// (leading "/"); literal %XX escapes must survive verbatim and the percent-DECODING
-	// normalizeFilePathForSdk must NOT touch it.
-	it("keeps result paths raw (leading slash only, literal %XX preserved, no decode)", async () => {
-		const sdkResults = [
-			{ item: { tag: "File", inner: [{ uuid: "file-0001", region: "us-east-1" }] }, path: "foo/Invoice %20 backup.pdf" },
-			{ item: { tag: "File", inner: [{ uuid: "file-0002", region: "us-east-1" }] }, path: "/already/rooted" }
-		]
-
-		mockAuthedSdkClient.findItemMatchesForName.mockResolvedValue(sdkResults)
-		mockUnwrappedFileIntoDriveItem.mockReturnValue({ type: "file", data: { uuid: "file-0001" } } as any)
-		mockUnwrapFileMeta.mockReturnValue({ uuid: "file-0001" })
-
-		const result = await drive.findItemMatchesForName({ name: "bar" })
-
-		expect(result[0]!.path).toBe("/foo/Invoice %20 backup.pdf")
-		expect(result[1]!.path).toBe("/already/rooted")
-		expect(mockNormalizeFilePathForSdk).not.toHaveBeenCalled()
 	})
 })
 
