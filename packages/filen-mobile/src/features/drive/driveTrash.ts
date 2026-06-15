@@ -146,6 +146,10 @@ export async function restore({ item, signal }: { item: DriveItem; signal?: Abor
 		throw new Error("Invalid item type")
 	}
 
+	// Capture before reassignment — for the search self-heal emit below (Effect D keys its
+	// tombstone on the pre-restore uuid).
+	const previousUuid = item.data.uuid
+
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedItem =
 		item.type === "directory"
@@ -213,6 +217,16 @@ export async function restore({ item, signal }: { item: DriveItem; signal?: Abor
 	// Drop the item from an open preview showing it (restored out of trash).
 	events.emit("driveItemRemoved", {
 		uuid: item.data.uuid
+	})
+
+	// Un-suppress an active subtree cache-search: if this item was trashed while a /drive
+	// search was open, Effect D tombstoned it; this clears that tombstone (keyed on the
+	// pre-restore uuid + the restored uuid) so the next snapshot re-includes it. The gallery
+	// + Effect D only REPLACE present rows on this event, so the just-emitted removal above
+	// isn't undone (the item is absent → no-op there).
+	events.emit("driveItemUpdated", {
+		previousUuid,
+		item
 	})
 }
 

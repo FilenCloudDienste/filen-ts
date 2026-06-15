@@ -6,6 +6,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const {
 	mockGetSdkClients,
+	mockRestoreFile,
 	mockRestoreFileVersion,
 	mockDeleteFileVersion,
 	mockDeleteFilePermanently,
@@ -20,6 +21,7 @@ const {
 	mockUnwrappedFileIntoDriveItem
 } = vi.hoisted(() => ({
 	mockGetSdkClients: vi.fn(),
+	mockRestoreFile: vi.fn(),
 	mockRestoreFileVersion: vi.fn(),
 	mockDeleteFileVersion: vi.fn(),
 	mockDeleteFilePermanently: vi.fn().mockResolvedValue(undefined),
@@ -85,7 +87,8 @@ vi.mock("@/lib/cache", () => ({
 
 vi.mock("@filen/sdk-rs", () => ({}))
 
-import { restoreFileVersion, deleteVersion, deletePermanently } from "@/features/drive/driveTrash"
+import { restoreFileVersion, deleteVersion, deletePermanently, restore } from "@/features/drive/driveTrash"
+import events from "@/lib/events"
 import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import type { DriveItem } from "@/types"
 import type { FileVersion } from "@filen/sdk-rs"
@@ -112,6 +115,7 @@ beforeEach(() => {
 
 	mockGetSdkClients.mockResolvedValue({
 		authedSdkClient: {
+			restoreFile: mockRestoreFile,
 			restoreFileVersion: mockRestoreFileVersion,
 			deleteFileVersion: mockDeleteFileVersion,
 			deleteFilePermanently: mockDeleteFilePermanently,
@@ -120,6 +124,8 @@ beforeEach(() => {
 	})
 
 	// The SDK returns the modified file; the unwrap mock turns it into a DriveItem.
+	// `region` present so restore() takes the file branch.
+	mockRestoreFile.mockResolvedValue({ uuid: "file-1", region: "us" })
 	mockRestoreFileVersion.mockResolvedValue({ uuid: "file-1" })
 	mockDeleteFileVersion.mockResolvedValue(undefined)
 	mockDeleteFilePermanently.mockResolvedValue(undefined)
@@ -262,5 +268,38 @@ describe("deletePermanently — trash listing removal (bug #34)", () => {
 		await deletePermanently({ item: trashFileItem })
 
 		expect(mockCacheForgetItem).toHaveBeenCalledWith("trash-file-1")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// restore — search self-heal: emits driveItemRemoved (drop from trash views)
+// AND driveItemUpdated (un-suppress an active /drive subtree cache-search whose
+// Effect D tombstoned the item when it was trashed).
+// ---------------------------------------------------------------------------
+
+describe("restore — search self-heal events", () => {
+	it("emits driveItemRemoved then driveItemUpdated carrying the PRE-restore uuid", async () => {
+		// The mock rotates the uuid on restore (trash-file-1 -> file-1), proving the
+		// driveItemUpdated carries the pre-restore uuid as previousUuid (what Effect D
+		// tombstoned) and the restored uuid on the item.
+		const removed: { uuid: string }[] = []
+		const updated: { previousUuid: string; item: DriveItem }[] = []
+
+		const subRemoved = events.subscribe("driveItemRemoved", payload => removed.push(payload))
+		const subUpdated = events.subscribe("driveItemUpdated", payload => updated.push(payload))
+
+		await restore({ item: trashFileItem })
+
+		subRemoved.remove()
+		subUpdated.remove()
+
+		// Drops the restored item out of the trash list / preview (post-restore uuid).
+		expect(removed).toEqual([{ uuid: "file-1" }])
+
+		// Clears the drive-search tombstone keyed on the PRE-restore uuid so the next
+		// snapshot re-includes it; carries the restored item for any in-place replace.
+		expect(updated).toHaveLength(1)
+		expect(updated[0]?.previousUuid).toBe("trash-file-1")
+		expect(updated[0]?.item.data.uuid).toBe("file-1")
 	})
 })

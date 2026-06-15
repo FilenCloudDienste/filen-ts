@@ -161,6 +161,9 @@ export async function setDirColor({ item, color, signal }: { item: DriveItem; co
 		throw new Error("Invalid item type")
 	}
 
+	// Capture before reassignment — the uuid may rotate on a metadata write.
+	const previousUuid = item.data.uuid
+
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedDir = await authedSdkClient.setDirColor(item.data, color, toSignalOpts(signal))
 
@@ -181,6 +184,13 @@ export async function setDirColor({ item, color, signal }: { item: DriveItem; co
 			updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
 		})
 	}
+
+	// Self-heal an open preview + an active subtree cache-search (Effect D replaces the
+	// row by previousUuid and clears any tombstone) — color changed in place.
+	events.emit("driveItemUpdated", {
+		previousUuid,
+		item
+	})
 
 	return item
 }
