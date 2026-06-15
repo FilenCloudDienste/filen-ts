@@ -583,8 +583,12 @@ export function createMenuButtons({
 				promptOkText: t("trash"),
 				promptDestructive: false,
 				action: () => drive.trash({ item }),
-				// Close the preview when trashing from inside it.
-				dismissOnSuccess: isPreview === true
+				// trash emits driveItemRemoved, which the gallery's own subscriber acts on —
+				// moving to a neighbour, or popping (once) when it was the last previewed item.
+				// So DON'T also self-pop here: in a single-item preview both pops fired (the
+				// gallery's navigateBack + confirmedAction's router.back) and double-popped past
+				// the gallery; in a multi-item gallery it closed instead of advancing.
+				dismissOnSuccess: false
 			})
 		})
 	}
@@ -625,9 +629,12 @@ export function createMenuButtons({
 				promptMessage: t("confirm_delete_permanently"),
 				promptOkText: t("delete_permanently"),
 				action: () => drive.deletePermanently({ item }),
-				// Close the preview when deleting from inside it. From the trash list this
-				// stays put (previously it popped the whole trash modal on every file delete).
-				dismissOnSuccess: isPreview === true
+				// deletePermanently emits driveItemRemoved → the gallery's subscriber owns the
+				// navigation (neighbour, or a single pop when it was the last previewed item).
+				// Don't also self-pop (would double-pop a single-item preview / close a
+				// multi-item gallery instead of advancing). From the trash LIST this is a no-op
+				// either way (isPreview was false there).
+				dismissOnSuccess: false
 			})
 		})
 	}
