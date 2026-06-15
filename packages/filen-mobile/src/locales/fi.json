@@ -164,6 +164,8 @@
 	"contacts_requests": "Pyynnöt",
 	"continue": "Jatka",
 	"conversion_error": "Tietojesi käsittelyssä tapahtui virhe.",
+	"convert_heic_to_jpg": "Muunna HEIC JPG-muotoon",
+	"convert_heic_to_jpg_description": "Muunna HEIC/HEIF-valokuvat automaattisesti JPG-muotoon latauksen yhteydessä paremman yhteensopivuuden saavuttamiseksi laitteiden ja sovellusten välillä.",
 	"copied_to_clipboard": "Kopioitu leikepöydälle",
 	"copy": "Kopioi",
 	"copy_content": "Kopioi sisältö",

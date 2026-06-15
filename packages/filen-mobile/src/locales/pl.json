@@ -164,6 +164,8 @@
 	"contacts_requests": "Zaproszenia",
 	"continue": "Kontynuuj",
 	"conversion_error": "Coś poszło nie tak podczas przetwarzania danych.",
+	"convert_heic_to_jpg": "Konwertuj HEIC na JPG",
+	"convert_heic_to_jpg_description": "Automatycznie konwertuj zdjęcia HEIC/HEIF na JPG podczas przesyłania, aby zapewnić lepszą zgodność między urządzeniami i aplikacjami.",
 	"copied_to_clipboard": "Skopiowano do schowka",
 	"copy": "Kopiuj",
 	"copy_content": "Kopiuj treść",
