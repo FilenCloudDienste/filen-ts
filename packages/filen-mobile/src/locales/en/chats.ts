@@ -126,5 +126,10 @@ export const chats = {
 	/** Conversation — empty-state subtitle when the chat has no messages yet */
 	no_messages_description: "Send a message to start the conversation.",
 	/** Chat participants — empty-state subtitle when the chat has no other participants */
-	no_chat_participants_description: "Add people to start chatting."
+	no_chat_participants_description: "Add people to start chatting.",
+	// ── Blocked users ─────────────────────────────────────────────────────────
+	/** Tombstone shown in place of a message (or chat-list preview) from a blocked user */
+	message_hidden_blocked: "Message hidden",
+	/** Reveal affordance on a blocked-message tombstone */
+	message_hidden_blocked_show: "Show"
 } as const

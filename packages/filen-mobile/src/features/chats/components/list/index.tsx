@@ -14,12 +14,15 @@ import { useTranslation } from "react-i18next"
 import Button from "@/components/ui/button"
 import { createChatFlow } from "@/features/chats/chatsActions"
 import useIsOnline from "@/hooks/useIsOnline"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
 
 const List = ({ searchQuery }: { searchQuery: string }) => {
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
+	const blocked = useBlockedUsers()
 
 	const chats = (() => {
 		if (chatsQuery.status !== "success") {
@@ -28,6 +31,7 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 
 		let chats = chatsQuery.data
 			.filter(chat => chat.ownerId === stringigiedClient?.userId || chat.lastMessage)
+			.filter(chat => !isOneOnOneWithBlocked(chat, stringigiedClient?.userId, blocked))
 			.sort((a, b) => {
 				const aLastMessageTimestamp = a.lastMessage ? Number(a.lastMessage.sentTimestamp) : 0
 				const bLastMessageTimestamp = b.lastMessage ? Number(b.lastMessage.sentTimestamp) : 0

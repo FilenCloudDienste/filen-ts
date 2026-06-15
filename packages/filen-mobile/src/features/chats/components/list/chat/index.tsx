@@ -20,12 +20,15 @@ import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { formatRelativeTime, simpleDateNoTime } from "@/lib/time"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 
 const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()
 	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
 	const unreadCount = useChatUnreadCount(info.item)
+	const blocked = useBlockedUsers()
+	const lastMessageFromBlocked = !!info.item.lastMessage && blocked.userIds.has(info.item.lastMessage.inner.senderId)
 	const typing = useChatsStore(useShallow(state => state.typing[info.item.uuid] ?? []))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { isSelected, areChatsSelected } = useChatsStore(
@@ -151,9 +154,16 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 								<Text
 									numberOfLines={1}
 									ellipsizeMode="tail"
-									className={cn("text-xs", unreadCount > 0 ? "text-foreground font-bold" : "text-muted-foreground")}
+									className={cn(
+										"text-xs",
+										lastMessageFromBlocked
+											? "text-muted-foreground italic"
+											: unreadCount > 0
+												? "text-foreground font-bold"
+												: "text-muted-foreground"
+									)}
 								>
-									{info.item.lastMessage?.inner.message ?? t("no_messages_yet")}
+									{lastMessageFromBlocked ? t("message_hidden_blocked") : (info.item.lastMessage?.inner.message ?? t("no_messages_yet"))}
 								</Text>
 							) : (
 								<Text
