@@ -164,6 +164,8 @@
 	"contacts_requests": "Permintaan",
 	"continue": "Lanjutkan",
 	"conversion_error": "Terjadi kesalahan saat memproses data Anda.",
+	"convert_heic_to_jpg": "Konversi HEIC ke JPG",
+	"convert_heic_to_jpg_description": "Secara otomatis mengonversi foto HEIC/HEIF ke JPG saat diunggah untuk kompatibilitas yang lebih baik di berbagai perangkat dan aplikasi.",
 	"copied_to_clipboard": "Disalin ke papan klip",
 	"copy": "Salin",
 	"copy_content": "Salin konten",

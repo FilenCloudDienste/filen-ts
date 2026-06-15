@@ -164,6 +164,8 @@
 	"contacts_requests": "अनुरोध",
 	"continue": "जारी रखें",
 	"conversion_error": "आपके डेटा को संसाधित करते समय कुछ गलत हो गया।",
+	"convert_heic_to_jpg": "HEIC को JPG में बदलें",
+	"convert_heic_to_jpg_description": "डिवाइसों और ऐप्स में बेहतर अनुकूलता के लिए अपलोड के समय HEIC/HEIF फ़ोटो को स्वचालित रूप से JPG में बदलें।",
 	"copied_to_clipboard": "क्लिपबोर्ड पर कॉपी किया गया",
 	"copy": "कॉपी करें",
 	"copy_content": "सामग्री कॉपी करें",

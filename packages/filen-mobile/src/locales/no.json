@@ -164,6 +164,8 @@
 	"contacts_requests": "Forespørsler",
 	"continue": "Fortsett",
 	"conversion_error": "Noe gikk galt under behandlingen av dataene dine.",
+	"convert_heic_to_jpg": "Konverter HEIC til JPG",
+	"convert_heic_to_jpg_description": "Konverter automatisk HEIC/HEIF-bilder til JPG ved opplasting for bedre kompatibilitet på tvers av enheter og apper.",
 	"copied_to_clipboard": "Kopiert til utklippstavlen",
 	"copy": "Kopier",
 	"copy_content": "Kopier innhold",
