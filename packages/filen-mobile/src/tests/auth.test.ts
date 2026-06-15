@@ -173,6 +173,18 @@ vi.mock("@/features/audio/audio", () => ({
 	}
 }))
 
+vi.mock("@/features/drive/driveSearch", () => ({
+	default: {
+		init: vi.fn(async () => {}),
+		closeActive: vi.fn(async () => {
+			callLog.push("driveSearch.closeActive")
+		}),
+		teardownOnLogout: vi.fn(async () => {
+			callLog.push("driveSearch.teardownOnLogout")
+		})
+	}
+}))
+
 vi.mock("expo", () => ({
 	reloadAppAsync: vi.fn(async () => {
 		callLog.push("reloadAppAsync")

@@ -92,6 +92,9 @@ vi.mock("@/lib/sqlite", () => ({ default: mockSqlite }))
 vi.mock("@/features/offline/offline", () => ({ default: mockOffline }))
 vi.mock("@/lib/alerts", () => ({ default: mockAlerts }))
 vi.mock("@/features/transfers/foregroundService", () => ({ default: mockForegroundService }))
+vi.mock("@/features/drive/driveSearch", () => ({
+	default: { init: vi.fn(async () => {}), closeActive: vi.fn(async () => {}), teardownOnLogout: vi.fn(async () => {}) }
+}))
 vi.mock("@/lib/tmp", () => ({ sweepTmpDir: mockSweepTmpDir }))
 vi.mock("@/lib/fsUtils", () => ({ sweepStrayDownloadFiles: mockSweepStrayDownloadFiles }))
 vi.mock("@/lib/reconnect", () => ({ startReconnectListener: mockStartReconnectListener }))
