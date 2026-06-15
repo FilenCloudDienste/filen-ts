@@ -164,6 +164,8 @@
 	"contacts_requests": "Cereri",
 	"continue": "Continuă",
 	"conversion_error": "A apărut o problemă la procesarea datelor tale.",
+	"convert_heic_to_jpg": "Conversie HEIC în JPG",
+	"convert_heic_to_jpg_description": "Convertește automat fotografiile HEIC/HEIF în JPG la încărcare pentru o compatibilitate mai bună între dispozitive și aplicații.",
 	"copied_to_clipboard": "Copiat în clipboard",
 	"copy": "Copiază",
 	"copy_content": "Copiază conținutul",

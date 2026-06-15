@@ -164,6 +164,8 @@
 	"contacts_requests": "Anfragen",
 	"continue": "Fortfahren",
 	"conversion_error": "Beim Verarbeiten deiner Daten ist etwas schiefgelaufen.",
+	"convert_heic_to_jpg": "HEIC in JPG umwandeln",
+	"convert_heic_to_jpg_description": "HEIC-/HEIF-Fotos beim Hochladen automatisch in JPG umwandeln, um die Kompatibilität mit verschiedenen Geräten und Apps zu verbessern.",
 	"copied_to_clipboard": "In die Zwischenablage kopiert",
 	"copy": "Kopieren",
 	"copy_content": "Inhalt kopieren",

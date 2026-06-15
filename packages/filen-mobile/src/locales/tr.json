@@ -164,6 +164,8 @@
 	"contacts_requests": "İstekler",
 	"continue": "Devam et",
 	"conversion_error": "Verileriniz işlenirken bir sorun oluştu.",
+	"convert_heic_to_jpg": "HEIC'i JPG'ye dönüştür",
+	"convert_heic_to_jpg_description": "Cihazlar ve uygulamalar arasında daha iyi uyumluluk için HEIC/HEIF fotoğraflarını yüklerken otomatik olarak JPG'ye dönüştürün.",
 	"copied_to_clipboard": "Panoya kopyalandı",
 	"copy": "Kopyala",
 	"copy_content": "İçeriği kopyala",

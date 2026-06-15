@@ -164,6 +164,8 @@
 	"contacts_requests": "Verzoeken",
 	"continue": "Doorgaan",
 	"conversion_error": "Er is iets misgegaan bij het verwerken van je gegevens.",
+	"convert_heic_to_jpg": "HEIC naar JPG converteren",
+	"convert_heic_to_jpg_description": "Converteer HEIC/HEIF-foto's bij het uploaden automatisch naar JPG voor betere compatibiliteit tussen apparaten en apps.",
 	"copied_to_clipboard": "Gekopieerd naar klembord",
 	"copy": "Kopiëren",
 	"copy_content": "Inhoud kopiëren",

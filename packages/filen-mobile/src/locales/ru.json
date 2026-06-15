@@ -164,6 +164,8 @@
 	"contacts_requests": "Запросы",
 	"continue": "Продолжить",
 	"conversion_error": "При обработке ваших данных произошла ошибка.",
+	"convert_heic_to_jpg": "Конвертировать HEIC в JPG",
+	"convert_heic_to_jpg_description": "Автоматически конвертировать фотографии HEIC/HEIF в JPG при загрузке для лучшей совместимости между устройствами и приложениями.",
 	"copied_to_clipboard": "Скопировано в буфер обмена",
 	"copy": "Копировать",
 	"copy_content": "Копировать содержимое",

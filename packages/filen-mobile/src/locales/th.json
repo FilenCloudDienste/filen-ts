@@ -164,6 +164,8 @@
 	"contacts_requests": "คำขอ",
 	"continue": "ดำเนินการต่อ",
 	"conversion_error": "เกิดข้อผิดพลาดขณะประมวลผลข้อมูลของคุณ",
+	"convert_heic_to_jpg": "แปลง HEIC เป็น JPG",
+	"convert_heic_to_jpg_description": "แปลงรูปภาพ HEIC/HEIF เป็น JPG โดยอัตโนมัติเมื่ออัปโหลด เพื่อความเข้ากันได้ที่ดีขึ้นระหว่างอุปกรณ์และแอปต่าง ๆ",
 	"copied_to_clipboard": "คัดลอกไปยังคลิปบอร์ดแล้ว",
 	"copy": "คัดลอก",
 	"copy_content": "คัดลอกเนื้อหา",

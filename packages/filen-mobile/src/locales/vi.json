@@ -164,6 +164,8 @@
 	"contacts_requests": "Lời mời",
 	"continue": "Tiếp tục",
 	"conversion_error": "Đã xảy ra lỗi khi xử lý dữ liệu của bạn.",
+	"convert_heic_to_jpg": "Chuyển đổi HEIC sang JPG",
+	"convert_heic_to_jpg_description": "Tự động chuyển đổi ảnh HEIC/HEIF sang JPG khi tải lên để tương thích tốt hơn trên các thiết bị và ứng dụng.",
 	"copied_to_clipboard": "Đã sao chép vào bộ nhớ tạm",
 	"copy": "Sao chép",
 	"copy_content": "Sao chép nội dung",

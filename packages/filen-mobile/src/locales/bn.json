@@ -164,6 +164,8 @@
 	"contacts_requests": "অনুরোধ",
 	"continue": "চালিয়ে যান",
 	"conversion_error": "আপনার ডেটা প্রক্রিয়া করার সময় কিছু একটা সমস্যা হয়েছে।",
+	"convert_heic_to_jpg": "HEIC থেকে JPG-তে রূপান্তর করুন",
+	"convert_heic_to_jpg_description": "ডিভাইস ও অ্যাপের মধ্যে আরও ভালো সামঞ্জস্যের জন্য আপলোডের সময় HEIC/HEIF ছবি স্বয়ংক্রিয়ভাবে JPG-তে রূপান্তর করুন।",
 	"copied_to_clipboard": "ক্লিপবোর্ডে কপি করা হয়েছে",
 	"copy": "কপি",
 	"copy_content": "কন্টেন্ট কপি করুন",
