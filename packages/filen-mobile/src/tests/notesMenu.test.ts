@@ -1,15 +1,16 @@
 import { vi, describe, it, expect } from "vitest"
 
-// NoteType is a plain string-union constant in @filen/sdk-rs: 'text'|'md'|'code'|'rich'|'checklist'.
-// The mock must use the same string values so === comparisons in createMenuButtons are internally
-// consistent and match the shape the real SDK exports (sdk-rs.d.ts:940).
+// NoteType is a NUMERIC enum in the RN uniffi runtime the app actually runs
+// (@filen/sdk-rs/src/generated/filen_types.ts: Text=0, Md=1, Code=2, Rich=3, Checklist=4),
+// NOT the wasm .d.ts string union. Mirror the numeric ordinals so === comparisons in
+// createMenuButtons match the real runtime (matches the sibling notesHeaderMenuBuilders.test.ts).
 vi.mock("@filen/sdk-rs", () => {
 	const NoteType = {
-		Text: "text",
-		Md: "md",
-		Code: "code",
-		Rich: "rich",
-		Checklist: "checklist"
+		Text: 0,
+		Md: 1,
+		Code: 2,
+		Rich: 3,
+		Checklist: 4
 	}
 
 	return { NoteType }
@@ -295,6 +296,26 @@ describe("createMenuButtons", () => {
 			expect(ids).not.toContain("archive")
 			expect(ids).not.toContain("trash")
 			expect(ids).not.toContain("delete")
+		})
+	})
+
+	describe("copy_content", () => {
+		it("is present for every note type, including richtext", () => {
+			for (const noteType of [NoteType.Text, NoteType.Md, NoteType.Code, NoteType.Rich, NoteType.Checklist]) {
+				const note = makeNote({ noteType })
+				const buttons = createMenuButtons({ note, writeAccess: true, origin: "notes", isOwner: true })
+				const ids = buttons.map(b => b.id)
+
+				expect(ids, `copy_content should be present for noteType ${String(noteType)}`).toContain("copy_content")
+			}
+		})
+
+		it("requires online", () => {
+			const note = makeNote()
+			const buttons = createMenuButtons({ note, writeAccess: true, origin: "notes", isOwner: true })
+			const copyButton = buttons.find(b => b.id === "copy_content")
+
+			expect(copyButton?.requiresOnline).toBe(true)
 		})
 	})
 })
