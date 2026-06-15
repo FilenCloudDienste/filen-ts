@@ -9,6 +9,7 @@ import { run } from "@filen/utils"
 import { useStringifiedClient } from "@/lib/auth"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
+import useIsOnline from "@/hooks/useIsOnline"
 import prompts from "@/lib/prompts"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import { type Chat } from "@/types"
@@ -31,6 +32,7 @@ const ChatParticipants = () => {
 	}>()
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
+	const isOnline = useIsOnline()
 	const selectedChatParticipants = useChatParticipantsStore(useShallow(state => state.selectedChatParticipants))
 
 	useFocusEffect(
@@ -245,6 +247,10 @@ const ChatParticipants = () => {
 				},
 				props: {
 					onPress: async () => {
+						if (!isOnline) {
+							return
+						}
+
 						const selectContactsResult = await selectContacts({
 							multiple: true,
 							userIdsToExclude: chat.participants.map(p => Number(p.userId))

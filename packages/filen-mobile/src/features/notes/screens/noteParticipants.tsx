@@ -22,6 +22,7 @@ import { runBulk } from "@/lib/bulkOps"
 import { useTranslation } from "react-i18next"
 import ParticipantList from "@/components/participants/participantList"
 import { type ParticipantRowProps } from "@/components/participants/participantRow"
+import useIsOnline from "@/hooks/useIsOnline"
 
 const NoteParticipants = () => {
 	const { t } = useTranslation()
@@ -31,6 +32,7 @@ const NoteParticipants = () => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
 	const selectedNoteParticipants = useNoteParticipantsStore(useShallow(state => state.selectedNoteParticipants))
+	const isOnline = useIsOnline()
 
 	useFocusEffect(
 		useCallback(() => {
@@ -310,6 +312,7 @@ const NoteParticipants = () => {
 					size: 20
 				},
 				props: {
+					enabled: isOnline,
 					onPress: async () => {
 						const selectContactsResult = await selectContacts({
 							multiple: true,

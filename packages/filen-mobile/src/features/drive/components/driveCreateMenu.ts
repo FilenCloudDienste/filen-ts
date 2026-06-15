@@ -117,6 +117,7 @@ export function buildDriveCreateMenuButtons({
 			id: "upload",
 			title: t("upload"),
 			icon: "upload",
+			requiresOnline: true,
 			subButtons: [
 				{
 					id: "uploadFiles",

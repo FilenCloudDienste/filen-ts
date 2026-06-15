@@ -126,6 +126,54 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 				})
 			}
 
+			if (selectedByType.incoming.length > 0) {
+				menuButtons.push({
+					id: "bulkDenyIncoming",
+					title: t("bulk_deny", { count: selectedByType.incoming.length }),
+					icon: "delete",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.incoming,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: t("deny"),
+								message: t("deny_selected_requests_confirmation"),
+								okText: t("deny"),
+								cancelText: t("cancel"),
+								destructive: true
+							},
+							op: c => contacts.denyRequest({ uuid: c.data.uuid })
+						})
+					}
+				})
+			}
+
+			if (selectedByType.outgoing.length > 0) {
+				menuButtons.push({
+					id: "bulkCancelOutgoing",
+					title: t("bulk_cancel_request", { count: selectedByType.outgoing.length }),
+					icon: "cancel",
+					destructive: true,
+					requiresOnline: true,
+					onPress: async () => {
+						await runBulk({
+							items: selectedByType.outgoing,
+							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
+							confirm: {
+								title: t("cancel_request"),
+								message: t("cancel_selected_outgoing_confirmation"),
+								okText: t("cancel_request"),
+								cancelText: t("cancel"),
+								destructive: true
+							},
+							op: c => contacts.cancelRequest({ uuid: c.data.uuid })
+						})
+					}
+				})
+			}
+
 			if (selectedByType.contacts.length > 0) {
 				menuButtons.push({
 					id: "bulkRemoveContacts",
@@ -177,54 +225,6 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 									timestamp: contact.timestamp
 								})
 							}
-						})
-					}
-				})
-			}
-
-			if (selectedByType.incoming.length > 0) {
-				menuButtons.push({
-					id: "bulkDenyIncoming",
-					title: t("bulk_deny", { count: selectedByType.incoming.length }),
-					icon: "delete",
-					destructive: true,
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedByType.incoming,
-							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
-							confirm: {
-								title: t("deny"),
-								message: t("deny_selected_requests_confirmation"),
-								okText: t("deny"),
-								cancelText: t("cancel"),
-								destructive: true
-							},
-							op: c => contacts.denyRequest({ uuid: c.data.uuid })
-						})
-					}
-				})
-			}
-
-			if (selectedByType.outgoing.length > 0) {
-				menuButtons.push({
-					id: "bulkCancelOutgoing",
-					title: t("bulk_cancel_request", { count: selectedByType.outgoing.length }),
-					icon: "cancel",
-					destructive: true,
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedByType.outgoing,
-							clearSelection: () => useContactsStore.getState().clearSelectedContacts(),
-							confirm: {
-								title: t("cancel_request"),
-								message: t("cancel_selected_outgoing_confirmation"),
-								okText: t("cancel_request"),
-								cancelText: t("cancel"),
-								destructive: true
-							},
-							op: c => contacts.cancelRequest({ uuid: c.data.uuid })
 						})
 					}
 				})

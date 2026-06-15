@@ -184,6 +184,7 @@ const Header = ({
 			menuButtons.push({
 				id: "empty",
 				title: t("empty_trash"),
+				requiresOnline: true,
 				destructive: true,
 				icon: "delete",
 				onPress: async () => {

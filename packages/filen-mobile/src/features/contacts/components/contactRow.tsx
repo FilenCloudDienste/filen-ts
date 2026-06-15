@@ -9,6 +9,8 @@ import Avatar from "@/components/ui/avatar"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { PressableScale } from "@/components/ui/pressables"
 import contacts from "@/features/contacts/contacts"
+import chatsLib from "@/features/chats/chats"
+import { router } from "expo-router"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import useContactsStore, { type ContactListItemWithHeader } from "@/features/contacts/store/useContacts.store"
@@ -171,6 +173,31 @@ export const Contact = ({
 		}
 
 		if (info.item.type === "contact") {
+			const contactItem = info.item
+
+			buttons.push({
+				id: "message",
+				requiresOnline: true,
+				title: t("message"),
+				icon: "reply",
+				onPress: async () => {
+					const result = await runWithLoading(async () => {
+						return await chatsLib.create({
+							contacts: [contactItem.data]
+						})
+					})
+
+					if (!result.success) {
+						console.error(result.error)
+						alerts.error(result.error)
+
+						return
+					}
+
+					router.push(`/chat/${result.data.uuid}`)
+				}
+			})
+
 			// Remove first (less harsh: drops them from your contact list).
 			// Block last (most harsh: also prevents them from contacting you).
 			buttons.push({

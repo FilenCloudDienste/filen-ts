@@ -90,11 +90,13 @@ export function buildNotesHeaderRightItems({
 				id: "create",
 				title: t("create_note"),
 				icon: "plus",
+				requiresOnline: true,
 				subButtons: [
 					{
 						title: t("note_type_text"),
 						id: "text",
 						icon: "text",
+						requiresOnline: true,
 						onPress: async () => {
 							await createNote(NoteType.Text)
 						}
@@ -103,22 +105,16 @@ export function buildNotesHeaderRightItems({
 						title: t("note_type_checklist"),
 						id: "checklist",
 						icon: "checklist",
+						requiresOnline: true,
 						onPress: async () => {
 							await createNote(NoteType.Checklist)
-						}
-					},
-					{
-						title: t("note_type_markdown"),
-						id: "markdown",
-						icon: "markdown",
-						onPress: async () => {
-							await createNote(NoteType.Md)
 						}
 					},
 					{
 						title: t("note_type_code"),
 						id: "code",
 						icon: "code",
+						requiresOnline: true,
 						onPress: async () => {
 							await createNote(NoteType.Code)
 						}
@@ -127,8 +123,18 @@ export function buildNotesHeaderRightItems({
 						title: t("note_type_richtext"),
 						id: "richtext",
 						icon: "richtext",
+						requiresOnline: true,
 						onPress: async () => {
 							await createNote(NoteType.Rich)
+						}
+					},
+					{
+						title: t("note_type_markdown"),
+						id: "markdown",
+						icon: "markdown",
+						requiresOnline: true,
+						onPress: async () => {
+							await createNote(NoteType.Md)
 						}
 					}
 				]
@@ -138,6 +144,7 @@ export function buildNotesHeaderRightItems({
 				id: "import",
 				title: t("import_note"),
 				icon: "import",
+				requiresOnline: true,
 				subButtons: NOTE_TYPE_OPTIONS.map(
 					({ type, typeString }) =>
 						({
@@ -145,6 +152,7 @@ export function buildNotesHeaderRightItems({
 							title: t(NOTE_TYPE_LABEL_KEY[typeString]),
 							icon: noteTypeToIcon(type),
 							keepMenuOpenOnPress: Platform.OS === "android",
+							requiresOnline: true,
 							onPress: () => {
 								run(async defer => {
 									const documentPickerResult = await run(async () => {
@@ -571,6 +579,7 @@ export function buildNotesHeaderRightItems({
 			id: "createTag",
 			title: t("create_tag"),
 			icon: "tag",
+			requiresOnline: true,
 			onPress: async () => {
 				const result = await run(async () => {
 					return await prompts.input({

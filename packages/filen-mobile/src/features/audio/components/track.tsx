@@ -103,7 +103,6 @@ export function buildUndecryptableTrackButtons({
 
 export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track: TrackType; playlist: PlaylistWithItems }): MenuButton[] {
 	return [
-		selectButton({ t, track }),
 		{
 			id: "play",
 			title: t("play"),
@@ -212,6 +211,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 				}
 			}
 		},
+		selectButton({ t, track }),
 		removeFromPlaylistButton({ t, track, playlist })
 	]
 }

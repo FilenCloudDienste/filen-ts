@@ -65,6 +65,10 @@ vi.mock("expo-sharing", () => ({
 	shareAsync: vi.fn()
 }))
 
+vi.mock("expo-clipboard", () => ({
+	setStringAsync: vi.fn()
+}))
+
 vi.mock("@/lib/serializer", () => ({
 	serialize: vi.fn(x => JSON.stringify(x))
 }))

@@ -110,6 +110,8 @@ export const chats = {
 	// ── Chat participants screen ─────────────────────────────────────────────
 	/** Header title for the chat participants management screen */
 	chat_participants: "Chat participants",
+	/** Menu item (owner only): add a new participant to the chat */
+	add_participant: "Add participant",
 	/** Empty-state title shown when the chat has no other participants */
 	no_chat_participants: "No participants",
 	// remove_participant and remove_selected live in common.ts.

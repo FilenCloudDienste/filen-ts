@@ -45,6 +45,8 @@ export const notes = {
 	note_type_richtext: "Rich text",
 
 	// ── Create / import notes ─────────────────────────────────────────────────
+	/** Menu action: copy the note's text content to the clipboard */
+	copy_content: "Copy content",
 	/** Menu action / dialog title: create a new note */
 	create_note: "Create note",
 	/** Input dialog message asking for the new note's name */

@@ -11,7 +11,9 @@ import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import { randomUUID } from "expo-crypto"
 import offline from "@/features/offline/offline"
-import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
+import { getRealDriveItemParent, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
+import * as Clipboard from "expo-clipboard"
+import auth from "@/lib/auth"
 import { getPreviewType } from "@/lib/previewType"
 import type { DrivePath, SelectOptions } from "@/hooks/useDrivePath"
 import { serialize } from "@/lib/serializer"
@@ -162,6 +164,7 @@ export function createMenuButtons({
 		if (item.type === "file" && drivePath.type !== "offline") {
 			menuButtons.push({
 				id: "versions",
+				requiresOnline: true,
 				title: t("versions"),
 				icon: "versions",
 				onPress: () => {
@@ -186,6 +189,7 @@ export function createMenuButtons({
 	) {
 		menuButtons.push({
 			id: "color",
+			requiresOnline: true,
 			title: t("color"),
 			icon: "color",
 			onPress: () => {
@@ -378,39 +382,6 @@ export function createMenuButtons({
 		})
 	}
 
-	// Removing offline only makes sense on items that are TOP-LEVEL stored entries.
-	// `updateIndex()` flattens every nested child of a stored directory into
-	// `index.files` / `index.directories`, so a plain "is stored offline" check
-	// (the query backing `isStoredOffline`) returns true for nested children too —
-	// but `removeItem` only operates on top-level entries, so showing the button
-	// there is a silent no-op. The sync top-level check fixes that. Cold-cache
-	// falls back to undefined → hidden, which is acceptable: the per-row query
-	// (`useDriveItemStoredOfflineQuery`) warms the caches on first read.
-	//
-	//   - At /offline (virtual root) we know every item shown IS top-level, so
-	//     skip the per-item check.
-	//   - Anywhere else (/drive, /favorites, etc.), only show on items that are
-	//     known top-level stored. /offline nested view and /linked never show.
-	if (
-		(drivePath.type === "offline" && !drivePath.uuid) ||
-		(offline.isItemTopLevelStoredSync(item) === true && drivePath.type !== "offline" && drivePath.type !== "linked")
-	) {
-		menuButtons.push({
-			id: "removeOffline",
-			title: t("remove_offline"),
-			icon: "trash",
-			destructive: true,
-			onPress: confirmedDriveAction({
-				item,
-				promptTitle: t("remove_offline_item"),
-				promptMessage: t("confirm_remove_offline"),
-				promptOkText: t("remove_offline"),
-				action: () => offline.removeItem(item),
-				dismissOnSuccess: false
-			})
-		})
-	}
-
 	if (drivePath.type === "sharedIn" && !drivePath.uuid) {
 		menuButtons.push({
 			id: "removeShare",
@@ -470,6 +441,58 @@ export function createMenuButtons({
 		})
 
 		menuButtons.push({
+			id: "copyLink",
+			requiresOnline: true,
+			title: t("copy_link"),
+			icon: "copy",
+			onPress: async () => {
+				const result = await runWithLoading(async () => {
+					const { authedSdkClient } = await auth.getSdkClients()
+
+					let linkUuid: string
+					let linkKey: string | undefined
+
+					if (item.type === "file") {
+						const status = await authedSdkClient.getFileLinkStatus(item.data)
+
+						if (!status) {
+							throw new Error("No public link found for this file")
+						}
+
+						linkUuid = status.linkUuid
+						linkKey = undefined
+					} else {
+						const status = await authedSdkClient.getDirLinkStatus(item.data)
+
+						if (!status) {
+							throw new Error("No public link found for this directory")
+						}
+
+						linkUuid = status.linkUuid
+						linkKey = status.linkKey ?? undefined
+					}
+
+					const url = makeDriveItemPublicLink({ item, linkUuid, linkKey })
+
+					if (!url) {
+						throw new Error("Could not generate public link URL")
+					}
+
+					await Clipboard.setStringAsync(url)
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+
+				alerts.normal(t("copied_to_clipboard"))
+			}
+		})
+
+		menuButtons.push({
 			id: "disablePublicLink",
 			requiresOnline: true,
 			title: t("disable_public_link"),
@@ -483,6 +506,39 @@ export function createMenuButtons({
 				action: () => drive.disablePublicLink({ item }),
 				// Close the preview when disabling the link from inside it.
 				dismissOnSuccess: isPreview === true
+			})
+		})
+	}
+
+	// Removing offline only makes sense on items that are TOP-LEVEL stored entries.
+	// `updateIndex()` flattens every nested child of a stored directory into
+	// `index.files` / `index.directories`, so a plain "is stored offline" check
+	// (the query backing `isStoredOffline`) returns true for nested children too —
+	// but `removeItem` only operates on top-level entries, so showing the button
+	// there is a silent no-op. The sync top-level check fixes that. Cold-cache
+	// falls back to undefined → hidden, which is acceptable: the per-row query
+	// (`useDriveItemStoredOfflineQuery`) warms the caches on first read.
+	//
+	//   - At /offline (virtual root) we know every item shown IS top-level, so
+	//     skip the per-item check.
+	//   - Anywhere else (/drive, /favorites, etc.), only show on items that are
+	//     known top-level stored. /offline nested view and /linked never show.
+	if (
+		(drivePath.type === "offline" && !drivePath.uuid) ||
+		(offline.isItemTopLevelStoredSync(item) === true && drivePath.type !== "offline" && drivePath.type !== "linked")
+	) {
+		menuButtons.push({
+			id: "removeOffline",
+			title: t("remove_offline"),
+			icon: "trash",
+			destructive: true,
+			onPress: confirmedDriveAction({
+				item,
+				promptTitle: t("remove_offline_item"),
+				promptMessage: t("confirm_remove_offline"),
+				promptOkText: t("remove_offline"),
+				action: () => offline.removeItem(item),
+				dismissOnSuccess: false
 			})
 		})
 	}

@@ -7,6 +7,7 @@ import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import chats from "@/features/chats/chats"
+import { selectContacts } from "@/features/contacts/contactsSelect"
 import { router } from "expo-router"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
@@ -175,6 +176,40 @@ export function createMenuButtons({
 		},
 		...(isOwner
 			? ([
+					{
+						id: "addParticipant",
+						requiresOnline: true,
+						title: t("add_participant"),
+						icon: "users",
+						onPress: async () => {
+							const selectContactsResult = await selectContacts({
+								multiple: true,
+								userIdsToExclude: chat.participants.map(p => Number(p.userId))
+							})
+
+							if (selectContactsResult.cancelled) {
+								return
+							}
+
+							const result = await runWithLoading(async () => {
+								return await Promise.all(
+									selectContactsResult.selectedContacts.map(async contact => {
+										return await chats.addParticipant({
+											chat,
+											contact
+										})
+									})
+								)
+							})
+
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
+
+								return
+							}
+						}
+					} satisfies MenuButton,
 					{
 						id: "editName",
 						requiresOnline: true,

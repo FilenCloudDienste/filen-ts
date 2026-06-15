@@ -321,11 +321,11 @@ describe("buildPlaylistMenuButtons", () => {
 		expect(buttons).toHaveLength(3)
 	})
 
-	it("returns 5 buttons when playlist has files", () => {
+	it("returns 6 buttons when playlist has files", () => {
 		const playlist = makePlaylist([makeTrack("a"), makeTrack("b")])
 		const buttons = buildPlaylistMenuButtons({ t, playlist })
 
-		expect(buttons).toHaveLength(5)
+		expect(buttons).toHaveLength(6)
 	})
 
 	it("first button is 'play' when playlist has files", () => {
@@ -335,11 +335,11 @@ describe("buildPlaylistMenuButtons", () => {
 		expect(buttons[0]?.id).toBe("play")
 	})
 
-	it("second button is 'addToQueue' when playlist has files", () => {
+	it("second button is 'shufflePlay' when playlist has files", () => {
 		const playlist = makePlaylist([makeTrack("a")])
 		const buttons = buildPlaylistMenuButtons({ t, playlist })
 
-		expect(buttons[1]?.id).toBe("addToQueue")
+		expect(buttons[1]?.id).toBe("shufflePlay")
 	})
 
 	it("button ids without files are ['rename', 'add', 'delete']", () => {
@@ -350,12 +350,12 @@ describe("buildPlaylistMenuButtons", () => {
 		expect(ids).toEqual(["rename", "add", "delete"])
 	})
 
-	it("button ids with files are ['play', 'addToQueue', 'rename', 'add', 'delete']", () => {
+	it("button ids with files are ['play', 'shufflePlay', 'addToQueue', 'rename', 'add', 'delete']", () => {
 		const playlist = makePlaylist([makeTrack("a")])
 		const buttons = buildPlaylistMenuButtons({ t, playlist })
 		const ids = buttons.map((b: MenuButton) => b.id)
 
-		expect(ids).toEqual(["play", "addToQueue", "rename", "add", "delete"])
+		expect(ids).toEqual(["play", "shufflePlay", "addToQueue", "rename", "add", "delete"])
 	})
 
 	it("delete button has destructive:true", () => {
@@ -394,10 +394,10 @@ describe("buildPlaylistMenuButtons", () => {
 		expect(buttons.some((b: MenuButton) => b.id === "addToQueue")).toBe(false)
 	})
 
-	it("single-file playlist still yields 5 buttons", () => {
+	it("single-file playlist still yields 6 buttons", () => {
 		const playlist = makePlaylist([makeTrack("only")])
 		const buttons = buildPlaylistMenuButtons({ t, playlist })
 
-		expect(buttons).toHaveLength(5)
+		expect(buttons).toHaveLength(6)
 	})
 })
