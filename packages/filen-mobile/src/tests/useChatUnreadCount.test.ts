@@ -26,6 +26,11 @@ vi.mock("@/lib/auth", () => ({
 	useStringifiedClient: () => mocks.stringifiedClient
 }))
 
+// useBlockedUsers pulls the contacts query → query client → op-sqlite; stub it (no blocked users).
+vi.mock("@/features/contacts/hooks/useBlockedUsers", () => ({
+	default: () => ({ userIds: new Set(), emails: new Set() })
+}))
+
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { renderHook } from "@testing-library/react"
