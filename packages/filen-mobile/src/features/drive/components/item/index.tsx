@@ -9,6 +9,7 @@ import Size from "@/features/drive/components/item/size"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import Date from "@/features/drive/components/item/date"
+import ShareEmail from "@/features/drive/components/item/shareEmail"
 import { Platform } from "react-native"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { cn } from "@filen/utils"
@@ -291,6 +292,10 @@ const Item = ({
 										drivePath={drivePath}
 									/>
 								</Text>
+								<ShareEmail
+									info={info}
+									drivePath={drivePath}
+								/>
 								{hasOfflineSyncError && (
 									<Text
 										className="text-xs text-red-500"
