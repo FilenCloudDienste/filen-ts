@@ -1105,6 +1105,71 @@ describe("notes.addParticipant", () => {
 	})
 })
 
+describe("notes.addParticipants (bulk)", () => {
+	const makeContact = (userId: bigint, email: string) => ({
+		userId,
+		email,
+		uuid: `contact-${email}`,
+		avatar: undefined,
+		nickName: undefined,
+		lastActive: 0n,
+		timestamp: 0n,
+		publicKey: "k"
+	})
+
+	beforeEach(() => {
+		mockGetSdkClients.mockReset()
+		mockNotesWithContentQueryUpdate.mockReset()
+	})
+
+	it("threads each add through the previous result so the cache keeps every new participant", async () => {
+		// SDK add-one appends the contact to whatever note it receives, so a sequential threaded loop
+		// accumulates while the old parallel one (same stale base) would not.
+		const addNoteParticipantMock = vi.fn((n: Note, contact: { userId: bigint; email: string }) =>
+			Promise.resolve({
+				...n,
+				participants: [...n.participants, makeParticipant({ userId: contact.userId, email: contact.email })]
+			})
+		)
+		const sdkClient = makeMockSdkClient({ addNoteParticipant: addNoteParticipantMock })
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ participants: [], uuid: "note-bulk" })
+		const contacts = [makeContact(55n, "a@test.com"), makeContact(66n, "b@test.com")]
+
+		const result = await notes.addParticipants({ note, contacts, permissionsWrite: true })
+
+		// The second SDK call must receive the note returned by the first (1 participant), not the
+		// original empty note — the sequential threading that fixes the last-write-wins race.
+		expect(addNoteParticipantMock).toHaveBeenCalledTimes(2)
+		expect(addNoteParticipantMock.mock.calls[1]?.[0]?.participants).toHaveLength(1)
+
+		// A single cache write, carrying BOTH new participants.
+		expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledTimes(1)
+		expect(result.participants).toHaveLength(2)
+
+		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
+		if (!callArgs) throw new Error("expected a call")
+		const { updater } = callArgs[0]
+		const updatedEntries = updater([{ ...note, content: "keep" }])
+
+		expect(updatedEntries.find((n: Note) => n.uuid === "note-bulk")?.participants).toHaveLength(2)
+		expect(updatedEntries.find((n: Note) => n.uuid === "note-bulk")?.content).toBe("keep")
+	})
+
+	it("returns the note untouched (no SDK, no cache) when all contacts already exist", async () => {
+		const participant = makeParticipant({ userId: 42n })
+		const note = makeNote({ participants: [participant] })
+		const contacts = [makeContact(42n, "p@test.com")]
+
+		const result = await notes.addParticipants({ note, contacts, permissionsWrite: true })
+
+		expect(result).toBe(note)
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+		expect(mockNotesWithContentQueryUpdate).not.toHaveBeenCalled()
+	})
+})
+
 // ---------------------------------------------------------------------------
 // Tests: Notes.setParticipantPermission
 // ---------------------------------------------------------------------------

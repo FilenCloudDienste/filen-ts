@@ -324,15 +324,11 @@ const NoteParticipants = () => {
 						}
 
 						const result = await runWithLoading(async () => {
-							return await Promise.all(
-								selectContactsResult.selectedContacts.map(async contact => {
-									return await notes.addParticipant({
-										note,
-										contact,
-										permissionsWrite: true
-									})
-								})
-							)
+							return await notes.addParticipants({
+								note,
+								contacts: selectContactsResult.selectedContacts,
+								permissionsWrite: true
+							})
 						})
 
 						if (!result.success) {
