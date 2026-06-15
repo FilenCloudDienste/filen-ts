@@ -16,6 +16,11 @@ import Menu from "@/features/chats/components/chat/message/menu"
 import { messageDisplayBody } from "@/lib/decryption"
 import Typing from "@/features/chats/components/chat/message/typing"
 import Attachments from "@/features/chats/components/chat/message/attachments"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import useRevealedBlockedMessages from "@/features/chats/store/useRevealedBlockedMessages.store"
+import { PressableOpacity } from "@/components/ui/pressables"
+import Ionicons from "@expo/vector-icons/Ionicons"
+import { useResolveClassNames } from "uniwind"
 
 function computeIsMessageOnlyLink(message: string | undefined): boolean {
 	if (!message) {
@@ -54,6 +59,11 @@ const Message = ({
 	const isInflightError = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""] !== undefined))
 
 	const isMessageOnlyLink = computeIsMessageOnlyLink(info.item.inner.message)
+	const blocked = useBlockedUsers()
+	const senderBlocked = blocked.userIds.has(info.item.inner.senderId)
+	const isRevealed = useRevealedBlockedMessages(state => state.revealed.has(info.item.inner.uuid))
+	const showTombstone = senderBlocked && !isRevealed
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	return (
 		<View
@@ -80,6 +90,7 @@ const Message = ({
 			{chat.lastFocus &&
 				info.item.sentTimestamp > chat.lastFocus &&
 				info.item.inner.senderId !== stringifiedClient?.userId &&
+				!senderBlocked &&
 				!(prevMessage && prevMessage.sentTimestamp > chat.lastFocus) && (
 					<View className="flex-1 flex-row px-4 items-center pb-2">
 						<View className="flex-row items-center justify-center bg-red-500 rounded-3xl p-1 px-2">
@@ -94,7 +105,7 @@ const Message = ({
 						<View className="flex-1 bg-red-500 h-px" />
 					</View>
 				)}
-			{chat.participants.length > 2 && info.item.inner.senderId !== stringifiedClient?.userId && (
+			{chat.participants.length > 2 && info.item.inner.senderId !== stringifiedClient?.userId && !senderBlocked && (
 				<View className="max-w-3/4 flex-row items-center px-4 pb-1 pl-6">
 					<Text className="text-xs text-muted-foreground">
 						{(() => {
@@ -105,88 +116,108 @@ const Message = ({
 					</Text>
 				</View>
 			)}
-			<View className="h-auto max-w-3/4">
-				<Menu
-					chat={chat}
-					info={info}
-					className="w-full h-auto pb-2 px-4"
-					isAnchoredToRight={info.item.inner.senderId !== stringifiedClient?.userId}
-				>
-					<View
-						className={cn(
-							"p-3 rounded-3xl w-auto h-auto flex-row shadow-sm",
-							info.item.inner.senderId === stringifiedClient?.userId
-								? cn(isInflightError ? "bg-red-500" : "bg-blue-500")
-								: "bg-background-secondary"
-						)}
+			{showTombstone && (
+				<View className="h-auto max-w-3/4 items-start">
+					<PressableOpacity
+						className="flex-row items-center gap-2 px-4 py-2"
+						onPress={() => useRevealedBlockedMessages.getState().reveal(info.item.inner.uuid)}
 					>
-						{nextMessage?.inner.senderId !== info.item.inner.senderId && (
-							<Fragment>
-								{info.item.inner.senderId === stringifiedClient?.userId ? (
-									<View className="absolute right-2 -bottom-1.75 overflow-hidden bg-transparent w-5 h-3.75">
-										<View
-											className={cn(
-												isInflightError ? "bg-red-500" : "bg-blue-500",
-												"absolute size-6.5 bottom-0 -right-3.25 rounded-[13px]"
-											)}
-										/>
-									</View>
-								) : (
-									<View
-										className="absolute left-2 -bottom-1.75 overflow-hidden bg-transparent w-5 h-3.75"
-										style={{
-											transform: [
-												{
-													scaleX: -1
-												}
-											]
-										}}
-									>
-										<View className="bg-background-secondary absolute size-6.5 bottom-0 -right-3.25 rounded-[13px]" />
-									</View>
-								)}
-							</Fragment>
-						)}
-						{isMessageOnlyLink ? (
-							<Attachments
-								chat={chat}
-								message={info.item}
-								fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
-								single={true}
-								layout={layout}
-							/>
-						) : (
-							<View className="flex-col bg-transparent w-auto h-auto">
-								<View className="bg-transparent w-auto h-auto flex-row">
-									{info.item.undecryptable ? (
-										<Text
-											className={cn(
-												"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
-												info.item.inner.senderId === stringifiedClient?.userId ? "text-white" : "text-foreground"
-											)}
-										>
-											{messageDisplayBody(info.item)}
-										</Text>
+						<Ionicons
+							name="ban-outline"
+							size={14}
+							color={textMutedForeground.color}
+						/>
+						<Text className="text-xs text-muted-foreground italic">{t("message_hidden_blocked")}</Text>
+						<Text className="text-xs text-blue-500">{t("message_hidden_blocked_show")}</Text>
+					</PressableOpacity>
+				</View>
+			)}
+			{!showTombstone && (
+				<View className="h-auto max-w-3/4">
+					<Menu
+						chat={chat}
+						info={info}
+						className="w-full h-auto pb-2 px-4"
+						isAnchoredToRight={info.item.inner.senderId !== stringifiedClient?.userId}
+					>
+						<View
+							className={cn(
+								"p-3 rounded-3xl w-auto h-auto flex-row shadow-sm",
+								info.item.inner.senderId === stringifiedClient?.userId
+									? cn(isInflightError ? "bg-red-500" : "bg-blue-500")
+									: "bg-background-secondary"
+							)}
+						>
+							{nextMessage?.inner.senderId !== info.item.inner.senderId && (
+								<Fragment>
+									{info.item.inner.senderId === stringifiedClient?.userId ? (
+										<View className="absolute right-2 -bottom-1.75 overflow-hidden bg-transparent w-5 h-3.75">
+											<View
+												className={cn(
+													isInflightError ? "bg-red-500" : "bg-blue-500",
+													"absolute size-6.5 bottom-0 -right-3.25 rounded-[13px]"
+												)}
+											/>
+										</View>
 									) : (
-										<Regexed
-											chat={chat}
-											message={info.item}
-											fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
-										/>
+										<View
+											className="absolute left-2 -bottom-1.75 overflow-hidden bg-transparent w-5 h-3.75"
+											style={{
+												transform: [
+													{
+														scaleX: -1
+													}
+												]
+											}}
+										>
+											<View className="bg-background-secondary absolute size-6.5 bottom-0 -right-3.25 rounded-[13px]" />
+										</View>
 									)}
-								</View>
+								</Fragment>
+							)}
+							{isMessageOnlyLink ? (
 								<Attachments
 									chat={chat}
 									message={info.item}
 									fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
-									single={false}
+									single={true}
 									layout={layout}
 								/>
-							</View>
-						)}
-					</View>
-				</Menu>
-			</View>
+							) : (
+								<View className="flex-col bg-transparent w-auto h-auto">
+									<View className="bg-transparent w-auto h-auto flex-row">
+										{info.item.undecryptable ? (
+											<Text
+												className={cn(
+													"text-sm shrink-0 flex-wrap text-wrap items-center break-all",
+													info.item.inner.senderId === stringifiedClient?.userId
+														? "text-white"
+														: "text-foreground"
+												)}
+											>
+												{messageDisplayBody(info.item)}
+											</Text>
+										) : (
+											<Regexed
+												chat={chat}
+												message={info.item}
+												fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
+											/>
+										)}
+									</View>
+									<Attachments
+										chat={chat}
+										message={info.item}
+										fromSelf={info.item.inner.senderId === stringifiedClient?.userId}
+										single={false}
+										layout={layout}
+									/>
+								</View>
+							)}
+						</View>
+					</Menu>
+				</View>
+			)}
 			{!nextMessage && <Typing chat={chat} />}
 		</View>
 	)
