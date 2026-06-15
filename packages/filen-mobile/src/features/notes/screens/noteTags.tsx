@@ -300,6 +300,7 @@ const NoteTags = () => {
 								size: 20
 							},
 							props: {
+								enabled: isOnline,
 								onPress: () => {
 									void createTagFlow({ t })
 								}
