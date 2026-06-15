@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next"
 import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
 import contacts from "@/features/contacts/contacts"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { isBlocked } from "@/features/contacts/blockedSelectors"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 
@@ -41,7 +42,7 @@ export const Menu = ({
 
 	const isOwner = info.item.inner.senderId === stringifiedClient?.userId
 	const blocked = useBlockedUsers()
-	const senderBlocked = blocked.userIds.has(info.item.inner.senderId)
+	const senderBlocked = isBlocked({ userId: info.item.inner.senderId, email: info.item.inner.senderEmail }, blocked)
 
 	const blockButton = {
 		id: "block",

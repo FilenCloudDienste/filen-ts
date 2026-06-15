@@ -21,6 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { formatRelativeTime, simpleDateNoTime } from "@/lib/time"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { isBlocked } from "@/features/contacts/blockedSelectors"
 
 const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()
@@ -28,7 +29,9 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const stringifiedClient = useStringifiedClient()
 	const unreadCount = useChatUnreadCount(info.item)
 	const blocked = useBlockedUsers()
-	const lastMessageFromBlocked = !!info.item.lastMessage && blocked.userIds.has(info.item.lastMessage.inner.senderId)
+	const lastMessageFromBlocked =
+		!!info.item.lastMessage &&
+		isBlocked({ userId: info.item.lastMessage.inner.senderId, email: info.item.lastMessage.inner.senderEmail }, blocked)
 	const typing = useChatsStore(useShallow(state => state.typing[info.item.uuid] ?? []))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { isSelected, areChatsSelected } = useChatsStore(
@@ -163,7 +166,9 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 												: "text-muted-foreground"
 									)}
 								>
-									{lastMessageFromBlocked ? t("message_hidden_blocked") : (info.item.lastMessage?.inner.message ?? t("no_messages_yet"))}
+									{lastMessageFromBlocked
+										? t("message_hidden_blocked")
+										: (info.item.lastMessage?.inner.message ?? t("no_messages_yet"))}
 								</Text>
 							) : (
 								<Text
