@@ -87,6 +87,12 @@ export const drive = {
 	// ── Header search bar ─────────────────────────────────────────────────────
 	/** Search bar placeholder in the drive header */
 	search_drive: "Search",
+	/** Empty-state title when the cache-backed search can't run (worker wedged / cache unavailable / root removed) */
+	search_unavailable: "Search unavailable",
+	/** Empty-state subtitle under search_unavailable */
+	search_unavailable_description: "Couldn't search right now. Pull to refresh or try again later.",
+	/** Footer shown when the match count exceeds the result cap; {{shown}} and {{total}} are counts */
+	search_results_truncated: "Showing the first {{shown}} of {{total}} matches. Refine your search to narrow it down.",
 
 	// ── Picker-mode header titles (drive/index.tsx headerTitle switch) ────────
 	/** Picker header: select the destination directory for a move operation */

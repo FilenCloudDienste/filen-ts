@@ -8,7 +8,7 @@ import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
 import type { DriveItem } from "@/types"
 import useDrivePath from "@/hooks/useDrivePath"
-import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
+import { type DriveSearchStatus } from "@/features/drive/hooks/useDriveSearch"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
@@ -27,16 +27,18 @@ import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } f
 const Header = ({
 	setSearchQuery,
 	listItems,
-	queryingGlobalSearch
+	searchStatus
 }: {
 	setSearchQuery: React.Dispatch<React.SetStateAction<string>>
 	// The search-filtered, sorted set the list body actually renders. Select-all
 	// and the select/deselect-all toggle MUST operate on this same visible set —
-	// not the unfiltered query data — or they'd target search-hidden items.
+	// not the unfiltered query data — or they'd target search-hidden items. It is
+	// ALSO the cross-reference set for bulk-action flags, so cross-directory cache
+	// search results carry fresh metadata into the bulk toolbar.
 	listItems: DriveItem[]
-	// In-flight global (SDK-backed) search indicator. Surfaced as a non-blocking
-	// header spinner; the list keeps showing the instant local-filter results.
-	queryingGlobalSearch: boolean
+	// Cache-backed search status. Drives the non-blocking header "searching" spinner
+	// (warming/background) and gates select-all until the result set has settled.
+	searchStatus: DriveSearchStatus
 }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
@@ -70,17 +72,6 @@ const Header = ({
 	const isAtStackRoot = (navigation.getState()?.index ?? 0) === 0
 	const { sort: currentSort, setSort, sortable } = useDriveSortPreference(drivePath)
 
-	const driveItemsQuery = useDriveItemsQuery(
-		{
-			path: drivePath
-		},
-		{
-			enabled: false
-		}
-	)
-
-	const driveItems = driveItemsQuery.status === "success" ? driveItemsQuery.data : []
-
 	const parent = getDriveParent(drivePath)
 
 	const upload = useDriveUpload({ parent, drivePath, t })
@@ -101,9 +92,15 @@ const Header = ({
 		// Select-all / deselect-all must mirror the list body's VISIBLE (search-
 		// filtered) set, not the unfiltered query data. With a search active,
 		// `listItems` is the narrowed subset the user actually sees; selecting all
-		// of `driveItems` would silently pick search-hidden items and the toggle
-		// label would be wrong. With no search active `listItems === itemsSorted`,
+		// of the directory listing would silently pick search-hidden items and the
+		// toggle label would be wrong. With no search active `listItems === itemsSorted`,
 		// so behavior is identical to before.
+		//
+		// Don't offer select-all on a still-converging cache search (warming/background):
+		// the visible set keeps growing as the resync lands, so "all" would be a partial
+		// set. Deselect-all stays available so an existing selection can always be cleared.
+		const canSelectAll = searchStatus === "idle" || searchStatus === "settled"
+
 		if (listItems.length > 0) {
 			if (selectedDriveItems.length === listItems.length) {
 				menuButtons.push({
@@ -114,7 +111,7 @@ const Header = ({
 						useDriveStore.getState().clearSelectedItems()
 					}
 				})
-			} else {
+			} else if (canSelectAll) {
 				menuButtons.push({
 					id: "selectAll",
 					title: t("select_all"),
@@ -161,12 +158,15 @@ const Header = ({
 		}
 
 		if (selectedDriveItems.length > 0) {
-			// Cross-reference selected items with the live query list before
-			// aggregating flags. Otherwise stale selection entries (e.g. an item
-			// that became undecryptable after a key change, or whose favorited
-			// state flipped via socket event) would feed outdated booleans into
-			// the bulk toolbar.
-			const liveItems = selectedDriveItems.map(sel => driveItems.find(live => live.data.uuid === sel.data.uuid) ?? sel)
+			// Cross-reference selected items with the VISIBLE list (`listItems`) before
+			// aggregating flags. This is the rendered set — the directory listing when
+			// browsing, the cache-search result set when searching — so a cross-directory
+			// search hit resolves to its fresh metadata here (the current-directory query
+			// wouldn't contain it). Falls back to the selection entry itself when absent.
+			// Otherwise stale selection entries (e.g. an item that became undecryptable
+			// after a key change, or whose favorited state flipped via socket event) would
+			// feed outdated booleans into the bulk toolbar.
+			const liveItems = selectedDriveItems.map(sel => listItems.find(live => live.data.uuid === sel.data.uuid) ?? sel)
 			const driveFlags = aggregateDriveSelectionFlags(liveItems)
 
 			for (const button of buildBulkActionMenu({
@@ -225,11 +225,11 @@ const Header = ({
 			})
 		}
 
-		// Non-blocking in-flight indicator for the debounced global (SDK) search.
-		// The list keeps rendering the instant local-filter results underneath;
-		// this just signals that broader results are still being fetched, instead
-		// of blanking the list with a full-screen spinner.
-		if (queryingGlobalSearch) {
+		// Non-blocking in-flight indicator for the cache-backed search. `warming` is the
+		// initial index warm-up (the list body shows its own spinner until the first
+		// snapshot); `background` is "results shown, still converging" — this top-right
+		// spinner is the always-visible signal for that (the footer can scroll off).
+		if (searchStatus === "warming" || searchStatus === "background") {
 			items.push({
 				type: "loader"
 			})

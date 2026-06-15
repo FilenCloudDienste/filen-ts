@@ -1,57 +1,67 @@
 // @vitest-environment happy-dom
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
-import { renderHook, act } from "@testing-library/react"
+import { renderHook, act, cleanup } from "@testing-library/react"
 
 // ------------------------------------------------------------------
 // Hoisted spies / mocks (must be defined before the imports they back)
 // ------------------------------------------------------------------
 
-const { debounceSpy, mockFindItemMatchesForName, mockIsOnline, mockAlertError } = vi.hoisted(() => ({
-	debounceSpy: vi.fn(),
-	mockFindItemMatchesForName: vi.fn(),
-	mockIsOnline: vi.fn(() => true),
-	mockAlertError: vi.fn()
+const { driveSearchMock, snapshotHolder, removeFromSelection, gates } = vi.hoisted(() => ({
+	driveSearchMock: {
+		open: vi.fn(),
+		setName: vi.fn(async () => {}),
+		closeActive: vi.fn(async () => {})
+	},
+	// The driveSearch singleton hands its onSnapshot callback to open(); tests grab it
+	// here and drive snapshots through it (the singleton itself is fully mocked).
+	snapshotHolder: { onSnapshot: null as ((snapshot: unknown) => void) | null },
+	removeFromSelection: vi.fn(),
+	// Reactive gates the hook reads — held in a box so a rerender() re-reads them.
+	gates: { online: true, appActive: true, focused: true }
 }))
 
-// Real debounce, wrapped so we can COUNT how many debounced functions get created.
-// The whole point of the fix is that the searcher is created exactly once for the
-// lifetime of the hook — not rebuilt on every render (the original IIFE bug).
-vi.mock("es-toolkit/function", async () => {
-	const actual = await vi.importActual<typeof import("es-toolkit/function")>("es-toolkit/function")
-
-	return {
-		...actual,
-		debounce: (...args: Parameters<typeof actual.debounce>) => {
-			debounceSpy()
-
-			return actual.debounce(...args)
-		}
-	}
-})
-
-vi.mock("@/features/drive/drive", () => ({
+vi.mock("@/features/drive/driveSearch", () => ({
 	default: {
-		findItemMatchesForName: mockFindItemMatchesForName
+		open: driveSearchMock.open,
+		setName: driveSearchMock.setName,
+		closeActive: driveSearchMock.closeActive
 	}
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: {
-		error: mockAlertError
-	}
+// CacheSearchResult_Tags is the only runtime value the hook pulls from the SDK.
+vi.mock("@filen/sdk-rs", () => ({
+	CacheSearchResult_Tags: { File: "File", Dir: "Dir" }
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-	onlineManager: {
-		isOnline: mockIsOnline
-	}
+// Passthrough unwrap → a minimal DriveItem carrying just `type` + `data.uuid`
+// (all the hook's map/tombstone/selection logic touches).
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapDirMeta: (dir: { uuid: string }) => dir,
+	unwrappedDirIntoDriveItem: (dir: { uuid: string }) => ({ type: "directory", data: { uuid: dir.uuid } }),
+	unwrapFileMeta: (file: { uuid: string }) => file,
+	unwrappedFileIntoDriveItem: (file: { uuid: string }) => ({ type: "file", data: { uuid: file.uuid } })
 }))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@/hooks/useIsOnline", () => ({ default: () => gates.online }))
+vi.mock("@/hooks/useIsAppActive", () => ({ default: () => gates.appActive }))
+vi.mock("expo-router", () => ({ useIsFocused: () => gates.focused }))
 
+vi.mock("@/features/drive/store/useDrive.store", () => ({
+	useDriveStore: { getState: () => ({ removeFromSelection }) }
+}))
+
+// Real (no native deps): events (EventEmitter3), the search status store + app store (zustand).
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import type { DrivePath } from "@/hooks/useDrivePath"
+import type { DriveItem } from "@/types"
+import events from "@/lib/events"
+import { useDriveSearchStore } from "@/features/drive/store/useDriveSearch.store"
+import { useAppStore } from "@/stores/useApp.store"
+
+const SETCONFIG_DEBOUNCE_MS = 350
+const GRACE_MS = 400
+const WATCHDOG_MS = 15_000
 
 function drivePath(over?: Partial<DrivePath>): DrivePath {
 	return {
@@ -61,53 +71,149 @@ function drivePath(over?: Partial<DrivePath>): DrivePath {
 	} as DrivePath
 }
 
+function dirResult(uuid: string) {
+	return { tag: "Dir", inner: { dir: { uuid } } }
+}
+
+function fileResult(uuid: string) {
+	return { tag: "File", inner: { file: { uuid } } }
+}
+
+function snapshot({ results = [], total = 0n, live = true }: { results?: unknown[]; total?: bigint; live?: boolean } = {}) {
+	return { results, total, live }
+}
+
+function deliver(snap: ReturnType<typeof snapshot>): void {
+	act(() => {
+		snapshotHolder.onSnapshot?.(snap)
+	})
+}
+
+async function advance(ms: number): Promise<void> {
+	await act(async () => {
+		await vi.advanceTimersByTimeAsync(ms)
+	})
+}
+
+function render() {
+	return renderHook(({ path }: { path: DrivePath }) => useDriveSearch({ drivePath: path }), {
+		initialProps: { path: drivePath() }
+	})
+}
+
 beforeEach(() => {
-	debounceSpy.mockClear()
-	mockFindItemMatchesForName.mockReset()
-	mockFindItemMatchesForName.mockResolvedValue([])
-	mockIsOnline.mockReturnValue(true)
-	mockAlertError.mockClear()
+	vi.useFakeTimers()
+
+	driveSearchMock.open.mockReset()
+	driveSearchMock.open.mockImplementation(async (args: { onSnapshot: (snapshot: unknown) => void }) => {
+		// Capture synchronously (no await before the assignment) so the callback is
+		// available the moment Effect A fires.
+		snapshotHolder.onSnapshot = args.onSnapshot
+	})
+	driveSearchMock.setName.mockClear()
+	driveSearchMock.closeActive.mockClear()
+	snapshotHolder.onSnapshot = null
+	removeFromSelection.mockClear()
+
+	gates.online = true
+	gates.appActive = true
+	gates.focused = true
+
+	useDriveSearchStore.setState({ resyncing: false, rootDeleted: false, cacheUnavailable: false })
+	useAppStore.setState({ biometricUnlocked: true })
 })
 
 afterEach(() => {
+	// Unmount every rendered hook so a persistent mount can't re-fire effects across
+	// tests when a later beforeEach mutates the shared gates / zustand stores.
+	cleanup()
 	vi.useRealTimers()
 })
 
-describe("useDriveSearch", () => {
-	it("creates the debounced searcher exactly once across many re-renders (stable identity)", () => {
-		const { rerender } = renderHook(({ path }: { path: DrivePath }) => useDriveSearch({ drivePath: path }), {
-			initialProps: { path: drivePath() }
-		})
+describe("useDriveSearch — gating + lifecycle", () => {
+	it("is idle with an empty query and never opens a search", () => {
+		const { result } = render()
 
-		// A fresh drivePath object every render (as useDrivePath produces) used to
-		// rebuild the debounced fn each time. With the lazy useState init it must not.
-		rerender({ path: drivePath() })
-		rerender({ path: drivePath() })
-		rerender({ path: drivePath() })
-
-		expect(debounceSpy).toHaveBeenCalledTimes(1)
+		expect(result.current.status).toBe("idle")
+		expect(result.current.searchResults).toEqual([])
+		expect(driveSearchMock.open).not.toHaveBeenCalled()
 	})
 
-	it("exposes a stable result-shape and updates searchQuery via setSearchQuery", () => {
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath() }))
-
-		expect(result.current.searchQuery).toBe("")
-		expect(result.current.globalSearchResult).toEqual([])
-		expect(result.current.queryingGlobalSearch).toBe(false)
+	it("opens the cache search once when a query becomes active (focused, foreground, unlocked)", () => {
+		const { result } = render()
 
 		act(() => {
-			result.current.setSearchQuery("hello")
+			result.current.setSearchQuery("report")
 		})
 
-		expect(result.current.searchQuery).toBe("hello")
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+		expect(driveSearchMock.open.mock.calls[0]?.[0]).toMatchObject({ rootUuid: null, name: "report" })
 	})
 
-	it("debounces: rapid query changes collapse into a single SDK search with the latest term", async () => {
-		vi.useFakeTimers()
+	it("does not open while the screen is unfocused", () => {
+		gates.focused = false
 
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath() }))
+		const { result } = render()
 
-		// Three rapid changes within the 1s window → only the last should fire.
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(driveSearchMock.open).not.toHaveBeenCalled()
+	})
+
+	it("does not open while biometric is locked", () => {
+		useAppStore.setState({ biometricUnlocked: null })
+
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(driveSearchMock.open).not.toHaveBeenCalled()
+	})
+
+	it("does not run cache search in select-mode (type='drive' WITH selectOptions)", () => {
+		const selectOptions = {
+			type: "single" as const,
+			files: true,
+			directories: false,
+			intention: "select" as const,
+			items: [],
+			id: "sel-1"
+		}
+
+		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath({ selectOptions }) }))
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(driveSearchMock.open).not.toHaveBeenCalled()
+		expect(result.current.status).toBe("idle")
+	})
+
+	it("closes the active search when the query is cleared", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+
+		act(() => {
+			result.current.setSearchQuery("")
+		})
+
+		expect(driveSearchMock.closeActive).toHaveBeenCalled()
+		expect(result.current.status).toBe("idle")
+	})
+
+	it("debounces query keystrokes into a single setName with the latest term (no reopen)", async () => {
+		const { result } = render()
+
 		act(() => {
 			result.current.setSearchQuery("a")
 		})
@@ -118,143 +224,285 @@ describe("useDriveSearch", () => {
 			result.current.setSearchQuery("abc")
 		})
 
-		expect(mockFindItemMatchesForName).not.toHaveBeenCalled()
+		// One open (the first activation); keystrokes flow through setName.
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
 
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1000)
-		})
+		await advance(SETCONFIG_DEBOUNCE_MS)
 
-		expect(mockFindItemMatchesForName).toHaveBeenCalledTimes(1)
-		expect(mockFindItemMatchesForName.mock.calls[0]?.[0]).toMatchObject({ name: "abc" })
+		expect(driveSearchMock.setName).toHaveBeenLastCalledWith("abc")
 	})
+})
 
-	it("does not run the global SDK search while offline", async () => {
-		vi.useFakeTimers()
-		mockIsOnline.mockReturnValue(false)
-
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath() }))
+describe("useDriveSearch — result mapping", () => {
+	it("maps dir + file CacheSearchResults to DriveItems and settles immediately when non-empty", () => {
+		const { result } = render()
 
 		act(() => {
-			result.current.setSearchQuery("anything")
+			result.current.setSearchQuery("x")
 		})
 
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1000)
-		})
+		deliver(snapshot({ results: [dirResult("d1"), fileResult("f1")], total: 2n, live: true }))
 
-		expect(mockFindItemMatchesForName).not.toHaveBeenCalled()
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["d1", "f1"])
+		expect(result.current.searchResults.map(i => i.type)).toEqual(["directory", "file"])
+		expect(result.current.status).toBe("settled")
 	})
+})
 
-	it("does not run the global search on a non-drive variant", async () => {
-		vi.useFakeTimers()
-
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath({ type: "trash" }) }))
+describe("useDriveSearch — state machine (warming / settled / background)", () => {
+	it("is warming before the first snapshot lands", () => {
+		const { result } = render()
 
 		act(() => {
-			result.current.setSearchQuery("anything")
+			result.current.setSearchQuery("x")
 		})
 
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1000)
-		})
-
-		expect(mockFindItemMatchesForName).not.toHaveBeenCalled()
+		expect(result.current.status).toBe("warming")
 	})
 
-	it("an empty/whitespace query clears results without an SDK call", async () => {
-		vi.useFakeTimers()
-
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath() }))
+	it("keeps warming on an empty snapshot inside the grace window, then settles to no-results", async () => {
+		const { result } = render()
 
 		act(() => {
-			result.current.setSearchQuery("   ")
+			result.current.setSearchQuery("x")
 		})
 
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1000)
-		})
+		deliver(snapshot({ results: [], total: 0n, live: true }))
 
-		expect(mockFindItemMatchesForName).not.toHaveBeenCalled()
-		expect(result.current.globalSearchResult).toEqual([])
+		// Within grace — must NOT flash "no results" (settled).
+		expect(result.current.status).toBe("warming")
+
+		await advance(GRACE_MS)
+
+		// Grace elapsed, no resync in flight → genuinely empty.
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults).toEqual([])
 	})
 
-	it("populates globalSearchResult from the SDK matches", async () => {
-		vi.useFakeTimers()
-
-		mockFindItemMatchesForName.mockResolvedValue([
-			{ item: { type: "file", data: { uuid: "u1" } } },
-			{ item: { type: "file", data: { uuid: "u2" } } }
-		])
-
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath() }))
+	it("keeps warming on an empty snapshot while a resync covers the root (past grace)", async () => {
+		const { result } = render()
 
 		act(() => {
-			result.current.setSearchQuery("photo")
+			result.current.setSearchQuery("x")
 		})
 
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1000)
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(true)
 		})
 
-		expect(result.current.globalSearchResult.map(i => i.data.uuid)).toEqual(["u1", "u2"])
-		expect(result.current.queryingGlobalSearch).toBe(false)
+		deliver(snapshot({ results: [], total: 0n, live: true }))
+
+		await advance(GRACE_MS)
+
+		expect(result.current.status).toBe("warming")
 	})
 
-	// #212 — type='drive' WITH selectOptions (select-mode) suppresses global search
-	it("does not run the global search when type='drive' but selectOptions is defined (select-mode)", async () => {
-		vi.useFakeTimers()
-
-		const selectOptions = {
-			type: "single" as const,
-			files: true,
-			directories: false,
-			intention: "select" as const,
-			items: [],
-			id: "sel-1"
-		}
-
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath({ type: "drive", selectOptions }) }))
+	it("reports background while results exist and a resync is still converging", () => {
+		const { result } = render()
 
 		act(() => {
-			result.current.setSearchQuery("anything")
+			result.current.setSearchQuery("x")
 		})
 
-		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1000)
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(true)
 		})
 
-		// The effect guard (line 138 of useDriveSearch.ts) returns early when
-		// selectOptions is defined, so the debounced searcher is never invoked.
-		expect(mockFindItemMatchesForName).not.toHaveBeenCalled()
-		// State should remain at initial defaults.
-		expect(result.current.globalSearchResult).toEqual([])
-		expect(result.current.queryingGlobalSearch).toBe(false)
+		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: true }))
+
+		expect(result.current.status).toBe("background")
+	})
+})
+
+describe("useDriveSearch — terminal + offline", () => {
+	it("is offline-incomplete when offline with no matches (never warming-forever)", () => {
+		gates.online = false
+
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		expect(result.current.status).toBe("offline-incomplete")
 	})
 
-	// #213 — SDK-error path: alerts.error called + globalSearchResult cleared + queryingGlobalSearch false
-	it("calls alerts.error and clears globalSearchResult when findItemMatchesForName rejects", async () => {
-		vi.useFakeTimers()
-
-		const sdkError = new Error("SDK network failure")
-
-		mockFindItemMatchesForName.mockRejectedValue(sdkError)
-
-		const { result } = renderHook(() => useDriveSearch({ drivePath: drivePath() }))
+	it("is terminal when the snapshot reports the search is no longer live", () => {
+		const { result } = render()
 
 		act(() => {
-			result.current.setSearchQuery("query")
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: false }))
+
+		expect(result.current.status).toBe("terminal")
+	})
+
+	it("is terminal when open() rejects", async () => {
+		driveSearchMock.open.mockImplementationOnce(async () => {
+			throw new Error("createSearch failed")
+		})
+
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
 		})
 
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1000)
+			await Promise.resolve()
 		})
 
-		// run() caught the rejection and returned { success: false, error }.
-		// The source (lines 115-122) must call alerts.error with the error and clear results.
-		expect(mockAlertError).toHaveBeenCalledTimes(1)
-		expect(mockAlertError).toHaveBeenCalledWith(sdkError)
-		expect(result.current.globalSearchResult).toEqual([])
-		// The defer in run() calls setQueryingGlobalSearch(false) on cleanup, so it must be false.
-		expect(result.current.queryingGlobalSearch).toBe(false)
+		expect(result.current.status).toBe("terminal")
+	})
+
+	it("is terminal when no snapshot arrives within the watchdog window", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		await advance(WATCHDOG_MS)
+
+		expect(result.current.status).toBe("terminal")
+	})
+
+	it("is terminal when the cache is unavailable", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		act(() => {
+			useDriveSearchStore.getState().setCacheUnavailable(true)
+		})
+
+		expect(result.current.status).toBe("terminal")
+	})
+
+	it("is terminal when the active root is deleted", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		act(() => {
+			useDriveSearchStore.getState().setRootDeleted(true)
+		})
+
+		expect(result.current.status).toBe("terminal")
+	})
+
+	it("reopens when connectivity is restored while offline-incomplete", () => {
+		gates.online = false
+
+		const { result, rerender } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [], total: 0n, live: true }))
+
+		expect(result.current.status).toBe("offline-incomplete")
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+
+		gates.online = true
+
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("useDriveSearch — own-action optimistic patch (Effect D)", () => {
+	it("drops, tombstones, and purges selection on an own driveItemRemoved", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		act(() => {
+			events.emit("driveItemRemoved", { uuid: "f1" })
+		})
+
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["f2"])
+		expect(removeFromSelection).toHaveBeenCalledWith(["f1"])
+	})
+
+	it("keeps a removed item suppressed even if a later snapshot still contains it (tombstone holds)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		act(() => {
+			events.emit("driveItemRemoved", { uuid: "f1" })
+		})
+
+		// Worker hasn't dropped it yet — same membership re-arrives.
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["f2"])
+	})
+
+	it("un-suppresses via an own driveItemUpdated so the next snapshot re-includes the item (restore)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		act(() => {
+			events.emit("driveItemRemoved", { uuid: "f1" })
+		})
+
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["f2"])
+
+		// Own restore clears the tombstone (but doesn't re-add a not-present row itself).
+		act(() => {
+			events.emit("driveItemUpdated", {
+				previousUuid: "f1",
+				item: { type: "file", data: { uuid: "f1" } } as unknown as DriveItem
+			})
+		})
+
+		// The worker's converged snapshot now re-includes it (rebuilt in snapshot order).
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		expect(result.current.searchResults.map(i => i.data.uuid).sort()).toEqual(["f1", "f2"])
+	})
+
+	it("replaces a present item in place on an own driveItemUpdated (rotated uuid)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		act(() => {
+			events.emit("driveItemUpdated", {
+				previousUuid: "f1",
+				item: { type: "file", data: { uuid: "f1-rotated" } } as unknown as DriveItem
+			})
+		})
+
+		expect(result.current.searchResults.map(i => i.data.uuid).sort()).toEqual(["f1-rotated", "f2"])
 	})
 })
