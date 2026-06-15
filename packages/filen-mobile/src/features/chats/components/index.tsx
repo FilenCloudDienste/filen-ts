@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { Platform } from "react-native"
@@ -49,6 +49,17 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 			uuid
 		})
 	)
+
+	// Stale-selection purge: if a selected chat becomes a 1:1-with-blocked (e.g. you block its
+	// partner while the selection is active) it's hidden from the list, so drop it from the
+	// selection too — keeps bulk actions and the select-all toggle honest. Guarded to avoid loops.
+	useEffect(() => {
+		const kept = selectedChats.filter(chat => !isOneOnOneWithBlocked(chat, stringigiedClient?.userId, blocked))
+
+		if (kept.length !== selectedChats.length) {
+			useChatsStore.getState().setSelectedChats(kept)
+		}
+	}, [selectedChats, blocked, stringigiedClient?.userId])
 
 	const headerLeftItems = (() => {
 		if (selectedChats.length === 0) {
