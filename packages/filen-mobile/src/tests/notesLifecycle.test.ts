@@ -4,9 +4,10 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ---------------------------------------------------------------------------
 
-const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockFlushToDisk } = vi.hoisted(() => ({
+const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockNoteContentQueryUpdate, mockFlushToDisk } = vi.hoisted(() => ({
 	mockGetSdkClients: vi.fn(),
 	mockNotesWithContentQueryUpdate: vi.fn(),
+	mockNoteContentQueryUpdate: vi.fn(),
 	mockFlushToDisk: vi.fn().mockResolvedValue(undefined)
 }))
 
@@ -29,7 +30,7 @@ vi.mock("@/features/notes/queries/useNotesWithContent.query", () => ({
 }))
 
 vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
-	noteContentQueryUpdate: vi.fn()
+	noteContentQueryUpdate: mockNoteContentQueryUpdate
 }))
 
 vi.mock("@/features/notes/components/sync", () => ({
@@ -162,6 +163,7 @@ describe("restoreFromHistory", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockReset()
 		mockNotesWithContentQueryUpdate.mockReset()
+		mockNoteContentQueryUpdate.mockReset()
 		mockFlushToDisk.mockClear()
 		mockFlushToDisk.mockResolvedValue(undefined)
 		useNotesInflightStore.getState().setInflightContent({})
@@ -262,6 +264,54 @@ describe("restoreFromHistory", () => {
 		expect(result).toHaveLength(1)
 		expect(result[0].uuid).toBe("other-uuid")
 		expect(result[0].content).toBe("other-content")
+	})
+
+	it("updater writes the restored history content when the history entry carries content", async () => {
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1" })
+		const history = makeHistory({ content: "restored-from-history" })
+		const cacheEntry = { ...note, content: "stale-cached-content" }
+
+		await restoreFromHistory({ note, history })
+
+		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
+		if (!callArgs) throw new Error("expected a call")
+		const { updater } = callArgs[0]
+		const result = updater([cacheEntry])
+
+		expect(result[0].content).toBe("restored-from-history")
+	})
+
+	it("writes the restored content into the per-note content query so the open editor reseeds", async () => {
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1" })
+		const history = makeHistory({ content: "restored-from-history" })
+
+		await restoreFromHistory({ note, history })
+
+		expect(mockNoteContentQueryUpdate).toHaveBeenCalledTimes(1)
+
+		const callArgs = mockNoteContentQueryUpdate.mock.calls[0]
+		if (!callArgs) throw new Error("expected a call")
+
+		expect(callArgs[0].params).toEqual({ uuid: "note-uuid-1" })
+		expect(callArgs[0].updater).toBe("restored-from-history")
+	})
+
+	it("does not touch the per-note content query when the history entry has no content", async () => {
+		const sdkClient = makeMockSdkClient()
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: sdkClient })
+
+		const note = makeNote({ uuid: "note-uuid-1" })
+		const history = makeHistory()
+
+		await restoreFromHistory({ note, history })
+
+		expect(mockNoteContentQueryUpdate).not.toHaveBeenCalled()
 	})
 
 	it("returns the updated note from the SDK (wrapped with undecryptable flag)", async () => {

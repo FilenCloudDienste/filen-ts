@@ -156,17 +156,35 @@ export async function restoreFromHistory({ note, history, signal }: { note: Note
 		)
 	)
 
+	// A restore makes the note's content the restored version's content. The
+	// history entry's content is optional: when present, optimistically paint it
+	// into both caches; when absent (unknown), leave the cached content untouched
+	// and let the next per-note fetch reconcile — never blank the note.
+	const restoredContent = history.content
+
 	notesWithContentQueryUpdate({
 		updater: prev =>
 			prev.map(n =>
 				n.uuid === note.uuid
 					? {
 							...note,
-							content: n.content
+							content: typeof restoredContent === "string" ? restoredContent : n.content
 						}
 					: n
 			)
 	})
+
+	if (typeof restoredContent === "string") {
+		// Reseed the open editor: its remount key is this query's dataUpdatedAt, so
+		// omitting dataUpdatedAt here bumps it and forces a repaint with the restored
+		// text (mirrors how a remote-edit reload repaints the editor).
+		noteContentQueryUpdate({
+			params: {
+				uuid: note.uuid
+			},
+			updater: restoredContent
+		})
+	}
 
 	// Drop any unsynced local content for this note. Otherwise sync.tsx would
 	// later push the still-queued pre-restore inflight content back to the
