@@ -141,7 +141,7 @@ describe("driveSearch lifecycle", () => {
 			{ name: "report", itemType: 0, recursive: true, caseSensitive: false },
 			{ signal: expect.anything() }
 		)
-		expect(fake.getRange).toHaveBeenCalledWith(0n, 5000n, expect.anything(), { signal: expect.anything() })
+		expect(fake.getRange).toHaveBeenCalledWith(0n, 1000n, expect.anything(), { signal: expect.anything() })
 		expect(onSnapshot).toHaveBeenCalledWith(fake.snapshot)
 	})
 
