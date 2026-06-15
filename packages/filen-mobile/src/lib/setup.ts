@@ -5,6 +5,7 @@ import { run, Semaphore } from "@filen/utils"
 import { restoreQueries } from "@/queries/client"
 import sqlite from "@/lib/sqlite"
 import foregroundService from "@/features/transfers/foregroundService"
+import driveSearch from "@/features/drive/driveSearch"
 import { startReconnectListener } from "@/lib/reconnect"
 import { initI18n } from "@/lib/i18n"
 import { initTheme } from "@/lib/theme"
@@ -95,6 +96,11 @@ const setup = {
 			// where growth happens instead of competing with startup.
 			if (isAuthed.isAuthed && !options?.background) {
 				foregroundService.init().catch(console.error)
+
+				// configureCache is pure storage (opens no DB until the first search), so this is
+				// fire-and-forget and cheap. Gated like foregroundService: never in a headless
+				// background run (no search worker there), and only when authed.
+				driveSearch.init().catch(console.error)
 			}
 
 			const duration = performance.now() - now
