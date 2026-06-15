@@ -173,6 +173,11 @@ type SharedValues = {
 	savedScale: SharedValue<number>
 	savedTranslateX: SharedValue<number>
 	savedTranslateY: SharedValue<number>
+	// The pinch keeps its OWN translate anchor. While two fingers are down the
+	// pan overwrites savedTranslateX/Y every frame (to stay ready for a one-finger
+	// handoff), so the pinch must not share those or its focal anchor drifts.
+	pinchSavedTranslateX: SharedValue<number>
+	pinchSavedTranslateY: SharedValue<number>
 	pinchBaseScale: SharedValue<number>
 	panDriving: SharedValue<number>
 	panTouchStartX: SharedValue<number>
@@ -185,6 +190,62 @@ type SharedValues = {
 	containerHeight: SharedValue<number>
 	contentWidth: SharedValue<number>
 	contentHeight: SharedValue<number>
+}
+
+// One frame of the pinch transform, extracted as a pure UI-thread worklet so it
+// is unit-testable. Reads the pinch's OWN translate anchor (pinchSavedTranslateX/Y)
+// — NEVER savedTranslateX/Y, which the pan gesture owns and overwrites every frame
+// while two fingers are down. Sharing those let the pan corrupt the focal anchor
+// mid-pinch, so the content + focal jumped whenever the fingers moved asymmetrically.
+//
+// Glues both fingers' material points under the fingers (the two-finger model):
+// t = focal - centerToContent · (newScale / savedScale), averaged over the two
+// pointers. Equivalent algebra to the closed form below.
+export function computePinchTransform(
+	sv: SharedValues,
+	eScale: number,
+	eFocalX: number,
+	eFocalY: number,
+	hasDismiss: boolean,
+	minZoom: number,
+	maxZoom: number
+): {
+	scale: number
+	translateX: number
+	translateY: number
+} {
+	"worklet"
+
+	const raw = (sv.savedScale.value * eScale) / sv.pinchBaseScale.value
+	const newScale = rubberBandScale(raw, hasDismiss ? PINCH_DISMISS_SCALE_FLOOR : minZoom, maxZoom)
+	const ratio = newScale / sv.savedScale.value
+	const centerX = sv.containerWidth.value / 2
+	const centerY = sv.containerHeight.value / 2
+	const rawTx =
+		sv.pinchSavedTranslateX.value +
+		(sv.focalX.value - centerX - sv.pinchSavedTranslateX.value) * (1 - ratio) +
+		(eFocalX - sv.focalX.value)
+	const rawTy =
+		sv.pinchSavedTranslateY.value +
+		(sv.focalY.value - centerY - sv.pinchSavedTranslateY.value) * (1 - ratio) +
+		(eFocalY - sv.focalY.value)
+
+	if (newScale < minZoom) {
+		// Shrinking towards dismissal — the image follows the fingers freely.
+		return {
+			scale: newScale,
+			translateX: rawTx,
+			translateY: rawTy
+		}
+	}
+
+	const bounds = getPanBounds(newScale, sv.containerWidth.value, sv.containerHeight.value, sv.contentWidth.value, sv.contentHeight.value)
+
+	return {
+		scale: newScale,
+		translateX: rubberBandClamp(rawTx, -bounds.x, bounds.x, sv.containerWidth.value),
+		translateY: rubberBandClamp(rawTy, -bounds.y, bounds.y, sv.containerHeight.value)
+	}
 }
 
 function resetZoom(scale: SharedValue<number>, translateX: SharedValue<number>, translateY: SharedValue<number>) {
@@ -264,8 +325,8 @@ function buildComposedGesture(
 			cancelAnimation(sv.translateY)
 
 			sv.savedScale.value = sv.scale.value
-			sv.savedTranslateX.value = sv.translateX.value
-			sv.savedTranslateY.value = sv.translateY.value
+			sv.pinchSavedTranslateX.value = sv.translateX.value
+			sv.pinchSavedTranslateY.value = sv.translateY.value
 			sv.pinchBaseScale.value = e.scale
 			sv.focalX.value = e.focalX
 			sv.focalY.value = e.focalY
@@ -291,40 +352,17 @@ function buildComposedGesture(
 				// focal deltas apply from the CURRENT transform (zero jump).
 				sv.pinchBaseScale.value = e.scale
 				sv.savedScale.value = sv.scale.value
-				sv.savedTranslateX.value = sv.translateX.value
-				sv.savedTranslateY.value = sv.translateY.value
+				sv.pinchSavedTranslateX.value = sv.translateX.value
+				sv.pinchSavedTranslateY.value = sv.translateY.value
 				sv.focalX.value = e.focalX
 				sv.focalY.value = e.focalY
 			}
 
-			const raw = (sv.savedScale.value * e.scale) / sv.pinchBaseScale.value
-			const newScale = rubberBandScale(raw, onPinchDismiss ? PINCH_DISMISS_SCALE_FLOOR : minZoom, maxZoom)
-			const ratio = newScale / sv.savedScale.value
-			const centerX = sv.containerWidth.value / 2
-			const centerY = sv.containerHeight.value / 2
-			const rawTx =
-				sv.savedTranslateX.value + (sv.focalX.value - centerX - sv.savedTranslateX.value) * (1 - ratio) + (e.focalX - sv.focalX.value)
-			const rawTy =
-				sv.savedTranslateY.value + (sv.focalY.value - centerY - sv.savedTranslateY.value) * (1 - ratio) + (e.focalY - sv.focalY.value)
+			const next = computePinchTransform(sv, e.scale, e.focalX, e.focalY, !!onPinchDismiss, minZoom, maxZoom)
 
-			if (newScale < minZoom) {
-				// Shrinking towards dismissal — the image follows the fingers freely.
-				sv.translateX.value = rawTx
-				sv.translateY.value = rawTy
-			} else {
-				const bounds = getPanBounds(
-					newScale,
-					sv.containerWidth.value,
-					sv.containerHeight.value,
-					sv.contentWidth.value,
-					sv.contentHeight.value
-				)
-
-				sv.translateX.value = rubberBandClamp(rawTx, -bounds.x, bounds.x, sv.containerWidth.value)
-				sv.translateY.value = rubberBandClamp(rawTy, -bounds.y, bounds.y, sv.containerHeight.value)
-			}
-
-			sv.scale.value = newScale
+			sv.translateX.value = next.translateX
+			sv.translateY.value = next.translateY
+			sv.scale.value = next.scale
 		})
 		.onEnd(e => {
 			"worklet"
@@ -637,6 +675,8 @@ const ZoomableView = ({
 	const savedScale = useSharedValue<number>(1)
 	const savedTranslateX = useSharedValue<number>(0)
 	const savedTranslateY = useSharedValue<number>(0)
+	const pinchSavedTranslateX = useSharedValue<number>(0)
+	const pinchSavedTranslateY = useSharedValue<number>(0)
 	const pinchBaseScale = useSharedValue<number>(1)
 	const panDriving = useSharedValue<number>(0)
 	const panTouchStartX = useSharedValue<number>(0)
@@ -687,6 +727,8 @@ const ZoomableView = ({
 			savedScale,
 			savedTranslateX,
 			savedTranslateY,
+			pinchSavedTranslateX,
+			pinchSavedTranslateY,
 			pinchBaseScale,
 			panDriving,
 			panTouchStartX,

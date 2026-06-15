@@ -66,8 +66,44 @@ import {
 	getPanBounds,
 	rubberBandOffset,
 	rubberBandClamp,
-	rubberBandScale
+	rubberBandScale,
+	computePinchTransform
 } from "@/components/ui/zoomableView"
+
+type Sv = Parameters<typeof computePinchTransform>[0]
+
+// A SharedValues-like bag of { value } refs for the worklet under test. Only the
+// fields computePinchTransform touches are populated; savedTranslateX/Y are here
+// purely so a test can POISON them (the pinch must ignore them — the pan owns them).
+function makeSv(values: {
+	savedScale: number
+	pinchBaseScale: number
+	pinchSavedTranslateX: number
+	pinchSavedTranslateY: number
+	focalX: number
+	focalY: number
+	containerWidth: number
+	containerHeight: number
+	contentWidth: number
+	contentHeight: number
+	savedTranslateX: number
+	savedTranslateY: number
+}): Sv {
+	return {
+		savedScale: { value: values.savedScale },
+		pinchBaseScale: { value: values.pinchBaseScale },
+		pinchSavedTranslateX: { value: values.pinchSavedTranslateX },
+		pinchSavedTranslateY: { value: values.pinchSavedTranslateY },
+		focalX: { value: values.focalX },
+		focalY: { value: values.focalY },
+		containerWidth: { value: values.containerWidth },
+		containerHeight: { value: values.containerHeight },
+		contentWidth: { value: values.contentWidth },
+		contentHeight: { value: values.contentHeight },
+		savedTranslateX: { value: values.savedTranslateX },
+		savedTranslateY: { value: values.savedTranslateY }
+	} as unknown as Sv
+}
 
 // ─── getDisplayedContentSize: "contain" letterbox math ───────────────────────
 
@@ -238,5 +274,84 @@ describe("rubberBandScale", () => {
 
 	it("passes a non-positive raw scale through unchanged", () => {
 		expect(rubberBandScale(0, 1, 5)).toBe(0)
+	})
+})
+
+// ─── computePinchTransform: two-finger focal anchoring ───────────────────────
+// The pinch and pan run via Gesture.Simultaneous, so both fire onUpdate every
+// frame while two fingers are down. The pan overwrites savedTranslateX/Y each
+// frame (to stay ready for a one-finger handoff); the pinch must therefore read
+// its OWN anchor. When it shared savedTranslateX/Y the pan corrupted the focal
+// anchor mid-pinch and the content + focal jumped on any asymmetric finger move.
+
+describe("computePinchTransform", () => {
+	const BASE = {
+		savedScale: 1,
+		pinchBaseScale: 1,
+		pinchSavedTranslateX: 0,
+		pinchSavedTranslateY: 0,
+		focalX: 260,
+		focalY: 400,
+		containerWidth: 400,
+		containerHeight: 800,
+		contentWidth: 0,
+		contentHeight: 0
+	}
+
+	it("ignores savedTranslateX/Y — the pan must not corrupt the pinch focal", () => {
+		// Same gesture frame, two different poisoned pan anchors → identical result.
+		const clean = computePinchTransform(makeSv({ ...BASE, savedTranslateX: 0, savedTranslateY: 0 }), 1.5, 275, 405, false, 1, 5)
+		const poisoned = computePinchTransform(
+			makeSv({ ...BASE, savedTranslateX: 9999, savedTranslateY: -8888 }),
+			1.5,
+			275,
+			405,
+			false,
+			1,
+			5
+		)
+
+		expect(poisoned).toEqual(clean)
+	})
+
+	it("keeps the content point under the focal glued to the moving focal", () => {
+		// Off-center anchor focal (260,400) at scale 1, translate 0 → the content
+		// point under the focal is 60px right of center. After an asymmetric pinch
+		// to 1.5x with the focal drifting to (275,405), that same content point
+		// must sit under the NEW focal — that is the whole job of the transform.
+		const centerX = 200
+		const centerY = 400
+		const anchorPointX = (260 - centerX - 0) / 1
+		const anchorPointY = (400 - centerY - 0) / 1
+
+		const next = computePinchTransform(makeSv({ ...BASE, savedTranslateX: 0, savedTranslateY: 0 }), 1.5, 275, 405, false, 1, 5)
+
+		expect(next.scale).toBeCloseTo(1.5)
+		expect(next.translateX + next.scale * anchorPointX).toBeCloseTo(275 - centerX)
+		expect(next.translateY + next.scale * anchorPointY).toBeCloseTo(405 - centerY)
+	})
+
+	it("tracks the focal across a multi-frame asymmetric pinch (scale + focal both moving)", () => {
+		const sv = makeSv({ ...BASE, focalX: 250, savedTranslateX: 0, savedTranslateY: 0 })
+		const centerX = 200
+		const anchorPointX = (250 - centerX) / 1
+
+		// Scale ramps 1→1.8 while the focal drifts 250→285 — the asymmetric case
+		// that used to shift the content. Each frame also re-poisons the pan anchor
+		// to prove the pinch never reads it. All frames stay within pan bounds.
+		const frames = [
+			{ scale: 1.2, focalX: 258 },
+			{ scale: 1.4, focalX: 266 },
+			{ scale: 1.6, focalX: 275 },
+			{ scale: 1.8, focalX: 285 }
+		]
+
+		for (const frame of frames) {
+			sv.savedTranslateX.value = frame.scale * 1234
+
+			const next = computePinchTransform(sv, frame.scale, frame.focalX, 400, false, 1, 5)
+
+			expect(next.translateX + next.scale * anchorPointX).toBeCloseTo(frame.focalX - centerX)
+		}
 	})
 })
