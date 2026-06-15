@@ -443,7 +443,6 @@ export function createMenuButtons({
 		requiresOnline: true,
 		title: t("copy_content"),
 		icon: "copy",
-		hidden: note.noteType === NoteType.Rich,
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
 				return await notes.getContent({
