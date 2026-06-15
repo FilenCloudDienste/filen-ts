@@ -1,7 +1,14 @@
 import { NoteType, type Note as SdkNote, type NoteTag as SdkNoteTag } from "@filen/sdk-rs"
-import { type Note, type NoteTag } from "@/types"
+import { type Note, type NoteTag, type NoteHistory } from "@/types"
 import { noteDisplayTitle, tagDisplayName } from "@/lib/decryption"
 import { type ListItem as NoteListItem } from "@/features/notes/components/note"
+
+// Order note history newest-first (latest revision on top). The SDK returns history in
+// its own order, so the screen sorts explicitly by editedTimestamp — a bigint (ms),
+// compared directly, no Number() precision risk. Pure; does not mutate the input.
+export function sortNoteHistoryNewestFirst(history: NoteHistory[]): NoteHistory[] {
+	return [...history].sort((a, b) => (a.editedTimestamp < b.editedTimestamp ? 1 : a.editedTimestamp > b.editedTimestamp ? -1 : 0))
+}
 
 // Narrows a (grouped) note list to the subset matching the active search query.
 // An empty/whitespace query returns the list unchanged. Section headers are dropped
