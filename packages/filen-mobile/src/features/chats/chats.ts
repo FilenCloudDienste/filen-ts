@@ -402,30 +402,49 @@ class Chats {
 		return chat
 	}
 
-	public async addParticipant({ chat, contact, signal }: { chat: Chat; contact: Contact; signal?: AbortSignal }) {
-		if (chat.participants.find(p => p.userId === contact.userId)) {
+	public async addParticipants({ chat, contacts, signal }: { chat: Chat; contacts: Contact[]; signal?: AbortSignal }) {
+		// Skip contacts already in the chat; if none remain, touch neither the SDK nor the cache.
+		const toAdd = contacts.filter(contact => !chat.participants.find(p => p.userId === contact.userId))
+
+		if (toAdd.length === 0) {
 			return chat
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
 
-		chat = wrapChat(
-			await authedSdkClient.addChatParticipant(
-				chat,
-				contact,
-				signal
-					? {
-							signal
-						}
-					: undefined
+		// Sequential by design: each add threads the previous result so the single cache write below
+		// reflects EVERY new participant. Adding them in parallel (Promise.all) had each call compute
+		// "base chat + its own contact" from the same stale chat, so the last write to resolve
+		// clobbered the others — only one new participant survived in the cache until a refetch.
+		let updated = chat
+
+		for (const contact of toAdd) {
+			updated = wrapChat(
+				await authedSdkClient.addChatParticipant(
+					updated,
+					contact,
+					signal
+						? {
+								signal
+							}
+						: undefined
+				)
 			)
-		)
+		}
 
 		chatsQueryUpdate({
-			updater: prev => prev.map(c => (c.uuid === chat.uuid ? chat : c))
+			updater: prev => prev.map(c => (c.uuid === chat.uuid ? updated : c))
 		})
 
-		return chat
+		return updated
+	}
+
+	public async addParticipant({ chat, contact, signal }: { chat: Chat; contact: Contact; signal?: AbortSignal }) {
+		return await this.addParticipants({
+			chat,
+			contacts: [contact],
+			signal
+		})
 	}
 
 	public async removeParticipant({ chat, participant, signal }: { chat: Chat; participant: ChatParticipant; signal?: AbortSignal }) {

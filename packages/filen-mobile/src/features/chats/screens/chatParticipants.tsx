@@ -261,14 +261,10 @@ const ChatParticipants = () => {
 						}
 
 						const result = await runWithLoading(async () => {
-							return await Promise.all(
-								selectContactsResult.selectedContacts.map(async contact => {
-									return await chats.addParticipant({
-										chat,
-										contact
-									})
-								})
-							)
+							return await chats.addParticipants({
+								chat,
+								contacts: selectContactsResult.selectedContacts
+							})
 						})
 
 						if (!result.success) {
