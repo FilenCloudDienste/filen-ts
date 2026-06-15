@@ -13,7 +13,7 @@ import chatsLib from "@/features/chats/chats"
 import type { MenuButton } from "@/components/ui/menu"
 import { createChatFlow } from "@/features/chats/chatsActions"
 import { runBulk } from "@/lib/bulkOps"
-import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread } from "@/features/chats/chatSelectors"
+import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread, isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
 import { useTranslation } from "react-i18next"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
@@ -36,7 +36,9 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 			return []
 		}
 
-		return chatsQuery.data.filter(chat => chat.ownerId === stringigiedClient?.userId || chat.lastMessage)
+		return chatsQuery.data
+			.filter(chat => chat.ownerId === stringigiedClient?.userId || chat.lastMessage)
+			.filter(chat => !isOneOnOneWithBlocked(chat, stringigiedClient?.userId, blocked))
 	})()
 
 	// Live-list cross-reference: stale selections could carry old `undecryptable`
@@ -105,7 +107,13 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 
 		if (selectedChats.length > 0) {
 			if (chatFlags.includesUnread) {
-				const unreadChats = selectedChats.filter(c => chatHasUnread(c, stringigiedClient?.userId ?? 0n))
+				const unreadChats = selectedChats.filter(c =>
+					chatHasUnread(c, stringigiedClient?.userId ?? 0n, blocked, uuid =>
+						chatMessagesQueryGet({
+							uuid
+						})
+					)
+				)
 
 				menuButtons.push({
 					id: "bulkMarkAsRead",

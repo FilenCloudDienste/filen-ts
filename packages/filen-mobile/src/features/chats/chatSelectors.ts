@@ -93,6 +93,23 @@ export function chatHasUnread(
 }
 
 /**
+ * A chat is "1:1 with a blocked user" when exactly one participant isn't us and that
+ * participant is blocked. Group chats (2+ others) are never hidden wholesale — their
+ * blocked members' messages are tombstoned instead.
+ */
+export function isOneOnOneWithBlocked(chat: Chat, selfUserId: bigint | undefined, blocked: BlockedUsers): boolean {
+	const others = chat.participants.filter(p => p.userId !== selfUserId)
+
+	if (others.length !== 1) {
+		return false
+	}
+
+	const other = others[0]
+
+	return other !== undefined && (blocked.userIds.has(other.userId) || blocked.emails.has(other.email.trim().toLowerCase()))
+}
+
+/**
  * Returns true iff every chat in `visibleChats` is present in `selectedChats`
  * (matched by uuid), AND `visibleChats` is non-empty.
  *
