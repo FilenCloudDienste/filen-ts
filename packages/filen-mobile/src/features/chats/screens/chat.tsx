@@ -1,4 +1,5 @@
 import { Fragment, useEffect } from "react"
+import useRevealedBlockedMessages from "@/features/chats/store/useRevealedBlockedMessages.store"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { useLocalSearchParams, useRouter } from "expo-router"
@@ -261,6 +262,14 @@ const Chat = () => {
 			cleanup()
 		}
 	}, [uuid, router])
+
+	// Reveals of tombstoned blocked messages are per-visit — reset them when leaving or
+	// switching chats so re-entering re-hides them.
+	useEffect(() => {
+		return () => {
+			useRevealedBlockedMessages.getState().clear()
+		}
+	}, [uuid])
 
 	if (!chat) {
 		return <DismissStack />
