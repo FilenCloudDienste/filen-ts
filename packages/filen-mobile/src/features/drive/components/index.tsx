@@ -1,4 +1,4 @@
-import { Fragment, useCallback } from "react"
+import { Fragment, useCallback, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import useDrivePath from "@/hooks/useDrivePath"
@@ -72,6 +72,24 @@ const Drive = () => {
 	const items = isCacheSearch
 		? itemSorter.sortItems(searchResults, sort)
 		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort), searchQuery)
+
+	// Returning from a cache search to the directory listing: the search REPLACED the
+	// listing as the rendered source, so on clear the list shows whatever
+	// `driveItemsQuery.data` currently holds. Refetch on that transition so a listing that
+	// went stale / errored / never settled while the search was the view repopulates,
+	// instead of dropping to a false empty state.
+	const refetchListing = driveItemsQuery.refetch
+	const wasCacheSearchRef = useRef<boolean>(isCacheSearch)
+
+	useEffect(() => {
+		const wasCacheSearch = wasCacheSearchRef.current
+
+		wasCacheSearchRef.current = isCacheSearch
+
+		if (wasCacheSearch && !isCacheSearch) {
+			void refetchListing()
+		}
+	}, [isCacheSearch, refetchListing])
 
 	useFocusEffect(
 		useCallback(() => {

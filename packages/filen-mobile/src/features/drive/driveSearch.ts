@@ -23,7 +23,11 @@ import { useDriveSearchStore } from "@/features/drive/store/useDriveSearch.store
 // auto-refills its requested range as results stream in, so a single getRange tracks
 // the converging set; no incremental grow. Beyond the cap the list truncates (the
 // alphabetically-first `CEILING`) with a "refine search" hint.
-const CEILING = 5000
+//
+// Capped at 1000 (not 5000): on Hermes a multi-thousand-row FlashList data array that is
+// rebuilt + re-sorted on every streaming snapshot is expensive, and a mobile user never
+// scrolls a thousand hits — the truncation footer nudges them to refine instead.
+const CEILING = 1000
 
 // Dedupe key for the account-root search (rootUuid === null).
 const ROOT_KEY = "__account_root__"
@@ -271,12 +275,17 @@ export class DriveSearch {
 		onSnapshot(window.snapshot)
 	}
 
-	/** Re-filter the live search in place (engine-local; no network, no recreate). */
-	public async setName(name: string): Promise<void> {
+	/**
+	 * Re-filter the live search in place (engine-local; no network, no recreate). Returns
+	 * `false` when there is NO live search to refilter (e.g. it was closed on backgrounding
+	 * and not yet reopened) — the caller treats that as "reopen needed" so a keystroke can
+	 * never silently vanish into a closed search.
+	 */
+	public async setName(name: string): Promise<boolean> {
 		const search = this.active?.search
 
 		if (!search) {
-			return
+			return false
 		}
 
 		try {
@@ -286,8 +295,12 @@ export class DriveSearch {
 				recursive: true,
 				caseSensitive: false
 			})
+
+			return true
 		} catch (error) {
 			console.error("[driveSearch] setConfig failed", error)
+
+			return false
 		}
 	}
 

@@ -137,10 +137,18 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		searchQueryRef.current = searchQuery
 	}, [searchQuery])
 
-	// Stable debounced re-filter (engine-local setConfig; no network, no re-open).
+	// Stable debounced re-filter (engine-local setConfig; no network, no re-open). If the
+	// search is no longer live (closed on backgrounding and not reopened, or the handle went
+	// stale), setName returns false and we REOPEN via the passed callback — otherwise a
+	// keystroke after a background→foreground cycle would silently no-op forever (the search
+	// was torn down to release the shared socket, and refilter alone can't bring it back).
 	const [debouncedSetName] = useState(() =>
-		debounce((name: string) => {
-			void driveSearch.setName(name)
+		debounce((name: string, reopen: () => void) => {
+			void driveSearch.setName(name).then(applied => {
+				if (!applied) {
+					reopen()
+				}
+			})
 		}, SETCONFIG_DEBOUNCE_MS)
 	)
 
@@ -249,13 +257,15 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		}
 	}, [isCacheSearch, hasSnapshot, drivePath.uuid, reopenNonce, resyncProgress])
 
-	// Effect B — debounced re-filter on query change (no re-open).
+	// Effect B — debounced re-filter on query change. Reopens (bumps the nonce → Effect A)
+	// if the refilter finds no live search, so typing after a background→foreground cycle
+	// recovers instead of no-opping.
 	useEffect(() => {
 		if (!isCacheSearch) {
 			return
 		}
 
-		debouncedSetName(searchQuery)
+		debouncedSetName(searchQuery, () => setReopenNonce(nonce => nonce + 1))
 	}, [searchQuery, isCacheSearch, debouncedSetName])
 
 	// Stall ceiling — backstop for a dropped `Finished` (best-effort delivery) so a stuck

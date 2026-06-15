@@ -10,7 +10,7 @@ import { renderHook, act, cleanup } from "@testing-library/react"
 const { driveSearchMock, snapshotHolder, removeFromSelection, gates } = vi.hoisted(() => ({
 	driveSearchMock: {
 		open: vi.fn(),
-		setName: vi.fn(async () => {}),
+		setName: vi.fn(async () => true),
 		closeActive: vi.fn(async () => {})
 	},
 	// The driveSearch singleton hands its onSnapshot callback to open(); tests grab it
@@ -111,7 +111,8 @@ beforeEach(() => {
 		// available the moment Effect A fires.
 		snapshotHolder.onSnapshot = args.onSnapshot
 	})
-	driveSearchMock.setName.mockClear()
+	driveSearchMock.setName.mockReset()
+	driveSearchMock.setName.mockResolvedValue(true)
 	driveSearchMock.closeActive.mockClear()
 	snapshotHolder.onSnapshot = null
 	removeFromSelection.mockClear()
@@ -231,6 +232,34 @@ describe("useDriveSearch — gating + lifecycle", () => {
 		await advance(SETCONFIG_DEBOUNCE_MS)
 
 		expect(driveSearchMock.setName).toHaveBeenLastCalledWith("abc")
+	})
+
+	// Bug: search active → app backgrounded (singleton closes the search to release the
+	// shared socket) → foreground → typing only refiltered via setName, which no-ops on a
+	// closed search → no results. Fix: a refilter that finds no live search (setName → false)
+	// must REOPEN.
+	it("reopens when a keystroke can't refilter a closed search (background recovery)", async () => {
+		driveSearchMock.setName.mockResolvedValue(false)
+
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("a")
+		})
+
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+
+		act(() => {
+			result.current.setSearchQuery("ab")
+		})
+
+		await advance(SETCONFIG_DEBOUNCE_MS)
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		// setName returned false (no live search) → the hook bumped the nonce → Effect A reopened.
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(2)
 	})
 })
 
