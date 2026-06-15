@@ -10,6 +10,7 @@ import DocumentScanner, {
 } from "react-native-document-scanner-plugin"
 import { randomUUID } from "expo-crypto"
 import { normalizeFilePathForExpo } from "@/lib/paths"
+import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { withSystemPresentation } from "@/lib/systemPresentation"
 import transfers from "@/features/transfers/transfers"
@@ -20,6 +21,54 @@ import { newTmpDir } from "@/lib/tmp"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
 import type { DrivePath } from "@/hooks/useDrivePath"
+
+// Convert a picked HEIC/HEIF asset to JPG when the global option is on, adjusting the
+// upload name + mime to match. Returns the file to upload plus the converted tmp file
+// (if any) so the caller can clean it up. convertHeicToJpg no-ops on non-HEIC input and
+// returns the original on failure, so a non-image or a failed conversion uploads as-is.
+async function maybeConvertHeicForUpload({
+	file,
+	name,
+	mime,
+	enabled
+}: {
+	file: FileSystem.File
+	name: string
+	mime: string | undefined
+	enabled: boolean
+}): Promise<{
+	file: FileSystem.File
+	name: string
+	mime: string | undefined
+	convertedTmpFile: FileSystem.File | null
+}> {
+	if (!enabled) {
+		return {
+			file,
+			name,
+			mime,
+			convertedTmpFile: null
+		}
+	}
+
+	const converted = await convertHeicToJpg(file)
+
+	if (converted.uri === file.uri) {
+		return {
+			file,
+			name,
+			mime,
+			convertedTmpFile: null
+		}
+	}
+
+	return {
+		file: converted,
+		name: `${FileSystem.Paths.basename(name, FileSystem.Paths.extname(name))}.jpg`,
+		mime: "image/jpeg",
+		convertedTmpFile: converted
+	}
+}
 
 export type UseDriveUpload = {
 	uploadFiles: () => Promise<void>
@@ -167,6 +216,7 @@ export function useDriveUpload({
 		}
 
 		const assets = documentPickerResult.data.assets
+		const convertHeic = await isConvertHeicToJpgEnabled()
 
 		const transferResult = await run(async () => {
 			return await Promise.allSettled(
@@ -185,12 +235,29 @@ export function useDriveUpload({
 								throw new Error("Asset file does not exist")
 							}
 
-							return await transfers.upload({
-								localFileOrDir: assetFile,
-								parent,
+							const converted = await maybeConvertHeicForUpload({
+								file: assetFile,
 								name: asset.name,
+								mime: asset.mimeType,
+								enabled: convertHeic
+							})
+
+							if (converted.convertedTmpFile) {
+								const convertedTmpFile = converted.convertedTmpFile
+
+								defer(() => {
+									if (convertedTmpFile.exists) {
+										convertedTmpFile.delete()
+									}
+								})
+							}
+
+							return await transfers.upload({
+								localFileOrDir: converted.file,
+								parent,
+								name: converted.name,
 								modified: asset.lastModified,
-								mime: asset.mimeType
+								mime: converted.mime
 							})
 						},
 						{
@@ -242,6 +309,7 @@ export function useDriveUpload({
 		}
 
 		const assets = imagePickerResult.data.assets
+		const convertHeic = await isConvertHeicToJpgEnabled()
 
 		const transferResult = await run(async () => {
 			return await Promise.allSettled(
@@ -263,11 +331,28 @@ export function useDriveUpload({
 							const extname = FileSystem.Paths.extname(asset.uri)
 							const fileName = asset.fileName ?? `${randomUUID()}${extname}`
 
-							return await transfers.upload({
-								localFileOrDir: assetFile,
-								parent,
+							const converted = await maybeConvertHeicForUpload({
+								file: assetFile,
 								name: fileName,
 								mime: asset.mimeType,
+								enabled: convertHeic
+							})
+
+							if (converted.convertedTmpFile) {
+								const convertedTmpFile = converted.convertedTmpFile
+
+								defer(() => {
+									if (convertedTmpFile.exists) {
+										convertedTmpFile.delete()
+									}
+								})
+							}
+
+							return await transfers.upload({
+								localFileOrDir: converted.file,
+								parent,
+								name: converted.name,
+								mime: converted.mime,
 								...(addTimestamps ? { created: Date.now(), modified: Date.now() } : {})
 							})
 						},

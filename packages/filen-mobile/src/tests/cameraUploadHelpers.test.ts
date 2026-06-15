@@ -748,6 +748,64 @@ describe("dedupTreeKey", () => {
 
 		expect(a).not.toBe(b)
 	})
+
+	it("strips the extension when convertHeic is ON even if compress is OFF", () => {
+		expect(dedupTreeKey({ path: "/camera roll/photo.heic", compress: false, convertHeic: true })).toBe("/camera roll/photo")
+	})
+
+	it("convertHeic ON: local .heic and remote .jpg collapse to one key (HEIC→JPG symmetry)", () => {
+		// listLocal lists the source .heic; listRemote lists the converted .jpg.
+		// Both must dedup to the identical stem key or the asset re-uploads every sync.
+		const local = dedupTreeKey({ path: "/camera roll/photo.heic", compress: false, convertHeic: true })
+		const remote = dedupTreeKey({ path: "/camera roll/photo.jpg", compress: false, convertHeic: true })
+
+		expect(local).toBe(remote)
+		expect(local).toBe("/camera roll/photo")
+	})
+
+	it("keeps the full path when BOTH compress and convertHeic are OFF", () => {
+		expect(dedupTreeKey({ path: "/camera roll/photo.heic", compress: false, convertHeic: false })).toBe("/camera roll/photo.heic")
+	})
+})
+
+// Toggle-safety: users flip compress / convertHeic at will, even mid-run. The
+// dedup key must stay stable so a settings change never makes a synced asset look
+// "missing remotely" and re-upload forever. These guard the invariant at the key
+// level (the integration loop tests live in cameraUpload.test.ts).
+describe("dedup key stability across compress/convertHeic toggle states", () => {
+	it("local .heic and remote .jpg collapse to the SAME key in every stripped state", () => {
+		const localHeic = "/camera roll/photo.heic"
+		const remoteJpg = "/camera roll/photo.jpg"
+		const strippedStates = [
+			{ compress: true, convertHeic: false },
+			{ compress: false, convertHeic: true },
+			{ compress: true, convertHeic: true }
+		]
+
+		for (const state of strippedStates) {
+			expect(dedupTreeKey({ path: localHeic, ...state })).toBe(dedupTreeKey({ path: remoteJpg, ...state }))
+		}
+	})
+
+	it("the stem key is identical across all three stripped states (toggling among them never re-keys)", () => {
+		const path = "/camera roll/photo.heic"
+		const compressOnly = dedupTreeKey({ path, compress: true, convertHeic: false })
+		const convertOnly = dedupTreeKey({ path, compress: false, convertHeic: true })
+		const both = dedupTreeKey({ path, compress: true, convertHeic: true })
+
+		expect(compressOnly).toBe(convertOnly)
+		expect(convertOnly).toBe(both)
+		expect(both).toBe("/camera roll/photo")
+	})
+
+	it("only the both-OFF state keys on the full extension (the single re-key boundary)", () => {
+		const path = "/camera roll/photo.heic"
+
+		expect(dedupTreeKey({ path, compress: false, convertHeic: false })).toBe("/camera roll/photo.heic")
+		expect(dedupTreeKey({ path, compress: true, convertHeic: false })).not.toBe(
+			dedupTreeKey({ path, compress: false, convertHeic: false })
+		)
+	})
 })
 
 describe("#15 — compress-rename key symmetry through the collision suffix", () => {

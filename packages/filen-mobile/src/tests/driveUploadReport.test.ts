@@ -21,6 +21,11 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
+vi.mock("@/lib/imageConversion", () => ({
+	isConvertHeicToJpgEnabled: vi.fn().mockResolvedValue(false),
+	convertHeicToJpg: vi.fn(async (file: unknown) => file)
+}))
+
 vi.mock("@filen/sdk-rs", () => ({
 	AnyNormalDir: class {}
 }))
@@ -171,12 +176,7 @@ describe("summarizeTransferResults (C2)", () => {
 	})
 
 	it("mixed batch: aborts inflate neither succeeded nor failed", () => {
-		const summary = summarizeTransferResults([
-			fulfilled(uploadOk),
-			fulfilled(null),
-			fulfilled(null),
-			failed(new Error("boom"))
-		])
+		const summary = summarizeTransferResults([fulfilled(uploadOk), fulfilled(null), fulfilled(null), failed(new Error("boom"))])
 
 		expect(summary.succeeded).toBe(1)
 		expect(summary.failed).toBe(1)
@@ -282,10 +282,7 @@ describe("useDriveUpload reportTransferResults wiring (C2)", () => {
 	it("aborts do not inflate the failed count in the with-failures toast", async () => {
 		primePicker(["file:///document/a.bin", "file:///document/b.bin", "file:///document/c.bin"])
 
-		mockTransfersUpload
-			.mockResolvedValueOnce(null)
-			.mockRejectedValueOnce(new Error("upload failed"))
-			.mockResolvedValueOnce(uploadOk)
+		mockTransfersUpload.mockResolvedValueOnce(null).mockRejectedValueOnce(new Error("upload failed")).mockResolvedValueOnce(uploadOk)
 
 		const { uploadFiles } = useDriveUpload({
 			parent,

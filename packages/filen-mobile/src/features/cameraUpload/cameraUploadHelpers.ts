@@ -136,10 +136,15 @@ export function albumFolderTitle(title: string): string | null {
 // compression lost, or `.jpg` when it won) then collapse to the identical stem,
 // so the asset is matched and not re-evaluated as "missing remotely" every sync.
 //
-// When compress is OFF the full path (extension included) is kept verbatim, so
+// The HEIC→JPG conversion option behaves identically: when `convertHeic` is on,
+// a `.heic`/`.heif` source is uploaded as `.jpg`, so the local key (source `.heic`)
+// and the remote key (`.jpg`) must collapse to the same stem — exactly like compress.
+// Stripping is therefore applied when EITHER feature can rewrite the extension.
+//
+// When both are OFF the full path (extension included) is kept verbatim, so
 // genuinely different-extension siblings never merge.
-export function dedupTreeKey({ path, compress }: { path: string; compress: boolean }): string {
-	if (!compress) {
+export function dedupTreeKey({ path, compress, convertHeic }: { path: string; compress: boolean; convertHeic?: boolean }): string {
+	if (!compress && !convertHeic) {
 		return path
 	}
 

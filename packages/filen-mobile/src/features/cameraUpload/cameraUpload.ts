@@ -5,6 +5,7 @@ import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext }
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
 import { type UnwrapFileMetaResult, unwrapFileMeta } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForExpo } from "@/lib/paths"
+import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
 import { PauseSignal } from "@/lib/signals"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
@@ -260,11 +261,11 @@ class CameraUpload {
 		}
 
 		// Correct the extension to .jpg since the content is now JPEG.
-		// File.moveSync() updates the uri property in place.
+		// File.move() updates the uri property in place.
 		if (extname !== ".jpg" && extname !== ".jpeg") {
 			const newFile = new FileSystem.File(file.uri.replace(/\.[^.]+$/, ".jpg"))
 
-			file.moveSync(newFile)
+			await file.move(newFile)
 
 			return newFile
 		}
@@ -272,7 +273,15 @@ class CameraUpload {
 		return file
 	}
 
-	private async listLocal({ config, signal }: { config: Config; signal: AbortSignal }): Promise<LocalListing> {
+	private async listLocal({
+		config,
+		convertHeic,
+		signal
+	}: {
+		config: Config
+		convertHeic: boolean
+		signal: AbortSignal
+	}): Promise<LocalListing> {
 		const tree: LocalTree = {}
 		// Set when any album query or asset-info fetch fails (abort-driven teardown
 		// excluded): the tree is then known-incomplete and its absences must not be
@@ -525,7 +534,7 @@ class CameraUpload {
 					// and symmetrically on the remote side. The collision-suffix name is
 					// likewise stripped of its extension so the suffix path stays symmetric.
 					const fullPath = originalPath.toLowerCase()
-					let path = config.compress ? dedupTreeKey({ path: fullPath, compress: true }) : fullPath
+					let path = dedupTreeKey({ path: fullPath, compress: config.compress, convertHeic })
 					let iteration = 0
 					// #B2: remember the suffix the winning slot carries so the upload can
 					// reproduce it in the uploaded filename ("" = base slot, plain name).
@@ -545,7 +554,7 @@ class CameraUpload {
 
 					while (tree[path]) {
 						if (collisionName === null || localContentHash === null) {
-							collisionName = config.compress ? stripFilenameExtension(info.filename) : info.filename
+							collisionName = config.compress || convertHeic ? stripFilenameExtension(info.filename) : info.filename
 							localContentHash = String(sortSec)
 						}
 
@@ -624,11 +633,13 @@ class CameraUpload {
 	private async listRemote({
 		remoteDir,
 		signal,
-		compress
+		compress,
+		convertHeic
 	}: {
 		remoteDir: AnyNormalDir
 		signal: AbortSignal
 		compress: boolean
+		convertHeic: boolean
 	}): Promise<RemoteListing> {
 		const { authedSdkClient } = await auth.getSdkClients()
 		// Per the SDK contract, entries inside errored subtrees are silently ABSENT from
@@ -718,12 +729,14 @@ class CameraUpload {
 			// literal "%2F" would gain a phantom "/" separator), or the key diverges from
 			// the local raw composition and the asset re-uploads forever.
 			const fullPath = rawRemoteTreePath(file.path).toLowerCase()
+			// HEIC→JPG mirror of #15: convertHeic also rewrites the uploaded extension
+			// (.heic → .jpg), so strip it from the remote key + collision name too.
 			// #15: mirror listLocal — when compress is enabled, the remote filename may
 			// be the compressed `.jpg` (or the original extension when compression lost),
 			// so the dedup key is made extension-agnostic and the collision-suffix name is
 			// stripped of its extension. This keeps the remote key symmetric with the local
 			// stem-based key for the same physical asset.
-			let path = compress ? dedupTreeKey({ path: fullPath, compress: true }) : fullPath
+			let path = dedupTreeKey({ path: fullPath, compress, convertHeic })
 			let iteration = 0
 
 			// Collision-only inputs, computed lazily on the first occupied slot. The
@@ -737,7 +750,7 @@ class CameraUpload {
 				if (collisionName === null || remoteContentHash === null) {
 					const remoteName = meta?.name ?? FileSystem.Paths.basename(fullPath)
 
-					collisionName = compress ? stripFilenameExtension(remoteName) : remoteName
+					collisionName = compress || convertHeic ? stripFilenameExtension(remoteName) : remoteName
 					remoteContentHash = String(sortSec)
 				}
 
@@ -773,7 +786,7 @@ class CameraUpload {
 		}
 	}
 
-	private async deltas({ config, signal }: { config: Config; signal: AbortSignal }): Promise<{
+	private async deltas({ config, convertHeic, signal }: { config: Config; convertHeic: boolean; signal: AbortSignal }): Promise<{
 		deltas: Delta[]
 		localListing: LocalListing
 		remoteListing: RemoteListing
@@ -785,12 +798,14 @@ class CameraUpload {
 		const [localListing, remoteListing] = await Promise.all([
 			this.listLocal({
 				config,
+				convertHeic,
 				signal
 			}),
 			this.listRemote({
 				remoteDir: config.remoteDir,
 				signal,
-				compress: config.compress
+				compress: config.compress,
+				convertHeic
 			})
 		])
 
@@ -980,7 +995,10 @@ class CameraUpload {
 				return
 			}
 
-			const [netState, permissions] = await Promise.all([NetInfo.fetch(), hasAllNeededMediaPermissions({ library: "all", needCamera: false })])
+			const [netState, permissions] = await Promise.all([
+				NetInfo.fetch(),
+				hasAllNeededMediaPermissions({ library: "all", needCamera: false })
+			])
 
 			if (!permissions) {
 				return
@@ -1040,6 +1058,11 @@ class CameraUpload {
 				useCameraUploadStore.getState().setSyncing(false)
 			})
 
+			// Read the global HEIC→JPG toggle ONCE per sync so listLocal, listRemote and
+			// the upload pipeline all use the SAME value. A mid-sync flip can't then make
+			// the local (.heic) and remote (.jpg) dedup keys diverge and re-upload forever.
+			const convertHeic = await isConvertHeicToJpgEnabled()
+
 			const {
 				deltas: allDeltas,
 				localListing,
@@ -1051,6 +1074,7 @@ class CameraUpload {
 							includeVideos: false
 						}
 					: config,
+				convertHeic,
 				signal: abortController.signal
 			})
 
@@ -1216,8 +1240,24 @@ class CameraUpload {
 
 								let uploadFile = tmpFile
 
+								// HEIC→JPG runs BEFORE compress so the two compose: convert at max
+								// quality, then (optionally) compress for size. convertHeicToJpg
+								// returns a SEPARATE tmp file (compress renames in place), so it is
+								// cleaned up below alongside the staging file.
+								if (convertHeic) {
+									uploadFile = await convertHeicToJpg(uploadFile)
+								}
+
 								if (config.compress) {
-									uploadFile = await this.compress(tmpFile)
+									uploadFile = await this.compress(uploadFile)
+								}
+
+								if (uploadFile.uri !== tmpFile.uri) {
+									defer(() => {
+										if (uploadFile.exists) {
+											uploadFile.delete()
+										}
+									})
 								}
 
 								// When compress() rewrites the content to JPEG (e.g. .png → .jpg),
@@ -1270,7 +1310,10 @@ class CameraUpload {
 									// count it persistently (audit B4): cancel() wipes the in-memory
 									// failure counter and the next run may be a fresh process.
 									if (params?.background && abortController.signal.aborted) {
-										cache.cameraUploadBackgroundAborts.set(assetId, (cache.cameraUploadBackgroundAborts.get(assetId) ?? 0) + 1)
+										cache.cameraUploadBackgroundAborts.set(
+											assetId,
+											(cache.cameraUploadBackgroundAborts.get(assetId) ?? 0) + 1
+										)
 									}
 
 									break

@@ -18,6 +18,7 @@ import offline from "@/features/offline/offline"
 import useCacheSizesQuery, { invalidateCacheSizesQuery } from "@/features/settings/queries/useCacheSizes.query"
 import { useTranslation } from "react-i18next"
 import i18n from "@/lib/i18n"
+import { CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY, DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED } from "@/lib/imageConversion"
 import { sweepTmpDir } from "@/lib/tmp"
 import { sweepStrayDownloadFiles } from "@/lib/fsUtils"
 import useTransfersStore from "@/features/transfers/store/useTransfers.store"
@@ -37,9 +38,7 @@ const SIZE_LOADING_PLACEHOLDER = "…"
 // residual of the store-gated design.
 function transfersOrSyncsActive(): boolean {
 	return (
-		useTransfersStore.getState().transfers.length > 0 ||
-		useOfflineStore.getState().syncing ||
-		useCameraUploadStore.getState().syncing
+		useTransfersStore.getState().transfers.length > 0 || useOfflineStore.getState().syncing || useCameraUploadStore.getState().syncing
 	)
 }
 
@@ -123,6 +122,11 @@ function Advanced() {
 		DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
 	)
 
+	const [convertHeic, setConvertHeic] = useSecureStore<boolean>(
+		CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY,
+		DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED
+	)
+
 	const offlineSubtitle = (() => {
 		if (!sizes) {
 			return SIZE_LOADING_PLACEHOLDER
@@ -149,6 +153,23 @@ function Advanced() {
 				edges={["left", "right"]}
 			>
 				<SettingsScrollView>
+					<Group
+						className="bg-background-tertiary"
+						buttons={[
+							{
+								icon: "swap-horizontal-outline",
+								title: t("convert_heic_to_jpg"),
+								subTitle: t("convert_heic_to_jpg_description"),
+								rightItem: {
+									type: "switch",
+									value: convertHeic,
+									onValueChange: () => {
+										setConvertHeic(prev => !prev)
+									}
+								}
+							}
+						]}
+					/>
 					{Platform.OS === "android" ? (
 						<Group
 							className="bg-background-tertiary"

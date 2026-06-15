@@ -234,6 +234,7 @@ import {
 	type CollisionParams
 } from "@/features/cameraUpload/cameraUploadHelpers"
 import secureStore from "@/lib/secureStore"
+import { CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY } from "@/lib/imageConversion"
 import NetInfo from "@react-native-community/netinfo"
 import * as Battery from "expo-battery"
 import { getPermissionsAsync } from "expo-media-library/legacy"
@@ -2501,6 +2502,68 @@ describe("sync flow — remote collision resolution", () => {
 		// The local file matches remote-1 (same path after collision resolution)
 		// so no re-upload is needed.
 		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+})
+
+// ─── HEIC→JPG conversion: stem-key dedup + no eternal re-upload loop ──────────
+
+describe("sync flow — HEIC→JPG conversion dedup", () => {
+	function setupHeicAsset() {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["heic-1"] })
+
+		const uri = "file:///media/heic-1"
+
+		ml.addAsset({
+			id: "heic-1",
+			filename: "photo.heic",
+			uri,
+			mediaType: MediaType.IMAGE,
+			creationTime: 1000,
+			modificationTime: 2000
+		})
+
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+	}
+
+	// A previous sync (with conversion on) uploaded photo.heic as photo.jpg.
+	function remoteHasConvertedJpg() {
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				listDirRecursiveWithPaths: vi.fn(async () => ({
+					files: [{ path: "/Camera Roll/photo.jpg", file: { uuid: "remote-jpg" } }]
+				})),
+				createDir: vi.fn(async () => ({ uuid: "dir" })),
+				getDirOptional: vi.fn(async () => ({ uuid: "remote-uuid", parent: { tag: "Uuid", inner: ["root-uuid"] } }))
+			}
+		} as any)
+
+		vi.mocked(unwrapFileMeta).mockReturnValue({ meta: { name: "photo.jpg", created: 1000n, modified: 2000n } } as any)
+	}
+
+	it("convertHeic ON: a local .heic already uploaded as .jpg is matched by stem key and NOT re-uploaded", async () => {
+		setupHeicAsset()
+		remoteHasConvertedJpg()
+
+		vi.mocked(secureStore.get).mockImplementation(async (key: string) =>
+			key === CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY ? (true as any) : (ENABLED_CONFIG as any)
+		)
+
+		await cameraUpload.sync()
+
+		// Local /camera roll/photo.heic and remote /camera roll/photo.jpg both collapse to
+		// the stem key /camera roll/photo → matched → no re-upload (the eternal-loop guard).
+		expect(transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("convertHeic OFF: the same .heic does NOT match the remote .jpg (the stripping is what links them)", async () => {
+		setupHeicAsset()
+		remoteHasConvertedJpg()
+
+		// Default mock → convertHeic + compress both OFF → keys keep their extensions.
+		await cameraUpload.sync()
+
+		// /camera roll/photo.heic ≠ /camera roll/photo.jpg → seen as missing remotely → uploaded.
+		expect(transfers.upload).toHaveBeenCalled()
 	})
 })
 
