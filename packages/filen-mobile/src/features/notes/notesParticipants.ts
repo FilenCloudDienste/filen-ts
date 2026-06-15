@@ -86,6 +86,61 @@ export async function removeParticipant({
 	return note
 }
 
+export async function addParticipants({
+	note,
+	signal,
+	permissionsWrite,
+	contacts
+}: {
+	note: Note
+	signal?: AbortSignal
+	permissionsWrite: boolean
+	contacts: Contact[]
+}) {
+	// Skip contacts already in the note; if none remain, touch neither the SDK nor the cache.
+	const toAdd = contacts.filter(contact => !note.participants.find(p => p.userId === contact.userId))
+
+	if (toAdd.length === 0) {
+		return note
+	}
+
+	const { authedSdkClient } = await auth.getSdkClients()
+
+	// Sequential by design (mirrors chats.addParticipants): each add threads the previous result so
+	// the single cache write below keeps EVERY new participant. Parallel adds each computed
+	// "base note + their own contact" from the same stale note, so the last write clobbered the rest.
+	let updated = note
+
+	for (const contact of toAdd) {
+		updated = wrapSdkNote(
+			await authedSdkClient.addNoteParticipant(
+				updated,
+				contact,
+				permissionsWrite,
+				signal
+					? {
+							signal
+						}
+					: undefined
+			)
+		)
+	}
+
+	notesWithContentQueryUpdate({
+		updater: prev =>
+			prev.map(n =>
+				n.uuid === note.uuid
+					? {
+							...updated,
+							content: n.content
+						}
+					: n
+			)
+	})
+
+	return updated
+}
+
 export async function addParticipant({
 	note,
 	signal,
@@ -97,38 +152,12 @@ export async function addParticipant({
 	permissionsWrite: boolean
 	contact: Contact
 }) {
-	if (note.participants.find(p => p.userId === contact.userId)) {
-		return note
-	}
-
-	const { authedSdkClient } = await auth.getSdkClients()
-
-	note = wrapSdkNote(
-		await authedSdkClient.addNoteParticipant(
-			note,
-			contact,
-			permissionsWrite,
-			signal
-				? {
-						signal
-					}
-				: undefined
-		)
-	)
-
-	notesWithContentQueryUpdate({
-		updater: prev =>
-			prev.map(n =>
-				n.uuid === note.uuid
-					? {
-							...note,
-							content: n.content
-						}
-					: n
-			)
+	return await addParticipants({
+		note,
+		contacts: [contact],
+		permissionsWrite,
+		signal
 	})
-
-	return note
 }
 
 export async function setParticipantPermission({

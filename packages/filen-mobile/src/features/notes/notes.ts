@@ -8,7 +8,7 @@ import { sanitizeFileName } from "@/lib/utils"
 import { newTmpFile } from "@/lib/tmp"
 import * as FileSystem from "expo-file-system"
 import { addTag, removeTag, createTag, renameTag, deleteTag, favoriteTag } from "@/features/notes/notesTags"
-import { leave, removeParticipant, addParticipant, setParticipantPermission } from "@/features/notes/notesParticipants"
+import { leave, removeParticipant, addParticipant, addParticipants, setParticipantPermission } from "@/features/notes/notesParticipants"
 import { getContent, setContent, setType, setTitle } from "@/features/notes/notesContent"
 import { setPinned, setFavorited, archive, restore, restoreFromHistory, trash, deleteNote } from "@/features/notes/notesLifecycle"
 
@@ -22,6 +22,7 @@ const notes = {
 	leave,
 	removeParticipant,
 	addParticipant,
+	addParticipants,
 	setParticipantPermission,
 	getContent,
 	setContent,
