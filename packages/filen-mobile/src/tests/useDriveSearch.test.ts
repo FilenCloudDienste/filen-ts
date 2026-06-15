@@ -584,3 +584,54 @@ describe("useDriveSearch — session-flag reset regressions", () => {
 		expect(result.current.status).toBe("background")
 	})
 })
+
+describe("useDriveSearch — activity-based timers (slow huge-tree / slow network)", () => {
+	// The watchdog re-arms on every resync-progress heartbeat, so a search that is slow but
+	// actively LISTING (Listing ticks ~every 200ms in production) must never go terminal —
+	// even long past the raw WATCHDOG_MS — as long as progress keeps arriving.
+	it("never goes terminal while resync-progress heartbeats keep arriving (no snapshot yet)", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		// A heartbeat every 5s for 30s — twice the 15s watchdog window. Each bump re-arms it.
+		for (let i = 0; i < 6; i++) {
+			await advance(5_000)
+			act(() => {
+				useDriveSearchStore.getState().bumpResyncProgress()
+			})
+		}
+
+		expect(result.current.status).toBe("warming")
+	})
+
+	// The stall ceiling re-arms on every heartbeat, so a still-converging search streaming
+	// progress keeps showing "background" (its spinner) past STALL_CEILING_MS — it must not
+	// prematurely collapse to settled / "no results".
+	it("keeps showing background past the stall window while heartbeats keep arriving", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(true)
+		})
+
+		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: true }))
+
+		expect(result.current.status).toBe("background")
+
+		// A heartbeat every 10s for 60s — twice the 30s stall window.
+		for (let i = 0; i < 6; i++) {
+			await advance(10_000)
+			act(() => {
+				useDriveSearchStore.getState().bumpResyncProgress()
+			})
+		}
+
+		expect(result.current.status).toBe("background")
+	})
+})

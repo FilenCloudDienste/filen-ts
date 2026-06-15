@@ -83,8 +83,16 @@ export class DriveSearch {
 							}
 						} else if (progress.tag === ResyncProgressMessage_Tags.Finished) {
 							// `Finished` carries no roots; one worker-global resync at a time, so clearing
-							// is correct. Delivery is lossy — the hook's stall ceiling is the backstop.
+							// is correct. Delivery is best-effort — the hook's stall ceiling is the backstop.
 							store.setResyncing(false)
+						} else if (this.activeRootUuid !== null) {
+							// Listing (~every 200ms during the network phase) / Applying — a LIVENESS
+							// heartbeat. One worker-global resync at a time, so any progress while we have
+							// an active search is ours (Listing may be on a sibling root we converge after).
+							// The hook re-arms its watchdog + stall timers on this so a slow-but-progressing
+							// search never false-fails. Not root-matched: keeping us alive through the whole
+							// global resync is correct (our results converge when our root is listed).
+							store.bumpResyncProgress()
 						}
 
 						break

@@ -76,7 +76,7 @@ beforeEach(() => {
 	mocks.dirHolder.exists = false
 	mocks.listHolder.items = []
 	mocks.errorHolder.inner = null
-	useDriveSearchStore.setState({ resyncing: false, rootDeleted: false, cacheUnavailable: false })
+	useDriveSearchStore.setState({ resyncing: false, rootDeleted: false, cacheUnavailable: false, resyncProgress: 0 })
 })
 
 describe("driveSearch.init", () => {
@@ -152,6 +152,24 @@ describe("driveSearch lifecycle", () => {
 		await new DriveSearch().open({ rootUuid: null, name: "x", onSnapshot: vi.fn(), signal: signal() })
 
 		expect(mocks.createSearch).toHaveBeenCalledWith("root-uuid", expect.anything(), expect.anything())
+	})
+
+	it("forwards Listing/Applying resync progress as a liveness heartbeat while a search is active", async () => {
+		const fake = makeFakeSearch()
+		mocks.createSearch.mockResolvedValueOnce(fake.search)
+		const ds = new DriveSearch()
+
+		// open() triggers init() -> configureCache(dbPath, statusListener); grab the listener.
+		await ds.open({ rootUuid: "dir", name: "x", onSnapshot: vi.fn(), signal: signal() })
+
+		const status = mocks.configureCache.mock.calls[0]?.[1] as { onMessages: (m: unknown[]) => void }
+		const before = useDriveSearchStore.getState().resyncProgress
+
+		status.onMessages([{ tag: "ResyncProgress", inner: { progress: { tag: "Listing" } } }])
+		status.onMessages([{ tag: "ResyncProgress", inner: { progress: { tag: "Applying" } } }])
+
+		// Both ticks bump the heartbeat the hook's watchdog + stall timers re-arm on.
+		expect(useDriveSearchStore.getState().resyncProgress).toBe(before + 2)
 	})
 
 	it("re-filters via setConfig", async () => {
