@@ -8,7 +8,7 @@ import { Fragment, useRef, useState } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/utils"
 import VirtualList from "@/components/ui/virtualList"
-import { simpleDate } from "@/lib/time"
+import { formatRelativeTime } from "@/lib/time"
 import alerts from "@/lib/alerts"
 import { UserEventResult_Tags, type UserEvent, type UserEventResult } from "@filen/sdk-rs"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -32,23 +32,20 @@ const ON_END_REACHED_THRESHOLD = 0.5
  * already seen (full dedup). This prevents Err-only pages from causing an
  * infinite refetch loop.
  */
-export function computeNextPage(
-	existingOkIds: Set<bigint>,
-	next: UserEventResult[]
-): { newOk: UserEventResult[]; terminate: boolean } {
-	const newOk = next.filter(
-		e => e.tag === UserEventResult_Tags.Ok && !existingOkIds.has(e.inner[0].id)
-	)
+export function computeNextPage(existingOkIds: Set<bigint>, next: UserEventResult[]): { newOk: UserEventResult[]; terminate: boolean } {
+	const newOk = next.filter(e => e.tag === UserEventResult_Tags.Ok && !existingOkIds.has(e.inner[0].id))
 
 	return { newOk, terminate: newOk.length === 0 }
 }
 
 const Event = ({ event }: { event: UserEvent }) => {
+	const { t } = useTranslation()
+
 	return (
 		<ListRow
 			separator={true}
 			title={eventKindToReadable(event.kind)}
-			subtitle={simpleDate(Number(event.timestamp))}
+			subtitle={formatRelativeTime(Number(event.timestamp), t)}
 			onPress={() => {
 				router.push({
 					pathname: "/eventInfo",
@@ -224,9 +221,7 @@ const Events = () => {
 							icon="list-outline"
 							title={t("no_events")}
 							description={
-								firstPageErrCount > 0
-									? t("events_undecryptable", { count: firstPageErrCount })
-									: t("no_events_description")
+								firstPageErrCount > 0 ? t("events_undecryptable", { count: firstPageErrCount }) : t("no_events_description")
 							}
 						/>
 					)}

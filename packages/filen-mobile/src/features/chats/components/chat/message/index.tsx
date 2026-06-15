@@ -10,7 +10,7 @@ import { useShallow } from "zustand/shallow"
 import { contactDisplayName } from "@/lib/utils"
 import { extractLinks, safeParseUrl } from "@/lib/linkParser"
 import { Fragment } from "react"
-import { simpleDate } from "@/lib/time"
+import { formatRelativeTime } from "@/lib/time"
 import Regexed from "@/features/chats/components/chat/message/regexed"
 import Menu from "@/features/chats/components/chat/message/menu"
 import { messageDisplayBody } from "@/lib/decryption"
@@ -73,7 +73,7 @@ const Message = ({
 						numberOfLines={1}
 						ellipsizeMode="middle"
 					>
-						{simpleDate(Number(info.item.sentTimestamp))}
+						{formatRelativeTime(Number(info.item.sentTimestamp), t)}
 					</Text>
 				</View>
 			)}

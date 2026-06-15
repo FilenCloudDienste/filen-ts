@@ -10,7 +10,7 @@ import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import { useStringifiedClient } from "@/lib/auth"
-import { simpleDate } from "@/lib/time"
+import { formatRelativeTime } from "@/lib/time"
 import Icon from "@/features/notes/components/note/icon"
 import Menu, { NoteMenuOrigin } from "@/features/notes/components/note/menu"
 import { cn, fastLocaleCompare } from "@filen/utils"
@@ -20,6 +20,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Avatar from "@/components/ui/avatar"
+import { useTranslation } from "react-i18next"
 
 export type Item = TNote & {
 	content?: string
@@ -67,6 +68,7 @@ const NoteRow = ({
 	prevNote?: ListItem
 }) => {
 	const router = useRouter()
+	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const itemUuid = info.item.type === "header" ? info.item.id : info.item.uuid
@@ -234,7 +236,7 @@ const NoteRow = ({
 									ellipsizeMode="tail"
 									className="text-muted-foreground text-xs"
 								>
-									{simpleDate(Number(info.item.editedTimestamp))}
+									{formatRelativeTime(Number(info.item.editedTimestamp), t)}
 								</Text>
 								{participantsWithoutCurrentUser.length > 0 && (
 									<View className="flex-row flex-wrap gap-2 bg-transparent pt-1">
