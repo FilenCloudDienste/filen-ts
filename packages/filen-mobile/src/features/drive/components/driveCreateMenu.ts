@@ -43,8 +43,8 @@ export function canShowDriveCreateMenu({
 	return (
 		parent !== null &&
 		(drivePath.type === "drive" ||
-			drivePath.type === "links" ||
-			drivePath.type === "favorites" ||
+			(drivePath.type === "links" && drivePath.uuid !== null) ||
+			(drivePath.type === "favorites" && drivePath.uuid !== null) ||
 			(drivePath.type === "sharedOut" && drivePath.uuid !== null)) &&
 		!drivePath.selectOptions &&
 		!selectionMode
