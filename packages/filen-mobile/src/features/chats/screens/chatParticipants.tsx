@@ -246,11 +246,8 @@ const ChatParticipants = () => {
 					size: 20
 				},
 				props: {
+					enabled: isOnline,
 					onPress: async () => {
-						if (!isOnline) {
-							return
-						}
-
 						const selectContactsResult = await selectContacts({
 							multiple: true,
 							userIdsToExclude: chat.participants.map(p => Number(p.userId))
