@@ -21,6 +21,7 @@ import Menu from "@/components/ui/menu"
 import useNotesWithContentQuery from "@/features/notes/queries/useNotesWithContent.query"
 import useNoteHistoryQuery from "@/features/notes/queries/useNoteHistory.query"
 import notes from "@/features/notes/notes"
+import { sortNoteHistoryNewestFirst } from "@/features/notes/utils"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Icon from "@/features/notes/components/note/icon"
 import DismissStack from "@/components/dismissStack"
@@ -148,7 +149,7 @@ const NoteHistory = () => {
 		}
 	)
 
-	const history = noteHistoryQuery.status === "success" && note ? noteHistoryQuery.data : []
+	const history = noteHistoryQuery.status === "success" && note ? sortNoteHistoryNewestFirst(noteHistoryQuery.data) : []
 
 	const historyEmptyComponent = () => {
 		if (noteHistoryQuery.status === "error") {
