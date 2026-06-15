@@ -156,6 +156,8 @@ export const common = {
 	download_selected: "Download selected",
 	/** Selection-mode bulk action: make every selected item available offline */
 	make_available_offline_selected: "Make available offline",
+	/** Error when a selected item's parent directory can't be resolved for offline storage */
+	offline_location_unavailable: "Couldn't determine the location of a selected item. Open its directory once, then try again.",
 	/** Selection-mode bulk action: mark every selected item as a favorite */
 	favorite_selected: "Favorite selected",
 	/** Selection-mode bulk action: remove every selected item from favorites */

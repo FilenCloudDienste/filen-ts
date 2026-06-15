@@ -62,6 +62,7 @@ import { useAppStore } from "@/stores/useApp.store"
 const SETCONFIG_DEBOUNCE_MS = 350
 const GRACE_MS = 400
 const WATCHDOG_MS = 15_000
+const STALL_CEILING_MS = 30_000
 
 function drivePath(over?: Partial<DrivePath>): DrivePath {
 	return {
@@ -504,5 +505,82 @@ describe("useDriveSearch — own-action optimistic patch (Effect D)", () => {
 		})
 
 		expect(result.current.searchResults.map(i => i.data.uuid).sort()).toEqual(["f1-rotated", "f2"])
+	})
+})
+
+describe("useDriveSearch — session-flag reset regressions", () => {
+	// Fix A: openError is sticky session state NOT in sessionKey. A foreground/focus re-open
+	// re-runs Effect A without changing sessionKey, so the render-phase reset never clears it.
+	// The deriveStatus `(openError && !hasSnapshot)` guard must let a successful re-open's
+	// snapshot self-heal the terminal state instead of wedging the session forever.
+	it("recovers from a transient open failure once a foreground re-open delivers results", async () => {
+		driveSearchMock.open.mockImplementationOnce(async () => {
+			throw new Error("createSearch failed")
+		})
+
+		const { result, rerender } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		expect(result.current.status).toBe("terminal")
+
+		// Background→foreground cycle: Effect A re-runs (isAppActive is a dep) WITHOUT changing
+		// sessionKey, so openError is not cleared — the re-open's snapshot must clear terminal.
+		gates.appActive = false
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+		gates.appActive = true
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+
+		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: true }))
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["f1"])
+	})
+
+	// Fix D: the stall-ceiling timer's effect deps are [resyncing]. If resyncing stays true
+	// across a directory/session change, the effect does NOT re-run and its old timer keeps
+	// counting; without the generation guard it would fire setStallCeilingHit(true) into the
+	// new session and prematurely collapse it from background to settled.
+	it("does not let a stale stall-ceiling timer collapse a new session", async () => {
+		const { result, rerender } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(true)
+		})
+
+		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: true }))
+
+		expect(result.current.status).toBe("background")
+
+		// Most of the stall window elapses (timer still pending).
+		await advance(STALL_CEILING_MS - 5_000)
+
+		// Directory change while resyncing stays true → Effect A reopens + bumps generation,
+		// but the stall-ceiling effect ([resyncing]) does not re-run; the old timer survives.
+		act(() => {
+			rerender({ path: drivePath({ uuid: "other-dir" }) })
+		})
+
+		deliver(snapshot({ results: [fileResult("f2")], total: 1n, live: true }))
+
+		expect(result.current.status).toBe("background")
+
+		// Cross the original 30s boundary: the stale timer fires but is generation-guarded.
+		await advance(6_000)
+
+		expect(result.current.status).toBe("background")
 	})
 })

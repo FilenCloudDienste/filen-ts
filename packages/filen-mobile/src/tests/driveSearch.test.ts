@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => {
 		createSearch,
 		getSdkClients,
 		createFn,
+		deleteDirFn: vi.fn(),
+		dirHolder: { exists: false },
 		listHolder: { items: [] as { name: string; delete: () => void }[] },
 		errorHolder: { inner: null as { kind: () => string } | null }
 	}
@@ -31,7 +33,13 @@ vi.mock("@filen/sdk-rs", () => ({
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: mocks.getSdkClients } }))
 vi.mock("@/lib/paths", () => ({ normalizeFilePathForSdk: (p: string) => p }))
 vi.mock("@/lib/storageRoots", () => ({
-	SDK_CACHE_DIRECTORY: { exists: false, create: mocks.createFn },
+	SDK_CACHE_DIRECTORY: {
+		get exists() {
+			return mocks.dirHolder.exists
+		},
+		create: mocks.createFn,
+		delete: mocks.deleteDirFn
+	},
 	SDK_CACHE_PARENT_DIRECTORY: { exists: true, list: () => mocks.listHolder.items },
 	SDK_CACHE_DB_FILE: { uri: "file:///sdkCache/v1/cache.db" },
 	SDK_CACHE_VERSION: 1
@@ -64,6 +72,8 @@ beforeEach(() => {
 	mocks.createSearch.mockReset()
 	mocks.getSdkClients.mockClear()
 	mocks.createFn.mockReset()
+	mocks.deleteDirFn.mockReset()
+	mocks.dirHolder.exists = false
 	mocks.listHolder.items = []
 	mocks.errorHolder.inner = null
 	useDriveSearchStore.setState({ resyncing: false, rootDeleted: false, cacheUnavailable: false })
@@ -165,6 +175,22 @@ describe("driveSearch lifecycle", () => {
 
 		expect(fake.close).toHaveBeenCalledTimes(1)
 		expect(fake.uniffiDestroy).toHaveBeenCalledTimes(1)
+	})
+
+	it("teardownOnLogout closes the active search, destroys the handle, and deletes the cache dir", async () => {
+		const fake = makeFakeSearch()
+		mocks.createSearch.mockResolvedValueOnce(fake.search)
+		mocks.dirHolder.exists = true
+		const ds = new DriveSearch()
+
+		await ds.open({ rootUuid: "dir", name: "a", onSnapshot: vi.fn(), signal: signal() })
+		await ds.teardownOnLogout()
+
+		// MUST close the live search (releasing the worker's socket listener) BEFORE the authed
+		// client is destroyed by the logout flow, then wipe the decrypted-at-rest cache DB.
+		expect(fake.close).toHaveBeenCalledTimes(1)
+		expect(fake.uniffiDestroy).toHaveBeenCalledTimes(1)
+		expect(mocks.deleteDirFn).toHaveBeenCalledTimes(1)
 	})
 
 	it("closes the orphan when superseded during createSearch (no install, no snapshot)", async () => {

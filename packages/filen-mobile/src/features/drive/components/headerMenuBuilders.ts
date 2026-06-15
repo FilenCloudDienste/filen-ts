@@ -398,7 +398,20 @@ export function buildBulkActionMenu({
 	// "show" when the per-item cache hasn't been populated yet.
 	const everySelectedKnownStoredOffline = liveItems.every(it => offline.isItemStoredSync(it) === true)
 
-	if (!hasUndecryptable && (drivePath.type === "drive" || drivePath.type === "favorites") && !everySelectedKnownStoredOffline) {
+	// Offline storage needs each item's PARENT directory resolved from cache
+	// (getRealDriveItemParent). A cache-search result from a never-browsed directory has an
+	// uncached parent → unresolvable. Mirror the single-item Make-offline contract (which
+	// HIDES its button when the parent is null, menuActionsDownload.ts) by hiding the bulk
+	// action unless EVERY selected item's parent resolves — otherwise the op below would
+	// silently skip those items while runBulk reports success (clearing the selection).
+	const everySelectedParentResolvable = liveItems.every(it => getRealDriveItemParent({ item: it, drivePath }) !== null)
+
+	if (
+		!hasUndecryptable &&
+		(drivePath.type === "drive" || drivePath.type === "favorites") &&
+		!everySelectedKnownStoredOffline &&
+		everySelectedParentResolvable
+	) {
 		menuButtons.push({
 			id: "bulkMakeOffline",
 			title: t("make_available_offline_selected"),
@@ -412,7 +425,11 @@ export function buildBulkActionMenu({
 						const parent = getRealDriveItemParent({ item, drivePath })
 
 						if (!parent) {
-							return
+							// Defense-in-depth: the visibility gate above hides this action when any
+							// parent is unresolvable, so this shouldn't be reached. If it is, THROW
+							// (not silent return) so runBulk surfaces an error + keeps the selection,
+							// instead of reporting a false success that stored nothing.
+							throw new Error(t("offline_location_unavailable"))
 						}
 
 						if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {

@@ -193,6 +193,14 @@ export class DriveSearch {
 
 		this.currentOpenToken = token
 
+		// configureCache MUST have run before createSearch (the SDK throws otherwise). init()
+		// is fired (un-awaited) at app setup, so in practice it's done by the time a user
+		// searches — but on a cold start a fast search could outrun it. Idempotent: a no-op
+		// once configured. Closing during this await flips the token, caught just below.
+		if (!this.configured) {
+			await this.init()
+		}
+
 		const { authedSdkClient } = await auth.getSdkClients()
 		const resolvedRoot = rootUuid ?? authedSdkClient.root().uuid
 
