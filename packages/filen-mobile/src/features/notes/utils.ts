@@ -2,6 +2,7 @@ import { NoteType, type Note as SdkNote, type NoteTag as SdkNoteTag } from "@fil
 import { type Note, type NoteTag, type NoteHistory } from "@/types"
 import { noteDisplayTitle, tagDisplayName } from "@/lib/decryption"
 import { type ListItem as NoteListItem } from "@/features/notes/components/note"
+import { type BlockedUsers } from "@/features/contacts/blockedSelectors"
 
 // Order note history newest-first (latest revision on top). The SDK returns history in
 // its own order, so the screen sorts explicitly by editedTimestamp — a bigint (ms),
@@ -124,4 +125,14 @@ export function computeTagState({ notes, tag }: { notes: readonly Note[]; tag: N
 	}
 
 	return "some"
+}
+
+// Hides notes shared TO the user by a blocked owner. Owner-based only — a note the user owns is
+// never hidden because a participant happens to be blocked. Pure (no React/store reads).
+export function filterNotesByBlockedOwner(notes: readonly Note[], blocked: BlockedUsers): Note[] {
+	if (blocked.userIds.size === 0) {
+		return notes as Note[]
+	}
+
+	return notes.filter(note => !blocked.userIds.has(note.ownerId))
 }

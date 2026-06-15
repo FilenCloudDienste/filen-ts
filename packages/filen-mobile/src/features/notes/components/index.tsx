@@ -20,14 +20,16 @@ import { useSecureStore } from "@/lib/secureStore"
 import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/notes/components/header"
-import { filterNoteListItemsBySearchQuery, filterNoteTagsBySearchQuery } from "@/features/notes/utils"
+import { filterNoteListItemsBySearchQuery, filterNoteTagsBySearchQuery, filterNotesByBlockedOwner } from "@/features/notes/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import useIsOnline from "@/hooks/useIsOnline"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 
 const Notes = () => {
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
 	const notesQuery = useNotesWithContentQuery()
+	const blocked = useBlockedUsers()
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
@@ -49,7 +51,7 @@ const Notes = () => {
 		}
 
 		const grouped = notesSorter.group({
-			notes: notesQuery.data,
+			notes: filterNotesByBlockedOwner(notesQuery.data, blocked),
 			groupArchived: true,
 			groupTrashed: true,
 			groupFavorited: true,
@@ -64,6 +66,17 @@ const Notes = () => {
 	// Header so select-all / deselect-all operate on the SAME search-filtered set —
 	// otherwise they'd silently target search-hidden notes (#15).
 	const visibleNotes = notes.filter((note): note is NoteDataItem => note.type === "note")
+
+	// Stale-selection purge: if a note's owner becomes blocked while it's selected, the note is
+	// hidden from the list, so drop it from the selection too — keeps bulk actions honest.
+	useEffect(() => {
+		const selected = useNotesStore.getState().selectedNotes
+		const kept = selected.filter(note => !blocked.userIds.has(note.ownerId))
+
+		if (kept.length !== selected.length) {
+			useNotesStore.getState().setSelectedNotes(kept)
+		}
+	}, [blocked])
 
 	const notesTags = (() => {
 		if (notesTagsQuery.status !== "success") {
