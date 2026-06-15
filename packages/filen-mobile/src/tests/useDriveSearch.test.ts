@@ -663,4 +663,52 @@ describe("useDriveSearch — activity-based timers (slow huge-tree / slow networ
 
 		expect(result.current.status).toBe("background")
 	})
+
+	// Review #1: Effect A re-opens (bumping the generation) on focus/foreground/unlock edges.
+	// The watchdog effect must re-arm on those same edges, or a search re-opened on foreground
+	// that then wedges (never delivers a snapshot) spins "warming" forever.
+	it("re-arms the watchdog on a foreground re-open so a wedged re-open still goes terminal", async () => {
+		const { result, rerender } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		// Background→foreground cycle, no snapshot ever delivered (wedged). Effect A re-opens
+		// on the foreground edge with a fresh generation; the watchdog must re-arm for it.
+		gates.appActive = false
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+		gates.appActive = true
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+
+		await advance(WATCHDOG_MS)
+
+		expect(result.current.status).toBe("terminal")
+	})
+
+	// Review #2: a sticky watchdogFired must clear when progress resumes (a Listing heartbeat
+	// after a dropped Started, resyncing still false) — otherwise it mis-reports terminal on a
+	// visibly-progressing search.
+	it("clears a stale watchdog latch when a progress heartbeat resumes", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		await advance(WATCHDOG_MS)
+
+		expect(result.current.status).toBe("terminal")
+
+		// A resync-progress heartbeat (no Started, no snapshot) — the worker is alive again.
+		act(() => {
+			useDriveSearchStore.getState().bumpResyncProgress()
+		})
+
+		expect(result.current.status).toBe("warming")
+	})
 })

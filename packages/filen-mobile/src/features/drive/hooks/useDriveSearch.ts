@@ -118,6 +118,20 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		setStallCeilingHit(false)
 	}
 
+	// Clear the watchdog latch on the re-arm edges `sessionKey` excludes — the open-gate
+	// flips (focus/foreground/unlock) and every resync-progress heartbeat. Otherwise a sticky
+	// `watchdogFired` would mis-report "terminal" on a search that re-opened or resumed
+	// progressing (e.g. Listing ticks after a dropped Started). The watchdog effect can't
+	// setState synchronously (lint); this render-phase reset is the equivalent. (sessionKey
+	// changes — uuid / reopenNonce / on-off — already clear it via the block above.)
+	const watchdogRearmKey = `${isFocused}:${isAppActive}:${String(biometricUnlocked)}:${resyncProgress}`
+	const [prevWatchdogRearmKey, setPrevWatchdogRearmKey] = useState<string>(watchdogRearmKey)
+
+	if (watchdogRearmKey !== prevWatchdogRearmKey) {
+		setPrevWatchdogRearmKey(watchdogRearmKey)
+		setWatchdogFired(false)
+	}
+
 	// Imperative state that must NOT re-run the open effect: the live query (read at open
 	// time — synced in an effect below, since a render-phase ref write is illegal), the
 	// per-search generation, the removal tombstones (cleared only on an own restore/update
@@ -240,7 +254,11 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// never false-fails. Inert once a snapshot has landed (`hasSnapshot` guard + dep). Only
 	// fires when nothing — no snapshot, no progress — happened for the whole window.
 	useEffect(() => {
-		if (!isCacheSearch || hasSnapshot) {
+		// Arm ONLY while the search is actually open — mirror Effect A's open-gates. Without
+		// the gates here, Effect A re-opens (bumping the generation) on a focus/foreground/
+		// unlock edge while this effect (which lacked those deps) didn't re-run, so the
+		// re-opened generation got NO watchdog and a wedged re-open span "warming" forever.
+		if (!isCacheSearch || !isFocused || !isAppActive || biometricUnlocked !== true || hasSnapshot) {
 			return
 		}
 
@@ -255,7 +273,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		return () => {
 			clearTimeout(watchdog)
 		}
-	}, [isCacheSearch, hasSnapshot, drivePath.uuid, reopenNonce, resyncProgress])
+	}, [isCacheSearch, isFocused, isAppActive, biometricUnlocked, hasSnapshot, drivePath.uuid, reopenNonce, resyncProgress])
 
 	// Effect B — debounced re-filter on query change. Reopens (bumps the nonce → Effect A)
 	// if the refilter finds no live search, so typing after a background→foreground cycle
