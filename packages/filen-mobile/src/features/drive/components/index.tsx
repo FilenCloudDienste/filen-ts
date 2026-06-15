@@ -11,6 +11,7 @@ import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
 import Header from "@/features/drive/components/header"
+import DriveSearchFooter from "@/features/drive/components/searchFooter"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
@@ -22,8 +23,7 @@ import {
 	getDriveEmptyStateIcon,
 	getDriveEmptyStateTitleKey,
 	getDriveEmptyStateDescriptionKey,
-	filterDriveItemsBySearchQuery,
-	mergeByUuid
+	filterDriveItemsBySearchQuery
 } from "@/features/drive/utils"
 import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
@@ -39,7 +39,7 @@ import { useResolveClassNames } from "uniwind"
 const Drive = () => {
 	const drivePath = useDrivePath()
 	const { t } = useTranslation()
-	const { searchQuery, setSearchQuery, globalSearchResult, queryingGlobalSearch } = useDriveSearch({ drivePath })
+	const { searchQuery, setSearchQuery, searchResults, status, totalCount } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
 	const parent = getDriveParent(drivePath)
 	const upload = useDriveUpload({ parent, drivePath, t })
@@ -57,14 +57,21 @@ const Drive = () => {
 		}
 	)
 
+	const isPlainDrive = drivePath.type === "drive" && !drivePath.selectOptions
+	const searchActive = searchQuery.trim().length > 0
+	// The cache-backed search is the SINGLE source for the list ONLY on the plain /drive
+	// browser with an active query — it already matched the whole subtree, so there's no
+	// merge with the directory listing and no local re-filter (that would double-filter an
+	// already-matched set). Every other context (favorites/trash/recents/select/…) keeps
+	// its local listing, locally filtered by the query — and the plain browser with no
+	// query falls through here too (empty query → filter is a no-op).
+	const isCacheSearch = isPlainDrive && searchActive
+
 	// #26 — use retained data unconditionally (stale-while-error); status "error"
 	// with prior data keeps the listing visible instead of flipping to "empty".
-	// #27 — de-dup local listing + global search by uuid before sorting so
-	// FlashList never receives duplicate keys or inflated selection counts.
-	const baseItems = driveItemsQuery.data ?? []
-	const merged = mergeByUuid(baseItems, globalSearchResult)
-	const itemsSorted = itemSorter.sortItems(merged, sort)
-	const items = filterDriveItemsBySearchQuery(itemsSorted, searchQuery)
+	const items = isCacheSearch
+		? itemSorter.sortItems(searchResults, sort)
+		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort), searchQuery)
 
 	useFocusEffect(
 		useCallback(() => {
@@ -81,7 +88,7 @@ const Drive = () => {
 			<Header
 				setSearchQuery={setSearchQuery}
 				listItems={items}
-				queryingGlobalSearch={queryingGlobalSearch}
+				searchStatus={status}
 			/>
 			<SafeAreaView
 				className={cn(
@@ -116,32 +123,73 @@ const Drive = () => {
 								/>
 							)
 						}}
-						onRefresh={async () => {
-							// The offline cache listing reads purely from local storage
-							// (the query is networkMode: "always"), so pull-to-refresh must
-							// work while offline. Every other variant hits the network.
-							if (!onlineManager.isOnline() && drivePath.type !== "offline") {
-								return
-							}
+						// Cache search is live (no manual refetch): suppress pull-to-refresh while it's
+						// the source. Every non-cache-search context keeps the existing refresh.
+						onRefresh={
+							isCacheSearch
+								? undefined
+								: async () => {
+										// The offline cache listing reads purely from local storage
+										// (the query is networkMode: "always"), so pull-to-refresh must
+										// work while offline. Every other variant hits the network.
+										if (!onlineManager.isOnline() && drivePath.type !== "offline") {
+											return
+										}
 
-							// Manual offline-cache sync on pull-to-refresh — fire-and-forget
-							// so the gesture resolves with the local listing refetch;
-							// offlineSync gates connectivity/Wi-Fi-only internally.
-							if (drivePath.type === "offline") {
-								offlineSync.sync({ manual: true }).catch(console.error)
-							}
+										// Manual offline-cache sync on pull-to-refresh — fire-and-forget
+										// so the gesture resolves with the local listing refetch;
+										// offlineSync gates connectivity/Wi-Fi-only internally.
+										if (drivePath.type === "offline") {
+											offlineSync.sync({ manual: true }).catch(console.error)
+										}
 
-							const result = await run(async () => {
-								return await driveItemsQuery.refetch()
-							})
+										const result = await run(async () => {
+											return await driveItemsQuery.refetch()
+										})
 
-							if (!result.success) {
-								console.error(result.error)
-								alerts.error(result.error)
-							}
-						}}
-						loading={driveItemsQuery.status === "pending"}
+										if (!result.success) {
+											console.error(result.error)
+											alerts.error(result.error)
+										}
+									}
+						}
+						loading={driveItemsQuery.status === "pending" || (isCacheSearch && status === "warming")}
+						footerComponent={
+							isCacheSearch
+								? () => (
+										<DriveSearchFooter
+											status={status}
+											totalCount={totalCount}
+											resultCount={items.length}
+										/>
+									)
+								: undefined
+						}
 						emptyComponent={() => {
+							// Plain-drive cache search: its own terminal / no-results states. The
+							// directory listing query is NOT the source here, so its error/empty
+							// states don't apply (warming never reaches this — `loading` suppresses
+							// emptyComponent — so an empty result here is genuinely settled/terminal).
+							if (isCacheSearch) {
+								if (status === "terminal") {
+									return (
+										<ListEmpty
+											icon="alert-circle-outline"
+											title={t("search_unavailable")}
+											description={t("search_unavailable_description")}
+										/>
+									)
+								}
+
+								return (
+									<ListEmpty
+										icon="search-outline"
+										title={t("no_results")}
+										description={t("no_results_description")}
+									/>
+								)
+							}
+
 							// #26 — distinguish a query error with no retained data (show
 							// error + retry) from a genuinely empty directory (existing empty
 							// state). When data was retained through the error, items.length
@@ -157,7 +205,8 @@ const Drive = () => {
 								)
 							}
 
-							if (searchQuery.trim().length > 0) {
+							// Local-filter search (favorites/trash/recents/select/…) with no matches.
+							if (searchActive) {
 								return (
 									<ListEmpty
 										icon="search-outline"
