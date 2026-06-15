@@ -21,13 +21,13 @@ const ListEmpty = ({
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	return (
-		<View className="flex-1 items-center justify-center bg-transparent gap-2 px-16">
+		<View className="flex-1 items-center justify-center bg-transparent gap-0.5 px-16">
 			<Ionicons
 				name={icon}
 				size={64}
 				color={textMutedForeground.color}
 			/>
-			<Text className="text-base text-foreground mt-2 text-center max-w-xs">{title}</Text>
+			<Text className="text-base text-foreground mt-1 text-center max-w-xs">{title}</Text>
 			{description ? <Text className="text-xs text-muted-foreground text-center max-w-xs">{description}</Text> : null}
 			{action ? <View className="mt-4 bg-transparent">{action}</View> : null}
 		</View>
