@@ -15,6 +15,7 @@ import * as FileSystem from "expo-file-system"
 import { runBulk } from "@/lib/bulkOps"
 import { serialize } from "@/lib/serializer"
 import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
+import { createTagFlow } from "@/features/notes/components/notesActions"
 import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
@@ -581,44 +582,7 @@ export function buildNotesHeaderRightItems({
 			icon: "tag",
 			requiresOnline: true,
 			onPress: async () => {
-				const result = await run(async () => {
-					return await prompts.input({
-						title: t("create_tag"),
-						message: t("enter_tag_name"),
-						cancelText: t("cancel"),
-						okText: t("create")
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-
-				if (result.data.cancelled || result.data.type !== "string") {
-					return
-				}
-
-				const tagName = result.data.value.trim()
-
-				if (tagName.length === 0) {
-					return
-				}
-
-				const createResult = await runWithLoading(async () => {
-					return await notesLib.createTag({
-						name: tagName
-					})
-				})
-
-				if (!createResult.success) {
-					console.error(createResult.error)
-					alerts.error(createResult.error)
-
-					return
-				}
+				await createTagFlow({ t })
 			}
 		})
 	}
