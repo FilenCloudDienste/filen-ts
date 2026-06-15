@@ -37,6 +37,7 @@ vi.mock("@/features/audio/audio", () => ({
 		clearQueue: vi.fn(),
 		replaceQueue: vi.fn(),
 		play: vi.fn(),
+		setShuffleEnabled: vi.fn(),
 		addToQueue: vi.fn(),
 		getQueue: vi.fn(() => []),
 		renamePlaylist: vi.fn(),
@@ -340,6 +341,36 @@ describe("buildPlaylistMenuButtons", () => {
 		const buttons = buildPlaylistMenuButtons({ t, playlist })
 
 		expect(buttons[1]?.id).toBe("shufflePlay")
+	})
+
+	it("play disables shuffle and starts in-order at position 0", async () => {
+		vi.mocked(audio.replaceQueue).mockResolvedValue({ droppedUndecryptable: false })
+
+		const playlist = makePlaylist([makeTrack("a"), makeTrack("b"), makeTrack("c")])
+		const buttons = buildPlaylistMenuButtons({ t, playlist })
+		const playBtn = buttons.find((b: MenuButton) => b.id === "play")
+
+		await playBtn?.onPress?.()
+
+		expect(audio.setShuffleEnabled).toHaveBeenCalledWith(false)
+		expect(audio.replaceQueue).toHaveBeenCalledWith(expect.objectContaining({ startingPosition: 0 }))
+	})
+
+	it("shufflePlay enables shuffle and starts on a random in-range track", async () => {
+		vi.mocked(audio.replaceQueue).mockResolvedValue({ droppedUndecryptable: false })
+
+		const playlist = makePlaylist([makeTrack("a"), makeTrack("b"), makeTrack("c")])
+		const buttons = buildPlaylistMenuButtons({ t, playlist })
+		const shuffleBtn = buttons.find((b: MenuButton) => b.id === "shufflePlay")
+
+		await shuffleBtn?.onPress?.()
+
+		expect(audio.setShuffleEnabled).toHaveBeenCalledWith(true)
+
+		const startingPosition = vi.mocked(audio.replaceQueue).mock.calls[0]?.[0]?.startingPosition ?? -1
+
+		expect(startingPosition).toBeGreaterThanOrEqual(0)
+		expect(startingPosition).toBeLessThan(playlist.files.length)
 	})
 
 	it("button ids without files are ['rename', 'add', 'delete']", () => {
