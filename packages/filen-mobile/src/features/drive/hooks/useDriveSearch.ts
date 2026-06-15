@@ -246,13 +246,21 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 
 	// Stall ceiling — a dropped `Finished` must not pin "Still searching…" forever. The
 	// reset (on `resyncing` toggling) is the render-phase block above; this only ARMS.
+	// Generation-guarded: this effect's deps are [resyncing], so if `resyncing` stays true
+	// across a session change (Effect A reopens + bumps the generation), this effect does
+	// NOT re-run and its old timer keeps counting. Capturing the generation at arm time and
+	// checking it in the callback stops a stale timer from collapsing the new session.
 	useEffect(() => {
 		if (!resyncing) {
 			return
 		}
 
+		const generation = generationRef.current
+
 		const timer = setTimeout(() => {
-			setStallCeilingHit(true)
+			if (generation === generationRef.current) {
+				setStallCeilingHit(true)
+			}
 		}, STALL_CEILING_MS)
 
 		return () => {
@@ -362,7 +370,11 @@ function deriveStatus(input: {
 
 	if (
 		!input.live ||
-		input.openError ||
+		// `!hasSnapshot`-guarded like watchdogFired: openError is sticky session state NOT in
+		// sessionKey, so a foreground/focus/unlock re-open re-runs Effect A without clearing
+		// it. Without this guard a single failed open would wedge the session in "terminal"
+		// forever even after a successful re-open delivers results. Self-heals on first snapshot.
+		(input.openError && !input.hasSnapshot) ||
 		input.cacheUnavailable ||
 		input.rootDeleted ||
 		(input.watchdogFired && !input.hasSnapshot)
