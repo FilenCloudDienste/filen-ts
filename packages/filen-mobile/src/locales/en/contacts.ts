@@ -32,6 +32,8 @@ export const contacts = {
 	// add (the dialog OK button) lives in common.ts.
 
 	// ── Per-row actions (individual contact menu) ─────────────────────────────
+	/** Menu item: start or open a direct-message chat with this contact */
+	message: "Message",
 	/** Menu item: accept an incoming contact request */
 	accept: "Accept",
 	/** Menu item: deny an incoming contact request */

@@ -19,6 +19,7 @@ import useAppStore from "@/stores/useApp.store"
 import { shareTmpFile } from "@/lib/share"
 import { serialize } from "@/lib/serializer"
 import { t } from "@/lib/i18n"
+import * as Clipboard from "expo-clipboard"
 
 export type NoteMenuOrigin = "notes" | "search" | "content"
 
@@ -402,37 +403,8 @@ export function createMenuButtons({
 	})
 
 	buttons.push({
-		id: "participants",
-		title: t("participants"),
-		icon: "users",
-		onPress: () => {
-			router.push({
-				pathname: "/noteParticipants",
-				params: {
-					note: serialize(note)
-				}
-			})
-		}
-	})
-
-	if (writeAccess) {
-		buttons.push({
-			id: "history",
-			title: t("history"),
-			icon: "clock",
-			onPress: () => {
-				router.push({
-					pathname: "/noteHistory",
-					params: {
-						note: serialize(note)
-					}
-				})
-			}
-		})
-	}
-
-	buttons.push({
 		id: "export",
+		requiresOnline: true,
 		title: t("export"),
 		icon: "export",
 		onPress: async () => {
@@ -465,6 +437,62 @@ export function createMenuButtons({
 			}
 		}
 	})
+
+	buttons.push({
+		id: "copy_content",
+		requiresOnline: true,
+		title: t("copy_content"),
+		icon: "copy",
+		hidden: note.noteType === NoteType.Rich,
+		onPress: async () => {
+			const result = await runWithLoading(async () => {
+				return await notes.getContent({
+					note
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+
+				return
+			}
+
+			await Clipboard.setStringAsync(result.data ?? "")
+			alerts.normal(t("copied_to_clipboard"))
+		}
+	})
+
+	buttons.push({
+		id: "participants",
+		title: t("participants"),
+		icon: "users",
+		onPress: () => {
+			router.push({
+				pathname: "/noteParticipants",
+				params: {
+					note: serialize(note)
+				}
+			})
+		}
+	})
+
+	if (writeAccess) {
+		buttons.push({
+			id: "history",
+			requiresOnline: true,
+			title: t("history"),
+			icon: "clock",
+			onPress: () => {
+				router.push({
+					pathname: "/noteHistory",
+					params: {
+						note: serialize(note)
+					}
+				})
+			}
+		})
+	}
 
 	if (isOwner) {
 		if (!note.archive && !note.trash) {

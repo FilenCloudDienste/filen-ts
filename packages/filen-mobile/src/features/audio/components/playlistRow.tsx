@@ -29,55 +29,6 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				usePlaylistsStore.getState().toggleSelectedPlaylist(playlist)
 			}
 		},
-		{
-			id: "rename",
-			title: t("rename"),
-			icon: "edit",
-			requiresOnline: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
-						title: t("rename_playlist"),
-						message: t("enter_playlist_name"),
-						placeholder: t("playlist_name_placeholder"),
-						cancelText: t("cancel"),
-						okText: t("rename"),
-						defaultValue: playlist.name
-					})
-				})
-
-				if (!promptResult.success) {
-					console.error(promptResult.error)
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
-					return
-				}
-
-				const newName = promptResult.data.value.trim()
-
-				if (newName.length === 0) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await audio.renamePlaylist({
-						playlist,
-						name: newName
-					})
-				})
-
-				if (!result.success) {
-					console.error(result.error)
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		},
 		...(playlist.files.length > 0
 			? ([
 					{
@@ -87,6 +38,37 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 						onPress: async () => {
 							const result = await runWithLoading(async () => {
 								await audio.clearQueue()
+
+								const { droppedUndecryptable } = await audio.replaceQueue({
+									items: playlist.files.map(file => ({
+										item: file.item,
+										playlistUuid: playlist.uuid
+									})),
+									startingPosition: 0
+								})
+
+								if (droppedUndecryptable) {
+									alerts.normal(t("cannot_decrypt_toast"))
+								}
+
+								await audio.play()
+							})
+
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
+
+								return
+							}
+						}
+					},
+					{
+						id: "shufflePlay",
+						title: t("shuffle_play"),
+						icon: "listBullet",
+						onPress: async () => {
+							const result = await runWithLoading(async () => {
+								await audio.setShuffleEnabled(true)
 
 								const { droppedUndecryptable } = await audio.replaceQueue({
 									items: playlist.files.map(file => ({
@@ -180,6 +162,55 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 					await audio.addFilesToPlaylist({
 						playlist,
 						items: selectDriveItemsResult.data.cancelled ? [] : selectDriveItemsResult.data.selectedItems
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+
+					return
+				}
+			}
+		},
+		{
+			id: "rename",
+			title: t("rename"),
+			icon: "edit",
+			requiresOnline: true,
+			onPress: async () => {
+				const promptResult = await run(async () => {
+					return await prompts.input({
+						title: t("rename_playlist"),
+						message: t("enter_playlist_name"),
+						placeholder: t("playlist_name_placeholder"),
+						cancelText: t("cancel"),
+						okText: t("rename"),
+						defaultValue: playlist.name
+					})
+				})
+
+				if (!promptResult.success) {
+					console.error(promptResult.error)
+					alerts.error(promptResult.error)
+
+					return
+				}
+
+				if (promptResult.data.cancelled || promptResult.data.type !== "string") {
+					return
+				}
+
+				const newName = promptResult.data.value.trim()
+
+				if (newName.length === 0) {
+					return
+				}
+
+				const result = await runWithLoading(async () => {
+					await audio.renamePlaylist({
+						playlist,
+						name: newName
 					})
 				})
 

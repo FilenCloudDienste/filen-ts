@@ -280,6 +280,37 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 						}
 					},
 					{
+						id: "shufflePlay",
+						title: t("shuffle_play"),
+						icon: "listBullet",
+						onPress: async () => {
+							const result = await runWithLoading(async () => {
+								await audio.setShuffleEnabled(true)
+
+								const { droppedUndecryptable } = await audio.replaceQueue({
+									items: playlist.files.map(file => ({
+										item: file.item,
+										playlistUuid: playlist.uuid
+									})),
+									startingPosition: 0
+								})
+
+								if (droppedUndecryptable) {
+									alerts.normal(t("cannot_decrypt_toast"))
+								}
+
+								await audio.play()
+							})
+
+							if (!result.success) {
+								console.error(result.error)
+								alerts.error(result.error)
+
+								return
+							}
+						}
+					},
+					{
 						id: "addToQueue",
 						title: t("add_to_queue"),
 						icon: "queue",

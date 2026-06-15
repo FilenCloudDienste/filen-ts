@@ -95,6 +95,7 @@ const Menu = ({
 				title: t("delete"),
 				icon: "delete",
 				destructive: true,
+				requiresOnline: true,
 				onPress: async () => {
 					const promptResult = await run(async () => {
 						return await prompts.alert({
@@ -157,11 +158,13 @@ const Menu = ({
 			id: "create",
 			title: t("create_note"),
 			icon: "plus",
+			requiresOnline: true,
 			subButtons: [
 				{
 					title: t("note_type_text"),
 					id: "text",
 					icon: "text",
+					requiresOnline: true,
 					onPress: async () => {
 						await createNote(NoteType.Text)
 					}
@@ -170,22 +173,16 @@ const Menu = ({
 					title: t("note_type_checklist"),
 					id: "checklist",
 					icon: "checklist",
+					requiresOnline: true,
 					onPress: async () => {
 						await createNote(NoteType.Checklist)
-					}
-				},
-				{
-					title: t("note_type_markdown"),
-					id: "markdown",
-					icon: "markdown",
-					onPress: async () => {
-						await createNote(NoteType.Md)
 					}
 				},
 				{
 					title: t("note_type_code"),
 					id: "code",
 					icon: "code",
+					requiresOnline: true,
 					onPress: async () => {
 						await createNote(NoteType.Code)
 					}
@@ -194,8 +191,18 @@ const Menu = ({
 					title: t("note_type_richtext"),
 					id: "richtext",
 					icon: "richtext",
+					requiresOnline: true,
 					onPress: async () => {
 						await createNote(NoteType.Rich)
+					}
+				},
+				{
+					title: t("note_type_markdown"),
+					id: "markdown",
+					icon: "markdown",
+					requiresOnline: true,
+					onPress: async () => {
+						await createNote(NoteType.Md)
 					}
 				}
 			]
@@ -205,6 +212,7 @@ const Menu = ({
 			id: tag.favorite ? "unfavorite" : "favorite",
 			title: tag.favorite ? t("unfavorite") : t("favorite"),
 			icon: "heart",
+			requiresOnline: true,
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
 					await notes.favoriteTag({
@@ -226,6 +234,7 @@ const Menu = ({
 			id: "rename",
 			title: t("rename"),
 			icon: "edit",
+			requiresOnline: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.input({
@@ -275,6 +284,7 @@ const Menu = ({
 			title: t("delete"),
 			icon: "delete",
 			destructive: true,
+			requiresOnline: true,
 			onPress: async () => {
 				const promptResult = await run(async () => {
 					return await prompts.alert({

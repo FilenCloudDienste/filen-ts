@@ -115,6 +115,8 @@ export const media = {
 	play: "Play",
 	/** Playlists — action-sheet item: add all tracks of this playlist to the playback queue */
 	add_to_queue: "Add to queue",
+	/** Playlists — action-sheet / menu item: start this playlist in shuffle mode */
+	shuffle_play: "Shuffle play",
 	/** Playlists — action-sheet item: add one or more tracks to one or more playlists */
 	add_to_playlist: "Add to playlist",
 	/** Playlists — action-sheet / menu item: add tracks to the playlist */
