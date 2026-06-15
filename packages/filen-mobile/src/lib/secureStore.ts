@@ -551,7 +551,7 @@ class SecureStore {
 			// move is an atomic intra-volume rename (not a cross-volume copy, which would
 			// widen the crash window). We deliberately move the OLD file ASIDE to a backup
 			// before promoting the staged payload — not to dodge an overwrite limitation
-			// (File.moveSync() does take a RelocationOptions { overwrite }, but a single
+			// (File.move() does take a RelocationOptions { overwrite }, but a single
 			// overwriting rename would still leave a window with zero intact copies if the
 			// process dies mid-rename) — so that on any failure during the swap the backup
 			// can be restored and the store never reaches a state with zero copies.
@@ -569,14 +569,14 @@ class SecureStore {
 				// Move the existing store aside to the backup before clearing the destination.
 				// Use a fresh handle so the shared this.secureStoreFile.uri is never mutated by move().
 				if (this.secureStoreFile.exists) {
-					new FileSystem.File(destinationUri).moveSync(new FileSystem.File(backupUri))
+					await new FileSystem.File(destinationUri).move(new FileSystem.File(backupUri))
 
 					backedUp = true
 				}
 
 				// Promote the staged payload into place. Use a fresh destination handle so the
 				// shared this.secureStoreFile instance keeps its identity.
-				tmpFile.moveSync(new FileSystem.File(destinationUri))
+				await tmpFile.move(new FileSystem.File(destinationUri))
 
 				// The new payload is now the live store. move() has mutated tmpFile.uri to the
 				// destination, so from here the catch block must NOT delete tmpFile.
