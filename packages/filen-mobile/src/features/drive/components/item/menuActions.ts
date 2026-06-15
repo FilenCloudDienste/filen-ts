@@ -455,6 +455,21 @@ export function createMenuButtons({
 
 	if (drivePath.type === "links" && (item.type === "file" || item.type === "directory") && !drivePath.uuid) {
 		menuButtons.push({
+			id: "editPublicLink",
+			requiresOnline: true,
+			title: t("edit_public_link"),
+			icon: "link",
+			onPress: () => {
+				router.push({
+					pathname: "/publicLink",
+					params: {
+						item: serialize(item)
+					}
+				})
+			}
+		})
+
+		menuButtons.push({
 			id: "disablePublicLink",
 			requiresOnline: true,
 			title: t("disable_public_link"),

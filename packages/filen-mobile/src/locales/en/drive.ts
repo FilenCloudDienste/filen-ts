@@ -270,6 +270,8 @@ export const drive = {
 	stop_sharing: "Stop sharing",
 	/** Per-item context menu: disable the public link for this item */
 	disable_public_link: "Disable public link",
+	/** Per-item context menu (links screen): open the public-link screen to edit the link's settings */
+	edit_public_link: "Edit public link",
 	/** Per-item context menu: view file version history */
 	versions: "Versions",
 	/** Per-item context menu: change the directory icon color */
