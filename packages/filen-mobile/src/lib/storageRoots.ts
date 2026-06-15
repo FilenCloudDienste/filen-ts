@@ -42,3 +42,14 @@ export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 export const SQLITE_VERSION = 1
 export const SQLITE_DB_FILE_NAME = "sqlite.db"
 export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "sqlite", `v${SQLITE_VERSION}`))
+
+// SDK cache (filen-sdk-rs `cache` feature) — backs the live, cache-backed drive
+// search (`Client.configureCache` + `createSearch`). A separate SQLite DB the
+// Rust worker opens directly; distinct from the app's own sqlite.db and from the
+// File/Documents Provider extensions' native_cache.db (no collision). Holds
+// decrypted dir/file names at rest (same posture as offline/fileCache) — wiped on
+// logout. The parent dir is swept on init so a version bump invalidates old data.
+export const SDK_CACHE_VERSION = 1
+export const SDK_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "sdkCache"))
+export const SDK_CACHE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(SDK_CACHE_PARENT_DIRECTORY.uri, `v${SDK_CACHE_VERSION}`))
+export const SDK_CACHE_DB_FILE = new FileSystem.File(FileSystem.Paths.join(SDK_CACHE_DIRECTORY.uri, "cache.db"))
