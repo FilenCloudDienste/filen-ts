@@ -4,6 +4,7 @@ import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import contacts from "@/features/contacts/contacts"
 import { run } from "@filen/utils"
+import { type MenuButton } from "@/components/ui/menu"
 
 /**
  * Prompt the user for a Filen email address and send a contact request.
@@ -43,5 +44,113 @@ export async function addContactFlow({ t }: { t: TFunction }): Promise<void> {
 	if (!result.success) {
 		console.error(result.error)
 		alerts.error(result.error)
+	}
+}
+
+/**
+ * Builds a Block or Unblock menu action for a user identified by id + email, usable from any
+ * participant row (chat / note). `blockedUuid` is required to unblock (the BlockedContact uuid).
+ * `timestamp` is cosmetic (blocked-list sort order) and self-heals on the next contacts refetch.
+ */
+export function buildBlockToggleMenuAction(params: {
+	t: TFunction
+	isBlocked: boolean
+	blockedUuid: string | undefined
+	userId: bigint
+	email: string
+	avatar: string | undefined
+	nickName: string | undefined
+	timestamp: bigint
+}): MenuButton {
+	const { t, isBlocked, blockedUuid, userId, email, avatar, nickName, timestamp } = params
+
+	if (isBlocked) {
+		return {
+			id: "unblock",
+			title: t("unblock"),
+			icon: "restore",
+			requiresOnline: true,
+			onPress: async () => {
+				if (!blockedUuid) {
+					return
+				}
+
+				const promptResponse = await run(async () => {
+					return await prompts.alert({
+						title: t("unblock_contact"),
+						message: t("unblock_contact_confirmation"),
+						cancelText: t("cancel"),
+						okText: t("unblock")
+					})
+				})
+
+				if (!promptResponse.success) {
+					console.error(promptResponse.error)
+					alerts.error(promptResponse.error)
+
+					return
+				}
+
+				if (promptResponse.data.cancelled) {
+					return
+				}
+
+				const result = await runWithLoading(async () => {
+					await contacts.unblock({
+						uuid: blockedUuid
+					})
+				})
+
+				if (!result.success) {
+					console.error(result.error)
+					alerts.error(result.error)
+				}
+			}
+		}
+	}
+
+	return {
+		id: "block",
+		title: t("block"),
+		icon: "block",
+		destructive: true,
+		requiresOnline: true,
+		onPress: async () => {
+			const promptResponse = await run(async () => {
+				return await prompts.alert({
+					title: t("block_contact"),
+					message: t("block_contact_confirmation"),
+					cancelText: t("cancel"),
+					okText: t("block"),
+					destructive: true
+				})
+			})
+
+			if (!promptResponse.success) {
+				console.error(promptResponse.error)
+				alerts.error(promptResponse.error)
+
+				return
+			}
+
+			if (promptResponse.data.cancelled) {
+				return
+			}
+
+			const result = await runWithLoading(async () => {
+				await contacts.block({
+					userId,
+					email,
+					avatar,
+					nickName,
+					timestamp
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+			}
+		}
 	}
 }

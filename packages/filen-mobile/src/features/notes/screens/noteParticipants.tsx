@@ -23,6 +23,9 @@ import { useTranslation } from "react-i18next"
 import ParticipantList from "@/components/participants/participantList"
 import { type ParticipantRowProps } from "@/components/participants/participantRow"
 import useIsOnline from "@/hooks/useIsOnline"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { contactsQueryGet } from "@/features/contacts/queries/useContacts.query"
+import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
 
 const NoteParticipants = () => {
 	const { t } = useTranslation()
@@ -33,6 +36,7 @@ const NoteParticipants = () => {
 	const stringifiedClient = useStringifiedClient()
 	const selectedNoteParticipants = useNoteParticipantsStore(useShallow(state => state.selectedNoteParticipants))
 	const isOnline = useIsOnline()
+	const blocked = useBlockedUsers()
 
 	useFocusEffect(
 		useCallback(() => {
@@ -67,12 +71,27 @@ const NoteParticipants = () => {
 	const toRowProps = (participant: NoteParticipant): ParticipantRowProps => {
 		const isSelected = selectedNoteParticipants.some(p => p.userId === participant.userId)
 		const areOthersSelected = selectedNoteParticipants.length > 0
+		const isParticipantBlocked = blocked.userIds.has(participant.userId)
+		const blockedUuid = isParticipantBlocked ? contactsQueryGet()?.blocked.find(b => b.userId === participant.userId)?.uuid : undefined
 
 		return {
 			email: participant.email,
 			displayName: contactDisplayName(participant),
 			avatar: participant.avatar,
 			permission: isOwner ? (participant.permissionsWrite ? "write" : "read") : undefined,
+			blocked: isParticipantBlocked,
+			extraMenuActions: [
+				buildBlockToggleMenuAction({
+					t,
+					isBlocked: isParticipantBlocked,
+					blockedUuid,
+					userId: participant.userId,
+					email: participant.email,
+					avatar: participant.avatar,
+					nickName: participant.nickName,
+					timestamp: participant.addedTimestamp
+				})
+			],
 			ownerActions: isOwner
 				? {
 						isSelected,

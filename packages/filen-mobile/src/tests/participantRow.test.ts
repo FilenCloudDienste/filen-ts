@@ -87,6 +87,38 @@ describe("buildParticipantMenuButtons", () => {
 		})
 	})
 
+	describe("extraMenuActions (ownership-independent)", () => {
+		const blockAction = { id: "block", title: "block", icon: "block", onPress: vi.fn() } as unknown as MenuButton
+
+		it("returns the extra actions when there are no ownerActions", () => {
+			const result = buildParticipantMenuButtons({
+				ownerActions: undefined,
+				permission: undefined,
+				isSelected: false,
+				extraMenuActions: [blockAction],
+				t
+			})
+
+			expect(result).toHaveLength(1)
+			expect(result[0]?.id).toBe("block")
+		})
+
+		it("appends the extra actions after the owner actions", () => {
+			const ownerActions = makeOwnerActions({
+				menuActions: [{ id: "remove", title: "remove", icon: "delete", onPress: vi.fn() } as unknown as MenuButton]
+			})
+			const result = buildParticipantMenuButtons({
+				ownerActions,
+				permission: undefined,
+				isSelected: false,
+				extraMenuActions: [blockAction],
+				t
+			})
+
+			expect(result.map(b => b.id)).toEqual(["select", "remove", "block"])
+		})
+	})
+
 	describe("ownerActions without permission callbacks", () => {
 		it("returns exactly one button with id='select' when no permission callbacks provided", () => {
 			const ownerActions = makeOwnerActions()

@@ -31,20 +31,26 @@ export type ParticipantRowProps = {
 	avatar?: string | null
 	permission?: ParticipantPermission
 	ownerActions?: ParticipantOwnerActions
+	// Actions available regardless of chat/note ownership (e.g. Block / Unblock).
+	extraMenuActions?: MenuButton[]
+	// When true, render a muted "blocked" marker on the row.
+	blocked?: boolean
 }
 
 export type BuildParticipantMenuButtonsParams = {
 	ownerActions: ParticipantOwnerActions | undefined
 	permission: ParticipantPermission | undefined
 	isSelected: boolean
+	extraMenuActions?: MenuButton[]
 	t: TFunction
 }
 
 export function buildParticipantMenuButtons(params: BuildParticipantMenuButtonsParams): MenuButton[] {
-	const { ownerActions, permission, isSelected, t } = params
+	const { ownerActions, permission, isSelected, extraMenuActions, t } = params
+	const extra = extraMenuActions ?? []
 
 	if (!ownerActions) {
-		return []
+		return extra
 	}
 
 	const buttons: MenuButton[] = [
@@ -92,7 +98,7 @@ export function buildParticipantMenuButtons(params: BuildParticipantMenuButtonsP
 		})
 	}
 
-	return [...buttons, ...ownerActions.menuActions]
+	return [...buttons, ...ownerActions.menuActions, ...extra]
 }
 
 export const ParticipantRow = (props: ParticipantRowProps) => {
@@ -106,6 +112,7 @@ export const ParticipantRow = (props: ParticipantRowProps) => {
 		ownerActions,
 		permission: props.permission,
 		isSelected,
+		extraMenuActions: props.extraMenuActions,
 		t
 	})
 
@@ -143,9 +150,9 @@ export const ParticipantRow = (props: ParticipantRowProps) => {
 				</View>
 			}
 			title={props.displayName}
-			subtitle={props.email}
+			subtitle={props.blocked ? `${props.email} · ${t("contact_blocked")}` : props.email}
 			trailing={
-				ownerActions ? (
+				menuButtons.length > 0 ? (
 					<Menu
 						type="dropdown"
 						buttons={menuButtons}

@@ -24,6 +24,9 @@ import { useShallow } from "zustand/shallow"
 import { runBulk } from "@/lib/bulkOps"
 import ParticipantList from "@/components/participants/participantList"
 import { type ParticipantRowProps } from "@/components/participants/participantRow"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { contactsQueryGet } from "@/features/contacts/queries/useContacts.query"
+import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
 
 const ChatParticipants = () => {
 	const { t } = useTranslation()
@@ -34,6 +37,7 @@ const ChatParticipants = () => {
 	const stringifiedClient = useStringifiedClient()
 	const isOnline = useIsOnline()
 	const selectedChatParticipants = useChatParticipantsStore(useShallow(state => state.selectedChatParticipants))
+	const blocked = useBlockedUsers()
 
 	useFocusEffect(
 		useCallback(() => {
@@ -65,6 +69,8 @@ const ChatParticipants = () => {
 	const toRowProps = (participant: ChatParticipant): ParticipantRowProps => {
 		const isSelected = selectedChatParticipants.some(p => p.userId === participant.userId)
 		const areOthersSelected = selectedChatParticipants.length > 0
+		const isParticipantBlocked = blocked.userIds.has(participant.userId)
+		const blockedUuid = isParticipantBlocked ? contactsQueryGet()?.blocked.find(b => b.userId === participant.userId)?.uuid : undefined
 
 		return {
 			email: participant.email,
@@ -72,6 +78,19 @@ const ChatParticipants = () => {
 			avatar: participant.avatar,
 			// Chat participants are remove-only — no read/write permission concept.
 			permission: undefined,
+			blocked: isParticipantBlocked,
+			extraMenuActions: [
+				buildBlockToggleMenuAction({
+					t,
+					isBlocked: isParticipantBlocked,
+					blockedUuid,
+					userId: participant.userId,
+					email: participant.email,
+					avatar: participant.avatar,
+					nickName: participant.nickName,
+					timestamp: participant.added
+				})
+			],
 			ownerActions: isOwner
 				? {
 						isSelected,

@@ -14,6 +14,10 @@ import { simpleDate } from "@/lib/time"
 import events from "@/lib/events"
 import { useTranslation } from "react-i18next"
 import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
+import contacts from "@/features/contacts/contacts"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import prompts from "@/lib/prompts"
 
 export const Menu = ({
 	chat,
@@ -36,6 +40,53 @@ export const Menu = ({
 	const isFailedInflight = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""] !== undefined))
 
 	const isOwner = info.item.inner.senderId === stringifiedClient?.userId
+	const blocked = useBlockedUsers()
+	const senderBlocked = blocked.userIds.has(info.item.inner.senderId)
+
+	const blockButton = {
+		id: "block",
+		title: t("block"),
+		icon: "block" as const,
+		destructive: true,
+		requiresOnline: true,
+		onPress: async () => {
+			const promptResponse = await run(async () => {
+				return await prompts.alert({
+					title: t("block_contact"),
+					message: t("block_contact_confirmation"),
+					cancelText: t("cancel"),
+					okText: t("block"),
+					destructive: true
+				})
+			})
+
+			if (!promptResponse.success) {
+				console.error(promptResponse.error)
+				alerts.error(promptResponse.error)
+
+				return
+			}
+
+			if (promptResponse.data.cancelled) {
+				return
+			}
+
+			const result = await runWithLoading(async () => {
+				await contacts.block({
+					userId: info.item.inner.senderId,
+					email: info.item.inner.senderEmail,
+					avatar: info.item.inner.senderAvatar,
+					nickName: info.item.inner.senderNickName,
+					timestamp: info.item.sentTimestamp
+				})
+			})
+
+			if (!result.success) {
+				console.error(result.error)
+				alerts.error(result.error)
+			}
+		}
+	} satisfies MenuButton
 
 	const deleteButton = {
 		id: "delete",
@@ -155,7 +206,8 @@ export const Menu = ({
 								},
 								deleteButton
 							]
-						: [])
+						: []),
+					...(!isOwner && !senderBlocked ? [blockButton] : [])
 				] satisfies MenuButton[])
 
 	return (
