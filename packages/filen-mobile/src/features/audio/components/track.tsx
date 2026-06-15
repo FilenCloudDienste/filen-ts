@@ -230,7 +230,9 @@ export function Track({ track, playlist, reorderDisabled }: { track: TrackType; 
 	const audioMetadataQuery = useAudioMetadataQuery({
 		type: "drive",
 		data: {
-			uuid: track.item.data.uuid
+			uuid: track.item.data.uuid,
+			// By-value so a cross-directory search hit resolves its metadata.
+			item: track.item
 		}
 	})
 

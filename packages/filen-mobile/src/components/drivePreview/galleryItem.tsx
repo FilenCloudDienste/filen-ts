@@ -44,7 +44,10 @@ const GalleryItem = ({
 			? {
 					type: "drive",
 					data: {
-						uuid: info.item.data.data.uuid
+						uuid: info.item.data.data.uuid,
+						// Thread the held item by value so a cross-directory search hit (not in
+						// the global uuid cache) still resolves its bytes.
+						item: info.item.data
 					}
 				}
 			: {

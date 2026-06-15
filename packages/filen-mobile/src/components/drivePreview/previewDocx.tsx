@@ -28,7 +28,9 @@ const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 			: {
 					type: "drive",
 					data: {
-						uuid: item.data.data.uuid
+						uuid: item.data.data.uuid,
+						// By-value so a cross-directory search hit resolves its bytes.
+						item: item.data
 					}
 				}
 	)

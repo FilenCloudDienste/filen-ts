@@ -21,7 +21,9 @@ const AudioSlot = () => {
 		{
 			type: "drive",
 			data: {
-				uuid: queueItem?.item.data.uuid ?? ""
+				uuid: queueItem?.item.data.uuid ?? "",
+				// By-value so a cross-directory search hit resolves its metadata.
+				item: queueItem?.item
 			}
 		},
 		{
