@@ -556,12 +556,17 @@ function buildOutputSchema(keys: readonly string[]): Record<string, unknown> {
 	}
 }
 
-// Max keys per Anthropic request. The full catalog (~764 keys) in a single response can exceed
-// max_tokens for verbose languages (German/Russian/Japanese/Chinese) → a truncated JSON body that
-// fails to parse and aborts that language. Batching keeps every response well under max_tokens; the
-// cached system prefix (English source + glossary) is identical across all batches and languages,
-// so each extra batch is a cheap cache READ, not a re-send of the big prefix.
-const BATCH_SIZE = 100
+// Max keys per Anthropic request. Two independent limits force small batches:
+//   1. max_tokens — the full catalog (~764 keys) in one response can exceed max_tokens for verbose
+//      languages (German/Russian/Japanese/Chinese), truncating the JSON body so it fails to parse.
+//   2. Structured-output grammar size — buildOutputSchema declares one required property per key, and
+//      Anthropic compiles that closed schema into a constrained-decoding grammar whose size grows
+//      with the key count. Past a few dozen keys it is rejected with 400 "compiled grammar is too
+//      large" (a single 74-key delta batch hit exactly this). Small batches keep the per-request
+//      grammar well under that limit.
+// Extra batches are cheap: the cached system prefix (English source + glossary) is identical across
+// every batch and language, so each extra batch is a cache READ, not a re-send of the big prefix.
+const BATCH_SIZE = 25
 
 function chunkEntries(subset: Record<string, string>, size: number): Record<string, string>[] {
 	const entries = Object.entries(subset)
