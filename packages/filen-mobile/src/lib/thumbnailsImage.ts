@@ -161,7 +161,7 @@ export async function generateImage(
 				outputFile.delete()
 			}
 
-			savedFile.moveSync(outputFile)
+			await savedFile.move(outputFile)
 		} catch (error) {
 			try {
 				if (savedFile.exists) {
