@@ -42,7 +42,11 @@ vi.mock("@/lib/signals", () => ({
 
 // ─── Actual imports ──────────────────────────────────────────────────────────
 
-import { favoritesListingUpdater } from "@/features/drive/driveMetadata"
+import { favoritesListingUpdater, setDirColor } from "@/features/drive/driveMetadata"
+import auth from "@/lib/auth"
+import { unwrappedDirIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
+import events from "@/lib/events"
+import type { DirColor } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -134,5 +138,45 @@ describe("favoritesListingUpdater", () => {
 		favoritesListingUpdater(prev, a, false)
 
 		expect(prev).toEqual([a])
+	})
+})
+
+// ─── setDirColor — search/preview self-heal ──────────────────────────────────
+
+describe("setDirColor", () => {
+	it("emits driveItemUpdated with the pre-change uuid and the recolored item", async () => {
+		const updatedItem = {
+			type: "directory",
+			data: {
+				uuid: "dir-new",
+				parent: null
+			}
+		} as unknown as DriveItem
+
+		vi.mocked(auth.getSdkClients).mockResolvedValue({
+			authedSdkClient: {
+				setDirColor: vi.fn(async () => ({}))
+			}
+		} as never)
+		vi.mocked(unwrappedDirIntoDriveItem).mockReturnValue(updatedItem)
+		vi.mocked(unwrapParentUuid).mockReturnValue(null)
+
+		const updates: { previousUuid: string; item: DriveItem }[] = []
+		const sub = events.subscribe("driveItemUpdated", payload => updates.push(payload))
+
+		const original = {
+			type: "directory",
+			data: {
+				uuid: "dir-old"
+			}
+		} as unknown as DriveItem
+
+		await setDirColor({ item: original, color: "blue" as unknown as DirColor })
+
+		sub.remove()
+
+		expect(updates).toHaveLength(1)
+		expect(updates[0]?.previousUuid).toBe("dir-old")
+		expect(updates[0]?.item).toBe(updatedItem)
 	})
 })

@@ -21,6 +21,20 @@ import { selectContacts } from "@/features/contacts/contactsSelect"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { type TFunction } from "i18next"
 import { isFileItem, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
+import cache from "@/lib/cache"
+
+// Warm the global uuid-keyed cache for the tapped item BEFORE navigating to a metadata
+// screen. A cache-search result from a directory the user never browsed is not yet in the
+// cache, but the pushed screens (info / versions / color / publicLink) run their own
+// uuid-keyed lookups (directory-size query, public-link gate, version list), which would
+// miss without this. No-op for shared-variant items (they arrive via their own listings).
+function warmMetadataCache(item: DriveItem): void {
+	if (item.type === "file") {
+		cache.cacheNewFile(item.data, item)
+	} else if (item.type === "directory") {
+		cache.cacheNewNormalDir(item.data, item)
+	}
+}
 
 export function createMenuButtons({
 	item,
@@ -149,6 +163,8 @@ export function createMenuButtons({
 			title: t("info"),
 			icon: "info",
 			onPress: () => {
+				warmMetadataCache(item)
+
 				router.push({
 					pathname: "/driveItemInfo",
 					params: {
@@ -168,6 +184,8 @@ export function createMenuButtons({
 				title: t("versions"),
 				icon: "versions",
 				onPress: () => {
+					warmMetadataCache(item)
+
 					router.push({
 						pathname: "/fileVersions",
 						params: {
@@ -193,6 +211,8 @@ export function createMenuButtons({
 			title: t("color"),
 			icon: "color",
 			onPress: () => {
+				warmMetadataCache(item)
+
 				router.push({
 					pathname: "/changeDirectoryColor",
 					params: {
@@ -334,6 +354,8 @@ export function createMenuButtons({
 					title: t("share_public_link"),
 					icon: "link",
 					onPress: () => {
+						warmMetadataCache(item)
+
 						router.push({
 							pathname: "/publicLink",
 							params: {
@@ -431,6 +453,8 @@ export function createMenuButtons({
 			title: t("edit_public_link"),
 			icon: "link",
 			onPress: () => {
+				warmMetadataCache(item)
+
 				router.push({
 					pathname: "/publicLink",
 					params: {

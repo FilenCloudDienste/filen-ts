@@ -1,7 +1,18 @@
+import { useEffect } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import { unwrapFileMeta, unwrappedFileIntoDriveItem, getRealDriveItemParent } from "@/lib/sdkUnwrap"
+import {
+	unwrapFileMeta,
+	unwrappedFileIntoDriveItem,
+	getRealDriveItemParent,
+	unwrapParentUuid,
+	unwrapDirMeta,
+	unwrappedDirIntoDriveItem
+} from "@/lib/sdkUnwrap"
 import { getPreviewType } from "@/lib/previewType"
+import cache from "@/lib/cache"
+import auth from "@/lib/auth"
+import events from "@/lib/events"
 import TextEditor, { backgroundColors } from "@/components/textEditor"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
@@ -17,7 +28,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { newTmpFile } from "@/lib/tmp"
 import { useRecyclingState } from "@shopify/flash-list"
-import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
+import { AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import type { DriveItemFileExtracted } from "@/types"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -33,14 +44,75 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 	const textPrimary = useResolveClassNames("text-primary")
 	const [itemEdited, setItemEdited] = useRecyclingState<DriveItemFileExtracted | null>(null, [galleryItemKey(item)])
 	const isOnline = useIsOnline()
+	// Parent directory resolved by a background warm (below) for a cross-directory search
+	// hit whose parent isn't in the cache. Resets per item (useRecyclingState key). Preferred
+	// over the cache read so `readOnly` recomputes the moment the warm lands (the React
+	// Compiler memoizes `parent`, and getRealDriveItemParent reads a non-reactive Map).
+	const [warmedParent, setWarmedParent] = useRecyclingState<AnyDirWithContext | null>(null, [galleryItemKey(item)])
 
 	const parent =
-		item.type === "drive" && drivePath
+		warmedParent ??
+		(item.type === "drive" && drivePath
 			? getRealDriveItemParent({
 					item: item.data,
 					drivePath: drivePath
 				})
-			: null
+			: null)
+
+	// Warm the parent-directory cache for a deep search-result file: getRealDriveItemParent
+	// (and thus editability) needs the parent dir in cache. A file opened from a directory
+	// the user never browsed misses, leaving the editor read-only; resolve it by uuid.
+	useEffect(() => {
+		// Only the plain-drive `file` case (the cache-search scenario) — shared files resolve
+		// their parent from a different cache, and only `file` carries a `parent` uuid.
+		if (item.type !== "drive" || item.data.type !== "file") {
+			return
+		}
+
+		const parentUuid = unwrapParentUuid(item.data.data.parent)
+
+		// Root parent resolves without the cache; an already-cached parent needs no warm.
+		if (
+			!parentUuid ||
+			(cache.rootUuid && parentUuid === cache.rootUuid) ||
+			cache.directoryUuidToAnyNormalDir.get(parentUuid)
+		) {
+			return
+		}
+
+		const controller = new AbortController()
+
+		void (async () => {
+			try {
+				const { authedSdkClient } = await auth.getSdkClients()
+				const dir = await authedSdkClient.getDirOptional(parentUuid, { signal: controller.signal })
+
+				if (controller.signal.aborted || !dir) {
+					return
+				}
+
+				const dirItem = unwrappedDirIntoDriveItem(unwrapDirMeta(dir))
+
+				if (dirItem.type !== "directory") {
+					return
+				}
+
+				cache.cacheNewNormalDir(dir, dirItem)
+
+				const normalDir = cache.directoryUuidToAnyNormalDir.get(parentUuid)
+
+				if (normalDir && !controller.signal.aborted) {
+					setWarmedParent(new AnyDirWithContext.Normal(normalDir))
+				}
+			} catch (e) {
+				console.error("[previewText] failed to warm parent directory", e)
+			}
+		})()
+
+		return () => {
+			controller.abort()
+		}
+	}, [item, setWarmedParent])
 
 	const itemToUse =
 		item.type === "drive"
@@ -113,12 +185,30 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 				const newDriveItem = unwrappedFileIntoDriveItem(unwrapFileMeta(newFile))
 
 				if (newDriveItem.type === "file") {
+					// The upload rotates the uuid (new content). uploadCore already cached the new
+					// item; drop the stale old-uuid entry and tell the list/preview/search the
+					// identity rotated so they re-key (Effect D replaces by previousUuid + clears
+					// any tombstone). itemToUse is the file we just overwrote (non-null on this path
+					// — readOnly would have been true otherwise).
+					const oldUuid = itemToUse?.data.uuid
+
 					setItemEdited(newDriveItem)
 
 					useDrivePreviewStore.getState().setCurrentItem({
 						type: "drive",
 						data: newDriveItem
 					})
+
+					if (oldUuid) {
+						if (oldUuid !== newDriveItem.data.uuid) {
+							cache.forgetItem(oldUuid)
+						}
+
+						events.emit("driveItemUpdated", {
+							previousUuid: oldUuid,
+							item: newDriveItem
+						})
+					}
 				}
 			}
 		}
