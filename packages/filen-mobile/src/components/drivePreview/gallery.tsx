@@ -12,6 +12,7 @@ import { type DrivePath } from "@/hooks/useDrivePath"
 import GalleryHeader from "@/components/drivePreview/header"
 import GalleryItem from "@/components/drivePreview/galleryItem"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import events from "@/lib/events"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { runOnJS } from "react-native-worklets"
 import { useShallow } from "zustand/shallow"
@@ -276,6 +277,9 @@ const Gallery = () => {
 	// viewability with stale item layouts against the new viewport) can never
 	// poison it — unlike store.currentIndex.
 	const [anchorIndex, setAnchorIndex] = useState<number>(initialScrollIndex)
+	// Mirror of anchorIndex readable from the (mount-time) event subscriptions
+	// below without re-subscribing on every settle.
+	const anchorIndexRef = useRef<number>(initialScrollIndex)
 
 	const onMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
 		const pageWidth = e.nativeEvent.layoutMeasurement.width
@@ -288,6 +292,7 @@ const Gallery = () => {
 		const index = Math.max(0, Math.min(Math.round(e.nativeEvent.contentOffset.x / pageWidth), Math.max(0, storeItems.length - 1)))
 
 		setAnchorIndex(index)
+		anchorIndexRef.current = index
 
 		// Cached video players keep playing through page transitions (and through
 		// rotation remounts — that is their purpose); stop the ones the pager
@@ -516,6 +521,90 @@ const Gallery = () => {
 		}
 	}, [])
 
+	// Keep the open preview in sync when the previewed file changes identity or
+	// location elsewhere: a version restore rotates the uuid (so the page reseeds
+	// with fresh content), and a move changes the parent (so the preview's own
+	// save targets the new directory). Match by the pre-change uuid and swap in
+	// the updated item.
+	useEffect(() => {
+		const updateSubscription = events.subscribe("driveItemUpdated", ({ previousUuid, item }) => {
+			if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+				return
+			}
+
+			const replacement: GalleryItemTagged = {
+				type: "drive",
+				data: item
+			}
+
+			useDrivePreviewStore
+				.getState()
+				.setCurrentItems(prev =>
+					prev.map(existing => (existing.type === "drive" && existing.data.data.uuid === previousUuid ? replacement : existing))
+				)
+
+			useDrivePreviewStore
+				.getState()
+				.setCurrentItem(prev => (prev && prev.type === "drive" && prev.data.data.uuid === previousUuid ? replacement : prev))
+		})
+
+		// Removal (trash / delete / restore-out-of-trash): drop the item from the
+		// gallery list and re-render correctly — close if it was the last one, else
+		// keep a neighbour visible.
+		const removeSubscription = events.subscribe("driveItemRemoved", ({ uuid }) => {
+			const storeItems = useDrivePreviewStore.getState().items
+			const removedIndex = storeItems.findIndex(existing => existing.type === "drive" && existing.data.data.uuid === uuid)
+
+			if (removedIndex === -1) {
+				return
+			}
+
+			const remaining = storeItems.filter((_, index) => index !== removedIndex)
+
+			if (remaining.length === 0) {
+				navigateBack({
+					didNavigateBack,
+					isDismissing
+				})
+
+				return
+			}
+
+			// Keep the same item visible: an earlier removal shifts everything left
+			// by one; removing the current item lands on its neighbour (clamped to
+			// the new last when it WAS the last).
+			const anchor = anchorIndexRef.current
+			const nextIndex = Math.max(0, Math.min(removedIndex < anchor ? anchor - 1 : anchor, remaining.length - 1))
+
+			useDrivePreviewStore.getState().setCurrentItems(remaining)
+			useDrivePreviewStore.getState().setCurrentIndex(nextIndex)
+			useDrivePreviewStore.getState().setCurrentItem(remaining[nextIndex] ?? null)
+			setAnchorIndex(nextIndex)
+			anchorIndexRef.current = nextIndex
+
+			const pageWidth = anchoredWidthRef.current
+
+			// Re-anchor after the shorter list commits. Offset-based (index * width)
+			// for the same reason onListContainerLayout is: scrollToIndex lands
+			// between pages while FlashList's item layout is still async. If the
+			// width is not measured yet, onListContainerLayout re-anchors to the
+			// updated anchorIndex on the next layout pass instead.
+			if (pageWidth > 0) {
+				requestAnimationFrame(() => {
+					listRef.current?.scrollToOffset({
+						offset: nextIndex * pageWidth,
+						animated: false
+					})
+				})
+			}
+		})
+
+		return () => {
+			updateSubscription.remove()
+			removeSubscription.remove()
+		}
+	}, [didNavigateBack, isDismissing])
+
 	return (
 		<View className="flex-1 bg-transparent">
 			<AnimatedView
@@ -593,11 +682,7 @@ const Gallery = () => {
 									icon="eye-off-outline"
 									title={t("no_preview")}
 									description={t("no_preview_description")}
-									action={
-										<Button onPress={() => router.back()}>
-											{t("go_back")}
-										</Button>
-									}
+									action={<Button onPress={() => router.back()}>{t("go_back")}</Button>}
 								/>
 							</View>
 						)}

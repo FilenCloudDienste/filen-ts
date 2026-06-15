@@ -11,6 +11,7 @@ import {
 import { driveItemVersionsQueryUpdate } from "@/features/drive/queries/useDriveItemVersions.query"
 import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import cache from "@/lib/cache"
+import events from "@/lib/events"
 
 export async function deletePermanently({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
 	if (item.type !== "directory" && item.type !== "file") {
@@ -61,6 +62,11 @@ export async function deletePermanently({ item, signal }: { item: DriveItem; sig
 			updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 		})
 	}
+
+	// Drop the item from an open preview showing it (permanently gone).
+	events.emit("driveItemRemoved", {
+		uuid: item.data.uuid
+	})
 
 	return item
 }
@@ -125,6 +131,11 @@ export async function trash({ item, signal }: { item: DriveItem; signal?: AbortS
 			}
 		},
 		updater: prev => [...prev.filter(i => i.data.uuid !== item.data.uuid), item]
+	})
+
+	// Drop the item from an open preview showing it (now lives in trash).
+	events.emit("driveItemRemoved", {
+		uuid: item.data.uuid
 	})
 
 	return item
@@ -198,6 +209,11 @@ export async function restore({ item, signal }: { item: DriveItem; signal?: Abor
 		},
 		updater: prev => prev.filter(i => i.data.uuid !== item.data.uuid)
 	})
+
+	// Drop the item from an open preview showing it (restored out of trash).
+	events.emit("driveItemRemoved", {
+		uuid: item.data.uuid
+	})
 }
 
 export async function emptyTrash({ signal }: { signal?: AbortSignal }) {
@@ -242,6 +258,10 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 		throw new Error("Invalid item type")
 	}
 
+	// A version restore is a content change, so the file's uuid rotates. Capture
+	// the pre-restore uuid to re-point any open preview keyed by the old uuid.
+	const previousUuid = item.data.uuid
+
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedFile = await authedSdkClient.restoreFileVersion(
 		item.data,
@@ -285,6 +305,13 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 			uuid: item.data.uuid
 		},
 		updater: prev => prev.filter(v => v.uuid !== version.uuid)
+	})
+
+	// Re-point an open drive preview from the old uuid to the restored file, so it
+	// shows the restored content (and edits/saves build on it, not stale bytes).
+	events.emit("driveItemUpdated", {
+		previousUuid,
+		item
 	})
 
 	return item

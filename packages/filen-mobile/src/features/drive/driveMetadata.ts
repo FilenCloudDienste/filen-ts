@@ -5,6 +5,7 @@ import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveI
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import cache from "@/lib/cache"
 import { toSignalOpts } from "@/lib/signals"
+import events from "@/lib/events"
 
 /**
  * Optimistic updater for the root Favorites listing (`{ type: "favorites", uuid: null }`).
@@ -26,6 +27,11 @@ export async function favorite({ item, favorited, signal }: { item: DriveItem; f
 	if (item.data.favorited === favorited) {
 		return item
 	}
+
+	// Capture before the SDK reassigns `item`: an open preview matches by the uuid
+	// it currently holds. (favorite keeps the uuid, but capturing first stays
+	// correct and consistent with move/restoreFileVersion regardless.)
+	const previousUuid = item.data.uuid
 
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedItem = await authedSdkClient.setFavorite(
@@ -70,6 +76,12 @@ export async function favorite({ item, favorited, signal }: { item: DriveItem; f
 		updater: prev => favoritesListingUpdater(prev, item, favorited)
 	})
 
+	// Refresh an open preview showing this file (favorite badge in the header).
+	events.emit("driveItemUpdated", {
+		previousUuid,
+		item
+	})
+
 	return item
 }
 
@@ -81,6 +93,9 @@ export async function rename({ item, newName, signal }: { item: DriveItem; newNa
 	if (item.data.decryptedMeta?.name === newName || newName.trim().length === 0) {
 		return item
 	}
+
+	// Capture before the SDK reassigns `item` (see favorite above).
+	const previousUuid = item.data.uuid
 
 	const { authedSdkClient } = await auth.getSdkClients()
 
@@ -131,6 +146,12 @@ export async function rename({ item, newName, signal }: { item: DriveItem; newNa
 			updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
 		})
 	}
+
+	// Refresh an open preview showing this file (new name in the header).
+	events.emit("driveItemUpdated", {
+		previousUuid,
+		item
+	})
 
 	return item
 }

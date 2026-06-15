@@ -4,6 +4,7 @@ import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import cache from "@/lib/cache"
+import events from "@/lib/events"
 
 export async function createDirectory({
 	parent,
@@ -177,6 +178,14 @@ export async function move({
 			]
 		})
 	}
+
+	// Re-point an open drive preview to the moved item. A move keeps the uuid but
+	// changes the parent, so this refreshes the preview's item — its own save then
+	// targets the new directory instead of the stale original one.
+	events.emit("driveItemUpdated", {
+		previousUuid: oldItemUuid,
+		item
+	})
 
 	return item
 }
