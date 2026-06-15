@@ -22,6 +22,13 @@ export type Events = {
 	chatConversationDeleted: {
 		uuid: string
 	}
+	driveItemUpdated: {
+		previousUuid: string
+		item: DriveItem
+	}
+	driveItemRemoved: {
+		uuid: string
+	}
 	noteContentEdited: {
 		noteUuid: string
 		contentEdited: NoteContentEdited
