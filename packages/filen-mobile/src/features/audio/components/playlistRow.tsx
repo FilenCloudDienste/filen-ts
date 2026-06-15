@@ -37,6 +37,9 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 						icon: "play",
 						onPress: async () => {
 							const result = await runWithLoading(async () => {
+								// Plain play is deterministically in-order: clear any inherited shuffle
+								// mode so a previous "Shuffle play" doesn't bleed into this playback.
+								await audio.setShuffleEnabled(false)
 								await audio.clearQueue()
 
 								const { droppedUndecryptable } = await audio.replaceQueue({
@@ -70,12 +73,15 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 							const result = await runWithLoading(async () => {
 								await audio.setShuffleEnabled(true)
 
+								// Start on a random track so "Shuffle play" actually begins shuffled —
+								// replaceQueue pins startingPosition first in the shuffle order and play()
+								// loads it; with position 0 the first track would always be track #1.
 								const { droppedUndecryptable } = await audio.replaceQueue({
 									items: playlist.files.map(file => ({
 										item: file.item,
 										playlistUuid: playlist.uuid
 									})),
-									startingPosition: 0
+									startingPosition: Math.floor(Math.random() * playlist.files.length)
 								})
 
 								if (droppedUndecryptable) {
