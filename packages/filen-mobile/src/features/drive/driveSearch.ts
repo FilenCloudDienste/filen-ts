@@ -3,10 +3,10 @@ import {
 	type CacheStatusMessage,
 	CacheStatusMessage_Tags,
 	ResyncProgressMessage_Tags,
-	ErrorKind
+	ErrorKind,
+	FilenSdkError
 } from "@filen/sdk-rs"
 import auth from "@/lib/auth"
-import { unwrapSdkError } from "@/lib/sdkErrors"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SDK_CACHE_DIRECTORY, SDK_CACHE_PARENT_DIRECTORY, SDK_CACHE_DB_FILE, SDK_CACHE_VERSION } from "@/lib/storageRoots"
 import { useDriveSearchStore } from "@/features/drive/store/useDriveSearch.store"
@@ -104,7 +104,9 @@ export class DriveSearch {
 
 			this.configured = true
 		} catch (error) {
-			if (unwrapSdkError(error)?.kind() === ErrorKind.InvalidState) {
+			const inner = FilenSdkError.hasInner(error) ? FilenSdkError.getInner(error) : null
+
+			if (inner?.kind() === ErrorKind.InvalidState) {
 				// A cache worker is already live (re-login in the same JS process). The
 				// stored config is retained — treat as configured and move on.
 				this.configured = true
@@ -115,6 +117,43 @@ export class DriveSearch {
 			console.error("[driveSearch] configureCache failed", error)
 
 			useDriveSearchStore.getState().setCacheUnavailable(true)
+		}
+	}
+
+	/**
+	 * Close any live search and reset status. The lifecycle phase replaces the body
+	 * with the real teardown (close the held `CacheSearch`, release its window handle,
+	 * bump the generation); until a search can be opened there is nothing to close, so
+	 * this just clears the active root + status flags. Idempotent.
+	 */
+	public async closeActive(): Promise<void> {
+		this.activeRootUuid = null
+
+		const store = useDriveSearchStore.getState()
+
+		store.setResyncing(false)
+		store.setRootDeleted(false)
+	}
+
+	/**
+	 * Logout teardown: close the live search (so the worker releases its socket
+	 * listener while the client is still alive), then delete the cache DB (it holds
+	 * decrypted names at rest). Must run BEFORE the authed client is destroyed. The
+	 * dir delete is best-effort (POSIX unlink-while-open is benign if the worker's
+	 * write connection is briefly still closing).
+	 */
+	public async teardownOnLogout(): Promise<void> {
+		await this.closeActive()
+
+		this.configured = false
+		this.versionSwept = false
+
+		try {
+			if (SDK_CACHE_DIRECTORY.exists) {
+				SDK_CACHE_DIRECTORY.delete()
+			}
+		} catch (error) {
+			console.error("[driveSearch] failed to delete cache directory on logout", error)
 		}
 	}
 

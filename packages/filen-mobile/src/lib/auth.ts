@@ -22,6 +22,7 @@ import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
+import driveSearch from "@/features/drive/driveSearch"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
 
@@ -120,6 +121,10 @@ class Auth {
 	 * pre-reload window parks quietly instead of throwing. Mirrors doLogout's teardown.
 	 */
 	public prepareForReload(): void {
+		// Login-flow reload — no drive search is open yet, so this is a no-op in practice; fired
+		// (not awaited) for robustness so a live search's worker is released before the reload.
+		void driveSearch.closeActive()
+
 		this.destroyClient(this.authedClient)
 		this.destroyClient(this.unauthedClient)
 
@@ -318,6 +323,16 @@ class Auth {
 		this.lastStringifiedClient = null
 
 		this.armClientsReady()
+
+		// Phase 3.5 — close the cache search BEFORE destroying the client. close() releases the
+		// worker's socket listener + read connection (client-bound) and then we delete the cache DB
+		// (decrypted names at rest). Must precede Phase 4 — destroyClient tears down the socket the
+		// worker shares. allSettled-style isolation: never let a teardown failure abort the wipe.
+		try {
+			await driveSearch.teardownOnLogout()
+		} catch (e) {
+			console.error(e)
+		}
 
 		// Phase 4 — destroy the native handles AFTER cancellations settled (avoid use-after-destroy).
 		// Destroying the authed client tears down the socket it owns, so no socket event can mutate the

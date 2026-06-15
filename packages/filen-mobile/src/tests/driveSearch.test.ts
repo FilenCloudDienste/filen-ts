@@ -12,17 +12,20 @@ const mocks = vi.hoisted(() => {
 		getSdkClients,
 		createFn,
 		listHolder: { items: [] as { name: string; delete: () => void }[] },
-		unwrapHolder: { value: null as { kind: () => string } | null }
+		errorHolder: { inner: null as { kind: () => string } | null }
 	}
 })
 
 vi.mock("@filen/sdk-rs", () => ({
 	CacheStatusMessage_Tags: { Errors: "Errors", SyncRootsDeleted: "SyncRootsDeleted", ResyncProgress: "ResyncProgress" },
 	ResyncProgressMessage_Tags: { Started: "Started", Listing: "Listing", Applying: "Applying", Finished: "Finished" },
-	ErrorKind: { InvalidState: "InvalidState" }
+	ErrorKind: { InvalidState: "InvalidState" },
+	FilenSdkError: {
+		hasInner: () => mocks.errorHolder.inner !== null,
+		getInner: () => mocks.errorHolder.inner
+	}
 }))
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: mocks.getSdkClients } }))
-vi.mock("@/lib/sdkErrors", () => ({ unwrapSdkError: () => mocks.unwrapHolder.value }))
 vi.mock("@/lib/paths", () => ({ normalizeFilePathForSdk: (p: string) => p }))
 vi.mock("@/lib/storageRoots", () => ({
 	SDK_CACHE_DIRECTORY: { exists: false, create: mocks.createFn },
@@ -40,7 +43,7 @@ describe("driveSearch.init", () => {
 		mocks.getSdkClients.mockClear()
 		mocks.createFn.mockReset()
 		mocks.listHolder.items = []
-		mocks.unwrapHolder.value = null
+		mocks.errorHolder.inner = null
 		useDriveSearchStore.setState({ resyncing: false, rootDeleted: false, cacheUnavailable: false })
 	})
 
@@ -64,7 +67,7 @@ describe("driveSearch.init", () => {
 
 	it("swallows InvalidState (a worker is already live)", async () => {
 		mocks.configureCache.mockRejectedValueOnce(new Error("boom"))
-		mocks.unwrapHolder.value = { kind: () => "InvalidState" }
+		mocks.errorHolder.inner = { kind: () => "InvalidState" }
 
 		const ds = new DriveSearch()
 
@@ -74,7 +77,7 @@ describe("driveSearch.init", () => {
 
 	it("marks the cache unavailable on a non-InvalidState failure", async () => {
 		mocks.configureCache.mockRejectedValueOnce(new Error("io"))
-		mocks.unwrapHolder.value = { kind: () => "Io" }
+		mocks.errorHolder.inner = { kind: () => "Io" }
 
 		const ds = new DriveSearch()
 
