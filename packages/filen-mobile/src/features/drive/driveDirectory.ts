@@ -1,5 +1,5 @@
 import auth from "@/lib/auth"
-import { AnyNormalDir, NonRootItem_Tags } from "@filen/sdk-rs"
+import { AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
@@ -188,45 +188,4 @@ export async function move({
 	})
 
 	return item
-}
-
-export async function findItemMatchesForName({ name, signal }: { name: string; signal?: AbortSignal }) {
-	const { authedSdkClient } = await auth.getSdkClients()
-
-	const result = await authedSdkClient.findItemMatchesForName(
-		name.trim().toLowerCase(),
-		signal
-			? {
-					signal
-				}
-			: undefined
-	)
-
-	return result
-		.map(({ item, path }) => {
-			if (item.tag !== NonRootItem_Tags.NormalDir && item.tag !== NonRootItem_Tags.File) {
-				return null
-			}
-
-			return {
-				item:
-					item.tag === NonRootItem_Tags.NormalDir
-						? unwrappedDirIntoDriveItem(unwrapDirMeta(item.inner[0]))
-						: unwrappedFileIntoDriveItem(unwrapFileMeta(item.inner[0])),
-				// The SDK search path is built from RAW decrypted names — only normalize the
-				// outer shape (leading "/"); NEVER percent-decode it. normalizeFilePathForSdk
-				// decodes %XX escapes (correct only for encoded expo `.uri` inputs) and would
-				// corrupt a literal "%20" in a real filename — the same bug class as the
-				// offline/camera-upload eternal-loop fixes.
-				path: path.startsWith("/") ? path : `/${path}`
-			}
-		})
-		.filter(
-			(
-				i
-			): i is {
-				item: DriveItem
-				path: string
-			} => i !== null
-		)
 }

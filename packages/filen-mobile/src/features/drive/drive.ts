@@ -21,7 +21,7 @@ import type { Linked } from "@/hooks/useDrivePath"
 import i18n from "@/lib/i18n"
 import { enablePublicLink, disablePublicLink, updatePublicLink, removeDirLink, removeFileLink } from "@/features/drive/drivePublicLink"
 import { deletePermanently, trash, restore, emptyTrash, restoreFileVersion, deleteVersion } from "@/features/drive/driveTrash"
-import { createDirectory, move, findItemMatchesForName } from "@/features/drive/driveDirectory"
+import { createDirectory, move } from "@/features/drive/driveDirectory"
 import { favorite, rename, setDirColor, updateTimestamps } from "@/features/drive/driveMetadata"
 import { shareWithFilenUser, removeShare } from "@/features/drive/driveShare"
 
@@ -41,7 +41,6 @@ const drive = {
 	removeFileLink,
 	createDirectory,
 	move,
-	findItemMatchesForName,
 	updateTimestamps,
 	enablePublicLink,
 	disablePublicLink,
