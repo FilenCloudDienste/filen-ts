@@ -75,6 +75,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	const resyncing = useDriveSearchStore(state => state.resyncing)
 	const rootDeleted = useDriveSearchStore(state => state.rootDeleted)
 	const cacheUnavailable = useDriveSearchStore(state => state.cacheUnavailable)
+	const resyncProgress = useDriveSearchStore(state => state.resyncProgress)
 	const isOnline = useIsOnline()
 	const isAppActive = useIsAppActive()
 	const isFocused = useIsFocused()
@@ -158,20 +159,13 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		mapCacheRef.current = new Map<string, DriveItem>()
 
 		// Grace: give a freshly-opened search ~400ms before an empty result is allowed to
-		// surface as "no results" (lets the convergence resync land first).
+		// surface as "no results" (lets the convergence resync land first). The watchdog
+		// ("no sign of life") is a separate, activity-resettable effect below.
 		const grace = setTimeout(() => {
 			if (generation === generationRef.current) {
 				setGraceElapsed(true)
 			}
 		}, GRACE_MS)
-
-		// Watchdog: no first snapshot within this window -> terminal, so a wedged worker
-		// can't spin "warming" forever.
-		const watchdog = setTimeout(() => {
-			if (generation === generationRef.current) {
-				setWatchdogFired(true)
-			}
-		}, WATCHDOG_MS)
 
 		const controller = new AbortController()
 
@@ -211,8 +205,6 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 					setTotalCount(Number(snapshot.total))
 					setLive(snapshot.live)
 					setHasSnapshot(true)
-
-					clearTimeout(watchdog)
 				}
 			})
 			.catch(() => {
@@ -224,7 +216,6 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		return () => {
 			controller.abort()
 			clearTimeout(grace)
-			clearTimeout(watchdog)
 
 			// Background close is the singleton's (it releases the worker's socket listener so
 			// the WS can close); closing here too would race it. Only close on a real
@@ -235,6 +226,29 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		}
 	}, [isCacheSearch, isFocused, isAppActive, biometricUnlocked, drivePath.uuid, reopenNonce])
 
+	// Watchdog — terminal "no sign of life". Re-arms on open AND on every resync-progress
+	// heartbeat (`resyncProgress`), so it measures SILENCE, not total elapsed time: a slow
+	// search that's actively listing (Listing ticks ~every 200ms) keeps pushing it out and
+	// never false-fails. Inert once a snapshot has landed (`hasSnapshot` guard + dep). Only
+	// fires when nothing — no snapshot, no progress — happened for the whole window.
+	useEffect(() => {
+		if (!isCacheSearch || hasSnapshot) {
+			return
+		}
+
+		const generation = generationRef.current
+
+		const watchdog = setTimeout(() => {
+			if (generation === generationRef.current) {
+				setWatchdogFired(true)
+			}
+		}, WATCHDOG_MS)
+
+		return () => {
+			clearTimeout(watchdog)
+		}
+	}, [isCacheSearch, hasSnapshot, drivePath.uuid, reopenNonce, resyncProgress])
+
 	// Effect B — debounced re-filter on query change (no re-open).
 	useEffect(() => {
 		if (!isCacheSearch) {
@@ -244,12 +258,15 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		debouncedSetName(searchQuery)
 	}, [searchQuery, isCacheSearch, debouncedSetName])
 
-	// Stall ceiling — a dropped `Finished` must not pin "Still searching…" forever. The
-	// reset (on `resyncing` toggling) is the render-phase block above; this only ARMS.
-	// Generation-guarded: this effect's deps are [resyncing], so if `resyncing` stays true
-	// across a session change (Effect A reopens + bumps the generation), this effect does
-	// NOT re-run and its old timer keeps counting. Capturing the generation at arm time and
-	// checking it in the callback stops a stale timer from collapsing the new session.
+	// Stall ceiling — backstop for a dropped `Finished` (best-effort delivery) so a stuck
+	// `resyncing` can't pin "Still searching…" forever. Re-arms on `resyncProgress` (every
+	// Listing/Applying heartbeat) so it measures SILENCE since the last sign of life, NOT
+	// total resync duration: a legitimately long search streaming Listing ticks (~every
+	// 200ms) keeps resetting it and never false-collapses to "no results"/settled. It only
+	// fires after a full window of total silence (a dropped Finished, or the rare silent
+	// >window `Applying` phase). Generation-guarded: if `resyncing` stays true across a
+	// session change (Effect A reopens + bumps the generation) this effect's old timer keeps
+	// counting, so the captured-generation check stops it collapsing the new session.
 	useEffect(() => {
 		if (!resyncing) {
 			return
@@ -266,7 +283,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		return () => {
 			clearTimeout(timer)
 		}
-	}, [resyncing])
+	}, [resyncing, resyncProgress])
 
 	// Offline -> online while incomplete: re-open (the uncached resync can now complete).
 	// Conditional (guarded by the transition) — not a synchronous effect-body setState.
@@ -377,7 +394,10 @@ function deriveStatus(input: {
 		(input.openError && !input.hasSnapshot) ||
 		input.cacheUnavailable ||
 		input.rootDeleted ||
-		(input.watchdogFired && !input.hasSnapshot)
+		// `&& !resyncing`: a watchdog fire during an active resync (Started arrived, worker
+		// alive) is not a wedge — stay warming. The watchdog effect also resets on every
+		// progress heartbeat, so this mainly covers a brief tick gap after Started.
+		(input.watchdogFired && !input.hasSnapshot && !input.resyncing)
 	) {
 		return "terminal"
 	}
