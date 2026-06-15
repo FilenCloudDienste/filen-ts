@@ -210,6 +210,8 @@ export const common = {
 	history: "History",
 	/** Generic label for an item's participants (chat / note collaborators) */
 	participants: "Participants",
+	/** Metadata row on a list item shared WITH the current user — names the owner who shared it */
+	shared_by_email: "Shared by {{email}}",
 	/** Mention placeholder addressing every participant in a conversation */
 	everyone: "Everyone",
 

@@ -102,6 +102,13 @@ const NoteRow = ({
 
 	const participantsWithoutCurrentUser =
 		info.item.type === "header" ? [] : info.item.participants.filter(participant => participant.userId !== stringifiedClient?.userId)
+	// A note we don't own was shared TO us (we're a participant on someone else's note); surface
+	// the owner's email (from the isOwner participant) on its own metadata row when so.
+	const isSharedToMe = info.item.type !== "header" && !!stringifiedClient && info.item.ownerId !== stringifiedClient.userId
+	const sharedByOwnerEmail =
+		isSharedToMe && info.item.type !== "header"
+			? (info.item.participants.find(participant => participant.isOwner)?.email ?? null)
+			: null
 	const tags =
 		info.item.type === "header" ? [] : [...info.item.tags].sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
@@ -238,6 +245,15 @@ const NoteRow = ({
 								>
 									{formatRelativeTime(Number(info.item.editedTimestamp), t)}
 								</Text>
+								{sharedByOwnerEmail && (
+									<Text
+										numberOfLines={1}
+										ellipsizeMode="middle"
+										className="text-muted-foreground text-xs"
+									>
+										{t("shared_by_email", { email: sharedByOwnerEmail })}
+									</Text>
+								)}
 								{participantsWithoutCurrentUser.length > 0 && (
 									<View className="flex-row flex-wrap gap-2 bg-transparent pt-1">
 										{participantsWithoutCurrentUser.map(participant => {
