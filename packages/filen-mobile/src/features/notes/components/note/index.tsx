@@ -257,7 +257,7 @@ const NoteRow = ({
 										{tags.map(tag => (
 											<View
 												key={tag.uuid}
-												className="px-2 py-1 rounded-full border border-border flex-row items-center gap-1 bg-background-tertiary"
+												className="px-2 py-1 rounded-full flex-row items-center gap-1 bg-background-tertiary"
 											>
 												{tag.favorite && (
 													<Ionicons
