@@ -6,6 +6,7 @@ import {
 	type SharedDir,
 	type SharedFile,
 	type SharedRootDir,
+	type SharingRole,
 	type Note as SdkNote,
 	type Chat as SdkChat,
 	type ChatMessage as SdkChatMessage,
@@ -57,6 +58,10 @@ export type DriveItemDirectorySharedNonRoot = Prettify<
 	SharedDir &
 		ExtraData & {
 			decryptedMeta: DecryptedDirMeta | null
+			// Present at runtime for sharedIn/sharedOut listings (spread from the parent's share
+			// info in useDriveItems.query.ts); optional because other paths that build a
+			// sharedDirectory item may not set it.
+			sharingRole?: SharingRole
 		}
 >
 

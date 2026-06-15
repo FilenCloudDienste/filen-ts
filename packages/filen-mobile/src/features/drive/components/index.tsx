@@ -19,6 +19,9 @@ import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
+import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { isBlocked } from "@/features/contacts/blockedSelectors"
+import { getSharerIdentity } from "@/features/drive/driveSharer"
 import {
 	getDriveEmptyStateIcon,
 	getDriveEmptyStateTitleKey,
@@ -41,6 +44,7 @@ const Drive = () => {
 	const { t } = useTranslation()
 	const { searchQuery, setSearchQuery, searchResults, status, totalCount } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
+	const blocked = useBlockedUsers()
 	const parent = getDriveParent(drivePath)
 	const upload = useDriveUpload({ parent, drivePath, t })
 	const primaryColor = useResolveClassNames("bg-primary").backgroundColor as string
@@ -69,9 +73,20 @@ const Drive = () => {
 
 	// #26 — use retained data unconditionally (stale-while-error); status "error"
 	// with prior data keeps the listing visible instead of flipping to "empty".
-	const items = isCacheSearch
+	const sortedItems = isCacheSearch
 		? itemSorter.sortItems(searchResults, sort)
 		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort), searchQuery)
+
+	// Hide shared-in items shared by a blocked user (virtual-root filter — the query stays
+	// unopinionated). Only the sharedIn context carries a sharer identity to check.
+	const items =
+		drivePath.type === "sharedIn"
+			? sortedItems.filter(item => {
+					const sharer = getSharerIdentity(item)
+
+					return !sharer || !isBlocked(sharer, blocked)
+				})
+			: sortedItems
 
 	// Returning from a cache search to the directory listing: the search REPLACED the
 	// listing as the rendered source, so on clear the list shows whatever
@@ -90,6 +105,25 @@ const Drive = () => {
 			void refetchListing()
 		}
 	}, [isCacheSearch, refetchListing])
+
+	// Stale-selection purge (sharedIn): if a sharer becomes blocked while their items are
+	// selected, drop those items from the selection so bulk actions / select-all stay honest.
+	useEffect(() => {
+		if (drivePath.type !== "sharedIn") {
+			return
+		}
+
+		const selected = useDriveStore.getState().selectedItems
+		const kept = selected.filter(item => {
+			const sharer = getSharerIdentity(item)
+
+			return !sharer || !isBlocked(sharer, blocked)
+		})
+
+		if (kept.length !== selected.length) {
+			useDriveStore.getState().setSelectedItems(kept)
+		}
+	}, [blocked, drivePath.type])
 
 	useFocusEffect(
 		useCallback(() => {
