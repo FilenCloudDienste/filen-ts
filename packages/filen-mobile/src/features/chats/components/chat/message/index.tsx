@@ -17,6 +17,7 @@ import { messageDisplayBody } from "@/lib/decryption"
 import Typing from "@/features/chats/components/chat/message/typing"
 import Attachments from "@/features/chats/components/chat/message/attachments"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import { isBlocked } from "@/features/contacts/blockedSelectors"
 import useRevealedBlockedMessages from "@/features/chats/store/useRevealedBlockedMessages.store"
 import { PressableOpacity } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -60,7 +61,7 @@ const Message = ({
 
 	const isMessageOnlyLink = computeIsMessageOnlyLink(info.item.inner.message)
 	const blocked = useBlockedUsers()
-	const senderBlocked = blocked.userIds.has(info.item.inner.senderId)
+	const senderBlocked = isBlocked({ userId: info.item.inner.senderId, email: info.item.inner.senderEmail }, blocked)
 	const isRevealed = useRevealedBlockedMessages(state => state.revealed.has(info.item.inner.uuid))
 	const showTombstone = senderBlocked && !isRevealed
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")

@@ -21,6 +21,17 @@ describe("isMessageUnread blocked-aware", () => {
 	it("is NOT unread for a blocked sender", () => {
 		expect(isMessageUnread(msg(99n, 100n), chat(50n, msg(99n, 100n)), 1n, blocked)).toBe(false)
 	})
+
+	it("is NOT unread for a sender matched by email only (userId differs)", () => {
+		const m = {
+			chat: "c",
+			inner: { uuid: "m", senderId: 7n, senderEmail: "spam@x.com", message: "hi" },
+			sentTimestamp: 100n,
+			edited: false
+		} as unknown as ChatMessage
+
+		expect(isMessageUnread(m, chat(50n, m), 1n, blocked)).toBe(false)
+	})
 })
 
 describe("chatHasUnread scan-back", () => {

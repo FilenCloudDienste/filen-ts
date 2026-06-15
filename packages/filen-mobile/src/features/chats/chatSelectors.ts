@@ -1,5 +1,5 @@
 import { type Chat, type ChatMessage } from "@/types"
-import { type BlockedUsers, EMPTY_BLOCKED_USERS } from "@/features/contacts/blockedSelectors"
+import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked } from "@/features/contacts/blockedSelectors"
 
 /**
  * Aggregated flags for a Chats selection, computed in a single pass.
@@ -43,7 +43,12 @@ export const EMPTY_CHAT_FLAGS: ChatSelectionFlags = Object.freeze({
 	includesUndecryptable: false
 }) as ChatSelectionFlags
 
-export function isMessageUnread(message: ChatMessage, chat: Chat, userId: bigint | undefined, blocked: BlockedUsers = EMPTY_BLOCKED_USERS): boolean {
+export function isMessageUnread(
+	message: ChatMessage,
+	chat: Chat,
+	userId: bigint | undefined,
+	blocked: BlockedUsers = EMPTY_BLOCKED_USERS
+): boolean {
 	return (
 		chat.lastFocus !== undefined &&
 		chat.lastFocus !== null &&
@@ -51,7 +56,7 @@ export function isMessageUnread(message: ChatMessage, chat: Chat, userId: bigint
 		!chat.muted &&
 		message.sentTimestamp > chat.lastFocus &&
 		message.inner.senderId !== userId &&
-		!blocked.userIds.has(message.inner.senderId)
+		!isBlocked({ userId: message.inner.senderId, email: message.inner.senderEmail }, blocked)
 	)
 }
 
@@ -78,8 +83,8 @@ export function chatHasUnread(
 
 	// Last message is from a blocked sender — the cheap last-message check would false-positive.
 	// Scan the cached message list for any unread message from a non-blocked, non-self sender
-	// (false unless we can see the messages).
-	if (blocked.userIds.has(lastSenderId)) {
+	// (false unless we can see the messages). Match userId+email (consistent with isMessageUnread).
+	if (isBlocked({ userId: lastSenderId, email: c.lastMessage.inner.senderEmail }, blocked)) {
 		const messages = getMessages?.(c.uuid)
 
 		if (!messages) {
