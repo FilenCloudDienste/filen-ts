@@ -82,7 +82,13 @@ const INTENTIONAL_PLURAL_KEYS = new Set([
 	"import_partial_upload_one",
 	"import_partial_upload_other",
 	"events_undecryptable_one",
-	"events_undecryptable_other"
+	"events_undecryptable_other",
+	"relative_minutes_ago_one",
+	"relative_minutes_ago_other",
+	"relative_hours_ago_one",
+	"relative_hours_ago_other",
+	"relative_days_ago_one",
+	"relative_days_ago_other"
 ])
 
 describe("auth catalog", () => {
@@ -169,10 +175,7 @@ describe("auth catalog", () => {
 		// absent from both the locale catalogs AND the snapshot until CI fills them. Diffing against the
 		// snapshot keeps real drift protection (a locale missing an already-translated key fails) without
 		// false-failing every time a developer adds an English string ahead of the CI translation pass.
-		const snapshot = JSON.parse(fs.readFileSync(path.join(localesDir, ".en-snapshot.json"), "utf8")) as Record<
-			string,
-			unknown
-		>
+		const snapshot = JSON.parse(fs.readFileSync(path.join(localesDir, ".en-snapshot.json"), "utf8")) as Record<string, unknown>
 
 		// Plural forms legitimately differ per language (en uses _one/_other; ru adds
 		// _few/_many, etc.), so completeness is asserted over non-plural keys only —

@@ -9,7 +9,7 @@ import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
-import { simpleDate } from "@/lib/time"
+import { formatRelativeTime } from "@/lib/time"
 import Menu from "@/features/notes/components/tag/menu"
 import { cn } from "@filen/utils"
 import { PressableScale } from "@/components/ui/pressables"
@@ -157,7 +157,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 								>
 									{t("tag_notes_count_and_date", {
 										count: notesForTag.length,
-										date: simpleDate(Number(info.item.editedTimestamp))
+										date: formatRelativeTime(Number(info.item.editedTimestamp), t)
 									})}
 								</Text>
 							</View>

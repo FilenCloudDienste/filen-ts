@@ -7,7 +7,7 @@ import {
 	DirMeta_Tags,
 	UserEventKind_Tags
 } from "@filen/sdk-rs"
-import { simpleDate } from "@/lib/time"
+import { formatRelativeTime } from "@/lib/time"
 import i18n from "@/lib/i18n"
 import { type TFunction } from "i18next"
 import { type en } from "@/locales/en"
@@ -96,7 +96,7 @@ export function buildEventDetails(
 		},
 		{
 			title: t("timestamp"),
-			value: simpleDate(Number(event.timestamp))
+			value: formatRelativeTime(Number(event.timestamp), t)
 		},
 		{
 			title: t("ip"),

@@ -217,5 +217,21 @@ export const common = {
 	/** Generic empty-state title shown when a search/filter returns no matching items */
 	no_results: "No results",
 	/** Generic empty-state subtitle under no_results, hinting to adjust the search */
-	no_results_description: "Try a different search."
+	no_results_description: "Try a different search.",
+
+	// ── Relative time (formatRelativeTime — falls back to a full date after 7 days) ──
+	/** Relative time shown for timestamps less than a minute old */
+	relative_just_now: "Just now",
+	/** Relative time, singular minutes. {{count}} is the number of minutes */
+	relative_minutes_ago_one: "{{count}} minute ago",
+	/** Relative time, plural minutes. {{count}} is the number of minutes */
+	relative_minutes_ago_other: "{{count}} minutes ago",
+	/** Relative time, singular hours. {{count}} is the number of hours */
+	relative_hours_ago_one: "{{count}} hour ago",
+	/** Relative time, plural hours. {{count}} is the number of hours */
+	relative_hours_ago_other: "{{count}} hours ago",
+	/** Relative time, singular days. {{count}} is the number of days */
+	relative_days_ago_one: "{{count}} day ago",
+	/** Relative time, plural days. {{count}} is the number of days */
+	relative_days_ago_other: "{{count}} days ago"
 } as const

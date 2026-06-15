@@ -1,4 +1,5 @@
 import * as ExpoLocalization from "expo-localization"
+import { type TFunction } from "i18next"
 
 export let intlLanguage: string = "en-US"
 
@@ -248,4 +249,47 @@ export function simpleDateNoDate(timestamp: number | Date): string {
 	const seconds = pad2(date.getSeconds())
 
 	return formatTimePart(hours, minutes, seconds)
+}
+
+// Number of days after which formatRelativeTime falls back to the absolute date.
+const RELATIVE_TIME_CUTOFF_DAYS = 7
+
+/**
+ * Formats a timestamp as a relative time ("Just now", "5 minutes ago", "2 hours ago",
+ * "3 days ago") for the recent past, falling back to the locale-aware full date
+ * (`simpleDate`) once it is older than `RELATIVE_TIME_CUTOFF_DAYS`. Hermes-safe (no Intl)
+ * and localized via the i18next plural pipeline. `t` is passed in — time.ts must not import
+ * the i18n module, since i18n.ts already depends on this module for `setIntlLanguage`.
+ *
+ * @param timestamp - Unix timestamp (seconds or milliseconds) or Date object
+ * @param t - the i18next translation function (component `t` or module-level `i18n.t`)
+ */
+export function formatRelativeTime(timestamp: number | Date, t: TFunction): string {
+	const date = toDate(timestamp)
+	const diffSeconds = Math.floor((Date.now() - date.getTime()) / 1000)
+
+	// Clock skew / future timestamps collapse to "just now" rather than a negative count.
+	if (diffSeconds < 60) {
+		return t("relative_just_now")
+	}
+
+	const diffMinutes = Math.floor(diffSeconds / 60)
+
+	if (diffMinutes < 60) {
+		return t("relative_minutes_ago", { count: diffMinutes })
+	}
+
+	const diffHours = Math.floor(diffMinutes / 60)
+
+	if (diffHours < 24) {
+		return t("relative_hours_ago", { count: diffHours })
+	}
+
+	const diffDays = Math.floor(diffHours / 24)
+
+	if (diffDays < RELATIVE_TIME_CUTOFF_DAYS) {
+		return t("relative_days_ago", { count: diffDays })
+	}
+
+	return simpleDate(timestamp)
 }
