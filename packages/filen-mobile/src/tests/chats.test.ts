@@ -618,6 +618,58 @@ describe("chats.addParticipant", () => {
 	})
 })
 
+describe("chats.addParticipants (bulk)", () => {
+	beforeEach(() => {
+		mockGetSdkClients.mockClear()
+		mockChatsQueryUpdate.mockClear()
+		mockSdkClient.addChatParticipant.mockReset()
+	})
+
+	it("threads each add through the previous result so the cache keeps every new participant", async () => {
+		const chat = makeChat({ participants: [], uuid: "chat-bulk" })
+		const contactA = { userId: 55n, email: "a@test.com" } as unknown as Contact
+		const contactB = { userId: 66n, email: "b@test.com" } as unknown as Contact
+
+		// SDK add-one appends the contact to whatever chat it receives (mirrors real behavior), so a
+		// sequential threaded loop accumulates while the old parallel one (same stale base) would not.
+		mockSdkClient.addChatParticipant.mockImplementation((c: Chat, contact: Contact) =>
+			Promise.resolve({
+				...c,
+				participants: [...c.participants, makeParticipant(contact.userId, contact.email)]
+			})
+		)
+
+		const result = await chats.addParticipants({ chat, contacts: [contactA, contactB] })
+
+		// The second SDK call must receive the chat returned by the first (1 participant), not the
+		// original empty chat — this is the sequential threading that fixes the last-write-wins race.
+		expect(mockSdkClient.addChatParticipant).toHaveBeenCalledTimes(2)
+		expect(mockSdkClient.addChatParticipant.mock.calls[1]?.[0].participants).toHaveLength(1)
+
+		// A single cache write, carrying BOTH new participants.
+		expect(mockChatsQueryUpdate).toHaveBeenCalledTimes(1)
+		expect(result.participants).toHaveLength(2)
+
+		const updater = getLastChatsUpdater()
+		const updated = updater([chat])
+
+		expect(updated.find(c => c.uuid === "chat-bulk")?.participants).toHaveLength(2)
+	})
+
+	it("returns the original chat without touching SDK or cache when all contacts already exist", async () => {
+		const existing = makeParticipant(42n, "existing@test.com")
+		const chat = makeChat({ participants: [existing] })
+		const contact = { userId: 42n, email: "existing@test.com" } as unknown as Contact
+
+		const result = await chats.addParticipants({ chat, contacts: [contact] })
+
+		expect(result).toBe(chat)
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+		expect(mockSdkClient.addChatParticipant).not.toHaveBeenCalled()
+		expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
+	})
+})
+
 describe("chats.removeParticipant", () => {
 	beforeEach(() => {
 		mockGetSdkClients.mockClear()
