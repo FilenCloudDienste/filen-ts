@@ -263,8 +263,16 @@ const RELATIVE_TIME_CUTOFF_DAYS = 7
  *
  * @param timestamp - Unix timestamp (seconds or milliseconds) or Date object
  * @param t - the i18next translation function (component `t` or module-level `i18n.t`)
+ * @param options.absolute - formatter used past the cutoff (default `simpleDate`); pass
+ *   `simpleDateNoTime` for compact surfaces such as chat list rows
  */
-export function formatRelativeTime(timestamp: number | Date, t: TFunction): string {
+export function formatRelativeTime(
+	timestamp: number | Date,
+	t: TFunction,
+	options?: {
+		absolute?: (timestamp: number | Date) => string
+	}
+): string {
 	const date = toDate(timestamp)
 	const diffSeconds = Math.floor((Date.now() - date.getTime()) / 1000)
 
@@ -291,5 +299,5 @@ export function formatRelativeTime(timestamp: number | Date, t: TFunction): stri
 		return t("relative_days_ago", { count: diffDays })
 	}
 
-	return simpleDate(timestamp)
+	return (options?.absolute ?? simpleDate)(timestamp)
 }

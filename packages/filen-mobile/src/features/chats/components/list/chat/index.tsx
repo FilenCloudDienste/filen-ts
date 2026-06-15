@@ -19,6 +19,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
+import { formatRelativeTime, simpleDateNoTime } from "@/lib/time"
 
 const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()
@@ -127,6 +128,16 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 								>
 									{title}
 								</Text>
+								{info.item.lastMessage && (
+									<Text
+										numberOfLines={1}
+										className={cn("text-xs shrink-0", unreadCount > 0 ? "text-foreground" : "text-muted-foreground")}
+									>
+										{formatRelativeTime(Number(info.item.lastMessage.sentTimestamp), t, {
+											absolute: simpleDateNoTime
+										})}
+									</Text>
+								)}
 							</View>
 							{typingUsers.length > 0 ? (
 								<Text
