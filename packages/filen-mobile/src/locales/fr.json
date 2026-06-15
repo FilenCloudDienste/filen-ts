@@ -164,6 +164,8 @@
 	"contacts_requests": "Demandes",
 	"continue": "Continuer",
 	"conversion_error": "Une erreur est survenue lors du traitement de vos données.",
+	"convert_heic_to_jpg": "Convertir HEIC en JPG",
+	"convert_heic_to_jpg_description": "Convertir automatiquement les photos HEIC/HEIF en JPG lors de l'envoi pour une meilleure compatibilité entre les appareils et les applications.",
 	"copied_to_clipboard": "Copié dans le presse-papiers",
 	"copy": "Copier",
 	"copy_content": "Copier le contenu",

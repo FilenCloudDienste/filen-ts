@@ -164,6 +164,8 @@
 	"contacts_requests": "Kérelmek",
 	"continue": "Folytatás",
 	"conversion_error": "Hiba történt az adatok feldolgozása közben.",
+	"convert_heic_to_jpg": "HEIC konvertálása JPG formátumba",
+	"convert_heic_to_jpg_description": "A HEIC/HEIF fotók automatikus konvertálása JPG formátumba feltöltéskor a jobb kompatibilitás érdekében eszközök és alkalmazások között.",
 	"copied_to_clipboard": "Vágólapra másolva",
 	"copy": "Másolás",
 	"copy_content": "Tartalom másolása",

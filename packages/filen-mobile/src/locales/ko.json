@@ -164,6 +164,8 @@
 	"contacts_requests": "요청",
 	"continue": "계속",
 	"conversion_error": "데이터를 처리하는 중 문제가 발생했습니다.",
+	"convert_heic_to_jpg": "HEIC를 JPG로 변환",
+	"convert_heic_to_jpg_description": "여러 기기와 앱 간 호환성을 높이기 위해 업로드 시 HEIC/HEIF 사진을 자동으로 JPG로 변환합니다.",
 	"copied_to_clipboard": "클립보드에 복사됨",
 	"copy": "복사",
 	"copy_content": "내용 복사",

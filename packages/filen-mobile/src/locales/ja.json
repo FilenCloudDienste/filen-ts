@@ -164,6 +164,8 @@
 	"contacts_requests": "リクエスト",
 	"continue": "続ける",
 	"conversion_error": "データの処理中に問題が発生しました。",
+	"convert_heic_to_jpg": "HEICをJPGに変換",
+	"convert_heic_to_jpg_description": "デバイスやアプリ間での互換性を高めるため、アップロード時にHEIC/HEIF写真を自動的にJPGに変換します。",
 	"copied_to_clipboard": "クリップボードにコピーしました",
 	"copy": "コピー",
 	"copy_content": "内容をコピー",

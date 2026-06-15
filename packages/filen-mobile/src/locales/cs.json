@@ -164,6 +164,8 @@
 	"contacts_requests": "Žádosti",
 	"continue": "Pokračovat",
 	"conversion_error": "Při zpracování vašich dat se něco pokazilo.",
+	"convert_heic_to_jpg": "Převést HEIC na JPG",
+	"convert_heic_to_jpg_description": "Při nahrávání automaticky převádět fotky HEIC/HEIF na JPG pro lepší kompatibilitu napříč zařízeními a aplikacemi.",
 	"copied_to_clipboard": "Zkopírováno do schránky",
 	"copy": "Kopírovat",
 	"copy_content": "Kopírovat obsah",
