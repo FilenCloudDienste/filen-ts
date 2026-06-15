@@ -450,7 +450,9 @@ const PreviewAudio = ({ item, fileUrl }: { item: GalleryItemTagged; fileUrl: str
 			? {
 					type: "drive",
 					data: {
-						uuid: item.data.data.uuid
+						uuid: item.data.data.uuid,
+						// By-value so a cross-directory search hit resolves its metadata.
+						item: item.data
 					}
 				}
 			: {

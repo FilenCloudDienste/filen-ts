@@ -44,9 +44,16 @@ vi.mock("@/lib/fileCache", () => ({
 // fileSource.ts also imports expo-file-system for the File type; the mock covers that
 // It also imports clearBarrier, serializer, storageRoots through fileCache — all via the vi.mock above
 
-import { resolveFile } from "@/queries/fileSource"
+import { resolveFile, fileSourceKey } from "@/queries/fileSource"
 import { type FileSource } from "@/queries/fileSource"
+import { type DriveItemFileExtracted } from "@/types"
 import { File as MockFile } from "@/tests/mocks/expoFileSystem"
+
+// The fixture factories return loosely-typed shapes (matching the existing `unknown`
+// cache-map usage); cast to the strict by-value item type at the FileSource boundary.
+function asFileItem(item: unknown): DriveItemFileExtracted {
+	return item as DriveItemFileExtracted
+}
 
 function makeFileItem(uuid = "file-uuid-1") {
 	return {
@@ -175,6 +182,56 @@ describe("resolveFile", () => {
 				item: { type: "drive", data: item },
 				signal: undefined
 			})
+		})
+	})
+
+	describe("drive type — by-value item fallback", () => {
+		it("prefers the passed-by-value item over the cache (cross-directory search hit)", async () => {
+			// Cache MISS — the item is not in uuidToAnyDriveItem (a search result from a
+			// directory the user never browsed), but the caller threads it by value.
+			const item = asFileItem(makeFileItem("by-value-uuid"))
+			const mockFile = new MockFile("file:///cache/by-value-uuid.bin")
+			mockFileCacheGet.mockResolvedValueOnce(mockFile)
+
+			const source: FileSource = { type: "drive", data: { uuid: "by-value-uuid", item } }
+			const result = await resolveFile(source)
+
+			expect(mockFileCacheGet).toHaveBeenCalledWith({
+				item: { type: "drive", data: item },
+				signal: undefined
+			})
+			expect(result).toBe(mockFile)
+		})
+
+		it("prefers the by-value item even when a (stale) cache entry exists for the uuid", async () => {
+			const cached = makeFileItem("dup-uuid")
+			const passed = asFileItem(makeSharedFileItem("dup-uuid"))
+			mockCacheMap.set("dup-uuid", cached)
+			const mockFile = new MockFile("file:///cache/dup-uuid.bin")
+			mockFileCacheGet.mockResolvedValueOnce(mockFile)
+
+			const source: FileSource = { type: "drive", data: { uuid: "dup-uuid", item: passed } }
+			await resolveFile(source)
+
+			expect(mockFileCacheGet).toHaveBeenCalledWith({
+				item: { type: "drive", data: passed },
+				signal: undefined
+			})
+		})
+	})
+
+	describe("fileSourceKey", () => {
+		it("strips the by-value item from the drive key so it never enters the query key", () => {
+			const item = asFileItem(makeFileItem("keep-uuid"))
+			const source: FileSource = { type: "drive", data: { uuid: "keep-uuid", item } }
+
+			expect(fileSourceKey(source)).toEqual({ type: "drive", data: { uuid: "keep-uuid" } })
+		})
+
+		it("returns external sources unchanged", () => {
+			const source: FileSource = { type: "external", data: { url: "https://x/y.bin", name: "y.bin" } }
+
+			expect(fileSourceKey(source)).toEqual(source)
 		})
 	})
 

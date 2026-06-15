@@ -6,7 +6,7 @@ import cache from "@/lib/cache"
 import useHttpStore from "@/stores/useHttp.store"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import type { DriveItemFileExtracted } from "@/types"
-import type { FileSource } from "@/queries/fileSource"
+import { type FileSource, fileSourceKey } from "@/queries/fileSource"
 import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
 import { waitForHttpProvider } from "@/lib/thumbnailsHelpers"
@@ -43,7 +43,9 @@ export async function fetchData(
 		return params.data.url
 	}
 
-	const item = cache.uuidToAnyDriveItem.get(params.data.uuid)
+	// Prefer the by-value item (a cross-directory search hit may not be in the global uuid
+	// cache); fall back to the cache lookup.
+	const item = params.data.item ?? cache.uuidToAnyDriveItem.get(params.data.uuid)
 
 	if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
 		return null
@@ -99,8 +101,6 @@ export function useFileUrlQuery(
 	params: UseFileUrlQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = sortParams(params)
-
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
 		// Evict immediately when the last subscriber unmounts. URLs are bound to the localhost HTTP provider's session-scoped port, so re-deriving on next mount is the correct behavior anyway.
@@ -111,10 +111,11 @@ export function useFileUrlQuery(
 		// resolution), so it must never be paused by TanStack's offline gating.
 		networkMode: "always",
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		// Key off identity only (fileSourceKey strips the by-value item).
+		queryKey: [BASE_QUERY_KEY, sortParams(fileSourceKey(params))],
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...params,
 				signal
 			})
 	})

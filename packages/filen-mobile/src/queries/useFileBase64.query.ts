@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import { Buffer } from "react-native-quick-crypto"
-import { type FileSource, resolveFile } from "@/queries/fileSource"
+import { type FileSource, resolveFile, fileSourceKey } from "@/queries/fileSource"
 
 export const BASE_QUERY_KEY = "useFileBase64Query"
 
@@ -22,17 +22,16 @@ export function useFileBase64Query(
 	params: UseFileBase64QueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = sortParams(params)
-
 	const query = useQuery({
 		...DEFAULT_QUERY_OPTIONS,
 		// Base64 strings are ~4/3 the original file size; evict immediately when the last subscriber unmounts. fileCache backs us on disk, so refetch is cheap.
 		gcTime: 0,
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		// Key off identity only (fileSourceKey strips the by-value item).
+		queryKey: [BASE_QUERY_KEY, sortParams(fileSourceKey(params))],
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...params,
 				signal
 			})
 	})
