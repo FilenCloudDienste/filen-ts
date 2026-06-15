@@ -196,6 +196,11 @@ export const settings = {
 	offline_dirs_count_one: "{{count}} directory",
 	/** Advanced — subtitle fragment counting offline directories (plural). {{count}} is the count */
 	offline_dirs_count_other: "{{count}} directories",
+	/** Advanced & Camera Upload — row title: convert HEIC/HEIF images to JPG on upload */
+	convert_heic_to_jpg: "Convert HEIC to JPG",
+	/** Advanced & Camera Upload — description for the HEIC/HEIF → JPG conversion toggle */
+	convert_heic_to_jpg_description:
+		"Automatically convert HEIC/HEIF photos to JPG on upload for better compatibility across devices and apps.",
 	/** Advanced — row title: clear generated image thumbnails */
 	clear_image_thumbnails: "Clear image thumbnails",
 	/** Advanced — confirm message before clearing image thumbnails */

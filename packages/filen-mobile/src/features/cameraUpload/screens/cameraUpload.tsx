@@ -5,6 +5,7 @@ import cameraUpload, { useCameraUploadConfig, DEFAULT_CONFIG, type Config } from
 import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import { applyAfterActivationToggle, CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY } from "@/features/cameraUpload/cameraUploadHelpers"
 import { useSecureStore } from "@/lib/secureStore"
+import { CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY, DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED } from "@/lib/imageConversion"
 import View from "@/components/ui/view"
 import { Fragment, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
@@ -31,6 +32,10 @@ const CameraUpload = () => {
 	const { t } = useTranslation()
 	const { config, setConfig } = useCameraUploadConfig()
 	const [reuploadDeleted, setReuploadDeleted] = useSecureStore<boolean>(CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY, false)
+	const [convertHeic, setConvertHeic] = useSecureStore<boolean>(
+		CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY,
+		DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED
+	)
 	const destination = useCameraUploadDestination(config.remoteDir)
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const textRed500 = useResolveClassNames("text-red-500")
@@ -302,6 +307,18 @@ const CameraUpload = () => {
 											subTitle: t("compress_description"),
 											icon: "contract-outline"
 										}),
+										{
+											icon: "swap-horizontal-outline",
+											title: t("convert_heic_to_jpg"),
+											subTitle: t("convert_heic_to_jpg_description"),
+											rightItem: {
+												type: "switch",
+												value: convertHeic,
+												onValueChange: () => {
+													setConvertHeic(prev => !prev)
+												}
+											}
+										},
 										makeToggleButton({
 											field: "afterActivation",
 											title: t("after_activation"),
