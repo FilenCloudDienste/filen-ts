@@ -1,4 +1,6 @@
 import Text from "@/components/ui/text"
+import { useState } from "react"
+import { Platform } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import { type Chat as TChat } from "@/types"
 import View from "@/components/ui/view"
@@ -40,6 +42,7 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 			areChatsSelected: state.selectedChats.length > 0
 		}))
 	)
+	const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
 
 	const typingUsers = typing
 		.map(t => t.senderId)
@@ -76,12 +79,20 @@ const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	}
 
 	return (
-		<View className="flex-row w-full h-auto">
+		<View
+			className={cn(
+				"flex-row w-full h-auto",
+				Platform.OS === "android" && isMenuOpen ? "bg-background-secondary" : "bg-transparent"
+			)}
+		>
 			<Menu
 				className="flex-row w-full h-auto"
 				isAnchoredToRight={true}
 				info={info}
 				origin="chats"
+				previewBackground={true}
+				onOpenMenu={() => setIsMenuOpen(true)}
+				onCloseMenu={() => setIsMenuOpen(false)}
 			>
 				<PressableScale
 					className="flex-row w-full h-auto"

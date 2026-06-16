@@ -14,6 +14,12 @@ import {
 import { type Icons, iconToSwiftUiIcon } from "@/components/ui/menuIcons"
 import useIsOnline from "@/hooks/useIsOnline"
 
+// Border radius (pt) for the lifted iOS context-menu preview of FLAT rows that opt in via
+// `previewBackground`. A "normal" rounded corner — deliberately NOT the large rounded-4xl of
+// card rows (notes/chat bubble). Those already lift opaque from their own rounded children, so
+// they do not set `previewBackground` and keep their native look.
+const LIFT_PREVIEW_BORDER_RADIUS = 14
+
 export type MenuButton = {
 	onPress?: () => void
 	id: string
@@ -291,9 +297,17 @@ export type MenuProps = {
 				right?: number
 		  }
 	previewConfig?: MenuPreviewConfig
+	// Opt-in for FLAT rows (drive/tags/chat-list/playlist) whose resting background is transparent.
+	// Backs the iOS lift snapshot with an opaque tertiary fill clipped to LIFT_PREVIEW_BORDER_RADIUS,
+	// so the preview lifts opaque + rounded WITHOUT touching the row's resting appearance. Card rows
+	// (notes / chat bubble) must NOT set this — they already lift opaque from their own rounded children,
+	// and a flat fill would square off their larger radius.
+	previewBackground?: boolean
 }
 
 const MenuInnerIos = ({ children, ...props }: MenuProps) => {
+	const bgBackgroundTertiary = useResolveClassNames("bg-background-tertiary")
+
 	const uniqueButtons = props.buttons && checkIfButtonIdsAreUnique(props.buttons) ? props.buttons : []
 
 	const onPressMenuItem = (e: OnPressMenuItemEventObject) => {
@@ -337,14 +351,21 @@ const MenuInnerIos = ({ children, ...props }: MenuProps) => {
 			renderPreview={props.renderPreview}
 			lazyPreview={!!props.renderPreview}
 			previewConfig={
-				props.renderPreview && !props.previewConfig
-					? {
-							previewSize: "INHERIT",
-							preferredCommitStyle: "dismiss",
-							isResizeAnimated: true,
-							previewType: "CUSTOM"
-						}
-					: props.previewConfig
+				props.previewConfig
+					? props.previewConfig
+					: props.renderPreview
+						? {
+								previewSize: "INHERIT",
+								preferredCommitStyle: "dismiss",
+								isResizeAnimated: true,
+								previewType: "CUSTOM"
+							}
+						: props.previewBackground
+							? {
+									backgroundColor: bgBackgroundTertiary.backgroundColor as string,
+									borderRadius: LIFT_PREVIEW_BORDER_RADIUS
+								}
+							: undefined
 			}
 			onPressMenuItem={onPressMenuItem}
 			shouldWaitForMenuToHideBeforeFiringOnPressMenuItem={false}

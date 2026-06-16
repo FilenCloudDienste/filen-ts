@@ -204,7 +204,11 @@ const Item = ({
 		<View
 			className={cn(
 				"w-full h-auto flex-row items-center flex-1",
-				isMenuOpen ? (drivePath.type === "offline" ? "bg-background-tertiary" : "bg-background-secondary") : "bg-transparent",
+				Platform.OS === "android" && isMenuOpen
+					? drivePath.type === "offline"
+						? "bg-background-tertiary"
+						: "bg-background-secondary"
+					: "bg-transparent",
 				disabled && !navigateOnly && "opacity-50"
 			)}
 		>
@@ -213,6 +217,7 @@ const Item = ({
 				type="context"
 				disabled={!!drivePath.selectOptions}
 				isAnchoredToRight={true}
+				previewBackground={true}
 				item={info.item}
 				onCloseMenu={() => setIsMenuOpen(false)}
 				onOpenMenu={() => setIsMenuOpen(true)}
