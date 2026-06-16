@@ -267,7 +267,6 @@ const Gallery = () => {
 	const items = useDrivePreviewStore(useShallow(state => state.items))
 	const initialScrollIndex = useDrivePreviewStore(useShallow(state => state.initialScrollIndex))
 	const zoomedInRef = useRef<boolean>(false)
-	const pinchActiveRef = useRef<boolean>(false)
 
 	const fadeRange = dimensions.height * 0.5
 	const width = dimensions.width
@@ -377,8 +376,13 @@ const Gallery = () => {
 		})
 	}
 
+	// scrollEnabled reflects ONLY the settled zoom state. An active pinch is
+	// blocked synchronously on the UI thread by ZoomableView's stateManager
+	// .activate(); toggling scrollEnabled from JS here (the old !pinchActiveRef
+	// term) was an async round-trip the native scroll didn't wait for, so the
+	// pager slid sideways under the pinch.
 	const syncScrollEnabled = () => {
-		setScrollEnabled(!zoomedInRef.current && !pinchActiveRef.current)
+		setScrollEnabled(!zoomedInRef.current)
 	}
 
 	const onZoomChange = (zoom: number) => {
@@ -393,27 +397,25 @@ const Gallery = () => {
 		}
 	}
 
-	// Disable paging the moment a pinch begins (two fingers down) instead of
-	// waiting for the gesture to end — otherwise the horizontal list pans
-	// underneath an active pinch.
+	// The pager is blocked DURING a pinch synchronously by ZoomableView's
+	// stateManager.activate() (UI thread), not from here. This callback only
+	// re-anchors on release: a staggered pinch (the second finger lands after the
+	// first nudged the pager) can cancel an in-flight native scroll and leave the
+	// pager resting between pages, so when the pinch releases back at rest we snap
+	// onto the page it happened on. A clean pinch never moved the pager → target
+	// equals the current offset → no visible jump.
 	const onPinchActiveChange = (active: boolean) => {
-		pinchActiveRef.current = active
+		if (active || zoomScale.value > 1) {
+			return
+		}
 
-		syncScrollEnabled()
+		const itemCount = useDrivePreviewStore.getState().items.length
 
-		// A pinch cancels any in-flight pager scroll natively, which skips the
-		// paging snap and can leave the pager resting between pages. When the
-		// pinch releases with the content back at rest, snap onto the anchored
-		// page (no-op when already aligned).
-		if (!active && zoomScale.value <= 1) {
-			const itemCount = useDrivePreviewStore.getState().items.length
-
-			if (itemCount > 1) {
-				listRef.current?.scrollToOffset({
-					offset: Math.max(0, Math.min(anchorIndex, itemCount - 1)) * width,
-					animated: false
-				})
-			}
+		if (itemCount > 1 && width > 0) {
+			listRef.current?.scrollToOffset({
+				offset: Math.max(0, Math.min(anchorIndex, itemCount - 1)) * width,
+				animated: false
+			})
 		}
 	}
 
