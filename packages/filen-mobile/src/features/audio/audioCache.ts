@@ -13,6 +13,7 @@ import { xxHash32 } from "js-xxhash"
 import mimeTypes from "mime-types"
 import type { CacheItem } from "@/types"
 import { AUDIO_CACHE_VERSION, AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
+import { planSizeCapEviction, CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 
 export type Metadata = {
 	pictureUri?: string | null
@@ -398,9 +399,12 @@ export class AudioCache {
 		}
 
 		const now = Date.now()
+		const ttlMs = age ?? 86400 * 1000
 		const entries = PARENT_DIRECTORY.list()
+		const survivors: { key: string; cachedAt: number; size: number }[] = []
 
-		// Pass 1: gc expired or corrupt sidecars and their owning picture files.
+		// Pass 1: gc expired or corrupt sidecars and their owning picture files; collect
+		// the survivors (footprint + cachedAt) for the size-cap pass below.
 		await Promise.all(
 			entries.map(async entry => {
 				await run(async defer => {
@@ -414,13 +418,15 @@ export class AudioCache {
 
 					let shouldDelete = false
 					let pictureUri: string | null = null
+					let cachedAt = 0
 
 					const parseResult = await run(async () => {
 						const metadata = parseMetadata(await entry.text())
 
 						pictureUri = metadata?.pictureUri ?? null
+						cachedAt = metadata?.cachedAt ?? 0
 
-						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
+						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + ttlMs
 					})
 
 					if (parseResult.success) {
@@ -431,6 +437,23 @@ export class AudioCache {
 					}
 
 					if (!shouldDelete) {
+						// Survivor — record its footprint (sidecar + owning picture) for the cap pass.
+						let size = entry.size ?? 0
+
+						if (pictureUri) {
+							const pictureFile = new FileSystem.File(pictureUri)
+
+							if (pictureFile.exists) {
+								size += pictureFile.size ?? 0
+							}
+						}
+
+						survivors.push({
+							key: entry.name.replace(".filenmeta", ""),
+							cachedAt,
+							size
+						})
+
 						return
 					}
 
@@ -455,7 +478,7 @@ export class AudioCache {
 
 						pictureUri = metadata?.pictureUri ?? null
 
-						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + (age ?? 86400 * 1000)
+						return !hasMetadata(metadata) || now >= (metadata?.cachedAt ?? 0) + ttlMs
 					})
 
 					if (recheck.success && !recheck.data) {
@@ -472,6 +495,63 @@ export class AudioCache {
 
 					if (entry.exists) {
 						entry.delete()
+					}
+				})
+			})
+		)
+
+		// Pass 1.5: soft size-cap eviction over the survivors — drop the oldest sidecars
+		// (and their pictures) until within CACHE_MAX_SIZE_BYTES, never the newest. Skips
+		// any entry a concurrent get() refreshed (cachedAt changed) since planning.
+		const capCachedAt = new Map<string, number>()
+
+		for (const survivor of survivors) {
+			capCachedAt.set(survivor.key, survivor.cachedAt)
+		}
+
+		await Promise.all(
+			planSizeCapEviction(survivors, CACHE_MAX_SIZE_BYTES).map(async cacheId => {
+				await run(async defer => {
+					const mutex = this.getMutexForKey(cacheId)
+
+					await mutex.acquire()
+
+					defer(() => {
+						mutex.release()
+					})
+
+					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, `${cacheId}.filenmeta`))
+
+					if (!sidecar.exists) {
+						return
+					}
+
+					const plannedCachedAt = capCachedAt.get(cacheId)
+					let pictureUri: string | null = null
+
+					const recheck = await run(async () => {
+						const metadata = parseMetadata(await sidecar.text())
+
+						pictureUri = metadata?.pictureUri ?? null
+
+						// Only evict if untouched since planning — a refresh makes it the newest.
+						return hasMetadata(metadata) && metadata.cachedAt === plannedCachedAt
+					})
+
+					if (!recheck.success || !recheck.data) {
+						return
+					}
+
+					if (pictureUri) {
+						const pictureFile = new FileSystem.File(pictureUri)
+
+						if (pictureFile.exists) {
+							pictureFile.delete()
+						}
+					}
+
+					if (sidecar.exists) {
+						sidecar.delete()
 					}
 				})
 			})

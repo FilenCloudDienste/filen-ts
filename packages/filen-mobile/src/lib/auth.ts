@@ -20,6 +20,7 @@ import { sync as chatsSync } from "@/features/chats/components/sync"
 import { sync as notesSync } from "@/features/notes/components/sync"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
+import audioCache from "@/features/audio/audioCache"
 import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
 import driveSearch from "@/features/drive/driveSearch"
@@ -145,7 +146,12 @@ class Auth {
 		// Reconstructing would uniffiDestroy handles that in-flight work captured via
 		// getSdkClients() mid-call. Reconstruction is only needed when the credentials
 		// actually changed (login / changePassword persist a new blob).
-		if (this.authedClient && this.unauthedClient && this.lastStringifiedClient !== null && isEqual(this.lastStringifiedClient, stringifiedClient)) {
+		if (
+			this.authedClient &&
+			this.unauthedClient &&
+			this.lastStringifiedClient !== null &&
+			isEqual(this.lastStringifiedClient, stringifiedClient)
+		) {
 			return {
 				authedClient: this.authedClient,
 				unauthedClient: this.unauthedClient
@@ -357,6 +363,7 @@ class Auth {
 			sqlite.clearAsync(),
 			offline.clearAll(),
 			fileCache.clear(),
+			audioCache.clear(),
 			thumbnails.clear(),
 			sandboxCache.clear()
 		])

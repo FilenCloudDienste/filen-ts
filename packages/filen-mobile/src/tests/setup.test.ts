@@ -1,5 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
+// setup.ts now imports expo-image (for the iOS disk-cache cap) — unloadable in the node
+// env, which needs the native expo runtime. Mock it.
+vi.mock("expo-image", async () => await import("@/tests/mocks/expoImage"))
+
 const {
 	mockAuth,
 	mockCache,

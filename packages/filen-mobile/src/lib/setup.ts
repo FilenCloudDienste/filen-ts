@@ -9,6 +9,9 @@ import driveSearch from "@/features/drive/driveSearch"
 import { startReconnectListener } from "@/lib/reconnect"
 import { initI18n } from "@/lib/i18n"
 import { initTheme } from "@/lib/theme"
+import { Image } from "expo-image"
+import { Platform } from "react-native"
+import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 
 // Serializes setup() so a concurrent invocation (e.g. background task overlapping the
 // foreground launch) can't run the init flow twice. No other instance state -> plain object.
@@ -44,6 +47,21 @@ const setup = {
 			})
 
 			const now = performance.now()
+
+			// Bound expo-image's iOS disk cache (SDWebImage) to match Android's Glide default
+			// (~250MB). Without it iOS is size-unbounded — only a 1-week age cap — which is the
+			// main driver of the "temporary cache" (sandbox) growth. iOS only: there is no
+			// Android configureCache, and the JS call would throw on the missing native function.
+			// Idempotent and pure native config, so it's safe to re-run on every setup().
+			if (Platform.OS === "ios") {
+				try {
+					Image.configureCache({
+						maxDiskSize: CACHE_MAX_SIZE_BYTES
+					})
+				} catch (e) {
+					console.error("[Setup] Image.configureCache failed", e)
+				}
+			}
 
 			// Crash-orphan sweeps (filen-tmp/ staging + stray .filendl partials) are NOT run
 			// at boot — the stray-file walk scales with the offline store (measured 1.9s with
