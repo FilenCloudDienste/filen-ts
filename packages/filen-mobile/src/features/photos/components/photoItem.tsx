@@ -119,6 +119,7 @@ export const Photo = ({
 				style={viewStyle}
 				type="context"
 				isAnchoredToRight={true}
+				previewBackground={true}
 				item={info.item}
 				drivePath={drivePath}
 				isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}

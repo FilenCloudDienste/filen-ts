@@ -65,6 +65,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 				tag={info.item}
 				origin="tags"
 				isAnchoredToRight={true}
+				previewBackground={true}
 			>
 				<PressableScale
 					onPress={onPress}
@@ -73,13 +74,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 					<View
 						className={cn(
 							"w-full h-auto flex-row",
-							isActive
-								? "bg-background-secondary"
-								: Platform.select({
-										ios: "",
-										default: "bg-transparent"
-									}),
-							isSelected ? "bg-background-secondary" : ""
+							(Platform.OS === "android" && isActive) || isSelected ? "bg-background-secondary" : "bg-transparent"
 						)}
 					>
 						<View className="flex-1 flex-row gap-4 px-4 w-full h-auto bg-transparent items-center">

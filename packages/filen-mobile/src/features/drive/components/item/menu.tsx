@@ -18,7 +18,8 @@ const Menu = ({
 	disabled,
 	style,
 	showSelectToggle,
-	isPreview
+	isPreview,
+	previewBackground
 }: {
 	item: DriveItem
 	children: React.ReactNode
@@ -34,6 +35,7 @@ const Menu = ({
 	showSelectToggle?: boolean
 	// Set by the preview (gallery) header so destructive actions close the preview on success.
 	isPreview?: boolean
+	previewBackground?: boolean
 }) => {
 	const { t } = useTranslation()
 	const menuButtons = disabled
@@ -58,6 +60,7 @@ const Menu = ({
 			onOpenMenu={onOpenMenu}
 			disabled={disabled}
 			style={style}
+			previewBackground={previewBackground}
 		>
 			{children}
 		</MenuComponent>

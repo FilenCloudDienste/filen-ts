@@ -1,4 +1,6 @@
 import { useResolveClassNames } from "uniwind"
+import { useState } from "react"
+import { Platform } from "react-native"
 import { router } from "expo-router"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
@@ -279,6 +281,7 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 	const { queueItem } = useAudioQueue()
 	const isSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.some(p => p.uuid === playlist.uuid)))
 	const arePlaylistsSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.length > 0))
+	const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false)
 
 	const isCurrent = !!queueItem && playlist.uuid === queueItem.playlistUuid
 	const disabled =
@@ -322,13 +325,20 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 		<Menu
 			type="context"
 			disabled={menuDisabled}
+			previewBackground={true}
+			onOpenMenu={() => setIsMenuOpen(true)}
+			onCloseMenu={() => setIsMenuOpen(false)}
 			buttons={buildPlaylistRowButtons({ t, playlist })}
 		>
 			<PressableScale
 				className={cn(
 					"flex-row items-center px-4 gap-3",
 					disabled && "opacity-50 pointer-events-none",
-					isSelected && !selectOptions ? "bg-background-tertiary" : "bg-transparent"
+					isSelected && !selectOptions
+						? "bg-background-tertiary"
+						: Platform.OS === "android" && isMenuOpen
+							? "bg-background-secondary"
+							: "bg-transparent"
 				)}
 				onPress={onPress}
 			>

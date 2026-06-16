@@ -264,13 +264,19 @@ const Menu = ({
 	children,
 	className,
 	isAnchoredToRight,
-	origin
+	origin,
+	previewBackground,
+	onOpenMenu,
+	onCloseMenu
 }: {
 	info: ListRenderItemInfo<TChat>
 	children: React.ReactNode
 	className?: string
 	isAnchoredToRight?: boolean
 	origin: ChatMenuOrigin
+	previewBackground?: boolean
+	onOpenMenu?: () => void
+	onCloseMenu?: () => void
 }) => {
 	const stringifiedClient = useStringifiedClient()
 	const isSelected = useChatsStore(useShallow(state => state.selectedChats.some(n => n.uuid === info.item.uuid)))
@@ -292,6 +298,9 @@ const Menu = ({
 			buttons={buttons}
 			className={className}
 			isAnchoredToRight={isAnchoredToRight}
+			previewBackground={previewBackground}
+			onOpenMenu={onOpenMenu}
+			onCloseMenu={onCloseMenu}
 		>
 			{children}
 		</MenuComponent>
