@@ -149,6 +149,16 @@ vi.mock("@/lib/fileCache", () => ({
 	}
 }))
 
+// Stubbed (like fileCache) so auth.ts's import chain doesn't load the real audioCache —
+// it pulls expo-image + expo-file-system, which are unloadable in the node test env.
+vi.mock("@/features/audio/audioCache", () => ({
+	default: {
+		clear: vi.fn(async () => {
+			callLog.push("audioCache.clear")
+		})
+	}
+}))
+
 vi.mock("@/lib/thumbnails", () => ({
 	default: {
 		clear: vi.fn(async () => {
@@ -414,6 +424,7 @@ describe("auth.logout", () => {
 		// All decrypted-at-rest stores are wiped.
 		expect(callLog).toContain("offline.clearAll")
 		expect(callLog).toContain("fileCache.clear")
+		expect(callLog).toContain("audioCache.clear")
 		expect(callLog).toContain("thumbnails.clear")
 		expect(callLog).toContain("sandboxCache.clear")
 	})
@@ -643,7 +654,6 @@ describe("auth.setSdkClients", () => {
 		internals.authedClient = { uniffiDestroy: authedDestroy }
 		internals.unauthedClient = { uniffiDestroy: unauthedDestroy }
 		internals.lastStringifiedClient = { apiKey: "ak" }
-
 		;(auth as unknown as { prepareForReload: () => void }).prepareForReload()
 
 		expect(authedDestroy).toHaveBeenCalledTimes(1)

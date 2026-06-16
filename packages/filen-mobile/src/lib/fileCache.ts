@@ -14,6 +14,7 @@ import { ClearBarrier } from "@/lib/clearBarrier"
 import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
 import { FILE_CACHE_VERSION, FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
+import { planSizeCapEviction, CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
 
 export type Metadata = (
 	| {
@@ -423,35 +424,50 @@ export class FileCache {
 		}
 
 		const toDelete: string[] = []
+		const survivors: { key: string; cachedAt: number; size: number }[] = []
 		const now = Date.now()
+		const ttlMs = age ?? DEFAULT_GC_AGE_MS
 		const entries = PARENT_DIRECTORY.list()
 
 		await Promise.all(
 			entries.map(async entry => {
 				const inspection = await run(async () => {
 					if (!(entry instanceof FileSystem.Directory)) {
-						return null
+						return { kind: "skip" as const }
 					}
 
 					const uuid = entry.name
 					const metadataFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${uuid}.filenmeta`))
 
 					if (!metadataFile.exists) {
-						return uuid
+						return { kind: "delete" as const, uuid }
 					}
 
 					const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-					if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? DEFAULT_GC_AGE_MS)) {
-						return uuid
+					if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + ttlMs) {
+						return { kind: "delete" as const, uuid }
 					}
 
-					return null
+					return {
+						kind: "survive" as const,
+						key: uuid,
+						cachedAt: metadata.cachedAt,
+						size: sumLocalDirectoryFileBytes(entry)
+					}
 				})
 
-				if (inspection.success && inspection.data) {
-					toDelete.push(inspection.data)
-				} else if (!inspection.success && entry instanceof FileSystem.Directory) {
+				if (inspection.success) {
+					if (inspection.data.kind === "delete") {
+						toDelete.push(inspection.data.uuid)
+					} else if (inspection.data.kind === "survive") {
+						survivors.push({
+							key: inspection.data.key,
+							cachedAt: inspection.data.cachedAt,
+							size: inspection.data.size
+						})
+					}
+				} else if (entry instanceof FileSystem.Directory) {
 					// A read/parse failure for a well-shaped directory means the entry is corrupted —
 					// schedule it for deletion so a future gc/clear can recover.
 					toDelete.push(entry.name)
@@ -459,8 +475,20 @@ export class FileCache {
 			})
 		)
 
+		// Soft size-cap eviction over the survivors: drop the oldest entries until the cache
+		// is within CACHE_MAX_SIZE_BYTES, never the newest (the file just cached / in use). A
+		// single entry larger than the cap is kept and ages out via the TTL above. cachedAt is
+		// captured so Phase 2 skips any entry a concurrent get() refreshed since planning.
+		const capCachedAt = new Map<string, number>()
+
+		for (const survivor of survivors) {
+			capCachedAt.set(survivor.key, survivor.cachedAt)
+		}
+
+		const capEvict = planSizeCapEviction(survivors, CACHE_MAX_SIZE_BYTES)
+
 		await Promise.all(
-			toDelete.map(async uuid => {
+			[...toDelete, ...capEvict].map(async uuid => {
 				await run(async defer => {
 					const mutex = this.getMutexForKey(uuid)
 
@@ -476,16 +504,22 @@ export class FileCache {
 						return
 					}
 
-					// Re-check the staleness predicate inside the mutex. A concurrent get()
-					// may have written a fresh entry for this uuid while we were queued
-					// behind it on the mutex — Phase 1 ran without the mutex held.
+					// Re-check inside the mutex. A concurrent get() may have written a fresh entry
+					// for this uuid while we were queued behind it — Phase 1 ran without the mutex.
+					// TTL/corrupt entries delete if still stale; a size-cap eviction only deletes if
+					// its cachedAt is unchanged (a refresh makes it the newest → must be kept).
 					const metadataFile = new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, `${uuid}.filenmeta`))
+					const plannedCapCachedAt = capCachedAt.get(uuid)
 
 					if (metadataFile.exists) {
 						const recheck = await run(async () => {
 							const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-							return !metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + (age ?? DEFAULT_GC_AGE_MS)
+							if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + ttlMs) {
+								return true
+							}
+
+							return plannedCapCachedAt !== undefined && metadata.cachedAt === plannedCapCachedAt
 						})
 
 						if (recheck.success && !recheck.data) {
