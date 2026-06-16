@@ -184,11 +184,7 @@ const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<Li
 					numColumns={itemsPerRow}
 					drawDistance={0}
 					maintainVisibleContentPosition={{
-						disabled: false,
-						autoscrollToTopThreshold: undefined,
-						autoscrollToBottomThreshold: undefined,
-						animateAutoScrollToBottom: false,
-						startRenderingFromBottom: false
+						disabled: true
 					}}
 					showsHorizontalScrollIndicator={!props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
 					showsVerticalScrollIndicator={props.horizontal ? false : (props.data ?? []).length > 0 && !props.loading}
