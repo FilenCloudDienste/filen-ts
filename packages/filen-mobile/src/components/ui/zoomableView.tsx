@@ -27,10 +27,14 @@ const OVERSCALE_RESISTANCE = 0.3
 const UNDERSCALE_RESISTANCE = 0.45
 const PAN_FAIL_SLOP_SQUARED = 64
 
-// Settling into bounds after a gesture ends — a touch of life, no harsh stop.
+// Settling into bounds after a gesture ends — critically damped (dampingRatio 1
+// + overshootClamping) so the content arrives once and stays put. The old 0.9
+// (underdamped, overshoots) applied through three independent springs that could
+// desync was the jarring "snap back".
 const SPRING_SETTLE = {
 	duration: 350,
-	dampingRatio: 0.9
+	dampingRatio: 1,
+	overshootClamping: true
 }
 
 // Double-tap zoom toggle — fast and critically damped like iOS Photos.
@@ -131,6 +135,29 @@ export function rubberBandClamp(value: number, min: number, max: number, dimensi
 	return value
 }
 
+// Per-axis pan-release decision. In-bounds → a momentum decay clamped to the
+// edge (no rubber-band bounce — that flag was the "bounces too much"). Released
+// past the edge (the drag rubber-banded out) → a gentle critically-damped spring
+// back to the bound. Pure so the decision is unit-testable; the caller turns it
+// into withDecay / withSpring.
+export function planAxisRelease(
+	value: number,
+	bound: number,
+	velocity: number
+): { type: "decay"; clamp: [number, number]; velocity: number } | { type: "spring"; to: number } {
+	"worklet"
+
+	if (value > bound) {
+		return { type: "spring", to: bound }
+	}
+
+	if (value < -bound) {
+		return { type: "spring", to: -bound }
+	}
+
+	return { type: "decay", clamp: [-bound, bound], velocity }
+}
+
 // Damped scale outside [min, max] — pinching past the limits gives with
 // resistance instead of hitting a hard wall, then springs back on release.
 export function rubberBandScale(raw: number, min: number, max: number): number {
@@ -171,18 +198,18 @@ type SharedValues = {
 	translateY: SharedValue<number>
 	opacity: SharedValue<number>
 	savedScale: SharedValue<number>
+	// Translate captured at the start of the active gesture (pinch OR pan). The
+	// Race composition means pinch and pan never run on the same touch stream, so
+	// they safely share one anchor — no separate pinch anchor is needed anymore.
 	savedTranslateX: SharedValue<number>
 	savedTranslateY: SharedValue<number>
-	// The pinch keeps its OWN translate anchor. While two fingers are down the
-	// pan overwrites savedTranslateX/Y every frame (to stay ready for a one-finger
-	// handoff), so the pinch must not share those or its focal anchor drifts.
-	pinchSavedTranslateX: SharedValue<number>
-	pinchSavedTranslateY: SharedValue<number>
+	// e.scale captured at pinch start, to normalise the recognizer's cumulative
+	// scale to 1 at the moment the pinch activates.
 	pinchBaseScale: SharedValue<number>
-	panDriving: SharedValue<number>
 	panTouchStartX: SharedValue<number>
 	panTouchStartY: SharedValue<number>
-	pinchPointersDown: SharedValue<number>
+	// 1 while a pinch is active — drives the gallery pager-block + release re-align.
+	pinchActive: SharedValue<number>
 	dismissCommitted: SharedValue<number>
 	focalX: SharedValue<number>
 	focalY: SharedValue<number>
@@ -193,14 +220,13 @@ type SharedValues = {
 }
 
 // One frame of the pinch transform, extracted as a pure UI-thread worklet so it
-// is unit-testable. Reads the pinch's OWN translate anchor (pinchSavedTranslateX/Y)
-// — NEVER savedTranslateX/Y, which the pan gesture owns and overwrites every frame
-// while two fingers are down. Sharing those let the pan corrupt the focal anchor
-// mid-pinch, so the content + focal jumped whenever the fingers moved asymmetrically.
+// is unit-testable. Anchors on savedTranslateX/Y (the translate captured at pinch
+// start). With the Race composition the pan never runs during a pinch, so this
+// anchor is stable for the whole gesture (no dual-anchor dance needed anymore).
 //
-// Glues both fingers' material points under the fingers (the two-finger model):
-// t = focal - centerToContent · (newScale / savedScale), averaged over the two
-// pointers. Equivalent algebra to the closed form below.
+// Glues the focal material point under the fingers (the two-finger model):
+// t = focal - centerToContent · (newScale / savedScale). Equivalent algebra to
+// the closed form below.
 export function computePinchTransform(
 	sv: SharedValues,
 	eScale: number,
@@ -222,13 +248,9 @@ export function computePinchTransform(
 	const centerX = sv.containerWidth.value / 2
 	const centerY = sv.containerHeight.value / 2
 	const rawTx =
-		sv.pinchSavedTranslateX.value +
-		(sv.focalX.value - centerX - sv.pinchSavedTranslateX.value) * (1 - ratio) +
-		(eFocalX - sv.focalX.value)
+		sv.savedTranslateX.value + (sv.focalX.value - centerX - sv.savedTranslateX.value) * (1 - ratio) + (eFocalX - sv.focalX.value)
 	const rawTy =
-		sv.pinchSavedTranslateY.value +
-		(sv.focalY.value - centerY - sv.pinchSavedTranslateY.value) * (1 - ratio) +
-		(eFocalY - sv.focalY.value)
+		sv.savedTranslateY.value + (sv.focalY.value - centerY - sv.savedTranslateY.value) * (1 - ratio) + (eFocalY - sv.focalY.value)
 
 	if (newScale < minZoom) {
 		// Shrinking towards dismissal — the image follows the fingers freely.
@@ -245,6 +267,42 @@ export function computePinchTransform(
 		scale: newScale,
 		translateX: rubberBandClamp(rawTx, -bounds.x, bounds.x, sv.containerWidth.value),
 		translateY: rubberBandClamp(rawTy, -bounds.y, bounds.y, sv.containerHeight.value)
+	}
+}
+
+// The rest position a pinch settles to on release: scale clamped into
+// [minZoom, maxZoom], translation re-derived focal-anchored AT THE CLAMPED SCALE
+// (so the pinch origin stays put), then hard-clamped into pan bounds. Pure so
+// the settle target is unit-testable and identical to the live math — settling
+// scale + both axes to this single target with one critically-damped spring is
+// what removes the snap-back.
+export function computePinchSettleTarget(
+	sv: SharedValues,
+	minZoom: number,
+	maxZoom: number
+): {
+	scale: number
+	translateX: number
+	translateY: number
+} {
+	"worklet"
+
+	const targetScale = clampNumber(sv.scale.value, minZoom, maxZoom)
+	const ratio = targetScale / sv.scale.value
+	const centerX = sv.containerWidth.value / 2
+	const centerY = sv.containerHeight.value / 2
+	const bounds = getPanBounds(
+		targetScale,
+		sv.containerWidth.value,
+		sv.containerHeight.value,
+		sv.contentWidth.value,
+		sv.contentHeight.value
+	)
+
+	return {
+		scale: targetScale,
+		translateX: clampNumber(sv.translateX.value + (sv.focalX.value - centerX - sv.translateX.value) * (1 - ratio), -bounds.x, bounds.x),
+		translateY: clampNumber(sv.translateY.value + (sv.focalY.value - centerY - sv.translateY.value) * (1 - ratio), -bounds.y, bounds.y)
 	}
 }
 
@@ -315,6 +373,29 @@ function buildComposedGesture(
 ) {
 	const pinchGesture = Gesture.Pinch()
 		.enabled(enabled)
+		.manualActivation(true)
+		.onTouchesDown((e, stateManager) => {
+			"worklet"
+
+			// Two fingers = a pinch. Activate synchronously on the UI thread: this
+			// starts the pinch AND cancels the parent FlashList's native scroll in
+			// the same frame (a JS scrollEnabled toggle loses that race). One finger
+			// keeps the pinch dormant so the pan / taps can win the Race.
+			if (e.numberOfTouches >= 2) {
+				stateManager.activate()
+			}
+		})
+		.onTouchesUp((e, stateManager) => {
+			"worklet"
+
+			// Drop below two fingers → end the pinch (fires onEnd → the single
+			// settle). Because the pinch holds the Race until it ends, a staggered
+			// 2→1→0 lift can no longer hand a lone finger to the pan mid-release —
+			// that handoff was the snap-back.
+			if (e.numberOfTouches < 2) {
+				stateManager.end()
+			}
+		})
 		.onStart(e => {
 			"worklet"
 
@@ -325,37 +406,23 @@ function buildComposedGesture(
 			cancelAnimation(sv.translateY)
 
 			sv.savedScale.value = sv.scale.value
-			sv.pinchSavedTranslateX.value = sv.translateX.value
-			sv.pinchSavedTranslateY.value = sv.translateY.value
+			sv.savedTranslateX.value = sv.translateX.value
+			sv.savedTranslateY.value = sv.translateY.value
 			sv.pinchBaseScale.value = e.scale
 			sv.focalX.value = e.focalX
 			sv.focalY.value = e.focalY
-			sv.panDriving.value = 0
+
+			if (sv.pinchActive.value === 0) {
+				sv.pinchActive.value = 1
+
+				runOnJS(notifyPinchActive)(true)
+			}
 		})
 		.onUpdate(e => {
 			"worklet"
 
-			if (sv.dismissCommitted.value === 1) {
+			if (sv.dismissCommitted.value === 1 || e.numberOfPointers < 2) {
 				return
-			}
-
-			// With one finger left the recognizer's focal point and scale are
-			// meaningless — freeze, and re-anchor when the second finger returns.
-			if (e.numberOfPointers < 2) {
-				sv.pinchBaseScale.value = -1
-
-				return
-			}
-
-			if (sv.pinchBaseScale.value === -1) {
-				// Second finger returned: re-anchor so the cumulative scale and
-				// focal deltas apply from the CURRENT transform (zero jump).
-				sv.pinchBaseScale.value = e.scale
-				sv.savedScale.value = sv.scale.value
-				sv.pinchSavedTranslateX.value = sv.translateX.value
-				sv.pinchSavedTranslateY.value = sv.translateY.value
-				sv.focalX.value = e.focalX
-				sv.focalY.value = e.focalY
 			}
 
 			const next = computePinchTransform(sv, e.scale, e.focalX, e.focalY, !!onPinchDismiss, minZoom, maxZoom)
@@ -402,110 +469,72 @@ function buildComposedGesture(
 				return
 			}
 
-			// Spring scale and translation back into bounds, anchored at the
-			// pinch focal point so over-zoom releases zoom back where you pinched.
-			const targetScale = clampNumber(sv.scale.value, minZoom, maxZoom)
-			const ratio = targetScale / sv.scale.value
-			const centerX = sv.containerWidth.value / 2
-			const centerY = sv.containerHeight.value / 2
-			const bounds = getPanBounds(
-				targetScale,
-				sv.containerWidth.value,
-				sv.containerHeight.value,
-				sv.contentWidth.value,
-				sv.contentHeight.value
-			)
-			const targetTx = clampNumber(
-				sv.translateX.value + (sv.focalX.value - centerX - sv.translateX.value) * (1 - ratio),
-				-bounds.x,
-				bounds.x
-			)
-			const targetTy = clampNumber(
-				sv.translateY.value + (sv.focalY.value - centerY - sv.translateY.value) * (1 - ratio),
-				-bounds.y,
-				bounds.y
-			)
+			// Spring scale and translation back into bounds, anchored at the pinch
+			// focal point so over-zoom releases zoom back where you pinched. One
+			// critically-damped settle for all three values (SPRING_SETTLE) — the
+			// underdamped, three-independent-spring version was the snap-back.
+			const target = computePinchSettleTarget(sv, minZoom, maxZoom)
 
-			if (targetScale !== sv.scale.value) {
-				sv.scale.value = withSpring(targetScale, SPRING_SETTLE)
+			if (target.scale !== sv.scale.value) {
+				sv.scale.value = withSpring(target.scale, SPRING_SETTLE)
 			}
 
-			if (targetTx !== sv.translateX.value) {
-				sv.translateX.value = withSpring(targetTx, SPRING_SETTLE)
+			if (target.translateX !== sv.translateX.value) {
+				sv.translateX.value = withSpring(target.translateX, SPRING_SETTLE)
 			}
 
-			if (targetTy !== sv.translateY.value) {
-				sv.translateY.value = withSpring(targetTy, SPRING_SETTLE)
+			if (target.translateY !== sv.translateY.value) {
+				sv.translateY.value = withSpring(target.translateY, SPRING_SETTLE)
 			}
 
-			runOnJS(notifyZoomChange)(targetScale)
+			runOnJS(notifyZoomChange)(target.scale)
+		})
+		.onFinalize(() => {
+			"worklet"
+
+			if (sv.pinchActive.value === 1) {
+				sv.pinchActive.value = 0
+
+				runOnJS(notifyPinchActive)(false)
+			}
 		})
 
 	const panGesture = Gesture.Pan()
 		.enabled(enabled)
 		.manualActivation(true)
-		.onTouchesDown((e, stateManager) => {
+		.maxPointers(1)
+		.onTouchesDown(e => {
 			"worklet"
 
-			if (e.numberOfTouches === 1) {
-				const touch = e.allTouches[0]
+			const touch = e.allTouches[0]
 
-				if (touch) {
-					sv.panTouchStartX.value = touch.x
-					sv.panTouchStartY.value = touch.y
-				}
-
-				// Catch a decaying/settling image under the finger (iOS behavior:
-				// touching a moving scroll view stops it immediately).
-				if (sv.scale.value > minZoom) {
-					cancelAnimation(sv.translateX)
-					cancelAnimation(sv.translateY)
-				}
-
-				return
+			if (touch) {
+				sv.panTouchStartX.value = touch.x
+				sv.panTouchStartY.value = touch.y
 			}
 
-			// Two fingers down = a pinch is possible. ACTIVATE immediately:
-			// activation is synchronous on the UI thread and cancels the pager's
-			// native scroll right here — the runOnJS scroll-disable below loses
-			// that race, and a pinch with unequal finger speeds reads as a
-			// horizontal drag that scrolls/snaps the pager mid-pinch. While two
-			// pointers are down the pan writes nothing (see onUpdate), so the
-			// activation is purely a native-scroll blocker.
-			stateManager.activate()
-
-			// JS-side lock as the second line of defense (and for the pager
-			// re-align on release in the gallery).
-			if (sv.pinchPointersDown.value === 0) {
-				sv.pinchPointersDown.value = 1
-
-				runOnJS(notifyPinchActive)(true)
+			// Catch a decaying/settling image under the finger (iOS behavior:
+			// touching a moving scroll view stops it immediately).
+			if (sv.scale.value > minZoom) {
+				cancelAnimation(sv.translateX)
+				cancelAnimation(sv.translateY)
 			}
 		})
 		.onTouchesMove((e, stateManager) => {
 			"worklet"
 
-			if (e.numberOfTouches !== 1) {
-				return
-			}
-
+			// Zoomed in → this single finger pans the image: activate (also blocks
+			// the pager). maxPointers(1) makes a second finger FAIL this pan, handing
+			// the stream to the pinch — that is the pan→pinch transition.
 			if (sv.scale.value > minZoom && sv.dismissCommitted.value === 0) {
 				stateManager.activate()
 
 				return
 			}
 
-			// At rest this pan must FAIL for definite single-finger drags: on iOS
-			// the pager's native scroll and the outer dismiss pan wait for it via
-			// UIKit failure arbitration, so staying undecided blocks them forever.
-			// The slop keeps the pan alive through finger-landing jitter so a
-			// pinch→single-finger handoff still works when fingers land together.
-			// Never fail once a pinch happened in this stream — the pan was
-			// deliberately activated as the pinch's native-scroll blocker.
-			if (sv.pinchPointersDown.value === 1) {
-				return
-			}
-
+			// At rest a definite drag must FAIL so the FlashList pager and the
+			// gallery swipe-down dismiss (both wait on this via UIKit failure
+			// arbitration) can take over. Slop keeps it alive through landing jitter.
 			const touch = e.allTouches[0]
 
 			if (!touch) {
@@ -519,40 +548,18 @@ function buildComposedGesture(
 				stateManager.fail()
 			}
 		})
-		.onFinalize(() => {
-			"worklet"
-
-			if (sv.pinchPointersDown.value === 1) {
-				sv.pinchPointersDown.value = 0
-
-				runOnJS(notifyPinchActive)(false)
-			}
-		})
 		.onStart(() => {
 			"worklet"
 
 			sv.savedTranslateX.value = sv.translateX.value
 			sv.savedTranslateY.value = sv.translateY.value
-			sv.panDriving.value = 1
 		})
 		.onUpdate(e => {
 			"worklet"
 
-			if (e.numberOfPointers !== 1) {
-				// A second finger is down — the pinch owns the transform. Keep our
-				// anchor in sync so a later single-finger continuation has no jump.
-				sv.savedTranslateX.value = sv.translateX.value - e.translationX
-				sv.savedTranslateY.value = sv.translateY.value - e.translationY
-				sv.panDriving.value = 0
-
-				return
-			}
-
 			if (sv.scale.value <= minZoom || sv.dismissCommitted.value === 1) {
 				return
 			}
-
-			sv.panDriving.value = 1
 
 			const bounds = getPanBounds(
 				sv.scale.value,
@@ -568,11 +575,9 @@ function buildComposedGesture(
 		.onEnd((e, success) => {
 			"worklet"
 
-			if (!success || sv.panDriving.value !== 1 || sv.scale.value <= minZoom || sv.dismissCommitted.value === 1) {
+			if (!success || sv.scale.value <= minZoom || sv.dismissCommitted.value === 1) {
 				return
 			}
-
-			sv.panDriving.value = 0
 
 			const bounds = getPanBounds(
 				sv.scale.value,
@@ -581,21 +586,17 @@ function buildComposedGesture(
 				sv.contentWidth.value,
 				sv.contentHeight.value
 			)
-			const clampX: [number, number] = [-bounds.x, bounds.x]
-			const clampY: [number, number] = [-bounds.y, bounds.y]
 
-			// rubberBandEffect also springs back when released out of bounds.
-			sv.translateX.value = withDecay({
-				velocity: clampNumber(e.velocityX, -MAX_PAN_VELOCITY, MAX_PAN_VELOCITY),
-				clamp: clampX,
-				rubberBandEffect: true
-			})
+			// In-bounds → momentum decay that ARRESTS at the edge (no rubber-band
+			// bounce). Released past the edge → a gentle critically-damped spring
+			// back. Decided per axis so a fling on one axis doesn't bounce the other.
+			const relX = planAxisRelease(sv.translateX.value, bounds.x, clampNumber(e.velocityX, -MAX_PAN_VELOCITY, MAX_PAN_VELOCITY))
+			const relY = planAxisRelease(sv.translateY.value, bounds.y, clampNumber(e.velocityY, -MAX_PAN_VELOCITY, MAX_PAN_VELOCITY))
 
-			sv.translateY.value = withDecay({
-				velocity: clampNumber(e.velocityY, -MAX_PAN_VELOCITY, MAX_PAN_VELOCITY),
-				clamp: clampY,
-				rubberBandEffect: true
-			})
+			sv.translateX.value =
+				relX.type === "decay" ? withDecay({ velocity: relX.velocity, clamp: relX.clamp }) : withSpring(relX.to, SPRING_SETTLE)
+			sv.translateY.value =
+				relY.type === "decay" ? withDecay({ velocity: relY.velocity, clamp: relY.clamp }) : withSpring(relY.to, SPRING_SETTLE)
 		})
 
 	const doubleTapGesture = Gesture.Tap()
@@ -651,7 +652,11 @@ function buildComposedGesture(
 			}
 		})
 
-	return Gesture.Simultaneous(pinchGesture, panGesture, doubleTapGesture, singleTapGesture)
+	// Race (NOT Simultaneous): only one of pinch / pan / taps can be active on a
+	// touch stream. The 2-finger-gated pinch holds the Race until it ends, so the
+	// pan can never run alongside it and hijack the release — that dual-settle was
+	// the snap-back. maxPointers(1) on the pan yields a 2nd finger to the pinch.
+	return Gesture.Race(pinchGesture, panGesture, doubleTapGesture, singleTapGesture)
 }
 
 const ZoomableView = ({
@@ -675,13 +680,10 @@ const ZoomableView = ({
 	const savedScale = useSharedValue<number>(1)
 	const savedTranslateX = useSharedValue<number>(0)
 	const savedTranslateY = useSharedValue<number>(0)
-	const pinchSavedTranslateX = useSharedValue<number>(0)
-	const pinchSavedTranslateY = useSharedValue<number>(0)
 	const pinchBaseScale = useSharedValue<number>(1)
-	const panDriving = useSharedValue<number>(0)
 	const panTouchStartX = useSharedValue<number>(0)
 	const panTouchStartY = useSharedValue<number>(0)
-	const pinchPointersDown = useSharedValue<number>(0)
+	const pinchActive = useSharedValue<number>(0)
 	const dismissCommitted = useSharedValue<number>(0)
 	const focalX = useSharedValue<number>(0)
 	const focalY = useSharedValue<number>(0)
@@ -727,13 +729,10 @@ const ZoomableView = ({
 			savedScale,
 			savedTranslateX,
 			savedTranslateY,
-			pinchSavedTranslateX,
-			pinchSavedTranslateY,
 			pinchBaseScale,
-			panDriving,
 			panTouchStartX,
 			panTouchStartY,
-			pinchPointersDown,
+			pinchActive,
 			dismissCommitted,
 			focalX,
 			focalY,

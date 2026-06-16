@@ -67,19 +67,19 @@ import {
 	rubberBandOffset,
 	rubberBandClamp,
 	rubberBandScale,
-	computePinchTransform
+	computePinchTransform,
+	planAxisRelease,
+	computePinchSettleTarget
 } from "@/components/ui/zoomableView"
 
 type Sv = Parameters<typeof computePinchTransform>[0]
 
 // A SharedValues-like bag of { value } refs for the worklet under test. Only the
-// fields computePinchTransform touches are populated; savedTranslateX/Y are here
-// purely so a test can POISON them (the pinch must ignore them — the pan owns them).
+// fields computePinchTransform touches are populated; savedTranslateX/Y are the
+// pinch's translate anchor (the Race composition stops the pan ever corrupting them).
 function makeSv(values: {
 	savedScale: number
 	pinchBaseScale: number
-	pinchSavedTranslateX: number
-	pinchSavedTranslateY: number
 	focalX: number
 	focalY: number
 	containerWidth: number
@@ -92,8 +92,6 @@ function makeSv(values: {
 	return {
 		savedScale: { value: values.savedScale },
 		pinchBaseScale: { value: values.pinchBaseScale },
-		pinchSavedTranslateX: { value: values.pinchSavedTranslateX },
-		pinchSavedTranslateY: { value: values.pinchSavedTranslateY },
 		focalX: { value: values.focalX },
 		focalY: { value: values.focalY },
 		containerWidth: { value: values.containerWidth },
@@ -288,8 +286,6 @@ describe("computePinchTransform", () => {
 	const BASE = {
 		savedScale: 1,
 		pinchBaseScale: 1,
-		pinchSavedTranslateX: 0,
-		pinchSavedTranslateY: 0,
 		focalX: 260,
 		focalY: 400,
 		containerWidth: 400,
@@ -298,11 +294,19 @@ describe("computePinchTransform", () => {
 		contentHeight: 0
 	}
 
-	it("ignores savedTranslateX/Y — the pan must not corrupt the pinch focal", () => {
-		// Same gesture frame, two different poisoned pan anchors → identical result.
-		const clean = computePinchTransform(makeSv({ ...BASE, savedTranslateX: 0, savedTranslateY: 0 }), 1.5, 275, 405, false, 1, 5)
-		const poisoned = computePinchTransform(
-			makeSv({ ...BASE, savedTranslateX: 9999, savedTranslateY: -8888 }),
+	it("uses savedTranslateX/Y as the pinch anchor (focal glued from a non-zero start translate)", () => {
+		// Start already panned (savedTranslate 30/-20) at scale 1, then pinch to
+		// 1.5x at focal (275,405). The content point under the focal at start must
+		// stay under the focal after scaling — proving the anchor IS read.
+		const startTranslateX = 30
+		const startTranslateY = -20
+		const centerX = 200
+		const centerY = 400
+		const anchorPointX = (275 - centerX - startTranslateX) / 1
+		const anchorPointY = (405 - centerY - startTranslateY) / 1
+
+		const next = computePinchTransform(
+			makeSv({ ...BASE, focalX: 275, focalY: 405, savedTranslateX: startTranslateX, savedTranslateY: startTranslateY }),
 			1.5,
 			275,
 			405,
@@ -311,7 +315,9 @@ describe("computePinchTransform", () => {
 			5
 		)
 
-		expect(poisoned).toEqual(clean)
+		expect(next.scale).toBeCloseTo(1.5)
+		expect(next.translateX + next.scale * anchorPointX).toBeCloseTo(275 - centerX)
+		expect(next.translateY + next.scale * anchorPointY).toBeCloseTo(405 - centerY)
 	})
 
 	it("keeps the content point under the focal glued to the moving focal", () => {
@@ -337,8 +343,8 @@ describe("computePinchTransform", () => {
 		const anchorPointX = (250 - centerX) / 1
 
 		// Scale ramps 1→1.8 while the focal drifts 250→285 — the asymmetric case
-		// that used to shift the content. Each frame also re-poisons the pan anchor
-		// to prove the pinch never reads it. All frames stay within pan bounds.
+		// that used to shift the content. The anchor (savedTranslateX 0) is fixed
+		// for the whole gesture; the focal point must stay glued every frame.
 		const frames = [
 			{ scale: 1.2, focalX: 258 },
 			{ scale: 1.4, focalX: 266 },
@@ -347,11 +353,120 @@ describe("computePinchTransform", () => {
 		]
 
 		for (const frame of frames) {
-			sv.savedTranslateX.value = frame.scale * 1234
-
 			const next = computePinchTransform(sv, frame.scale, frame.focalX, 400, false, 1, 5)
 
 			expect(next.translateX + next.scale * anchorPointX).toBeCloseTo(frame.focalX - centerX)
 		}
+	})
+})
+
+// ─── planAxisRelease: per-axis pan-release decision ──────────────────────────
+// In-bounds → momentum decay that ARRESTS at the edge (no rubber-band bounce).
+// Released past the edge (drag rubber-banded out) → a gentle spring back to the
+// bound. This is the "subtle rubber-band while dragging, no over-bounce on
+// release" feel — the old onEnd used withDecay({ rubberBandEffect: true }) which
+// bounces over the limit (the reported over-bounce).
+
+describe("planAxisRelease", () => {
+	it("decays toward the edge when released in-bounds", () => {
+		const r = planAxisRelease(40, 100, 1200)
+
+		expect(r.type).toBe("decay")
+
+		if (r.type === "decay") {
+			expect(r.clamp).toEqual([-100, 100])
+			expect(r.velocity).toBe(1200)
+		}
+	})
+
+	it("springs back to the positive bound when released past it", () => {
+		expect(planAxisRelease(140, 100, 800)).toEqual({
+			type: "spring",
+			to: 100
+		})
+	})
+
+	it("springs back to the negative bound when released past it", () => {
+		expect(planAxisRelease(-140, 100, -800)).toEqual({
+			type: "spring",
+			to: -100
+		})
+	})
+
+	it("decays with a zero-width clamp on a non-pannable axis (bound 0)", () => {
+		const r = planAxisRelease(0, 0, 500)
+
+		expect(r.type).toBe("decay")
+
+		if (r.type === "decay") {
+			expect(r.clamp).toEqual([-0, 0])
+		}
+	})
+})
+
+// ─── computePinchSettleTarget: focal-anchored rest position on pinch release ──
+// The rest position a pinch settles to: scale clamped into [minZoom, maxZoom],
+// translation re-derived focal-anchored AT THE CLAMPED SCALE, then hard-clamped
+// into pan bounds. Settling all three to this single target (one critically-
+// damped spring) is what removes the snap-back.
+
+type SettleSv = Parameters<typeof computePinchSettleTarget>[0]
+
+function makeSettleSv(values: {
+	scale: number
+	translateX: number
+	translateY: number
+	focalX: number
+	focalY: number
+	containerWidth: number
+	containerHeight: number
+	contentWidth: number
+	contentHeight: number
+}): SettleSv {
+	return {
+		scale: { value: values.scale },
+		translateX: { value: values.translateX },
+		translateY: { value: values.translateY },
+		focalX: { value: values.focalX },
+		focalY: { value: values.focalY },
+		containerWidth: { value: values.containerWidth },
+		containerHeight: { value: values.containerHeight },
+		contentWidth: { value: values.contentWidth },
+		contentHeight: { value: values.contentHeight }
+	} as unknown as SettleSv
+}
+
+const SETTLE_BASE = {
+	translateX: 0,
+	translateY: 0,
+	focalX: 0,
+	focalY: 0,
+	containerWidth: 300,
+	containerHeight: 600,
+	contentWidth: 300,
+	contentHeight: 600
+}
+
+describe("computePinchSettleTarget", () => {
+	it("clamps an over-zoomed scale back to maxZoom", () => {
+		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 12 }), 1, 10)
+
+		expect(target.scale).toBe(10)
+	})
+
+	it("clamps an under-zoomed scale back to minZoom and recenters (bounds collapse to 0)", () => {
+		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 0.8, translateX: 30, translateY: 40 }), 1, 10)
+
+		expect(target.scale).toBe(1)
+		expect(target.translateX).toBe(0)
+		expect(target.translateY).toBe(0)
+	})
+
+	it("keeps an in-range scale and hard-clamps an over-panned translation into pan bounds", () => {
+		const target = computePinchSettleTarget(makeSettleSv({ ...SETTLE_BASE, scale: 2, translateX: 99999, translateY: 99999 }), 1, 10)
+
+		expect(target.scale).toBe(2)
+		expect(target.translateX).toBe(150)
+		expect(target.translateY).toBe(300)
 	})
 })
