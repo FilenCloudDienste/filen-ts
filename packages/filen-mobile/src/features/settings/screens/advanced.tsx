@@ -15,6 +15,7 @@ import fileCache from "@/lib/fileCache"
 import audioCache from "@/features/audio/audioCache"
 import sandboxCache from "@/lib/sandboxCache"
 import offline from "@/features/offline/offline"
+import diagnostics from "@/features/settings/diagnostics"
 import useCacheSizesQuery, { invalidateCacheSizesQuery } from "@/features/settings/queries/useCacheSizes.query"
 import { useTranslation } from "react-i18next"
 import i18n from "@/lib/i18n"
@@ -138,6 +139,44 @@ function Advanced() {
 			count: sizes.offline.dirs
 		})}`
 	})()
+
+	const exportLogs = async () => {
+		const promptResult = await run(async () => {
+			return await prompts.alert({
+				title: t("export_logs"),
+				message: t("export_logs_consent"),
+				okText: t("export_logs_action"),
+				cancelText: i18n.t("cancel"),
+				destructive: false
+			})
+		})
+
+		if (!promptResult.success) {
+			console.error(promptResult.error)
+			alerts.error(promptResult.error)
+
+			return
+		}
+
+		if (promptResult.data.cancelled) {
+			return
+		}
+
+		const result = await runWithLoading(async () => {
+			return await diagnostics.exportLogs()
+		})
+
+		if (!result.success) {
+			console.error(result.error)
+			alerts.error(result.error)
+
+			return
+		}
+
+		if (result.data === "no-logs") {
+			alerts.normal(t("export_logs_none"))
+		}
+	}
 
 	return (
 		<Fragment>
@@ -352,6 +391,19 @@ function Advanced() {
 							}
 						]}
 					/>
+						<Group
+							className="bg-background-tertiary"
+							buttons={[
+								{
+									icon: "document-text-outline",
+									title: t("export_logs"),
+									subTitle: t("export_logs_description"),
+									onPress: () => {
+										exportLogs()
+									}
+								}
+							]}
+						/>
 				</SettingsScrollView>
 			</SafeAreaView>
 		</Fragment>

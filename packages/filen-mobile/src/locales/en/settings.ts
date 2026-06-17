@@ -373,5 +373,18 @@ export const settings = {
 	/** Events — empty-state subtitle when there is no account activity yet */
 	no_events_description: "Your account activity will appear here.",
 	/** Account / Security / 2FA — error-state title shown when the account could not be loaded */
-	could_not_load_account: "Couldn't load your account"
+	could_not_load_account: "Couldn't load your account",
+
+	// ── Diagnostics (Advanced → Export logs) ──────────────────────────────────
+	/** Advanced — diagnostics row title */
+	export_logs: "Export logs",
+	/** Advanced — diagnostics row subtitle */
+	export_logs_description: "Save app diagnostic logs to share with Filen support.",
+	/** Advanced — consent shown before exporting; logs may contain personal data but never secrets */
+	export_logs_consent:
+		"Logs may contain file and folder names, paths, and other personal information — but never your password or encryption keys. Only share them with people you trust, such as Filen support.",
+	/** Advanced — confirm button on the export-logs consent dialog */
+	export_logs_action: "Export",
+	/** Advanced — toast shown when there are no logs to export yet */
+	export_logs_none: "There are no logs to export yet."
 } as const
