@@ -386,6 +386,18 @@ export const settings = {
 	no_logs: "No logs yet",
 	/** Logs viewer — empty-state subtitle */
 	no_logs_description: "Diagnostic logs will appear here as you use the app.",
+	/** Logs viewer — header level-filter menu title */
+	filter_logs: "Filter by level",
+	/** Logs viewer — level filter option: all levels */
+	log_level_all: "All",
+	/** Logs viewer — level filter option: errors only */
+	log_level_errors: "Errors",
+	/** Logs viewer — level filter option: warnings only */
+	log_level_warnings: "Warnings",
+	/** Logs viewer — level filter option: info only */
+	log_level_info: "Info",
+	/** Logs viewer — level filter option: debug only */
+	log_level_debug: "Debug",
 	/** Advanced — diagnostics row title */
 	export_logs: "Export logs",
 	/** Advanced — diagnostics row subtitle */

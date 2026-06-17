@@ -23,6 +23,21 @@ const LEVEL_CLASS: Record<string, string> = {
 	debug: "text-muted-foreground"
 }
 
+const LEVEL_FILTERS = ["all", "error", "warn", "info", "debug"] as const
+
+type LevelFilter = (typeof LEVEL_FILTERS)[number]
+
+const FILTER_LABEL_KEY: Record<
+	LevelFilter,
+	"log_level_all" | "log_level_errors" | "log_level_warnings" | "log_level_info" | "log_level_debug"
+> = {
+	all: "log_level_all",
+	error: "log_level_errors",
+	warn: "log_level_warnings",
+	info: "log_level_info",
+	debug: "log_level_debug"
+}
+
 function pad(value: number, length: number = 2): string {
 	return String(value).padStart(length, "0")
 }
@@ -93,6 +108,9 @@ const Logs = () => {
 	const [entries, setEntries] = useState<ReadLogEntry[]>([])
 	const [loading, setLoading] = useState<boolean>(true)
 	const [expanded, setExpanded] = useState<Set<number>>(new Set())
+	const [levelFilter, setLevelFilter] = useState<LevelFilter>("all")
+
+	const visible = levelFilter === "all" ? entries : entries.filter(entry => entry.l === levelFilter)
 
 	useEffect(() => {
 		// Reading + parsing the NDJSON is synchronous; defer it one tick so the screen paints (with the
@@ -135,13 +153,35 @@ const Logs = () => {
 					],
 					default: undefined
 				})}
+				rightItems={[
+					{
+						type: "menu",
+						icon: {
+							name: "funnel-outline",
+							color: textForeground.color,
+							size: 20
+						},
+						props: {
+							title: t("filter_logs"),
+							buttons: LEVEL_FILTERS.map(level => ({
+								id: level,
+								title: t(FILTER_LABEL_KEY[level]),
+								checked: levelFilter === level,
+								onPress: () => {
+									setLevelFilter(level)
+									setExpanded(new Set())
+								}
+							}))
+						}
+					}
+				]}
 			/>
 			<SafeAreaView
 				className="flex-1 bg-background-secondary"
 				edges={["left", "right"]}
 			>
 				<VirtualList
-					data={entries}
+					data={visible}
 					extraData={expanded}
 					loading={loading}
 					contentInsetAdjustmentBehavior="automatic"
