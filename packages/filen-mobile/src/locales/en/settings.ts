@@ -375,7 +375,17 @@ export const settings = {
 	/** Account / Security / 2FA — error-state title shown when the account could not be loaded */
 	could_not_load_account: "Couldn't load your account",
 
-	// ── Diagnostics (Advanced → Export logs) ──────────────────────────────────
+	// ── Diagnostics (Advanced → Logs) ─────────────────────────────────────────
+	/** Logs viewer — screen title */
+	logs: "Logs",
+	/** Advanced — open the in-app log viewer */
+	view_logs: "View logs",
+	/** Advanced — subtitle for the view-logs row */
+	view_logs_description: "See the diagnostic logs you can export, newest first.",
+	/** Logs viewer — empty-state title */
+	no_logs: "No logs yet",
+	/** Logs viewer — empty-state subtitle */
+	no_logs_description: "Diagnostic logs will appear here as you use the app.",
 	/** Advanced — diagnostics row title */
 	export_logs: "Export logs",
 	/** Advanced — diagnostics row subtitle */

@@ -3,7 +3,7 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import { Fragment } from "react"
 import { Platform } from "react-native"
-import { useNavigation } from "expo-router"
+import { router, useNavigation } from "expo-router"
 import { Image } from "expo-image"
 import { run, formatBytes } from "@filen/utils"
 import SettingsHeader from "@/components/ui/settingsHeader"
@@ -394,6 +394,14 @@ function Advanced() {
 						<Group
 							className="bg-background-tertiary"
 							buttons={[
+								{
+									icon: "list-outline",
+									title: t("view_logs"),
+									subTitle: t("view_logs_description"),
+									onPress: () => {
+										router.push("/logViewer")
+									}
+								},
 								{
 									icon: "document-text-outline",
 									title: t("export_logs"),
