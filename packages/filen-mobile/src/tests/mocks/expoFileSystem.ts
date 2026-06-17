@@ -186,12 +186,23 @@ export class File {
 		return btoa(binary)
 	}
 
-	write(content: string | Uint8Array, _options?: { encoding?: string; append?: boolean }): void {
-		if (typeof content === "string") {
-			fs.set(this.uri, new TextEncoder().encode(content))
-		} else {
-			fs.set(this.uri, content)
+	write(content: string | Uint8Array, options?: { encoding?: string; append?: boolean }): void {
+		const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content
+
+		if (options?.append) {
+			const existing = fs.get(this.uri)
+			const base = existing instanceof Uint8Array ? existing : new Uint8Array(0)
+			const merged = new Uint8Array(base.length + bytes.length)
+
+			merged.set(base, 0)
+			merged.set(bytes, base.length)
+
+			fs.set(this.uri, merged)
+
+			return
 		}
+
+		fs.set(this.uri, bytes)
 	}
 
 	create(_options?: { intermediates?: boolean; overwrite?: boolean }): void {
