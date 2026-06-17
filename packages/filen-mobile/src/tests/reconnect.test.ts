@@ -40,6 +40,7 @@ vi.mock("@/features/offline/offlineSync", () => ({ default: { sync: (...args: un
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: { sync: () => mockCameraUploadSync() } }))
 vi.mock("@/features/notes/components/sync", () => ({ sync: { executeNow: () => mockNotesExecuteNow() } }))
 vi.mock("@/features/chats/components/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
+vi.mock("@/lib/logger", () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 function fireOnlineEvent(isOnline: boolean) {
 	for (const sub of capturedSubscribers) {

@@ -179,7 +179,11 @@ vi.mock("@/lib/logger", () => ({
 	default: {
 		purge: vi.fn(() => {
 			callLog.push("logger.purge")
-		})
+		}),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn()
 	}
 }))
 
