@@ -224,4 +224,24 @@ describe("logRedaction", () => {
 			expect(err["inner"]).toEqual({ code: 2 })
 		})
 	})
+
+	describe("depth + blob guards", () => {
+		it("caps nesting deeper than MAX_DEPTH at [depth]", () => {
+			let nested: unknown = { leaf: "bottom" }
+
+			for (let i = 0; i < 12; i++) {
+				nested = { child: nested }
+			}
+
+			const out = JSON.stringify(redact(nested))
+
+			expect(out).toContain("[depth]")
+			expect(out).not.toContain("bottom")
+		})
+
+		it("redacts a 128+ char high-entropy blob but keeps a 127-char string", () => {
+			expect(redact("z".repeat(127))).toBe("z".repeat(127))
+			expect(redact("z".repeat(128))).toBe("[redacted]")
+		})
+	})
 })

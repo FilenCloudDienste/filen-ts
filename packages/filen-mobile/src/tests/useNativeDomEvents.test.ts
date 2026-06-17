@@ -4,6 +4,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import { useNativeDomEvents, type DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
+import logger from "@/lib/logger"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,34 @@ describe("useNativeDomEvents", () => {
 	afterEach(() => {
 		vi.useRealTimers()
 		vi.restoreAllMocks()
+	})
+
+	// ── WebView console proxy interception ───────────────────────────────────
+
+	it("routes a __filenLog console envelope to the logger and skips the app onMessage", () => {
+		vi.mocked(logger.warn).mockClear()
+
+		const onMessage = vi.fn()
+		const ref = makeRef()
+		const { onDomMessage } = useNativeDomEvents<{ x: number }>({ ref, onMessage })
+
+		onDomMessage(makeWebViewMessageEvent({ __filenLog: { level: "warn", message: "from webview" } }) as never)
+
+		expect(logger.warn).toHaveBeenCalledWith("webview", "from webview")
+		expect(onMessage).not.toHaveBeenCalled()
+	})
+
+	it("passes a normal message through to the app onMessage, not the logger", () => {
+		vi.mocked(logger.warn).mockClear()
+
+		const onMessage = vi.fn()
+		const ref = makeRef()
+		const { onDomMessage } = useNativeDomEvents<{ x: number }>({ ref, onMessage })
+
+		onDomMessage(makeWebViewMessageEvent({ x: 5 }) as never)
+
+		expect(onMessage).toHaveBeenCalledWith({ x: 5 }, expect.any(Function))
+		expect(logger.warn).not.toHaveBeenCalled()
 	})
 
 	// ── postMessage — ref immediately available (happy path) ─────────────────
