@@ -223,6 +223,7 @@ function More() {
 								{
 									icon: "lock-closed-outline",
 									title: t("security"),
+									badge: accountQuery.status === "success" && !accountQuery.data.didExportMasterKeys ? "!" : undefined,
 									onPress: () => {
 										router.push("/security")
 									}
