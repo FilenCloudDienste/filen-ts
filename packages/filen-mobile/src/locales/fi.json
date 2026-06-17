@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Tuonti peruutettu: {{count}} tiedostoa ei voitu ladata",
 	"import_partial_upload_one": "Tuonti keskeneräinen: {{count}} tiedostoa ei voitu lähettää",
 	"import_partial_upload_other": "Tuonti keskeneräinen: {{count}} tiedostoa ei voitu lähettää",
+	"incorrect_two_factor_code_try_again": "Virheellinen koodi. Yritä uudelleen.",
 	"info": "Tiedot",
 	"information": "Tiedot",
 	"insert": "Lisää",

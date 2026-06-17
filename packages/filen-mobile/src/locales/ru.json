@@ -399,6 +399,7 @@
 	"import_partial_upload_many": "Импорт не завершён: не удалось выгрузить {{count}} файлов",
 	"import_partial_upload_one": "Импорт не завершён: не удалось выгрузить {{count}} файл",
 	"import_partial_upload_other": "Импорт не завершён: не удалось выгрузить {{count}} файлов",
+	"incorrect_two_factor_code_try_again": "Неверный код. Попробуйте ещё раз.",
 	"info": "Сведения",
 	"information": "Сведения",
 	"insert": "Вставить",

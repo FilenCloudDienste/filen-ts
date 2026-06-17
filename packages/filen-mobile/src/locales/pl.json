@@ -399,6 +399,7 @@
 	"import_partial_upload_many": "Import niekompletny: nie udało się przesłać {{count}} plików",
 	"import_partial_upload_one": "Import niekompletny: nie udało się przesłać {{count}} pliku",
 	"import_partial_upload_other": "Import niekompletny: nie udało się przesłać {{count}} plików",
+	"incorrect_two_factor_code_try_again": "Nieprawidłowy kod. Spróbuj ponownie.",
 	"info": "Informacje",
 	"information": "Informacje",
 	"insert": "Wstaw",

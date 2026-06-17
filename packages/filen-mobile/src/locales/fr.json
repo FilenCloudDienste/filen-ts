@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Importation annulée : {{count}} fichiers n'ont pas pu être téléchargés",
 	"import_partial_upload_one": "Importation incomplète : {{count}} fichier n'a pas pu être importé",
 	"import_partial_upload_other": "Importation incomplète : {{count}} fichiers n'ont pas pu être importés",
+	"incorrect_two_factor_code_try_again": "Code incorrect. Veuillez réessayer.",
 	"info": "Infos",
 	"information": "Informations",
 	"insert": "Insérer",

@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Impor dibatalkan: {{count}} berkas tidak dapat diunduh",
 	"import_partial_upload_one": "Impor tidak lengkap: {{count}} berkas tidak dapat diunggah",
 	"import_partial_upload_other": "Impor tidak lengkap: {{count}} berkas tidak dapat diunggah",
+	"incorrect_two_factor_code_try_again": "Kode salah. Silakan coba lagi.",
 	"info": "Info",
 	"information": "Informasi",
 	"insert": "Sisipkan",
