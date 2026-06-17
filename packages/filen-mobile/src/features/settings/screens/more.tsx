@@ -42,7 +42,7 @@ function More() {
 	// "Free" — never a single plan name. The storage half echoes the bar below as a one-line total.
 	const accountSubtitle =
 		accountQuery.status === "success"
-			? `${accountQuery.data.isPremium ? t("pro") : t("free_plan")} · ${t("used_of", {
+			? `${userIsSubbed ? t("pro") : t("free_plan")} · ${t("used_of", {
 					used: formatBytes(Number(accountQuery.data.storageUsed)),
 					max: formatBytes(Number(accountQuery.data.maxStorage))
 				})}`
@@ -57,7 +57,10 @@ function More() {
 		})
 
 		if (!result.success) {
-			logger.error("settings", "failed to open external link", { url, error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("settings", "failed to open external link", {
+				url,
+				error: result.error instanceof Error ? result.error.message : String(result.error)
+			})
 			alerts.error(result.error)
 		}
 	}
