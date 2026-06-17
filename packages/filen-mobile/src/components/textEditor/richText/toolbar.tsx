@@ -14,6 +14,7 @@ import prompts from "@/lib/prompts"
 import * as Linking from "expo-linking"
 import { cn } from "@filen/utils"
 import { Platform } from "react-native"
+import logger from "@/lib/logger"
 
 // Compact sizing tuned for the native stack header bar (~44pt iOS / ~56dp
 // Android). Slightly smaller than the old floating toolbar so all 9 buttons
@@ -68,7 +69,7 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 								return
 							}
 
-							Linking.openURL(active as string).catch(console.error)
+							Linking.openURL(active as string).catch(e => logger.warn("textEditor", "openURL failed in richtext toolbar", { error: e }))
 						}
 					},
 					{

@@ -32,6 +32,7 @@ import { AnyDirWithContext, AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import type { DriveItemFileExtracted } from "@/types"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 
 const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "code"; text: string; item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
@@ -105,7 +106,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 					setWarmedParent(new AnyDirWithContext.Normal(normalDir))
 				}
 			} catch (e) {
-				console.error("[previewText] failed to warm parent directory", e)
+				logger.warn("drivePreview", "Failed to warm parent directory for text preview", { error: e })
 			}
 		})()
 
@@ -170,7 +171,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("drivePreview", "Text file save failed", { error: result.error })
 			alerts.error(result.error)
 
 			return

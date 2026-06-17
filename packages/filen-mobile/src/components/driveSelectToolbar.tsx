@@ -21,6 +21,7 @@ import events from "@/lib/events"
 import { useNavigation } from "expo-router"
 import { useTranslation } from "react-i18next"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 
 const DriveSelectToolbar = () => {
 	const textForeground = useResolveClassNames("text-foreground")
@@ -100,7 +101,7 @@ const DriveSelectToolbar = () => {
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.error("driveSelect", "Create directory prompt failed", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return
@@ -124,7 +125,7 @@ const DriveSelectToolbar = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("driveSelect", "Create directory operation failed", { error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -168,7 +169,7 @@ const DriveSelectToolbar = () => {
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("driveSelect", "Move operation failed", { error: result.error })
 						alerts.error(result.error)
 
 						return

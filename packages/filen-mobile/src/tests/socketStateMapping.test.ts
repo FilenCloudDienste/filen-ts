@@ -16,6 +16,7 @@
  */
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const { mockSetTyping } = vi.hoisted(() => ({
 	mockSetTyping: vi.fn()

@@ -13,6 +13,7 @@ import {
 	type FlashListRef,
 	type ListRenderItemInfo as FlashListListRenderItemInfo
 } from "@shopify/flash-list"
+import logger from "@/lib/logger"
 
 export type ListRenderItemInfo<T> = FlashListListRenderItemInfo<T>
 
@@ -117,7 +118,7 @@ const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<Li
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("ui", "VirtualList pull-to-refresh failed", { error: result.error })
 			alerts.error(result.error)
 		}
 	}

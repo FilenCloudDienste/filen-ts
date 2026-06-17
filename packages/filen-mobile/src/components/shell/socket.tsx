@@ -12,6 +12,7 @@ import { handleNoteEvent } from "@/features/notes/socketHandlers"
 import { handleChatEvent, chatTypingTimeoutsRef } from "@/features/chats/socketHandlers"
 import { handleDriveEvent } from "@/features/drive/socketHandlers"
 import { handleContactEvent } from "@/features/contacts/socketHandlers"
+import logger from "@/lib/logger"
 
 type ConnectionTag =
 	| SocketEvent_Tags.Reconnecting
@@ -46,9 +47,11 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 				useSocketStore.getState().setState(socketEventTagToState(event.tag))
 
+				logger.info("socket", "connection state changed", { tag: event.tag })
+
 				if (event.tag === SocketEvent_Tags.AuthSuccess) {
 					// Refetch chats and messages to ensure we have the latest data after reconnect + to update unread counts
-					chats.refetchChatsAndMessages().catch(console.error)
+					chats.refetchChatsAndMessages().catch(e => logger.error("socket", "chats refetch after reconnect failed", { error: e instanceof Error ? e.message : String(e) }))
 				}
 
 				break
@@ -59,9 +62,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 				switch (eventInner.inner.tag) {
 					case GeneralEvent_Tags.PasswordChanged: {
-						auth.logout().catch(e => {
-							console.error("[Socket] logout failed:", e)
-						})
+						auth.logout().catch(e => logger.error("socket", "logout after PasswordChanged failed", { error: e instanceof Error ? e.message : String(e) }))
 
 						break
 					}
@@ -73,7 +74,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 					}
 
 					default: {
-						console.error(eventInner)
+						logger.error("socket", "Unhandled general event", { tag: (eventInner as { inner?: { tag?: string } }).inner?.tag })
 
 						throw new Error("Unhandled general event")
 					}
@@ -107,13 +108,13 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 			}
 
 			default: {
-				console.error(event)
+				logger.error("socket", "Unhandled socket event", { tag: (event as { tag?: string }).tag })
 
 				throw new Error("Unhandled event")
 			}
 		}
 	} catch (e) {
-		console.error(e)
+		logger.error("socket", "onEvent failed", { eventTag: event.tag, error: e instanceof Error ? e.message : String(e) })
 		alerts.error(e)
 	}
 }
@@ -153,7 +154,7 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 										onEvent({
 											event,
 											userId: client ? client.userId : BigInt(0)
-										}).catch(console.error)
+										}).catch(e => logger.error("socket", "onEvent threw outside try/catch", { error: e instanceof Error ? e.message : String(e) }))
 									}
 								},
 								undefined
@@ -184,7 +185,7 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("socket", "appState transition failed", { nextAppState, error: result.error instanceof Error ? result.error.message : String(result.error) })
 				alerts.error(result.error)
 
 				return
@@ -222,7 +223,7 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 		// (cold launch pre-becomeActive, or a background launch), the AppState listener
 		// registered above handles the real transition instead.
 		if (AppState.currentState === "active") {
-			onAppStateChange("active").catch(console.error)
+			onAppStateChange("active").catch(e => logger.error("socket", "initial socket connect failed", { error: e instanceof Error ? e.message : String(e) }))
 		}
 	})
 

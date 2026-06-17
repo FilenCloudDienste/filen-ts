@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRecyclingState } from "@shopify/flash-list"
 import Button from "@/components/ui/button"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
+import logger from "@/lib/logger"
 
 const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
@@ -56,7 +57,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("drivePreview", "PDF password prompt failed", { error: result.error })
 			alerts.error(result.error)
 
 			setDidCancelPasswordPrompt(true)

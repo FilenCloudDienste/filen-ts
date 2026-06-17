@@ -23,6 +23,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import * as Linking from "expo-linking"
 import SafeAreaView from "@/components/ui/safeAreaView"
+import logger from "@/lib/logger"
 
 const GalleryHeader = ({
 	animatedStyle,
@@ -176,7 +177,7 @@ const GalleryHeader = ({
 												})
 
 												if (!canOpenResult.success) {
-													console.error(canOpenResult.error)
+													logger.error("drivePreview", "canOpenURL failed for linked file", { error: canOpenResult.error })
 													alerts.error(canOpenResult.error)
 
 													return
@@ -201,7 +202,7 @@ const GalleryHeader = ({
 													})
 
 													if (!promptResponse.success) {
-														console.error(promptResponse.error)
+														logger.error("drivePreview", "trust-prompt failed", { error: promptResponse.error })
 														alerts.error(promptResponse.error)
 
 														return
@@ -222,7 +223,7 @@ const GalleryHeader = ({
 												})
 
 												if (!openResult.success) {
-													console.error(openResult.error)
+													logger.error("drivePreview", "openURL failed for linked file", { error: openResult.error })
 													alerts.error(openResult.error)
 
 													return
