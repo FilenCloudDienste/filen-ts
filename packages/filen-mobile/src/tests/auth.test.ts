@@ -435,7 +435,13 @@ describe("auth.logout", () => {
 		expect(callLog).toContain("audioCache.clear")
 		expect(callLog).toContain("thumbnails.clear")
 		expect(callLog).toContain("sandboxCache.clear")
-		expect(callLog).toContain("logger.purge")
+
+		// logger.purge() runs after the in-memory cache clear and before the SQLite/disk wipe — so it's
+		// part of the decrypted-state wipe and can't run after a (Phase 7) reload where it'd never fire.
+		const purgeIdx = callLog.indexOf("logger.purge")
+
+		expect(purgeIdx).toBeGreaterThan(cacheClearIdx)
+		expect(purgeIdx).toBeLessThan(sqliteClearIdx)
 	})
 
 	// #8 — the SDK client handles must be destroyed and nulled, and clientsReady re-armed, so no

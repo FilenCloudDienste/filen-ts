@@ -1,7 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"
 import { redact } from "@/lib/logRedaction"
-import { planSizeCapEviction } from "@/lib/cacheEviction"
 
 // Async, non-blocking, privacy-aware on-disk diagnostic logger.
 //
@@ -88,6 +87,16 @@ export class Logger {
 	private flushTimer: ReturnType<typeof setTimeout> | null = null
 	private directoryReady: boolean = false
 
+	// Monotonic rotation counter — disambiguates rotated filenames so two rotations in the same
+	// millisecond can't collide and silently overwrite each other.
+	private rotationSeq: number = 0
+
+	// Set by purge() (logout). Once disabled, no entry is captured and no flush writes — so a
+	// console.* emitted during/after the logout wipe can't re-arm a flush and resurrect the logs
+	// directory with decrypted-at-rest data. The post-logout reload instantiates a fresh, enabled
+	// logger for the next session.
+	private disabled: boolean = false
+
 	public configure(opts: Partial<LoggerConfig>): void {
 		this.config = {
 			...this.config,
@@ -121,6 +130,11 @@ export class Logger {
 	}
 
 	public log(level: LogLevel, tag: string, msg: string, data?: unknown): void {
+		// Terminal-disabled (post-logout) and below-threshold calls cost a compare + return, no alloc.
+		if (this.disabled) {
+			return
+		}
+
 		const rank = RANK[level]
 
 		// HOT PATH gate — the cheapest possible check; gated calls cost a compare + return.
@@ -143,6 +157,10 @@ export class Logger {
 
 	// Used by the console tee (capture wiring) to record a raw console.* call.
 	public captureConsole(level: LogLevel, args: unknown[]): void {
+		if (this.disabled) {
+			return
+		}
+
 		const rank = RANK[level]
 
 		if (rank < this.minRank) {
@@ -180,13 +198,9 @@ export class Logger {
 
 		this.pending.push(entry)
 
-		if (this.pending.length >= this.config.pendingMax) {
-			this.flushNow()
-
-			return
-		}
-
-		this.scheduleFlush()
+		// Defer even the burst (pendingMax) flush off the calling frame via a 0ms timer, so the
+		// synchronous file write never lands in the middle of the render/gesture that logged entry N.
+		this.scheduleFlush(this.pending.length >= this.config.pendingMax ? 0 : this.config.flushDelayMs)
 	}
 
 	private pushBreadcrumb(entry: Entry): void {
@@ -214,30 +228,40 @@ export class Logger {
 		const start = this.ringCount < capacity ? 0 : this.ringHead
 
 		for (let i = 0; i < this.ringCount; i++) {
-			const entry = this.ring[(start + i) % capacity]
+			const idx = (start + i) % capacity
+			const entry = this.ring[idx]
 
 			if (entry) {
 				out.push(entry)
 			}
+
+			// Null the slot to release the held reference (so a logged object graph isn't retained
+			// past the drain) WITHOUT reallocating the backing array.
+			this.ring[idx] = undefined
 		}
 
-		this.ring = new Array<Entry | undefined>(capacity)
 		this.ringHead = 0
 		this.ringCount = 0
 
 		return out
 	}
 
-	private scheduleFlush(): void {
+	private scheduleFlush(delayMs: number = this.config.flushDelayMs): void {
 		if (this.flushTimer !== null) {
-			return
+			// A flush is already pending. Only re-arm if the new request is sooner (burst → immediate).
+			if (delayMs >= this.config.flushDelayMs) {
+				return
+			}
+
+			clearTimeout(this.flushTimer)
+			this.flushTimer = null
 		}
 
 		this.flushTimer = setTimeout(() => {
 			this.flushTimer = null
 
 			this.flushNow()
-		}, this.config.flushDelayMs)
+		}, delayMs)
 	}
 
 	public flushNow(): void {
@@ -247,12 +271,21 @@ export class Logger {
 			this.flushTimer = null
 		}
 
+		// Disabled (post-logout): never write. Release any buffered refs and bail.
+		if (this.disabled) {
+			this.pending = []
+
+			return
+		}
+
 		if (this.pending.length === 0) {
 			return
 		}
 
 		const batch = this.pending
 
+		// Release the reference immediately so the held entries (and the object graphs they reference)
+		// become collectable as soon as the batch is written — they are not retained past the flush.
 		this.pending = []
 
 		try {
@@ -340,7 +373,12 @@ export class Logger {
 			return
 		}
 
-		const rotated = new FileSystem.File(FileSystem.Paths.join(LOGS_DIRECTORY.uri, `log-${Date.now()}.ndjson`))
+		// Monotonic sequence disambiguates the filename so two rotations in the same millisecond can't
+		// collide (which, with overwrite, would silently destroy a rotated file — worst exactly during
+		// the error storm the logs are meant to capture).
+		const rotated = new FileSystem.File(
+			FileSystem.Paths.join(LOGS_DIRECTORY.uri, `log-${Date.now()}-${this.rotationSeq++}.ndjson`)
+		)
 
 		try {
 			current.move(rotated, {
@@ -354,31 +392,47 @@ export class Logger {
 	}
 
 	private pruneOldFiles(): void {
-		const byUri = new Map<string, FileSystem.File>()
-		const entries: { key: string; cachedAt: number; size: number }[] = []
+		// Evict OLDEST rotated files first until the rotated total is within maxTotalBytes. Unlike the
+		// file cache, no rotated file is "in use" (the active file is current.ndjson, excluded here), so
+		// nothing is protected — maxTotalBytes is a true ceiling for rotated logs. Ordered by the
+		// (timestamp, sequence) encoded in the filename, which is monotonic and collision-free (so ties
+		// on a coarse mtime can't keep the wrong file).
+		const rotated: { file: FileSystem.File; ts: number; seq: number; size: number }[] = []
+		let total = 0
 
 		for (const item of LOGS_DIRECTORY.list()) {
-			if (!(item instanceof FileSystem.File)) {
+			if (!(item instanceof FileSystem.File) || item.name === CURRENT_FILE_NAME || !item.name.endsWith(".ndjson")) {
 				continue
 			}
 
-			// Never evict the active file — that's where the next entries land.
-			if (item.name === CURRENT_FILE_NAME) {
-				continue
-			}
+			const match = /^log-(\d+)-(\d+)\.ndjson$/.exec(item.name)
+			const size = item.size ?? 0
 
-			byUri.set(item.uri, item)
+			total += size
 
-			entries.push({
-				key: item.uri,
-				cachedAt: item.lastModified ?? 0,
-				size: item.size ?? 0
+			rotated.push({
+				file: item,
+				ts: match ? Number(match[1]) : 0,
+				seq: match ? Number(match[2]) : 0,
+				size
 			})
 		}
 
-		for (const uri of planSizeCapEviction(entries, this.config.maxTotalBytes)) {
+		if (total <= this.config.maxTotalBytes) {
+			return
+		}
+
+		rotated.sort((a, b) => a.ts - b.ts || a.seq - b.seq)
+
+		for (const entry of rotated) {
+			if (total <= this.config.maxTotalBytes) {
+				break
+			}
+
 			try {
-				byUri.get(uri)?.delete()
+				entry.file.delete()
+
+				total -= entry.size
 			} catch {
 				// Best-effort cleanup.
 			}
@@ -404,6 +458,10 @@ export class Logger {
 
 	// Wipe every on-disk log + in-memory buffer. Hooked into logout (decrypted-state wipe).
 	public purge(): void {
+		// Terminal: once purged (logout), capture + flush are disabled so a console.* during/after the
+		// logout wipe can't re-arm a flush and re-create the logs directory with decrypted-at-rest data.
+		this.disabled = true
+
 		if (this.flushTimer !== null) {
 			clearTimeout(this.flushTimer)
 

@@ -66,6 +66,23 @@ describe("diagnostics.exportLogs", () => {
 		expect(written).toBeInstanceOf(Uint8Array)
 		expect(written.length).toBeGreaterThan(0)
 
+		// Unzip the actual archive and verify it contains BOTH the device-info header and the log
+		// file's real bytes — not just "some non-empty buffer".
+		const JSZip = (await import("jszip")).default
+		const archive = await JSZip.loadAsync(written)
+
+		expect(archive.file("device-info.json")).not.toBeNull()
+		expect(archive.file("current.ndjson")).not.toBeNull()
+
+		const logText = await archive.file("current.ndjson")!.async("string")
+
+		expect(logText).toContain("boom")
+
+		const info = JSON.parse(await archive.file("device-info.json")!.async("string")) as Record<string, unknown>
+
+		expect(info["appVersion"]).toBe("9.9.9")
+		expect(info["platform"]).toBeDefined()
+
 		expect(shareMock.shareTmpFile).toHaveBeenCalledWith(
 			expect.objectContaining({
 				uri: tmpFile.uri,

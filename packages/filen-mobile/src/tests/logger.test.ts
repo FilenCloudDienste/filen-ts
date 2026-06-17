@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
 
-import { File, Paths, fs } from "@/tests/mocks/expoFileSystem"
+import { File, Directory, Paths, fs } from "@/tests/mocks/expoFileSystem"
 import { Logger } from "@/lib/logger"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"
 
@@ -134,16 +134,52 @@ describe("logger", () => {
 	})
 
 	describe("batching", () => {
-		it("auto-flushes once pending reaches pendingMax (no manual flush)", () => {
-			const logger = makeLogger()
+		it("defers the burst (pendingMax) flush off the calling frame, then writes on the next tick", async () => {
+			vi.useFakeTimers()
 
-			logger.configure({ pendingMax: 3 })
+			try {
+				const logger = makeLogger()
 
-			logger.error("test", "1")
-			logger.error("test", "2")
-			logger.error("test", "3")
+				logger.configure({ pendingMax: 3 })
 
-			expect(readCurrentLines().map(l => l.msg)).toEqual(["1", "2", "3"])
+				logger.error("test", "1")
+				logger.error("test", "2")
+				logger.error("test", "3")
+
+				// The pendingMax flush is scheduled on a 0ms timer, NOT run synchronously inside the
+				// logging call — so nothing is on disk during the calling frame.
+				expect(readCurrentLines()).toHaveLength(0)
+
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(readCurrentLines().map(l => l.msg)).toEqual(["1", "2", "3"])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("debounces a sub-threshold persisted entry until flushDelayMs (batched, infrequent I/O)", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const logger = new Logger()
+
+				logger.configure({ flushDelayMs: 2000, pendingMax: 100 })
+
+				logger.error("test", "later")
+
+				expect(readCurrentLines()).toHaveLength(0)
+
+				await vi.advanceTimersByTimeAsync(1999)
+
+				expect(readCurrentLines()).toHaveLength(0)
+
+				await vi.advanceTimersByTimeAsync(1)
+
+				expect(readCurrentLines().map(l => l.msg)).toEqual(["later"])
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 	})
 
@@ -159,6 +195,23 @@ describe("logger", () => {
 			expect(data["name"]).toBe("salary.pdf")
 			expect(data["size"]).toBe(100)
 			expect(data["apiKey"]).toBe("[redacted]")
+		})
+
+		it("serializes bigint payloads instead of collapsing the whole line to [unserializable]", () => {
+			const logger = makeLogger()
+
+			logger.error("drive", "item sizes", { size: 4096n, count: 3 })
+			logger.flushNow()
+
+			const line = readCurrentLines()[0]!
+
+			// The line is real (not the unserializable fallback) and the bigint survived.
+			expect(line.msg).toBe("item sizes")
+
+			const data = line.data as Record<string, unknown>
+
+			expect(data["size"]).toBe("4096n")
+			expect(data["count"]).toBe(3)
 		})
 
 		it("captureConsole persists console errors with redaction", () => {
@@ -178,32 +231,54 @@ describe("logger", () => {
 	})
 
 	describe("rotation + size cap", () => {
-		it("rotates the current file once it exceeds maxFileBytes", () => {
+		it("rotates with collision-free filenames under burst (unique monotonic seq)", () => {
 			const logger = makeLogger()
 
 			logger.configure({ maxFileBytes: 200, maxTotalBytes: 1_000_000 })
 
 			for (let i = 0; i < 20; i++) {
-				logger.error("test", `message number ${i} with some padding to grow the file`)
+				logger.error("test", `message number ${i} with some padding to grow the file past the cap`)
 				logger.flushNow()
 			}
 
-			expect(logFileNames().some(name => name.startsWith("log-"))).toBe(true)
+			const rotatedNames = logFileNames().filter(name => name.startsWith("log-"))
+
+			expect(rotatedNames.length).toBeGreaterThan(1)
+			// The old bug used Date.now()-only names that collide within a millisecond and overwrite
+			// each other; every rotated filename must now be unique.
+			expect(new Set(rotatedNames).size).toBe(rotatedNames.length)
 		})
 
-		it("prunes oldest rotated files to stay near the total size cap", () => {
+		it("prunes OLDEST rotated files first and keeps the rotated total within maxTotalBytes", () => {
 			const logger = makeLogger()
 
 			logger.configure({ maxFileBytes: 120, maxTotalBytes: 600 })
 
 			for (let i = 0; i < 60; i++) {
-				logger.error("test", `entry ${i} padded out to force many rotations and pruning`)
+				logger.error("test", `entry ${String(i).padStart(3, "0")} padded out to force many rotations and pruning`)
 				logger.flushNow()
 			}
 
-			// current.ndjson is always kept; rotated files are capped near maxTotalBytes.
-			expect(totalLogBytes()).toBeLessThan(600 + 120 * 3)
-			expect(logFileNames().length).toBeLessThan(12)
+			const current = currentFile()
+			const rotatedBytes = totalLogBytes() - (current.exists ? current.size : 0)
+
+			// True ceiling: rotated files (active file excluded) stay within maxTotalBytes — no
+			// "protect-newest" leftover from the file-cache eviction planner.
+			expect(rotatedBytes).toBeLessThanOrEqual(600)
+
+			// Oldest-first: the surviving rotated files are a contiguous NEWEST suffix of the sequence
+			// space (a prefix of old files was evicted, none from the middle), and the oldest (seq 0) is gone.
+			const seqs = logFileNames()
+				.filter(name => name.startsWith("log-"))
+				.map(name => Number(/^log-\d+-(\d+)\.ndjson$/.exec(name)?.[1] ?? -1))
+				.sort((a, b) => a - b)
+
+			expect(seqs.length).toBeGreaterThan(0)
+			expect(seqs[0]).toBeGreaterThan(0)
+
+			for (let i = 1; i < seqs.length; i++) {
+				expect(seqs[i]).toBe((seqs[i - 1] ?? 0) + 1)
+			}
 		})
 	})
 
@@ -220,6 +295,25 @@ describe("logger", () => {
 			expect(() => logger.flushNow()).not.toThrow()
 		})
 
+		it("never throws when rotation move or prune listing fails", () => {
+			const logger = makeLogger()
+
+			logger.configure({ maxFileBytes: 30, maxTotalBytes: 60 })
+
+			// move (rotation) and list (prune) are both in the flush path beyond the write — a throw in
+			// either must be swallowed by flushNow's guard, not escape to the caller.
+			vi.spyOn(Directory.prototype, "list").mockImplementation(() => {
+				throw new Error("list fail")
+			})
+
+			expect(() => {
+				for (let i = 0; i < 5; i++) {
+					logger.error("test", `padding message number ${i} to exceed the tiny file cap and rotate`)
+					logger.flushNow()
+				}
+			}).not.toThrow()
+		})
+
 		it("a log call itself never throws even with a circular payload", () => {
 			const logger = makeLogger()
 
@@ -233,7 +327,7 @@ describe("logger", () => {
 	})
 
 	describe("purge", () => {
-		it("deletes all on-disk logs and clears buffers", () => {
+		it("deletes all on-disk logs, clears buffers, and disables further logging", () => {
 			const logger = makeLogger()
 
 			logger.info("test", "breadcrumb")
@@ -246,11 +340,14 @@ describe("logger", () => {
 
 			expect(logFileNames().length).toBe(0)
 
-			// A subsequent error after purge starts a clean file with no resurrected breadcrumbs.
+			// After purge the logger is DISABLED. A subsequent log (e.g. a console.* during the logout
+			// wipe) must NOT re-create the logs directory — otherwise decrypted-at-rest data is
+			// resurrected on disk after logout.
 			logger.error("test", "after purge")
 			logger.flushNow()
 
-			expect(readCurrentLines().map(l => l.msg)).toEqual(["after purge"])
+			expect(logFileNames().length).toBe(0)
+			expect(readCurrentLines()).toHaveLength(0)
 		})
 	})
 })
