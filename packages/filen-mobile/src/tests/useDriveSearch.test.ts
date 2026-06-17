@@ -72,12 +72,12 @@ function drivePath(over?: Partial<DrivePath>): DrivePath {
 	} as DrivePath
 }
 
-function dirResult(uuid: string) {
-	return { tag: "Dir", inner: { dir: { uuid } } }
+function dirResult(uuid: string, parentPath = "") {
+	return { parentPath, result: { tag: "Dir", inner: { dir: { uuid } } } }
 }
 
-function fileResult(uuid: string) {
-	return { tag: "File", inner: { file: { uuid } } }
+function fileResult(uuid: string, parentPath = "") {
+	return { parentPath, result: { tag: "File", inner: { file: { uuid } } } }
 }
 
 function snapshot({ results = [], total = 0n, live = true }: { results?: unknown[]; total?: bigint; live?: boolean } = {}) {
@@ -276,6 +276,19 @@ describe("useDriveSearch — result mapping", () => {
 		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["d1", "f1"])
 		expect(result.current.searchResults.map(i => i.type)).toEqual(["directory", "file"])
 		expect(result.current.status).toBe("settled")
+	})
+
+	it("exposes each hit's parentPath via searchResultPaths (keyed by uuid)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [dirResult("d1", "Documents"), fileResult("f1", "Documents/Work")], total: 2n, live: true }))
+
+		expect(result.current.searchResultPaths.get("d1")).toBe("Documents")
+		expect(result.current.searchResultPaths.get("f1")).toBe("Documents/Work")
 	})
 })
 
