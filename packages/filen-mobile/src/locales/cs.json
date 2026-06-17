@@ -395,6 +395,7 @@
 	"import_partial_upload_few": "Import nedokončen: {{count}} soubory se nepodařilo nahrát",
 	"import_partial_upload_one": "Import nedokončen: {{count}} soubor se nepodařilo nahrát",
 	"import_partial_upload_other": "Import nedokončen: {{count}} souborů se nepodařilo nahrát",
+	"incorrect_two_factor_code_try_again": "Nesprávný kód. Zkuste to prosím znovu.",
 	"info": "Informace",
 	"information": "Informace",
 	"insert": "Vložit",

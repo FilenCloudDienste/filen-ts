@@ -391,6 +391,7 @@
 	"import_partial_download_other": "インポートをキャンセルしました：{{count}} 個のファイルをダウンロードできませんでした",
 	"import_partial_upload_one": "インポートが不完全です：{{count}} 個のファイルをアップロードできませんでした",
 	"import_partial_upload_other": "インポートが不完全です：{{count}} 個のファイルをアップロードできませんでした",
+	"incorrect_two_factor_code_try_again": "コードが正しくありません。もう一度お試しください。",
 	"info": "情報",
 	"information": "情報",
 	"insert": "挿入",

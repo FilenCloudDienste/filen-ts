@@ -391,6 +391,7 @@
 	"import_partial_download_other": "ยกเลิกการนำเข้า: ไม่สามารถดาวน์โหลดไฟล์ {{count}} ไฟล์ได้",
 	"import_partial_upload_one": "การนำเข้าไม่สมบูรณ์: ไม่สามารถอัปโหลดไฟล์ {{count}} ไฟล์ได้",
 	"import_partial_upload_other": "การนำเข้าไม่สมบูรณ์: ไม่สามารถอัปโหลดไฟล์ {{count}} ไฟล์ได้",
+	"incorrect_two_factor_code_try_again": "รหัสไม่ถูกต้อง กรุณาลองอีกครั้ง",
 	"info": "ข้อมูล",
 	"information": "ข้อมูล",
 	"insert": "แทรก",

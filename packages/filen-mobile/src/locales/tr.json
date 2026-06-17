@@ -391,6 +391,7 @@
 	"import_partial_download_other": "İçe aktarma iptal edildi: {{count}} dosya indirilemedi",
 	"import_partial_upload_one": "İçe aktarma tamamlanmadı: {{count}} dosya yüklenemedi",
 	"import_partial_upload_other": "İçe aktarma tamamlanmadı: {{count}} dosya yüklenemedi",
+	"incorrect_two_factor_code_try_again": "Hatalı kod. Lütfen tekrar deneyin.",
 	"info": "Bilgi",
 	"information": "Bilgi",
 	"insert": "Ekle",

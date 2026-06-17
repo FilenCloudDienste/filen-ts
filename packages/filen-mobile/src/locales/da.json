@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Import annulleret: {{count}} filer kunne ikke downloades",
 	"import_partial_upload_one": "Import ufuldstændig: {{count}} fil kunne ikke uploades",
 	"import_partial_upload_other": "Import ufuldstændig: {{count}} filer kunne ikke uploades",
+	"incorrect_two_factor_code_try_again": "Forkert kode. Prøv venligst igen.",
 	"info": "Info",
 	"information": "Information",
 	"insert": "Indsæt",
