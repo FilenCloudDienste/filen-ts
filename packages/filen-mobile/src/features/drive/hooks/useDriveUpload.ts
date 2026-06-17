@@ -143,7 +143,6 @@ export function useDriveUpload({
 
 		for (const error of errors) {
 			logger.error("drive-upload", "upload item failed", { error: String(error) })
-			console.error(error)
 			alerts.error(error)
 		}
 
@@ -175,7 +174,7 @@ export function useDriveUpload({
 		})
 
 		if (!permissionsResult.success) {
-			console.error(permissionsResult.error)
+			logger.warn("drive-upload", "media permissions check failed", { error: String(permissionsResult.error) })
 			alerts.error(permissionsResult.error)
 
 			return false
@@ -207,7 +206,7 @@ export function useDriveUpload({
 		})
 
 		if (!documentPickerResult.success) {
-			console.error(documentPickerResult.error)
+			logger.warn("drive-upload", "document picker failed", { error: String(documentPickerResult.error) })
 			alerts.error(documentPickerResult.error)
 
 			return
@@ -272,7 +271,6 @@ export function useDriveUpload({
 
 		if (!transferResult.success) {
 			logger.error("drive-upload", "uploadFiles fan-out failed", { error: String(transferResult.error), count: assets.length })
-			console.error(transferResult.error)
 			alerts.error(transferResult.error)
 
 			return
@@ -301,7 +299,7 @@ export function useDriveUpload({
 		})
 
 		if (!imagePickerResult.success) {
-			console.error(imagePickerResult.error)
+			logger.warn("drive-upload", "image picker failed", { error: String(imagePickerResult.error) })
 			alerts.error(imagePickerResult.error)
 
 			return
@@ -369,7 +367,6 @@ export function useDriveUpload({
 
 		if (!transferResult.success) {
 			logger.error("drive-upload", "uploadFromPicker fan-out failed", { error: String(transferResult.error), count: assets.length })
-			console.error(transferResult.error)
 			alerts.error(transferResult.error)
 
 			return
@@ -430,7 +427,7 @@ export function useDriveUpload({
 		})
 
 		if (!scannerResult.success) {
-			console.error(scannerResult.error)
+			logger.warn("drive-upload", "document scanner failed", { error: String(scannerResult.error) })
 			alerts.error(scannerResult.error)
 
 			return
@@ -478,7 +475,6 @@ export function useDriveUpload({
 
 		if (!transferResult.success) {
 			logger.error("drive-upload", "scanDocument fan-out failed", { error: String(transferResult.error), count: scans.length })
-			console.error(transferResult.error)
 			alerts.error(transferResult.error)
 
 			return
@@ -503,7 +499,7 @@ export function useDriveUpload({
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.warn("drive-upload", "create text file prompt failed", { error: String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return
@@ -562,7 +558,6 @@ export function useDriveUpload({
 
 		if (!result.success) {
 			logger.error("drive-upload", "createTextFile failed", { error: String(result.error), fileName })
-			console.error(result.error)
 			alerts.error(result.error)
 
 			return

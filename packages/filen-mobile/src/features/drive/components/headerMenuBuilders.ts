@@ -22,6 +22,7 @@ import { type DriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
 import { serialize } from "@/lib/serializer"
 import { selectContacts } from "@/features/contacts/contactsSelect"
+import logger from "@/lib/logger"
 
 export function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void, t: TFunction): MenuButton {
 	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
@@ -204,7 +205,7 @@ export function buildBulkActionMenu({
 				})
 
 				if (!driveRootUuidResult.success) {
-					console.error(driveRootUuidResult.error)
+					logger.error("drive", "bulk move: failed to get root uuid", { error: String(driveRootUuidResult.error) })
 					alerts.error(driveRootUuidResult.error)
 
 					return
@@ -279,7 +280,7 @@ export function buildBulkActionMenu({
 				})
 
 				if (!permissionsResult.success) {
-					console.error(permissionsResult.error)
+					logger.warn("drive", "bulk save to photos: media permissions check failed", { error: String(permissionsResult.error) })
 					alerts.error(permissionsResult.error)
 
 					return
@@ -361,7 +362,7 @@ export function buildBulkActionMenu({
 				})
 
 				if (!pickResult.success) {
-					console.error(pickResult.error)
+					logger.warn("drive", "bulk share: contact picker failed", { error: String(pickResult.error) })
 					alerts.error(pickResult.error)
 
 					return

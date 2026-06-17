@@ -9,6 +9,7 @@ import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import cache from "@/lib/cache"
+import logger from "@/lib/logger"
 
 // Resolves the AnyNormalDir to create/upload into for the current Drive path, or null when the
 // path has no user-owned parent directory (e.g. shared-in, trash, or an uncached directory).
@@ -84,7 +85,7 @@ export function buildDriveCreateMenuButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("drive", "create directory prompt failed", { error: String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -108,7 +109,7 @@ export function buildDriveCreateMenuButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("drive", "create directory failed", { error: String(result.error) })
 					alerts.error(result.error)
 				}
 			}

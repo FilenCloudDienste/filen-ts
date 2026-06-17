@@ -11,6 +11,7 @@ import { AppState } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
 import { useFocusEffect } from "expo-router"
 import * as FileSystem from "expo-file-system"
+import logger from "@/lib/logger"
 
 const MAX_ERROR_RETRIES = 3
 const MAX_GENERATE_RETRIES = 3
@@ -141,13 +142,13 @@ const FileThumbnailWithGenerate = ({
 				await new Promise<void>(resolve => setTimeout(resolve, 1000))
 			}
 
-			console.error(lastError)
+			logger.warn("drive", "thumbnail generation failed after retries", { error: String(lastError), uuid: item.data.uuid })
 
 			cache.availableThumbnails.delete(item.data.uuid)
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.warn("drive", "thumbnail generate run failed", { error: String(result.error), uuid: item.data.uuid })
 
 			return
 		}

@@ -27,6 +27,7 @@ import { runBulk } from "@/lib/bulkOps"
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import ListRow from "@/components/ui/listRow"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 
 const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const { t } = useTranslation()
@@ -75,7 +76,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!promptResponse.success) {
-									console.error(promptResponse.error)
+									logger.warn("drive", "restore file version prompt failed", { error: String(promptResponse.error) })
 									alerts.error(promptResponse.error)
 
 									return
@@ -93,7 +94,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!result.success) {
-									console.error(result.error)
+									logger.error("drive", "restore file version failed", { error: String(result.error), uuid: version.uuid })
 									alerts.error(result.error)
 
 									return
@@ -118,7 +119,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!promptResponse.success) {
-									console.error(promptResponse.error)
+									logger.warn("drive", "delete file version prompt failed", { error: String(promptResponse.error) })
 									alerts.error(promptResponse.error)
 
 									return
@@ -136,7 +137,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!result.success) {
-									console.error(result.error)
+									logger.error("drive", "delete file version failed", { error: String(result.error), uuid: version.uuid })
 									alerts.error(result.error)
 
 									return
@@ -249,7 +250,7 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 						})
 
 						if (!promptResponse.success) {
-							console.error(promptResponse.error)
+							logger.warn("drive", "delete all versions prompt failed", { error: String(promptResponse.error) })
 							alerts.error(promptResponse.error)
 
 							return
@@ -271,7 +272,7 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("drive", "delete all file versions failed", { error: String(result.error) })
 							alerts.error(result.error)
 
 							return
@@ -402,7 +403,7 @@ const FileVersions = () => {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("drive", "file versions refresh failed", { error: String(result.error) })
 							alerts.error(result.error)
 						}
 					}}

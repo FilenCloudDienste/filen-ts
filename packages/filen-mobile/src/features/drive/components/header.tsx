@@ -23,6 +23,7 @@ import { resolveDriveHeaderTitle } from "@/features/drive/utils"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import { buildSortMenuButton, buildBulkActionMenu } from "@/features/drive/components/headerMenuBuilders"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
+import logger from "@/lib/logger"
 
 const Header = ({
 	setSearchQuery,
@@ -151,7 +152,7 @@ const Header = ({
 					requiresOnline: true,
 					disabled: offlineSyncing,
 					onPress: () => {
-						offlineSync.sync({ manual: true }).catch(console.error)
+						offlineSync.sync({ manual: true }).catch(e => logger.warn("drive", "offline sync failed", { error: String(e) }))
 					}
 				})
 			}
@@ -199,7 +200,7 @@ const Header = ({
 					})
 
 					if (!promptResult.success) {
-						console.error(promptResult.error)
+						logger.warn("drive", "empty trash prompt failed", { error: String(promptResult.error) })
 						alerts.error(promptResult.error)
 
 						return
@@ -216,7 +217,7 @@ const Header = ({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("drive", "empty trash failed", { error: String(result.error) })
 						alerts.error(result.error)
 
 						return
