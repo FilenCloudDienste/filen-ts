@@ -301,6 +301,10 @@ const RootLayout = () => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="logViewer"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="drivePreview"
 												options={{
 													presentation: "transparentModal",

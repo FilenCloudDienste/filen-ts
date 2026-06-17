@@ -326,6 +326,77 @@ describe("logger", () => {
 		})
 	})
 
+	describe("readEntries (in-app viewer)", () => {
+		it("returns persisted entries newest-first", () => {
+			vi.useFakeTimers()
+
+			try {
+				const logger = makeLogger()
+
+				vi.setSystemTime(1000)
+				logger.error("alpha", "first")
+				vi.setSystemTime(2000)
+				logger.error("beta", "second")
+				vi.setSystemTime(3000)
+				logger.error("gamma", "third")
+				logger.flushNow()
+
+				const entries = logger.readEntries()
+
+				expect(entries.map(e => e.msg)).toEqual(["third", "second", "first"])
+				expect(entries[0]!.l).toBe("error")
+				expect(entries[0]!.tag).toBe("gamma")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("caps at the requested limit, keeping the newest", () => {
+			vi.useFakeTimers()
+
+			try {
+				const logger = makeLogger()
+
+				for (let i = 0; i < 5; i++) {
+					vi.setSystemTime(1000 + i)
+					logger.error("t", `m${i}`)
+				}
+
+				logger.flushNow()
+
+				expect(logger.readEntries(2).map(e => e.msg)).toEqual(["m4", "m3"])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("skips malformed / torn lines", () => {
+			const logger = makeLogger()
+
+			logger.error("t", "valid")
+			logger.flushNow()
+
+			// A partially-written final line (e.g. a crash mid-append).
+			currentFile().write("this is not json\n", { append: true })
+
+			expect(logger.readEntries().map(e => e.msg)).toEqual(["valid"])
+		})
+
+		it("returns [] when there are no logs", () => {
+			expect(makeLogger().readEntries()).toEqual([])
+		})
+
+		it("returns [] after purge (disabled)", () => {
+			const logger = makeLogger()
+
+			logger.error("t", "boom")
+			logger.flushNow()
+			logger.purge()
+
+			expect(logger.readEntries()).toEqual([])
+		})
+	})
+
 	describe("purge", () => {
 		it("deletes all on-disk logs, clears buffers, and disables further logging", () => {
 			const logger = makeLogger()

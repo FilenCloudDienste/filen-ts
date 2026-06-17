@@ -35,12 +35,26 @@ const LEVEL_NAME: Record<number, LogLevel> = {
 
 const CURRENT_FILE_NAME = "current.ndjson"
 
+// Cap for the in-app log VIEWER (readEntries). Bounds parse cost + memory; the export bundles the
+// full files regardless. 5000 newest entries is plenty for a diagnostic view and renders instantly
+// in a virtualized list.
+const MAX_VIEW_ENTRIES = 5000
+
 type Entry = {
 	t: number
 	rank: number
 	tag: string
 	msg: string
 	data: unknown
+}
+
+// A parsed, already-redacted log line as written to disk — the shape the in-app viewer reads back.
+export type ReadLogEntry = {
+	t: number
+	l: LogLevel
+	tag: string
+	msg: string
+	data?: unknown
 }
 
 export type LoggerConfig = {
@@ -454,6 +468,93 @@ export class Logger {
 		}
 
 		return files
+	}
+
+	// Log files ordered newest-first: the active file, then rotated files by descending (ts, seq).
+	private logFilesNewestFirst(): FileSystem.File[] {
+		const current: FileSystem.File[] = []
+		const rotated: { file: FileSystem.File; ts: number; seq: number }[] = []
+
+		for (const item of LOGS_DIRECTORY.list()) {
+			if (!(item instanceof FileSystem.File) || !item.name.endsWith(".ndjson")) {
+				continue
+			}
+
+			if (item.name === CURRENT_FILE_NAME) {
+				current.push(item)
+
+				continue
+			}
+
+			const match = /^log-(\d+)-(\d+)\.ndjson$/.exec(item.name)
+
+			rotated.push({
+				file: item,
+				ts: match ? Number(match[1]) : 0,
+				seq: match ? Number(match[2]) : 0
+			})
+		}
+
+		rotated.sort((a, b) => b.ts - a.ts || b.seq - a.seq)
+
+		return [...current, ...rotated.map(entry => entry.file)]
+	}
+
+	// Reads the persisted log lines back for the in-app viewer, newest-first, capped at `limit`.
+	// Flushes pending entries first so the view reflects the latest state. Reads files newest-first
+	// and walks each file's lines in reverse so it can stop at the cap without parsing everything;
+	// malformed/torn lines are skipped. The lines are already redacted (redaction happens at write).
+	public readEntries(limit: number = MAX_VIEW_ENTRIES): ReadLogEntry[] {
+		if (this.disabled) {
+			return []
+		}
+
+		this.flushNow()
+
+		if (!LOGS_DIRECTORY.exists) {
+			return []
+		}
+
+		const out: ReadLogEntry[] = []
+
+		for (const file of this.logFilesNewestFirst()) {
+			if (out.length >= limit) {
+				break
+			}
+
+			let text: string
+
+			try {
+				text = file.textSync()
+			} catch {
+				continue
+			}
+
+			const lines = text.split("\n")
+
+			for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+				const line = lines[i]
+
+				if (!line) {
+					continue
+				}
+
+				try {
+					const parsed = JSON.parse(line) as ReadLogEntry
+
+					if (parsed && typeof parsed.t === "number") {
+						out.push(parsed)
+					}
+				} catch {
+					// Skip a malformed / torn line (e.g. a partially-written final line).
+				}
+			}
+		}
+
+		// Strict newest-first across file boundaries (rotation order is chronological, but be exact).
+		out.sort((a, b) => b.t - a.t)
+
+		return out
 	}
 
 	// Wipe every on-disk log + in-memory buffer. Hooked into logout (decrypted-state wipe).
