@@ -3,6 +3,7 @@ import offlineSync from "@/features/offline/offlineSync"
 import { sync as notesSync } from "@/features/notes/components/sync"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
+import logger from "@/lib/logger"
 
 let started = false
 
@@ -49,8 +50,8 @@ export function startReconnectListener(): void {
 			return
 		}
 
-		cameraUpload.sync().catch(console.error)
-		offlineSync.sync().catch(console.error)
+		cameraUpload.sync().catch(e => { logger.error("reconnect", "cameraUpload.sync failed on reconnect", { error: String(e) }) })
+		offlineSync.sync().catch(e => { logger.error("reconnect", "offlineSync.sync failed on reconnect", { error: String(e) }) })
 		notesSync.executeNow()
 		chatsSync.syncNow()
 	})

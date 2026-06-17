@@ -12,6 +12,7 @@ import { initTheme } from "@/lib/theme"
 import { Image } from "expo-image"
 import { Platform } from "react-native"
 import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import logger from "@/lib/logger"
 
 // Serializes setup() so a concurrent invocation (e.g. background task overlapping the
 // foreground launch) can't run the init flow twice. No other instance state -> plain object.
@@ -59,7 +60,7 @@ const setup = {
 						maxDiskSize: CACHE_MAX_SIZE_BYTES
 					})
 				} catch (e) {
-					console.error("[Setup] Image.configureCache failed", e)
+					logger.error("setup", "Image.configureCache failed", { error: String(e) })
 				}
 			}
 
@@ -113,12 +114,12 @@ const setup = {
 			// debounced gc after writes and gc on app-background, so reclamation happens
 			// where growth happens instead of competing with startup.
 			if (isAuthed.isAuthed && !options?.background) {
-				foregroundService.init().catch(console.error)
+				foregroundService.init().catch(e => { logger.error("setup", "foregroundService.init failed", { error: String(e) }) })
 
 				// configureCache is pure storage (opens no DB until the first search), so this is
 				// fire-and-forget and cheap. Gated like foregroundService: never in a headless
 				// background run (no search worker there), and only when authed.
-				driveSearch.init().catch(console.error)
+				driveSearch.init().catch(e => { logger.error("setup", "driveSearch.init failed", { error: String(e) }) })
 			}
 
 			const duration = performance.now() - now
@@ -131,6 +132,8 @@ const setup = {
 		})
 
 		if (!result.success) {
+			logger.error("setup", "setup pipeline failed", { error: String(result.error) })
+
 			throw result.error
 		}
 

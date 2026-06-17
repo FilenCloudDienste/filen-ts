@@ -110,7 +110,7 @@ class Auth {
 		try {
 			;(client as unknown as { uniffiDestroy: () => void }).uniffiDestroy()
 		} catch (e) {
-			console.error(e)
+			logger.warn("auth", "uniffiDestroy failed — native handle leaked", { err: String(e) })
 		}
 	}
 
@@ -207,6 +207,8 @@ class Auth {
 		await this.clientsReady
 
 		if (!this.authedClient || !this.unauthedClient) {
+			logger.error("auth", "SDK clients null after clientsReady resolved — invariant violation", { hasAuthed: !!this.authedClient, hasUnauthed: !!this.unauthedClient })
+
 			throw new Error("SDK clients not initialized after clientsReady resolved")
 		}
 
@@ -241,6 +243,8 @@ class Auth {
 		try {
 			this.authedClient = await unauthedClient.login(...params)
 		} catch (e) {
+			logger.error("auth", "login SDK call failed", { err: String(e) })
+
 			this.destroyClient(unauthedClient)
 
 			this.unauthedClient = null
@@ -252,7 +256,13 @@ class Auth {
 			throw new Error("Login failed, authed client is null")
 		}
 
-		await this.saveStringifiedClientToSecureStorage(await this.authedClient.toStringified())
+		try {
+			await this.saveStringifiedClientToSecureStorage(await this.authedClient.toStringified())
+		} catch (e) {
+			logger.error("auth", "failed to persist credentials after login", { err: String(e) })
+
+			throw e
+		}
 
 		this.notifyClientsReady()
 
@@ -298,12 +308,14 @@ class Auth {
 	}
 
 	private async doLogout(): Promise<void> {
+		logger.info("auth", "logout started")
+
 		// Phase 1 — stop background producers. allSettled so one failure never aborts the wipe.
 		const phase1 = await Promise.allSettled([unregisterBackgroundSync(), audio.stop(), fileProvider.disable()])
 
 		for (const result of phase1) {
 			if (result.status === "rejected") {
-				console.error(result.reason)
+				logger.warn("auth", "logout phase-1 teardown failed", { index: phase1.indexOf(result), err: String(result.reason) })
 			}
 		}
 
@@ -316,7 +328,7 @@ class Auth {
 			notesSync.cancel()
 			offlineSync.cancel()
 		} catch (e) {
-			console.error(e)
+			logger.warn("auth", "logout phase-2 cancel threw", { err: String(e) })
 		}
 
 		// Phase 3 — snapshot the SDK clients, then immediately null the fields and re-arm clientsReady
@@ -338,7 +350,7 @@ class Auth {
 		try {
 			await driveSearch.teardownOnLogout()
 		} catch (e) {
-			console.error(e)
+			logger.error("auth", "driveSearch teardown failed during logout", { err: String(e) })
 		}
 
 		// Phase 4 — destroy the native handles AFTER cancellations settled (avoid use-after-destroy).
@@ -353,7 +365,7 @@ class Auth {
 		try {
 			cache.clear()
 		} catch (e) {
-			console.error(e)
+			logger.error("auth", "in-memory cache clear failed during logout", { err: String(e) })
 		}
 
 		// Diagnostic logs hold decrypted-at-rest data (file/dir names, paths) by design — wipe them
@@ -373,9 +385,11 @@ class Auth {
 			sandboxCache.clear()
 		])
 
+		const WIPE_OPS = ["secureStore", "sqlite", "offline", "fileCache", "audioCache", "thumbnails", "sandboxCache"]
+
 		for (const result of wipe) {
 			if (result.status === "rejected") {
-				console.error(result.reason)
+				logger.error("auth", "logout wipe failed", { store: WIPE_OPS[wipe.indexOf(result)], err: String(result.reason) })
 			}
 		}
 
@@ -391,13 +405,15 @@ class Auth {
 
 				return
 			} catch (e) {
-				console.error(e)
+				logger.error("auth", "reloadAppAsync attempt failed", { attempt, maxAttempts: RELOAD_MAX_ATTEMPTS, err: String(e) })
 
 				if (attempt < RELOAD_MAX_ATTEMPTS) {
 					await new Promise(resolve => setTimeout(resolve, RELOAD_RETRY_DELAY))
 				}
 			}
 		}
+
+		logger.error("auth", "all reload attempts exhausted — app is in a torn post-logout state", { maxAttempts: RELOAD_MAX_ATTEMPTS })
 	}
 }
 
