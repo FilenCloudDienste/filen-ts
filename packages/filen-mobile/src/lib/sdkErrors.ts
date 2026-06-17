@@ -39,12 +39,13 @@ export function isRetryableAuthError(error: unknown): boolean {
 	return unwrapped.kind() === ErrorKind.Unauthenticated
 }
 
-// Produces the user-facing string for an SDK error. SERVER/API errors show the server's own
-// human message (`serverMessage()`, SDK 0.4.26+); everything else shows the raw inner Rust
-// message (`innerMessage()`, e.g. "No such file or directory") — both far more readable than the
-// developer-oriented `message()` Display wrapper ("Error of kind X: …"). The translated kind
-// label is only the last-resort fallback when neither is available. Module level (not a hook) →
-// uses the imported module `i18n`.
+// Produces the user-facing string for an SDK error. Priority: (1) SERVER/API errors show the
+// server's own human message (`serverMessage()`, SDK 0.4.26+); (2) any KNOWN error kind shows its
+// friendly localized label — this deliberately WINS over the raw inner Rust message, because for
+// the network/parse/codec kinds (Reqwest/Response/Conversion/…) that inner is a technical
+// reqwest/serde string ("error sending request for url …") the average user can't act on, whereas
+// the label ("Network error") is clear; (3) only an UNMAPPED kind falls back to the raw inner
+// message (`innerMessage()`), then the generic label. Module level (not a hook) → uses `i18n`.
 export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
 	const errorKey = (() => {
 		switch (unwrapped.kind()) {
@@ -146,24 +147,27 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 		}
 	})()
 
-	// Server/API errors → the server's own human-readable message.
+	// Server/API errors → the server's own human-readable message (the most specific text we have).
 	const serverMessage = unwrapped.serverMessage()
 
 	if (serverMessage) {
 		return serverMessage
 	}
 
-	// Non-server errors → the raw inner Rust message (e.g. "No such file or directory"). Skipped
-	// for server/API errors (a `code` is set, or the generic `Server` kind) so we never surface
-	// the raw "API Error, message: None, code: …" inner — those fall through to the label below.
-	if (unwrapped.serverCode() === undefined && unwrapped.kind() !== ErrorKind.Server) {
-		const innerMessage = unwrapped.innerMessage()
-
-		if (innerMessage) {
-			return innerMessage
-		}
+	// Any KNOWN kind → its friendly localized label. This wins over the raw inner Rust message:
+	// for network/parse/codec kinds the inner is a technical reqwest/serde string the average user
+	// can't act on, whereas the label ("Network error") is clear.
+	if (errorKey !== "error_generic") {
+		return i18n.t(errorKey)
 	}
 
-	// Fallback: the translated kind label (no server/inner message available).
+	// Unmapped/unknown kind → the raw inner Rust message as a better-than-generic fallback.
+	const innerMessage = unwrapped.innerMessage()
+
+	if (innerMessage) {
+		return innerMessage
+	}
+
+	// Nothing better available.
 	return i18n.t(errorKey)
 }

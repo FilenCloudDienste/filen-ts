@@ -108,12 +108,21 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 		expect(result).toBe("The password you entered is incorrect.")
 	})
 
-	it("returns the raw inner Rust message for a non-server error", () => {
+	it("uses the friendly localized label for a known non-server kind, ignoring the technical inner", () => {
 		const result = unwrappedSdkErrorToHumanReadable(
-			makeError(ErrorKindMock.Io, "", { innerMessage: "No such file or directory" })
+			makeError(ErrorKindMock.Reqwest, "", { innerMessage: "error sending request for url (https://gateway.filen.io)" })
 		)
 
-		expect(result).toBe("No such file or directory")
+		// Network/parse/codec inners are technical Rust/reqwest strings; the label wins.
+		expect(result).toBe(en.network_error)
+	})
+
+	it("falls back to the raw inner Rust message only for an UNMAPPED kind", () => {
+		const result = unwrappedSdkErrorToHumanReadable(
+			makeError("SomethingBrandNew", "", { innerMessage: "low-level thing went wrong" })
+		)
+
+		expect(result).toBe("low-level thing went wrong")
 	})
 
 	it("uses the translated label (never the raw inner) for a server error with a code but no message", () => {
