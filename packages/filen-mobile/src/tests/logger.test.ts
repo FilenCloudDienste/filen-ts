@@ -5,6 +5,7 @@ vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSyst
 import { File, Directory, Paths, fs } from "@/tests/mocks/expoFileSystem"
 import { Logger } from "@/lib/logger"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"
+import * as logRedaction from "@/lib/logRedaction"
 
 type Line = { t: number; l: string; tag: string; msg: string; data?: unknown }
 
@@ -394,6 +395,43 @@ describe("logger", () => {
 			logger.purge()
 
 			expect(logger.readEntries()).toEqual([])
+		})
+	})
+
+	describe("serialization fallback + breadcrumb bound (regression guards)", () => {
+		it("writes [unserializable] (never throws, keeps t/l/tag) when serialization fails", () => {
+			const logger = makeLogger()
+
+			// Force entryToLine's catch: redact returns a value JSON.stringify still chokes on (raw bigint).
+			vi.spyOn(logRedaction, "redact").mockReturnValue({ msg: "x", data: 5n })
+
+			expect(() => {
+				logger.error("auth", "boom")
+				logger.flushNow()
+			}).not.toThrow()
+
+			const lines = readCurrentLines()
+
+			expect(lines).toHaveLength(1)
+			expect(lines[0]?.l).toBe("error")
+			expect(lines[0]?.tag).toBe("auth")
+			expect(lines[0]?.msg).toBe("[unserializable]")
+			expect(typeof lines[0]?.t).toBe("number")
+		})
+
+		it("breadcrumb ring is bounded — only the last N breadcrumbs are dragged before an error", () => {
+			const logger = makeLogger()
+			logger.configure({ breadcrumbCapacity: 3 })
+
+			logger.info("t", "a")
+			logger.info("t", "b")
+			logger.info("t", "c")
+			logger.info("t", "d")
+			logger.info("t", "e")
+			logger.error("t", "boom")
+			logger.flushNow()
+
+			expect(readCurrentLines().map(l => l.msg)).toEqual(["c", "d", "e", "boom"])
 		})
 	})
 
