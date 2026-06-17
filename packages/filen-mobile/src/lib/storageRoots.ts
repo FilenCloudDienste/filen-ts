@@ -53,3 +53,11 @@ export const SDK_CACHE_VERSION = 1
 export const SDK_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "sdkCache"))
 export const SDK_CACHE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(SDK_CACHE_PARENT_DIRECTORY.uri, `v${SDK_CACHE_VERSION}`))
 export const SDK_CACHE_DB_FILE = new FileSystem.File(FileSystem.Paths.join(SDK_CACHE_DIRECTORY.uri, "cache.db"))
+
+// Diagnostic logger sink (src/lib/logger.ts). Rotating NDJSON files of app diagnostics the user
+// can export and send to support. Holds decrypted-at-rest data (file/dir names, paths) by design
+// — never secrets/keys (stripped by logRedaction) — so it shares the same posture as offline/
+// fileCache and is wiped on logout. Excluded from user-facing cache-size accounting/clear.
+export const LOGS_VERSION = 1
+export const LOGS_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "logs"))
+export const LOGS_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(LOGS_PARENT_DIRECTORY.uri, `v${LOGS_VERSION}`))
