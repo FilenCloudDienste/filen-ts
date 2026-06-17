@@ -3,11 +3,12 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Platform, ActivityIndicator } from "react-native"
+import * as Linking from "expo-linking"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { PressableScale } from "@/components/ui/pressables"
-import { formatBytes } from "@filen/utils"
+import { formatBytes, run } from "@filen/utils"
 import { router } from "expo-router"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
@@ -16,6 +17,11 @@ import useAccountQuery from "@/queries/useAccount.query"
 import { useTranslation } from "react-i18next"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import { LazyWrapper } from "@/components/lazyWrapper"
+import logger from "@/lib/logger"
+import alerts from "@/lib/alerts"
+
+const TERMS_URL = "https://filen.io/terms"
+const PRIVACY_URL = "https://filen.io/privacy"
 
 function More() {
 	const stringifiedClient = useStringifiedClient()
@@ -29,6 +35,20 @@ function More() {
 	const accountQuery = useAccountQuery()
 
 	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.some(sub => Number(sub.activated) === 1)
+
+	// External links (Terms / Privacy) — Linking.openURL is a real app-switch, exempt from
+	// withSystemPresentation (it doesn't flash the privacy cover / re-lock biometric). Mirrors the
+	// chat link-open pattern (run() + logger.error + alerts.error on failure).
+	const openExternalLink = async (url: string) => {
+		const result = await run(async () => {
+			return await Linking.openURL(url)
+		})
+
+		if (!result.success) {
+			logger.error("settings", "failed to open external link", { url, error: result.error instanceof Error ? result.error.message : String(result.error) })
+			alerts.error(result.error)
+		}
+	}
 
 	return (
 		<Fragment>
@@ -240,6 +260,24 @@ function More() {
 									title: t("advanced"),
 									onPress: () => {
 										router.push("/advanced")
+									}
+								}
+							]}
+						/>
+						<Group
+							buttons={[
+								{
+									icon: "document-text-outline",
+									title: t("terms_of_service"),
+									onPress: () => {
+										openExternalLink(TERMS_URL)
+									}
+								},
+								{
+									icon: "shield-checkmark-outline",
+									title: t("privacy_policy"),
+									onPress: () => {
+										openExternalLink(PRIVACY_URL)
 									}
 								}
 							]}

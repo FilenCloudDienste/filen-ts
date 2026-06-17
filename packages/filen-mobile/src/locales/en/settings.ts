@@ -26,6 +26,10 @@ export const settings = {
 	events: "Events",
 	/** More-menu row: advanced settings (caches, debug) */
 	advanced: "Advanced",
+	/** More screen — opens the Terms of Service (filen.io/terms) in the browser */
+	terms_of_service: "Terms of Service",
+	/** More screen — opens the Privacy Policy (filen.io/privacy) in the browser */
+	privacy_policy: "Privacy Policy",
 
 	// ── Offline settings screen ───────────────────────────────────────────────
 	// (screen title reuses the existing `offline` key from drive.ts)
