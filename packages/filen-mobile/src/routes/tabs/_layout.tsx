@@ -5,6 +5,7 @@ import { useResolveClassNames, useUniwind } from "uniwind"
 import { useIsAuthed } from "@/lib/auth"
 import useChatsUnreadCount from "@/features/chats/hooks/useChatsUnreadCount"
 import useContactRequestsQuery from "@/features/contacts/queries/useContactRequests.query"
+import useAccountQuery from "@/queries/useAccount.query"
 import { useTranslation } from "react-i18next"
 
 const TabsLayout = () => {
@@ -15,12 +16,25 @@ const TabsLayout = () => {
 	const isAuthed = useIsAuthed()
 	const chatsUnreadCount = useChatsUnreadCount()
 	const contactRequestsQuery = useContactRequestsQuery()
+	// Read-only consumer (enabled: false) — never fetches; reads the SHARED account cache and stays
+	// reactive to its updates. The cache is populated + refreshed by accountReminders (at launch) and
+	// the More/Security screens, so the badge appears and clears (once the export flips
+	// didExportMasterKeys) without the always-mounted tab bar ever fetching.
+	const accountQuery = useAccountQuery({
+		enabled: false
+	})
 	const { theme } = useUniwind()
 	const { t } = useTranslation()
 
 	if (!isAuthed) {
 		return null
 	}
+
+	// Master-key export is data-loss-critical, so it claims the More tab's single badge slot;
+	// otherwise fall back to the incoming contact-requests count. Both stay badged inside More.
+	const keysNotExported = accountQuery.status === "success" && !accountQuery.data.didExportMasterKeys
+	const incomingRequests = contactRequestsQuery.status === "success" ? contactRequestsQuery.data.incoming.length : 0
+	const moreBadge = keysNotExported ? "!" : incomingRequests > 0 ? incomingRequests.toString() : null
 
 	return (
 		<NativeTabs
@@ -113,9 +127,7 @@ const TabsLayout = () => {
 			</NativeTabs.Trigger>
 			<NativeTabs.Trigger name="more">
 				<NativeTabs.Trigger.Label>{t("tab_more")}</NativeTabs.Trigger.Label>
-				{contactRequestsQuery.status === "success" && contactRequestsQuery.data.incoming.length > 0 && (
-					<NativeTabs.Trigger.Badge>{contactRequestsQuery.data.incoming.length.toString()}</NativeTabs.Trigger.Badge>
-				)}
+				{moreBadge !== null && <NativeTabs.Trigger.Badge>{moreBadge}</NativeTabs.Trigger.Badge>}
 				{Platform.select({
 					ios: <NativeTabs.Trigger.Icon sf="ellipsis" />,
 					default: (
