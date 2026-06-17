@@ -157,7 +157,7 @@ const Drive = () => {
 							drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
 						)}
 						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+						contentContainerClassName={cn("pb-80", Platform.OS === "android" && "pb-96")}
 						keyExtractor={(item: DriveItem) => {
 							return item.data.uuid
 						}}
