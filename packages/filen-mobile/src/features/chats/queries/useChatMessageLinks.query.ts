@@ -7,6 +7,7 @@ import { safeParseUrl, extractLinks } from "@/lib/linkParser"
 import { MaybeEncryptedUniffi_Tags, type DirPublicInfo, type LinkedFile } from "@filen/sdk-rs"
 import { Paths } from "expo-file-system"
 import mimeTypes from "mime-types"
+import logger from "@/lib/logger"
 
 const MAX_FILE_SIZE_IMAGE = 32 * 1024 * 1024
 const MAX_REDIRECTS = 5
@@ -370,6 +371,12 @@ export async function fetchData(
 			}
 		})
 	)
+
+	const rejected = parsed.filter(r => r.status === "rejected")
+
+	if (rejected.length > 0) {
+		logger.warn("chats", "Link preview fetch rejected", { count: rejected.length })
+	}
 
 	return parsed.filter(result => result.status === "fulfilled").map(result => result.value)
 }

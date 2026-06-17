@@ -15,6 +15,7 @@ import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
 import { serialize } from "@/lib/serializer"
 import { t } from "@/lib/i18n"
 import { confirmedChatAction } from "@/features/chats/components/confirmedChatAction"
+import logger from "@/lib/logger"
 
 export type ChatMenuOrigin = "chats" | "search" | "chat"
 
@@ -130,7 +131,7 @@ export function createMenuButtons({
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("chats", "markAsRead failed", { error: result.error })
 								alerts.error(result.error)
 
 								return
@@ -154,7 +155,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("chats", "mute chat failed", { error: result.error })
 					alerts.error(result.error)
 
 					return
@@ -199,7 +200,7 @@ export function createMenuButtons({
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("chats", "addParticipants (list menu) failed", { error: result.error })
 								alerts.error(result.error)
 
 								return
@@ -222,7 +223,7 @@ export function createMenuButtons({
 							})
 
 							if (!promptResult.success) {
-								console.error(promptResult.error)
+								logger.error("chats", "edit chat name prompt failed", { error: promptResult.error })
 								alerts.error(promptResult.error)
 
 								return
@@ -246,7 +247,7 @@ export function createMenuButtons({
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("chats", "rename chat failed", { error: result.error })
 								alerts.error(result.error)
 
 								return

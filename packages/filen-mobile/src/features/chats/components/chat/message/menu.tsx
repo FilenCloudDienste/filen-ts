@@ -19,6 +19,7 @@ import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { isBlocked } from "@/features/contacts/blockedSelectors"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
+import logger from "@/lib/logger"
 
 export const Menu = ({
 	chat,
@@ -62,7 +63,7 @@ export const Menu = ({
 			})
 
 			if (!promptResponse.success) {
-				console.error(promptResponse.error)
+				logger.error("chats", "block contact prompt failed", { error: promptResponse.error })
 				alerts.error(promptResponse.error)
 
 				return
@@ -83,7 +84,7 @@ export const Menu = ({
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("chats", "block contact failed", { error: result.error })
 				alerts.error(result.error)
 			}
 		}
@@ -122,7 +123,7 @@ export const Menu = ({
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("chats", "copy message to clipboard failed", { error: result.error })
 				alerts.error(result.error)
 
 				return
@@ -146,7 +147,7 @@ export const Menu = ({
 						retryInflightMessage({
 							chat,
 							message: info.item
-						}).catch(console.error)
+						}).catch(e => logger.warn("chats", "retryInflightMessage failed", { error: e instanceof Error ? e.message : String(e) }))
 					}
 				},
 				{
@@ -158,7 +159,7 @@ export const Menu = ({
 						removeInflightMessage({
 							chat,
 							message: info.item
-						}).catch(console.error)
+						}).catch(e => logger.warn("chats", "removeInflightMessage failed", { error: e instanceof Error ? e.message : String(e) }))
 					}
 				}
 			] satisfies MenuButton[])

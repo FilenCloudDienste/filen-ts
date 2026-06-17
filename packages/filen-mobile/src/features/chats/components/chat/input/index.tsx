@@ -39,6 +39,7 @@ import MentionSuggestions from "@/features/chats/components/chat/input/mentionSu
 import EmojiSuggestions from "@/features/chats/components/chat/input/emojiSuggestions"
 import ReplyTo from "@/features/chats/components/chat/input/replyTo"
 import { withSystemPresentation } from "@/lib/systemPresentation"
+import logger from "@/lib/logger"
 
 type ChatTextInputProps = {
 	chatInputValue: string
@@ -174,7 +175,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("chats", "uploadAssetsAndInsert failed", { error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -219,7 +220,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.warn("chats", "sendTypingEvent failed", { error: result.error })
 
 				return
 			}
@@ -246,7 +247,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 		try {
 			clearTimeout(typingTimeoutRef.current)
-			sendTypingEvent(ChatTypingType.Up).catch(console.error)
+			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (on send) failed", { error: e instanceof Error ? e.message : String(e) }))
 
 			inputRef.current?.clear()
 
@@ -268,7 +269,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("chats", "editMessage failed", { error: result.error })
 					alerts.error(result.error)
 
 					setChatInputValue(normalizedMessage)
@@ -342,12 +343,12 @@ const Input = ({ chat }: { chat: Chat }) => {
 	}
 
 	const onKeyPress = () => {
-		sendTypingEvent(ChatTypingType.Down).catch(console.error)
+		sendTypingEvent(ChatTypingType.Down).catch(e => logger.warn("chats", "sendTypingEvent Down failed", { error: e instanceof Error ? e.message : String(e) }))
 
 		clearTimeout(typingTimeoutRef.current)
 
 		typingTimeoutRef.current = setTimeout(() => {
-			sendTypingEvent(ChatTypingType.Up).catch(console.error)
+			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (timeout) failed", { error: e instanceof Error ? e.message : String(e) }))
 		}, 3000)
 	}
 
@@ -355,7 +356,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 		useChatsStore.getState().setInputFocused(false)
 
 		clearTimeout(typingTimeoutRef.current)
-		sendTypingEvent(ChatTypingType.Up).catch(console.error)
+		sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (onBlur) failed", { error: e instanceof Error ? e.message : String(e) }))
 	}
 
 	const onFocus = () => {
@@ -406,7 +407,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 	useEffect(() => {
 		return () => {
 			clearTimeout(typingTimeoutRef.current)
-			sendTypingEvent(ChatTypingType.Up).catch(console.error)
+			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (cleanup) failed", { error: e instanceof Error ? e.message : String(e) }))
 		}
 	}, [sendTypingEvent])
 
@@ -450,7 +451,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 								})
 
 								if (!permissionsResult.success) {
-									console.error(permissionsResult.error)
+									logger.error("chats", "addMedia permissions check failed", { error: permissionsResult.error })
 									alerts.error(permissionsResult.error)
 
 									return
@@ -477,7 +478,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 								})
 
 								if (!imagePickerResult.success) {
-									console.error(imagePickerResult.error)
+									logger.error("chats", "addMedia image picker failed", { error: imagePickerResult.error })
 									alerts.error(imagePickerResult.error)
 
 									return
@@ -517,7 +518,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 								})
 
 								if (!permissionsResult.success) {
-									console.error(permissionsResult.error)
+									logger.error("chats", "takeMedia permissions check failed", { error: permissionsResult.error })
 									alerts.error(permissionsResult.error)
 
 									return
@@ -544,7 +545,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 								})
 
 								if (!imagePickerResult.success) {
-									console.error(imagePickerResult.error)
+									logger.error("chats", "takeMedia camera picker failed", { error: imagePickerResult.error })
 									alerts.error(imagePickerResult.error)
 
 									return
@@ -585,7 +586,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 								})
 
 								if (!documentPickerResult.success) {
-									console.error(documentPickerResult.error)
+									logger.error("chats", "addFiles document picker failed", { error: documentPickerResult.error })
 									alerts.error(documentPickerResult.error)
 
 									return
@@ -615,7 +616,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 								})
 
 								if (!selectDriveItemsResult.success) {
-									console.error(selectDriveItemsResult.error)
+									logger.error("chats", "addDriveItems drive select failed", { error: selectDriveItemsResult.error })
 									alerts.error(selectDriveItemsResult.error)
 
 									return
@@ -647,7 +648,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 								})
 
 								if (!result.success) {
-									console.error(result.error)
+									logger.error("chats", "addDriveItems enable public link failed", { error: result.error })
 									alerts.error(result.error)
 
 									return

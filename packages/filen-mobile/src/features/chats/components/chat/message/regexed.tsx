@@ -19,6 +19,7 @@ import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { URL_REGEX } from "@/constants"
 import { useTranslation } from "react-i18next"
+import logger from "@/lib/logger"
 
 export const MENTION_REGEX: RegExp = /(@[\w.-]+@[\w.-]+\.\w+|@everyone)/g
 export const LINE_BREAK_REGEX: RegExp = /\n/gi
@@ -110,7 +111,7 @@ export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: b
 		})
 
 		if (!canOpenResult.success) {
-			console.error(canOpenResult.error)
+			logger.error("chats", "canOpenURL check failed", { error: canOpenResult.error })
 			alerts.error(canOpenResult.error)
 
 			return
@@ -133,7 +134,7 @@ export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: b
 			})
 
 			if (!promptResponse.success) {
-				console.error(promptResponse.error)
+				logger.error("chats", "open link confirmation prompt failed", { error: promptResponse.error })
 				alerts.error(promptResponse.error)
 
 				return
@@ -154,7 +155,7 @@ export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: b
 		})
 
 		if (!openResult.success) {
-			console.error(openResult.error)
+			logger.error("chats", "openURL failed", { error: openResult.error })
 			alerts.error(openResult.error)
 
 			return

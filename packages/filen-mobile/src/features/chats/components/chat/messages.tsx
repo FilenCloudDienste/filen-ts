@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { composeMessageList } from "@/features/chats/utils"
+import logger from "@/lib/logger"
 
 const SCROLL_THRESHOLD = 300
 
@@ -213,7 +214,7 @@ const Messages = ({ chat }: { chat: TChat }) => {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("chats", "listBefore failed", { error: result.error })
 							alerts.error(result.error)
 
 							return

@@ -3,6 +3,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import chatsLib from "@/features/chats/chats"
+import logger from "@/lib/logger"
 
 export async function createChatFlow(): Promise<void> {
 	const selectContactsResult = await selectContacts({
@@ -21,7 +22,7 @@ export async function createChatFlow(): Promise<void> {
 	})
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.error("chats", "createChatFlow failed", { error: result.error })
 		alerts.error(result.error)
 
 		return

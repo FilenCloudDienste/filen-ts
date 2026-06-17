@@ -32,6 +32,7 @@ import { simpleDateNoTime } from "@/lib/time"
 import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
+import logger from "@/lib/logger"
 
 const HeaderTitle = ({ chat }: { chat: TChat }) => {
 	const stringifiedClient = useStringifiedClient()
@@ -161,7 +162,7 @@ const Unread = ({ chat }: { chat: TChat }) => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("chats", "markRead failed", { error: result.error })
 			alerts.error(result.error)
 
 			return

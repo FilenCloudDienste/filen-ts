@@ -6,6 +6,7 @@ import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
 import cache from "@/lib/cache"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
+import logger from "@/lib/logger"
 
 export type ChatSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Chat }>
 
@@ -119,6 +120,12 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 									: c
 							)
 					})
+
+					break
+				}
+
+				default: {
+					logger.warn("chats", "ConversationNameEdited: received encrypted name, skipping cache update", { chatUuid: inner.chat })
 				}
 			}
 
@@ -149,6 +156,12 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 									: m
 							)
 					})
+
+					break
+				}
+
+				default: {
+					logger.warn("chats", "MessageEdited: received encrypted content, skipping cache update", { chatUuid: inner.chat, msgUuid: inner.uuid })
 				}
 			}
 
@@ -168,6 +181,8 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 			})
 
 			if (!chat) {
+				logger.warn("chats", "MessageDelete: message not found in cache", { msgUuid: inner.uuid })
+
 				break
 			}
 
@@ -248,6 +263,8 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 			const chat = chats?.find(c => c.uuid === inner.uuid)
 
 			if (!chat) {
+				logger.warn("chats", "ConversationDeleted: chat not in cache", { chatUuid: inner.uuid })
+
 				break
 			}
 
@@ -330,7 +347,7 @@ export async function handleChatEvent({ event, userId }: { event: ChatSocketEven
 		}
 
 		default: {
-			console.error(eventInner)
+			logger.error("chats", "Unhandled chat event", { tag: (eventInner.inner as { tag: string }).tag })
 
 			throw new Error("Unhandled chat event")
 		}

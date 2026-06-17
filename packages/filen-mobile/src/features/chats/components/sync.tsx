@@ -9,6 +9,7 @@ import sqlite from "@/lib/sqlite"
 import { fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
 import { FilenSdkError } from "@filen/sdk-rs"
 import { unwrapSdkError, isNetworkClassError, isRetryableAuthError } from "@/lib/sdkErrors"
+import logger from "@/lib/logger"
 
 // D4a (ported from notes sync #40/VC3): a message whose send is rejected by the server with a
 // PERMANENT error (non-network, non-auth SDK rejection) must eventually stop being retried —
@@ -136,14 +137,14 @@ export class Sync {
 					return updated
 				})
 			} catch (e) {
-				console.error("Error pruning restored chat sync queue:", e)
+				logger.error("chats-sync", "failed to prune restored inflight queue", { error: e instanceof Error ? e.message : String(e) })
 			}
 
 			return true
 		})
 
 		if (!result.success) {
-			console.error("Error initializing chat sync:", result.error)
+			logger.error("chats-sync", "restoreFromDisk failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 		}
 
 		this.resolveInit()
@@ -177,7 +178,7 @@ export class Sync {
 		})
 
 		if (!result.success) {
-			console.error("Error flushing chat sync to disk:", result.error)
+			logger.error("chats-sync", "flushToDisk failed — messages memory-only", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 		}
 
 		return result.success
@@ -273,10 +274,7 @@ export class Sync {
 								// retried again. The error entry above stays (with the message
 								// snapshot) so the failed bubble remains visible and actionable
 								// (retry/remove) in the chat.
-								console.error(
-									`[ChatsSync] Dropping inflight message ${message.inflightId} after ${permanentRejections} consecutive non-retryable errors:`,
-									e
-								)
+								logger.error("chats-sync", "dropping inflight message after max permanent rejections", { inflightId: message.inflightId, chatUuid, permanentRejections, error: e instanceof Error ? e.message : String(e) })
 
 								useChatsStore.getState().setInflightMessages(prev => {
 									const existing = prev[chatUuid]
@@ -330,7 +328,7 @@ export class Sync {
 
 			for (const r of results) {
 				if (r.status === "rejected") {
-					console.error("[ChatsSync] Failed to sync chat:", r.reason)
+					logger.error("chats-sync", "sync pass failed for a chat", { reason: r.reason instanceof Error ? r.reason.message : String(r.reason) })
 				}
 			}
 
@@ -347,13 +345,13 @@ export class Sync {
 				return
 			}
 
-			console.error(result.error)
+			logger.error("chats-sync", "sync pass threw unexpectedly", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 			alerts.error(result.error)
 		}
 	}
 
 	public syncNow(): void {
-		this.sync().catch(console.error)
+		this.sync().catch(e => logger.error("chats-sync", "syncNow threw unexpectedly", { error: e instanceof Error ? e.message : String(e) }))
 	}
 }
 

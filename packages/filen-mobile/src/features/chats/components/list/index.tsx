@@ -16,6 +16,7 @@ import { createChatFlow } from "@/features/chats/chatsActions"
 import useIsOnline from "@/hooks/useIsOnline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
+import logger from "@/lib/logger"
 
 const List = ({ searchQuery }: { searchQuery: string }) => {
 	const { t } = useTranslation()
@@ -87,7 +88,7 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("chats", "chat list refresh failed", { error: result.error })
 			alerts.error(result.error)
 		}
 	}
