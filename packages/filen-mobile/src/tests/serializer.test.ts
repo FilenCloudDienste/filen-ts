@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // uniffi-bindgen-react-native declares "type": "module" but ships CJS code,
 // breaking Node imports. The real UniffiEnum is just an empty class with a

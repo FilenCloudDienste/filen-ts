@@ -1,4 +1,5 @@
 import { UniffiEnum } from "uniffi-bindgen-react-native"
+import logger from "@/lib/logger"
 
 const uniffiTypeNameSymbol = Symbol.for("typeName")
 
@@ -459,7 +460,9 @@ export function deserializeRouteParam<T>(serialized: string | undefined | null):
 
 	try {
 		return deserialize(serialized) as T
-	} catch {
+	} catch (e) {
+		logger.warn("serializer", "deserializeRouteParam failed — returning null", { inputLength: serialized.length, error: String(e) })
+
 		return null
 	}
 }

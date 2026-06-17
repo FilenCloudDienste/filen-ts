@@ -162,7 +162,11 @@ const contacts = {
 						signal
 					}
 				: undefined
-		)
+		).catch(e => {
+			logger.error("contacts", "getContacts refresh failed after successful unblock; unblock did complete server-side", { uuid, error: e instanceof Error ? e.message : String(e) })
+
+			throw e
+		})
 
 		contactsQueryUpdate({
 			updater: prev => ({
