@@ -19,6 +19,7 @@ import useIsOnline from "@/hooks/useIsOnline"
 import { reloadAppAsync } from "expo"
 import { ErrorKind } from "@filen/sdk-rs"
 import { isValidEmail } from "@/features/auth/utils"
+import logger from "@/lib/logger"
 
 function isTwoFactorRequiredError(error: unknown): boolean {
 	const unwrapped = unwrapSdkError(error)
@@ -59,7 +60,7 @@ const Login = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.warn("auth", "app reload after login failed", { error: String(result.error) })
 			alerts.error(result.error)
 
 			return
@@ -79,7 +80,7 @@ const Login = () => {
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.warn("auth", "two-factor prompt failed", { error: String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return null
@@ -116,7 +117,7 @@ const Login = () => {
 		}
 
 		if (!isTwoFactorRequiredError(firstAttempt.error)) {
-			console.error(firstAttempt.error)
+			logger.warn("auth", "login failed", { error: String(firstAttempt.error) })
 			alerts.error(firstAttempt.error)
 
 			return
@@ -150,7 +151,7 @@ const Login = () => {
 			// A 2FA error after a code was submitted means it was wrong/expired → re-prompt with a
 			// hint. Any other failure is real → surface it and stop.
 			if (!isTwoFactorRequiredError(attempt.error)) {
-				console.error(attempt.error)
+				logger.warn("auth", "login with 2FA failed", { error: String(attempt.error) })
 				alerts.error(attempt.error)
 
 				return
@@ -180,7 +181,7 @@ const Login = () => {
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.warn("auth", "reset password prompt failed", { error: String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return
@@ -203,7 +204,7 @@ const Login = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.warn("auth", "password reset request failed", { error: String(result.error) })
 			alerts.error(result.error)
 
 			return

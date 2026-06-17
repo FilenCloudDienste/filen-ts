@@ -11,6 +11,7 @@ import { buildEventDetails } from "@/features/events/eventDetails"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 import DetailRow from "@/components/ui/detailRow"
+import logger from "@/lib/logger"
 
 const EventInfo = () => {
 	const { event: eventSerialized } = useLocalSearchParams<{
@@ -23,6 +24,8 @@ const EventInfo = () => {
 	const event = deserializeRouteParam<UserEvent>(eventSerialized)
 
 	if (!event) {
+		logger.warn("events", "event detail param missing or corrupt — dismissing", { paramPresent: !!eventSerialized, paramLength: eventSerialized?.length })
+
 		return <DismissStack />
 	}
 

@@ -18,6 +18,7 @@ import { eventKindToReadable } from "@/features/events/eventDetails"
 import { serialize } from "@/lib/serializer"
 import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
+import logger from "@/lib/logger"
 
 const ON_END_REACHED_THRESHOLD = 0.5
 
@@ -139,7 +140,7 @@ const Events = () => {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("events", "pull-to-refresh failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 							alerts.error(result.error)
 						}
 					}}
@@ -198,6 +199,7 @@ const Events = () => {
 							const { newOk, terminate } = computeNextPage(existingOkIds, next)
 
 							if (terminate) {
+								logger.warn("events", "pagination page had no new decryptable events — terminating", { pageSize: next.length, errCount: next.filter(e => e.tag !== UserEventResult_Tags.Ok).length, existingOkCount: existingOkIds.size })
 								setHasMore(false)
 
 								return
@@ -211,7 +213,7 @@ const Events = () => {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("events", "pagination fetch failed", { timestamp: oldest.inner[0].timestamp?.toString(), error: result.error instanceof Error ? result.error.message : String(result.error) })
 							alerts.error(result.error)
 						}
 					}}

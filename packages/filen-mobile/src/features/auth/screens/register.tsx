@@ -16,6 +16,7 @@ import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useIsOnline from "@/hooks/useIsOnline"
 import { isValidEmail } from "@/features/auth/utils"
+import logger from "@/lib/logger"
 
 type PasswordStrength = ReturnType<typeof ratePasswordStrength>["strength"]
 
@@ -75,7 +76,7 @@ const Register = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.warn("auth", "registration failed", { error: String(result.error) })
 			alerts.error(result.error)
 
 			return
@@ -103,7 +104,7 @@ const Register = () => {
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.warn("auth", "resend confirmation prompt failed", { error: String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return
@@ -126,7 +127,7 @@ const Register = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.warn("auth", "resend confirmation email failed", { error: String(result.error) })
 			alerts.error(result.error)
 
 			return

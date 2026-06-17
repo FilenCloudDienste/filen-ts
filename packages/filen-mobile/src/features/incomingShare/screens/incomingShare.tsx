@@ -24,6 +24,7 @@ import Image from "@/components/ui/image"
 import { getPreviewType } from "@/lib/previewType"
 import { FileIcon } from "@/components/itemIcons"
 import ListRow from "@/components/ui/listRow"
+import logger from "@/lib/logger"
 
 function Payload({ payload }: { payload: ResolvedSharePayload }) {
 	const previewType =
@@ -134,7 +135,7 @@ function IncomingShare() {
 			})
 
 			if (!selectResult.success) {
-				console.error(selectResult.error)
+				logger.error("incomingShare", "failed to open directory picker", { error: selectResult.error instanceof Error ? selectResult.error.message : String(selectResult.error) })
 				alerts.error(selectResult.error)
 
 				return
@@ -165,6 +166,8 @@ function IncomingShare() {
 			})()
 
 			if (!remoteDir) {
+				logger.warn("incomingShare", "selected directory not found in cache, upload aborted", { uuid: selectedItem.type !== "root" ? selectedItem.data.data.uuid : null })
+
 				return
 			}
 
@@ -172,6 +175,8 @@ function IncomingShare() {
 				return await Promise.all(
 					payloads.map(async payload => {
 						if (!payload.contentUri || !payload.originalName) {
+							logger.warn("incomingShare", "payload missing contentUri or originalName, skipping", { contentUri: payload.contentUri ?? null, originalName: payload.originalName ?? null })
+
 							return null
 						}
 
@@ -200,7 +205,7 @@ function IncomingShare() {
 			})
 
 			if (!assetsResult.success) {
-				console.error(assetsResult.error)
+				logger.error("incomingShare", "failed to copy share payloads to tmp dir", { error: assetsResult.error instanceof Error ? assetsResult.error.message : String(assetsResult.error), payloadCount: payloads.length })
 				alerts.error(assetsResult.error)
 
 				return
@@ -238,7 +243,7 @@ function IncomingShare() {
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("incomingShare", "upload of shared files failed", { error: result.error instanceof Error ? result.error.message : String(result.error), assetCount: assets.length })
 				alerts.error(result.error)
 
 				return

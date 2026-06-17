@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // computeNextPage imports UserEventResult_Tags from @filen/sdk-rs.
 // The native binding is not available in the test environment, so we stub the
