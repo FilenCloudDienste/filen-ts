@@ -12,6 +12,7 @@ import alerts from "@/lib/alerts"
 import { useRouter } from "expo-router"
 import { Paths } from "expo-file-system"
 import { useTranslation } from "react-i18next"
+import logger from "@/lib/logger"
 
 export type TagMenuOrigin = "tags"
 
@@ -48,7 +49,7 @@ const Menu = ({
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("notes", "create note in tag prompt failed", { error: result.error, tagUuid: tag.uuid })
 			alerts.error(result.error)
 
 			return
@@ -73,7 +74,7 @@ const Menu = ({
 		})
 
 		if (!createResult.success) {
-			console.error(createResult.error)
+			logger.error("notes", "create note in tag failed", { error: createResult.error, tagUuid: tag.uuid })
 			alerts.error(createResult.error)
 
 			return
@@ -108,7 +109,7 @@ const Menu = ({
 					})
 
 					if (!promptResult.success) {
-						console.error(promptResult.error)
+						logger.error("notes", "delete tag confirm prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
 						alerts.error(promptResult.error)
 
 						return
@@ -125,7 +126,7 @@ const Menu = ({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("notes", "delete tag failed", { error: result.error, tagUuid: tag.uuid })
 						alerts.error(result.error)
 
 						return
@@ -222,7 +223,7 @@ const Menu = ({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("notes", "set tag favorited failed", { error: result.error, tagUuid: tag.uuid })
 					alerts.error(result.error)
 
 					return
@@ -247,7 +248,7 @@ const Menu = ({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.error("notes", "rename tag prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
 					alerts.error(promptResult.error)
 
 					return
@@ -271,7 +272,7 @@ const Menu = ({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("notes", "rename tag failed", { error: result.error, tagUuid: tag.uuid })
 					alerts.error(result.error)
 
 					return
@@ -297,7 +298,7 @@ const Menu = ({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.error("notes", "delete tag confirm prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
 					alerts.error(promptResult.error)
 
 					return
@@ -314,7 +315,7 @@ const Menu = ({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("notes", "delete tag failed", { error: result.error, tagUuid: tag.uuid })
 					alerts.error(result.error)
 
 					return

@@ -24,6 +24,7 @@ import ParticipantList from "@/components/participants/participantList"
 import { type ParticipantRowProps } from "@/components/participants/participantRow"
 import useIsOnline from "@/hooks/useIsOnline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import logger from "@/lib/logger"
 import { contactsQueryGet } from "@/features/contacts/queries/useContacts.query"
 import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
 
@@ -109,7 +110,7 @@ const NoteParticipants = () => {
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("notes", "set participant permission failed", { error: result.error, noteUuid: note.uuid, userId: participant.userId })
 								alerts.error(result.error)
 
 								return
@@ -139,7 +140,7 @@ const NoteParticipants = () => {
 									})
 
 									if (!promptResponse.success) {
-										console.error(promptResponse.error)
+										logger.error("notes", "remove participant prompt failed", { error: promptResponse.error, noteUuid: note.uuid, userId: participant.userId })
 										alerts.error(promptResponse.error)
 
 										return
@@ -157,7 +158,7 @@ const NoteParticipants = () => {
 									})
 
 									if (!result.success) {
-										console.error(result.error)
+										logger.error("notes", "remove participant failed", { error: result.error, noteUuid: note.uuid, userId: participant.userId })
 										alerts.error(result.error)
 
 										return
@@ -351,7 +352,7 @@ const NoteParticipants = () => {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("notes", "add participants failed", { error: result.error, noteUuid: note.uuid })
 							alerts.error(result.error)
 
 							return

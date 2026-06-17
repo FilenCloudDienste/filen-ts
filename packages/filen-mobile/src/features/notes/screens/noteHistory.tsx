@@ -27,6 +27,7 @@ import Icon from "@/features/notes/components/note/icon"
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 import ListRow from "@/components/ui/listRow"
+import logger from "@/lib/logger"
 
 const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 	const { t } = useTranslation()
@@ -85,7 +86,7 @@ const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 								})
 
 								if (!promptResponse.success) {
-									console.error(promptResponse.error)
+									logger.error("notes", "restore history prompt failed", { error: promptResponse.error, noteUuid: note.uuid })
 									alerts.error(promptResponse.error)
 
 									return
@@ -103,7 +104,7 @@ const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 								})
 
 								if (!result.success) {
-									console.error(result.error)
+									logger.error("notes", "restore from history failed", { error: result.error, noteUuid: note.uuid })
 									alerts.error(result.error)
 
 									return
@@ -235,7 +236,7 @@ const NoteHistory = () => {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("notes", "note history refresh failed", { error: result.error })
 							alerts.error(result.error)
 						}
 					}}

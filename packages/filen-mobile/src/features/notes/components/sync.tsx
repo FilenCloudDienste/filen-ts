@@ -12,6 +12,7 @@ import sqlite from "@/lib/sqlite"
 import { fetchData as notesWithContentQueryFetch, notesWithContentQueryGet } from "@/features/notes/queries/useNotesWithContent.query"
 import { noteContentQueryUpdate, noteContentQueryDataUpdatedAt } from "@/features/notes/queries/useNoteContent.query"
 import { unwrapSdkError, isNetworkClassError, isRetryableAuthError } from "@/lib/sdkErrors"
+import logger from "@/lib/logger"
 
 // D3: cheap stable content hash used for overwrite-conflict DETECTION (same xxHash32 the
 // fileCache/cameraUpload dedup paths use). Persisted inside inflight entries as
@@ -178,14 +179,14 @@ export class Sync {
 			})
 
 			if (!reconcile.success) {
-				console.error("Error reconciling note sync against cloud:", reconcile.error)
+				logger.warn("notes-sync", "cloud reconcile after restore failed; stale inflight entries may persist", { error: String(reconcile.error) })
 			}
 
 			return true
 		})
 
 		if (!result.success) {
-			console.error("Error initializing note sync:", result.error)
+			logger.error("notes-sync", "restoreFromDisk failed; unsaved edits from previous session may be lost", { error: String(result.error) })
 		}
 
 		this.resolveInit()
@@ -219,7 +220,7 @@ export class Sync {
 		})
 
 		if (!result.success) {
-			console.error("Error flushing note sync to disk:", result.error)
+			logger.error("notes-sync", "flushToDisk failed; in-flight edit not persisted", { error: String(result.error) })
 		}
 
 		return result.success
@@ -319,8 +320,9 @@ export class Sync {
 							overwritesNewerRemoteContent =
 								hashNoteContent(cloudContent) !== mostRecentContent.baseContentHash &&
 								cloudContent !== mostRecentContent.content
-						} catch {
-							// Availability beats the toast — push without the check, add no errors.
+						} catch (e) {
+							// Availability beats the toast — push without the check.
+							logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", { noteUuid, error: String(e) })
 						}
 					}
 
@@ -367,10 +369,7 @@ export class Sync {
 						if (rejections < MAX_NON_RETRYABLE_REJECTIONS) {
 							this.nonRetryableRejections.set(noteUuid, rejections)
 
-							console.error(
-								`[NotesSync] Non-network rejection ${rejections}/${MAX_NON_RETRYABLE_REJECTIONS} for note ${noteUuid}; keeping inflight for retry:`,
-								e
-							)
+							logger.warn("notes-sync", "non-retryable SDK rejection on setContent; will retry", { noteUuid, rejections, maxRejections: MAX_NON_RETRYABLE_REJECTIONS, error: e })
 
 							throw e
 						}
@@ -387,10 +386,7 @@ export class Sync {
 							return updated
 						})
 
-						console.error(
-							`[NotesSync] Dropping inflight content for note ${noteUuid} after ${rejections} consecutive non-retryable errors:`,
-							e
-						)
+						logger.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", { noteUuid, rejections, error: e })
 
 						return
 					}
@@ -465,7 +461,7 @@ export class Sync {
 
 			for (const r of results) {
 				if (r.status === "rejected") {
-					console.error("[NotesSync] Failed to sync note:", r.reason)
+					logger.error("notes-sync", "failed to sync note in pass", { reason: String(r.reason) })
 				}
 			}
 
@@ -483,7 +479,7 @@ export class Sync {
 				return
 			}
 
-			console.error(result.error)
+			logger.error("notes-sync", "sync pass failed unexpectedly", { error: String(result.error) })
 			alerts.error(result.error)
 		}
 	}
@@ -492,7 +488,7 @@ export class Sync {
 		this.syncTimeout?.cancel()
 
 		this.syncTimeout = createExecutableTimeout(() => {
-			this.sync().catch(console.error)
+			this.sync().catch(e => logger.error("notes-sync", "unhandled exception in debounced sync", { error: String(e) }))
 		}, 3000)
 	}
 
@@ -512,7 +508,7 @@ export class Sync {
 			return
 		}
 
-		this.sync().catch(console.error)
+		this.sync().catch(e => logger.error("notes-sync", "unhandled exception in executeNow sync", { error: String(e) }))
 	}
 }
 

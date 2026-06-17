@@ -21,6 +21,7 @@ import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { withSystemPresentation } from "@/lib/systemPresentation"
+import logger from "@/lib/logger"
 
 type NotesViewMode = "notes" | "tags"
 
@@ -168,7 +169,7 @@ export function buildNotesHeaderRightItems({
 									})
 
 									if (!documentPickerResult.success) {
-										console.error(documentPickerResult.error)
+										logger.error("notes", "import note document picker failed", { error: documentPickerResult.error })
 										alerts.error(documentPickerResult.error)
 
 										return
@@ -210,7 +211,7 @@ export function buildNotesHeaderRightItems({
 									})
 
 									if (!promptResult.success) {
-										console.error(promptResult.error)
+										logger.error("notes", "import note name prompt failed", { error: promptResult.error })
 										alerts.error(promptResult.error)
 
 										return
@@ -235,7 +236,7 @@ export function buildNotesHeaderRightItems({
 									})
 
 									if (!createResult.success) {
-										console.error(createResult.error)
+										logger.error("notes", "import note from file failed", { error: createResult.error })
 										alerts.error(createResult.error)
 
 										return
@@ -367,7 +368,7 @@ export function buildNotesHeaderRightItems({
 						})
 
 						if (!exportResult.success) {
-							console.error(exportResult.error)
+							logger.error("notes", "bulk export notes failed", { error: exportResult.error })
 							alerts.error(exportResult.error)
 
 							return
@@ -384,7 +385,7 @@ export function buildNotesHeaderRightItems({
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("notes", "share bulk exported notes failed", { error: result.error })
 							alerts.error(result.error)
 
 							return

@@ -20,6 +20,7 @@ import { shareTmpFile } from "@/lib/share"
 import { serialize } from "@/lib/serializer"
 import { t } from "@/lib/i18n"
 import * as Clipboard from "expo-clipboard"
+import logger from "@/lib/logger"
 
 export type NoteMenuOrigin = "notes" | "search" | "content"
 
@@ -145,7 +146,7 @@ export function createMenuButtons({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("notes", "restore undecryptable note failed", { error: result.error, noteUuid: note.uuid })
 						alerts.error(result.error)
 
 						return
@@ -233,7 +234,7 @@ export function createMenuButtons({
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("notes", "set note pinned failed", { error: result.error, noteUuid: note.uuid })
 				alerts.error(result.error)
 
 				return
@@ -255,7 +256,7 @@ export function createMenuButtons({
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("notes", "set note favorited failed", { error: result.error, noteUuid: note.uuid })
 				alerts.error(result.error)
 
 				return
@@ -302,7 +303,7 @@ export function createMenuButtons({
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("notes", "set note type failed", { error: result.error, noteUuid: note.uuid })
 								alerts.error(result.error)
 
 								return
@@ -348,7 +349,7 @@ export function createMenuButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.error("notes", "rename note prompt failed", { error: promptResult.error, noteUuid: note.uuid })
 					alerts.error(promptResult.error)
 
 					return
@@ -372,7 +373,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("notes", "rename note failed", { error: result.error, noteUuid: note.uuid })
 					alerts.error(result.error)
 
 					return
@@ -394,7 +395,7 @@ export function createMenuButtons({
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("notes", "duplicate note failed", { error: result.error, noteUuid: note.uuid })
 				alerts.error(result.error)
 
 				return
@@ -415,7 +416,7 @@ export function createMenuButtons({
 			})
 
 			if (!exportResult.success) {
-				console.error(exportResult.error)
+				logger.error("notes", "export note failed", { error: exportResult.error, noteUuid: note.uuid })
 				alerts.error(exportResult.error)
 
 				return
@@ -430,7 +431,7 @@ export function createMenuButtons({
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("notes", "share exported note failed", { error: result.error, noteUuid: note.uuid })
 				alerts.error(result.error)
 
 				return
@@ -451,7 +452,7 @@ export function createMenuButtons({
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("notes", "copy note content failed", { error: result.error, noteUuid: note.uuid })
 				alerts.error(result.error)
 
 				return
@@ -508,7 +509,7 @@ export function createMenuButtons({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("notes", "archive note failed", { error: result.error, noteUuid: note.uuid })
 						alerts.error(result.error)
 
 						return
@@ -531,7 +532,7 @@ export function createMenuButtons({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("notes", "restore note failed", { error: result.error, noteUuid: note.uuid })
 						alerts.error(result.error)
 
 						return

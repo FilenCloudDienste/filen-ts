@@ -7,6 +7,7 @@ import { router } from "expo-router"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import notesLib from "@/features/notes/notes"
+import logger from "@/lib/logger"
 
 export const createNoteFlow = async ({
 	t,
@@ -27,7 +28,7 @@ export const createNoteFlow = async ({
 	})
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.error("notes", "create note prompt failed", { error: result.error })
 		alerts.error(result.error)
 
 		return
@@ -52,7 +53,7 @@ export const createNoteFlow = async ({
 	})
 
 	if (!createResult.success) {
-		console.error(createResult.error)
+		logger.error("notes", "create note failed", { error: createResult.error })
 		alerts.error(createResult.error)
 
 		return
@@ -72,7 +73,7 @@ export const createTagFlow = async ({ t }: { t: TFunction }): Promise<void> => {
 	})
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.error("notes", "create tag prompt failed", { error: result.error })
 		alerts.error(result.error)
 
 		return
@@ -93,7 +94,7 @@ export const createTagFlow = async ({ t }: { t: TFunction }): Promise<void> => {
 	})
 
 	if (!createResult.success) {
-		console.error(createResult.error)
+		logger.error("notes", "create tag failed", { error: createResult.error })
 		alerts.error(createResult.error)
 
 		return

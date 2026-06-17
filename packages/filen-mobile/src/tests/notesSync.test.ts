@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
+import logger from "@/lib/logger"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const {
 	kvStore,
@@ -461,6 +463,8 @@ describe("Sync (Notes)", () => {
 
 				vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
 
+				vi.mocked(logger.error).mockClear()
+
 				const flushed = await sync.flushToDisk({
 					"note-1": [{ timestamp: 1000, content: "hello", note: mockNote("note-1") }]
 				})
@@ -468,7 +472,7 @@ describe("Sync (Notes)", () => {
 				// flushToDisk must not propagate the error — it reports failure as `false`
 				// so component call sites can alert (sync-internal callers ignore it).
 				expect(flushed).toBe(false)
-				expect(consoleSpy).toHaveBeenCalledWith("Error flushing note sync to disk:", expect.any(Error))
+				expect(logger.error).toHaveBeenCalled()
 			} finally {
 				consoleSpy.mockRestore()
 			}

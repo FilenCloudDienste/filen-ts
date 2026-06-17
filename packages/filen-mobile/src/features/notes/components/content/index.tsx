@@ -23,6 +23,7 @@ import prompts from "@/lib/prompts"
 import { sync, hashNoteContent } from "@/features/notes/components/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 import { useTranslation } from "react-i18next"
 import { useChecklistHideCompleted } from "@/features/notes/checklistView"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -352,7 +353,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			})
 
 			if (!promptResponse.success) {
-				console.error(promptResponse.error)
+				logger.error("notes", "reload-remote-edit prompt failed", { error: promptResponse.error })
 				alerts.error(promptResponse.error)
 
 				return
@@ -385,7 +386,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("notes", "reload remote edit failed", { error: result.error, noteUuid: note.uuid })
 				alerts.error(result.error)
 
 				return

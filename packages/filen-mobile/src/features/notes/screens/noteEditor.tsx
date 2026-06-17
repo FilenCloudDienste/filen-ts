@@ -27,6 +27,7 @@ import { NoteType } from "@filen/sdk-rs"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
 import { useTranslation } from "react-i18next"
+import logger from "@/lib/logger"
 
 const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }) => {
 	const { t } = useTranslation()
@@ -111,7 +112,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 									})
 
 									if (!result.success) {
-										console.error(result.error)
+										logger.error("notes", "restore from history prompt failed", { error: result.error, noteUuid: note.uuid })
 										alerts.error(result.error)
 
 										return
@@ -129,7 +130,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 									})
 
 									if (!restoreResult.success) {
-										console.error(restoreResult.error)
+										logger.error("notes", "restore from history failed", { error: restoreResult.error, noteUuid: note.uuid })
 										alerts.error(restoreResult.error)
 
 										return

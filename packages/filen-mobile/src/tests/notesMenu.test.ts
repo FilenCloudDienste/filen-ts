@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // NoteType is a NUMERIC enum in the RN uniffi runtime the app actually runs
 // (@filen/sdk-rs/src/generated/filen_types.ts: Text=0, Md=1, Code=2, Rich=3, Checklist=4),

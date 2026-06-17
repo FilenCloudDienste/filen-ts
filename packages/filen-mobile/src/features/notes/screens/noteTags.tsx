@@ -27,6 +27,7 @@ import { useTranslation } from "react-i18next"
 import { computeTagState } from "@/features/notes/utils"
 import { createTagFlow } from "@/features/notes/components/notesActions"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 
 const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] }) => {
 	const { t } = useTranslation()
@@ -88,7 +89,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("notes", "toggle tag on note failed", { error: result.error, tagUuid: tag.uuid })
 							alerts.error(result.error)
 
 							return
@@ -111,7 +112,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 						})
 
 						if (!promptResult.success) {
-							console.error(promptResult.error)
+							logger.error("notes", "rename tag prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
 							alerts.error(promptResult.error)
 
 							return
@@ -135,7 +136,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("notes", "rename tag failed", { error: result.error, tagUuid: tag.uuid })
 							alerts.error(result.error)
 
 							return
@@ -160,7 +161,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 						})
 
 						if (!promptResponse.success) {
-							console.error(promptResponse.error)
+							logger.error("notes", "delete tag confirm prompt failed", { error: promptResponse.error, tagUuid: tag.uuid })
 							alerts.error(promptResponse.error)
 
 							return
@@ -177,7 +178,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("notes", "delete tag failed", { error: result.error, tagUuid: tag.uuid })
 							alerts.error(result.error)
 
 							return
