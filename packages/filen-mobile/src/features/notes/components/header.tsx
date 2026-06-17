@@ -121,6 +121,10 @@ export const Header = ({
 				return t("selected", { count: selectedNotes.length })
 			}
 
+			if (tag) {
+				return tag.name ?? tag.uuid
+			}
+
 			return t("notes")
 		} else {
 			if (selectedTags.length > 0) {
