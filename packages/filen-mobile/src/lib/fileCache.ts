@@ -15,6 +15,7 @@ import offline from "@/features/offline/offline"
 import { xxHash32 } from "js-xxhash"
 import { FILE_CACHE_VERSION, FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 import { planSizeCapEviction, CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import logger from "@/lib/logger"
 
 export type Metadata = (
 	| {
@@ -105,7 +106,7 @@ export class FileCache {
 	private readonly scheduleGc = debounce(
 		() => {
 			this.gc().catch(err => {
-				console.error("[FileCache] gc failed", err)
+				logger.warn("fileCache", "gc failed", { error: String(err) })
 			})
 		},
 		GC_DEBOUNCE_MS,
@@ -122,7 +123,7 @@ export class FileCache {
 				this.scheduleGc.cancel()
 
 				this.gc().catch(err => {
-					console.error("[FileCache] gc failed", err)
+					logger.warn("fileCache", "gc on background failed", { error: String(err) })
 				})
 			}
 		})
@@ -212,7 +213,7 @@ export class FileCache {
 			try {
 				metadataContent = deserialize(await metadata.text()) as Metadata
 			} catch (e) {
-				console.error(e)
+				logger.warn("fileCache", "sidecar parse failed in has", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: String(e) })
 
 				// Torn/unparseable sidecar (crash mid-write before sidecars became atomic,
 				// disk corruption): self-heal at access time — treat as a miss and drop the
@@ -280,7 +281,7 @@ export class FileCache {
 						return file
 					}
 				} catch (e) {
-					console.error(e)
+					logger.warn("fileCache", "sidecar parse failed in get, re-downloading", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: String(e) })
 
 					if (metadataFile.exists) {
 						metadataFile.delete()
@@ -366,6 +367,8 @@ export class FileCache {
 				if (parentDirectory.exists) {
 					parentDirectory.delete()
 				}
+
+				logger.error("fileCache", "file download/cache failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item as Extract<CacheItem, { type: "external" }>), error: String(e) })
 
 				throw e
 			}
@@ -470,6 +473,7 @@ export class FileCache {
 				} else if (entry instanceof FileSystem.Directory) {
 					// A read/parse failure for a well-shaped directory means the entry is corrupted —
 					// schedule it for deletion so a future gc/clear can recover.
+					logger.warn("fileCache", "gc inspection failed for entry, scheduling delete", { uuid: entry.name })
 					toDelete.push(entry.name)
 				}
 			})

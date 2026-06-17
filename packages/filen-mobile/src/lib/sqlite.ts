@@ -4,6 +4,7 @@ import { AppState } from "react-native"
 import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
+import logger from "@/lib/logger"
 
 // Critical: When changing anything related to the on-disk database file format, bump SQLITE_VERSION in storageRoots.ts to invalidate old databases and prevent potential issues from stale or incompatible data.
 export const VERSION = SQLITE_VERSION
@@ -87,6 +88,10 @@ class Sqlite {
 				await db.execute("PRAGMA wal_checkpoint(PASSIVE)")
 				await db.execute("PRAGMA incremental_vacuum(64)")
 				await db.execute("PRAGMA optimize")
+			}).then(result => {
+				if (!result.success) {
+					logger.warn("sqlite", "Background maintenance failed", { error: String(result.error) })
+				}
 			})
 		})
 	}
@@ -102,6 +107,8 @@ class Sqlite {
 
 			if (!result.success) {
 				attempt++
+
+				logger.warn("sqlite", "DB init attempt failed, retrying", { attempt, error: String(result.error) })
 
 				if (attempt >= OPEN_DB_MAX_ATTEMPTS) {
 					throw result.error
@@ -177,7 +184,7 @@ class Sqlite {
 			await db.execute("PRAGMA incremental_vacuum")
 			await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 		} catch (err) {
-			console.error("[Sqlite] Post-wipe reclaim failed", err)
+			logger.warn("sqlite", "Post-wipe reclaim failed — freed pages may persist on disk", { error: String(err) })
 		}
 	}
 
@@ -271,7 +278,7 @@ class Sqlite {
 				try {
 					map.set(row[0] as string, deserialize(row[1] as string) as T)
 				} catch (e) {
-					console.error(`[Sqlite] Failed to deserialize value for key ${row[0] as string}`, e)
+					logger.warn("sqlite", "KV row deserialization failed", { key: row[0] as string, error: String(e) })
 				}
 			}
 

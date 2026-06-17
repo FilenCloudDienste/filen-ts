@@ -26,6 +26,7 @@
  * persisted-query shape, serializer-passthrough heavy).
  */
 import { describe, it, expect, afterAll, vi } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 import { writeFileSync } from "node:fs"
 
 const H = vi.hoisted(() => {

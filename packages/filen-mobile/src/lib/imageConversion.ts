@@ -4,6 +4,7 @@ import { randomUUID } from "expo-crypto"
 import { newTmpFile } from "@/lib/tmp"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import secureStore from "@/lib/secureStore"
+import logger from "@/lib/logger"
 
 // HEIC/HEIF file extensions (Apple's High Efficiency Image formats + their
 // multi-image burst variants). Lowercased; matched against the trailing extension.
@@ -85,7 +86,7 @@ export async function convertHeicToJpg(file: FileSystem.File): Promise<FileSyste
 
 		return target
 	} catch (e) {
-		console.error("[convertHeicToJpg]", e)
+		logger.warn("cameraUpload", "HEIC to JPG conversion failed, uploading original", { uri: file.uri, error: e instanceof Error ? e.message : String(e) })
 
 		return file
 	}

@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import { newTmpFile } from "@/lib/tmp"
+import logger from "@/lib/logger"
 
 /**
  * Write data to a file atomically using write-to-temp-then-move.
@@ -28,6 +29,8 @@ export function atomicWrite(file: FileSystem.File, data: string | Uint8Array): F
 		if (tmp.exists) {
 			tmp.delete()
 		}
+
+		logger.error("fsAtomic", "atomicWrite moveSync failed", { dest: file.uri, error: String(e) })
 
 		throw e
 	}

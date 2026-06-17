@@ -22,6 +22,7 @@ import {
 import offline from "@/features/offline/offline"
 import { generateImage } from "@/lib/thumbnailsImage"
 import { generateVideo } from "@/lib/thumbnailsVideo"
+import logger from "@/lib/logger"
 
 export type ThumbnailParams = {
 	item: DriveItem
@@ -268,17 +269,7 @@ class Thumbnails {
 					!(result.error instanceof OfflineAbortError) &&
 					!(result.error instanceof ProviderUnavailableError)
 				) {
-					console.error(
-						"[Thumbnails] generation failed",
-						{
-							uuid: params.uuid,
-							ext: params.ext,
-							isImage: params.isImage,
-							isVideo: params.isVideo,
-							platform: Platform.OS
-						},
-						result.error
-					)
+					logger.error("thumbnails", "generation failed", { uuid: params.uuid, ext: params.ext, isImage: params.isImage, isVideo: params.isVideo, platform: Platform.OS, error: String(result.error) })
 
 					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
 				}
@@ -343,6 +334,7 @@ class Thumbnails {
 		}
 
 		if ((this.failures.get(params.uuid) ?? 0) >= MAX_FAILURES) {
+			logger.warn("thumbnails", "thumbnail generation blacklisted (max failures reached)", { uuid: params.uuid })
 			return null
 		}
 
@@ -403,17 +395,7 @@ class Thumbnails {
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
 				if (!params.signal?.aborted && !(error instanceof OfflineAbortError) && !(error instanceof ProviderUnavailableError)) {
-					console.error(
-						"[Thumbnails] generateFromLocalFile failed",
-						{
-							uuid: params.uuid,
-							ext,
-							isImage,
-							isVideo,
-							platform: Platform.OS
-						},
-						error
-					)
+					logger.error("thumbnails", "generateFromLocalFile failed", { uuid: params.uuid, ext, isImage, isVideo, platform: Platform.OS, error: String(error) })
 
 					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
 				}
@@ -438,6 +420,7 @@ class Thumbnails {
 		const result = await run(async () => await promise)
 
 		if (!result.success) {
+			logger.warn("thumbnails", "generateFromLocalFile run wrapper failed", { uuid: params.uuid, error: String(result.error) })
 			return null
 		}
 

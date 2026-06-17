@@ -4,6 +4,7 @@ import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import { router } from "expo-router"
 import { t } from "@/lib/i18n"
+import logger from "@/lib/logger"
 
 // Shared shape for confirmed destructive actions across features (delete/leave/trash/remove):
 // prompt → guard cancel → runWithLoading(action) → guard failure → optionally pop back on
@@ -41,7 +42,7 @@ export function confirmedAction({
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.warn("confirmedAction", "prompt threw unexpectedly", { error: String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return
@@ -56,7 +57,7 @@ export function confirmedAction({
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("confirmedAction", "action failed", { error: String(result.error) })
 			alerts.error(result.error)
 
 			return

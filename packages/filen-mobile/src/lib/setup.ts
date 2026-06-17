@@ -31,7 +31,7 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
 	const start = performance.now()
 	const result = await fn()
 
-	console.log(`[Setup] ${label} in ${(performance.now() - start).toFixed(2)}ms`)
+	logger.debug("setup", `${label} completed`, { durationMs: (performance.now() - start).toFixed(2) })
 
 	return result
 }
@@ -124,7 +124,7 @@ const setup = {
 
 			const duration = performance.now() - now
 
-			console.log(`[Setup] Completed in ${duration.toFixed(2)}ms`)
+			logger.info("setup", "Setup completed", { durationMs: duration.toFixed(2) })
 
 			return {
 				isAuthed: isAuthed.isAuthed

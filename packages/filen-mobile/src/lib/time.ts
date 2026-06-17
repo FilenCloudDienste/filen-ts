@@ -1,5 +1,6 @@
 import * as ExpoLocalization from "expo-localization"
 import { type TFunction } from "i18next"
+import logger from "@/lib/logger"
 
 export let intlLanguage: string = "en-US"
 
@@ -9,7 +10,7 @@ try {
 			.filter(lang => lang.languageTag)
 			.at(0)?.languageTag ?? "en-US"
 } catch (e) {
-	console.error(e)
+	logger.warn("time", "Failed to read device locale", { error: String(e) })
 }
 
 // Keeps date/time formatting aligned with a runtime language switch. Resets the cached
