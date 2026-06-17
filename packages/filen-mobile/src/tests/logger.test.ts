@@ -397,6 +397,32 @@ describe("logger", () => {
 		})
 	})
 
+	describe("prod log-level default (constructor reads __DEV__)", () => {
+		it("narrows minLevel to 'warn' when __DEV__ === false (prod)", () => {
+			const g = globalThis as { __DEV__?: boolean }
+			const saved = g.__DEV__
+			g.__DEV__ = false
+
+			try {
+				expect(new Logger().minLevel).toBe("warn")
+			} finally {
+				g.__DEV__ = saved
+			}
+		})
+
+		it("keeps minLevel 'debug' in dev (__DEV__ === true)", () => {
+			const g = globalThis as { __DEV__?: boolean }
+			const saved = g.__DEV__
+			g.__DEV__ = true
+
+			try {
+				expect(new Logger().minLevel).toBe("debug")
+			} finally {
+				g.__DEV__ = saved
+			}
+		})
+	})
+
 	describe("purge", () => {
 		it("deletes all on-disk logs, clears buffers, and disables further logging", () => {
 			const logger = makeLogger()
