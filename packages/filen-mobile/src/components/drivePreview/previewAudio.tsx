@@ -179,11 +179,16 @@ function buildSliderTapGesture(sv: SliderSharedValues, trackWidth: number, seekT
 export const AudioSlider = ({
 	currentTime,
 	duration,
-	onSeek
+	onSeek,
+	themed = false
 }: {
 	currentTime: number
 	duration: number
 	onSeek: (seconds: number) => void
+	// When true, the track/fill/thumb follow the app theme (`foreground`) instead of assuming a
+	// dark media backdrop (white). Dark mode is identical either way (foreground === white);
+	// `themed` fixes light mode, where a white slider is invisible (e.g. the playlist toolbar).
+	themed?: boolean
 }) => {
 	const [trackWidth, setTrackWidth] = useState<number>(0)
 	const isSeeking = useSharedValue<boolean>(false)
@@ -239,6 +244,11 @@ export const AudioSlider = ({
 		}
 	})
 
+	// Dark mode: foreground === white, so these match the original white slider exactly. Light
+	// mode: foreground === black, so the track/fill/thumb stay visible (a white slider vanishes).
+	const trackColorClassName = themed ? "bg-foreground/20" : "bg-white/20"
+	const fillColorClassName = themed ? "bg-foreground" : "bg-white"
+
 	return (
 		<GestureDetector gesture={gesture}>
 			<View
@@ -251,13 +261,13 @@ export const AudioSlider = ({
 				}}
 			>
 				<View
-					className="w-full bg-white/20 rounded-full"
+					className={`w-full rounded-full ${trackColorClassName}`}
 					style={{
 						height: TRACK_HEIGHT
 					}}
 				>
 					<AnimatedView
-						className="bg-white rounded-full"
+						className={`rounded-full ${fillColorClassName}`}
 						style={[
 							{
 								height: TRACK_HEIGHT
@@ -267,7 +277,7 @@ export const AudioSlider = ({
 					/>
 				</View>
 				<AnimatedView
-					className="absolute bg-white rounded-full"
+					className={`absolute rounded-full ${fillColorClassName}`}
 					style={[
 						{
 							width: THUMB_SIZE,
