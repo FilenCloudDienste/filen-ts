@@ -67,10 +67,13 @@ describe("logRedaction", () => {
 			)
 		})
 
-		it("redacts a `queryKey` field (accepted over-redaction; key$ matches it)", () => {
-			const out = redact({ queryKey: ["drive", "uuid-123"], status: "error" }) as Record<string, unknown>
+		it("redacts a `queryKey` field (accepted over-redaction; key$ matches it) but keeps safe alternatives", () => {
+			const out = redact({ queryKey: ["drive", "uuid-123"], queryHash: "h:abc", rowId: "reactQuery_v1:xyz", status: "error" }) as Record<string, unknown>
 
 			expect(out["queryKey"]).toBe("[redacted]")
+			// queryHash / rowId are the non-secret-matching names used for diagnostic identifiers (key/queryKey are redacted).
+			expect(out["queryHash"]).toBe("h:abc")
+			expect(out["rowId"]).toBe("reactQuery_v1:xyz")
 			expect(out["status"]).toBe("error")
 		})
 	})

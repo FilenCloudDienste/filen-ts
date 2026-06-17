@@ -278,7 +278,7 @@ class Sqlite {
 				try {
 					map.set(row[0] as string, deserialize(row[1] as string) as T)
 				} catch (e) {
-					logger.warn("sqlite", "KV row deserialization failed", { key: row[0] as string, error: String(e) })
+					logger.warn("sqlite", "KV row deserialization failed", { rowId: row[0] as string, error: String(e) })
 				}
 			}
 
