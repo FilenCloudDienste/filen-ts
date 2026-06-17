@@ -97,7 +97,10 @@ const GalleryHeader = ({
 								/>
 							</View>
 						) : (
-							<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+							<CrossGlassContainerView
+								className={cn("size-11 flex-row items-center justify-center", Platform.OS === "android" && "bg-zinc-900")}
+								theme={Platform.OS === "android" ? "dark" : undefined}
+							>
 								<Ionicons
 									name="close-outline"
 									size={30}
@@ -140,7 +143,13 @@ const GalleryHeader = ({
 											/>
 										</View>
 									) : (
-										<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+										<CrossGlassContainerView
+											className={cn(
+												"size-11 flex-row items-center justify-center",
+												Platform.OS === "android" && "bg-zinc-900"
+											)}
+											theme={Platform.OS === "android" ? "dark" : undefined}
+										>
 											<Ionicons
 												name="ellipsis-horizontal"
 												size={24}
@@ -177,7 +186,9 @@ const GalleryHeader = ({
 												})
 
 												if (!canOpenResult.success) {
-													logger.error("drivePreview", "canOpenURL failed for linked file", { error: canOpenResult.error })
+													logger.error("drivePreview", "canOpenURL failed for linked file", {
+														error: canOpenResult.error
+													})
 													alerts.error(canOpenResult.error)
 
 													return
@@ -223,7 +234,9 @@ const GalleryHeader = ({
 												})
 
 												if (!openResult.success) {
-													logger.error("drivePreview", "openURL failed for linked file", { error: openResult.error })
+													logger.error("drivePreview", "openURL failed for linked file", {
+														error: openResult.error
+													})
 													alerts.error(openResult.error)
 
 													return
@@ -232,7 +245,13 @@ const GalleryHeader = ({
 										}
 									]}
 								>
-									<CrossGlassContainerView className="size-11 flex-row items-center justify-center">
+									<CrossGlassContainerView
+										className={cn(
+											"size-11 flex-row items-center justify-center",
+											Platform.OS === "android" && "bg-zinc-900"
+										)}
+										theme={Platform.OS === "android" ? "dark" : undefined}
+									>
 										<Ionicons
 											name="ellipsis-horizontal"
 											size={24}

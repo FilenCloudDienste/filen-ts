@@ -137,15 +137,17 @@ export const CrossGlassContainerView = ({
 	className,
 	style,
 	disableLiquidGlass,
-	disableInteraction
+	disableInteraction,
+	theme
 }: {
 	children: React.ReactNode
 	className?: string
 	style?: StyleProp<ViewStyle>
 	disableLiquidGlass?: boolean
 	disableInteraction?: boolean
+	theme?: "dark" | "light"
 }) => {
-	const { theme } = useUniwind()
+	const { theme: uniwindTheme } = useUniwind()
 
 	if (Platform.OS === "ios" && !disableLiquidGlass) {
 		return (
@@ -166,7 +168,7 @@ export const CrossGlassContainerView = ({
 				style,
 				{
 					borderWidth: StyleSheet.hairlineWidth,
-					boxShadow: theme === "dark" ? FAKE_GLASS_BOX_SHADOW_DARK : FAKE_GLASS_BOX_SHADOW_LIGHT
+					boxShadow: theme === "dark" || uniwindTheme === "dark" ? FAKE_GLASS_BOX_SHADOW_DARK : FAKE_GLASS_BOX_SHADOW_LIGHT
 				}
 			]}
 		>
