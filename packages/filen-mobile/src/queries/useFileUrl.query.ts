@@ -10,6 +10,7 @@ import { type FileSource, fileSourceKey } from "@/queries/fileSource"
 import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
 import { waitForHttpProvider } from "@/lib/thumbnailsHelpers"
+import logger from "@/lib/logger"
 
 export const BASE_QUERY_KEY = "useFileUrlQuery"
 
@@ -28,7 +29,7 @@ function getFileUrlForItem(item: DriveItemFileExtracted, getFileUrl: (file: AnyF
 			}
 		}
 	} catch (e) {
-		console.error(e)
+		logger.warn("fileUrl", "getFileUrl threw for item", { error: e })
 
 		return null
 	}

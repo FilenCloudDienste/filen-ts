@@ -1,5 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
+import logger from "@/lib/logger"
 
 // Filen-owned temporary files live under FileSystem.Paths.cache/filen-tmp/ so the
 // sandbox-cache clear action (which wipes other-libs' detritus from Paths.cache) can
@@ -55,8 +56,8 @@ export function sweepTmpDir(): void {
 
 	try {
 		directory.delete()
-	} catch {
-		// best-effort
+	} catch (e) {
+		logger.warn("tmp", "sweepTmpDir delete failed", { error: String(e) })
 	}
 
 	ensured = false

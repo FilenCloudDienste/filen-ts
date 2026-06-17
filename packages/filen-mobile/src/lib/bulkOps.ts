@@ -2,6 +2,7 @@ import { run } from "@filen/utils"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
+import logger from "@/lib/logger"
 
 export type BulkActionConfirm = {
 	title: string
@@ -48,7 +49,7 @@ export async function runBulk<T>({ items, op, clearSelection, confirm }: BulkAct
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.warn("bulkOps", "confirm prompt threw unexpectedly", { error: String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return false
@@ -64,7 +65,7 @@ export async function runBulk<T>({ items, op, clearSelection, confirm }: BulkAct
 	})
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.error("bulkOps", "bulk operation failed", { error: String(result.error) })
 		alerts.error(result.error)
 
 		return false

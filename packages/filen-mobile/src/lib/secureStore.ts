@@ -13,6 +13,7 @@ import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { isEqual } from "es-toolkit"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import useEffectOnce from "@/hooks/useEffectOnce"
+import logger from "@/lib/logger"
 
 export const VERSION = 1
 
@@ -109,7 +110,7 @@ class SecureStore {
 		try {
 			this.ensureDirectories()
 		} catch (e) {
-			console.error("SecureStore: deferred directory creation", e)
+			logger.warn("secure-store", "Deferred directory creation failed at module init", { error: String(e) })
 		}
 
 		this.mmkv = createMMKV({
@@ -188,7 +189,8 @@ class SecureStore {
 
 		try {
 			this.available = await ExpoSecureStore.isAvailableAsync()
-		} catch {
+		} catch (e) {
+			logger.warn("secure-store", "ExpoSecureStore availability check threw — using MMKV fallback", { error: String(e) })
 			this.available = false
 		}
 
@@ -226,6 +228,7 @@ class SecureStore {
 			this.encryptionKey = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
 
 			if (!this.encryptionKey) {
+				logger.warn("secure-store", "Encryption key not found in keychain — generating new key (first-install or keychain loss)")
 				this.encryptionKey = crypto.randomBytes(32).toString("hex")
 
 				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, this.encryptionKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
@@ -318,7 +321,8 @@ class SecureStore {
 
 		try {
 			entries = parentDirectory.list()
-		} catch {
+		} catch (e) {
+			logger.warn("secure-store", "Backup recovery: parent directory listing failed", { error: String(e) })
 			return null
 		}
 
@@ -352,8 +356,9 @@ class SecureStore {
 				// missing/zero here, so a plain move is safe. Use fresh handles so the shared
 				// this.secureStoreFile identity is never mutated.
 				new FileSystem.File(file.uri).moveSync(new FileSystem.File(destinationUri))
-			} catch {
+			} catch (e) {
 				// Restore failed — leave the backup in place for the next attempt and continue.
+				logger.warn("secure-store", "Backup recovery: failed to promote backup to destination", { backupUri: file.uri, error: String(e) })
 				continue
 			}
 
@@ -403,7 +408,7 @@ class SecureStore {
 				// a fresh empty store: the cloud is the source of truth and everything in
 				// here is restored by re-login. A failed delete keeps the old conservative
 				// throw (cannot recover safely this boot — retry next launch).
-				console.error("[SecureStore] Destination payload undecryptable — attempting backup recovery", e)
+				logger.error("secure-store", "Destination payload failed AES-GCM authentication — entering recovery ladder", { error: String(e) })
 
 				try {
 					this.secureStoreFile.delete()
@@ -423,7 +428,7 @@ class SecureStore {
 					return data
 				}
 
-				console.error("[SecureStore] No recoverable backup — resetting to an empty store (re-login)")
+				logger.error("secure-store", "No recoverable backup found — store reset to empty, re-login required")
 
 				this.cleanupStaleSiblings()
 
@@ -474,7 +479,7 @@ class SecureStore {
 		})
 
 		if (!result.success) {
-			console.error("SecureStore: Error reading secure store:", result.error)
+			logger.error("secure-store", "Read degraded to null after IO/decrypt failure", { error: String(result.error) })
 
 			return null
 		}
@@ -607,8 +612,9 @@ class SecureStore {
 					if (backupFile.exists) {
 						try {
 							backupFile.moveSync(new FileSystem.File(destinationUri))
-						} catch {
+						} catch (restoreErr) {
 							// Best-effort restore; the backup is preserved below for manual recovery.
+							logger.error("secure-store", "Write swap failed AND backup restore failed — destination may be empty", { error: String(e), restoreError: String(restoreErr) })
 						}
 					}
 				}
@@ -826,7 +832,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		})
 
 		if (!result.success) {
-			console.error("Error fetching value from secureStore:", result.error)
+			logger.error("secure-store", "useSecureStore: retrieve failed", { key, error: String(result.error) })
 		}
 	}
 
@@ -851,7 +857,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 				isLocalUpdateRef.current = false
 
 				if (!result.success) {
-					console.error("Error setting value in secureStore:", result.error)
+					logger.error("secure-store", "useSecureStore: set failed", { key, error: String(result.error) })
 				}
 			})()
 		},
@@ -863,7 +869,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	}, [initialValue])
 
 	useEffectOnce(() => {
-		retrieve().catch(console.error)
+		retrieve().catch(err => logger.error("secure-store", "useSecureStore: initial retrieve threw", { key, error: String(err) }))
 	})
 
 	useEffect(() => {

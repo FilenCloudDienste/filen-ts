@@ -1,6 +1,7 @@
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo"
 import { onlineManager } from "@tanstack/react-query"
 import { AppState } from "react-native"
+import logger from "@/lib/logger"
 
 function computeOnline(state: NetInfoState): boolean {
 	return state.isConnected !== false && state.isInternetReachable !== false
@@ -17,5 +18,5 @@ AppState.addEventListener("change", nextAppState => {
 		return
 	}
 
-	NetInfo.refresh().catch(console.error)
+	NetInfo.refresh().catch(e => logger.warn("onlineStatus", "NetInfo.refresh failed", { error: e }))
 })

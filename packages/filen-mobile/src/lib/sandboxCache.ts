@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system"
 import { run } from "@filen/utils"
 import { walkLocalDirectory } from "@/lib/fsUtils"
 import { TMP_DIR_NAME } from "@/lib/tmp"
+import logger from "@/lib/logger"
 
 // Wraps the OS-managed sandbox cache directory (`FileSystem.Paths.cache`). The directory itself
 // is owned by the OS and must not be deleted — we only remove its children.
@@ -30,6 +31,7 @@ export const sandboxCache = {
 		try {
 			entries = directory.list()
 		} catch {
+			logger.warn("sandboxCache", "failed to list sandbox cache directory, clear aborted")
 			return
 		}
 

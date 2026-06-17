@@ -11,6 +11,7 @@ import { type DriveItem, type Note, type Chat } from "@/types"
 import sqlite, { prefixUpperBound } from "@/lib/sqlite"
 import { serialize, deserialize } from "@/lib/serializer"
 import { AppState } from "react-native"
+import logger from "@/lib/logger"
 
 // Critical: When changing anything related to storage index/store/persistence format, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
@@ -438,7 +439,7 @@ export class Cache {
 					return
 				}
 
-				console.log(`[Cache] Persisting ${commands.length} changes`)
+				logger.debug("cache", "Persisting changes (background)", { count: commands.length })
 
 				const db = await sqlite.openDb()
 
@@ -450,9 +451,9 @@ export class Cache {
 
 				await db.executeBatch(commands)
 
-				console.log(`[Cache] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
+				logger.debug("cache", "Background batch persisted", { durationMs: (performance.now() - now).toFixed(2) })
 			} catch (err) {
-				console.error("[Cache] Failed to batch persist", err)
+				logger.error("cache", "Background batch persist failed — mutations re-queued", { error: String(err) })
 
 				// The batch never landed — re-mark the drained keys so the next persist retries.
 				this.remarkFailedBatch(generation, drained)
@@ -541,7 +542,7 @@ export class Cache {
 				return
 			}
 
-			console.log(`[Cache] Persisting ${commands.length} changes`)
+			logger.debug("cache", "Persisting changes (async)", { count: commands.length })
 
 			const db = await sqlite.openDb()
 
@@ -551,9 +552,9 @@ export class Cache {
 
 			await db.executeBatch(commands)
 
-			console.log(`[Cache] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
+			logger.debug("cache", "Async batch persisted", { durationMs: (performance.now() - now).toFixed(2) })
 		} catch (err) {
-			console.error("[Cache] Failed to persist", err)
+			logger.error("cache", "Async batch persist failed — mutations re-queued", { error: String(err) })
 
 			// The batch never landed — re-mark the drained keys so the next persist retries.
 			this.remarkFailedBatch(generation, drained)
@@ -654,10 +655,10 @@ export class Cache {
 			if (result.status === "rejected") {
 				const { key } = this.registry[i] as MapEntry
 
-				console.error(`[Cache] Failed to restore ${key}, clearing corrupted data`, result.reason)
+				logger.error("cache", "Map restore failed — map cleared", { mapKey: key, error: String(result.reason) })
 
 				sqlite.kvAsync.removeByPrefix(key + ":").catch(removeErr => {
-					console.error(`[Cache] Failed to remove corrupted keys for ${key}`, removeErr)
+					logger.error("cache", "Failed to remove corrupted map rows from SQLite", { mapKey: key, error: String(removeErr) })
 				})
 			}
 		}
@@ -670,7 +671,7 @@ export class Cache {
 		this.locked = false
 		this.restored = true
 
-		console.log(`[Cache] Restored in ${(performance.now() - now).toFixed(2)}ms (${rowCounts.join(", ")})`)
+		logger.info("cache", "Cache restored", { durationMs: (performance.now() - now).toFixed(2), rowCounts: rowCounts.join(", ") })
 	}
 
 	public flush(): void {
@@ -774,7 +775,7 @@ export class Cache {
 
 		for (const { key } of this.registry) {
 			sqlite.kvAsync.removeByPrefix(key + ":").catch(err => {
-				console.error(`[Cache] Failed to remove ${key}`, err)
+				logger.error("cache", "Logout wipe: failed to remove map rows from SQLite", { mapKey: key, error: String(err) })
 			})
 		}
 	}

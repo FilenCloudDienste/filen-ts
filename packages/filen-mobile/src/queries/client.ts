@@ -8,6 +8,7 @@ import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
 import auth from "@/lib/auth"
 import useAppStore from "@/stores/useApp.store"
+import logger from "@/lib/logger"
 
 // Critical: When changing anything related to query persistence, increment the VERSION constant to invalidate old caches and prevent potential issues from stale or incompatible data.
 export const VERSION = 1
@@ -96,7 +97,7 @@ export class QueryPersisterKv {
 		this.restoredOnce = false
 
 		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
-			console.error("[QueryPersisterKv] Failed to clear", err)
+			logger.error("queries-persist", "Failed to clear persisted query cache from SQLite", { error: err instanceof Error ? err.message : String(err) })
 		})
 	}
 
@@ -123,13 +124,13 @@ export class QueryPersisterKv {
 			try {
 				this.buffer.set((row[0] as string).slice(prefix.length), deserialize(row[1] as string))
 			} catch (err) {
-				console.error("[QueryPersisterKv] Failed to deserialize row, skipping", err)
+				logger.warn("queries-restore", "Skipped corrupt persisted query row", { key: row[0], error: err instanceof Error ? err.message : String(err) })
 			}
 		}
 
 		this.restoredOnce = true
 
-		console.log(`[QueryPersisterKv] Restored ${this.buffer.size} rows in ${(performance.now() - now).toFixed(2)}ms`)
+		logger.debug("queries-restore", "Restored persisted query rows", { count: this.buffer.size, ms: (performance.now() - now).toFixed(2) })
 	}
 
 	public flush(): void {
@@ -189,7 +190,7 @@ export class QueryPersisterKv {
 			return Promise.resolve()
 		}
 
-		console.log(`[QueryPersisterKv] Persisting ${commands.length} changes`)
+		logger.debug("queries-persist", "In-flight persist started", { count: commands.length })
 
 		// Chain depth is pinned by client.test.ts (openDb → executeBatch → catch → finally,
 		// one microtask each) — the void-normalizing .then must come AFTER the catch so the
@@ -198,7 +199,7 @@ export class QueryPersisterKv {
 			.openDb()
 			.then(db => db.executeBatch(commands))
 			.catch(err => {
-				console.error("[QueryPersisterKv] Failed to batch persist", err)
+				logger.error("queries-persist", "In-flight persist failed before flush", { error: err instanceof Error ? err.message : String(err) })
 
 				// Restore failed keys into the dirty sets so the next debounce retries them.
 				// Only re-add keys that have not been re-dirtied or removed in the interim
@@ -219,7 +220,7 @@ export class QueryPersisterKv {
 			})
 			.then(() => undefined)
 			.finally(() => {
-				console.log(`[QueryPersisterKv] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
+				logger.debug("queries-persist", "In-flight persist completed", { ms: (performance.now() - now).toFixed(2) })
 			})
 	}
 
@@ -290,15 +291,15 @@ export class QueryPersisterKv {
 				return
 			}
 
-			console.log(`[QueryPersisterKv] Persisting ${commands.length} changes`)
+			logger.debug("queries-persist", "Async persist started", { count: commands.length })
 
 			const db = await sqlite.openDb()
 
 			await db.executeBatch(commands)
 
-			console.log(`[QueryPersisterKv] Persisted in ${(performance.now() - now).toFixed(2)}ms`)
+			logger.debug("queries-persist", "Async persist completed", { ms: (performance.now() - now).toFixed(2) })
 		} catch (err) {
-			console.error("[QueryPersisterKv] Failed to persist", err)
+			logger.error("queries-persist", "Batch persist to SQLite failed", { error: err instanceof Error ? err.message : String(err), upserts: snapshotUpserts.size, deletes: snapshotDeletes.size })
 
 			// Restore failed keys so the finally-block re-trigger actually retries them.
 			// Only re-add keys that were not re-dirtied or re-removed after the snapshot.
@@ -451,9 +452,9 @@ export async function restoreQueries(): Promise<void> {
 			}
 		})
 
-		console.log(`[QueryClient] Restored ${restored} queries (${dropped} dropped) in ${(performance.now() - now).toFixed(2)}ms`)
+		logger.debug("queries-restore", "Restored persisted queries", { restored, dropped, ms: (performance.now() - now).toFixed(2) })
 	} catch (e) {
-		console.error(e)
+		logger.error("queries-restore", "Failed to restore persisted queries", { error: e instanceof Error ? e.message : String(e) })
 		alerts.error(e)
 	}
 }
@@ -532,13 +533,13 @@ const queryCache = new QueryCache({
 	// Fires ONCE when a query settles into an error state — not on every render. This is the
 	// correct place for imperative error UX (logging, logout, banners).
 	onError(err, query) {
-		console.error("Query error for key:", query.queryKey, err)
-
 		const action = decideQueryErrorAction(err, {
 			isNetworkClassError,
 			unwrapSdkError,
 			isOnline: () => onlineManager.isOnline()
 		})
+
+		logger.error("queries", "QueryCache error", { queryKey: query.queryKey, error: err instanceof Error ? err.message : String(err), action })
 
 		if (action === "suppress") {
 			return
@@ -548,7 +549,7 @@ const queryCache = new QueryCache({
 			// auth.logout() is internally idempotent (logoutPromise dedup), so concurrent
 			// Unauthenticated errors collapse into a single logout.
 			auth.logout().catch(e => {
-				console.error("[QueryClient] logout failed:", e)
+				logger.error("queries", "logout triggered by Unauthenticated query error failed", { error: e instanceof Error ? e.message : String(e) })
 			})
 
 			return
@@ -626,7 +627,7 @@ export const queryUpdater = {
 		} as unknown as QueryClient
 
 		queryClientPersister.persistQueryByKey(queryKey, lookupFacade).catch(err => {
-			console.error("[QueryClient] persistQueryByKey failed", err)
+			logger.error("queries-persist", "persistQueryByKey failed", { queryKey, error: err instanceof Error ? err.message : String(err) })
 		})
 	}
 }
