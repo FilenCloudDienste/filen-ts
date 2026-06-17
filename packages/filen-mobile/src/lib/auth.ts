@@ -387,9 +387,12 @@ class Auth {
 
 		const WIPE_OPS = ["secureStore", "sqlite", "offline", "fileCache", "audioCache", "thumbnails", "sandboxCache"]
 
+		// Logging past this point uses console.error, NOT the logger: logger.purge() above disabled the
+		// logger and wiped its dir, so logger.* is a no-op here (and forcing it would recreate the
+		// just-wiped dir). console.error stays dev-visible; a post-wipe failure isn't persistable by design.
 		for (const result of wipe) {
 			if (result.status === "rejected") {
-				logger.error("auth", "logout wipe failed", { store: WIPE_OPS[wipe.indexOf(result)], err: String(result.reason) })
+				console.error("logout wipe failed", { store: WIPE_OPS[wipe.indexOf(result)], err: String(result.reason) })
 			}
 		}
 
@@ -399,13 +402,15 @@ class Auth {
 	}
 
 	private async reloadWithRetry(): Promise<void> {
+		// Runs after logger.purge() (logout) — the logger is disabled here, so use console.error (see the
+		// note in doLogout's wipe loop). Dev-visible; not persistable post-wipe by design.
 		for (let attempt = 1; attempt <= RELOAD_MAX_ATTEMPTS; attempt++) {
 			try {
 				await reloadAppAsync()
 
 				return
 			} catch (e) {
-				logger.error("auth", "reloadAppAsync attempt failed", { attempt, maxAttempts: RELOAD_MAX_ATTEMPTS, err: String(e) })
+				console.error("reloadAppAsync attempt failed", { attempt, maxAttempts: RELOAD_MAX_ATTEMPTS, err: String(e) })
 
 				if (attempt < RELOAD_MAX_ATTEMPTS) {
 					await new Promise(resolve => setTimeout(resolve, RELOAD_RETRY_DELAY))
@@ -413,7 +418,7 @@ class Auth {
 			}
 		}
 
-		logger.error("auth", "all reload attempts exhausted — app is in a torn post-logout state", { maxAttempts: RELOAD_MAX_ATTEMPTS })
+		console.error("all reload attempts exhausted — app is in a torn post-logout state", { maxAttempts: RELOAD_MAX_ATTEMPTS })
 	}
 }
 

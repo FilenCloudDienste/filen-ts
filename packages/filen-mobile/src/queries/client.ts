@@ -539,7 +539,7 @@ const queryCache = new QueryCache({
 			isOnline: () => onlineManager.isOnline()
 		})
 
-		logger.error("queries", "QueryCache error", { queryKey: query.queryKey, error: err instanceof Error ? err.message : String(err), action })
+		logger.error("queries", "QueryCache error", { queryHash: query.queryHash, error: err instanceof Error ? err.message : String(err), action })
 
 		if (action === "suppress") {
 			return
@@ -627,7 +627,7 @@ export const queryUpdater = {
 		} as unknown as QueryClient
 
 		queryClientPersister.persistQueryByKey(queryKey, lookupFacade).catch(err => {
-			logger.error("queries-persist", "persistQueryByKey failed", { queryKey, error: err instanceof Error ? err.message : String(err) })
+			logger.error("queries-persist", "persistQueryByKey failed", { queryHash, error: err instanceof Error ? err.message : String(err) })
 		})
 	}
 }
