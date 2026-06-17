@@ -39,6 +39,40 @@ describe("logRedaction", () => {
 			expect(redact("-----BEGIN PRIVATE KEY-----\nMIIB...")).toBe("[redacted]")
 			expect(redact("A".repeat(200))).toBe("[redacted]")
 		})
+
+		it("masks the StringifiedClient.authInfo field (V1/V2 master keys / V3 DEK)", () => {
+			const out = redact({
+				email: "user@example.com",
+				apiKey: "a",
+				authInfo: "deadbeef".repeat(8),
+				baseFolderUUID: "550e8400-e29b-41d4-a716-446655440000"
+			}) as Record<string, unknown>
+
+			expect(out["authInfo"]).toBe("[redacted]")
+			expect(out["apiKey"]).toBe("[redacted]")
+			// Non-secret identifiers are kept.
+			expect(out["baseFolderUUID"]).toBe("550e8400-e29b-41d4-a716-446655440000")
+			expect(out["email"]).toBe("user@example.com")
+		})
+
+		it("masks a standalone 64-char hex key value under an unforeseen key name", () => {
+			// A 64-hex master key / DEK that slipped under a non-secret-named field still gets caught
+			// by the value heuristic (it evaded the old 128-char blob threshold).
+			const masterKey = "a1b2c3d4".repeat(8) // 64 hex chars
+
+			expect((redact({ blob: masterKey }) as Record<string, unknown>)["blob"]).toBe("[redacted]")
+			// A UUID (hex with dashes, 36 chars) is NOT a bare 64-hex key → kept.
+			expect((redact({ id: "550e8400-e29b-41d4-a716-446655440000" }) as Record<string, unknown>)["id"]).toBe(
+				"550e8400-e29b-41d4-a716-446655440000"
+			)
+		})
+
+		it("redacts a `queryKey` field (accepted over-redaction; key$ matches it)", () => {
+			const out = redact({ queryKey: ["drive", "uuid-123"], status: "error" }) as Record<string, unknown>
+
+			expect(out["queryKey"]).toBe("[redacted]")
+			expect(out["status"]).toBe("error")
+		})
 	})
 
 	describe("user data is intentionally kept (the diagnostic signal)", () => {
@@ -126,6 +160,18 @@ describe("logRedaction", () => {
 			expect(redact(true)).toBe(true)
 			expect(redact(null)).toBe(null)
 			expect(redact(undefined)).toBe(undefined)
+		})
+
+		it("stringifies bigint (JSON.stringify throws on raw bigint; filen uses it for sizes)", () => {
+			expect(redact(100n)).toBe("100n")
+
+			const out = redact({ size: 9007199254740993n, count: 2 }) as Record<string, unknown>
+
+			expect(out["size"]).toBe("9007199254740993n")
+			expect(out["count"]).toBe(2)
+
+			// The redacted output must be JSON-serializable (no raw bigint survives).
+			expect(() => JSON.stringify(out)).not.toThrow()
 		})
 	})
 })

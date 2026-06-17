@@ -13,21 +13,28 @@ const MAX_STRING_LENGTH = 2000
 const MAX_DEPTH = 8
 
 // Object KEY names whose VALUES are auth credentials or crypto keys. Matched case-insensitively as
-// a substring, so apiKey / masterKeys / privateKey / twoFactorCode / sessionToken / … all match.
-// Deliberately aggressive on names: over-redacting a field literally named like a secret is cheap,
-// leaking one is catastrophic. `\bkey\b` / `…Key` matches the per-file encryption key carried on
-// DecryptedFileMeta.key and the master keys; TanStack's `queryKey` is logged as a scalar/array
-// under its own name, never as a `key` field, so it survives.
+// a substring, so apiKey / masterKeys / privateKey / authInfo / twoFactorCode / sessionToken / … all
+// match. Deliberately aggressive on names: over-redacting a field literally named like a secret is
+// cheap, leaking one is catastrophic. `auth_?info` is the StringifiedClient field that holds the
+// V1/V2 master keys (or V3 DEK) — the single worst secret in the app. `key$` / `\bkey\b` matches the
+// per-file encryption key on DecryptedFileMeta.key and the master keys. NOTE: `key$` ALSO matches
+// TanStack's `queryKey`, so a `queryKey` field is redacted too — an accepted cost (we don't carve
+// out exceptions; secrets-first).
 const SECRET_KEY_RE =
-	/pass|secret|token|api_?key|master_?keys?|private_?key|public_?key|metadata_?key|key$|\bkey\b|\bdek\b|two_?factor|2fa|\botp\b|mnemonic|seed|credential|authoriz|bearer|stringifiedclient/i
+	/pass|secret|token|api_?key|master_?keys?|private_?key|public_?key|metadata_?key|auth_?info|key$|\bkey\b|\bdek\b|\bkek\b|derived|recovery|two_?factor|2fa|\botp\b|mnemonic|seed|credential|authoriz|bearer|stringifiedclient/i
 
 // String VALUES that are obviously serialized secret material even without a telltale key name:
-// a stringified SDK client, a PEM block, or a very long high-entropy blob (key/ciphertext).
-const SECRET_VALUE_MARKER_RE = /master_?keys?|private_?key|stringifiedclient|-----BEGIN/i
+// a stringified SDK client / auth blob, a PEM block, or a long high-entropy blob (joined master
+// keys, ciphertext). `auth_?info` catches a stringified StringifiedClient JSON.
+const SECRET_VALUE_MARKER_RE = /master_?keys?|private_?key|auth_?info|stringifiedclient|-----BEGIN/i
 const LONG_BLOB_RE = /[A-Za-z0-9+/=_-]{128,}/
+// A standalone fixed-length symmetric key/DEK: 64+ hex chars (V2/V3 keys are 64 hex). Anchored to
+// the WHOLE string so it can't match a path/sentence/UUID (those carry separators/spaces). A 64-hex
+// content hash also matches and gets redacted — an accepted, harmless loss (a hash isn't the signal).
+const HEX_KEY_RE = /^[0-9a-f]{64,}$/i
 
 function redactString(value: string): string {
-	if (SECRET_VALUE_MARKER_RE.test(value) || LONG_BLOB_RE.test(value)) {
+	if (SECRET_VALUE_MARKER_RE.test(value) || LONG_BLOB_RE.test(value) || HEX_KEY_RE.test(value)) {
 		return REDACTED
 	}
 
@@ -49,7 +56,14 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
 		return redactString(value as string)
 	}
 
-	if (type === "number" || type === "boolean" || type === "bigint") {
+	// BigInt must be stringified — JSON.stringify THROWS on a raw bigint, and filen uses bigint
+	// pervasively (DriveItem.size etc.), so passing it through would collapse the whole log line to
+	// the "[unserializable]" fallback. Tag with a trailing "n" so it's recognizable in the log.
+	if (type === "bigint") {
+		return `${(value as bigint).toString()}n`
+	}
+
+	if (type === "number" || type === "boolean") {
 		return value
 	}
 
