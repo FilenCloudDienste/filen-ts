@@ -391,6 +391,7 @@
 	"import_partial_download_other": "가져오기 취소됨: 파일 {{count}}개를 다운로드하지 못했습니다",
 	"import_partial_upload_one": "가져오기 미완료: 파일 {{count}}개를 업로드하지 못했습니다",
 	"import_partial_upload_other": "가져오기 미완료: 파일 {{count}}개를 업로드하지 못했습니다",
+	"incorrect_two_factor_code_try_again": "잘못된 코드입니다. 다시 시도해 주세요.",
 	"info": "정보",
 	"information": "정보",
 	"insert": "삽입",

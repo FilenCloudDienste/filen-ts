@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Importação cancelada: não foi possível transferir {{count}} ficheiros",
 	"import_partial_upload_one": "Importação incompleta: não foi possível carregar {{count}} ficheiro",
 	"import_partial_upload_other": "Importação incompleta: não foi possível carregar {{count}} ficheiros",
+	"incorrect_two_factor_code_try_again": "Código incorreto. Tente novamente.",
 	"info": "Informações",
 	"information": "Informações",
 	"insert": "Inserir",

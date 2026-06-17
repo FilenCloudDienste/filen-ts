@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Importen avbröts: {{count}} filer kunde inte laddas ned",
 	"import_partial_upload_one": "Importen är ofullständig: {{count}} fil kunde inte laddas upp",
 	"import_partial_upload_other": "Importen är ofullständig: {{count}} filer kunde inte laddas upp",
+	"incorrect_two_factor_code_try_again": "Felaktig kod. Försök igen.",
 	"info": "Info",
 	"information": "Information",
 	"insert": "Infoga",

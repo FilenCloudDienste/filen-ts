@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Nhập đã huỷ: không thể tải xuống {{count}} tệp",
 	"import_partial_upload_one": "Nhập chưa hoàn tất: không thể tải lên {{count}} tệp",
 	"import_partial_upload_other": "Nhập chưa hoàn tất: không thể tải lên {{count}} tệp",
+	"incorrect_two_factor_code_try_again": "Mã không đúng. Vui lòng thử lại.",
 	"info": "Thông tin",
 	"information": "Thông tin",
 	"insert": "Chèn",

@@ -399,6 +399,7 @@
 	"import_partial_upload_many": "Імпорт незавершено: не вдалося вивантажити {{count}} файлів",
 	"import_partial_upload_one": "Імпорт незавершено: не вдалося вивантажити {{count}} файл",
 	"import_partial_upload_other": "Імпорт незавершено: не вдалося вивантажити {{count}} файлів",
+	"incorrect_two_factor_code_try_again": "Неправильний код. Спробуйте ще раз.",
 	"info": "Інформація",
 	"information": "Інформація",
 	"insert": "Вставити",

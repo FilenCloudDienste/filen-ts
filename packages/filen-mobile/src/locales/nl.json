@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Import geannuleerd: {{count}} bestanden konden niet worden gedownload",
 	"import_partial_upload_one": "Import onvolledig: {{count}} bestand kon niet worden geüpload",
 	"import_partial_upload_other": "Import onvolledig: {{count}} bestanden konden niet worden geüpload",
+	"incorrect_two_factor_code_try_again": "Onjuiste code. Probeer het opnieuw.",
 	"info": "Info",
 	"information": "Informatie",
 	"insert": "Invoegen",

@@ -395,6 +395,7 @@
 	"import_partial_upload_few": "Import incomplet: {{count}} fișiere nu au putut fi încărcate",
 	"import_partial_upload_one": "Import incomplet: {{count}} fișier nu a putut fi încărcat",
 	"import_partial_upload_other": "Import incomplet: {{count}} de fișiere nu au putut fi încărcate",
+	"incorrect_two_factor_code_try_again": "Cod incorect. Te rugăm să încerci din nou.",
 	"info": "Informații",
 	"information": "Informații",
 	"insert": "Inserează",

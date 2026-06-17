@@ -391,6 +391,7 @@
 	"import_partial_download_other": "आयात रद्द किया गया: {{count}} फ़ाइलें डाउनलोड नहीं की जा सकीं",
 	"import_partial_upload_one": "आयात अधूरा: {{count}} फ़ाइल अपलोड नहीं की जा सकी",
 	"import_partial_upload_other": "आयात अधूरा: {{count}} फ़ाइलें अपलोड नहीं की जा सकीं",
+	"incorrect_two_factor_code_try_again": "गलत कोड। कृपया दोबारा प्रयास करें।",
 	"info": "जानकारी",
 	"information": "जानकारी",
 	"insert": "डालें",

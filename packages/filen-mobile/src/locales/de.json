@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Import abgebrochen: {{count}} Dateien konnten nicht heruntergeladen werden",
 	"import_partial_upload_one": "Import unvollständig: {{count}} Datei konnte nicht hochgeladen werden",
 	"import_partial_upload_other": "Import unvollständig: {{count}} Dateien konnten nicht hochgeladen werden",
+	"incorrect_two_factor_code_try_again": "Falscher Code. Bitte versuche es erneut.",
 	"info": "Info",
 	"information": "Informationen",
 	"insert": "Einfügen",

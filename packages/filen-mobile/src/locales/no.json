@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Import avbrutt: {{count}} filer kunne ikke lastes ned",
 	"import_partial_upload_one": "Import ufullstendig: {{count}} fil kunne ikke lastes opp",
 	"import_partial_upload_other": "Import ufullstendig: {{count}} filer kunne ikke lastes opp",
+	"incorrect_two_factor_code_try_again": "Feil kode. Vennligst prøv igjen.",
 	"info": "Info",
 	"information": "Informasjon",
 	"insert": "Sett inn",
