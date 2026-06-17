@@ -39,10 +39,12 @@ export function isRetryableAuthError(error: unknown): boolean {
 	return unwrapped.kind() === ErrorKind.Unauthenticated
 }
 
-// Maps the SDK's finite error KIND to a translated, user-readable string and appends the raw
-// `message()` as an untranslated diagnostic suffix. Per Google AIP-193 only the enumerable kind
-// is localized; `message()` is an open-ended English/developer string and must stay raw. Module
-// level (not a hook) → uses the imported module `i18n`.
+// Produces the user-facing string for an SDK error. SERVER/API errors show the server's own
+// human message (`serverMessage()`, SDK 0.4.26+); everything else shows the raw inner Rust
+// message (`innerMessage()`, e.g. "No such file or directory") — both far more readable than the
+// developer-oriented `message()` Display wrapper ("Error of kind X: …"). The translated kind
+// label is only the last-resort fallback when neither is available. Module level (not a hook) →
+// uses the imported module `i18n`.
 export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): string {
 	const errorKey = (() => {
 		switch (unwrapped.kind()) {
@@ -144,6 +146,24 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 		}
 	})()
 
-	// Translated kind + UNTRANSLATED raw message() diagnostic (AIP-193).
-	return `${i18n.t(errorKey)}: (${unwrapped.message()})`
+	// Server/API errors → the server's own human-readable message.
+	const serverMessage = unwrapped.serverMessage()
+
+	if (serverMessage) {
+		return serverMessage
+	}
+
+	// Non-server errors → the raw inner Rust message (e.g. "No such file or directory"). Skipped
+	// for server/API errors (a `code` is set, or the generic `Server` kind) so we never surface
+	// the raw "API Error, message: None, code: …" inner — those fall through to the label below.
+	if (unwrapped.serverCode() === undefined && unwrapped.kind() !== ErrorKind.Server) {
+		const innerMessage = unwrapped.innerMessage()
+
+		if (innerMessage) {
+			return innerMessage
+		}
+	}
+
+	// Fallback: the translated kind label (no server/inner message available).
+	return i18n.t(errorKey)
 }

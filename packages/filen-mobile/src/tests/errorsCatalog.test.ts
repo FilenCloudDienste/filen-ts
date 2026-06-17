@@ -87,10 +87,17 @@ import { unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Build a minimal FilenSdkError-shaped object without the native SDK class */
-function fakeError(kind: string, message = "raw diagnostic"): Parameters<typeof unwrappedSdkErrorToHumanReadable>[0] {
+function fakeError(
+	kind: string,
+	message = "raw diagnostic",
+	opts: { serverMessage?: string; serverCode?: string; innerMessage?: string } = {}
+): Parameters<typeof unwrappedSdkErrorToHumanReadable>[0] {
 	return {
 		kind: () => kind,
-		message: () => message
+		message: () => message,
+		serverMessage: () => opts.serverMessage,
+		serverCode: () => opts.serverCode,
+		innerMessage: () => opts.innerMessage
 	} as unknown as Parameters<typeof unwrappedSdkErrorToHumanReadable>[0]
 }
 
@@ -389,13 +396,6 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 		const result = unwrappedSdkErrorToHumanReadable(fakeError("SomeUnknownKind"))
 
 		expect(result).toContain("error_generic")
-	})
-
-	it("appends the raw message() as a diagnostic suffix", () => {
-		const result = unwrappedSdkErrorToHumanReadable(fakeError("Server", "upstream 503"))
-
-		// Raw message must appear in the output regardless of which key was selected
-		expect(result).toContain("upstream 503")
 	})
 
 	it("maps every handled ErrorKind to a non-generic catalog key", () => {
