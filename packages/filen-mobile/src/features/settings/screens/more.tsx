@@ -8,7 +8,7 @@ import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { PressableScale } from "@/components/ui/pressables"
-import { run } from "@filen/utils"
+import { run, formatBytes } from "@filen/utils"
 import { router } from "expo-router"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
@@ -35,7 +35,20 @@ function More() {
 
 	const accountQuery = useAccountQuery()
 
-	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.some(sub => Number(sub.activated) === 1)
+	const activeSub =
+		accountQuery.status === "success" ? accountQuery.data.subs.find(sub => Number(sub.activated) === 1) : undefined
+	const userIsSubbed = !!activeSub
+
+	// Muted subtitle under the email: plan tier + total usage ("Pro · 29.5 GB of 45.5 TB"). The plan
+	// name comes from the active subscription (→ "Free" when there is none); the storage half echoes
+	// the bar below as a one-line total (the bar/legend break the same figures down per segment).
+	const accountSubtitle =
+		accountQuery.status === "success"
+			? `${activeSub && activeSub.planName.trim().length > 0 ? activeSub.planName : t("free_plan")} · ${t("used_of", {
+					used: formatBytes(Number(accountQuery.data.storageUsed)),
+					max: formatBytes(Number(accountQuery.data.maxStorage))
+				})}`
+			: null
 
 	// External links (Terms / Privacy) — Linking.openURL is a real app-switch, exempt from
 	// withSystemPresentation (it doesn't flash the privacy cover / re-lock biometric). Mirrors the
@@ -80,13 +93,23 @@ function More() {
 											: undefined
 									}
 								/>
-								<Text
-									numberOfLines={1}
-									ellipsizeMode="middle"
-									className="flex-1 text-foreground text-lg font-bold"
-								>
-									{stringifiedClient?.email}
-								</Text>
+								<View className="flex-1 bg-transparent">
+									<Text
+										numberOfLines={1}
+										ellipsizeMode="middle"
+										className="text-foreground text-lg font-bold"
+									>
+										{stringifiedClient?.email}
+									</Text>
+									{accountSubtitle ? (
+										<Text
+											numberOfLines={1}
+											className="text-muted-foreground text-sm"
+										>
+											{accountSubtitle}
+										</Text>
+									) : null}
+								</View>
 								<Ionicons
 									name="chevron-forward-outline"
 									size={20}
