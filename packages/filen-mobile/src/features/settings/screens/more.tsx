@@ -8,7 +8,7 @@ import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { PressableScale } from "@/components/ui/pressables"
-import { formatBytes, run } from "@filen/utils"
+import { run } from "@filen/utils"
 import { router } from "expo-router"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
@@ -17,6 +17,7 @@ import useAccountQuery from "@/queries/useAccount.query"
 import { useTranslation } from "react-i18next"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import { LazyWrapper } from "@/components/lazyWrapper"
+import StorageUsageBar from "@/features/settings/components/storageUsageBar"
 import logger from "@/lib/logger"
 import alerts from "@/lib/alerts"
 
@@ -64,51 +65,46 @@ function More() {
 						contentInsetAdjustmentBehavior="automatic"
 					>
 						<PressableScale
-							className="bg-background-secondary rounded-3xl overflow-hidden flex-row gap-4 items-center p-4"
+							className="bg-background-secondary rounded-3xl overflow-hidden gap-3 p-4"
 							rippleColor="transparent"
 							onPress={() => {
 								router.push("/account")
 							}}
 						>
-							<Avatar
-								size={48}
-								source={
-									accountQuery.status === "success" && accountQuery.data.avatarUrl
-										? accountQuery.data.avatarUrl
-										: undefined
-								}
-							/>
-							<View className="flex-1 flex-col bg-transparent justify-center">
+							<View className="flex-row gap-4 items-center bg-transparent">
+								<Avatar
+									size={48}
+									source={
+										accountQuery.status === "success" && accountQuery.data.avatarUrl
+											? accountQuery.data.avatarUrl
+											: undefined
+									}
+								/>
 								<Text
 									numberOfLines={1}
 									ellipsizeMode="middle"
-									className="text-foreground text-lg font-bold"
+									className="flex-1 text-foreground text-lg font-bold"
 								>
 									{stringifiedClient?.email}
 								</Text>
-								{accountQuery.status === "success" ? (
-									<Text
-										numberOfLines={1}
-										ellipsizeMode="middle"
-										className="text-muted-foreground text-sm"
-									>
-										{t("used_of", {
-											used: formatBytes(Number(accountQuery.data.storageUsed)),
-											max: formatBytes(Number(accountQuery.data.maxStorage))
-										})}
-									</Text>
-								) : (
-									<ActivityIndicator
-										size="small"
-										color={textMutedForeground.color}
-									/>
-								)}
+								<Ionicons
+									name="chevron-forward-outline"
+									size={20}
+									color={textMutedForeground.color}
+								/>
 							</View>
-							<Ionicons
-								name="chevron-forward-outline"
-								size={20}
-								color={textMutedForeground.color}
-							/>
+							{accountQuery.status === "success" ? (
+								<StorageUsageBar
+									storageUsed={accountQuery.data.storageUsed}
+									versionedStorage={accountQuery.data.versionedStorage}
+									maxStorage={accountQuery.data.maxStorage}
+								/>
+							) : (
+								<ActivityIndicator
+									size="small"
+									color={textMutedForeground.color}
+								/>
+							)}
 						</PressableScale>
 						<Group
 							buttons={[

@@ -15,6 +15,10 @@ export const settings = {
 	more: "More",
 	/** Account-card subtitle on the More tab: used vs. total storage. {{used}} and {{max}} are formatted sizes (e.g. "2.1 GB") */
 	used_of: "{{used}} of {{max}}",
+	/** Storage legend — versioned-files segment */
+	versioned_files: "Versioned files",
+	/** Storage legend — free/remaining segment */
+	free: "Free",
 	// More-menu rows reuse keys defined in their owning feature files: recents, favorites,
 	// shared_with_me, shared_with_others (drive.ts); contacts (contacts.ts); playlists (media.ts);
 	// security (security.ts); appearance (appearance.ts).
