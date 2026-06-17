@@ -21,6 +21,8 @@ export const settings = {
 	free: "Free",
 	/** Account-card subtitle — plan tier for accounts with no paid subscription. Distinct from the "free space" legend label above: this is the no-cost plan (e.g. German "Kostenlos", not "Frei") */
 	free_plan: "Free",
+	/** Account-card subtitle — plan tier for any paid/premium account. Storage from stacked plans is combined, so we show one "Pro" tier rather than a plan name */
+	pro: "Pro",
 	// More-menu rows reuse keys defined in their owning feature files: recents, favorites,
 	// shared_with_me, shared_with_others (drive.ts); contacts (contacts.ts); playlists (media.ts);
 	// security (security.ts); appearance (appearance.ts).

@@ -35,16 +35,14 @@ function More() {
 
 	const accountQuery = useAccountQuery()
 
-	const activeSub =
-		accountQuery.status === "success" ? accountQuery.data.subs.find(sub => Number(sub.activated) === 1) : undefined
-	const userIsSubbed = !!activeSub
+	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.some(sub => Number(sub.activated) === 1)
 
-	// Muted subtitle under the email: plan tier + total usage ("Pro · 29.5 GB of 45.5 TB"). The plan
-	// name comes from the active subscription (→ "Free" when there is none); the storage half echoes
-	// the bar below as a one-line total (the bar/legend break the same figures down per segment).
+	// Muted subtitle under the email: plan tier + total usage ("Pro · 29.5 GB of 45.5 TB"). Plans can
+	// be stacked (even different ones) to combine storage, so the tier is just "Pro" (any premium) vs
+	// "Free" — never a single plan name. The storage half echoes the bar below as a one-line total.
 	const accountSubtitle =
 		accountQuery.status === "success"
-			? `${activeSub && activeSub.planName.trim().length > 0 ? activeSub.planName : t("free_plan")} · ${t("used_of", {
+			? `${accountQuery.data.isPremium ? t("pro") : t("free_plan")} · ${t("used_of", {
 					used: formatBytes(Number(accountQuery.data.storageUsed)),
 					max: formatBytes(Number(accountQuery.data.maxStorage))
 				})}`
