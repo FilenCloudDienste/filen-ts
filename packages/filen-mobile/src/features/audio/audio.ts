@@ -1,5 +1,5 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-audio"
-import { Platform } from "react-native"
+import { AppState, Platform } from "react-native"
 import { Asset } from "expo-asset"
 import audioCache, { type Metadata } from "@/features/audio/audioCache"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
@@ -70,6 +70,21 @@ const TRACK_END_WATCHDOG_BUFFER_MS = 2000
 // guards against skipping a track that merely stalled mid-buffer.
 const TRACK_END_WATCHDOG_EPSILON_S = 0.5
 
+// Background-safe end detection: a native status update reporting a loaded track that has
+// STOPPED at (or past) its reported end is treated as a track-end even when the one-shot
+// `didJustFinish` flag was dropped (observed on iOS short tracks). This rides the native
+// status stream — which keeps firing in the background — instead of the JS-timer watchdog,
+// which iOS/Android freeze while backgrounded. The window is a touch wider than the watchdog
+// epsilon since this only fires once the player has actually stopped.
+const TRACK_END_STATUS_EPSILON_S = 0.75
+
+// Foreground watchdog recovery: how many consecutive fires with no playback progress — while
+// we still intend to play AND the player has stopped — count as "ended". Recovers from a track
+// whose reported duration over-estimates the real end, so currentTime plateaus short of it and
+// the watchdog would otherwise re-arm forever. A track the player still reports as `playing`
+// (buffering) is never stall-skipped.
+const TRACK_END_WATCHDOG_MAX_STALLS = 3
+
 export class Audio {
 	private readonly player = createAudioPlayer(undefined, {
 		updateInterval: 1000,
@@ -93,6 +108,14 @@ export class Audio {
 
 	// Whether we currently intend to be playing; gates the watchdog so it doesn't poll while paused/stopped.
 	private intendPlaying: boolean = false
+
+	// Consecutive watchdog fires with no playback progress while stopped — see TRACK_END_WATCHDOG_MAX_STALLS.
+	// Reset to 0 on every real status update (which means playback is progressing).
+	private watchdogStalls: number = 0
+
+	// Aborts the previous next-track prefetch when a newer track starts, so only the most
+	// recent upcoming track is downloaded ahead of time.
+	private prefetchAbort: AbortController | null = null
 
 	// Last status emitted by the player. A PAUSED player emits no further playbackStatusUpdate
 	// events, so freshly-mounted consumers (playlist toolbar slider, floating-bar progress) would
@@ -152,7 +175,7 @@ export class Audio {
 
 			events.emit("audioStatus", status)
 
-			if (status.didJustFinish) {
+			if (status.didJustFinish || this.statusIndicatesTrackEnded(status)) {
 				this.clearTrackEndWatchdog()
 				this.handleTrackEnd().catch(console.error)
 
@@ -168,6 +191,15 @@ export class Audio {
 
 		this.player.addListener("remotePreviousTrack", () => {
 			this.previous().catch(console.error)
+		})
+
+		// Recover advances missed while backgrounded. The watchdog (a setTimeout) is frozen in
+		// the background and a dropped native didJustFinish leaves the queue stuck, so the moment
+		// we're foregrounded again, reconcile the player against our intent.
+		AppState.addEventListener("change", nextAppState => {
+			if (nextAppState === "active") {
+				this.reconcileOnForeground()
+			}
 		})
 	}
 
@@ -340,8 +372,10 @@ export class Audio {
 		// Capture the generation we are acting on. Any user-initiated next()/previous()/
 		// skipTo() that arrives while we are suspended at an await will call loadAndPlay(),
 		// which increments loadGeneration. Re-checking gen after each await lets us bail
-		// out before double-advancing the queue on top of the user navigation.
-		const gen = this.loadGeneration
+		// out before double-advancing the queue on top of the user navigation. We also
+		// re-sync `gen` after our OWN loadAndPlay (which bumps the generation) when skipping
+		// a failed track, so the supersede check keeps detecting only EXTERNAL navigation.
+		let gen = this.loadGeneration
 
 		this.clearTrackEndWatchdog()
 
@@ -352,25 +386,42 @@ export class Audio {
 		}
 
 		if (loopMode === "track") {
-			await this.loadAndPlay(this.state.position)
+			try {
+				await this.loadAndPlay(this.state.position)
+			} catch (e) {
+				console.error(e)
+			}
 
 			return
 		}
 
-		if (await this.advanceToNext()) {
+		// Advance to the next playable track, skipping any that fail to load so one bad/slow
+		// track can't stall the whole queue. Bounded by the queue length so a queue where every
+		// remaining track fails can't loop forever.
+		for (let attempt = 0; attempt < this.state.queue.length; attempt++) {
+			const advanced = await this.advanceToNext()
+
 			if (gen !== this.loadGeneration) {
 				return
 			}
 
-			await this.loadAndPlay(this.state.position)
+			if (!advanced) {
+				break
+			}
 
-			return
+			try {
+				await this.loadAndPlay(this.state.position)
+
+				return
+			} catch (e) {
+				console.error(e)
+
+				gen = this.loadGeneration
+			}
 		}
 
-		if (gen !== this.loadGeneration) {
-			return
-		}
-
+		// Reached the end with nothing playing. Loop back to the start if asked, again skipping
+		// any tracks that fail to load (bounded to a single pass over the queue).
 		if (loopMode === "queue" && this.state.queue.length > 0) {
 			await this.wrapToStart()
 
@@ -378,9 +429,27 @@ export class Audio {
 				return
 			}
 
-			await this.loadAndPlay(this.state.position)
+			for (let attempt = 0; attempt < this.state.queue.length; attempt++) {
+				try {
+					await this.loadAndPlay(this.state.position)
 
-			return
+					return
+				} catch (e) {
+					console.error(e)
+
+					gen = this.loadGeneration
+				}
+
+				const advanced = await this.advanceToNext()
+
+				if (gen !== this.loadGeneration) {
+					return
+				}
+
+				if (!advanced) {
+					break
+				}
+			}
 		}
 
 		this.intendPlaying = false
@@ -440,6 +509,12 @@ export class Audio {
 					metadata,
 					generation
 				}).catch(console.error)
+
+				// Pre-stage the next track so that when this one ends, loadAndPlay resolves from
+				// disk in a single tick instead of awaiting a download mid-gap. A long inter-track
+				// gap lets iOS deactivate the audio session and suspend the app in the background,
+				// which is the main reason auto-advance stalls there. Best-effort.
+				this.prefetchNextTrack().catch(() => {})
 			},
 			{
 				throw: true
@@ -507,6 +582,9 @@ export class Audio {
 			return
 		}
 
+		// A real status update means playback is progressing — reset the stall recovery counter.
+		this.watchdogStalls = 0
+
 		const remainingMs = Math.max(0, (status.duration - status.currentTime) * 1000)
 
 		this.scheduleTrackEndWatchdog(this.loadGeneration, remainingMs + TRACK_END_WATCHDOG_BUFFER_MS)
@@ -522,15 +600,35 @@ export class Audio {
 		const duration = this.player.duration
 		const currentTime = this.player.currentTime
 
+		// Duration not known yet (still loading/buffering). Keep polling while we intend to play
+		// rather than dead-ending — giving up here would strand the track with no advance.
 		if (!Number.isFinite(duration) || duration <= 0) {
+			if (!this.intendPlaying) {
+				return
+			}
+
+			this.scheduleTrackEndWatchdog(generation, TRACK_END_WATCHDOG_BUFFER_MS)
+
 			return
 		}
 
-		// Still short of the end — the track stalled (buffering) rather than finished.
-		// Keep waiting instead of skipping, but only while we still intend to play.
+		// Short of the reported end. Either the track is still playing/buffering (wait it out), or
+		// playback has STOPPED below the reported duration because that duration over-estimates the
+		// real end — in which case currentTime plateaus and we'd otherwise re-arm forever. Advance
+		// after a few stalled fires once the player has stopped; a still-playing track is never skipped.
 		if (currentTime < duration - TRACK_END_WATCHDOG_EPSILON_S) {
 			if (!this.intendPlaying) {
 				return
+			}
+
+			if (!this.player.playing) {
+				this.watchdogStalls++
+
+				if (this.watchdogStalls >= TRACK_END_WATCHDOG_MAX_STALLS) {
+					this.handleTrackEnd().catch(console.error)
+
+					return
+				}
 			}
 
 			const remainingMs = Math.max(0, (duration - currentTime) * 1000)
@@ -542,6 +640,110 @@ export class Audio {
 
 		// Reached the end but didJustFinish never arrived — advance the queue.
 		this.handleTrackEnd().catch(console.error)
+	}
+
+	private statusIndicatesTrackEnded(status: AudioStatus): boolean {
+		// Background-safe fallback for a dropped didJustFinish: a loaded track that has stopped
+		// playing at/after its reported end has finished. Rides the native status stream (which
+		// fires in the background) rather than the JS-timer watchdog (which does not). The
+		// per-generation dedupe in handleTrackEnd keeps this from double-advancing alongside a
+		// real didJustFinish. `currentTime > 0` rules out a freshly-replaced (time 0) track.
+		return (
+			this.intendPlaying &&
+			status.isLoaded &&
+			!status.playing &&
+			Number.isFinite(status.duration) &&
+			status.duration > 0 &&
+			status.currentTime > 0 &&
+			status.currentTime >= status.duration - TRACK_END_STATUS_EPSILON_S
+		)
+	}
+
+	private reconcileOnForeground(): void {
+		// A track that finished while the app was backgrounded may not have advanced (frozen
+		// watchdog + dropped didJustFinish). The instant we're foregrounded, recover by advancing
+		// if the current track has ended while we still intend to play. Skip while a load is in
+		// flight — a suspended loadAndPlay await may be resuming and would otherwise double-advance.
+		if (!this.intendPlaying || this.state.loading || this.state.queue.length === 0) {
+			return
+		}
+
+		const duration = this.player.duration
+		const currentTime = this.player.currentTime
+
+		if (!Number.isFinite(duration) || duration <= 0) {
+			return
+		}
+
+		// Still playing, or paused mid-track — nothing to recover.
+		if (this.player.playing || currentTime < duration - TRACK_END_STATUS_EPSILON_S) {
+			return
+		}
+
+		this.handleTrackEnd().catch(console.error)
+	}
+
+	private peekNextPlayIndex(shuffle: boolean, loopMode: LoopMode): number | null {
+		// The queue index that WILL play after the current track ends, computed without mutating
+		// any playback state. Returns null when there is nothing worth prefetching: an empty
+		// queue, track-loop (same track, already cached), the end of a non-looping queue, or a
+		// shuffle wrap (loop reshuffles unpredictably, so the next track can't be known here).
+		if (this.state.queue.length === 0 || loopMode === "track") {
+			return null
+		}
+
+		if (shuffle) {
+			if (this.shuffleOrder.length !== this.state.queue.length) {
+				return null
+			}
+
+			const next = this.shufflePosition + 1
+
+			return next < this.shuffleOrder.length ? (this.shuffleOrder[next] ?? null) : null
+		}
+
+		const next = this.state.position + 1
+
+		if (next < this.state.queue.length) {
+			return next
+		}
+
+		return loopMode === "queue" ? 0 : null
+	}
+
+	private async prefetchNextTrack(): Promise<void> {
+		try {
+			const shuffle = await this.isShuffleEnabled()
+			const loopMode = await this.getLoopMode()
+			const index = this.peekNextPlayIndex(shuffle, loopMode)
+
+			if (index === null) {
+				return
+			}
+
+			const entry = this.state.queue[index]
+
+			if (!entry || entry.item.data.undecryptable) {
+				return
+			}
+
+			// Only the most recent upcoming track matters — abort any in-flight prefetch.
+			this.prefetchAbort?.abort()
+
+			const abort = new AbortController()
+
+			this.prefetchAbort = abort
+
+			await audioCache.get({
+				item: {
+					type: "drive",
+					data: entry.item
+				},
+				signal: abort.signal
+			})
+		} catch {
+			// Best-effort: a failed or aborted prefetch must never disrupt current playback.
+		}
 	}
 
 	private async getPlaceholderArtworkUri(): Promise<string | undefined> {

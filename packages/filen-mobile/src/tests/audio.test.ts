@@ -156,7 +156,7 @@ import audioCache from "@/features/audio/audioCache"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio"
-import { Platform } from "react-native"
+import { AppState, Platform } from "react-native"
 import { type QueueItem } from "@/features/audio/audio"
 import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
 
@@ -1887,8 +1887,10 @@ describe("Audio", () => {
 				playlist.currentTime = 0
 				statusListener!({ playing: true, isLoaded: true, duration: 10, currentTime: 0, didJustFinish: false })
 
-				// Playback stalls at 3s (buffering) — well short of the end.
+				// Playback stalls at 3s (buffering) — well short of the end. The player still
+				// reports `playing`, so the watchdog must wait it out and never stall-skip it.
 				playlist.currentTime = 3
+				playlist.playing = true
 
 				// Past the original watchdog deadline (10s + 2s buffer).
 				await vi.advanceTimersByTimeAsync(10 * 1000 + 2000 + 100)
@@ -1925,6 +1927,403 @@ describe("Audio", () => {
 
 				expect(audio.getPosition()).toBe(0)
 				expect(playlist.replace).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+	})
+
+	describe("auto-advance skip-on-error", () => {
+		it("skips a track that fails to load and plays the next one instead", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("c", "c.mp3") })
+			await audio.play()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			expect(statusListener).toBeDefined()
+
+			// The next track (b) fails to load; c succeeds.
+			vi.mocked(audioCache.get)
+				.mockReset()
+				.mockRejectedValueOnce(new Error("decrypt failed"))
+				.mockResolvedValue({
+					audio: { uri: "file:///cache/c.mp3" },
+					metadata: { title: "C", cachedAt: Date.now() }
+				} as never)
+
+			playlist.replace.mockClear()
+
+			statusListener!({ didJustFinish: true })
+
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			// b (index 1) was skipped → landed on c (index 2).
+			expect(audio.getPosition()).toBe(2)
+			expect(playlist.replace).toHaveBeenCalledTimes(1)
+
+			const replaceArg = playlist.replace.mock.calls[0]![0] as { uri: string }
+
+			expect(replaceArg.uri).toBe("file:///cache/c.mp3")
+		})
+
+		it("pauses without infinite-looping when every remaining track fails", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.play()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			vi.mocked(audioCache.get).mockReset().mockRejectedValue(new Error("all fail"))
+
+			playlist.pause.mockClear()
+			playlist.replace.mockClear()
+
+			statusListener!({ didJustFinish: true })
+
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			expect(playlist.replace).not.toHaveBeenCalled()
+			expect(playlist.pause).toHaveBeenCalled()
+		})
+	})
+
+	describe("native-status end detection (background-safe)", () => {
+		it("advances when the player stops at the end without a didJustFinish flag", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.play()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			playlist.replace.mockClear()
+
+			// Native status: loaded, stopped at the reported end — but didJustFinish was dropped.
+			statusListener!({
+				didJustFinish: false,
+				isLoaded: true,
+				playing: false,
+				duration: 180,
+				currentTime: 180
+			})
+
+			await flushMicrotasks()
+
+			expect(audio.getPosition()).toBe(1)
+			expect(playlist.replace).toHaveBeenCalled()
+		})
+
+		it("does not treat a freshly-loaded (currentTime 0) status as ended", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.play()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			playlist.replace.mockClear()
+
+			statusListener!({
+				didJustFinish: false,
+				isLoaded: true,
+				playing: false,
+				duration: 180,
+				currentTime: 0
+			})
+
+			await flushMicrotasks()
+
+			expect(audio.getPosition()).toBe(0)
+			expect(playlist.replace).not.toHaveBeenCalled()
+		})
+
+		it("does not treat a mid-track paused status as ended", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.play()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			playlist.replace.mockClear()
+
+			statusListener!({
+				didJustFinish: false,
+				isLoaded: true,
+				playing: false,
+				duration: 180,
+				currentTime: 50
+			})
+
+			await flushMicrotasks()
+
+			expect(audio.getPosition()).toBe(0)
+			expect(playlist.replace).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("next-track prefetch", () => {
+		it("prefetches the next track into the cache when a track starts playing", async () => {
+			const { audio } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+
+			vi.mocked(audioCache.get).mockClear()
+
+			await audio.play()
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			const requestedUuids = vi
+				.mocked(audioCache.get)
+				.mock.calls.map(call => (call[0].item as { data: DriveItemFileExtracted }).data.data.uuid)
+
+			// Played a AND prefetched b.
+			expect(requestedUuids).toContain("a")
+			expect(requestedUuids).toContain("b")
+		})
+
+		it("does not prefetch past the end of the queue when loopMode is none", async () => {
+			const { audio } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.setLoopMode("none")
+
+			vi.mocked(audioCache.get).mockClear()
+
+			await audio.play()
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			const requestedUuids = vi
+				.mocked(audioCache.get)
+				.mock.calls.map(call => (call[0].item as { data: DriveItemFileExtracted }).data.data.uuid)
+
+			expect(requestedUuids).toEqual(["a"])
+		})
+
+		it("a failed prefetch does not disrupt current playback", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+
+			vi.mocked(audioCache.get)
+				.mockReset()
+				.mockImplementation(async input => {
+					const uuid = (input.item as { data: DriveItemFileExtracted }).data.data.uuid
+
+					if (uuid === "b") {
+						throw new Error("prefetch fail")
+					}
+
+					return {
+						audio: { uri: `file:///cache/${uuid}.mp3` },
+						metadata: { title: uuid, cachedAt: Date.now() }
+					} as never
+				})
+
+			playlist.play.mockClear()
+
+			await audio.play()
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			expect(playlist.play).toHaveBeenCalled()
+			expect(audio.getPosition()).toBe(0)
+		})
+	})
+
+	describe("foreground reconcile (background-miss recovery)", () => {
+		function getAppStateChangeListener(spy: ReturnType<typeof vi.spyOn>): ((state: string) => void) | undefined {
+			const call = spy.mock.calls.find((c: unknown[]) => c[0] === "change")
+
+			return call?.[1] as ((state: string) => void) | undefined
+		}
+
+		it("advances a track that ended while backgrounded once the app returns to active", async () => {
+			const spy = vi.spyOn(AppState, "addEventListener")
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				const onChange = getAppStateChangeListener(spy)
+
+				expect(onChange).toBeDefined()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				// Track a ended while backgrounded but never advanced (no didJustFinish, frozen timer).
+				playlist.playing = false
+				playlist.duration = 120
+				playlist.currentTime = 120
+				playlist.replace.mockClear()
+
+				onChange!("active")
+
+				await flushMicrotasks()
+
+				expect(audio.getPosition()).toBe(1)
+				expect(playlist.replace).toHaveBeenCalled()
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
+		it("does nothing on resume when the current track is still playing", async () => {
+			const spy = vi.spyOn(AppState, "addEventListener")
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				const onChange = getAppStateChangeListener(spy)
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				playlist.playing = true
+				playlist.duration = 120
+				playlist.currentTime = 30
+				playlist.replace.mockClear()
+
+				onChange!("active")
+
+				await flushMicrotasks()
+
+				expect(audio.getPosition()).toBe(0)
+				expect(playlist.replace).not.toHaveBeenCalled()
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
+		it("does nothing on resume while a track load is in flight", async () => {
+			const spy = vi.spyOn(AppState, "addEventListener")
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				const onChange = getAppStateChangeListener(spy)
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				// Begin a load that hangs → loading stays true (intendPlaying stays true from track a).
+				let resolveLoad: (value: { audio: { uri: string }; metadata: { cachedAt: number } }) => void = () => {}
+				const hangPromise = new Promise<{ audio: { uri: string }; metadata: { cachedAt: number } }>(resolve => {
+					resolveLoad = resolve
+				})
+
+				vi.mocked(audioCache.get).mockReturnValueOnce(hangPromise as never)
+
+				const skipPromise = audio.skipTo(1)
+
+				await new Promise(resolve => setTimeout(resolve, 0))
+
+				expect(audio.getLoading()).toBe(true)
+
+				playlist.playing = false
+				playlist.duration = 120
+				playlist.currentTime = 120
+
+				onChange!("active")
+
+				await new Promise(resolve => setTimeout(resolve, 0))
+
+				// Reconcile must NOT advance past the in-flight track (index 1).
+				expect(audio.getPosition()).toBe(1)
+
+				resolveLoad({ audio: { uri: "file:///cache/b.mp3" }, metadata: { cachedAt: Date.now() } })
+
+				await skipPromise
+			} finally {
+				spy.mockRestore()
+			}
+		})
+	})
+
+	describe("track-end watchdog (hardening)", () => {
+		it("advances when currentTime plateaus below an over-reported duration (no livelock)", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				const statusListener = getPlaylistStatusListener(playlist)
+
+				playlist.replace.mockClear()
+
+				// duration over-reports the real end (says 10s, playback tops out at 9.0s and stops).
+				playlist.duration = 10
+				playlist.playing = false
+				playlist.currentTime = 9
+				statusListener!({ playing: false, isLoaded: true, duration: 10, currentTime: 9, didJustFinish: false })
+
+				// No further status updates arrive (track is stuck below the epsilon). The watchdog
+				// must recover after a few stalled fires instead of re-arming forever.
+				await vi.advanceTimersByTimeAsync(4 * (1 * 1000 + 2000) + 200)
+
+				expect(audio.getPosition()).toBe(1)
+				expect(playlist.replace).toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("keeps polling instead of dead-ending when duration is unknown at fire time", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const { audio, playlist } = await createAudio()
+
+				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+				await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+				await audio.play()
+
+				const statusListener = getPlaylistStatusListener(playlist)
+
+				playlist.replace.mockClear()
+
+				// Arm the watchdog with a known 5s duration.
+				playlist.duration = 5
+				playlist.currentTime = 0
+				playlist.playing = true
+				statusListener!({ playing: true, isLoaded: true, duration: 5, currentTime: 0, didJustFinish: false })
+
+				// By the time it fires, the player transiently reports duration 0 → must reschedule.
+				playlist.duration = 0
+				playlist.currentTime = 0
+				await vi.advanceTimersByTimeAsync(5 * 1000 + 2000 + 100)
+
+				expect(audio.getPosition()).toBe(0)
+
+				// Duration becomes known again and the track is at its end → the poll advances.
+				playlist.duration = 5
+				playlist.currentTime = 5
+				playlist.playing = false
+				await vi.advanceTimersByTimeAsync(2000 + 100)
+
+				expect(audio.getPosition()).toBe(1)
 			} finally {
 				vi.useRealTimers()
 			}
