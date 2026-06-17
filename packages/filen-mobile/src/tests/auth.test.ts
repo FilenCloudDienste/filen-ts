@@ -175,6 +175,14 @@ vi.mock("@/lib/sandboxCache", () => ({
 	}
 }))
 
+vi.mock("@/lib/logger", () => ({
+	default: {
+		purge: vi.fn(() => {
+			callLog.push("logger.purge")
+		})
+	}
+}))
+
 vi.mock("@/features/audio/audio", () => ({
 	default: {
 		stop: vi.fn(async () => {
@@ -421,12 +429,13 @@ describe("auth.logout", () => {
 		expect(cacheClearIdx).toBeGreaterThanOrEqual(0)
 		expect(sqliteClearIdx).toBeGreaterThan(cacheClearIdx)
 
-		// All decrypted-at-rest stores are wiped.
+		// All decrypted-at-rest stores are wiped — including the diagnostic logs (file/dir names).
 		expect(callLog).toContain("offline.clearAll")
 		expect(callLog).toContain("fileCache.clear")
 		expect(callLog).toContain("audioCache.clear")
 		expect(callLog).toContain("thumbnails.clear")
 		expect(callLog).toContain("sandboxCache.clear")
+		expect(callLog).toContain("logger.purge")
 	})
 
 	// #8 — the SDK client handles must be destroyed and nulled, and clientsReady re-armed, so no

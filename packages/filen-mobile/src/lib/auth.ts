@@ -23,6 +23,7 @@ import fileCache from "@/lib/fileCache"
 import audioCache from "@/features/audio/audioCache"
 import thumbnails from "@/lib/thumbnails"
 import sandboxCache from "@/lib/sandboxCache"
+import logger from "@/lib/logger"
 import driveSearch from "@/features/drive/driveSearch"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
@@ -354,6 +355,10 @@ class Auth {
 		} catch (e) {
 			console.error(e)
 		}
+
+		// Diagnostic logs hold decrypted-at-rest data (file/dir names, paths) by design — wipe them
+		// with the rest of the decrypted state. Synchronous + internally guarded, so it never throws.
+		logger.purge()
 
 		// Phase 6 — wipe persisted + decrypted-at-rest state. secureStore (auth secret), SQLite (query
 		// cache + cache kv), and every decrypted-on-disk store. allSettled so a single failure can't
