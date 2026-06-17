@@ -76,6 +76,8 @@ export type LoggerConfig = {
 }
 
 const DEFAULT_CONFIG: LoggerConfig = {
+	// Dev/default. Production (bundled __DEV__ === false) narrows this to "warn" in the Logger
+	// constructor — armed before the first line, with no dev-only window.
 	minLevel: "debug",
 	persistLevel: "warn",
 	breadcrumbCapacity: 200,
@@ -114,6 +116,16 @@ export class Logger {
 	// logger for the next session.
 	private disabled: boolean = false
 
+	public constructor() {
+		// Production (bundled __DEV__ === false): capture warn/error only — debug/info stay in-memory
+		// breadcrumbs. Read at construction so it's correct in the app (where __DEV__ is defined) and
+		// deterministic in tests (where __DEV__ is undefined → keeps the dev "debug" default).
+		if ((globalThis as { __DEV__?: boolean }).__DEV__ === false) {
+			this.config.minLevel = "warn"
+			this.minRank = RANK["warn"]
+		}
+	}
+
 	public configure(opts: Partial<LoggerConfig>): void {
 		this.config = {
 			...this.config,
@@ -128,6 +140,12 @@ export class Logger {
 			this.ringHead = 0
 			this.ringCount = 0
 		}
+	}
+
+	// Effective minimum captured level. The in-app viewer reads this to hide filter levels that can
+	// never appear (prod = warn, so the Info/Debug filters would always be empty).
+	public get minLevel(): LogLevel {
+		return this.config.minLevel
 	}
 
 	public debug(tag: string, msg: string, data?: unknown): void {

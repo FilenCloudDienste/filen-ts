@@ -38,6 +38,22 @@ const FILTER_LABEL_KEY: Record<
 	debug: "log_level_debug"
 }
 
+// RANK ladder (mirrors src/lib/logger.ts). The viewer only offers filter levels that can actually
+// appear given the logger's effective minLevel — in prod minLevel is "warn", so Info/Debug (never
+// captured) aren't shown; in dev all levels are offered.
+const FILTER_RANK: Record<string, number> = {
+	debug: 10,
+	info: 20,
+	warn: 30,
+	error: 40
+}
+
+function visibleLevelFilters(minLevel: string): readonly LevelFilter[] {
+	const minRank = FILTER_RANK[minLevel] ?? 0
+
+	return LEVEL_FILTERS.filter(f => f === "all" || (FILTER_RANK[f] ?? 0) >= minRank)
+}
+
 function pad(value: number, length: number = 2): string {
 	return String(value).padStart(length, "0")
 }
@@ -163,7 +179,7 @@ const Logs = () => {
 						},
 						props: {
 							title: t("filter_logs"),
-							buttons: LEVEL_FILTERS.map(level => ({
+							buttons: visibleLevelFilters(logger.minLevel).map(level => ({
 								id: level,
 								title: t(FILTER_LABEL_KEY[level]),
 								checked: levelFilter === level,
