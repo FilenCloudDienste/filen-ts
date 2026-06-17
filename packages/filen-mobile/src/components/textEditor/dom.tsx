@@ -13,6 +13,7 @@ import type { TextEditorType, Font, Colors, TextEditorEvents } from "@/component
 import { createTextThemes, parseExtension, loadLanguage } from "@/components/textEditor/codeMirror"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
+import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import { classifyExternalLinkHref } from "@/components/textEditor/linkUtils"
 import MDEditor from "@uiw/react-md-editor"
@@ -20,6 +21,9 @@ import rehypeSanitize from "rehype-sanitize"
 import { visit } from "unist-util-visit"
 import type { Plugin } from "unified"
 import type { Root, Element } from "hast"
+
+// Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
+installDomConsoleProxy()
 
 const rehypeExternalLinks: Plugin<[], Root> = () => {
 	return tree => {
