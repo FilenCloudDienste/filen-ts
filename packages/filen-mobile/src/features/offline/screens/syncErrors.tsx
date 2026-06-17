@@ -10,6 +10,7 @@ import VirtualList from "@/components/ui/virtualList"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { useShallow } from "zustand/shallow"
+import logger from "@/lib/logger"
 import offlineSync from "@/features/offline/offlineSync"
 import { useTranslation } from "react-i18next"
 import ListRow from "@/components/ui/listRow"
@@ -114,7 +115,7 @@ const SyncErrors = () => {
 									onPress: () => {
 										useOfflineStore.getState().setSyncErrors([])
 
-										offlineSync.sync({ manual: true }).catch(console.error)
+										offlineSync.sync({ manual: true }).catch(err => logger.warn("offline-sync", "Manual sync after clearing errors failed", { error: err instanceof Error ? err.message : String(err) }))
 									}
 								},
 								{

@@ -28,6 +28,7 @@
  * shape work (tag check + result-object allocation) and counts calls.
  */
 import { describe, it, expect, afterAll, vi } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 import { writeFileSync } from "node:fs"
 
 // @ts-expect-error __DEV__ is a React Native global

@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useCameraUploadStore, { type CameraUploadError } from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useShallow } from "zustand/shallow"
 import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
+import logger from "@/lib/logger"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import { useTranslation } from "react-i18next"
 
@@ -99,7 +100,7 @@ const CameraUploadErrors = () => {
 									onPress: () => {
 										useCameraUploadStore.getState().setErrors([])
 
-										cameraUpload.sync().catch(console.error)
+										cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Sync after clearing errors failed", { error: err instanceof Error ? err.message : String(err) }))
 									}
 								},
 								{

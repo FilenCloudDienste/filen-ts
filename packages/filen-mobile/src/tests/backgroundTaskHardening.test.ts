@@ -9,6 +9,7 @@
  * existing suite pins Success for the authed and unauthed HAPPY paths only.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const {
 	mockTaskManager,

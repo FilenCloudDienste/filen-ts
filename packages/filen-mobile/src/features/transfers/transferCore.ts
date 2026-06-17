@@ -1,4 +1,5 @@
 import auth from "@/lib/auth"
+import logger from "@/lib/logger"
 import { run } from "@filen/utils"
 import * as FileSystem from "expo-file-system"
 import {
@@ -195,13 +196,13 @@ function removeSettledTransfer(
 						addFinishedTransfer(snapshot)
 					}
 				} catch (e) {
-					console.error(e)
+					logger.error("transfers", "Failed to append finished transfer snapshot", { id, type, outcome, error: e instanceof Error ? e.message : String(e) })
 				}
 			}
 
 			useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === type)))
 		})
-		.catch(console.error)
+		.catch(err => logger.error("transfers", "removeSettledTransfer cleanup chain rejected", { id, type, outcome, error: err instanceof Error ? err.message : String(err) }))
 }
 
 // Registers a deferred cleanup that removes the transfer entry from the store once the transfer
@@ -581,7 +582,9 @@ export async function uploadCore(
 				return null
 			}
 
-			if (!hideProgress) {
+			if (hideProgress) {
+				logger.error("transfers", "Directory upload failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+			} else {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
 						t.id === id && t.type === "uploadDirectory"
@@ -744,7 +747,9 @@ export async function uploadCore(
 			return null
 		}
 
-		if (!hideProgress) {
+		if (hideProgress) {
+			logger.error("transfers", "File upload failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+		} else {
 			useTransfersStore.getState().setTransfers(prev =>
 				prev.map(t =>
 					t.id === id && t.type === "uploadFile"
@@ -831,7 +836,7 @@ export async function uploadCore(
 				signal: compositeAbortSignal
 			})
 			.catch(err => {
-				console.error("[Transfers] Thumbnail generation failed, deferring", err)
+				logger.warn("transfers", "Thumbnail generation failed after upload", { uuid: result.data.uuid, name: uploadedFileName, error: err instanceof Error ? err.message : String(err) })
 			})
 	}
 
@@ -1148,7 +1153,9 @@ export async function downloadCore(
 				return null
 			}
 
-			if (!hideProgress) {
+			if (hideProgress) {
+				logger.error("transfers", "Directory download failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+			} else {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
 						t.id === id && t.type === "downloadDirectory"
@@ -1370,7 +1377,9 @@ export async function downloadCore(
 			return null
 		}
 
-		if (!hideProgress) {
+		if (hideProgress) {
+			logger.error("transfers", "File download failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+		} else {
 			useTransfersStore.getState().setTransfers(prev =>
 				prev.map(t =>
 					t.id === id && t.type === "downloadFile"

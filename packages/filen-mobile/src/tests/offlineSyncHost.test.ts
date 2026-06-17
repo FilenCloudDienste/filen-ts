@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // Coverage for the <OfflineSync /> host component (src/features/offline/sync.tsx),
 // which kicks the initial offline index-refresh + offlineSync pass on mount and

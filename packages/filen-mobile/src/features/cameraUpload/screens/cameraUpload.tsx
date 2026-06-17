@@ -11,6 +11,7 @@ import { Fragment, useCallback } from "react"
 import { router, useFocusEffect } from "expo-router"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import alerts from "@/lib/alerts"
+import logger from "@/lib/logger"
 import { run } from "@filen/utils"
 import cache from "@/lib/cache"
 import { unwrapDirMeta } from "@/lib/sdkUnwrap"
@@ -96,7 +97,7 @@ const CameraUpload = () => {
 	useFocusEffect(
 		useCallback(() => {
 			return () => {
-				cameraUpload.sync().catch(console.error)
+				cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Focus-leave sync failed", { error: err instanceof Error ? err.message : String(err) }))
 			}
 		}, [])
 	)
@@ -225,7 +226,7 @@ const CameraUpload = () => {
 												})
 
 												if (!result.success) {
-													console.error(result.error)
+													logger.error("cameraUpload", "Failed to open directory picker", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 													alerts.error(result.error)
 
 													return

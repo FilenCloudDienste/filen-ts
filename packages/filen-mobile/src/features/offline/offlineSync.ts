@@ -1,4 +1,5 @@
 import { run, Semaphore } from "@filen/utils"
+import logger from "@/lib/logger"
 import { onlineManager } from "@tanstack/react-query"
 import NetInfo from "@react-native-community/netinfo"
 import { ErrorKind, AnyDirWithContext, AnyDirWithContext_Tags, AnyNormalDir, AnySharedDir_Tags } from "@filen/sdk-rs"
@@ -217,6 +218,10 @@ export class OfflineSync {
 		this.inFlight = this.runPass({
 			thorough: manual === true,
 			background: background === true
+		}).catch(e => {
+			logger.error("offline-sync", "Sync pass threw unexpectedly", { error: e instanceof Error ? e.message : String(e) })
+
+			throw e
 		}).finally(() => {
 			this.inFlight = null
 		})
@@ -1043,6 +1048,8 @@ export class OfflineSync {
 				})
 
 				if (!result.success) {
+					logger.error("offline-sync", "healBrokenStandalones: repair threw", { uuid, name: resolvedName ?? uuid, error: errorMessage(result.error) })
+
 					pushError(
 						makeSyncError({
 							itemUuid: uuid,
@@ -1181,6 +1188,8 @@ export class OfflineSync {
 				})
 
 				if (!result.success) {
+					logger.error("offline-sync", "healBrokenTrees: repair threw", { uuid, name: resolvedName ?? uuid, error: errorMessage(result.error) })
+
 					pushError(
 						makeSyncError({
 							itemUuid: uuid,
@@ -1210,6 +1219,8 @@ export class OfflineSync {
 				defer(() => {
 					useOfflineStore.getState().setSyncing(false)
 				})
+
+				logger.info("offline-sync", "Sync pass started", { thorough, background })
 
 				const signal = this.abortController.signal
 
@@ -1447,6 +1458,8 @@ export class OfflineSync {
 
 					this.lastCompletedAt = Date.now()
 				}
+
+				logger.info("offline-sync", "Sync pass completed", { thorough, errorCount: errors.length })
 			},
 			{
 				throw: true

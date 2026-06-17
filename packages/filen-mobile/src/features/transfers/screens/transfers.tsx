@@ -27,6 +27,7 @@ import { driveItemDisplayName } from "@/lib/decryption"
 import { run } from "@filen/utils"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
+import logger from "@/lib/logger"
 
 // Discriminated wrapper so the list can hold both still-running ("active") transfers and
 // settled ("finished") snapshots and the renderer can branch on `kind`.
@@ -172,7 +173,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 									})
 
 									if (!promptResult.success) {
-										console.error(promptResult.error)
+										logger.warn("transfers", "Transfer cancel prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 										alerts.error(promptResult.error)
 
 										return
@@ -397,7 +398,7 @@ const TransfersHeader = () => {
 															})
 
 															if (!promptResult.success) {
-																console.error(promptResult.error)
+																logger.warn("transfers", "Cancel-all prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 																alerts.error(promptResult.error)
 
 																return
