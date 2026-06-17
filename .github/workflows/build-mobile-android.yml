@@ -36,15 +36,15 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-08-14
+          toolchain: nightly-2026-02-20
           components: rust-src
           targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Install cargo-ndk
         uses: taiki-e/cache-cargo-install-action@v2
         with:
-          # using specific version due to https://github.com/bbqsrc/cargo-ndk/issues/181
-          tool: cargo-ndk@3.5.4
+          # cargo-ndk 4.x required: filen-rs heif-decoder/build.rs reads ANDROID_ABI (d454f4d); 3.5.4 set CARGO_NDK_ANDROID_TARGET (reverses bbqsrc/cargo-ndk#181)
+          tool: cargo-ndk@4.1.2
 
       - name: Install dependencies
         run: npm install --force --include=dev && npx -y patch-package --patch-dir ./patches
