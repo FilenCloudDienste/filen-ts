@@ -290,6 +290,54 @@ describe("useDriveSearch — result mapping", () => {
 		expect(result.current.searchResultPaths.get("d1")).toBe("Documents")
 		expect(result.current.searchResultPaths.get("f1")).toBe("Documents/Work")
 	})
+
+	it("rebuilds searchResultPaths from each snapshot (path can change between snapshots)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1", "Documents")], total: 1n, live: true }))
+
+		expect(result.current.searchResultPaths.get("f1")).toBe("Documents")
+
+		// A later snapshot reports the item under a different parent — the map follows it.
+		deliver(snapshot({ results: [fileResult("f1", "Documents/Archive")], total: 1n, live: true }))
+
+		expect(result.current.searchResultPaths.get("f1")).toBe("Documents/Archive")
+	})
+
+	it("reports the SDK total even when it exceeds the windowed result count (truncation footer)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		// The window caps at CEILING; the SDK still reports the full match total.
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 1500n, live: true }))
+
+		expect(result.current.searchResults).toHaveLength(2)
+		expect(result.current.totalCount).toBe(1500)
+	})
+
+	it("reuses the same DriveItem object for an unchanged uuid across snapshots (stable refs)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: true }))
+
+		const first = result.current.searchResults[0]
+
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		// f1 is the SAME object (mapCacheRef memo) — only f2 is freshly mapped.
+		expect(result.current.searchResults.find(i => i.data.uuid === "f1")).toBe(first)
+	})
 })
 
 describe("useDriveSearch — state machine (warming / settled / background)", () => {
@@ -388,6 +436,47 @@ describe("useDriveSearch — state machine (warming / settled / background)", ()
 		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: true }))
 
 		expect(result.current.status).toBe("background")
+	})
+
+	it("hydrates from an empty warming state to settled when the results snapshot arrives", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		// First snapshot is empty (cache mid-index) — warming, never "no results".
+		deliver(snapshot({ results: [], total: 0n, live: true }))
+
+		expect(result.current.status).toBe("warming")
+		expect(result.current.searchResults).toEqual([])
+
+		// Converged results stream in on a later snapshot.
+		deliver(snapshot({ results: [fileResult("f1"), dirResult("d1")], total: 2n, live: true }))
+
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["f1", "d1"])
+		expect(result.current.status).toBe("settled")
+	})
+
+	it("keeps warming on an empty snapshot while resync-progress heartbeats keep arriving (past grace)", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [], total: 0n, live: true }))
+
+		// Heartbeats every 250ms (≈ Listing cadence) well past the 400ms grace — each re-arms the
+		// grace, so an empty result must NOT flash "no results" mid-index.
+		for (let i = 0; i < 4; i++) {
+			await advance(250)
+			act(() => {
+				useDriveSearchStore.getState().bumpResyncProgress()
+			})
+		}
+
+		expect(result.current.status).toBe("warming")
 	})
 })
 
@@ -757,5 +846,28 @@ describe("useDriveSearch — activity-based timers (slow huge-tree / slow networ
 		})
 
 		expect(result.current.status).toBe("warming")
+	})
+
+	// Backstop for a dropped `Finished` (best-effort delivery): an empty result pinned "warming"
+	// by `resyncing` must still settle once the stall ceiling trips on total silence — never spin
+	// "Searching…" forever. (Re-arming grace doesn't override this: `stallCeilingHit` wins.)
+	it("collapses an empty resyncing search to settled after the stall ceiling (dropped Finished)", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(true)
+		})
+
+		deliver(snapshot({ results: [], total: 0n, live: true }))
+
+		expect(result.current.status).toBe("warming")
+
+		await advance(STALL_CEILING_MS)
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults).toEqual([])
 	})
 })
