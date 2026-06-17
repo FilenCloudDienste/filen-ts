@@ -26,6 +26,8 @@ export function useNativeDomEvents<T>(params: {
 			try {
 				params.ref.current.postMessage(message)
 			} catch (e) {
+				// console.* (not the RN logger): part of the DOM-event bridge — kept on console with
+				// useDomDomEvents until the deferred WebView-console-proxy work lands.
 				console.error(e)
 			}
 		})()

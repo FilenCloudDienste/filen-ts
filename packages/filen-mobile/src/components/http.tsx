@@ -7,6 +7,7 @@ import { runEffect, run, Semaphore } from "@filen/utils"
 import useHttpStore from "@/stores/useHttp.store"
 import alerts from "@/lib/alerts"
 import { queryClient } from "@/queries/client"
+import logger from "@/lib/logger"
 
 const mutex = new Semaphore(1)
 
@@ -67,7 +68,7 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("http", "HTTP provider lifecycle failed", { nextAppState, error: result.error })
 				alerts.error(result.error)
 
 				return
@@ -105,7 +106,7 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 		// port for nothing during the background window. The AppState listener above
 		// starts it on the real "active" transition instead.
 		if (AppState.currentState === "active") {
-			onAppStateChange("active").catch(console.error)
+			onAppStateChange("active").catch(e => logger.error("http", "HTTP provider failed on initial mount", { error: e }))
 		}
 	})
 

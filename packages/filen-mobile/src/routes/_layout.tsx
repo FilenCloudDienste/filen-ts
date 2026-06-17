@@ -38,13 +38,14 @@ import Biometric from "@/components/biometric"
 import PrivacyScreen from "@/components/privacyScreen"
 import AccountReminders from "@/components/accountReminders"
 import OfflineBanner from "@/components/offlineBanner"
+import logger from "@/lib/logger"
 
 SplashScreen.setOptions({
 	duration: 400,
 	fade: true
 })
 
-SplashScreen.preventAutoHideAsync().catch(console.error)
+SplashScreen.preventAutoHideAsync().catch(e => logger.warn("layout", "SplashScreen.preventAutoHideAsync failed", { error: e }))
 
 const RootLayout = () => {
 	const bgBackground = useResolveClassNames("bg-background")
@@ -70,7 +71,7 @@ const RootLayout = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("layout", "Setup pipeline failed", { error: result.error })
 
 			setIsSetupDone(false)
 			// Surface the failure with a retry path instead of rendering null forever.
@@ -78,7 +79,7 @@ const RootLayout = () => {
 			// of the error UI, leaving the app permanently stuck behind the splash.
 			setSetupFailed(true)
 
-			SplashScreen.hideAsync().catch(console.error)
+			SplashScreen.hideAsync().catch(e => logger.warn("layout", "SplashScreen.hideAsync failed after setup error", { error: e }))
 
 			return
 		}
@@ -87,7 +88,7 @@ const RootLayout = () => {
 		setIsSetupDone(true)
 
 		setTimeout(() => {
-			SplashScreen.hideAsync().catch(console.error)
+			SplashScreen.hideAsync().catch(e => logger.warn("layout", "SplashScreen.hideAsync failed after setup", { error: e }))
 		}, 1)
 	}
 
@@ -126,7 +127,7 @@ const RootLayout = () => {
 					<PressablesConfig
 						globalHandlers={{
 							onPress: () => {
-								Haptics.selectionAsync().catch(console.error)
+								Haptics.selectionAsync().catch(e => logger.warn("layout", "Haptics.selectionAsync failed", { error: e }))
 							}
 						}}
 					>

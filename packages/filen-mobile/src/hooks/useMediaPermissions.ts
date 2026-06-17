@@ -5,6 +5,7 @@ import { run } from "@filen/utils"
 import { useEffect, useRef, useCallback } from "react"
 import { AppState } from "react-native"
 import { withSystemPresentation } from "@/lib/systemPresentation"
+import logger from "@/lib/logger"
 
 export type MediaPermissions =
 	| {
@@ -133,7 +134,7 @@ export default function useMediaPermissions(params?: MediaPermissionsParams): Me
 		if (params?.shouldRequest && !didRequestRef.current) {
 			didRequestRef.current = true
 
-			requestPermissions().catch(console.error)
+			requestPermissions().catch(e => logger.warn("media", "requestPermissions failed on mount", { error: e }))
 		}
 	}, [params?.shouldRequest, requestPermissions])
 

@@ -13,6 +13,7 @@ import * as ExpoLinking from "expo-linking"
 import alerts from "@/lib/alerts"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import i18n from "@/lib/i18n"
+import logger from "@/lib/logger"
 
 export type TextEditorType = "richtext" | "text" | "markdown" | "code"
 
@@ -174,12 +175,12 @@ export const TextEditor = ({
 							}
 
 							ExpoLinking.openURL(message.data).catch(err => {
-								console.error(err)
+								logger.error("textEditor", "openURL failed for external link", { error: err })
 								alerts.error(err)
 							})
 						})
 						.catch(err => {
-							console.error(err)
+							logger.error("textEditor", "canOpenURL failed for external link", { error: err })
 							alerts.error(err)
 						})
 

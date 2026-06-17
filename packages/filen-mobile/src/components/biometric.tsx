@@ -18,6 +18,7 @@ import { PressableOpacity } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import events from "@/lib/events"
+import logger from "@/lib/logger"
 import { withSystemPresentation, systemPresentation, useSystemPresentationStore } from "@/lib/systemPresentation"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
@@ -244,6 +245,8 @@ async function promptBiometric(): Promise<LocalAuthentication.LocalAuthenticatio
 	const { hasHardware, isEnrolled } = await fetchData()
 
 	if (!hasHardware || !isEnrolled) {
+		logger.warn("biometric", "Biometric hardware not available or not enrolled", { hasHardware, isEnrolled })
+
 		return {
 			success: false,
 			error: "not_available"
@@ -302,10 +305,14 @@ async function promptPin(biometric: EnabledBiometric): Promise<PinResult> {
 }
 
 async function applyAuthFailure(biometric: EnabledBiometric): Promise<void> {
-	await secureStore.set("biometric", {
-		...biometric,
-		...nextLockState(biometric)
-	} satisfies TBiometric)
+	try {
+		await secureStore.set("biometric", {
+			...biometric,
+			...nextLockState(biometric)
+		} satisfies TBiometric)
+	} catch (e) {
+		logger.warn("biometric", "Failed to persist lock-escalation state after failed auth attempt", { error: e })
+	}
 
 	alerts.error(i18n.t("invalid_pin"))
 }
@@ -326,7 +333,7 @@ async function applyAuthSuccess(biometric: EnabledBiometric, onSuccess: () => vo
 	)
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.warn("biometric", "Failed to reset lock state after successful auth (best-effort)", { error: result.error })
 	}
 }
 
@@ -507,14 +514,14 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("biometric", "tryAuth failed unexpectedly", { preferBiometric, error: result.error })
 			alerts.error(result.error)
 		}
 	}
 
 	useEffectOnce(() => {
 		;(async () => {
-			await tryAuth(true).catch(console.error)
+			await tryAuth(true).catch(e => logger.error("biometric", "Initial biometric prompt threw unexpectedly", { error: e }))
 		})()
 	})
 
@@ -526,7 +533,7 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 			action={
 				<PrimaryButton
 					onPress={async () => {
-						await tryAuth(false).catch(console.error)
+						await tryAuth(false).catch(e => logger.error("biometric", "tryAuth failed unexpectedly", { preferBiometric: false, error: e }))
 					}}
 				>
 					{t("use_pin")}

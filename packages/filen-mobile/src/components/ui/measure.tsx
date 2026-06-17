@@ -2,6 +2,7 @@ import { useRef } from "react"
 import useViewLayout from "@/hooks/useViewLayout"
 import View from "@/components/ui/view"
 import type { LayoutChangeEvent, View as RNView } from "react-native"
+import logger from "@/lib/logger"
 
 const Measure = ({ children, id }: { children: React.ReactNode; id?: string }) => {
 	const viewRef = useRef<RNView>(null)
@@ -12,7 +13,7 @@ const Measure = ({ children, id }: { children: React.ReactNode; id?: string }) =
 	}
 
 	const handleLayout = (e: LayoutChangeEvent) => {
-		console.log("Measure layout:", id, `WxH ${e.nativeEvent.layout.width}x${e.nativeEvent.layout.height}`)
+		logger.debug("ui", "Measure layout", { id, width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })
 		onLayout(e)
 	}
 

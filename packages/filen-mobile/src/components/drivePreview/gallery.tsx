@@ -22,6 +22,7 @@ import Button from "@/components/ui/button"
 import { type External } from "@/routes/drivePreview"
 import { FlashList, type FlashListRef } from "@shopify/flash-list"
 import galleryVideoPlayers from "@/components/drivePreview/galleryVideoPlayers"
+import logger from "@/lib/logger"
 
 const DISMISS_POSITION_RATIO = 0.22
 const DISMISS_VELOCITY_THRESHOLD = 800
@@ -334,11 +335,11 @@ const Gallery = () => {
 	}
 
 	const onDismissGestureStart = () => {
-		lockToCurrentOrientation().catch(console.error)
+		lockToCurrentOrientation().catch(e => logger.warn("gallery", "lockToCurrentOrientation failed on dismiss start", { error: e }))
 	}
 
 	const onDismissGestureEnd = () => {
-		ScreenOrientation.unlockAsync().catch(console.error)
+		ScreenOrientation.unlockAsync().catch(e => logger.warn("gallery", "unlockAsync failed on dismiss end", { error: e }))
 	}
 
 	const goBack = () => {
@@ -391,9 +392,9 @@ const Gallery = () => {
 		syncScrollEnabled()
 
 		if (zoom > 1) {
-			lockToCurrentOrientation().catch(console.error)
+			lockToCurrentOrientation().catch(e => logger.warn("gallery", "lockToCurrentOrientation failed on zoom in", { error: e }))
 		} else {
-			ScreenOrientation.unlockAsync().catch(console.error)
+			ScreenOrientation.unlockAsync().catch(e => logger.warn("gallery", "unlockAsync failed on zoom out", { error: e }))
 		}
 	}
 
@@ -519,7 +520,7 @@ const Gallery = () => {
 
 			galleryVideoPlayers.releaseAll()
 
-			ScreenOrientation.unlockAsync().catch(console.error)
+			ScreenOrientation.unlockAsync().catch(e => logger.warn("gallery", "unlockAsync failed on unmount", { error: e }))
 		}
 	}, [])
 

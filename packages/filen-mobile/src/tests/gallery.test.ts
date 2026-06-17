@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // ─── Module boundary mocks ───────────────────────────────────────────────────
 // gallery.tsx imports many native/heavy modules; stub them all so the pure

@@ -7,6 +7,7 @@ import useAppStore from "@/stores/useApp.store"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import useIsAppActive from "@/hooks/useIsAppActive"
+import logger from "@/lib/logger"
 
 const AccountReminders = () => {
 	const { t } = useTranslation()
@@ -92,7 +93,7 @@ const AccountReminders = () => {
 
 		run(showReminders).then(result => {
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("reminders", "Account reminder flow failed", { error: result.error, pathname })
 				alerts.error(result.error)
 			}
 		})
