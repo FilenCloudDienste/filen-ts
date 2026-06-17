@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const platformMock = vi.hoisted(() => ({ OS: "android" as "ios" | "android" }))
 

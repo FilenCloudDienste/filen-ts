@@ -4,6 +4,7 @@ import { bpsToReadable } from "@filen/utils"
 import i18n from "@/lib/i18n"
 import secureStore from "@/lib/secureStore"
 import { withSystemPresentation } from "@/lib/systemPresentation"
+import logger from "@/lib/logger"
 
 const CHANNEL_ID = "transfers"
 const NOTIFICATION_ID = "filen-transfers-fgs"
@@ -51,6 +52,8 @@ class ForegroundService {
 				importance: AndroidImportance.LOW
 			})
 		})().catch(err => {
+			logger.error("transfers-fgs", "Foreground service init failed", { error: err instanceof Error ? err.message : String(err) })
+
 			this.initPromise = null
 
 			throw err
