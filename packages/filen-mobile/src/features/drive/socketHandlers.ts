@@ -482,7 +482,6 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 		default: {
 			logger.error("drive-socket", "unhandled drive event tag", { tag: eventInner.inner.tag })
-			console.error(eventInner)
 
 			throw new Error("Unhandled drive event")
 		}

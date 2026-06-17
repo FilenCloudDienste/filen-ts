@@ -6,6 +6,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
+import logger from "@/lib/logger"
 
 // Undecryptable items only support destructive disposition — every other
 // action (rename/move/share/download/info/etc.) requires decrypted meta.
@@ -41,7 +42,7 @@ export function buildUndecryptableMenuButtons({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("drive", "restore undecryptable item failed", { error: String(result.error), uuid: item.data.uuid })
 						alerts.error(result.error)
 
 						return

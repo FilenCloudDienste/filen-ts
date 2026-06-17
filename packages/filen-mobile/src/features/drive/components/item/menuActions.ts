@@ -22,6 +22,7 @@ import useDriveStore from "@/features/drive/store/useDrive.store"
 import { type TFunction } from "i18next"
 import { isFileItem, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
 import cache from "@/lib/cache"
+import logger from "@/lib/logger"
 
 // Warm the global uuid-keyed cache for the tapped item BEFORE navigating to a metadata
 // screen. A cache-search result from a directory the user never browsed is not yet in the
@@ -140,7 +141,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("drive", "favorite toggle failed", { error: String(result.error), uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -252,7 +253,7 @@ export function createMenuButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("drive", "rename prompt failed", { error: String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -276,7 +277,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("drive", "rename failed", { error: String(result.error), uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -296,7 +297,7 @@ export function createMenuButtons({
 					})
 
 					if (!driveRootUuidResult.success) {
-						console.error(driveRootUuidResult.error)
+						logger.error("drive", "move: failed to get root uuid", { error: String(driveRootUuidResult.error) })
 						alerts.error(driveRootUuidResult.error)
 
 						return
@@ -378,7 +379,7 @@ export function createMenuButtons({
 						})
 
 						if (!pickResult.success) {
-							console.error(pickResult.error)
+							logger.warn("drive", "share: contact picker failed", { error: String(pickResult.error) })
 							alerts.error(pickResult.error)
 
 							return
@@ -395,7 +396,7 @@ export function createMenuButtons({
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("drive", "share with Filen user failed", { error: String(result.error), uuid: item.data.uuid })
 							alerts.error(result.error)
 						}
 					}
@@ -506,7 +507,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("drive", "copy public link failed", { error: String(result.error), uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -607,7 +608,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("drive", "restore failed", { error: String(result.error), uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return

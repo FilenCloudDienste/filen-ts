@@ -37,6 +37,7 @@ import Menu from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
+import logger from "@/lib/logger"
 import { useResolveClassNames } from "uniwind"
 
 const Drive = () => {
@@ -193,7 +194,7 @@ const Drive = () => {
 										// so the gesture resolves with the local listing refetch;
 										// offlineSync gates connectivity/Wi-Fi-only internally.
 										if (drivePath.type === "offline") {
-											offlineSync.sync({ manual: true }).catch(console.error)
+											offlineSync.sync({ manual: true }).catch(e => logger.warn("drive", "offline sync failed", { error: String(e) }))
 										}
 
 										const result = await run(async () => {
@@ -201,7 +202,7 @@ const Drive = () => {
 										})
 
 										if (!result.success) {
-											console.error(result.error)
+											logger.error("drive", "drive list refresh failed", { error: String(result.error) })
 											alerts.error(result.error)
 										}
 									}

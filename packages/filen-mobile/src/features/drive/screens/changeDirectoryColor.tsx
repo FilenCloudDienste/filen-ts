@@ -18,6 +18,7 @@ import drive from "@/features/drive/drive"
 import { ScrollView } from "react-native-gesture-handler"
 import { Information } from "@/features/drive/components/information"
 import DismissStack from "@/components/dismissStack"
+import logger from "@/lib/logger"
 import useIsOnline from "@/hooks/useIsOnline"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { useTranslation } from "react-i18next"
@@ -102,7 +103,7 @@ const ChangeDirectoryColor = () => {
 									})
 
 									if (!result.success) {
-										console.error(result.error)
+										logger.error("drive", "set directory color failed", { error: String(result.error) })
 										alerts.error(result.error)
 
 										return
