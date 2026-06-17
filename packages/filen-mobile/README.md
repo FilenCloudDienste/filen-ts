@@ -14,9 +14,9 @@ The iOS File Provider Extension and the Android Documents Provider are wired in 
 
 - **Node.js 24+** (older versions may work, but the old app required 24+; not relaxed in the rewrite).
 - **Rust** — install via [rustup](https://www.rust-lang.org/tools/install).
-- **cargo-ndk** for Android Rust cross-compilation:
+- **cargo-ndk** for Android Rust cross-compilation — must be **4.x** (the native build reads cargo-ndk 4.x's `ANDROID_ABI` as of filen-rs `d454f4d`; the old 3.5.4 sets `CARGO_NDK_ANDROID_TARGET` and no longer propagates the heif-decoder ABI):
     ```bash
-    cargo install --version 3.5.4 cargo-ndk
+    cargo install --version 4.1.2 cargo-ndk
     ```
 - **Rust targets** for the file/documents provider native build:
     ```bash

@@ -86,7 +86,7 @@ Three git submodules live directly under `packages/filen-mobile/` (pinned SHAs i
 | `filen-ios-file-provider/`          | Swift source for the iOS File Provider Extension. `withFileProvider.ts` plugin copies these files into the prebuilt Xcode project + builds the Rust xcframework + wires up the extension target.                                                                                                                                  |
 | `filen-android-documents-provider/` | Kotlin source for the Android Documents Provider (`io.filen.app.FilenDocumentsProvider`). `withAndroidRustBuild.ts` plugin builds the `.so` files via cargo-ndk, generates uniffi Kotlin bindings, copies the Kotlin class into `app/src/main/java/io/filen/app/`, and injects the `<provider>` element into AndroidManifest.xml. |
 
-Building the native cache requires **cargo-ndk pinned to 3.5.4** (see README — 4.x has bbqsrc/cargo-ndk#181 which breaks the heif-decoder ABI propagation).
+Building the native cache requires **cargo-ndk 4.x** — as of filen-rs `d454f4d` (`heif-decoder/build.rs`) the build reads cargo-ndk 4.x's `ANDROID_ABI` env var; the previously-pinned 3.5.4 sets the old `CARGO_NDK_ANDROID_TARGET` and no longer propagates the heif-decoder ABI (this reverses the earlier bbqsrc/cargo-ndk#181 workaround).
 
 `src/features/settings/fileProvider.ts` is the TS bridge that writes `auth.json` to the shared location both extensions read from (iOS app group container; Android `filesDir`). Mirrored boolean state lives in secureStore under `FILE_PROVIDER_ENABLED_SECURE_STORE_KEY` for fast reactive UI reads.
 
@@ -396,7 +396,7 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
     - `withNotifeeForegroundServiceType.ts` — notifee FGS type for transfers
 - **Scripts**: `npm run verify` = lint + typecheck + test; `npm run clean` = `.expo/`; `npm run superclean` = `.expo/` + DerivedData + `.gradle/` + Rust target dirs; `npm run prebuild:clean` = clean + expo prebuild --clean; `npm run prebuild:ci:{ios,android}` = superclean + prebuild for one platform
 - **patch-package**: applied via `scripts/postinstall.sh`. Patches in `patches/` cover xcode 3.0.1 (file-provider `addResourceFile` null guard) and expo-media-library version-bumped patches.
-- **cargo-ndk** pinned to 3.5.4 for prebuild (bbqsrc/cargo-ndk#181 — see README)
+- **cargo-ndk** 4.x for prebuild (reads `ANDROID_ABI` per filen-rs `d454f4d`; the old 3.5.4 pin no longer propagates the heif-decoder ABI, reversing the earlier bbqsrc/cargo-ndk#181 workaround — see README)
 
 ## SDK Integration Patterns
 

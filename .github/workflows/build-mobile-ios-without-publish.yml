@@ -32,7 +32,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-08-14
+          toolchain: nightly-2026-02-20
           components: rust-src
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
