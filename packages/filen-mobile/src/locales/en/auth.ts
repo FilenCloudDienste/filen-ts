@@ -20,6 +20,8 @@ export const auth = {
 	enter_two_factor_code_or_recovery_key: "Enter your two-factor code or recovery key",
 	/** Two-factor prompt — input placeholder for the 2FA code or recovery key field */
 	code_or_recovery_key: "Code or recovery key",
+	/** Two-factor prompt — dialog message shown after a rejected code, prompting a re-entry */
+	incorrect_two_factor_code_try_again: "Incorrect code. Please try again.",
 	/** Password-reset prompt — dialog title for requesting a reset email */
 	reset_password: "Reset password",
 	/** Password-reset prompt — dialog message asking for the account email address */

@@ -31,9 +31,11 @@ function isTwoFactorRequiredError(error: unknown): boolean {
 		return true
 	}
 
-	const message = unwrapped.message().toLowerCase()
+	// Fallback when the kind isn't set: the SDK 0.4.26 server code is exact — no brittle
+	// message-substring matching.
+	const serverCode = unwrapped.serverCode()
 
-	return message.includes("2fa") || message.includes("two factor") || message.includes("twofactor")
+	return serverCode === "enter_2fa" || serverCode === "wrong_2fa"
 }
 
 const Login = () => {
@@ -64,11 +66,11 @@ const Login = () => {
 		}
 	}
 
-	const promptForTwoFactor = async (): Promise<string | null> => {
+	const promptForTwoFactor = async (wrongCode: boolean): Promise<string | null> => {
 		const promptResult = await run(async () => {
 			return await prompts.input({
 				title: t("two_factor_authentication"),
-				message: t("enter_two_factor_code_or_recovery_key"),
+				message: wrongCode ? t("incorrect_two_factor_code_try_again") : t("enter_two_factor_code_or_recovery_key"),
 				inputType: "plain-text",
 				placeholder: t("code_or_recovery_key"),
 				cancelText: t("cancel"),
@@ -120,28 +122,42 @@ const Login = () => {
 			return
 		}
 
-		const twoFactorCode = await promptForTwoFactor()
+		// 2FA required. Prompt and retry; on a rejected code, re-prompt with a hint instead of
+		// dropping back to the Sign In button. Cancelling the prompt exits the flow.
+		let wrongCode = false
 
-		if (!twoFactorCode) {
-			return
-		}
+		for (;;) {
+			const twoFactorCode = await promptForTwoFactor(wrongCode)
 
-		const secondAttempt = await runWithLoading(async () => {
-			await auth.login({
-				email: trimmedEmail,
-				password,
-				twoFactorCode
+			if (!twoFactorCode) {
+				return
+			}
+
+			const attempt = await runWithLoading(async () => {
+				await auth.login({
+					email: trimmedEmail,
+					password,
+					twoFactorCode
+				})
 			})
-		})
 
-		if (!secondAttempt.success) {
-			console.error(secondAttempt.error)
-			alerts.error(secondAttempt.error)
+			if (attempt.success) {
+				await finishLogin()
 
-			return
+				return
+			}
+
+			// A 2FA error after a code was submitted means it was wrong/expired → re-prompt with a
+			// hint. Any other failure is real → surface it and stop.
+			if (!isTwoFactorRequiredError(attempt.error)) {
+				console.error(attempt.error)
+				alerts.error(attempt.error)
+
+				return
+			}
+
+			wrongCode = true
 		}
-
-		await finishLogin()
 	}
 
 	const handleForgotPassword = async (): Promise<void> => {
