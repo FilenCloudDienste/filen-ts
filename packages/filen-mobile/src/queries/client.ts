@@ -124,7 +124,7 @@ export class QueryPersisterKv {
 			try {
 				this.buffer.set((row[0] as string).slice(prefix.length), deserialize(row[1] as string))
 			} catch (err) {
-				logger.warn("queries-restore", "Skipped corrupt persisted query row", { key: row[0], error: err instanceof Error ? err.message : String(err) })
+				logger.warn("queries-restore", "Skipped corrupt persisted query row", { rowId: row[0], error: err instanceof Error ? err.message : String(err) })
 			}
 		}
 
