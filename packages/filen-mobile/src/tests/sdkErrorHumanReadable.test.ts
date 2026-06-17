@@ -82,51 +82,65 @@ vi.mock("@/lib/i18n", () => ({
 
 import { unwrappedSdkErrorToHumanReadable, unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 
-function makeError(kind: string, message: string) {
+function makeError(
+	kind: string,
+	message = "",
+	opts: { serverMessage?: string; serverCode?: string; innerMessage?: string } = {}
+) {
 	return {
 		kind: () => kind,
-		message: () => message
+		message: () => message,
+		serverMessage: () => opts.serverMessage,
+		serverCode: () => opts.serverCode,
+		innerMessage: () => opts.innerMessage
 	} as unknown as Parameters<typeof unwrappedSdkErrorToHumanReadable>[0]
 }
 
 describe("unwrappedSdkErrorToHumanReadable", () => {
-	it("returns the translated kind plus the raw untranslated message() suffix", () => {
-		const result = unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.WrongPassword, "rejected by server"))
+	it("returns the server's own message for a server/API error", () => {
+		const result = unwrappedSdkErrorToHumanReadable(
+			makeError(ErrorKindMock.WrongPassword, "", {
+				serverMessage: "The password you entered is incorrect.",
+				serverCode: "wrong_password"
+			})
+		)
 
-		expect(result).toBe(`${en.wrong_password}: (rejected by server)`)
+		expect(result).toBe("The password you entered is incorrect.")
 	})
 
-	it("keeps the raw message() verbatim — it is never localized (AIP-193)", () => {
-		const raw = "decrypt failed: aes-gcm tag mismatch @ offset 0x1f"
-		const result = unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.MetadataWasNotDecrypted, raw))
+	it("returns the raw inner Rust message for a non-server error", () => {
+		const result = unwrappedSdkErrorToHumanReadable(
+			makeError(ErrorKindMock.Io, "", { innerMessage: "No such file or directory" })
+		)
 
-		expect(result).toBe(`${en.metadata_was_not_decrypted}: (${raw})`)
+		expect(result).toBe("No such file or directory")
 	})
 
-	it("maps both Reqwest and Response to the shared network_error key", () => {
-		const reqwest = unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Reqwest, "timeout"))
-		const response = unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.Response, "502"))
+	it("uses the translated label (never the raw inner) for a server error with a code but no message", () => {
+		const result = unwrappedSdkErrorToHumanReadable(
+			makeError(ErrorKindMock.MaxStorageReached, "", {
+				serverCode: "max_storage_reached",
+				innerMessage: 'API Error, message: `None`, code: `Some("max_storage_reached")`'
+			})
+		)
 
-		expect(reqwest).toBe(`${en.network_error}: (timeout)`)
-		expect(response).toBe(`${en.network_error}: (502)`)
+		expect(result).toBe(en.max_remote_storage_reached)
 	})
 
-	it("maps RetryFailed to the distinct network_retry_failed key — not the shared network_error key", () => {
-		const result = unwrappedSdkErrorToHumanReadable(makeError(ErrorKindMock.RetryFailed, "gave up"))
+	it("uses the translated label for the generic Server kind with no server message", () => {
+		const result = unwrappedSdkErrorToHumanReadable(
+			makeError(ErrorKindMock.Server, "", { innerMessage: "API Error, message: `None`, code: `None`" })
+		)
 
-		expect(result).toBe(`${en.network_retry_failed}: (gave up)`)
-		// Explicit guard: RetryFailed must NOT collapse to the same copy as Reqwest/Response.
-		expect(result).not.toBe(`${en.network_error}: (gave up)`)
+		expect(result).toBe(en.server_error)
 	})
 
-	it("falls back to the generic key for an unknown kind", () => {
-		const result = unwrappedSdkErrorToHumanReadable(makeError("SomethingBrandNew", "weird"))
-
-		expect(result).toBe(`${en.error_generic}: (weird)`)
+	it("falls back to the generic key for an unknown kind with no messages", () => {
+		expect(unwrappedSdkErrorToHumanReadable(makeError("SomethingBrandNew"))).toBe(en.error_generic)
 	})
 
-	// Each arm of the switch gets its own row so a single broken mapping produces an individually
-	// identified failure rather than stopping the whole block at the first failed expect().
+	// The kind -> translated label fallback, used when neither a server message nor an inner
+	// message is available. Each arm gets its own row so one broken mapping fails individually.
 	it.each([
 		[ErrorKindMock.BadRecoveryKey, en.bad_recovery_key],
 		[ErrorKindMock.Cancelled, en.operation_cancelled],
@@ -143,11 +157,14 @@ describe("unwrappedSdkErrorToHumanReadable", () => {
 		[ErrorKindMock.InvalidType, en.invalid_type],
 		[ErrorKindMock.Io, en.fs_io_error],
 		[ErrorKindMock.MaxStorageReached, en.max_remote_storage_reached],
+		[ErrorKindMock.Reqwest, en.network_error],
+		[ErrorKindMock.Response, en.network_error],
+		[ErrorKindMock.RetryFailed, en.network_retry_failed],
 		[ErrorKindMock.Server, en.server_error],
 		[ErrorKindMock.Unauthenticated, en.unauthenticated],
 		[ErrorKindMock.Walk, en.fs_directory_walk_error]
-	])("maps ErrorKind.%s to its translated copy", (kind, expectedCopy) => {
-		expect(unwrappedSdkErrorToHumanReadable(makeError(kind, "x"))).toBe(`${expectedCopy}: (x)`)
+	])("maps ErrorKind.%s to its translated label when no message is present", (kind, expectedCopy) => {
+		expect(unwrappedSdkErrorToHumanReadable(makeError(kind))).toBe(expectedCopy)
 	})
 })
 
