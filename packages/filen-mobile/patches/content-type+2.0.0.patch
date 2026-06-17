@@ -1,0 +1,15 @@
+diff --git a/node_modules/content-type/dist/index.js b/node_modules/content-type/dist/index.js
+index 4026f97..0e50c58 100644
+--- a/node_modules/content-type/dist/index.js
++++ b/node_modules/content-type/dist/index.js
+@@ -7,6 +7,10 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.format = format;
+ exports.parse = parse;
++// patch-package: this CJS module sets `__esModule: true` but ships no `default`, so Metro/Babel's
++// `_interopRequireDefault` binds `import ContentType from "content-type"` to `undefined` (music-metadata
++// then throws "Guessed MIME-type not supported" for every audio file under Hermes). Provide the default.
++exports.default = exports;
+ const TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
+ const TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+ /**
