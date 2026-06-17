@@ -340,6 +340,40 @@ describe("useDriveSearch — state machine (warming / settled / background)", ()
 		expect(result.current.status).toBe("warming")
 	})
 
+	it("stays warming when a resync finishes empty just before the results snapshot lands", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		// Resync covering the root is in flight; an empty window snapshot lands while indexing.
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(true)
+		})
+
+		deliver(snapshot({ results: [], total: 0n, live: true }))
+
+		await advance(GRACE_MS)
+
+		expect(result.current.status).toBe("warming")
+
+		// Resync FINISHES (resyncing -> false) a beat before the converged results snapshot is
+		// delivered on the (decoupled) window channel — must NOT flash settled/"no results".
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(false)
+		})
+
+		await advance(GRACE_MS / 2)
+
+		expect(result.current.status).toBe("warming")
+
+		// ...and it still settles once the resync has been quiet for a full grace window (no deadlock).
+		await advance(GRACE_MS)
+
+		expect(result.current.status).toBe("settled")
+	})
+
 	it("reports background while results exist and a resync is still converging", () => {
 		const { result } = render()
 

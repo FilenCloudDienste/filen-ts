@@ -138,6 +138,19 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		setWatchdogFired(false)
 	}
 
+	// Re-arm the GRACE on every resync sign-of-life (a `Started`/`Finished` edge or a `Listing`
+	// heartbeat), mirroring the watchdog/stall-ceiling. So `graceElapsed` means "GRACE_MS of QUIET
+	// since open or the last resync activity", not "GRACE_MS since open" — an empty result can't
+	// then flash "no results" during a transient `!resyncing` gap while the convergence resync is
+	// still streaming results in (e.g. `Finished` landing a beat before the final snapshot).
+	const graceRearmKey = `${resyncProgress}:${String(resyncing)}`
+	const [prevGraceRearmKey, setPrevGraceRearmKey] = useState<string>(graceRearmKey)
+
+	if (graceRearmKey !== prevGraceRearmKey) {
+		setPrevGraceRearmKey(graceRearmKey)
+		setGraceElapsed(false)
+	}
+
 	// Imperative state that must NOT re-run the open effect: the live query (read at open
 	// time — synced in an effect below, since a render-phase ref write is illegal), the
 	// per-search generation, the removal tombstones (cleared only on an own restore/update
@@ -185,15 +198,6 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 
 		tombstonesRef.current = new Set<string>()
 		mapCacheRef.current = new Map<string, DriveItem>()
-
-		// Grace: give a freshly-opened search ~400ms before an empty result is allowed to
-		// surface as "no results" (lets the convergence resync land first). The watchdog
-		// ("no sign of life") is a separate, activity-resettable effect below.
-		const grace = setTimeout(() => {
-			if (generation === generationRef.current) {
-				setGraceElapsed(true)
-			}
-		}, GRACE_MS)
 
 		const controller = new AbortController()
 
@@ -246,7 +250,6 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 
 		return () => {
 			controller.abort()
-			clearTimeout(grace)
 
 			// Background close is the singleton's (it releases the worker's socket listener so
 			// the WS can close); closing here too would race it. Only close on a real
@@ -256,6 +259,29 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 			}
 		}
 	}, [isCacheSearch, isFocused, isAppActive, biometricUnlocked, drivePath.uuid, reopenNonce])
+
+	// Grace timer — re-armed (cleared + restarted) on every resync sign-of-life via its
+	// `resyncProgress`/`resyncing` deps (the render-phase block above resets the latch on the same
+	// edges). So `graceElapsed` fires only after GRACE_MS of true quiet, never mid-stream. Unlike
+	// the watchdog there's NO `hasSnapshot` guard: an EMPTY first snapshot must still be graced
+	// before it can surface as "no results".
+	useEffect(() => {
+		if (!isCacheSearch || !isFocused || !isAppActive || biometricUnlocked !== true) {
+			return
+		}
+
+		const generation = generationRef.current
+
+		const grace = setTimeout(() => {
+			if (generation === generationRef.current) {
+				setGraceElapsed(true)
+			}
+		}, GRACE_MS)
+
+		return () => {
+			clearTimeout(grace)
+		}
+	}, [isCacheSearch, isFocused, isAppActive, biometricUnlocked, drivePath.uuid, reopenNonce, resyncProgress, resyncing])
 
 	// Watchdog — terminal "no sign of life". Re-arms on open AND on every resync-progress
 	// heartbeat (`resyncProgress`), so it measures SILENCE, not total elapsed time: a slow
