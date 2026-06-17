@@ -4,6 +4,7 @@ import events from "@/lib/events"
 import { serialize, deserialize } from "@/lib/serializer"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import useContactsStore from "@/features/contacts/store/useContacts.store"
+import logger from "@/lib/logger"
 
 export type SelectOptions = {
 	id: string
@@ -78,7 +79,9 @@ export function useSelectOptions() {
 					// render as undefined (consumers call .some/.includes on it synchronously).
 					userIdsToExclude: parsed.userIdsToExclude ?? []
 				}
-			} catch {
+			} catch (e) {
+				logger.error("contacts-select", "Failed to deserialize selectOptions param", { error: e instanceof Error ? e.message : String(e) })
+
 				return null
 			}
 		}

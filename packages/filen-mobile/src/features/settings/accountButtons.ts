@@ -13,6 +13,7 @@ import { shareTmpFile } from "@/lib/share"
 import { newTmpFile } from "@/lib/tmp"
 import { convertBigInts } from "@/lib/utils"
 import * as Linking from "expo-linking"
+import logger from "@/lib/logger"
 
 type AccountQuerySuccess = Extract<ReturnType<typeof useAccountQuery>, { status: "success" }>
 
@@ -55,7 +56,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "delete versioned files confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -76,7 +77,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!confirmPromptResult.success) {
-					console.error(confirmPromptResult.error)
+					logger.warn("settings", "delete versioned files 2nd confirmation prompt failed", { error: confirmPromptResult.error instanceof Error ? confirmPromptResult.error.message : String(confirmPromptResult.error) })
 					alerts.error(confirmPromptResult.error)
 
 					return
@@ -94,7 +95,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("settings", "deleteAllVersions failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -124,7 +125,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "delete all files confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -145,7 +146,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!confirmPromptResult.success) {
-					console.error(confirmPromptResult.error)
+					logger.warn("settings", "delete all files 2nd confirmation prompt failed", { error: confirmPromptResult.error instanceof Error ? confirmPromptResult.error.message : String(confirmPromptResult.error) })
 					alerts.error(confirmPromptResult.error)
 
 					return
@@ -163,7 +164,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("settings", "deleteAllItems failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -189,7 +190,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "request account deletion prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -210,7 +211,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!confirmPromptResult.success) {
-					console.error(confirmPromptResult.error)
+					logger.warn("settings", "request account deletion 2nd confirmation prompt failed", { error: confirmPromptResult.error instanceof Error ? confirmPromptResult.error.message : String(confirmPromptResult.error) })
 					alerts.error(confirmPromptResult.error)
 
 					return
@@ -235,7 +236,7 @@ export function buildDangerZoneButtons({
 					})
 
 					if (!twoFactorPromptResult.success) {
-						console.error(twoFactorPromptResult.error)
+						logger.warn("settings", "delete account 2FA prompt failed", { error: twoFactorPromptResult.error instanceof Error ? twoFactorPromptResult.error.message : String(twoFactorPromptResult.error) })
 						alerts.error(twoFactorPromptResult.error)
 
 						return
@@ -262,7 +263,7 @@ export function buildDangerZoneButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("settings", "deleteAccount failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -303,7 +304,7 @@ export function buildProfileButtons({
 				})
 
 				if (!newEmailPromptResult.success) {
-					console.error(newEmailPromptResult.error)
+					logger.warn("settings", "change email new-email prompt failed", { error: newEmailPromptResult.error instanceof Error ? newEmailPromptResult.error.message : String(newEmailPromptResult.error) })
 					alerts.error(newEmailPromptResult.error)
 
 					return
@@ -329,7 +330,7 @@ export function buildProfileButtons({
 				})
 
 				if (!confirmNewEmailPromptResult.success) {
-					console.error(confirmNewEmailPromptResult.error)
+					logger.warn("settings", "change email confirm-email prompt failed", { error: confirmNewEmailPromptResult.error instanceof Error ? confirmNewEmailPromptResult.error.message : String(confirmNewEmailPromptResult.error) })
 					alerts.error(confirmNewEmailPromptResult.error)
 
 					return
@@ -362,7 +363,7 @@ export function buildProfileButtons({
 				})
 
 				if (!passwordPromptResult.success) {
-					console.error(passwordPromptResult.error)
+					logger.warn("settings", "change email password prompt failed", { error: passwordPromptResult.error instanceof Error ? passwordPromptResult.error.message : String(passwordPromptResult.error) })
 					alerts.error(passwordPromptResult.error)
 
 					return
@@ -386,7 +387,7 @@ export function buildProfileButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("settings", "changeEmail failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -411,7 +412,7 @@ export function buildProfileButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "change nickname prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -435,7 +436,7 @@ export function buildProfileButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("settings", "setNickname failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -472,7 +473,7 @@ export function buildProfileButtons({
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("settings", "getGdprInfo failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -489,7 +490,7 @@ export function buildProfileButtons({
 				})
 
 				if (!shareResult.success) {
-					console.error(shareResult.error)
+					logger.warn("settings", "GDPR file share failed", { error: shareResult.error instanceof Error ? shareResult.error.message : String(shareResult.error) })
 					alerts.error(shareResult.error)
 
 					return
@@ -510,7 +511,7 @@ export function buildProfileButtons({
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "open web app prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -525,7 +526,7 @@ export function buildProfileButtons({
 				})
 
 				if (!canOpenResult.success) {
-					console.error(canOpenResult.error)
+					logger.error("settings", "canOpenURL check failed", { error: canOpenResult.error instanceof Error ? canOpenResult.error.message : String(canOpenResult.error) })
 					alerts.error(canOpenResult.error)
 
 					return
@@ -542,7 +543,7 @@ export function buildProfileButtons({
 				})
 
 				if (!openResult.success) {
-					console.error(openResult.error)
+					logger.error("settings", "openURL failed", { error: openResult.error instanceof Error ? openResult.error.message : String(openResult.error) })
 					alerts.error(openResult.error)
 
 					return
@@ -580,7 +581,7 @@ export function buildAccountToggleButtons({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("settings", "setVersioningEnabled failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 						alerts.error(result.error)
 
 						return
@@ -605,7 +606,7 @@ export function buildAccountToggleButtons({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("settings", "setLoginAlertsEnabled failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 						alerts.error(result.error)
 
 						return
@@ -648,7 +649,7 @@ export function buildTwoFactorButtons({
 						})
 
 						if (!promptResult.success) {
-							console.error(promptResult.error)
+							logger.warn("settings", "disable 2FA confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 							alerts.error(promptResult.error)
 
 							return
@@ -670,7 +671,7 @@ export function buildTwoFactorButtons({
 						})
 
 						if (!twoFactorPromptResult.success) {
-							console.error(twoFactorPromptResult.error)
+							logger.warn("settings", "disable 2FA code prompt failed", { error: twoFactorPromptResult.error instanceof Error ? twoFactorPromptResult.error.message : String(twoFactorPromptResult.error) })
 							alerts.error(twoFactorPromptResult.error)
 
 							return
@@ -692,7 +693,7 @@ export function buildTwoFactorButtons({
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("settings", "disable2fa failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 							alerts.error(result.error)
 
 							return
@@ -712,7 +713,7 @@ export function buildTwoFactorButtons({
 					})
 
 					if (!twoFactorPromptResult.success) {
-						console.error(twoFactorPromptResult.error)
+						logger.warn("settings", "enable 2FA code prompt failed", { error: twoFactorPromptResult.error instanceof Error ? twoFactorPromptResult.error.message : String(twoFactorPromptResult.error) })
 						alerts.error(twoFactorPromptResult.error)
 
 						return
@@ -737,7 +738,7 @@ export function buildTwoFactorButtons({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("settings", "enable2faGetRecoveryKey failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 						alerts.error(result.error)
 
 						return
@@ -773,7 +774,7 @@ export function buildLogoutButtons({ t }: { t: TFunction }): Button[] {
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "logout confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -788,7 +789,7 @@ export function buildLogoutButtons({ t }: { t: TFunction }): Button[] {
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("settings", "logout failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return

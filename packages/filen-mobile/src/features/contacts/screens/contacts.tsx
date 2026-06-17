@@ -17,6 +17,7 @@ import Contact, { ContactSectionHeader } from "@/features/contacts/components/co
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 import useContactSections from "@/features/contacts/hooks/useContactSections"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 
 const Contacts = () => {
 	const { t } = useTranslation()
@@ -93,7 +94,7 @@ const Contacts = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("contacts", "Contacts list refresh failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 			alerts.error(result.error)
 		}
 	}

@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next"
 import alerts from "@/lib/alerts"
 import { shareTmpFile } from "@/lib/share"
 import { newTmpFile } from "@/lib/tmp"
+import logger from "@/lib/logger"
 
 function TwoFactorRecoveryKey() {
 	const { t } = useTranslation()
@@ -68,7 +69,7 @@ function TwoFactorRecoveryKey() {
 										})
 
 										if (!result.success) {
-											console.error(result.error)
+											logger.warn("settings", "copy recovery key to clipboard failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 											alerts.error(result.error)
 
 											return
@@ -94,7 +95,7 @@ function TwoFactorRecoveryKey() {
 										})
 
 										if (!exportResult.success) {
-											console.error(exportResult.error)
+											logger.error("settings", "recovery key file write failed", { error: exportResult.error instanceof Error ? exportResult.error.message : String(exportResult.error) })
 											alerts.error(exportResult.error)
 
 											return
@@ -111,7 +112,7 @@ function TwoFactorRecoveryKey() {
 										})
 
 										if (!shareResult.success) {
-											console.error(shareResult.error)
+											logger.warn("settings", "recovery key file share failed", { error: shareResult.error instanceof Error ? shareResult.error.message : String(shareResult.error) })
 											alerts.error(shareResult.error)
 
 											return

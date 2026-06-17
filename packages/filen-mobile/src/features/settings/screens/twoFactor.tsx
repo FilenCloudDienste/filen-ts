@@ -16,6 +16,7 @@ import Button from "@/components/ui/button"
 import * as Clipboard from "expo-clipboard"
 import { useTranslation } from "react-i18next"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 
 function TwoFactor() {
 	const { t } = useTranslation()
@@ -82,7 +83,7 @@ function TwoFactor() {
 											})
 
 											if (!result.success) {
-												console.error(result.error)
+												logger.warn("settings", "copy 2FA secret to clipboard failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 												alerts.error(result.error)
 
 												return

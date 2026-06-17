@@ -1,4 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const contactsQueryUpdates: Array<{ updater: (prev: unknown) => unknown }> = []
 const contactRequestsQueryUpdates: Array<{ updater: (prev: unknown) => unknown }> = []
