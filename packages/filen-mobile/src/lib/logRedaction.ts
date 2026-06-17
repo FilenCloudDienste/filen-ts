@@ -107,11 +107,58 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
 		return out
 	}
 
+	// Non-plain objects (constructor !== Object) can be binary views or UniFFI tagged unions —
+	// both of which bare JSON mangles: a typed array becomes a giant {"0":..,"1":..} index-object,
+	// and a UniFFI enum's type name lives on a global symbol that Object.keys never sees. Handle
+	// them explicitly. (Plain literals/JSON skip this and go straight to the key-walk.)
+	if (obj.constructor !== Object) {
+		// Binary: summarize, never dump the bytes (log readability + size).
+		if (ArrayBuffer.isView(value)) {
+			const view = value as { constructor: { name: string }; byteLength: number }
+
+			return `[${view.constructor.name} byteLength=${view.byteLength}]`
+		}
+
+		if (value instanceof ArrayBuffer) {
+			return `[ArrayBuffer byteLength=${value.byteLength}]`
+		}
+
+		// UniFFI tagged union (uniffi-bindgen-react-native): the type name is symbol-keyed; the
+		// variant `.tag` + `.inner` are regular props. Capture the discriminant explicitly.
+		const typeName = (value as Record<symbol, unknown>)[Symbol.for("typeName")]
+
+		if (typeof typeName === "string") {
+			const enumValue = value as { tag?: unknown; inner?: unknown }
+			const ueOut: Record<string, unknown> = {
+				__type: typeName,
+				tag: enumValue.tag
+			}
+
+			if (enumValue.inner !== undefined) {
+				ueOut["inner"] = redactValue(enumValue.inner, depth + 1, seen)
+			}
+
+			return ueOut
+		}
+	}
+
 	const source = obj as Record<string, unknown>
 	const out: Record<string, unknown> = {}
 
+	// Per-key guard: a property getter that throws when read must not collapse the whole entry to
+	// the "[unserializable]" fallback — isolate it to "[unreadable]" and keep the rest.
 	for (const key of Object.keys(source)) {
-		out[key] = SECRET_KEY_RE.test(key) ? REDACTED : redactValue(source[key], depth + 1, seen)
+		if (SECRET_KEY_RE.test(key)) {
+			out[key] = REDACTED
+
+			continue
+		}
+
+		try {
+			out[key] = redactValue(source[key], depth + 1, seen)
+		} catch {
+			out[key] = "[unreadable]"
+		}
 	}
 
 	return out

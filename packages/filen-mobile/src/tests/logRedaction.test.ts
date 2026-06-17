@@ -174,4 +174,54 @@ describe("logRedaction", () => {
 			expect(() => JSON.stringify(out)).not.toThrow()
 		})
 	})
+
+	describe("handles exotic data robustly (full-pipeline coverage)", () => {
+		it("summarizes typed arrays instead of dumping a giant index-object", () => {
+			const out = redact({ buf: new Uint8Array([1, 2, 3, 4]) }) as Record<string, unknown>
+
+			expect(out["buf"]).toBe("[Uint8Array byteLength=4]")
+			expect(() => JSON.stringify(out)).not.toThrow()
+		})
+
+		it("summarizes a raw ArrayBuffer", () => {
+			const out = redact({ b: new ArrayBuffer(16) }) as Record<string, unknown>
+
+			expect(out["b"]).toBe("[ArrayBuffer byteLength=16]")
+		})
+
+		it("never throws on a getter that throws — yields [unreadable] for that field", () => {
+			const value = {
+				ok: "fine",
+				get bad(): string {
+					throw new Error("boom")
+				}
+			}
+
+			let out: Record<string, unknown> = {}
+
+			expect(() => {
+				out = redact(value) as Record<string, unknown>
+			}).not.toThrow()
+
+			expect(out["ok"]).toBe("fine")
+			expect(out["bad"]).toBe("[unreadable]")
+		})
+
+		it("preserves a UniFFI tagged-union's type name + variant tag", () => {
+			class FakeEnum {
+				public readonly tag = "Io"
+				public readonly inner = { code: 2 }
+			}
+
+			const fake = new FakeEnum()
+			;(fake as unknown as Record<symbol, unknown>)[Symbol.for("typeName")] = "ErrorKind"
+
+			const out = redact({ err: fake }) as Record<string, unknown>
+			const err = out["err"] as Record<string, unknown>
+
+			expect(err["__type"]).toBe("ErrorKind")
+			expect(err["tag"]).toBe("Io")
+			expect(err["inner"]).toEqual({ code: 2 })
+		})
+	})
 })
