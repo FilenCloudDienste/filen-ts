@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 import { renderHook, act, cleanup } from "@testing-library/react"
 
 // ------------------------------------------------------------------

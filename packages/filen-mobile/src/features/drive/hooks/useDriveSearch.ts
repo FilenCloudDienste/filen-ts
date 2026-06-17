@@ -13,6 +13,7 @@ import events from "@/lib/events"
 import useIsOnline from "@/hooks/useIsOnline"
 import useIsAppActive from "@/hooks/useIsAppActive"
 import { useAppStore } from "@/stores/useApp.store"
+import logger from "@/lib/logger"
 
 export type DriveSearchStatus = "idle" | "warming" | "background" | "settled" | "terminal" | "offline-incomplete"
 
@@ -242,8 +243,9 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 					setHasSnapshot(true)
 				}
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
 				if (generation === generationRef.current) {
+					logger.error("drive-search", "search open failed", { error: String(error), rootUuid: drivePath.uuid })
 					setOpenError(true)
 				}
 			})

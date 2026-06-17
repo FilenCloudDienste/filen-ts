@@ -1,4 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const { mockGetSdkClients, mockGetFileLinkStatus, mockGetDirLinkStatus, cacheUuidToAnyDriveItem } = vi.hoisted(() => {
 	const cacheUuidToAnyDriveItem = new Map<string, unknown>()

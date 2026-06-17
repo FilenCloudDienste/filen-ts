@@ -16,6 +16,7 @@ import auth from "@/lib/auth"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SDK_CACHE_DIRECTORY, SDK_CACHE_PARENT_DIRECTORY, SDK_CACHE_DB_FILE, SDK_CACHE_VERSION } from "@/lib/storageRoots"
 import { useDriveSearchStore } from "@/features/drive/store/useDriveSearch.store"
+import logger from "@/lib/logger"
 
 // One window loads the whole match set (up to this cap) so the local sort produces a
 // correct GLOBAL order for the user's sort pref — the SDK window is hardcoded
@@ -112,6 +113,7 @@ export class DriveSearch {
 
 					case CacheStatusMessage_Tags.Errors: {
 						// Non-fatal — the worker keeps running. Log only (silent infra).
+						logger.error("drive-search", "cache worker reported errors", { count: message.inner.errors.length, first: String(message.inner.errors[0]) })
 						console.error("[driveSearch] cache worker errors", message.inner.errors)
 
 						break
@@ -159,6 +161,7 @@ export class DriveSearch {
 				return
 			}
 
+			logger.error("drive-search", "configureCache failed — search unavailable", { error: String(error) })
 			console.error("[driveSearch] configureCache failed", error)
 
 			useDriveSearchStore.getState().setCacheUnavailable(true)
@@ -298,6 +301,7 @@ export class DriveSearch {
 
 			return true
 		} catch (error) {
+			logger.warn("drive-search", "setConfig failed, will reopen", { error: String(error) })
 			console.error("[driveSearch] setConfig failed", error)
 
 			return false
@@ -348,6 +352,7 @@ export class DriveSearch {
 				SDK_CACHE_DIRECTORY.delete()
 			}
 		} catch (error) {
+			logger.warn("drive-search", "failed to delete cache on logout", { error: String(error) })
 			console.error("[driveSearch] failed to delete cache directory on logout", error)
 		}
 	}
@@ -356,6 +361,7 @@ export class DriveSearch {
 		try {
 			await search.close()
 		} catch (error) {
+			logger.warn("drive-search", "error closing search handle", { error: String(error) })
 			console.error("[driveSearch] error closing search", error)
 		}
 

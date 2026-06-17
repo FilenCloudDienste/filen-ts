@@ -21,6 +21,7 @@ import { newTmpDir } from "@/lib/tmp"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
 import type { DrivePath } from "@/hooks/useDrivePath"
+import logger from "@/lib/logger"
 
 // Convert a picked HEIC/HEIF asset to JPG when the global option is on, adjusting the
 // upload name + mime to match. Returns the file to upload plus the converted tmp file
@@ -141,6 +142,7 @@ export function useDriveUpload({
 		const { succeeded, failed, errors } = summarizeTransferResults(results)
 
 		for (const error of errors) {
+			logger.error("drive-upload", "upload item failed", { error: String(error) })
 			console.error(error)
 			alerts.error(error)
 		}
@@ -269,6 +271,7 @@ export function useDriveUpload({
 		})
 
 		if (!transferResult.success) {
+			logger.error("drive-upload", "uploadFiles fan-out failed", { error: String(transferResult.error), count: assets.length })
 			console.error(transferResult.error)
 			alerts.error(transferResult.error)
 
@@ -365,6 +368,7 @@ export function useDriveUpload({
 		})
 
 		if (!transferResult.success) {
+			logger.error("drive-upload", "uploadFromPicker fan-out failed", { error: String(transferResult.error), count: assets.length })
 			console.error(transferResult.error)
 			alerts.error(transferResult.error)
 
@@ -473,6 +477,7 @@ export function useDriveUpload({
 		})
 
 		if (!transferResult.success) {
+			logger.error("drive-upload", "scanDocument fan-out failed", { error: String(transferResult.error), count: scans.length })
 			console.error(transferResult.error)
 			alerts.error(transferResult.error)
 
@@ -556,6 +561,7 @@ export function useDriveUpload({
 		})
 
 		if (!result.success) {
+			logger.error("drive-upload", "createTextFile failed", { error: String(result.error), fileName })
 			console.error(result.error)
 			alerts.error(result.error)
 

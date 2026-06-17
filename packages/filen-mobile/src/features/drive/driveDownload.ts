@@ -9,6 +9,7 @@ import { normalizeFilePathForBlobUtil } from "@/lib/paths"
 import { newTmpDir } from "@/lib/tmp"
 import transfers from "@/features/transfers/transfers"
 import i18n from "@/lib/i18n"
+import logger from "@/lib/logger"
 
 /**
  * Per-item cache of already-completed MediaStore copies.
@@ -233,6 +234,7 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 					const failedCount = results.filter(r => r.status === "rejected").length
 
 					if (failedCount > 0) {
+						logger.error("drive-download", "MediaStore copy partially failed", { uuid: item.data.uuid, failedCount, total: files.length })
 						throw new Error(i18n.t("download_partial_failure", { failed: failedCount, total: files.length }))
 					}
 				}
@@ -243,6 +245,7 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 		// (secondary) MediaStore copy failure of the files that DID download — a retry
 		// surfaces whatever failure class remains.
 		if (missingFileCount > 0) {
+			logger.error("drive-download", "directory download incomplete: some files missing", { uuid: item.data.uuid, missingFileCount })
 			throw new Error(i18n.t("download_missing_files", { count: missingFileCount }))
 		}
 

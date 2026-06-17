@@ -24,6 +24,7 @@ import { deletePermanently, trash, restore, emptyTrash, restoreFileVersion, dele
 import { createDirectory, move } from "@/features/drive/driveDirectory"
 import { favorite, rename, setDirColor, updateTimestamps } from "@/features/drive/driveMetadata"
 import { shareWithFilenUser, removeShare } from "@/features/drive/driveShare"
+import logger from "@/lib/logger"
 
 const drive = {
 	favorite,
@@ -131,6 +132,7 @@ const drive = {
 				return
 			}
 
+			logger.error("drive-link", "openLinkedDirectory failed", { linkUuid, error: String(result.error) })
 			console.error(result.error)
 			alerts.error(result.error)
 
@@ -219,6 +221,7 @@ const drive = {
 				return
 			}
 
+			logger.error("drive-link", "openLinkedFile failed", { linkUuid, error: String(result.error) })
 			console.error(result.error)
 			alerts.error(result.error)
 

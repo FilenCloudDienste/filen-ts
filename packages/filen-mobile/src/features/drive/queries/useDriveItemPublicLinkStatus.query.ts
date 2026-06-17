@@ -3,6 +3,7 @@ import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
+import logger from "@/lib/logger"
 
 export const BASE_QUERY_KEY = "useDriveItemPublicLinkStatusQuery"
 
@@ -18,6 +19,8 @@ export async function fetchData(
 	const fromCache = cache.uuidToAnyDriveItem.get(params.uuid)
 
 	if (!fromCache) {
+		logger.warn("drive", "Public link status query: item not in cache, returning null", { uuid: params.uuid })
+
 		return null
 	}
 

@@ -3,6 +3,7 @@ import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
+import logger from "@/lib/logger"
 
 export const BASE_QUERY_KEY = "useDriveItemVersionsQuery"
 
@@ -18,6 +19,8 @@ export async function fetchData(
 	const fromCache = cache.fileUuidToNormalFile.get(params.uuid)
 
 	if (!fromCache) {
+		logger.warn("drive", "File versions query: file not in cache, returning empty", { uuid: params.uuid })
+
 		return []
 	}
 
