@@ -15,6 +15,7 @@ import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.quer
 import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { convertBigInts } from "@/lib/utils"
+import logger from "@/lib/logger"
 
 export type LoopMode = "none" | "track" | "queue"
 
@@ -177,7 +178,7 @@ export class Audio {
 
 			if (status.didJustFinish || this.statusIndicatesTrackEnded(status)) {
 				this.clearTrackEndWatchdog()
-				this.handleTrackEnd().catch(console.error)
+				this.handleTrackEnd().catch(e => logger.error("audio", "handleTrackEnd failed from status listener", { generation: this.loadGeneration, error: e instanceof Error ? e.message : String(e) }))
 
 				return
 			}
@@ -186,11 +187,11 @@ export class Audio {
 		})
 
 		this.player.addListener("remoteNextTrack", () => {
-			this.next().catch(console.error)
+			this.next().catch(e => logger.error("audio", "next() failed from remote control", { position: this.state.position, error: e instanceof Error ? e.message : String(e) }))
 		})
 
 		this.player.addListener("remotePreviousTrack", () => {
-			this.previous().catch(console.error)
+			this.previous().catch(e => logger.error("audio", "previous() failed from remote control", { position: this.state.position, error: e instanceof Error ? e.message : String(e) }))
 		})
 
 		// Recover advances missed while backgrounded. The watchdog (a setTimeout) is frozen in
@@ -389,7 +390,7 @@ export class Audio {
 			try {
 				await this.loadAndPlay(this.state.position)
 			} catch (e) {
-				console.error(e)
+				logger.error("audio", "loadAndPlay failed in track-loop", { uuid: this.state.queue[this.state.position]?.item.data.uuid, error: e instanceof Error ? e.message : String(e) })
 			}
 
 			return
@@ -414,7 +415,7 @@ export class Audio {
 
 				return
 			} catch (e) {
-				console.error(e)
+				logger.warn("audio", "track skipped during auto-advance due to load failure", { position: this.state.position, uuid: this.state.queue[this.state.position]?.item.data.uuid, error: e instanceof Error ? e.message : String(e) })
 
 				gen = this.loadGeneration
 			}
@@ -435,7 +436,7 @@ export class Audio {
 
 					return
 				} catch (e) {
-					console.error(e)
+					logger.warn("audio", "track skipped during queue loop-wrap due to load failure", { position: this.state.position, uuid: this.state.queue[this.state.position]?.item.data.uuid, error: e instanceof Error ? e.message : String(e) })
 
 					gen = this.loadGeneration
 				}
@@ -508,7 +509,7 @@ export class Audio {
 					item: entry,
 					metadata,
 					generation
-				}).catch(console.error)
+				}).catch(e => logger.error("audio", "lock screen update failed", { uuid: entry.item.data.uuid, error: e instanceof Error ? e.message : String(e) }))
 
 				// Pre-stage the next track so that when this one ends, loadAndPlay resolves from
 				// disk in a single tick instead of awaiting a download mid-gap. A long inter-track
@@ -625,7 +626,7 @@ export class Audio {
 				this.watchdogStalls++
 
 				if (this.watchdogStalls >= TRACK_END_WATCHDOG_MAX_STALLS) {
-					this.handleTrackEnd().catch(console.error)
+					this.handleTrackEnd().catch(e => logger.error("audio", "handleTrackEnd failed from status listener", { generation: this.loadGeneration, error: e instanceof Error ? e.message : String(e) }))
 
 					return
 				}
@@ -639,7 +640,7 @@ export class Audio {
 		}
 
 		// Reached the end but didJustFinish never arrived — advance the queue.
-		this.handleTrackEnd().catch(console.error)
+		this.handleTrackEnd().catch(e => logger.error("audio", "handleTrackEnd failed from status listener", { generation: this.loadGeneration, error: e instanceof Error ? e.message : String(e) }))
 	}
 
 	private statusIndicatesTrackEnded(status: AudioStatus): boolean {
@@ -680,7 +681,7 @@ export class Audio {
 			return
 		}
 
-		this.handleTrackEnd().catch(console.error)
+		this.handleTrackEnd().catch(e => logger.error("audio", "handleTrackEnd failed from status listener", { generation: this.loadGeneration, error: e instanceof Error ? e.message : String(e) }))
 	}
 
 	private peekNextPlayIndex(shuffle: boolean, loopMode: LoopMode): number | null {
@@ -762,7 +763,7 @@ export class Audio {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("audio", "failed to resolve placeholder artwork asset", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 
 			return undefined
 		}
@@ -1140,7 +1141,7 @@ export class Audio {
 				const result = this.parsePlaylistBytes(read)
 
 				if (!result) {
-					console.warn(`Skipping malformed playlist file: ${file.uuid}`)
+					logger.warn("audio", "playlist file failed to parse", { uuid: file.uuid })
 
 					return null
 				}
@@ -1187,7 +1188,7 @@ export class Audio {
 							files: result.files.filter(file => !nonExistentFileUuids.has(file.uuid))
 						},
 						signal
-					}).catch(console.error)
+					}).catch(e => logger.error("audio", "playlist cleanup persist failed", { playlistUuid: result.uuid, removedCount: nonExistentFileUuids.size, error: e instanceof Error ? e.message : String(e) }))
 				}
 
 				return {

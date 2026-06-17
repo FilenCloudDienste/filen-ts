@@ -10,6 +10,7 @@ import usePlaylistTracksStore, { type PlaylistTrack } from "@/features/audio/sto
 import { runBulk } from "@/lib/bulkOps"
 import type { MenuButton } from "@/components/ui/menu"
 import { type TFunction } from "i18next"
+import logger from "@/lib/logger"
 
 /**
  * Shared "add tracks to playlist" flow: opens the drive item picker filtered to audio files,
@@ -29,7 +30,7 @@ export async function addTracksToPlaylistFlow({ playlist }: { playlist: Playlist
 	})
 
 	if (!selectDriveItemsResult.success) {
-		console.error(selectDriveItemsResult.error)
+		logger.error("audio", "drive item selection failed in add-tracks flow", { playlistUuid: playlist.uuid, error: selectDriveItemsResult.error instanceof Error ? selectDriveItemsResult.error.message : String(selectDriveItemsResult.error) })
 		alerts.error(selectDriveItemsResult.error)
 
 		return
@@ -47,7 +48,7 @@ export async function addTracksToPlaylistFlow({ playlist }: { playlist: Playlist
 	})
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.error("audio", "addFilesToPlaylist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 		alerts.error(result.error)
 	}
 }
@@ -148,7 +149,7 @@ export function buildSelectionMenuButtons({
 			})
 
 			if (!selectResult.success) {
-				console.error(selectResult.error)
+				logger.error("audio", "select playlists failed in bulk-add flow", { playlistUuid: playlist.uuid, error: selectResult.error instanceof Error ? selectResult.error.message : String(selectResult.error) })
 				alerts.error(selectResult.error)
 
 				return
@@ -275,7 +276,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("audio", "play playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 								alerts.error(result.error)
 
 								return
@@ -309,7 +310,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("audio", "shuffle play playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 								alerts.error(result.error)
 
 								return
@@ -345,7 +346,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("audio", "add playlist to queue failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 								alerts.error(result.error)
 
 								return
@@ -372,7 +373,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.error("audio", "rename playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -396,7 +397,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("audio", "rename playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -430,7 +431,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.error("audio", "delete playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -447,7 +448,7 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("audio", "delete playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return

@@ -14,6 +14,7 @@ import mimeTypes from "mime-types"
 import type { CacheItem } from "@/types"
 import { AUDIO_CACHE_VERSION, AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
 import { planSizeCapEviction, CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import logger from "@/lib/logger"
 
 export type Metadata = {
 	pictureUri?: string | null
@@ -77,7 +78,7 @@ export class AudioCache {
 	private readonly scheduleGc = debounce(
 		() => {
 			this.gc().catch(err => {
-				console.error("[AudioCache] gc failed", err)
+				logger.error("audioCache", "gc failed (scheduled)", { error: err instanceof Error ? err.message : String(err) })
 			})
 		},
 		GC_DEBOUNCE_MS,
@@ -94,7 +95,7 @@ export class AudioCache {
 				this.scheduleGc.cancel()
 
 				this.gc().catch(err => {
-					console.error("[AudioCache] gc failed", err)
+					logger.error("audioCache", "gc failed (background)", { error: err instanceof Error ? err.message : String(err) })
 				})
 			}
 		})
@@ -228,7 +229,7 @@ export class AudioCache {
 						}
 					}
 				} catch (e) {
-					console.error(e)
+					logger.error("audioCache", "corrupt metadata sidecar deleted", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e instanceof Error ? e.message : String(e) })
 
 					if (metadataFile.exists) {
 						metadataFile.delete()
@@ -290,7 +291,7 @@ export class AudioCache {
 								image = await Image.loadAsync(pictureFile.uri)
 								pictureBlurhash = await Image.generateBlurhashAsync(image, [4, 3])
 							} catch (e) {
-								console.error(e)
+								logger.warn("audioCache", "blurhash generation failed for cover art", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e instanceof Error ? e.message : String(e) })
 							} finally {
 								if (image) {
 									image.release()
@@ -328,7 +329,7 @@ export class AudioCache {
 						}
 					}
 				} catch (e) {
-					console.error(e)
+					logger.error("audioCache", "audio metadata parse or sidecar write failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e instanceof Error ? e.message : String(e) })
 
 					if (metadataFile.exists) {
 						metadataFile.delete()

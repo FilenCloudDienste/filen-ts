@@ -28,6 +28,7 @@ import Photo from "@/features/photos/components/photoItem"
 import DateRange from "@/features/photos/components/dateRange"
 import { filterPhotoGridItems } from "@/features/photos/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
+import logger from "@/lib/logger"
 
 const Photos = () => {
 	const { t } = useTranslation()
@@ -156,11 +157,11 @@ const Photos = () => {
 									})
 
 									if (!result.success) {
-										console.error(result.error)
+										logger.error("photos", "photos list refetch failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 										alerts.error(result.error)
 									}
 
-									cameraUpload.sync().catch(console.error)
+									cameraUpload.sync().catch(e => logger.warn("photos", "cameraUpload.sync failed on pull-to-refresh", { error: e instanceof Error ? e.message : String(e) }))
 								}}
 								loading={driveItemsQuery.status === "pending"}
 								emptyComponent={() => (

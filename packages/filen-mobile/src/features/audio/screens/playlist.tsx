@@ -23,6 +23,7 @@ import {
 	addTracksToPlaylistFlow
 } from "@/features/audio/components/playlistMenuButtons"
 import { driveItemDisplayName } from "@/lib/decryption"
+import logger from "@/lib/logger"
 
 export function Playlist() {
 	const { t } = useTranslation()
@@ -245,7 +246,7 @@ export function Playlist() {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("audio", "reorder tracks failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 							alerts.error(result.error)
 
 							return

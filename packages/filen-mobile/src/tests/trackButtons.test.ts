@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before any import of the module under test
