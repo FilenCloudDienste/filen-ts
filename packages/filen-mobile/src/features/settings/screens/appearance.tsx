@@ -15,6 +15,7 @@ import { useLanguage, LANGUAGE_LABELS } from "@/lib/language"
 import { SUPPORTED_LANGUAGES } from "@/locales/languages"
 import { changeAppLanguage, hasTranslations } from "@/lib/i18n"
 import { useThemeSetting, THEME_SETTINGS, changeAppTheme, type ThemeSetting } from "@/lib/theme"
+import logger from "@/lib/logger"
 
 function Appearance() {
 	const navigation = useNavigation()
@@ -155,7 +156,7 @@ function Appearance() {
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "reset sort confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return

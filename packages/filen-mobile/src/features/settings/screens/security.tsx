@@ -19,6 +19,7 @@ import { shareTmpFile } from "@/lib/share"
 import useIsOnline from "@/hooks/useIsOnline"
 import { usePrivacyScreenEnabled } from "@/features/settings/privacyScreen"
 import { useTranslation } from "react-i18next"
+import logger from "@/lib/logger"
 
 function Security() {
 	const { t } = useTranslation()
@@ -73,7 +74,7 @@ function Security() {
 										})
 
 										if (!newPasswordPromptResult.success) {
-											console.error(newPasswordPromptResult.error)
+											logger.warn("settings", "change password new-password prompt failed", { error: newPasswordPromptResult.error instanceof Error ? newPasswordPromptResult.error.message : String(newPasswordPromptResult.error) })
 											alerts.error(newPasswordPromptResult.error)
 
 											return
@@ -100,7 +101,7 @@ function Security() {
 										})
 
 										if (!confirmNewPasswordPromptResult.success) {
-											console.error(confirmNewPasswordPromptResult.error)
+											logger.warn("settings", "change password confirm-password prompt failed", { error: confirmNewPasswordPromptResult.error instanceof Error ? confirmNewPasswordPromptResult.error.message : String(confirmNewPasswordPromptResult.error) })
 											alerts.error(confirmNewPasswordPromptResult.error)
 
 											return
@@ -136,7 +137,7 @@ function Security() {
 										})
 
 										if (!currentPasswordPromptResult.success) {
-											console.error(currentPasswordPromptResult.error)
+											logger.warn("settings", "change password current-password prompt failed", { error: currentPasswordPromptResult.error instanceof Error ? currentPasswordPromptResult.error.message : String(currentPasswordPromptResult.error) })
 											alerts.error(currentPasswordPromptResult.error)
 
 											return
@@ -167,7 +168,7 @@ function Security() {
 										})
 
 										if (!changePasswordResult.success) {
-											console.error(changePasswordResult.error)
+											logger.error("settings", "changePassword failed", { error: changePasswordResult.error instanceof Error ? changePasswordResult.error.message : String(changePasswordResult.error) })
 											alerts.error(changePasswordResult.error)
 
 											return
@@ -224,7 +225,7 @@ function Security() {
 										})
 
 										if (!promptResult.success) {
-											console.error(promptResult.error)
+											logger.warn("settings", "export master keys confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 											alerts.error(promptResult.error)
 
 											return
@@ -250,7 +251,7 @@ function Security() {
 										})
 
 										if (!exportResult.success) {
-											console.error(exportResult.error)
+											logger.error("settings", "exportMasterKeys failed", { error: exportResult.error instanceof Error ? exportResult.error.message : String(exportResult.error) })
 											alerts.error(exportResult.error)
 
 											return
@@ -267,7 +268,7 @@ function Security() {
 										})
 
 										if (!shareResult.success) {
-											console.error(shareResult.error)
+											logger.warn("settings", "master keys file share failed", { error: shareResult.error instanceof Error ? shareResult.error.message : String(shareResult.error) })
 											alerts.error(shareResult.error)
 
 											return

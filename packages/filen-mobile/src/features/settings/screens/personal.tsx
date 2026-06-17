@@ -18,6 +18,7 @@ import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
 import { countries } from "@/features/settings/constants"
 import useIsOnline from "@/hooks/useIsOnline"
+import logger from "@/lib/logger"
 
 type StringFieldKey = "firstName" | "lastName" | "companyName" | "vatId" | "street" | "streetNumber" | "city" | "postalCode"
 
@@ -57,7 +58,7 @@ function Personal() {
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.warn("settings", "personal info field prompt failed", { field, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -120,7 +121,7 @@ function Personal() {
 									})
 
 									if (!result.success) {
-										console.error(result.error)
+										logger.error("settings", "updatePersonalInfo failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 										alerts.error(result.error)
 
 										return

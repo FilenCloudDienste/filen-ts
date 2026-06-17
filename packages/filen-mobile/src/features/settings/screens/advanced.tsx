@@ -30,6 +30,7 @@ import {
 	TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
 	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
 } from "@/features/transfers/foregroundService"
+import logger from "@/lib/logger"
 
 const SIZE_LOADING_PLACEHOLDER = "…"
 
@@ -56,12 +57,12 @@ function formatSize(value: number | undefined): string {
 async function clearExpoImageCache(): Promise<void> {
 	await Promise.all([
 		Image.clearMemoryCache().catch(err => {
-			console.error("[Advanced] Failed to clear expo-image memory cache", err)
+			logger.warn("settings", "Failed to clear expo-image memory cache", { error: err instanceof Error ? err.message : String(err) })
 
 			return false
 		}),
 		Image.clearDiskCache().catch(err => {
-			console.error("[Advanced] Failed to clear expo-image disk cache", err)
+			logger.warn("settings", "Failed to clear expo-image disk cache", { error: err instanceof Error ? err.message : String(err) })
 
 			return false
 		})
@@ -85,7 +86,7 @@ async function confirmAndRun(options: {
 	})
 
 	if (!promptResult.success) {
-		console.error(promptResult.error)
+		logger.warn("settings", "clear cache confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 		alerts.error(promptResult.error)
 
 		return
@@ -100,7 +101,7 @@ async function confirmAndRun(options: {
 	})
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.error("settings", "clear cache action failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 		alerts.error(result.error)
 
 		return
@@ -152,7 +153,7 @@ function Advanced() {
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.warn("settings", "export logs confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return
@@ -167,7 +168,7 @@ function Advanced() {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("settings", "exportLogs failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 			alerts.error(result.error)
 
 			return

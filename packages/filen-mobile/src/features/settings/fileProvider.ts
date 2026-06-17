@@ -4,6 +4,7 @@ import { Semaphore } from "@filen/utils"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
+import logger from "@/lib/logger"
 
 // Safety floor for cache budgets. Below this the extension would thrash —
 // thumbnails alone need ~32 MiB to be useful.
@@ -23,6 +24,10 @@ export const AUTH_FILE = new FileSystem.File(
 		"auth.json"
 	)
 )
+
+if (Platform.OS === "ios" && !FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]) {
+	logger.warn("file-provider", "App Group container not found — auth.json falling back to private Documents; file provider extension will not see the file", { groupId: IOS_APP_GROUP_IDENTIFIER })
+}
 
 // Mirrors the Rust `FilenSDKConfig` struct in filen-rs/filen-types/src/auth.rs.
 // Every field is required — serde rejects the whole AuthFile if any of these
@@ -64,7 +69,9 @@ class FileProvider {
 
 		try {
 			return JSON.parse(await AUTH_FILE.text()) as AuthFileSchema
-		} catch {
+		} catch (e) {
+			logger.error("file-provider", "auth.json parse failed — file corrupt or truncated", { path: AUTH_FILE.uri, error: e instanceof Error ? e.message : String(e) })
+
 			return null
 		}
 	}
@@ -123,6 +130,8 @@ class FileProvider {
 		} finally {
 			this.writeMutex.release()
 		}
+
+		logger.info("file-provider", "file provider disabled — auth.json deleted")
 
 		await secureStore.set(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)
 	}
@@ -191,6 +200,8 @@ class FileProvider {
 		AUTH_FILE.create()
 
 		AUTH_FILE.write(JSON.stringify(data, null, 4))
+
+		logger.info("file-provider", "auth.json written", { providerEnabled: data.providerEnabled, hasSdkConfig: data.sdkConfig !== null, maxCacheFilesBudget: data.maxCacheFilesBudget ?? null, maxThumbnailFilesBudget: data.maxThumbnailFilesBudget ?? null })
 	}
 }
 

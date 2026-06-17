@@ -2,6 +2,7 @@ import auth from "@/lib/auth"
 import { contactRequestsQueryUpdate, BASE_QUERY_KEY as CONTACT_REQUESTS_QUERY_KEY } from "@/features/contacts/queries/useContactRequests.query"
 import { contactsQueryUpdate, BASE_QUERY_KEY as CONTACTS_QUERY_KEY } from "@/features/contacts/queries/useContacts.query"
 import queryClient from "@/queries/client"
+import logger from "@/lib/logger"
 
 // Stateless namespace of contact operations (requests, block/unblock, delete). No instance
 // state, so a plain object rather than a class. Silent: throws on failure; UI owns error UX.
@@ -31,10 +32,10 @@ const contacts = {
 		// removed but the new contact absent (inconsistent gap until next focus refetch).
 		// Consistent with the bulk-accept path in contactsHeader.tsx.
 		queryClient.invalidateQueries({ queryKey: [CONTACTS_QUERY_KEY] }).catch(e => {
-			console.error("[contacts.acceptRequest] Failed to invalidate contacts query", e)
+			logger.warn("contacts", "Failed to invalidate contacts query after acceptRequest", { uuid, error: e instanceof Error ? e.message : String(e) })
 		})
 		queryClient.invalidateQueries({ queryKey: [CONTACT_REQUESTS_QUERY_KEY] }).catch(e => {
-			console.error("[contacts.acceptRequest] Failed to invalidate contactRequests query", e)
+			logger.warn("contacts", "Failed to invalidate contactRequests query after acceptRequest", { uuid, error: e instanceof Error ? e.message : String(e) })
 		})
 	},
 

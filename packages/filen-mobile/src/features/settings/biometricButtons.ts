@@ -5,6 +5,7 @@ import alerts from "@/lib/alerts"
 import events from "@/lib/events"
 import fileProvider from "@/features/settings/fileProvider"
 import { type Biometric } from "@/features/settings/screens/biometric"
+import logger from "@/lib/logger"
 
 export function disableBiometric({ setBiometric }: { setBiometric: (value: Biometric) => void }) {
 	setBiometric({ enabled: false })
@@ -45,7 +46,7 @@ export async function enableBiometric({
 		})
 
 		if (!confirmProviderDisableResult.success) {
-			console.error(confirmProviderDisableResult.error)
+			logger.warn("settings", "biometric enable — provider-disable confirmation prompt failed", { error: confirmProviderDisableResult.error instanceof Error ? confirmProviderDisableResult.error.message : String(confirmProviderDisableResult.error) })
 			alerts.error(confirmProviderDisableResult.error)
 
 			return
@@ -67,7 +68,7 @@ export async function enableBiometric({
 	})
 
 	if (!fallbackPromptResult.success) {
-		console.error(fallbackPromptResult.error)
+		logger.warn("settings", "biometric enable — fallback password prompt failed", { error: fallbackPromptResult.error instanceof Error ? fallbackPromptResult.error.message : String(fallbackPromptResult.error) })
 		alerts.error(fallbackPromptResult.error)
 
 		return
@@ -94,7 +95,7 @@ export async function enableBiometric({
 	})
 
 	if (!confirmFallbackPasswordPromptResult.success) {
-		console.error(confirmFallbackPasswordPromptResult.error)
+		logger.warn("settings", "biometric enable — confirm fallback password prompt failed", { error: confirmFallbackPasswordPromptResult.error instanceof Error ? confirmFallbackPasswordPromptResult.error.message : String(confirmFallbackPasswordPromptResult.error) })
 		alerts.error(confirmFallbackPasswordPromptResult.error)
 
 		return
@@ -124,7 +125,7 @@ export async function enableBiometric({
 		})
 
 		if (!disableProviderResult.success) {
-			console.error(disableProviderResult.error)
+			logger.error("settings", "file provider disable failed during biometric enable", { error: disableProviderResult.error instanceof Error ? disableProviderResult.error.message : String(disableProviderResult.error) })
 			alerts.error(disableProviderResult.error)
 
 			return
