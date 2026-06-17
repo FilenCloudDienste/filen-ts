@@ -112,6 +112,9 @@ describe("errorHandlers", () => {
 			"Unhandled promise rejection",
 			expect.objectContaining({ id: 7 })
 		)
+
+		// A rejection can precede a crash — it must be flushed immediately, like the uncaught handler.
+		expect(loggerMock.flushNow).toHaveBeenCalled()
 	})
 
 	it("does NOT enable its own rejection tracker in dev (leaves RN's intact)", () => {

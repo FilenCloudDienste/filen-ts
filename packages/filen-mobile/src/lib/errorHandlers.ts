@@ -63,6 +63,9 @@ export function installGlobalErrorHandlers(): void {
 						id,
 						rejection
 					})
+
+					// An unhandled rejection can precede a crash — persist now, like the uncaught handler.
+					logger.flushNow()
 				} catch {
 					// Never throw from the rejection tracker.
 				}
