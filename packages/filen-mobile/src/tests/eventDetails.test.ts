@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // eventDetails.ts imports @/lib/i18n at module level (only for the default `t` of
 // eventKindToReadable). That chain pulls expo-localization + every locale JSON, so we
