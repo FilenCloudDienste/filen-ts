@@ -1,4 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+import logger from "@/lib/logger"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const { chatsState, mockSetInflightMessages, mockSetInflightErrors, mockFlushToDisk, mockSyncNow, mockSecureStoreRemove, mockChatMessagesQueryUpdate } =
 	vi.hoisted(() => {
@@ -174,10 +176,12 @@ describe("chatsInflight", () => {
 
 				mockSecureStoreRemove.mockRejectedValue(new Error("keychain unavailable"))
 
+				vi.mocked(logger.warn).mockClear()
+
 				await expect(purgeChatInflightState("chat-1")).resolves.toBeUndefined()
 
 				expect(chatsState.inflightMessages["chat-1"]).toBeUndefined()
-				expect(consoleErrorSpy).toHaveBeenCalled()
+				expect(logger.warn).toHaveBeenCalled()
 			} finally {
 				consoleErrorSpy.mockRestore()
 			}

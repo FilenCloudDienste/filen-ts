@@ -11,6 +11,7 @@ import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } f
 import * as FileSystem from "expo-file-system"
 import cache from "@/lib/cache"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
+import logger from "@/lib/logger"
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
@@ -97,6 +98,8 @@ class Chats {
 		} else {
 			// No committed message on the returned chat (unexpected SDK state) — still drop the
 			// optimistic in-flight copy so the inflight queue can be cleared and the send is not retried.
+			logger.error("chats", "sendMessage: no lastMessage on committed chat", { chatUuid: chat.uuid, inflightId })
+
 			chatMessagesQueryUpdate({
 				params: {
 					uuid: chat.uuid
@@ -640,6 +643,8 @@ class Chats {
 						})
 
 						if (!uploadResult) {
+							logger.warn("chats", "asset upload returned no result", { assetName: asset.name, assetUri: asset.uri })
+
 							return []
 						}
 
@@ -653,6 +658,8 @@ class Chats {
 									})
 
 									if (link.type !== "file") {
+										logger.warn("chats", "public link for uploaded asset is not file type", { linkType: link.type, assetName: asset.name })
+
 										return null
 									}
 

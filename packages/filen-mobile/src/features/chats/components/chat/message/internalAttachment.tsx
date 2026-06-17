@@ -14,6 +14,7 @@ import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { cannotDecryptPlaceholder } from "@/lib/decryption"
 import { t as i18nT } from "@/lib/i18n"
 import { type InternalLinkData } from "@/features/chats/utils"
+import logger from "@/lib/logger"
 
 export const InternalAttachment = ({
 	data,
@@ -55,7 +56,7 @@ export const InternalAttachment = ({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("chats", "openLinkedDirectory failed", { error: result.error })
 						alerts.error(result.error)
 
 						return
@@ -79,7 +80,7 @@ export const InternalAttachment = ({
 					})
 
 					if (!result.success) {
-						console.error(result.error)
+						logger.error("chats", "openLinkedFile failed", { error: result.error })
 						alerts.error(result.error)
 
 						return

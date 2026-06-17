@@ -6,6 +6,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { isMessageUnread } from "@/features/chats/chatSelectors"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import logger from "@/lib/logger"
 
 export function useChatsUnreadCount() {
 	const stringifiedClient = useStringifiedClient()
@@ -52,7 +53,7 @@ export function useChatsUnreadCount() {
 
 	useEffect(() => {
 		if (hasMissingMessages && stringifiedClient) {
-			chats.refetchChatsAndMessages().catch(console.error)
+			chats.refetchChatsAndMessages().catch(e => logger.warn("chats", "refetchChatsAndMessages (missing messages) failed", { error: e instanceof Error ? e.message : String(e) }))
 		}
 	}, [hasMissingMessages, stringifiedClient])
 
@@ -62,7 +63,7 @@ export function useChatsUnreadCount() {
 		}
 
 		chats.refetchChatsAndMessages().catch(err => {
-			console.error(err)
+			logger.error("chats", "initial refetchChatsAndMessages failed", { error: err instanceof Error ? err.message : String(err) })
 		})
 	})
 

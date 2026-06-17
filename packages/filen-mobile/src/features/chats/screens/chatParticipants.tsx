@@ -27,6 +27,7 @@ import { type ParticipantRowProps } from "@/components/participants/participantR
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { contactsQueryGet } from "@/features/contacts/queries/useContacts.query"
 import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
+import logger from "@/lib/logger"
 
 const ChatParticipants = () => {
 	const { t } = useTranslation()
@@ -117,7 +118,7 @@ const ChatParticipants = () => {
 									})
 
 									if (!promptResponse.success) {
-										console.error(promptResponse.error)
+										logger.error("chats", "remove participant prompt failed", { error: promptResponse.error })
 										alerts.error(promptResponse.error)
 
 										return
@@ -135,7 +136,7 @@ const ChatParticipants = () => {
 									})
 
 									if (!result.success) {
-										console.error(result.error)
+										logger.error("chats", "removeParticipant failed", { error: result.error })
 										alerts.error(result.error)
 
 										return
@@ -284,7 +285,7 @@ const ChatParticipants = () => {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("chats", "addParticipants failed", { error: result.error })
 							alerts.error(result.error)
 
 							return

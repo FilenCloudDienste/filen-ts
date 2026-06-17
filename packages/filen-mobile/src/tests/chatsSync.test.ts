@@ -1,4 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+import logger from "@/lib/logger"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const { kvStore, chatsState, mockSendMessage, mockFetchChats, mockSetInflightMessages, mockSetInflightErrors, ErrorKindMock, sdkErrorState } =
 	vi.hoisted(() => {
@@ -557,6 +559,8 @@ describe("Sync (Chats)", () => {
 
 			vi.mocked(sqlite.kvAsync.set).mockRejectedValueOnce(new Error("write failed"))
 
+			vi.mocked(logger.error).mockClear()
+
 			const flushed = await sync.flushToDisk({
 				"chat-1": {
 					chat: mockChat("chat-1"),
@@ -567,7 +571,7 @@ describe("Sync (Chats)", () => {
 			// Failure is reported as `false` so component call sites can alert
 			// (sync-internal callers ignore it).
 			expect(flushed).toBe(false)
-			expect(consoleErrorSpy).toHaveBeenCalled()
+			expect(logger.error).toHaveBeenCalled()
 
 			consoleErrorSpy.mockRestore()
 		})

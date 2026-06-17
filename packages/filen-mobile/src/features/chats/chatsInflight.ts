@@ -4,6 +4,7 @@ import { sync } from "@/features/chats/components/sync"
 import secureStore from "@/lib/secureStore"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/useChatMessages.query"
 import { type Chat } from "@/types"
+import logger from "@/lib/logger"
 
 // The per-chat draft keys written by the chat input (input/index.tsx and message/menu.tsx).
 // MUST stay in sync with the useSecureStore call sites there.
@@ -49,7 +50,7 @@ export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 	})
 
 	if (!flushResult.success) {
-		console.error("Error flushing chat inflight purge to disk:", flushResult.error)
+		logger.error("chats-inflight", "failed to flush inflight purge to disk", { chatUuid, error: flushResult.error instanceof Error ? flushResult.error.message : String(flushResult.error) })
 	}
 
 	const draftsResult = await run(async () => {
@@ -57,7 +58,7 @@ export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 	})
 
 	if (!draftsResult.success) {
-		console.error("Error removing chat draft keys:", draftsResult.error)
+		logger.warn("chats-inflight", "failed to remove chat draft keys", { chatUuid, error: draftsResult.error instanceof Error ? draftsResult.error.message : String(draftsResult.error) })
 	}
 }
 
@@ -96,7 +97,11 @@ export async function retryInflightMessage({ chat, message }: { chat: Chat; mess
 		return updated
 	})
 
-	await sync.flushToDisk(useChatsStore.getState().inflightMessages)
+	const retryFlushed = await sync.flushToDisk(useChatsStore.getState().inflightMessages)
+
+	if (!retryFlushed) {
+		logger.error("chats-inflight", "retryInflightMessage flush failed — message memory-only", { inflightId: message.inflightId, chatUuid: chat.uuid })
+	}
 
 	sync.syncNow()
 }
@@ -155,5 +160,9 @@ export async function removeInflightMessage({ chat, message }: { chat: Chat; mes
 		updater: prev => prev.filter(m => m.inflightId !== message.inflightId)
 	})
 
-	await sync.flushToDisk(useChatsStore.getState().inflightMessages)
+	const removeFlushed = await sync.flushToDisk(useChatsStore.getState().inflightMessages)
+
+	if (!removeFlushed) {
+		logger.warn("chats-inflight", "removeInflightMessage flush failed — removed message may re-appear", { inflightId: message.inflightId, chatUuid: chat.uuid })
+	}
 }
