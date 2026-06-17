@@ -8,6 +8,7 @@ import { Image } from "expo-image"
 import { run, formatBytes } from "@filen/utils"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
+import { shareTmpFile } from "@/lib/share"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import thumbnails from "@/lib/thumbnails"
@@ -163,12 +164,13 @@ function Advanced() {
 			return
 		}
 
+		// Prep (flush + zip) under the loading overlay...
 		const result = await runWithLoading(async () => {
-			return await diagnostics.exportLogs()
+			return await diagnostics.prepareLogsExport()
 		})
 
 		if (!result.success) {
-			logger.error("settings", "exportLogs failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("settings", "exportLogs prep failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 			alerts.error(result.error)
 
 			return
@@ -176,6 +178,22 @@ function Advanced() {
 
 		if (result.data === "no-logs") {
 			alerts.normal(t("export_logs_none"))
+
+			return
+		}
+
+		// ...then open the share sheet OUTSIDE runWithLoading — the loading overlay must not cover the
+		// native share sheet. shareTmpFile funnels through withSystemPresentation (privacy cover stays hidden).
+		const shareResult = await shareTmpFile({
+			uri: result.data.uri,
+			name: result.data.name,
+			mimeType: "application/zip",
+			cleanup: result.data.cleanup
+		})
+
+		if (!shareResult.success) {
+			logger.error("settings", "exportLogs share failed", { error: shareResult.error instanceof Error ? shareResult.error.message : String(shareResult.error) })
+			alerts.error(shareResult.error)
 		}
 	}
 
