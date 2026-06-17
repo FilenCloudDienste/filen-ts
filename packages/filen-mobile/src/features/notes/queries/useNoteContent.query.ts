@@ -3,6 +3,7 @@ import queryClient, { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/clie
 import { sortParams } from "@filen/utils"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
+import logger from "@/lib/logger"
 
 export const BASE_QUERY_KEY = "useNoteContentQuery"
 
@@ -18,6 +19,8 @@ export async function fetchData(
 	const note = cache.noteUuidToNote.get(params.uuid)
 
 	if (!note) {
+		logger.warn("notes-query", "note not in cache during content fetch; returning undefined", { uuid: params.uuid })
+
 		return undefined
 	}
 

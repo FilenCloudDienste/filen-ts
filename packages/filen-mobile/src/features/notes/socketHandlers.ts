@@ -6,6 +6,7 @@ import {
 } from "@/features/notes/queries/useNotesWithContent.query"
 import events from "@/lib/events"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import logger from "@/lib/logger"
 
 export type NoteSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Note }>
 
@@ -88,7 +89,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 				}
 
 				default: {
-					console.warn("TitleEdited: received encrypted title, skipping cache update", inner)
+					logger.warn("notes", "TitleEdited: received encrypted title, skipping cache update", { noteUuid: inner.note })
 
 					break
 				}
@@ -176,6 +177,8 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 			const note = notes?.find(n => n.uuid === inner.note)
 
 			if (!note) {
+				logger.warn("notes", "ContentEdited: note not found in cache", { noteUuid: inner.note })
+
 				break
 			}
 
@@ -188,7 +191,7 @@ export async function handleNoteEvent({ event }: { event: NoteSocketEvent }): Pr
 		}
 
 		default: {
-			console.error(eventInner)
+			logger.error("notes", "Unhandled note event", { tag: (eventInner.inner as { tag: string }).tag })
 
 			throw new Error("Unhandled note event")
 		}

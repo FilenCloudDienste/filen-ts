@@ -24,6 +24,7 @@ import { filterNoteListItemsBySearchQuery, filterNoteTagsBySearchQuery, filterNo
 import { LazyWrapper } from "@/components/lazyWrapper"
 import useIsOnline from "@/hooks/useIsOnline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
+import logger from "@/lib/logger"
 
 const Notes = () => {
 	const { t } = useTranslation()
@@ -149,7 +150,7 @@ const Notes = () => {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("notes", "notes list refresh failed", { error: result.error })
 			alerts.error(result.error)
 		}
 	}

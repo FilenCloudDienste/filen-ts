@@ -3,6 +3,7 @@ import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/utils"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
+import logger from "@/lib/logger"
 
 export const BASE_QUERY_KEY = "useNoteHistoryQuery"
 
@@ -18,6 +19,8 @@ export async function fetchData(
 	const note = cache.noteUuidToNote.get(params.uuid)
 
 	if (!note) {
+		logger.warn("notes-query", "note not in cache during history fetch; returning empty", { uuid: params.uuid })
+
 		return []
 	}
 

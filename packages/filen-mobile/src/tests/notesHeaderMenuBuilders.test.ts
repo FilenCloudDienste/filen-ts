@@ -1,4 +1,5 @@
 import { vi, describe, it, expect } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // NoteType numeric enum — must match sdk-rs values so type subButton id mapping works.
 vi.mock("@filen/sdk-rs", () => ({

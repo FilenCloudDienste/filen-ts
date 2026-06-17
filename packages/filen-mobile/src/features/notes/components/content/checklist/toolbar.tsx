@@ -5,6 +5,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { PressableScale } from "@/components/ui/pressables"
 import alerts from "@/lib/alerts"
+import logger from "@/lib/logger"
 
 const Toolbar = () => {
 	const keyboardState = useKeyboardState()
@@ -16,7 +17,7 @@ const Toolbar = () => {
 		}
 
 		KeyboardController.dismiss().catch(err => {
-			console.error(err)
+			logger.error("notes", "keyboard dismiss failed", { error: err })
 			alerts.error(err)
 		})
 	}

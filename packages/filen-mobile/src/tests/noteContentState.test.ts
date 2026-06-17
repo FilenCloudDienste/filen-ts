@@ -20,6 +20,7 @@
 //   spin an eternal spinner over already-rendered content.
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const { mockFlushToDisk } = vi.hoisted(() => ({
 	mockFlushToDisk: vi.fn()

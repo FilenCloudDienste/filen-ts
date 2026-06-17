@@ -1,4 +1,5 @@
 import auth from "@/lib/auth"
+import logger from "@/lib/logger"
 import { NoteType } from "@filen/sdk-rs"
 import { type Note, type NoteTag } from "@/types"
 import { wrapSdkNote } from "@/features/notes/utils"
@@ -128,6 +129,8 @@ const notes = {
 				})
 
 				if (content === undefined) {
+					logger.warn("notes-export", "exportMultiple: getContent returned undefined for note; skipping", { noteUuid: note.uuid })
+
 					return
 				}
 
