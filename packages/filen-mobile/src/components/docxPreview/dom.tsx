@@ -4,6 +4,10 @@ import { useRef, useState } from "react"
 import { renderAsync } from "docx-preview"
 import { Buffer } from "buffer"
 import useEffectOnce from "@/hooks/useEffectOnce"
+import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
+
+// Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
+installDomConsoleProxy()
 
 const Dom = ({
 	base64,

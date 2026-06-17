@@ -6,12 +6,16 @@ import { type DOMProps, useDOMImperativeHandle } from "expo/dom"
 import { useEffect, useRef, useCallback } from "react"
 import type { DOMRef } from "@/hooks/useDomEvents/useNativeDomEvents"
 import useDomDomEvents from "@/hooks/useDomEvents/useDomDomEvents"
+import { installDomConsoleProxy } from "@/hooks/useDomEvents/domConsoleProxy"
 import { decodeEditorInitialValue } from "@/components/textEditor/initialValueCodec"
 import Quill from "quill"
 import DOMPurify from "dompurify"
 import QuillThemeCustomizer, { getThemeOptions } from "@/components/textEditor/richText/quillTheme"
 import type { Platform } from "react-native"
 import type { TextEditorEvents, Colors, Font } from "@/components/textEditor"
+
+// Forward this WebView's console.* to the RN diagnostic logger (see domConsoleProxy).
+installDomConsoleProxy()
 
 DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
 	if (node.tagName === "A" && node.getAttribute("href")) {

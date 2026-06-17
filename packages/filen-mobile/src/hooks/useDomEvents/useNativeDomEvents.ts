@@ -1,5 +1,6 @@
 import type { DOMImperativeFactory } from "expo/dom"
 import type { WebViewMessageEvent } from "react-native-webview"
+import { forwardDomConsoleLog } from "@/hooks/useDomEvents/forwardDomLog"
 
 export interface DOMRef extends DOMImperativeFactory {
 	postMessage: (message: unknown) => void
@@ -34,12 +35,27 @@ export function useNativeDomEvents<T>(params: {
 	}
 
 	const onDomMessage = (message: WebViewMessageEvent) => {
+		let parsed: unknown
+
+		try {
+			parsed = JSON.parse(message.nativeEvent.data)
+		} catch (e) {
+			console.error(e)
+
+			return
+		}
+
+		// Intercept WebView console-proxy envelopes → RN logger before the app handler sees them.
+		if (forwardDomConsoleLog(parsed)) {
+			return
+		}
+
 		if (!params.onMessage) {
 			return
 		}
 
 		try {
-			params.onMessage(JSON.parse(message.nativeEvent.data) as T, postMessage)
+			params.onMessage(parsed as T, postMessage)
 		} catch (e) {
 			console.error(e)
 		}
