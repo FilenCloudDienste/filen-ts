@@ -391,6 +391,7 @@
 	"import_partial_download_other": "আমদানি বাতিল: {{count}}টি ফাইল ডাউনলোড করা যায়নি",
 	"import_partial_upload_one": "আমদানি অসম্পূর্ণ: {{count}}টি ফাইল আপলোড করা যায়নি",
 	"import_partial_upload_other": "আমদানি অসম্পূর্ণ: {{count}}টি ফাইল আপলোড করা যায়নি",
+	"incorrect_two_factor_code_try_again": "ভুল কোড। অনুগ্রহ করে আবার চেষ্টা করুন।",
 	"info": "তথ্য",
 	"information": "তথ্য",
 	"insert": "সন্নিবেশ করুন",

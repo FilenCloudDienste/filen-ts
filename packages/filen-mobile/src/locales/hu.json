@@ -391,6 +391,7 @@
 	"import_partial_download_other": "Importálás megszakítva: {{count}} fájlt nem sikerült letölteni",
 	"import_partial_upload_one": "Az importálás nem teljes: {{count}} fájlt nem sikerült feltölteni",
 	"import_partial_upload_other": "Az importálás nem teljes: {{count}} fájlt nem sikerült feltölteni",
+	"incorrect_two_factor_code_try_again": "Helytelen kód. Kérjük, próbálja újra.",
 	"info": "Információ",
 	"information": "Információ",
 	"insert": "Beszúrás",
