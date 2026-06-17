@@ -17,6 +17,7 @@ import { newTmpDir } from "@/lib/tmp"
 import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import alerts from "@/lib/alerts"
+import logger from "@/lib/logger"
 
 /**
  * Builds the bulk-action menu buttons (favorite / save-to-device / download /
@@ -77,7 +78,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 				})
 
 				if (!permissionsResult.success) {
-					console.error(permissionsResult.error)
+					logger.error("photos", "media permissions check failed in save-to-photos", { error: permissionsResult.error instanceof Error ? permissionsResult.error.message : String(permissionsResult.error) })
 					alerts.error(permissionsResult.error)
 
 					return
@@ -96,6 +97,8 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 						const meta = item.data.decryptedMeta
 
 						if (!meta) {
+							logger.warn("photos", "skipping item with no decryptedMeta in save-to-photos bulk op", { uuid: item.data.uuid })
+
 							return
 						}
 
@@ -119,6 +122,8 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 							const downloadResult = await transfers.download({ item, destination })
 
 							if (!downloadResult) {
+								logger.warn("photos", "download returned falsy result during save-to-photos, skipping MediaLibrary save", { uuid: item.data.uuid, name: meta.name })
+
 								return
 							}
 

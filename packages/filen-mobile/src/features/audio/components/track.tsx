@@ -19,6 +19,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
+import logger from "@/lib/logger"
 
 type TrackType = PlaylistWithItems["files"][number]
 
@@ -44,7 +45,7 @@ async function playTrack({ t, track, playlist }: { t: TFunction; track: TrackTyp
 	})
 
 	if (!result.success) {
-		console.error(result.error)
+		logger.error("audio", "playTrack failed", { uuid: track.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 		alerts.error(result.error)
 
 		return
@@ -80,7 +81,7 @@ function removeFromPlaylistButton({ t, track, playlist }: { t: TFunction; track:
 			})
 
 			if (!result.success) {
-				console.error(result.error)
+				logger.error("audio", "remove from playlist failed", { uuid: track.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 				alerts.error(result.error)
 
 				return
@@ -136,7 +137,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("audio", "add to queue failed", { uuid: track.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -157,7 +158,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 				})
 
 				if (!selectResult.success) {
-					console.error(selectResult.error)
+					logger.error("audio", "select playlists failed", { uuid: track.uuid, error: selectResult.error instanceof Error ? selectResult.error.message : String(selectResult.error) })
 					alerts.error(selectResult.error)
 
 					return
@@ -204,7 +205,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("audio", "add to playlist failed", { uuid: track.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -264,7 +265,7 @@ export function Track({ track, playlist, reorderDisabled }: { track: TrackType; 
 						return
 					}
 
-					playTrack({ t, track, playlist }).catch(console.error)
+					playTrack({ t, track, playlist }).catch(e => logger.error("audio", "playTrack failed from row tap", { uuid: track.uuid, error: e instanceof Error ? e.message : String(e) }))
 				}}
 			>
 				{areTracksSelected && (

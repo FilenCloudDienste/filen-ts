@@ -20,6 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
+import logger from "@/lib/logger"
 
 export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlist: PlaylistWithItems }): MenuButton[] {
 	return [
@@ -60,7 +61,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("audio", "play playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 								alerts.error(result.error)
 
 								return
@@ -94,7 +95,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("audio", "shuffle play playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 								alerts.error(result.error)
 
 								return
@@ -130,7 +131,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 							})
 
 							if (!result.success) {
-								console.error(result.error)
+								logger.error("audio", "add playlist to queue failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 								alerts.error(result.error)
 
 								return
@@ -156,7 +157,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!selectDriveItemsResult.success) {
-					console.error(selectDriveItemsResult.error)
+					logger.error("audio", "drive item selection failed in add-tracks flow", { playlistUuid: playlist.uuid, error: selectDriveItemsResult.error instanceof Error ? selectDriveItemsResult.error.message : String(selectDriveItemsResult.error) })
 					alerts.error(selectDriveItemsResult.error)
 
 					return
@@ -174,7 +175,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("audio", "addFilesToPlaylist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -199,7 +200,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.error("audio", "rename playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -223,7 +224,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("audio", "rename playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return
@@ -248,7 +249,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!promptResult.success) {
-					console.error(promptResult.error)
+					logger.error("audio", "delete playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 					alerts.error(promptResult.error)
 
 					return
@@ -265,7 +266,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!result.success) {
-					console.error(result.error)
+					logger.error("audio", "delete playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
 					alerts.error(result.error)
 
 					return

@@ -13,6 +13,7 @@ import alerts from "@/lib/alerts"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
 import { useTranslation } from "react-i18next"
 import { resolveAudioTrackLabels } from "@/features/audio/utils"
+import logger from "@/lib/logger"
 
 const PlaylistToolbar = () => {
 	const { t } = useTranslation()
@@ -109,7 +110,7 @@ const PlaylistToolbar = () => {
 							rippleColor="transparent"
 							onPress={() => {
 								audio.clearQueue().catch(err => {
-									console.error(err)
+									logger.error("audio", "clearQueue failed", { error: err instanceof Error ? err.message : String(err) })
 									alerts.error(err)
 								})
 							}}
@@ -139,7 +140,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.seek(seconds).catch(err => {
-								console.error(err)
+								logger.error("audio", "seek failed", { error: err instanceof Error ? err.message : String(err) })
 								alerts.error(err)
 							})
 						}}
@@ -174,7 +175,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.setShuffleEnabled(!shuffleEnabled).catch(err => {
-								console.error(err)
+								logger.error("audio", "setShuffleEnabled failed", { error: err instanceof Error ? err.message : String(err) })
 								alerts.error(err)
 							})
 						}}
@@ -194,7 +195,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.previous().catch(err => {
-								console.error(err)
+								logger.error("audio", "previous() failed from toolbar", { error: err instanceof Error ? err.message : String(err) })
 								alerts.error(err)
 							})
 						}}
@@ -243,7 +244,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.next().catch(err => {
-								console.error(err)
+								logger.error("audio", "next() failed from toolbar", { error: err instanceof Error ? err.message : String(err) })
 								alerts.error(err)
 							})
 						}}
@@ -263,7 +264,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.setLoopMode(loopMode === "none" ? "queue" : loopMode === "queue" ? "track" : "none").catch(err => {
-								console.error(err)
+								logger.error("audio", "setLoopMode failed", { error: err instanceof Error ? err.message : String(err) })
 								alerts.error(err)
 							})
 						}}

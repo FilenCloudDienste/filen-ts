@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next"
 import type { MenuButton } from "@/components/ui/menu"
 import type { SelectOptions } from "@/features/audio/playlistsSelect"
 import PlaylistRow from "@/features/audio/components/playlistRow"
+import logger from "@/lib/logger"
 
 export function Playlists() {
 	const { t } = useTranslation()
@@ -122,7 +123,7 @@ export function Playlists() {
 		})
 
 		if (!promptResult.success) {
-			console.error(promptResult.error)
+			logger.error("audio", "create playlist prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
 			alerts.error(promptResult.error)
 
 			return
@@ -151,7 +152,7 @@ export function Playlists() {
 		})
 
 		if (!result.success) {
-			console.error(result.error)
+			logger.error("audio", "create playlist failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 			alerts.error(result.error)
 		}
 	}
@@ -325,7 +326,7 @@ export function Playlists() {
 						})
 
 						if (!result.success) {
-							console.error(result.error)
+							logger.error("audio", "playlists refetch failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 							alerts.error(result.error)
 						}
 					}}
