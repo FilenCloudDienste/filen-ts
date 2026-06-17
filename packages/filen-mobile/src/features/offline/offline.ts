@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system"
+import logger from "@/lib/logger"
 import type { DriveItem } from "@/types"
 import { run, Semaphore } from "@filen/utils"
 import transfers from "@/features/transfers/transfers"
@@ -248,7 +249,7 @@ export class Offline {
 
 			this.directoriesEnsured = true
 		} catch (e) {
-			console.error("[Offline] ensureDirectories failed", e)
+			logger.error("offline", "ensureDirectories failed", { error: e instanceof Error ? e.message : String(e) })
 		}
 	}
 
@@ -341,6 +342,8 @@ export class Offline {
 		})
 
 		if (!readResult.success) {
+			logger.warn("offline", "readDirectoryMeta deserialize failed — treating as corrupt", { uuid: topLevelUuid, error: readResult.error instanceof Error ? readResult.error.message : String(readResult.error) })
+
 			return null
 		}
 
@@ -369,7 +372,13 @@ export class Offline {
 			return meta
 		})
 
-		return readResult.success ? readResult.data : null
+		if (!readResult.success) {
+			logger.warn("offline", "readStandaloneMeta deserialize failed", { uuid, error: readResult.error instanceof Error ? readResult.error.message : String(readResult.error) })
+
+			return null
+		}
+
+		return readResult.data
 	}
 
 	// Recorded delivered size for a stored standalone file (see FileOrDirectoryOfflineMeta.diskSize) —
@@ -614,6 +623,8 @@ export class Offline {
 
 				return readResult.data
 			}
+
+			logger.warn("offline", "Index file corrupt — deleted and reset to empty", { error: readResult.error instanceof Error ? readResult.error.message : String(readResult.error) })
 
 			if (INDEX_FILE.exists) {
 				INDEX_FILE.delete()
@@ -1253,6 +1264,8 @@ export class Offline {
 			if (crashEscalation) {
 				// The physical tree changed (rescued moves) or at minimum held crash residue — drop
 				// derived caches.
+				logger.warn("offline", "Crash recovery: .sync-tmp residue found — escalating to disk-verified pass", { uuid: topLevelUuid })
+
 				this.invalidateCaches()
 			}
 
@@ -1278,6 +1291,8 @@ export class Offline {
 					}
 
 					this.invalidateCaches()
+
+					logger.error("offline", "Initial directory store failed — partial tree deleted", { uuid: topLevelUuid, fatalCount: fatal.length, firstError: fatal[0]?.message })
 
 					throw new Error(fatal[0]?.message ?? "Storing directory offline failed")
 				}
@@ -2303,6 +2318,8 @@ export class Offline {
 		})
 
 		if (!result.success) {
+			logger.error("offline", "storeFile failed", { uuid: file.data.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+
 			throw result.error
 		}
 

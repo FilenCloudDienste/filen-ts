@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { AppState } from "react-native"
+import logger from "@/lib/logger"
 import cameraUpload, { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
 import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
 import { debounce } from "es-toolkit/function"
@@ -8,7 +9,7 @@ import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/off
 
 const syncDebounced = debounce(
 	() => {
-		cameraUpload.sync().catch(console.error)
+		cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Debounced sync failed", { error: err instanceof Error ? err.message : String(err) }))
 	},
 	5000,
 	{
@@ -51,12 +52,12 @@ const CameraUploadSync = () => {
 		// background-task sync (maxUploads: 1) for the engine's syncing flag. The listener
 		// below covers the deferred first sync on the real "active" transition.
 		if (AppState.currentState === "active") {
-			cameraUpload.sync().catch(console.error)
+			cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Mount sync failed", { error: err instanceof Error ? err.message : String(err) }))
 		}
 
 		const appStateListener = AppState.addEventListener("change", nextAppState => {
 			if (nextAppState === "active") {
-				cameraUpload.sync().catch(console.error)
+				cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Foreground transition sync failed", { error: err instanceof Error ? err.message : String(err) }))
 			}
 		})
 

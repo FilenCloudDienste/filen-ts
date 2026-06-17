@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { AppState } from "react-native"
+import logger from "@/lib/logger"
 import offline from "@/features/offline/offline"
 import offlineSync from "@/features/offline/offlineSync"
 import useIsAppActive from "@/hooks/useIsAppActive"
@@ -29,7 +30,7 @@ const OfflineSync = () => {
 		}
 
 		Promise.all([offline.updateIndex(), offlineSync.sync()]).catch(err => {
-			console.error(err)
+			logger.error("offline-sync", "Initial index refresh or sync failed on mount", { error: err instanceof Error ? err.message : String(err) })
 			alerts.error(err)
 		})
 	}, [])
@@ -44,7 +45,7 @@ const OfflineSync = () => {
 		// their first sync from the mount effect above; background mounts (skipped there)
 		// get it here on the first real "active" transition.
 		if (!wasActive && isAppActive) {
-			offlineSync.sync().catch(console.error)
+			offlineSync.sync().catch(err => logger.warn("offline-sync", "Foreground transition sync failed", { error: err instanceof Error ? err.message : String(err) }))
 		}
 	}, [isAppActive])
 

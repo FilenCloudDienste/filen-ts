@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // ─── Hoisted mock state ───────────────────────────────────────────────────────
 // vi.mock factories are hoisted to the top of the file by Vitest, so any variable

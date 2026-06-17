@@ -2,6 +2,7 @@ import * as TaskManager from "expo-task-manager"
 import * as BackgroundTask from "expo-background-task"
 import { BackgroundTaskResult, BackgroundTaskStatus } from "expo-background-task"
 import { Platform } from "react-native"
+import logger from "@/lib/logger"
 import { run } from "@filen/utils"
 import setup from "@/lib/setup"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
@@ -146,11 +147,11 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			errorMessage: result.success ? undefined : result.error instanceof Error ? result.error.message : String(result.error)
 		})
 		.catch(err => {
-			console.error("[BackgroundTask] Failed to write run log entry:", err)
+			logger.warn("cameraUpload", "Failed to write background run log entry", { error: err instanceof Error ? err.message : String(err) })
 		})
 
 	if (!result.success) {
-		console.error("[BackgroundTask] Background sync run failed:", result.error)
+		logger.error("cameraUpload", "Background sync task failed", { phase, error: result.error instanceof Error ? result.error.message : String(result.error) })
 
 		// Honest semantics note (audit B3, 2026-06-11): the INSTALLED expo-background-task
 		// discards this value on both platforms — iOS always calls
@@ -170,7 +171,7 @@ export async function registerBackgroundSync(): Promise<void> {
 		const status = await BackgroundTask.getStatusAsync()
 
 		if (status !== BackgroundTaskStatus.Available) {
-			console.warn(`[BackgroundTask] Background sync not available: ${status}`)
+			logger.warn("cameraUpload", "Background task not available", { status })
 
 			return
 		}
@@ -179,9 +180,9 @@ export async function registerBackgroundSync(): Promise<void> {
 			minimumInterval: 15
 		})
 
-		console.log("[BackgroundTask] Registered background sync")
+		logger.debug("cameraUpload", "Registered background sync")
 	} catch (e) {
-		console.error("[BackgroundTask] Failed to register:", e)
+		logger.error("cameraUpload", "Background task registration failed", { error: e instanceof Error ? e.message : String(e) })
 	}
 }
 
@@ -195,8 +196,8 @@ export async function unregisterBackgroundSync(): Promise<void> {
 
 		await BackgroundTask.unregisterTaskAsync(TASK_NAME)
 
-		console.log("[BackgroundTask] Unregistered background sync")
+		logger.debug("cameraUpload", "Unregistered background sync")
 	} catch (e) {
-		console.error("[BackgroundTask] Failed to unregister:", e)
+		logger.warn("cameraUpload", "Background task unregistration failed", { error: e instanceof Error ? e.message : String(e) })
 	}
 }

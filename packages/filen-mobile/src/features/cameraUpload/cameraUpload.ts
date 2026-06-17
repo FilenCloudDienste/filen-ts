@@ -1,5 +1,6 @@
 import * as MediaLibrary from "expo-media-library/next"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
+import logger from "@/lib/logger"
 import auth from "@/lib/auth"
 import { type FileWithPath, AnyNormalDir, AnyNormalDir_Tags, AnyDirWithContext } from "@filen/sdk-rs"
 import { normalizeModificationTimestampForComparison } from "@/lib/utils"
@@ -331,7 +332,7 @@ class CameraUpload {
 			const folderTitle = albumFolderTitle(deviceAlbum.title)
 
 			if (folderTitle === null) {
-				console.warn(`[cameraUpload] Skipping selected album ${id}: title is empty after trim.`)
+				logger.warn("cameraUpload", "Skipping selected album: title is empty after trim", { albumId: id })
 
 				continue
 			}
@@ -481,7 +482,7 @@ class CameraUpload {
 
 					reportedFailedAssetIds.add(failedAsset.id)
 
-					console.error(result.reason)
+					logger.error("cameraUpload", "Asset info fetch failed", { assetId: failedAsset.id, albumId: id, error: result.reason instanceof Error ? result.reason.message : String(result.reason) })
 
 					useCameraUploadStore.getState().setErrors(errors => [
 						...errors,
@@ -608,7 +609,7 @@ class CameraUpload {
 
 			degraded = true
 
-			console.error(result.reason)
+			logger.error("cameraUpload", "Album assets query failed", { albumId: entry[0], albumTitle: entry[1], error: result.reason instanceof Error ? result.reason.message : String(result.reason) })
 
 			useCameraUploadStore.getState().setErrors(errors => [
 				...errors,
@@ -670,7 +671,7 @@ class CameraUpload {
 		// anything this device already uploaded; the residual risk is version churn on
 		// fresh devices, accepted and surfaced here.
 		if (scanErrors.length > 0 && !signal.aborted) {
-			console.error("[cameraUpload] Remote listing degraded by scan errors:", scanErrors)
+			logger.warn("cameraUpload", "Remote listing degraded by scan errors", { errorCount: scanErrors.length, firstError: scanErrors[0] instanceof Error ? scanErrors[0].message : String(scanErrors[0]) })
 
 			useCameraUploadStore.getState().setErrors(errors => [
 				...errors,
@@ -1047,6 +1048,8 @@ class CameraUpload {
 				})
 
 				if (destinationCheck.success && !destinationCheck.data) {
+					logger.warn("cameraUpload", "Remote destination is unusable (deleted or trashed), skipping sync", { remoteDirUuid: remoteDir.inner[0].uuid })
+
 					return
 				}
 			}
@@ -1148,6 +1151,8 @@ class CameraUpload {
 					const assetId = delta.file.info.id
 
 					if ((this.uploadFailures.get(assetId) ?? 0) >= MAX_UPLOAD_FAILURES) {
+						logger.warn("cameraUpload", "Asset skipped after max upload failures", { assetId, maxFailures: MAX_UPLOAD_FAILURES })
+
 						useCameraUploadStore.getState().addSkippedAsset(assetId)
 
 						continue
@@ -1350,7 +1355,7 @@ class CameraUpload {
 
 						this.uploadFailures.set(assetId, (this.uploadFailures.get(assetId) ?? 0) + 1)
 
-						console.error(result.error)
+						logger.error("cameraUpload", "Upload pipeline failed for asset", { assetId, filename: delta.file.info.filename, error: result.error instanceof Error ? result.error.message : String(result.error) })
 
 						useCameraUploadStore.getState().setErrors(errors => [
 							...errors,
@@ -1380,7 +1385,7 @@ class CameraUpload {
 				return
 			}
 
-			console.error(result.error)
+			logger.error("cameraUpload", "Sync run failed unexpectedly", { error: result.error instanceof Error ? result.error.message : String(result.error) })
 
 			useCameraUploadStore.getState().setErrors(errors => [
 				...errors,
