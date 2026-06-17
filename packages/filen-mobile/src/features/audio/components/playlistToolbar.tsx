@@ -130,6 +130,7 @@ const PlaylistToolbar = () => {
 					)}
 				>
 					<AudioSlider
+						themed={true}
 						currentTime={!currentQueueItem ? 0 : (status?.currentTime ?? 0)}
 						duration={!currentQueueItem ? 0 : (status?.duration ?? 0)}
 						onSeek={seconds => {
