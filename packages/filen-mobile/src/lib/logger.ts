@@ -70,7 +70,8 @@ export type LoggerConfig = {
 	flushDelayMs: number
 	// Rotate the active file once it grows past this.
 	maxFileBytes: number
-	// Aggregate cap across rotated files (the active file is always kept on top).
+	// Aggregate cap across rotated files (the active file lives on top of this, so the on-disk total
+	// is roughly maxTotalBytes + maxFileBytes).
 	maxTotalBytes: number
 }
 
@@ -80,8 +81,10 @@ const DEFAULT_CONFIG: LoggerConfig = {
 	breadcrumbCapacity: 200,
 	pendingMax: 50,
 	flushDelayMs: 2000,
-	maxFileBytes: 512 * 1024,
-	maxTotalBytes: 4 * 1024 * 1024
+	// ~10 MB hard ceiling on disk: 9 MB of rotated 1 MB files + the active file. Cheap on device,
+	// and with prod logs limited to warnings/errors this holds a long history.
+	maxFileBytes: 1024 * 1024,
+	maxTotalBytes: 9 * 1024 * 1024
 }
 
 export class Logger {
