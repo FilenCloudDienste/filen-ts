@@ -10,7 +10,7 @@ Feature-based layout: `src/features/<feature>/` owns each product domain end-to-
 
 ```
 Entry:  src/entry.ts → expo-router
-Setup:  src/global.ts (crypto polyfill, Buffer, NetInfo, console replacement)
+Setup:  src/global.ts (DOMException/Buffer/crypto polyfills, console→logger tee, global error+rejection capture, NetInfo)
         src/lib/setup.ts (auth check → SDK init → SQLite → restore query cache)
 
 State:  Zustand stores (per feature store/ + shared src/stores/)  → UI-only state (selections, input focus, etc.)
@@ -106,7 +106,7 @@ Modal routes (top-level under `routes/`): `note/[uuid]`, `chat/[uuid]`, `transfe
 `driveSelect/[uuid]`, `changeDirectoryColor`, `notesTags`, `trash`, `recents`,
 `favorites/[uuid]`, `links/[uuid]`, `sharedIn/[uuid]`, `sharedOut/[uuid]`, `offline/[uuid]`,
 `drivePreview` (containedTransparentModal gallery preview), `account`, `security` (+ `/biometric`, `/twoFactor`),
-`fileProvider`, `appearance`, `advanced`, `events` (+ `eventInfo`), `playlists` (+ `[uuid]`), `selectPlaylists`,
+`fileProvider`, `appearance`, `advanced`, `logViewer`, `events` (+ `eventInfo`), `playlists` (+ `[uuid]`), `selectPlaylists`,
 `cameraUpload` (+ `/albums`, + `cameraUploadErrors`), `fileVersions`, `publicLink`, `linkedFile`,
 `linkedDir/[uuid]`, `incomingShare`, `chatParticipants`, `noteParticipants`, `noteHistory`, `register`.
 
@@ -139,6 +139,7 @@ routes/                       ← thin re-exports / wrappers into src/features/
 ├── events/                   → features/events
 ├── publicLink/               → features/publicLink
 ├── incomingShare/            → features/incomingShare
+├── logViewer/                → features/settings (in-app NDJSON log viewer; pushed from advanced via /logViewer)
 └── account, security/, fileProvider/, appearance, advanced  → features/settings
 ```
 
@@ -193,7 +194,7 @@ all MOVED into their features. What remains is infrastructure shared across feat
 | `sandboxCache.ts`         | OS sandbox cache wrapper (excludes filen-tmp/) — keeps measurable distinction between user-cleanable cache and active in-flight files.                                                                                      |
 | `clearBarrier.ts`         | Synchronization primitive: many concurrent readers, exclusive clear() — used to safely wipe caches without racing in-flight reads.                                                                                          |
 | `fsUtils.ts`              | File-system traversal (`walkLocalDirectory`) + cache size measurement helpers.                                                                                                                                              |
-| `storageRoots.ts`         | Single source of truth for on-disk storage paths + version constants. Anchors all cache/offline/tmp dirs.                                                                                                                   |
+| `storageRoots.ts`         | Single source of truth for on-disk storage paths + version constants. Anchors all cache/offline/tmp dirs + LOGS_DIRECTORY (diagnostic logger sink, v1; wiped on logout).                                                                                                                   |
 | `tmp.ts`                  | Transient staging directory (filen-tmp/) for in-flight uploads, exports, and decode targets. `newTmpFile(name)`/`newTmpDir(name)`.                                                                                          |
 | `secureStore.ts`          | Encrypted KV (expo-secure-store + MMKV fallback), AES-256-GCM encryption, event-driven cache invalidation. Exports `useSecureStore<T>(key, initialValue)` hook.                                                             |
 | `sqlite.ts`               | SQLite KV (single WITHOUT-ROWID `kv` table) for query/cache persistence — 8KB pages, WAL + synchronous NORMAL, 4MB cache, 128MB mmap (single-process invariant — see INIT_QUERIES comment), incremental autovacuum, secure_delete FAST, background maintenance (passive checkpoint + drip vacuum + optimize), post-logout full vacuum + WAL-truncate scrub, app group directory (iOS).  |
@@ -204,12 +205,15 @@ all MOVED into their features. What remains is infrastructure shared across feat
 | `i18n.ts` / `language.ts` | Localization runtime + language preference (typed catalog under `src/locales/`).                                                                                                                                            |
 | `theme.ts`                | Theme tokens / theme preference.                                                                                                                                                                                            |
 | `events.ts`               | Typed EventEmitter (secureStore, actionSheet, driveSelect, contactsSelect, chatConversationDeleted, noteContentEdited, etc.).                                                                                               |
+| `logger.ts`               | Async, non-blocking, privacy-aware on-disk diagnostic logger (class singleton). Hot path = level-gate + one cheap push; redaction/JSON/file-append/rotation happen batched off-path at flush. warn/error (+ uncaught errors/rejections) persist to rotating NDJSON; info/debug live only in a bounded in-memory breadcrumb ring, dragged to disk as context in front of a persisted error. ~10MB cap. Prod gate (warn/error only) armed in the constructor. `purge()` on logout (terminal disable + wipe). `readEntries()` feeds the in-app viewer. A log call MUST NEVER throw. |
+| `logRedaction.ts`         | SECRETS-ONLY redaction at flush. By product decision logs KEEP decrypted names/paths/queries (what makes bugs findable; user warned at export); only secret material (master keys, apiKey, privateKey, auth blobs, 64-hex/long high-entropy strings) is masked. Handles bigint/circular/binary/UniFFI/throwing-getters without throwing. |
+| `errorHandlers.ts`        | `installGlobalErrorHandlers()` (from `global.ts`): chains RN `ErrorUtils` for uncaught errors + enables the Hermes rejection tracker in PRODUCTION (RN only wires it in `__DEV__`). Both route to the logger + `flushNow()`. |
 | `prompts.ts`              | Native alert/input dialogs (@blazejkustra/react-native-alert).                                                                                                                                                              |
 | `alerts.tsx`              | Toast notifications (Burnt) and error banners (Notifier) with FilenSdkError unwrapping.                                                                                                                                     |
 | `reconnect.ts`            | Online-transition handler — on offline→online flip, kicks `cameraUpload.sync()`, `offline.sync()`, `notesSync.executeNow()`, `chatsSync.syncNow()`.                                                                         |
 | `setup.ts`                | App init: auth check → SDK → SecureStore → SQLite → restore queries → restore cache (Semaphore-protected).                                                                                                                  |
 
-`src/lib/polyfills/` — DOMException, Buffer, console-replacement, crypto loaded in order from `src/global.ts`.
+`src/lib/polyfills/` — loaded in order from `src/global.ts`: DOMException → buffer → crypto → console. `console.ts` is a TEE, not a plain replacement: every leveled `console.*` is forwarded into the diagnostic logger (`logger.captureConsole`, redacted at flush), then in dev only forwarded to the native console (prod native stays silent but the output is captured to disk). warn/error args are run through SDK-error unwrapping first.
 
 ## Hooks (src/hooks/) — shared cross-feature
 
@@ -380,7 +384,7 @@ Mounted by the root `_layout.tsx`. Pattern: subscribe to a single concern, never
 - **ESLint**: flat config (v9), react-compiler: error, no relative imports (enforced), TanStack Query plugin, exhaustive-deps with `useMemoDeep`/`useCallbackDeep`. Feature-architecture guardrails: selector-required store hooks, no `export *` barrels in `src/features/`, thin-route import restrictions (see "ESLint guardrails" above). Submodule trees (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and `plugins/` are ignored.
 - **Styling**: Tailwind CSS v4 + Uniwind, global.css with dark theme (OLED black #000000), iOS system color palette
 - **Metro**: crypto/stream/path polyfills, Uniwind CSS + TS type generation
-- **Babel**: babel-preset-expo + react-native-worklets/plugin
+- **Babel**: babel-preset-expo + react-native-worklets/plugin. In production also `transform-remove-console` with `exclude: ["error", "warn"]` — strips `console.log/info/debug/trace` call sites (keeps prod lean) but KEEPS `console.warn`/`console.error` so they reach the diagnostic-logger tee. Removing the exclude would silently disable warn/error capture in prod. Applies to the WebView bundle too — `domConsoleProxy.ts` overrides via `globalThis.console` (immune to the plugin).
 - **Testing**: Vitest (node env), path alias `@` → `./src`, react-native + expo-\* modules mocked under `src/tests/mocks/`. Submodule trees excluded.
 - **iOS**: deployment target **26.0**, app group `group.io.filen.app`, iCloud, 26 localizations, UIBackgroundModes: audio/fetch/processing, Apple team `7YTW5D2K7P`
 - **Android**: min SDK **33**, target SDK **36**, compile SDK 36, build tools 36.0.0; 23 permissions (incl. MANAGE_DOCUMENTS for the documents provider, ACTION_OPEN_DOCUMENT/\_TREE for incoming intents); Hermes; predictiveBackGestureEnabled: false; allowBackup: false
@@ -443,6 +447,7 @@ const url = getFileUrl(anyFile) // → http://localhost:{port}/...
 - **Module singletons** for feature/infra services — each exported as a single ready-to-use value, never instantiated by callers. Shape follows state: services holding real mutable runtime state (auth, chats, audio, offline, transfers, cameraUpload, cache, secureStore, sqlite, fileCache, thumbnails, QueryPersisterKv, …) are **class singletons** (`class X {} export default new X()` — the constructor is also the per-test isolation seam); stateless namespaces (alerts, prompts, queryUpdater, actionSheet, sandboxCache, contacts, notes, drive, setup, sorters, …) are **plain objects / module functions** (no class). New code: prefer a plain object / free functions unless the service holds mutable runtime state, in which case use a class singleton.
 - **SDK delegation** — no crypto/API/networking reimplementation in JS; everything routes through `@filen/sdk-rs`
 - **Silent infrastructure** — `src/lib/*` and feature `<feature>.ts` singletons expose state, never fire banners/toasts. UX belongs in UI components.
+- **Diagnostic logging** — `src/lib/logger.ts` is an async, never-throwing on-disk NDJSON logger wired at `src/global.ts` (console tee + `installGlobalErrorHandlers()`) and torn down at logout (`logger.purge()` in `auth.ts`). Prod = warn/error only (debug/info are in-memory breadcrumbs), armed in the logger constructor; babel strips debug/info console call sites. Logs KEEP names/paths but never secrets (`logRedaction.ts`). Surfaced via the `logViewer` route + `exportLogs()` in advanced settings; WebView console is proxied back via `hooks/useDomEvents/domConsoleProxy.ts`. From app code use `logger.warn/error(tag, msg, data)`; `console.*` is also captured.
 - **Optimistic updates** via query updaters for instant UI feedback
 - **Concurrency control** via Semaphores + composite abort/pause signals
 - **Event-driven cache invalidation** via typed EventEmitter
