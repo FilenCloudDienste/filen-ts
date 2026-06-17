@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { AppState } from "react-native"
 import { debounce } from "es-toolkit/function"
 import { useIsFocused } from "expo-router"
-import { CacheSearchResult_Tags, type CacheSearchResult, type CacheSearchSnapshot } from "@filen/sdk-rs"
+import { CacheSearchResult_Tags, type CacheSearchHit, type CacheSearchSnapshot } from "@filen/sdk-rs"
 import { type DriveItem } from "@/types"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import driveSearch from "@/features/drive/driveSearch"
@@ -20,6 +20,8 @@ export type UseDriveSearch = {
 	searchQuery: string
 	setSearchQuery: React.Dispatch<React.SetStateAction<string>>
 	searchResults: DriveItem[]
+	// uuid -> parent path relative to the search root, for the search list's path sub-row.
+	searchResultPaths: Map<string, string>
 	status: DriveSearchStatus
 	// Total match count reported by the SDK (may exceed `searchResults.length`, which is
 	// capped at the window CEILING) — drives the "showing first N of M" truncation footer.
@@ -36,14 +38,14 @@ const WATCHDOG_MS = 15_000
 // Backstop for a dropped `Finished`: stop showing "Still searching…" after this long.
 const STALL_CEILING_MS = 30_000
 
-function resultUuid(result: CacheSearchResult): string {
-	return result.tag === CacheSearchResult_Tags.Dir ? result.inner.dir.uuid : result.inner.file.uuid
+function resultUuid(hit: CacheSearchHit): string {
+	return hit.result.tag === CacheSearchResult_Tags.Dir ? hit.result.inner.dir.uuid : hit.result.inner.file.uuid
 }
 
-function mapResult(result: CacheSearchResult): DriveItem {
-	return result.tag === CacheSearchResult_Tags.Dir
-		? unwrappedDirIntoDriveItem(unwrapDirMeta(result.inner.dir))
-		: unwrappedFileIntoDriveItem(unwrapFileMeta(result.inner.file))
+function mapResult(hit: CacheSearchHit): DriveItem {
+	return hit.result.tag === CacheSearchResult_Tags.Dir
+		? unwrappedDirIntoDriveItem(unwrapDirMeta(hit.result.inner.dir))
+		: unwrappedFileIntoDriveItem(unwrapFileMeta(hit.result.inner.file))
 }
 
 /**
@@ -63,6 +65,9 @@ function mapResult(result: CacheSearchResult): DriveItem {
 export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriveSearch {
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const [searchResults, setSearchResults] = useState<DriveItem[]>([])
+	// uuid -> the hit's parent path relative to the search root (cache search only); drives the
+	// path sub-row in the drive search list. Rebuilt from each snapshot.
+	const [searchResultPaths, setSearchResultPaths] = useState<Map<string, string>>(() => new Map<string, string>())
 	const [totalCount, setTotalCount] = useState<number>(0)
 	const [live, setLive] = useState<boolean>(true)
 	const [hasSnapshot, setHasSnapshot] = useState<boolean>(false)
@@ -100,6 +105,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	if (sessionKey !== activeSessionKey) {
 		setActiveSessionKey(sessionKey)
 		setSearchResults([])
+		setSearchResultPaths(new Map<string, string>())
 		setTotalCount(0)
 		setLive(true)
 		setHasSnapshot(false)
@@ -204,6 +210,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 					const memo = mapCacheRef.current
 					const tombstones = tombstonesRef.current
 					const next: DriveItem[] = []
+					const nextPaths = new Map<string, string>()
 
 					for (const result of snapshot.results) {
 						const uuid = resultUuid(result)
@@ -221,9 +228,11 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 						}
 
 						next.push(item)
+						nextPaths.set(uuid, result.parentPath)
 					}
 
 					setSearchResults(next)
+					setSearchResultPaths(nextPaths)
 					setTotalCount(Number(snapshot.total))
 					setLive(snapshot.live)
 					setHasSnapshot(true)
@@ -386,6 +395,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		searchQuery,
 		setSearchQuery,
 		searchResults,
+		searchResultPaths,
 		status,
 		totalCount
 	}

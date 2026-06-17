@@ -42,7 +42,7 @@ import { useResolveClassNames } from "uniwind"
 const Drive = () => {
 	const drivePath = useDrivePath()
 	const { t } = useTranslation()
-	const { searchQuery, setSearchQuery, searchResults, status, totalCount } = useDriveSearch({ drivePath })
+	const { searchQuery, setSearchQuery, searchResults, searchResultPaths, status, totalCount } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
 	const blocked = useBlockedUsers()
 	const parent = getDriveParent(drivePath)
@@ -172,6 +172,7 @@ const Drive = () => {
 									info={info}
 									drivePath={drivePath}
 									getListItems={() => items}
+									searchParentPath={isCacheSearch ? searchResultPaths.get(info.item.data.uuid) : undefined}
 								/>
 							)
 						}}

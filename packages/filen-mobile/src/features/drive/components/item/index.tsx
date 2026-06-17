@@ -64,11 +64,15 @@ function OfflineIndicator() {
 const Item = ({
 	info,
 	drivePath,
-	getListItems
+	getListItems,
+	searchParentPath
 }: {
 	info: ListRenderItemInfo<DriveItem>
 	drivePath: DrivePath
 	getListItems: () => DriveItem[]
+	// Cache-search only: the hit's parent path relative to the search root. When non-empty, the
+	// row shows the item's full relative path as a third line. Undefined in normal browsing.
+	searchParentPath?: string
 }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
@@ -297,6 +301,15 @@ const Item = ({
 										drivePath={drivePath}
 									/>
 								</Text>
+								{searchParentPath !== undefined && searchParentPath.length > 0 && (
+									<Text
+										className="text-xs text-muted-foreground"
+										numberOfLines={1}
+										ellipsizeMode="head"
+									>
+										{`${searchParentPath}/${driveItemDisplayName(info.item)}`}
+									</Text>
+								)}
 								<ShareEmail
 									info={info}
 									drivePath={drivePath}
