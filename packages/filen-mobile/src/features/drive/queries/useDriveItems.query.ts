@@ -27,6 +27,7 @@ import { unwrapSdkError } from "@/lib/sdkErrors"
 import type { DriveItem } from "@/types"
 import offline from "@/features/offline/offline"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
+import logger from "@/lib/logger"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 
@@ -789,7 +790,9 @@ export function driveItemsQueryUpdateGlobal({
 				updater
 			})
 		})
-		.catch(console.error)
+		.catch(err => {
+			logger.error("drive", "driveItemsQueryUpdateGlobal: failed to get camera upload config", { error: err instanceof Error ? err.message : String(err) })
+		})
 }
 
 export function driveItemsQueryGet(params: UseDriveItemsQueryParams) {

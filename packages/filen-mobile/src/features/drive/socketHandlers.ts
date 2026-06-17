@@ -7,6 +7,7 @@ import {
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
+import logger from "@/lib/logger"
 
 export type DriveSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Drive }>
 
@@ -120,6 +121,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 
 			const fromCache = cache.fileUuidToNormalFile.get(inner.uuid)
 
+			if (!fromCache) {
+				logger.warn("drive-socket", "FileMetadataChanged: file not in cache, update skipped", { uuid: inner.uuid })
+			}
+
 			if (fromCache) {
 				const updatedRawFile = {
 					...fromCache,
@@ -150,6 +155,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			const [inner] = eventInner.inner.inner
 
 			const fromCacheOld = cache.fileUuidToNormalFile.get(inner.file.uuid)
+
+			if (!fromCacheOld) {
+				logger.warn("drive-socket", "FileMove: file not in cache, listing not updated", { uuid: inner.file.uuid })
+			}
 
 			if (fromCacheOld) {
 				const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.parent)
@@ -189,6 +198,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			const [inner] = eventInner.inner.inner
 
 			const fromCacheOld = cache.directoryUuidToAnyNormalDir.get(inner.dir.uuid)
+
+			if (!fromCacheOld) {
+				logger.warn("drive-socket", "FolderMove: directory not in cache, listing not updated", { uuid: inner.dir.uuid })
+			}
 
 			if (fromCacheOld && fromCacheOld.tag === AnyNormalDir_Tags.Dir) {
 				const unwrappedParentUuidOld = unwrapParentUuid(fromCacheOld.inner[0].parent)
@@ -468,6 +481,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		}
 
 		default: {
+			logger.error("drive-socket", "unhandled drive event tag", { tag: eventInner.inner.tag })
 			console.error(eventInner)
 
 			throw new Error("Unhandled drive event")
