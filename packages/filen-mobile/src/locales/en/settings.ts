@@ -19,6 +19,8 @@ export const settings = {
 	versioned_files: "Versioned files",
 	/** Storage legend — free/remaining segment */
 	free: "Free",
+	/** Account-card subtitle — plan tier for accounts with no paid subscription. Distinct from the "free space" legend label above: this is the no-cost plan (e.g. German "Kostenlos", not "Frei") */
+	free_plan: "Free",
 	// More-menu rows reuse keys defined in their owning feature files: recents, favorites,
 	// shared_with_me, shared_with_others (drive.ts); contacts (contacts.ts); playlists (media.ts);
 	// security (security.ts); appearance (appearance.ts).
