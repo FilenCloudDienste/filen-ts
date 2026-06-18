@@ -244,18 +244,6 @@ class SecureStore {
 		return result.data
 	}
 
-	// Derive a DEDICATED passphrase for the on-disk SQLCipher app database from the keychain-protected
-	// root key. Key separation: this is never the same bytes as the secureStore payload key — it is an
-	// HMAC-SHA256 subkey under a fixed domain label (equivalent to HKDF for deriving a single 256-bit
-	// subkey from a uniformly-random root key). Deterministic, so the database stays readable across
-	// relaunches WITHOUT storing a second secret, and it transparently inherits the root key's
-	// protection (keychain, or the bundle-key MMKV fallback when the keychain is unavailable).
-	public async getDatabaseEncryptionKey(): Promise<string> {
-		const rootKey = await this.getEncryptionKey()
-
-		return crypto.createHmac("sha256", Buffer.from(rootKey, "hex")).update("filen-sqlite-db-v1").digest("hex")
-	}
-
 	// Pure AES-256-GCM decrypt + deserialize of a full store payload (12-byte IV ++ ciphertext ++
 	// 16-byte authTag). Throws if the buffer is too short, the auth tag fails (tampered/corrupt/
 	// wrong key), or the plaintext does not deserialize. The thrown error is the integrity gate

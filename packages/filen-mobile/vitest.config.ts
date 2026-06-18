@@ -4,12 +4,6 @@ import path from "node:path"
 export default defineConfig({
 	test: {
 		environment: "node",
-		// The secureStore singleton constructor — now reachable transitively via @/lib/sqlite ->
-		// @/lib/secureStore — throws without this env var. Set it for every test file so importing
-		// sqlite/cache/secureStore never crashes at module load. Tests can still delete/override it.
-		env: {
-			EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY: "test-fallback-key-1234567890abcdef"
-		},
 		exclude: [
 			"**/node_modules/**",
 			"**/dist/**",
@@ -41,15 +35,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),
-			"react-native": path.resolve(__dirname, "./src/tests/mocks/reactNative.ts"),
-			// Native modules that throw on import under Node. Aliased to their canonical mocks GLOBALLY
-			// so anything transitively importing @/lib/secureStore (via @/lib/sqlite) loads cleanly; a
-			// per-test vi.mock still overrides where a test needs a specific variant (e.g. the strict
-			// expo-file-system mock).
-			"react-native-mmkv": path.resolve(__dirname, "./src/tests/mocks/reactNativeMMKV.ts"),
-			"expo-secure-store": path.resolve(__dirname, "./src/tests/mocks/expoSecureStore.ts"),
-			"react-native-quick-crypto": path.resolve(__dirname, "./src/tests/mocks/reactNativeQuickCrypto.ts"),
-			"expo-file-system": path.resolve(__dirname, "./src/tests/mocks/expoFileSystem.ts")
+			"react-native": path.resolve(__dirname, "./src/tests/mocks/reactNative.ts")
 		}
 	}
 })
