@@ -123,6 +123,14 @@ vi.mock("@op-engineering/op-sqlite", () => ({
 	open
 }))
 
+// sqlite now derives its SQLCipher key from secureStore; stub it so this unit test doesn't pull the
+// real secureStore chain (and so open() receives a deterministic encryptionKey).
+vi.mock("@/lib/secureStore", () => ({
+	default: {
+		getDatabaseEncryptionKey: async () => "0".repeat(64)
+	}
+}))
+
 vi.mock("@/lib/utils", () => ({}))
 
 vi.mock("@/lib/paths", () => ({
@@ -183,7 +191,8 @@ describe("Sqlite", () => {
 			expect(open).toHaveBeenCalledTimes(1)
 			expect(open).toHaveBeenCalledWith({
 				name: "sqlite.db",
-				location: expect.any(String)
+				location: expect.any(String),
+				encryptionKey: expect.any(String)
 			})
 
 			const execArg = mockDb.execute.mock.calls[0]![0] as string

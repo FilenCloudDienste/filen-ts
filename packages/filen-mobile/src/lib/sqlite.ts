@@ -5,6 +5,7 @@ import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_VERSION, SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
 import logger from "@/lib/logger"
+import secureStore from "@/lib/secureStore"
 
 // Critical: When changing anything related to the on-disk database file format, bump SQLITE_VERSION in storageRoots.ts to invalidate old databases and prevent potential issues from stale or incompatible data.
 export const VERSION = SQLITE_VERSION
@@ -147,9 +148,15 @@ class Sqlite {
 					})
 				}
 
+				// SQLCipher passphrase derived from the keychain-protected secureStore root key (see
+				// secureStore.getDatabaseEncryptionKey). Encrypts the whole DB at rest; with op-sqlite's
+				// sqlcipher build flag the key is applied (PRAGMA key) before the INIT_QUERIES below run.
+				const encryptionKey = await secureStore.getDatabaseEncryptionKey()
+
 				this.db = open({
 					name: DB_FILE_NAME,
-					location: normalizeFilePathForSdk(DB_FILE_DIRECTORY.uri)
+					location: normalizeFilePathForSdk(DB_FILE_DIRECTORY.uri),
+					encryptionKey
 				})
 			}
 

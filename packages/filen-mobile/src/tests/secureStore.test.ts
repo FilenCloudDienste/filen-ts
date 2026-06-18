@@ -104,6 +104,33 @@ beforeEach(() => {
 })
 
 describe("SecureStore", () => {
+	describe("getDatabaseEncryptionKey", () => {
+		it("derives a deterministic 64-hex subkey, distinct from the root key and unique per root key", async () => {
+			const store = createSecureStore()
+
+			getItemAsync.mockResolvedValue("a".repeat(64))
+
+			const dbKey1 = await store.getDatabaseEncryptionKey()
+			const dbKey2 = await store.getDatabaseEncryptionKey()
+
+			// 256-bit hex passphrase
+			expect(dbKey1).toMatch(/^[0-9a-f]{64}$/)
+			// deterministic — the DB must stay readable across relaunches without storing a second secret
+			expect(dbKey2).toBe(dbKey1)
+			// key separation — never the raw secureStore root key
+			expect(dbKey1).not.toBe("a".repeat(64))
+
+			// a different root key derives a different DB key (the derivation depends on the root key)
+			const freshStore = createSecureStore()
+
+			getItemAsync.mockResolvedValue("b".repeat(64))
+
+			const dbKeyOther = await freshStore.getDatabaseEncryptionKey()
+
+			expect(dbKeyOther).not.toBe(dbKey1)
+		})
+	})
+
 	describe("constructor", () => {
 		it("throws if EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY is missing", () => {
 			const saved = process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"]
