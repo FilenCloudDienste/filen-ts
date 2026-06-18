@@ -298,7 +298,7 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 	const dimensions = useWindowDimensions()
 	const insets = useSafeAreaInsets()
 	const player = useAudioPlayer(fileUrl, {
-		updateInterval: 100,
+		updateInterval: 1000,
 		crossOrigin: "anonymous"
 	})
 	const status = useAudioPlayerStatus(player)

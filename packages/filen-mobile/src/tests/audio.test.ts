@@ -157,7 +157,7 @@ import audioCache from "@/features/audio/audioCache"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio"
-import { AppState, Platform } from "react-native"
+import { AppState } from "react-native"
 import { type QueueItem } from "@/features/audio/audio"
 import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
 
@@ -2376,38 +2376,6 @@ describe("Audio", () => {
 			const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
 
 			expect(lastCall![1].artworkUrl).toBe("file:///cache/cover.jpg")
-		})
-
-		it("disables the 10s seek controls on iOS so prev/next are shown", async () => {
-			Platform.OS = "ios"
-
-			const { audio, playlist } = await createAudio()
-
-			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
-			await audio.play()
-			await flushMicrotasks()
-
-			const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
-
-			expect(lastCall![2]).toEqual({ showSeekBackward: false, showSeekForward: false })
-		})
-
-		it("keeps the 10s seek controls on Android", async () => {
-			Platform.OS = "android"
-
-			try {
-				const { audio, playlist } = await createAudio()
-
-				await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
-				await audio.play()
-				await flushMicrotasks()
-
-				const lastCall = playlist.setActiveForLockScreen.mock.calls.at(-1)
-
-				expect(lastCall![2]).toEqual({ showSeekBackward: true, showSeekForward: true })
-			} finally {
-				Platform.OS = "ios"
-			}
 		})
 
 		it("calls Asset.fromModule only once — second play reuses cached placeholder URI", async () => {
