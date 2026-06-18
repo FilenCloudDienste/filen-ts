@@ -80,6 +80,8 @@ export const common = {
 	rename: "Rename",
 	/** Generic action: save changes */
 	save: "Save",
+	/** Generic destructive action: discard unsaved changes */
+	discard: "Discard changes",
 	/** Generic action: duplicate an item */
 	duplicate: "Duplicate",
 	/** Generic action: move an item to another location */

@@ -21,6 +21,14 @@ export type DrivePreviewStore = {
 	open(params: { items: GalleryItemTagged[]; initialItem: InitialItem }): void
 	setInitialScrollIndex: (fn: number | ((prev: number) => number)) => void
 	setDrivePath: (fn: DrivePath | null | ((prev: DrivePath | null) => DrivePath | null)) => void
+	// Whether the currently-open editable text preview has unsaved edits. Published by previewText;
+	// read by the route-level unsaved-changes guard to decide whether to prompt on navigate-away.
+	hasUnsavedEdits: boolean
+	setHasUnsavedEdits: (value: boolean) => void
+	// Saves the current editable text preview. Returns true once saved (so the guard can proceed to
+	// leave), false if it could not save (e.g. offline) — in which case the guard keeps the user put.
+	saveEdits: (() => Promise<boolean>) | null
+	setSaveEdits: (fn: (() => Promise<boolean>) | null) => void
 }
 
 export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
@@ -42,7 +50,9 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 			currentItem: null,
 			initialScrollIndex: 0,
 			items: [],
-			drivePath: null
+			drivePath: null,
+			hasUnsavedEdits: false,
+			saveEdits: null
 		})
 	},
 	currentItem: null,
@@ -68,6 +78,18 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 		set(state => ({
 			drivePath: typeof fn === "function" ? fn(state.drivePath) : fn
 		}))
+	},
+	hasUnsavedEdits: false,
+	setHasUnsavedEdits(value) {
+		set({
+			hasUnsavedEdits: value
+		})
+	},
+	saveEdits: null,
+	setSaveEdits(fn) {
+		set({
+			saveEdits: fn
+		})
 	},
 	open({ items, initialItem }) {
 		if (get().currentIndex !== null || get().currentItem !== null) {
