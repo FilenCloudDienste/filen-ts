@@ -1,5 +1,5 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioStatus } from "expo-audio"
-import { AppState, Platform } from "react-native"
+import { AppState } from "react-native"
 import { Asset } from "expo-asset"
 import audioCache, { type Metadata } from "@/features/audio/audioCache"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
@@ -88,7 +88,7 @@ const TRACK_END_WATCHDOG_MAX_STALLS = 3
 
 export class Audio {
 	private readonly player = createAudioPlayer(undefined, {
-		updateInterval: 100,
+		updateInterval: 1000,
 		crossOrigin: "anonymous"
 	})
 
