@@ -39,10 +39,7 @@ export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(BASE_DIRECTORY_URI, "thumbnails", `v${THUMBNAILS_VERSION}`)
 )
 
-// v2: the DB is now SQLCipher-encrypted (op-sqlite sqlcipher flag + a derived key). Bumping the
-// version points at a fresh sqlite/v2 dir so the old plaintext v1 DB is abandoned and recreated
-// encrypted — the query cache simply rebuilds from the server (no migration; not in prod).
-export const SQLITE_VERSION = 2
+export const SQLITE_VERSION = 1
 export const SQLITE_DB_FILE_NAME = "sqlite.db"
 export const SQLITE_DB_FILE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "sqlite", `v${SQLITE_VERSION}`))
 

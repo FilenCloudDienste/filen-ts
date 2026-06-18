@@ -66,10 +66,10 @@ describe("version segments embedded in paths", () => {
 		expect(THUMBNAILS_DIRECTORY.uri).toContain(`thumbnails/v${THUMBNAILS_VERSION}`)
 	})
 
-	it("SQLITE_DB_FILE_DIRECTORY.uri contains 'sqlite/v2'", async () => {
+	it("SQLITE_DB_FILE_DIRECTORY.uri contains 'sqlite/v1'", async () => {
 		const { SQLITE_DB_FILE_DIRECTORY, SQLITE_VERSION } = await importRoots("android")
 
-		expect(SQLITE_VERSION).toBe(2)
+		expect(SQLITE_VERSION).toBe(1)
 		expect(SQLITE_DB_FILE_DIRECTORY.uri).toContain(`sqlite/v${SQLITE_VERSION}`)
 	})
 })
