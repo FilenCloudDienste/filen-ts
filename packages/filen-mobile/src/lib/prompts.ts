@@ -1,5 +1,6 @@
 import Alert from "@blazejkustra/react-native-alert"
 import { Semaphore, run } from "@filen/utils"
+import { Platform } from "react-native"
 
 export type AlertPromptResult =
 	| {
@@ -16,6 +17,18 @@ export type AlertPromptOptions = {
 	okText?: string
 	cancelText?: string
 	destructive?: boolean
+}
+
+// Which button the user chose in a three-button alert (primary affirmative / destructive / cancel).
+export type ThreeButtonPromptResult = "primary" | "destructive" | "cancel"
+
+export type ThreeButtonPromptOptions = {
+	title?: string
+	message?: string
+	primaryText: string
+	destructiveText: string
+	cancelText?: string
+	cancellable?: boolean
 }
 
 export type InputPromptResult =
@@ -92,6 +105,71 @@ const prompts = {
 							resolve({
 								cancelled: true
 							})
+						}
+					}
+				)
+			})
+		})
+
+		if (!result.success) {
+			throw result.error
+		}
+
+		return result.data
+	},
+
+	// Three-button alert: a primary (affirmative) action, a destructive action, and cancel.
+	// Serialized through the same mutex as alert(). Button ORDER is platform-specific: Android maps
+	// buttons by position to neutral(0)/negative(1)/positive(2), so the affirmative goes last to sit
+	// on the right; iOS floats the cancel-style button to the bottom regardless and styles destructive
+	// red, so the affirmative goes first. A dismiss (tap-outside / back) resolves to "cancel".
+	async confirm3(options: ThreeButtonPromptOptions): Promise<ThreeButtonPromptResult> {
+		const result = await run(async defer => {
+			await promptsMutex.acquire()
+
+			defer(() => {
+				promptsMutex.release()
+			})
+
+			return await new Promise<ThreeButtonPromptResult>(resolve => {
+				const primaryButton = {
+					text: options.primaryText,
+					style: "default" as const,
+					onPress: () => {
+						resolve("primary")
+					}
+				}
+
+				const destructiveButton = {
+					text: options.destructiveText,
+					style: "destructive" as const,
+					onPress: () => {
+						resolve("destructive")
+					}
+				}
+
+				const cancelButton = {
+					text: options.cancelText ?? "Cancel",
+					style: "cancel" as const,
+					onPress: () => {
+						resolve("cancel")
+					}
+				}
+
+				Alert.alert(
+					options.title ?? "Title",
+					options.message,
+					Platform.OS === "android"
+						? [cancelButton, destructiveButton, primaryButton]
+						: [primaryButton, destructiveButton, cancelButton],
+					{
+						cancelable: options.cancellable ?? true,
+						onDismiss: () => {
+							if (!(options.cancellable ?? true)) {
+								return
+							}
+
+							resolve("cancel")
 						}
 					}
 				)

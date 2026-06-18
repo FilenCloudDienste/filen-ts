@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import {
@@ -128,9 +128,9 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 			? true
 			: itemToUse.type !== "file" || !itemToUse.data.decryptedMeta || !parent || parent === "sharedInRoot"
 
-	const save = async () => {
+	const save = async (): Promise<boolean> => {
 		if (editedText === null || readOnly || !isOnline) {
-			return
+			return false
 		}
 
 		const result = await runWithLoading(async defer => {
@@ -174,7 +174,7 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 			logger.error("drivePreview", "Text file save failed", { error: result.error })
 			alerts.error(result.error)
 
-			return
+			return false
 		}
 
 		if (result.data) {
@@ -212,8 +212,35 @@ const PreviewTextInner = ({ previewType, text, item }: { previewType: "text" | "
 					}
 				}
 			}
+
+			return true
 		}
+
+		return false
 	}
+
+	// Publish the dirty flag so the route-level unsaved-changes guard can prompt on navigate-away.
+	useEffect(() => {
+		useDrivePreviewStore.getState().setHasUnsavedEdits(editedText !== null && !readOnly)
+	}, [editedText, readOnly])
+
+	// save() is re-created each render; keep the latest in a ref and publish ONE stable wrapper so the
+	// guard can save-then-leave. Clear the handle + flag on unmount so a later preview cannot inherit
+	// this item's dirty state.
+	const saveRef = useRef(save)
+
+	useEffect(() => {
+		saveRef.current = save
+	})
+
+	useEffect(() => {
+		useDrivePreviewStore.getState().setSaveEdits(() => saveRef.current())
+
+		return () => {
+			useDrivePreviewStore.getState().setSaveEdits(null)
+			useDrivePreviewStore.getState().setHasUnsavedEdits(false)
+		}
+	}, [])
 
 	return (
 		<View

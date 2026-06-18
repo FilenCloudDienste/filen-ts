@@ -13,6 +13,10 @@ export const drivePreview = {
 	no_preview: "No preview available",
 	/** Gallery item state — the file can't be shown because the device is offline and it isn't cached locally */
 	unavailable_offline: "This file is not available offline",
+	/** Title of the alert shown when leaving the editable text/code preview with unsaved changes */
+	unsaved_changes: "Unsaved changes",
+	/** Body of the unsaved-changes alert (text/code preview); the buttons are Save / Discard / Cancel */
+	unsaved_changes_message: "You have unsaved changes to this file. Save them before leaving?",
 	// unknown_artist lives in media.ts.
 
 	// ── Gallery header (header.tsx) — external-link menu ───────────────────────
