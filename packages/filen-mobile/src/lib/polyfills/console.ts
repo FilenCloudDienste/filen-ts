@@ -127,3 +127,25 @@ global.console.error = (...args: unknown[]): void => {
 		original.error(...args)
 	}
 }
+
+// Dev DX: also mirror DIRECT logger.* calls (logger.warn/error/info/debug, which otherwise only land
+// on disk) to the native console, so they're visible in Metro/devtools alongside console.* output.
+// Uses the pre-tee `original` methods, so it can't recurse back through the tee above. Production
+// stays silent — in prod globalThis.__DEV__ === false, so the sink is never wired and the logger's
+// hot path stays a single null check. (captureConsole-originated entries are NOT mirrored here — the
+// tee above already forwarded those console.* calls in dev — so nothing double-prints.)
+//
+// This reads globalThis.__DEV__ (like the Logger constructor) rather than the bare __DEV__ used in the
+// method bodies above: this gate runs at module-eval time, and bare __DEV__ is undefined-at-eval in the
+// test runner (would throw), whereas the lazy method-body checks only run after a __DEV__ is in scope.
+if ((globalThis as { __DEV__?: boolean }).__DEV__ === true) {
+	logger.setDevConsole((level, tag, msg, data): void => {
+		const emit = level === "error" ? original.error : level === "warn" ? original.warn : level === "info" ? original.info : original.debug
+
+		if (data !== undefined) {
+			emit(`[${tag}] ${msg}`, data)
+		} else {
+			emit(`[${tag}] ${msg}`)
+		}
+	})
+}

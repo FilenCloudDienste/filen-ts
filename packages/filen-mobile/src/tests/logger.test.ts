@@ -485,4 +485,74 @@ describe("logger", () => {
 			expect(readCurrentLines()).toHaveLength(0)
 		})
 	})
+
+	describe("dev console mirror (setDevConsole)", () => {
+		it("mirrors DIRECT logger.* calls to the sink with (level, tag, msg, data)", () => {
+			const logger = makeLogger()
+			const sink = vi.fn()
+
+			logger.setDevConsole(sink)
+
+			logger.debug("t", "d", { a: 1 })
+			logger.info("t", "i")
+			logger.warn("t", "w", { b: 2 })
+			logger.error("t", "e")
+
+			// All four levels mirror (in dev minLevel is "debug"), regardless of whether they persist.
+			expect(sink.mock.calls).toEqual([
+				["debug", "t", "d", { a: 1 }],
+				["info", "t", "i", undefined],
+				["warn", "t", "w", { b: 2 }],
+				["error", "t", "e", undefined]
+			])
+		})
+
+		it("does NOT mirror captureConsole entries (the tee already forwarded those console.* calls in dev)", () => {
+			const logger = makeLogger()
+			const sink = vi.fn()
+
+			logger.setDevConsole(sink)
+			logger.captureConsole("error", ["console said boom"])
+
+			expect(sink).not.toHaveBeenCalled()
+		})
+
+		it("respects the minLevel gate — a gated call is not mirrored", () => {
+			const logger = makeLogger()
+			const sink = vi.fn()
+
+			logger.configure({ minLevel: "warn" })
+			logger.setDevConsole(sink)
+
+			logger.info("t", "gated out")
+			logger.warn("t", "kept")
+
+			expect(sink.mock.calls).toEqual([["warn", "t", "kept", undefined]])
+		})
+
+		it("does not mirror after purge (disabled)", () => {
+			const logger = makeLogger()
+			const sink = vi.fn()
+
+			logger.setDevConsole(sink)
+			logger.purge()
+			logger.error("t", "after purge")
+
+			expect(sink).not.toHaveBeenCalled()
+		})
+
+		it("a throwing sink never breaks the log call, and the entry is still persisted", () => {
+			const logger = makeLogger()
+
+			logger.setDevConsole(() => {
+				throw new Error("sink blew up")
+			})
+
+			expect(() => logger.error("t", "still logged")).not.toThrow()
+
+			logger.flushNow()
+
+			expect(readCurrentLines().map(l => l.msg)).toEqual(["still logged"])
+		})
+	})
 })

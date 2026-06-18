@@ -116,6 +116,13 @@ export class Logger {
 	// logger for the next session.
 	private disabled: boolean = false
 
+	// Dev-only sink (wired by the console polyfill) that mirrors DIRECT logger.* calls to the native
+	// console so they're visible in Metro/devtools, not only on disk. Stays null in production (the
+	// polyfill sets it under __DEV__ only) and in tests, so the hot path is just a null check. It uses
+	// the console captured BEFORE the tee, so it can't recurse back through it. captureConsole() does
+	// NOT use it — those came from console.* which the tee already mirrors in dev (avoids double-print).
+	private devConsole: ((level: LogLevel, tag: string, msg: string, data?: unknown) => void) | null = null
+
 	public constructor() {
 		// Production (bundled __DEV__ === false): capture warn/error only — debug/info stay in-memory
 		// breadcrumbs. Read at construction so it's correct in the app (where __DEV__ is defined) and
@@ -148,6 +155,12 @@ export class Logger {
 		return this.config.minLevel
 	}
 
+	// Wire the dev-only native-console mirror (see `devConsole`). Called once by the console polyfill,
+	// under __DEV__ only — so in production this is never called and the mirror stays off.
+	public setDevConsole(sink: ((level: LogLevel, tag: string, msg: string, data?: unknown) => void) | null): void {
+		this.devConsole = sink
+	}
+
 	public debug(tag: string, msg: string, data?: unknown): void {
 		this.log("debug", tag, msg, data)
 	}
@@ -175,6 +188,18 @@ export class Logger {
 		// HOT PATH gate — the cheapest possible check; gated calls cost a compare + return.
 		if (rank < this.minRank) {
 			return
+		}
+
+		// Dev DX: mirror DIRECT logger.* calls to the native console so they show up in Metro/devtools,
+		// not only on disk. Null in production/tests (the polyfill only wires it under __DEV__) → just a
+		// null check on the hot path. captureConsole() deliberately skips this (the tee already mirrors
+		// console.* in dev), and the sink uses the pre-tee console so it can't recurse back through it.
+		if (this.devConsole) {
+			try {
+				this.devConsole(level, tag, msg, data)
+			} catch {
+				// A log call must never throw.
+			}
 		}
 
 		try {
