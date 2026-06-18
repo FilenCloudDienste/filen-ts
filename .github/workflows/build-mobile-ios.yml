@@ -23,12 +23,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Verify fallback encryption key secret is present
+      - name: Write fallback encryption key to .env
         run: |
           if [ -z "${EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY}" ]; then
             echo "::error::EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY is empty - set the SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY org/repo secret"
             exit 1
           fi
+          # @expo/env loads packages/filen-mobile/.env (the run working-directory) at Metro bundle time,
+          # so EXPO_PUBLIC_* is inlined reliably even if the env var doesn't propagate into the native
+          # build's bundling subprocess. .env is gitignored; the always() Cleanup step removes it.
+          printf 'EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY=%s\n' "${EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY}" > .env
 
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -135,6 +139,9 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
+          # Remove the .env holding the fallback encryption key
+          rm -f .env
+
           # Remove API key
           rm -rf ~/.appstoreconnect
 
