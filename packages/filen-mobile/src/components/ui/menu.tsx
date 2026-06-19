@@ -13,6 +13,7 @@ import {
 } from "react-native-ios-context-menu"
 import { type Icons, iconToSwiftUiIcon } from "@/components/ui/menuIcons"
 import useIsOnline from "@/hooks/useIsOnline"
+import { InsideContextMenuContext } from "@/components/ui/longPressMenuGuard"
 
 // Border radius (pt) for the lifted iOS context-menu preview of FLAT rows that opt in via
 // `previewBackground`. A "normal" rounded corner — deliberately NOT the large rounded-4xl of
@@ -450,11 +451,18 @@ const MenuInner = ({ children, ...props }: MenuProps) => {
 		return children
 	}
 
+	// A long-press (context) menu shares the press with the row's own tap handler. Flag the subtree so
+	// the shared pressables drop a press held long enough to engage the menu — a long-press can then
+	// never also fire the row's navigate/open onPress. Dropdown menus open on tap (no shared
+	// long-press) and intentionally do not set it.
+	const content =
+		props.type === "dropdown" ? children : <InsideContextMenuContext.Provider value={true}>{children}</InsideContextMenuContext.Provider>
+
 	if (Platform.OS === "ios") {
-		return <MenuInnerIos {...effectiveProps}>{children}</MenuInnerIos>
+		return <MenuInnerIos {...effectiveProps}>{content}</MenuInnerIos>
 	}
 
-	return <MenuInnerAndroid {...effectiveProps}>{children}</MenuInnerAndroid>
+	return <MenuInnerAndroid {...effectiveProps}>{content}</MenuInnerAndroid>
 }
 
 export const Menu = withUniwind(MenuInner) as typeof MenuInner
