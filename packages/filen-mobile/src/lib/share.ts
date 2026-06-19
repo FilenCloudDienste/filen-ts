@@ -1,3 +1,4 @@
+import { Platform, Share } from "react-native"
 import * as Sharing from "expo-sharing"
 import { run } from "@filen/utils"
 import { withSystemPresentation } from "@/lib/systemPresentation"
@@ -39,4 +40,21 @@ export async function shareTmpFile({
 			})
 		)
 	})
+}
+
+/**
+ * Shares a URL / link through the OS share sheet.
+ *
+ * Unlike shareTmpFile (which shares a local FILE via expo-sharing), links must go through React
+ * Native's core Share API: expo-sharing is file-only — its Android module (SharingModule.kt) rejects
+ * any non-`file://` scheme, so Sharing.shareAsync(httpsUrl) throws on Android. Share.share routes the
+ * link via ACTION_SEND text/plain (Android) / UIActivityViewController (iOS). Android ignores the
+ * `url` field, so the link goes in `message`; iOS uses `url` for the richer link share.
+ *
+ * Wrapped in withSystemPresentation like shareTmpFile — the share sheet resigns the app active, so
+ * this keeps the privacy cover hidden and skips a biometric re-lock. Silent: rejects on failure for
+ * the calling screen to surface (logging / alerts).
+ */
+export async function shareUrl(url: string): Promise<void> {
+	await withSystemPresentation(() => Share.share(Platform.OS === "ios" ? { url } : { message: url }))
 }

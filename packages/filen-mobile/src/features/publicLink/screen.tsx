@@ -23,8 +23,7 @@ import { PressableOpacity } from "@/components/ui/pressables"
 import { PasswordState_Tags, PasswordState, PublicLinkExpiration, DirColor } from "@filen/sdk-rs"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
-import * as Sharing from "expo-sharing"
-import { withSystemPresentation } from "@/lib/systemPresentation"
+import { shareUrl } from "@/lib/share"
 import Menu from "@/components/ui/menu"
 import { makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
@@ -269,11 +268,7 @@ function PublicLink() {
 														throw new Error(i18n.t("public_link_generate_failed"))
 													}
 
-													if (!(await Sharing.isAvailableAsync())) {
-														throw new Error(i18n.t("sharing_not_available"))
-													}
-
-													return await withSystemPresentation(() => Sharing.shareAsync(url))
+													return await shareUrl(url)
 												})
 
 												if (!result.success) {

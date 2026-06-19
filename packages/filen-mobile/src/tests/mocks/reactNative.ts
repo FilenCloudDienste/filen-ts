@@ -9,6 +9,8 @@
  * Add more as needed.
  */
 
+import { vi } from "vitest"
+
 export const AppState = {
 	// Foregrounded-app default — host-component suites simulate foreground mounts.
 	// Suites testing background launches override this per-test.
@@ -23,4 +25,8 @@ export const Platform = {
 	select<T>(specifics: { ios?: T; android?: T; default?: T }): T | undefined {
 		return specifics[this.OS] ?? specifics["default"]
 	}
+}
+
+export const Share = {
+	share: vi.fn(async () => ({ action: "sharedAction" as const }))
 }

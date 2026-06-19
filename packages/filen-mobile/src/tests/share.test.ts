@@ -33,7 +33,8 @@ vi.mock("@filen/utils", () => ({
 	}
 }))
 
-import { shareTmpFile } from "@/lib/share"
+import { Platform, Share } from "react-native"
+import { shareTmpFile, shareUrl } from "@/lib/share"
 
 describe("shareTmpFile", () => {
 	beforeEach(() => {
@@ -79,5 +80,47 @@ describe("shareTmpFile", () => {
 
 		expect(result.success).toBe(false)
 		expect(cleanup).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("shareUrl", () => {
+	const URL = "https://drive.filen.io/d/abc#key"
+
+	beforeEach(() => {
+		mockShareAsync.mockReset()
+		vi.mocked(Share.share).mockReset().mockResolvedValue({ action: "sharedAction" })
+		Platform.OS = "ios"
+	})
+
+	it("shares via the iOS `url` field on iOS", async () => {
+		Platform.OS = "ios"
+
+		await shareUrl(URL)
+
+		expect(Share.share).toHaveBeenCalledTimes(1)
+		expect(Share.share).toHaveBeenCalledWith({ url: URL })
+	})
+
+	it("shares via the `message` field on Android (Android ignores the url field)", async () => {
+		Platform.OS = "android"
+
+		await shareUrl(URL)
+
+		expect(Share.share).toHaveBeenCalledTimes(1)
+		expect(Share.share).toHaveBeenCalledWith({ message: URL })
+	})
+
+	it("never routes a url through expo-sharing (file-only on Android)", async () => {
+		Platform.OS = "android"
+
+		await shareUrl(URL)
+
+		expect(mockShareAsync).not.toHaveBeenCalled()
+	})
+
+	it("propagates a rejection so the caller surfaces it", async () => {
+		vi.mocked(Share.share).mockRejectedValue(new Error("share boom"))
+
+		await expect(shareUrl(URL)).rejects.toThrow("share boom")
 	})
 })
