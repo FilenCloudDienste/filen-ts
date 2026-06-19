@@ -5,7 +5,7 @@ const { mockDb, open, mockAppStateListeners } = vi.hoisted(() => {
 
 	const mockDb = {
 		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
-		executeRaw: vi.fn().mockResolvedValue([]),
+		executeRaw: vi.fn().mockResolvedValue({ rawRows: [], columnNames: [], rowsAffected: 0 }),
 		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
 		prepareStatement: vi.fn(() => ({
 			bind: vi.fn(),
@@ -195,7 +195,7 @@ function setupMockDb(): void {
 		return { rows: [], insertId: undefined, rowsAffected: 0 }
 	})
 
-	mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => {
+	const executeRawRows = async (query: string, params?: unknown[]): Promise<unknown[][]> => {
 		if (query.startsWith("SELECT key, value FROM kv WHERE key >= ?")) {
 			const gte = params![0] as string
 			const lt = params![1] as string
@@ -241,7 +241,13 @@ function setupMockDb(): void {
 		}
 
 		return []
-	})
+	}
+
+	mockDb.executeRaw.mockImplementation(async (query: string, params?: unknown[]) => ({
+		rawRows: await executeRawRows(query, params),
+		columnNames: [] as string[],
+		rowsAffected: 0
+	}))
 
 	mockDb.executeBatch.mockImplementation(async (commands: [string, unknown[]][]) => {
 		for (const [query, params] of commands) {

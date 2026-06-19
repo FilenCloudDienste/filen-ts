@@ -634,7 +634,8 @@ export class Cache {
 			this.registry.map(async ({ key, map }) => {
 				const prefix = key + ":"
 				const prefixLength = prefix.length
-				const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
+				// op-sqlite 17: executeRaw returns { rawRows, ... } — the row arrays live on .rawRows.
+				const rows = (await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])).rawRows
 
 				for (const row of rows) {
 					const entryKey = (row[0] as string).slice(prefixLength)

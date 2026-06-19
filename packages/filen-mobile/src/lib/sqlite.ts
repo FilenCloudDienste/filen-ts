@@ -203,7 +203,8 @@ class Sqlite {
 	public kvAsync = {
 		get: async <T>(key: string): Promise<T | null> => {
 			const db = await this.openDb()
-			const result = await db.executeRaw("SELECT value FROM kv WHERE key = ?", [key])
+			// op-sqlite 17: executeRaw returns { rawRows, columnNames, ... } — the row arrays live on .rawRows.
+			const result = (await db.executeRaw("SELECT value FROM kv WHERE key = ?", [key])).rawRows
 			const row = result[0]
 
 			if (!row) {
@@ -233,7 +234,7 @@ class Sqlite {
 		},
 		keys: async (): Promise<string[]> => {
 			const db = await this.openDb()
-			const result = await db.executeRaw("SELECT key FROM kv")
+			const result = (await db.executeRaw("SELECT key FROM kv")).rawRows
 
 			return result.map(row => row[0] as string)
 		},
@@ -249,7 +250,7 @@ class Sqlite {
 		},
 		contains: async (key: string): Promise<boolean> => {
 			const db = await this.openDb()
-			const result = await db.executeRaw("SELECT EXISTS(SELECT 1 FROM kv WHERE key = ?)", [key])
+			const result = (await db.executeRaw("SELECT EXISTS(SELECT 1 FROM kv WHERE key = ?)", [key])).rawRows
 
 			return (result[0]?.[0] as number) === 1
 		},
@@ -265,13 +266,13 @@ class Sqlite {
 		},
 		keysByPrefix: async (prefix: string): Promise<string[]> => {
 			const db = await this.openDb()
-			const result = await db.executeRaw("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])
+			const result = (await db.executeRaw("SELECT key FROM kv WHERE key LIKE ?", [prefix + "%"])).rawRows
 
 			return result.map(row => row[0] as string)
 		},
 		getByPrefix: async <T>(prefix: string): Promise<Map<string, T>> => {
 			const db = await this.openDb()
-			const result = await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])
+			const result = (await db.executeRaw("SELECT key, value FROM kv WHERE key LIKE ?", [prefix + "%"])).rawRows
 			const map = new Map<string, T>()
 
 			for (const row of result) {

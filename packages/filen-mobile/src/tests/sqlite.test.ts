@@ -50,7 +50,7 @@ const { mockDb, open } = vi.hoisted(() => {
 		return { rows: [], insertId: undefined, rowsAffected: 0 }
 	}
 
-	const executeRawImpl = async (query: string, params?: unknown[]) => {
+	const executeRawRowsImpl = async (query: string, params?: unknown[]) => {
 		if (query.startsWith("SELECT value")) {
 			const value = store.get(params![0] as string)
 
@@ -79,6 +79,13 @@ const { mockDb, open } = vi.hoisted(() => {
 
 		return []
 	}
+
+	// op-sqlite 17: executeRaw resolves to { rawRows, columnNames, rowsAffected }.
+	const executeRawImpl = async (query: string, params?: unknown[]) => ({
+		rawRows: await executeRawRowsImpl(query, params),
+		columnNames: [] as string[],
+		rowsAffected: 0
+	})
 
 	const mockDb = {
 		execute: vi.fn(executeImpl),

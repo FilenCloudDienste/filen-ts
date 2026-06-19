@@ -20,8 +20,8 @@ export function createMockPreparedStatement() {
 export const mockDb = {
 	execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
 	executeSync: vi.fn().mockReturnValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
-	executeRaw: vi.fn().mockResolvedValue([]),
-	executeRawSync: vi.fn().mockReturnValue([]),
+	executeRaw: vi.fn().mockResolvedValue({ rawRows: [], columnNames: [], rowsAffected: 0 }),
+	executeRawSync: vi.fn().mockReturnValue({ rawRows: [], columnNames: [], rowsAffected: 0 }),
 	executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
 	prepareStatement: vi.fn(() => createMockPreparedStatement()),
 	close: vi.fn()

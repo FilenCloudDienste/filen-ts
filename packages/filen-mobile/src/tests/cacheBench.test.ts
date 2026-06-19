@@ -92,10 +92,10 @@ vi.mock("@/lib/sqlite", () => {
 					}
 				}
 
-				return rows
+				return { rawRows: rows, columnNames: [], rowsAffected: 0 }
 			}
 
-			return []
+			return { rawRows: [], columnNames: [], rowsAffected: 0 }
 		},
 		executeBatch: async (commands: [string, (string | Uint8Array)[]][]) => {
 			H.counters.batchCalls++

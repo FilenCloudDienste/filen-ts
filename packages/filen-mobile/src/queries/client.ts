@@ -114,7 +114,8 @@ export class QueryPersisterKv {
 		const now = performance.now()
 		const prefix = `${QUERY_CLIENT_PERSISTER_PREFIX}:`
 		const db = await sqlite.openDb()
-		const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
+		// op-sqlite 17: executeRaw returns { rawRows, ... } — the row arrays live on .rawRows.
+		const rows = (await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])).rawRows
 
 		for (const row of rows) {
 			// Isolate each row's deserialize so a single corrupt/unparseable value

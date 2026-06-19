@@ -28,7 +28,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 const { mockDb, open } = vi.hoisted(() => {
 	const mockDb = {
 		execute: vi.fn(async (_query: unknown, _params?: unknown) => ({ rows: [] as never[], insertId: undefined, rowsAffected: 0 })),
-		executeRaw: vi.fn(async (_query: unknown, _params?: unknown) => [] as unknown[]),
+		executeRaw: vi.fn(async (_query: unknown, _params?: unknown) => ({ rawRows: [] as unknown[][], columnNames: [] as string[], rowsAffected: 0 })),
 		executeBatch: vi.fn(async (_commands: unknown) => ({ rowsAffected: 0 })),
 		prepareStatement: vi.fn(() => ({
 			bind: vi.fn(),
@@ -112,10 +112,10 @@ function installKv(): void {
 				}
 			}
 
-			return rows
+			return { rawRows: rows, columnNames: [], rowsAffected: 0 }
 		}
 
-		return []
+		return { rawRows: [], columnNames: [], rowsAffected: 0 }
 	})
 
 	mockDb.executeBatch.mockImplementation(async (commands: unknown) => {
