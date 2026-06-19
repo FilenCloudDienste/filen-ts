@@ -268,13 +268,17 @@ async function promptBiometric(): Promise<LocalAuthentication.LocalAuthenticatio
 }
 
 async function promptPin(biometric: EnabledBiometric): Promise<PinResult> {
-	const pinPromptResult = await prompts.input({
-		title: i18n.t("pin_code"),
-		message: i18n.t("enter_pin"),
-		cancelText: i18n.t("cancel"),
-		okText: i18n.t("authenticate"),
-		inputType: "secure-text"
-	})
+	// Wrap like the Face ID prompt: prompts.input is a native dialog that resigns the app active, so without
+	// this the privacy cover (which redacts on "inactive") would flash on over the PIN entry.
+	const pinPromptResult = await withSystemPresentation(() =>
+		prompts.input({
+			title: i18n.t("pin_code"),
+			message: i18n.t("enter_pin"),
+			cancelText: i18n.t("cancel"),
+			okText: i18n.t("authenticate"),
+			inputType: "secure-text"
+		})
+	)
 
 	if (pinPromptResult.cancelled || pinPromptResult.type !== "string") {
 		return {
@@ -519,7 +523,16 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 		}
 	}
 
+	// Only auto-prompt while the app is actually foreground. The lock overlay ALSO mounts on
+	// lock-on-background (as the app is LEAVING) — prompting there flashes the system auth sheet for a frame
+	// before the OS tears it down. The foreground return re-keys this component (rekeyPrompt fires only on
+	// the AppState "active" transition), remounting it while active, which is exactly when the prompt should
+	// fire. (The manual "Use PIN" button remains available regardless.)
 	useEffectOnce(() => {
+		if (AppState.currentState !== "active") {
+			return
+		}
+
 		;(async () => {
 			await tryAuth(true).catch(e => logger.error("biometric", "Initial biometric prompt threw unexpectedly", { error: e }))
 		})()
