@@ -1,0 +1,19 @@
+diff --git a/node_modules/@expo/dom-webview/src/DomWebView.tsx b/node_modules/@expo/dom-webview/src/DomWebView.tsx
+index 3a07ac9..f1ecde1 100644
+--- a/node_modules/@expo/dom-webview/src/DomWebView.tsx
++++ b/node_modules/@expo/dom-webview/src/DomWebView.tsx
+@@ -23,7 +23,13 @@ const WebView = React.forwardRef<DomWebViewRef, DomWebViewProps>(
+       ref,
+       () => ({
+         scrollTo: (params) => viewRef.current?.scrollTo(params),
+-        injectJavaScript: (script: string) => viewRef.current?.injectJavaScript(script),
++        // Patched (filen): the native injectJavaScript is an expo-modules AsyncFunction whose Promise
++        // rejects when the DomWebView is mid-mount/destroyed (Android view-tag race on cold note-open).
++        // The call is fire-and-forget; an uncaught rejection otherwise hits our prod diagnostic logger
++        // on every racey open. Swallow it — nothing to inject into a gone view, and in-page JS errors
++        // are not reported through this Promise (evaluateJavascript discards results).
++        injectJavaScript: (script: string) =>
++          void (viewRef.current?.injectJavaScript(script) as unknown as Promise<void> | undefined)?.catch(() => {}),
+         reload: () => viewRef.current?.reload(),
+       }),
+       []
