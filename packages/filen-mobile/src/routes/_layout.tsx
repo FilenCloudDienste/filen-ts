@@ -306,6 +306,10 @@ const RootLayout = () => {
 												options={modalOptions}
 											/>
 											<Stack.Screen
+												name="developer"
+												options={modalOptions}
+											/>
+											<Stack.Screen
 												name="drivePreview"
 												options={{
 													presentation: "transparentModal",

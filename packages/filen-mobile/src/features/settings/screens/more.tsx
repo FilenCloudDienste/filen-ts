@@ -24,6 +24,23 @@ import alerts from "@/lib/alerts"
 const TERMS_URL = "https://filen.io/terms"
 const PRIVACY_URL = "https://filen.io/privacy"
 
+// Dev-only entry into the Developer debug menu (More → Developer). The globalThis read (not bare
+// __DEV__) keeps the module safe to evaluate under vitest; in a production build globalThis.__DEV__ is
+// false, so the row is never built. See features/settings/screens/developer.
+const SHOW_DEVELOPER_MENU = (globalThis as { __DEV__?: boolean }).__DEV__ === true
+
+const DEVELOPER_BUTTONS: Button[] = SHOW_DEVELOPER_MENU
+	? [
+			{
+				icon: "bug-outline",
+				title: "Developer",
+				onPress: () => {
+					router.push("/developer")
+				}
+			}
+		]
+	: []
+
 function More() {
 	const stringifiedClient = useStringifiedClient()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
@@ -282,7 +299,8 @@ function More() {
 									onPress: () => {
 										router.push("/advanced")
 									}
-								}
+								},
+								...DEVELOPER_BUTTONS
 							]}
 						/>
 						<Group
