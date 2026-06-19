@@ -299,6 +299,31 @@ describe("useDriveSearch — gating + lifecycle", () => {
 		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
 	})
 
+	// The engine stays warm across a clear (good), but the previous query's rows must NOT linger:
+	// retyping a DIFFERENT term should start fresh, not flash the old results until the next snapshot.
+	it("does not flash the previous query's results when retyping a different term after a clear", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1"), fileResult("f2")], total: 2n, live: true }))
+
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["f1", "f2"])
+
+		act(() => {
+			result.current.setSearchQuery("")
+		})
+		act(() => {
+			result.current.setSearchQuery("budget")
+		})
+
+		// Before the warm engine delivers a snapshot for "budget", the list is empty (fresh),
+		// never the stale "report" rows.
+		expect(result.current.searchResults).toEqual([])
+	})
+
 	it("debounces query keystrokes into a single setName with the latest term (no reopen)", async () => {
 		const { result } = render()
 

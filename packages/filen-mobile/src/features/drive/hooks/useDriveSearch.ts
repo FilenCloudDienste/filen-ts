@@ -148,6 +148,26 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		setOpenError(false)
 	}
 
+	// Clearing the query keeps the engine WARM (sessionKey is unchanged), so the previous query's
+	// rows would otherwise linger and flash when a DIFFERENT term is retyped before the engine's
+	// refilter snapshot lands. Reset the per-query display on the active→blank edge so a retype
+	// starts fresh (warming → filled by the next snapshot); the engine itself stays open (Effect A
+	// does not re-run). Render-phase, mirroring the session reset above.
+	const [prevSearchActive, setPrevSearchActive] = useState<boolean>(searchActive)
+
+	if (searchActive !== prevSearchActive) {
+		setPrevSearchActive(searchActive)
+
+		if (!searchActive) {
+			setSearchResults([])
+			setSearchResultPaths(new Map<string, string>())
+			setTotalCount(0)
+			setLive(true)
+			setHasSnapshot(false)
+			setGraceElapsed(false)
+		}
+	}
+
 	// Reset the stall ceiling whenever the worker-global resync flag toggles, so each
 	// resync gets a fresh stall window (render-phase, keyed on `resyncing`).
 	const [prevResyncing, setPrevResyncing] = useState<boolean>(resyncing)
