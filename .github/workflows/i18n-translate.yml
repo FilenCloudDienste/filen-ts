@@ -22,6 +22,13 @@ permissions:
   contents: write
   pull-requests: write
 
+# One rolling translation run per ref: a newer push to the English source cancels an in-flight run
+# so the single auto-translate PR always reflects the latest source (and two runs never race on the
+# fixed branch).
+concurrency:
+  group: i18n-translate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   translate:
     runs-on: ubuntu-latest
@@ -59,7 +66,11 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8
         with:
-          branch: i18n/auto-translate-${{ github.run_id }}
+          # FIXED branch (not per-run): peter-evans UPDATES this one rolling PR each run. Including
+          # ${{ github.run_id }} here made every run open a NEW branch + PR, which — since these
+          # machine translations rarely get merged — piled up dozens of stale auto-translate
+          # branches. delete-branch still removes it when the PR is merged/closed.
+          branch: i18n/auto-translate
           delete-branch: true
           commit-message: 'i18n: update translations'
           title: 'i18n: update translations'
