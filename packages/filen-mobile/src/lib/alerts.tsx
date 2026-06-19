@@ -8,12 +8,18 @@ import i18n from "@/lib/i18n"
 const NotifierErrorContainer = ({ children }: { children: React.ReactNode }) => {
 	const insets = useSafeAreaInsets()
 
+	// Must NOT be `position: absolute`. react-native-notifier hides the banner by translating it
+	// off-screen by the height it measures via onLayout on its content wrapper; an absolutely-positioned
+	// container collapses that measurement to ~0, so the hide falls back to DEFAULT_COMPONENT_HEIGHT
+	// (200px) and any taller banner leaves a red strip stuck at the top. The lib's own container is
+	// already `position: absolute; top: 0; width: 100%`, so this flows full-width at the top regardless.
+	// paddingTop spans the status-bar inset (the notifier renders in a FullWindowOverlay above it).
 	return (
 		<View
 			style={{
 				paddingTop: insets.top
 			}}
-			className="bg-red-500 z-1000 absolute top-0 left-0 right-0"
+			className="bg-red-500"
 		>
 			{children}
 		</View>
