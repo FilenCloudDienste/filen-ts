@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { AppState } from "react-native"
 import { debounce } from "es-toolkit/function"
 import { useIsFocused } from "expo-router"
-import { CacheSearchResult_Tags, type CacheSearchHit, type CacheSearchSnapshot } from "@filen/sdk-rs"
+import { CacheSearchResult_Tags, DirMeta_Tags, FileMeta_Tags, type CacheSearchHit, type CacheSearchSnapshot } from "@filen/sdk-rs"
 import { type DriveItem } from "@/types"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import driveSearch from "@/features/drive/driveSearch"
@@ -14,8 +14,9 @@ import useIsOnline from "@/hooks/useIsOnline"
 import useIsAppActive from "@/hooks/useIsAppActive"
 import { useAppStore } from "@/stores/useApp.store"
 import logger from "@/lib/logger"
+import { type DriveSearchStatus, deriveStatus, isOnlineComplete } from "@/features/drive/hooks/driveSearchStatus"
 
-export type DriveSearchStatus = "idle" | "warming" | "background" | "settled" | "terminal" | "offline-incomplete"
+export type { DriveSearchStatus }
 
 export type UseDriveSearch = {
 	searchQuery: string
@@ -47,6 +48,22 @@ function mapResult(hit: CacheSearchHit): DriveItem {
 	return hit.result.tag === CacheSearchResult_Tags.Dir
 		? unwrappedDirIntoDriveItem(unwrapDirMeta(hit.result.inner.dir))
 		: unwrappedFileIntoDriveItem(unwrapFileMeta(hit.result.inner.file))
+}
+
+// Cheap content signature of a hit, keying the per-uuid map cache so an item is RE-mapped when its
+// metadata changed remotely. A rename keeps the uuid (FileMetadataChanged / FolderMetadataChanged),
+// so a uuid-only cache would keep rendering the stale name. Name-based — the displayed field a
+// remote edit changes; the `d:`/`f:` prefix keeps a real signature distinct from a missing-meta "".
+function resultSignature(hit: CacheSearchHit): string {
+	if (hit.result.tag === CacheSearchResult_Tags.Dir) {
+		const meta = hit.result.inner.dir.meta
+
+		return `d:${meta?.tag === DirMeta_Tags.Decoded ? meta.inner[0].name : ""}`
+	}
+
+	const meta = hit.result.inner.file.meta
+
+	return `f:${meta?.tag === FileMeta_Tags.Decoded ? meta.inner[0].name : ""}`
 }
 
 /**
@@ -91,11 +108,26 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	const searchActive = searchQuery.trim().length > 0
 	const isCacheSearch = isPlainDrive && searchActive
 
-	// Identity of the current search session — changes whenever the open effect must
-	// (re)open: the cache-search gate flips, the target directory changes, or a
-	// connectivity-restore reopen bumps the nonce. The query TEXT is deliberately excluded
-	// (keystrokes refilter in place via setName, never reopen).
-	const sessionKey = `${isCacheSearch ? "on" : "off"}:${drivePath.type ?? ""}:${drivePath.uuid ?? ""}:${reopenNonce}`
+	// Identity of the current search session — changes whenever the open effect must (re)open: the
+	// plain-drive gate flips, the target directory changes, or a connectivity-restore reopen bumps
+	// the nonce. The query TEXT and its empty/non-empty state are deliberately excluded — keystrokes
+	// refilter in place via setName, and clearing to blank must NOT change the session (the engine
+	// stays warm; see `searchEngaged` below).
+	const sessionKey = `${isPlainDrive ? "plain" : "off"}:${drivePath.type ?? ""}:${drivePath.uuid ?? ""}:${reopenNonce}`
+
+	// Once a query has been entered this session, keep the SDK search engine OPEN even after the
+	// query is cleared to blank — so clearing + retyping is an in-engine refilter (setName), never a
+	// teardown + convergence-resync restart. The latch is keyed to the session, so it resets when
+	// the folder / nonce / plain-drive gate changes, but NOT when the query text toggles. The DISPLAY
+	// and status stay gated on `isCacheSearch` (blank → the directory listing); only the engine
+	// lifecycle (Effect A) uses `searchEngaged`.
+	const [engagedSessionKey, setEngagedSessionKey] = useState<string | null>(searchActive ? sessionKey : null)
+
+	if (searchActive && engagedSessionKey !== sessionKey) {
+		setEngagedSessionKey(sessionKey)
+	}
+
+	const searchEngaged = isPlainDrive && engagedSessionKey === sessionKey
 
 	// Render-phase reset (React's documented "adjust state while rendering" pattern — NOT
 	// an effect, so it triggers no cascading-render lint): the instant the session identity
@@ -156,12 +188,13 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// time — synced in an effect below, since a render-phase ref write is illegal), the
 	// per-search generation, the removal tombstones (cleared only on an own restore/update
 	// event — never on snapshot membership, or a trash would resurrect before the worker
-	// drops it), the uuid -> DriveItem memo (map only NEW results — onSnapshot re-fires the
-	// full window), and the last-seen online flag (for the connectivity-restore reopen).
+	// drops it), the uuid -> {sig, DriveItem} memo (re-map only NEW or content-CHANGED results —
+	// onSnapshot re-fires the full window; the signature catches a remote rename that keeps the
+	// uuid), and the last-seen online flag (for the connectivity-restore reopen).
 	const searchQueryRef = useRef<string>(searchQuery)
 	const generationRef = useRef<number>(0)
 	const tombstonesRef = useRef<Set<string>>(new Set<string>())
-	const mapCacheRef = useRef<Map<string, DriveItem>>(new Map<string, DriveItem>())
+	const mapCacheRef = useRef<Map<string, { sig: string; item: DriveItem }>>(new Map<string, { sig: string; item: DriveItem }>())
 	const wasOnlineRef = useRef<boolean>(isOnline)
 
 	// Keep the latest query in a ref WITHOUT making it an open-effect dependency (a keystroke
@@ -191,14 +224,23 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// reset is the render-phase block above. isAppActive is an OPEN-gate; background close is
 	// the singleton's job, so the cleanup skips close while the app is backgrounding.
 	useEffect(() => {
-		if (!isCacheSearch || !isFocused || !isAppActive || biometricUnlocked !== true) {
+		if (!searchEngaged || !isFocused || !isAppActive || biometricUnlocked !== true) {
+			return
+		}
+
+		// `searchEngaged` latches across a query-clear so the engine stays warm for an instant
+		// retype — but a (re)open edge (foreground / focus / unlock) reached with a BLANK query (the
+		// user cleared and left) must NOT spin up a match-everything search: that re-acquires the
+		// worker socket and runs a pointless subtree resync. Read via the ref (NOT a dep, so a
+		// clear/retype never re-runs this effect); a retype-after-clear recovers via setName → reopen.
+		if (searchQueryRef.current.trim().length === 0) {
 			return
 		}
 
 		const generation = ++generationRef.current
 
 		tombstonesRef.current = new Set<string>()
-		mapCacheRef.current = new Map<string, DriveItem>()
+		mapCacheRef.current = new Map<string, { sig: string; item: DriveItem }>()
 
 		const controller = new AbortController()
 
@@ -224,12 +266,19 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 							continue
 						}
 
-						let item = memo.get(uuid)
+						const sig = resultSignature(result)
+						const cached = memo.get(uuid)
+						let item: DriveItem
 
-						if (!item) {
+						// Reuse the cached object ONLY while the content signature matches (stable ref
+						// for FlashList); a remote rename keeps the uuid but changes the signature, so
+						// re-map it instead of rendering the stale name.
+						if (cached && cached.sig === sig) {
+							item = cached.item
+						} else {
 							item = mapResult(result)
 
-							memo.set(uuid, item)
+							memo.set(uuid, { sig, item })
 						}
 
 						next.push(item)
@@ -254,13 +303,15 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 			controller.abort()
 
 			// Background close is the singleton's (it releases the worker's socket listener so
-			// the WS can close); closing here too would race it. Only close on a real
-			// screen-leave / tab-blur / query-clear / unmount (app still active).
+			// the WS can close); closing here too would race it. Only close on a real session
+			// teardown — screen-leave / tab-blur / directory change / unmount (app still active).
+			// A query-clear does NOT reach here: `searchEngaged` stays true across a blank query, so
+			// Effect A doesn't re-run and the engine stays warm.
 			if (AppState.currentState === "active") {
 				void driveSearch.closeActive()
 			}
 		}
-	}, [isCacheSearch, isFocused, isAppActive, biometricUnlocked, drivePath.uuid, reopenNonce])
+	}, [searchEngaged, isFocused, isAppActive, biometricUnlocked, drivePath.uuid, reopenNonce])
 
 	// Grace timer — re-armed (cleared + restarted) on every resync sign-of-life via its
 	// `resyncProgress`/`resyncing` deps (the render-phase block above resets the latch on the same
@@ -383,7 +434,9 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 			tombstonesRef.current.delete(previousUuid)
 			tombstonesRef.current.delete(item.data.uuid)
 			mapCacheRef.current.delete(previousUuid)
-			mapCacheRef.current.set(item.data.uuid, item)
+			// Drop the cache entry (don't store the optimistic item) so the next snapshot re-maps
+			// from the authoritative hit — the memo holds {sig, item}, not a bare DriveItem.
+			mapCacheRef.current.delete(item.data.uuid)
 
 			setSearchResults(prev => {
 				const wasPresent = prev.some(existing => existing.data.uuid === previousUuid || existing.data.uuid === item.data.uuid)
@@ -427,62 +480,6 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		status,
 		totalCount
 	}
-}
-
-function isOnlineComplete(hasSnapshot: boolean, totalCount: number): boolean {
-	return hasSnapshot && totalCount > 0
-}
-
-function deriveStatus(input: {
-	isCacheSearch: boolean
-	live: boolean
-	openError: boolean
-	cacheUnavailable: boolean
-	rootDeleted: boolean
-	watchdogFired: boolean
-	hasSnapshot: boolean
-	isOnline: boolean
-	totalCount: number
-	resyncing: boolean
-	graceElapsed: boolean
-	stallCeilingHit: boolean
-}): DriveSearchStatus {
-	if (!input.isCacheSearch) {
-		return "idle"
-	}
-
-	if (
-		!input.live ||
-		// `!hasSnapshot`-guarded like watchdogFired: openError is sticky session state NOT in
-		// sessionKey, so a foreground/focus/unlock re-open re-runs Effect A without clearing
-		// it. Without this guard a single failed open would wedge the session in "terminal"
-		// forever even after a successful re-open delivers results. Self-heals on first snapshot.
-		(input.openError && !input.hasSnapshot) ||
-		input.cacheUnavailable ||
-		input.rootDeleted ||
-		// `&& !resyncing`: a watchdog fire during an active resync (Started arrived, worker
-		// alive) is not a wedge — stay warming. The watchdog effect also resets on every
-		// progress heartbeat, so this mainly covers a brief tick gap after Started.
-		(input.watchdogFired && !input.hasSnapshot && !input.resyncing)
-	) {
-		return "terminal"
-	}
-
-	if (!input.isOnline && input.totalCount === 0) {
-		return "offline-incomplete"
-	}
-
-	// Warming: no snapshot yet, OR an empty result that may still fill in — kept warming
-	// while a resync is in flight OR within the grace window, unless the stall ceiling tripped.
-	if (!input.hasSnapshot || (input.totalCount === 0 && (input.resyncing || !input.graceElapsed) && !input.stallCeilingHit)) {
-		return "warming"
-	}
-
-	if (input.totalCount > 0 && input.resyncing && !input.stallCeilingHit) {
-		return "background"
-	}
-
-	return "settled"
 }
 
 export default useDriveSearch

@@ -14,7 +14,7 @@ import Header from "@/features/drive/components/header"
 import DriveSearchFooter from "@/features/drive/components/searchFooter"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import { Platform } from "react-native"
+import { Platform, ActivityIndicator } from "react-native"
 import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
@@ -222,8 +222,10 @@ const Drive = () => {
 						emptyComponent={() => {
 							// Plain-drive cache search: its own terminal / no-results states. The
 							// directory listing query is NOT the source here, so its error/empty
-							// states don't apply (warming never reaches this — `loading` suppresses
-							// emptyComponent — so an empty result here is genuinely settled/terminal).
+							// states don't apply (`warming` never reaches this — `loading` suppresses
+							// emptyComponent). `searching-empty` (empty so far, resync still converging)
+							// surfaces a "still searching" hint; a bare empty result is genuinely
+							// settled/terminal.
 							if (isCacheSearch) {
 								if (status === "terminal") {
 									return (
@@ -231,6 +233,25 @@ const Drive = () => {
 											icon="alert-circle-outline"
 											title={t("search_unavailable")}
 											description={t("search_unavailable_description")}
+										/>
+									)
+								}
+
+								// Empty so far while the convergence resync is still streaming the
+								// subtree in: an explicit "no results yet, still searching" with a
+								// spinner instead of a premature "no results" or a bare full-screen loader.
+								if (status === "searching-empty") {
+									return (
+										<ListEmpty
+											icon="search-outline"
+											title={t("no_results_yet")}
+											description={t("still_searching_description")}
+											action={
+												<ActivityIndicator
+													size="small"
+													color={primaryColor}
+												/>
+											}
 										/>
 									)
 								}

@@ -30,19 +30,27 @@ vi.mock("@/features/drive/driveSearch", () => ({
 	}
 }))
 
-// CacheSearchResult_Tags is the only runtime value the hook pulls from the SDK.
+// Runtime enum tags the hook pulls from the SDK: result discrimination + meta-tag (read by the
+// content-signature that re-maps a remotely-renamed result whose uuid is preserved).
 vi.mock("@filen/sdk-rs", () => ({
-	CacheSearchResult_Tags: { File: "File", Dir: "Dir" }
+	CacheSearchResult_Tags: { File: "File", Dir: "Dir" },
+	DirMeta_Tags: { Decoded: "Decoded" },
+	FileMeta_Tags: { Decoded: "Decoded" }
 }))
 
-// Passthrough unwrap → a minimal DriveItem carrying just `type` + `data.uuid`
-// (all the hook's map/tombstone/selection logic touches).
-vi.mock("@/lib/sdkUnwrap", () => ({
-	unwrapDirMeta: (dir: { uuid: string }) => dir,
-	unwrappedDirIntoDriveItem: (dir: { uuid: string }) => ({ type: "directory", data: { uuid: dir.uuid } }),
-	unwrapFileMeta: (file: { uuid: string }) => file,
-	unwrappedFileIntoDriveItem: (file: { uuid: string }) => ({ type: "file", data: { uuid: file.uuid } })
-}))
+// Passthrough unwrap → a minimal DriveItem carrying `type` + `data.uuid` (+ `data.name` when the
+// raw hit carries decoded meta, so the content-signature / re-map path is observable in tests).
+vi.mock("@/lib/sdkUnwrap", () => {
+	type RawWithMeta = { uuid: string; meta?: { tag: string; inner: [{ name: string }] } }
+	const nameOf = (x: RawWithMeta) => (x.meta?.tag === "Decoded" ? x.meta.inner[0].name : undefined)
+
+	return {
+		unwrapDirMeta: (dir: RawWithMeta) => dir,
+		unwrappedDirIntoDriveItem: (dir: RawWithMeta) => ({ type: "directory", data: { uuid: dir.uuid, name: nameOf(dir) } }),
+		unwrapFileMeta: (file: RawWithMeta) => file,
+		unwrappedFileIntoDriveItem: (file: RawWithMeta) => ({ type: "file", data: { uuid: file.uuid, name: nameOf(file) } })
+	}
+})
 
 vi.mock("@/hooks/useIsOnline", () => ({ default: () => gates.online }))
 vi.mock("@/hooks/useIsAppActive", () => ({ default: () => gates.appActive }))
@@ -73,12 +81,16 @@ function drivePath(over?: Partial<DrivePath>): DrivePath {
 	} as DrivePath
 }
 
-function dirResult(uuid: string, parentPath = "") {
-	return { parentPath, result: { tag: "Dir", inner: { dir: { uuid } } } }
+function dirResult(uuid: string, parentPath = "", name?: string) {
+	const dir = name !== undefined ? { uuid, meta: { tag: "Decoded", inner: [{ name }] } } : { uuid }
+
+	return { parentPath, result: { tag: "Dir", inner: { dir } } }
 }
 
-function fileResult(uuid: string, parentPath = "") {
-	return { parentPath, result: { tag: "File", inner: { file: { uuid } } } }
+function fileResult(uuid: string, parentPath = "", name?: string) {
+	const file = name !== undefined ? { uuid, meta: { tag: "Decoded", inner: [{ name }] } } : { uuid }
+
+	return { parentPath, result: { tag: "File", inner: { file } } }
 }
 
 function snapshot({ results = [], total = 0n, live = true }: { results?: unknown[]; total?: bigint; live?: boolean } = {}) {
@@ -197,7 +209,7 @@ describe("useDriveSearch — gating + lifecycle", () => {
 		expect(result.current.status).toBe("idle")
 	})
 
-	it("closes the active search when the query is cleared", () => {
+	it("keeps the search engine open when the query is cleared (warm for instant re-search)", () => {
 		const { result } = render()
 
 		act(() => {
@@ -210,8 +222,81 @@ describe("useDriveSearch — gating + lifecycle", () => {
 			result.current.setSearchQuery("")
 		})
 
-		expect(driveSearchMock.closeActive).toHaveBeenCalled()
+		// Clearing returns the UI to idle (the directory listing) but does NOT tear down the SDK
+		// search — the engine stays warm so retyping is an in-engine refilter, not a resync restart.
+		expect(driveSearchMock.closeActive).not.toHaveBeenCalled()
 		expect(result.current.status).toBe("idle")
+	})
+
+	it("refilters via setName (no reopen) when retyping after a clear (warm engine)", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+
+		act(() => {
+			result.current.setSearchQuery("")
+		})
+		act(() => {
+			result.current.setSearchQuery("budget")
+		})
+
+		await advance(SETCONFIG_DEBOUNCE_MS)
+
+		// The engine stayed open across the clear → one open total; the retype flows through
+		// setName, never a second open (which would re-register the sync root + run a resync).
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+		expect(driveSearchMock.setName).toHaveBeenLastCalledWith("budget")
+	})
+
+	it("closes the search when the target directory changes (real session change)", () => {
+		const { result, rerender } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+
+		act(() => {
+			rerender({ path: drivePath({ uuid: "other-dir" }) })
+		})
+
+		// A different directory is a new search session → the prior engine is torn down.
+		expect(driveSearchMock.closeActive).toHaveBeenCalled()
+	})
+
+	// AppState socket hygiene: the singleton closes the engine on background (releasing the worker
+	// socket). On foreground with a BLANK query there is nothing to search, so the keep-alive latch
+	// must NOT reopen a match-everything search (which would re-acquire the socket + run a pointless
+	// subtree resync). It reopens only once the user types again.
+	it("does not reopen on foreground while the query is blank (no pointless match-everything search)", () => {
+		const { result, rerender } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
+
+		act(() => {
+			result.current.setSearchQuery("")
+		})
+
+		// Background → foreground cycle while the query is blank.
+		gates.appActive = false
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+		gates.appActive = true
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+
+		expect(driveSearchMock.open).toHaveBeenCalledTimes(1)
 	})
 
 	it("debounces query keystrokes into a single setName with the latest term (no reopen)", async () => {
@@ -339,6 +424,26 @@ describe("useDriveSearch — result mapping", () => {
 		// f1 is the SAME object (mapCacheRef memo) — only f2 is freshly mapped.
 		expect(result.current.searchResults.find(i => i.data.uuid === "f1")).toBe(first)
 	})
+
+	// A remote rename preserves the uuid (FileMetadataChanged / FolderMetadataChanged carry the
+	// existing uuid). A uuid-only memo would keep showing the stale name; the content signature must
+	// re-map the item so the open search reflects the new name.
+	it("re-maps a result whose name changed across snapshots (remote rename, stable uuid)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		deliver(snapshot({ results: [fileResult("f1", "", "old.txt")], total: 1n, live: true }))
+
+		expect(result.current.searchResults.map(i => (i.data as { name?: string }).name)).toEqual(["old.txt"])
+
+		// Same uuid, new name — the worker re-queried and re-delivered the renamed item.
+		deliver(snapshot({ results: [fileResult("f1", "", "new.txt")], total: 1n, live: true }))
+
+		expect(result.current.searchResults.map(i => (i.data as { name?: string }).name)).toEqual(["new.txt"])
+	})
 })
 
 describe("useDriveSearch — state machine (warming / settled / background)", () => {
@@ -371,7 +476,7 @@ describe("useDriveSearch — state machine (warming / settled / background)", ()
 		expect(result.current.searchResults).toEqual([])
 	})
 
-	it("keeps warming on an empty snapshot while a resync covers the root (past grace)", async () => {
+	it("is searching-empty on an empty snapshot while a resync covers the root (past grace)", async () => {
 		const { result } = render()
 
 		act(() => {
@@ -386,7 +491,8 @@ describe("useDriveSearch — state machine (warming / settled / background)", ()
 
 		await advance(GRACE_MS)
 
-		expect(result.current.status).toBe("warming")
+		// Empty past grace while still resyncing → "no results yet, still searching" (not a bare spinner).
+		expect(result.current.status).toBe("searching-empty")
 	})
 
 	it("stays warming when a resync finishes empty just before the results snapshot lands", async () => {
@@ -405,7 +511,8 @@ describe("useDriveSearch — state machine (warming / settled / background)", ()
 
 		await advance(GRACE_MS)
 
-		expect(result.current.status).toBe("warming")
+		// Empty past grace while still resyncing → "no results yet, still searching".
+		expect(result.current.status).toBe("searching-empty")
 
 		// Resync FINISHES (resyncing -> false) a beat before the converged results snapshot is
 		// delivered on the (decoupled) window channel — must NOT flash settled/"no results".

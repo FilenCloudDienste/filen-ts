@@ -229,9 +229,10 @@ const Header = ({
 
 		// Non-blocking in-flight indicator for the cache-backed search. `warming` is the
 		// initial index warm-up (the list body shows its own spinner until the first
-		// snapshot); `background` is "results shown, still converging" — this top-right
-		// spinner is the always-visible signal for that (the footer can scroll off).
-		if (searchStatus === "warming" || searchStatus === "background") {
+		// snapshot); `background` is "results shown, still converging"; `searching-empty` is
+		// "no matches yet, still converging" — this top-right spinner is the always-visible
+		// signal for all three (the footer can scroll off / the empty state is centered).
+		if (searchStatus === "warming" || searchStatus === "background" || searchStatus === "searching-empty") {
 			items.push({
 				type: "loader"
 			})
