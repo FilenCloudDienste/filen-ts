@@ -214,7 +214,7 @@ vi.mock("@tanstack/react-query", () => ({
 	}
 }))
 
-import thumbnails from "@/lib/thumbnails"
+import thumbnails, { DEFAULT_WIDTH } from "@/lib/thumbnails"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
 const THUMBNAILS_DIR = "file:///shared/group.io.filen.app/thumbnails/v2"
@@ -305,7 +305,7 @@ describe("Thumbnails", () => {
 
 			expect(mockManipulate).toHaveBeenCalledTimes(1)
 			expect(mockResize).toHaveBeenCalledWith({
-				width: 128
+				width: DEFAULT_WIDTH
 			})
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
 			expect(mockSaveAsync).toHaveBeenCalledWith({
@@ -456,7 +456,7 @@ describe("Thumbnails", () => {
 			await thumbnails.generate({ item })
 
 			expect(mockRotate).not.toHaveBeenCalled()
-			expect(mockResize).toHaveBeenCalledWith({ width: 128 })
+			expect(mockResize).toHaveBeenCalledWith({ width: DEFAULT_WIDTH })
 		})
 	})
 
@@ -471,7 +471,7 @@ describe("Thumbnails", () => {
 				quality: 1
 			})
 			expect(mockManipulate).toHaveBeenCalledTimes(1)
-			expect(mockResize).toHaveBeenCalledWith({ width: 128 })
+			expect(mockResize).toHaveBeenCalledWith({ width: DEFAULT_WIDTH })
 			expect(mockRenderAsync).toHaveBeenCalledTimes(1)
 
 			expect(result).toBe(`${THUMBNAILS_DIR}/video-uuid.webp`)
