@@ -18,7 +18,7 @@ export const VERSION = 1
 export const GLOBAL_PREFIX = `cache:v${VERSION}`
 
 const PERSIST_DEBOUNCE = 1000
-const PERSIST_CHUNK_SIZE = 100
+const PERSIST_CHUNK_SIZE = 256
 
 type Mutation =
 	| {
@@ -634,10 +634,7 @@ export class Cache {
 			this.registry.map(async ({ key, map }) => {
 				const prefix = key + ":"
 				const prefixLength = prefix.length
-				const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [
-					prefix,
-					prefixUpperBound(prefix)
-				])
+				const rows = await db.executeRaw("SELECT key, value FROM kv WHERE key >= ? AND key < ?", [prefix, prefixUpperBound(prefix)])
 
 				for (const row of rows) {
 					const entryKey = (row[0] as string).slice(prefixLength)
