@@ -53,10 +53,10 @@
 		"@expo/react-native-action-sheet": "^4.1.1",
 		"@expo/ui": "~56.0.18",
 		"@expo/vector-icons": "^15.1.1",
-		"@filen/sdk-rs": "0.4.26",
+		"@filen/sdk-rs": "0.4.27",
 		"@filen/utils": "^0.0.12",
 		"@kishannareshpal/expo-pdf": "^0.3.2",
-		"@op-engineering/op-sqlite": "^16.2.2",
+		"@op-engineering/op-sqlite": "^17.0.0",
 		"@react-native-community/netinfo": "12.0.1",
 		"@react-native-menu/menu": "^2.0.0",
 		"@shopify/flash-list": "2.3.2",
@@ -155,7 +155,7 @@
 		"zustand": "^5.0.14"
 	},
 	"devDependencies": {
-		"@anthropic-ai/sdk": "^0.104.2",
+		"@anthropic-ai/sdk": "^0.105.0",
 		"@tanstack/eslint-plugin-query": "^5.101.0",
 		"@testing-library/react": "^16.3.2",
 		"@types/mime-types": "^3.0.1",
