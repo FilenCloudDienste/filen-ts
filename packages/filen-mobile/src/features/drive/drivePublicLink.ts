@@ -4,15 +4,17 @@ import type { DriveItem } from "@/types"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import { driveItemPublicLinkStatusQueryUpdate } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 
-export async function removeDirLink({ item, signal, link }: { item: DriveItem; signal?: AbortSignal; link: DirPublicLinkRw }) {
+export async function removeDirLink({ item, signal }: { item: DriveItem; signal?: AbortSignal }) {
 	if (item.type !== "directory") {
 		throw new Error("Invalid item type")
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
 
+	// SDK 0.4.27: removeDirLink takes the directory itself and resolves the link by the dir's uuid.
+	// Passing the link (DirPublicLinkRw) sent the LINK uuid and failed with "public link not found".
 	await authedSdkClient.removeDirLink(
-		link,
+		item.data,
 		signal
 			? {
 					signal
@@ -205,8 +207,10 @@ export async function disablePublicLink({ item, signal }: { item: DriveItem; sig
 			return
 		}
 
+		// SDK 0.4.27: removeDirLink takes the directory, not the link. getDirLinkStatus above is only
+		// the "is there a link to remove?" guard; the removal itself keys off the dir's uuid.
 		await authedSdkClient.removeDirLink(
-			status,
+			item.data,
 			signal
 				? {
 						signal
