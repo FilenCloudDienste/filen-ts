@@ -32,7 +32,7 @@ export type ThumbnailParams = {
 	signal?: AbortSignal
 }
 
-export const DEFAULT_WIDTH = 128
+export const DEFAULT_WIDTH = 256
 export const DEFAULT_QUALITY = 0.9
 export const DEFAULT_VIDEO_TIMESTAMP = 1.0
 export const MAX_CONCURRENT = Platform.select({
@@ -269,7 +269,14 @@ class Thumbnails {
 					!(result.error instanceof OfflineAbortError) &&
 					!(result.error instanceof ProviderUnavailableError)
 				) {
-					logger.error("thumbnails", "generation failed", { uuid: params.uuid, ext: params.ext, isImage: params.isImage, isVideo: params.isVideo, platform: Platform.OS, error: String(result.error) })
+					logger.error("thumbnails", "generation failed", {
+						uuid: params.uuid,
+						ext: params.ext,
+						isImage: params.isImage,
+						isVideo: params.isVideo,
+						platform: Platform.OS,
+						error: String(result.error)
+					})
 
 					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
 				}
@@ -395,7 +402,14 @@ class Thumbnails {
 				return normalizeFilePathForExpo(outputPath)
 			} catch (error) {
 				if (!params.signal?.aborted && !(error instanceof OfflineAbortError) && !(error instanceof ProviderUnavailableError)) {
-					logger.error("thumbnails", "generateFromLocalFile failed", { uuid: params.uuid, ext, isImage, isVideo, platform: Platform.OS, error: String(error) })
+					logger.error("thumbnails", "generateFromLocalFile failed", {
+						uuid: params.uuid,
+						ext,
+						isImage,
+						isVideo,
+						platform: Platform.OS,
+						error: String(error)
+					})
 
 					this.failures.set(params.uuid, (this.failures.get(params.uuid) ?? 0) + 1)
 				}
