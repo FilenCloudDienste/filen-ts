@@ -1,72 +1,86 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Platform, AppState } from "react-native"
 import { FullWindowOverlay } from "react-native-screens"
-import { useSharedValue, useAnimatedStyle, type SharedValue } from "react-native-reanimated"
+import { FadeOut } from "react-native-reanimated"
+import { usePreventScreenCapture } from "expo-screen-capture"
 import { AnimatedView } from "@/components/ui/animated"
-import View from "@/components/ui/view"
 import { usePrivacyScreenEnabled } from "@/features/settings/privacyScreen"
-import { useSystemPresentationStore } from "@/lib/systemPresentation"
+import { useSystemPresentationStore, systemPresentation } from "@/lib/systemPresentation"
+import useAppStore from "@/stores/useApp.store"
+import { shouldRedact } from "@/components/privacyScreenLogic"
 
-const COVER_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background items-center justify-center"
+const COVER_CLASSES = "absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background"
 
-// iOS: a FullWindowOverlay (window-level — sits ABOVE native pageSheet/formSheet modals, which the
-// old expo-screen-capture blur did not, since it attached inside the RN root view).
-// Android: a high-z absolute View (mirrors the biometric lock's Parent).
-function Parent({ children }: { children: React.ReactNode }) {
-	if (Platform.OS === "ios") {
-		return <FullWindowOverlay>{children}</FullWindowOverlay>
-	}
+// expo-screen-capture key — scopes our prevent/allow pair so it never conflicts with any other caller.
+const SCREEN_CAPTURE_KEY = "privacy-screen"
 
-	return <View className="absolute top-0 left-0 right-0 bottom-0 z-10000 w-full h-full bg-background">{children}</View>
+// Resolves the live redaction inputs into a boolean (iOS cover only). Non-reactive reads (AppState.currentState
+// + store getStates); PrivacyCover re-runs this on the relevant subscriptions. presentationSuppressed uses the
+// grace-inclusive isReLockSuppressed so the cover rides out the brief "inactive" transitions around an in-app
+// prompt without flickering; shouldRedact's "background" branch ignores the grace so a real snapshot is never
+// left uncovered.
+function computeShouldRedact(): boolean {
+	const appState = AppState.currentState
+	const presentationSuppressed = systemPresentation.isReLockSuppressed()
+	const biometricLocked = useAppStore.getState().biometricUnlocked === false
+
+	return shouldRedact(appState, presentationSuppressed, biometricLocked)
 }
 
-function setOpacityValue(opacity: SharedValue<number>, active: boolean, suppressed: boolean): void {
-	opacity.value = !active && !suppressed ? 1 : 0
-}
-
-// React privacy cover. Redacts the app-switcher / recents preview whenever the app is not active, and
-// is NOT shown while an in-app native presentation (picker / permission / Face ID) is on screen
-// (systemPresentation). Replaces the native expo-screen-capture blur, which couldn't cover modals.
+// iOS privacy cover. Redacts the app-switcher snapshot while the app is not active, defers to the biometric
+// lock when it is up, and stays hidden while (and just after) an in-app native presentation is on screen.
 //
-// Visibility is driven IMPERATIVELY off AppState (+ the presentation suppression) onto a reanimated
-// shared value, rather than via React state, so it paints as early as possible against the OS
-// snapshot. The overlay is kept mounted the whole time the setting is on (toggle only, no mount cost),
-// and triggers on the "inactive" resign signal (earlier than "background").
+// iOS-only: a FullWindowOverlay (window-level — sits ABOVE native pageSheet/formSheet modals), conditionally
+// mounted with a STATIC opaque bg-background AnimatedView + exiting={FadeOut} for the fade-out. Mount/unmount
+// is correct by construction (nothing is in the tree when we should not redact); pointerEvents="none" lets
+// touches pass through during the exiting fade. (Android does NOT use this — see AndroidScreenCaptureGuard.)
 function PrivacyCover() {
-	const opacity = useSharedValue<number>(AppState.currentState === "active" ? 0 : 1)
+	const [redact, setRedact] = useState<boolean>(() => computeShouldRedact())
 
 	useEffect(() => {
 		const apply = (): void => {
-			const active = AppState.currentState === "active"
-			const suppressed = useSystemPresentationStore.getState().activeCount > 0
-
-			setOpacityValue(opacity, active, suppressed)
+			setRedact(computeShouldRedact())
 		}
 
 		apply()
 
 		const appStateSub = AppState.addEventListener("change", apply)
 		const unsubPresentation = useSystemPresentationStore.subscribe(apply)
+		const unsubApp = useAppStore.subscribe(apply)
 
 		return () => {
 			appStateSub.remove()
 			unsubPresentation()
+			unsubApp()
 		}
-	}, [opacity])
+	}, [])
 
-	const animatedStyle = useAnimatedStyle(() => ({
-		opacity: opacity.value
-	}))
+	if (!redact) {
+		return null
+	}
 
 	return (
-		<Parent>
+		<FullWindowOverlay>
 			<AnimatedView
 				className={COVER_CLASSES}
-				style={animatedStyle}
+				exiting={FadeOut}
 				pointerEvents="none"
 			/>
-		</Parent>
+		</FullWindowOverlay>
 	)
+}
+
+// Android redaction: FLAG_SECURE via expo-screen-capture, held for as long as this component is mounted (i.e.
+// for as long as the Privacy Screen setting is on). The OS blanks the recents/app-switcher snapshot ITSELF, at
+// the moment of backgrounding — BEFORE any JS overlay could mount. That is exactly the race a React cover loses
+// on Android (the snapshot is already captured by the time the cover mounts), and the reason the old Android
+// cover only ever painted the live app black instead of redacting anything. Trade-off: FLAG_SECURE also blocks
+// screenshots + screen recording while the setting is on — a deliberate, accepted cost for "hide the app in the
+// app switcher" on Android (the user opts in via the Privacy Screen toggle).
+function AndroidScreenCaptureGuard() {
+	usePreventScreenCapture(SCREEN_CAPTURE_KEY)
+
+	return null
 }
 
 function PrivacyScreen() {
@@ -74,6 +88,10 @@ function PrivacyScreen() {
 
 	if (!enabled) {
 		return null
+	}
+
+	if (Platform.OS === "android") {
+		return <AndroidScreenCaptureGuard />
 	}
 
 	return <PrivacyCover />
