@@ -1,7 +1,7 @@
 # filen-mobile
 
 Encrypted cloud storage mobile app — Expo 56 / React Native 0.85.3 (bridgeless/new-arch) / React 19 / Hermes.
-All server communication, encryption, and auth handled by Rust SDK (`@filen/sdk-rs@0.4.22`, exact pin).
+All server communication, encryption, and auth handled by Rust SDK (`@filen/sdk-rs@0.4.27`, exact pin).
 
 ## Architecture
 
