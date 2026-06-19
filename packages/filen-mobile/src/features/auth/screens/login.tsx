@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react"
 import { Platform, Image } from "react-native"
 import { Trans, useTranslation } from "react-i18next"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { cn, run } from "@filen/utils"
 import SafeAreaView from "@/components/ui/safeAreaView"

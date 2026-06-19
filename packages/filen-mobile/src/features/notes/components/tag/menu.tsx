@@ -9,7 +9,7 @@ import notes from "@/features/notes/notes"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import { useRouter } from "expo-router"
+import { router } from "@/lib/router"
 import { Paths } from "expo-file-system"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
@@ -28,7 +28,6 @@ const Menu = ({
 } & React.ComponentPropsWithoutRef<typeof MenuComponent>) => {
 	const { t } = useTranslation()
 	const isSelected = useNotesStore(useShallow(state => state.selectedTags.some(selectedTag => selectedTag.uuid === tag.uuid)))
-	const router = useRouter()
 
 	const onOpenMenu = () => {
 		useNotesStore.getState().setActiveTag(tag)

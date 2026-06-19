@@ -19,6 +19,16 @@ const NO_FEATURE_BARREL_RULE = {
 	selector: "ExportAllDeclaration",
 	message: "No barrel re-exports (export * from ...) inside src/features/ — import the specific module directly."
 }
+// Navigation must go through the guarded router (src/lib/router.ts), which drops a double-fired
+// navigation (a double/triple-tapped row, a double-tapped back). Importing expo-router's `router`
+// singleton or `useRouter` directly bypasses that guard. src/lib/router.ts itself wraps the real
+// router and is exempted via a scoped override below.
+const NO_EXPO_ROUTER_NAV_IMPORT = {
+	name: "expo-router",
+	importNames: ["router", "useRouter"],
+	message:
+		"Import { router } from '@/lib/router' — the guarded drop-in that dedupes double-fired navigation. Don't import router/useRouter from expo-router directly."
+}
 
 export default [
 	js.configs.recommended,
@@ -87,6 +97,7 @@ export default [
 			"no-restricted-imports": [
 				"error",
 				{
+					paths: [NO_EXPO_ROUTER_NAV_IMPORT],
 					patterns: [".*"]
 				}
 			],
@@ -125,6 +136,7 @@ export default [
 			"no-restricted-imports": [
 				"error",
 				{
+					paths: [NO_EXPO_ROUTER_NAV_IMPORT],
 					patterns: [
 						{
 							group: [".*"]
@@ -135,6 +147,20 @@ export default [
 								"Routes must stay thin — no feature store/query imports. Move logic into the feature's screen/hook; the route should only re-export or render a feature screen/component."
 						}
 					]
+				}
+			]
+		}
+	},
+	{
+		// The guarded router itself is the one sanctioned site that imports expo-router's navigation
+		// singleton — it wraps it. Keep the project-wide relative-import ban; lift only the expo-router
+		// navigation restriction here.
+		files: ["src/lib/router.ts"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [".*"]
 				}
 			]
 		}

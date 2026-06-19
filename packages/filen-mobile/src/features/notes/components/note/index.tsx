@@ -4,7 +4,7 @@ import { type Note as TNote } from "@/types"
 import { noteDisplayTitle } from "@/lib/decryption"
 import { ActivityIndicator, Platform } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
-import { useRouter } from "expo-router"
+import { router } from "@/lib/router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
@@ -67,7 +67,6 @@ const NoteRow = ({
 	nextNote?: ListItem
 	prevNote?: ListItem
 }) => {
-	const router = useRouter()
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")

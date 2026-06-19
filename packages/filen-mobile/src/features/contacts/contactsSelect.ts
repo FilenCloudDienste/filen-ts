@@ -1,4 +1,5 @@
-import { router, useLocalSearchParams } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
+import { router } from "@/lib/router"
 import { randomUUID } from "expo-crypto"
 import events from "@/lib/events"
 import { serialize, deserialize } from "@/lib/serializer"

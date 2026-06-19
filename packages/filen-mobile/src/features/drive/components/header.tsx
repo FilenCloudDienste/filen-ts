@@ -1,4 +1,5 @@
-import { useNavigation, router } from "expo-router"
+import { useNavigation } from "expo-router"
+import { router } from "@/lib/router"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { Platform } from "react-native"

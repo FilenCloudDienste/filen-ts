@@ -1,5 +1,6 @@
 import { Platform } from "react-native"
-import { useLocalSearchParams, router, useFocusEffect } from "expo-router"
+import { useLocalSearchParams, useFocusEffect } from "expo-router"
+import { router } from "@/lib/router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import { type HeaderItem } from "@/components/ui/header"
 import { useCallback } from "react"

@@ -1,4 +1,4 @@
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import audio, { type PlaylistWithItems } from "@/features/audio/audio"

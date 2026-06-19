@@ -2,7 +2,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { t } from "@/lib/i18n"
 import logger from "@/lib/logger"
 

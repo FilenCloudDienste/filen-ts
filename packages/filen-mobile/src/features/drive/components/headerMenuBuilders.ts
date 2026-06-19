@@ -1,4 +1,4 @@
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { type TFunction } from "i18next"
 import { run } from "@filen/utils"
 import { randomUUID } from "expo-crypto"

@@ -14,6 +14,12 @@ vi.mock("expo-router", () => ({
 	}
 }))
 
+vi.mock("@/lib/router", () => ({
+	router: {
+		push: mockRouterPush
+	}
+}))
+
 vi.mock("@/lib/utils", () => ({}))
 
 vi.mock("@/lib/previewType", async () => {

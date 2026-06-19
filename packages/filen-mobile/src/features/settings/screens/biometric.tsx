@@ -1,7 +1,7 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import { Fragment } from "react"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { useSecureStore } from "@/lib/secureStore"
 import useLocalAuthenticationQuery from "@/queries/useLocalAuthentication.query"

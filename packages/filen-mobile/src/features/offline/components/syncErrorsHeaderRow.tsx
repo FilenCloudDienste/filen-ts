@@ -1,5 +1,5 @@
 import Text from "@/components/ui/text"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import ListRow from "@/components/ui/listRow"

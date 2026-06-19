@@ -1,4 +1,4 @@
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
 import { selectContacts } from "@/features/contacts/contactsSelect"

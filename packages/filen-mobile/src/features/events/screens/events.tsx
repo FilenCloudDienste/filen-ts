@@ -1,5 +1,6 @@
 import { Platform, ActivityIndicator } from "react-native"
-import { router, useNavigation } from "expo-router"
+import { useNavigation } from "expo-router"
+import { router } from "@/lib/router"
 import View from "@/components/ui/view"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"

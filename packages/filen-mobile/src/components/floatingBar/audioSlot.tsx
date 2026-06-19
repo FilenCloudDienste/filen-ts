@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { ActivityIndicator } from "react-native"
 import audio, { useAudio } from "@/features/audio/audio"
 import View from "@/components/ui/view"

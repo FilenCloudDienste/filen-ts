@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { getPreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS } from "@/constants"

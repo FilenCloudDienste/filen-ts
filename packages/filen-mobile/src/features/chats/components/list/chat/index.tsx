@@ -9,7 +9,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import Menu from "@/features/chats/components/list/chat/menu"
 import { contactDisplayName } from "@/lib/utils"
 import { chatDisplayName } from "@/lib/decryption"
-import { useRouter } from "expo-router"
+import { router } from "@/lib/router"
 import { useStringifiedClient } from "@/lib/auth"
 import { fastLocaleCompare, cn } from "@filen/utils"
 import useChatUnreadCount from "@/features/chats/hooks/useChatUnreadCount"
@@ -27,7 +27,6 @@ import { isBlocked } from "@/features/contacts/blockedSelectors"
 
 const Chat = ({ info }: { info: ListRenderItemInfo<TChat> }) => {
 	const { t } = useTranslation()
-	const router = useRouter()
 	const stringifiedClient = useStringifiedClient()
 	const unreadCount = useChatUnreadCount(info.item)
 	const blocked = useBlockedUsers()

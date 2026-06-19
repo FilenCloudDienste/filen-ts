@@ -1,6 +1,7 @@
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Platform, ScrollView } from "react-native"
-import { useLocalSearchParams, router } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
+import { router } from "@/lib/router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"

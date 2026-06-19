@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
-import { router, usePathname } from "expo-router"
+import { usePathname } from "expo-router"
+import { router } from "@/lib/router"
 import { run } from "@filen/utils"
 import useAccountQuery from "@/queries/useAccount.query"
 import useAppStore from "@/stores/useApp.store"

@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react"
 import useIncomingShareStore from "@/features/incomingShare/store/useIncomingShare.store"
 import { useShallow } from "zustand/shallow"
-import { router, useNavigation, usePathname } from "expo-router"
+import { useNavigation, usePathname } from "expo-router"
+import { router } from "@/lib/router"
 
 const IncomingShareHandler = () => {
 	const process = useIncomingShareStore(useShallow(state => state.process))

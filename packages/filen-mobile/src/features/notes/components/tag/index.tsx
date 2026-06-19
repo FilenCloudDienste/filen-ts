@@ -4,7 +4,7 @@ import { type NoteTag, type Note } from "@/types"
 import { tagDisplayName } from "@/lib/decryption"
 import { Platform, ActivityIndicator } from "react-native"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
-import { useRouter } from "expo-router"
+import { router } from "@/lib/router"
 import { useResolveClassNames } from "uniwind"
 import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
@@ -21,7 +21,6 @@ import { useTranslation } from "react-i18next"
 
 const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesForTag: Note[] }) => {
 	const { t } = useTranslation()
-	const router = useRouter()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textPrimary = useResolveClassNames("text-primary")

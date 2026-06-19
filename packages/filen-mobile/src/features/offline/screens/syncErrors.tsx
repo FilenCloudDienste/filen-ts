@@ -1,6 +1,6 @@
 import Text from "@/components/ui/text"
 import { Platform } from "react-native"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import Header, { type HeaderItem } from "@/components/ui/header"

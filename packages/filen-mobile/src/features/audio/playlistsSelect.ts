@@ -1,4 +1,4 @@
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { randomUUID } from "expo-crypto"
 import events from "@/lib/events"
 import { serialize } from "@/lib/serializer"

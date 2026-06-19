@@ -1,6 +1,7 @@
 import { Fragment } from "react"
 import { Platform } from "react-native"
-import { router, useNavigation } from "expo-router"
+import { useNavigation } from "expo-router"
+import { router } from "@/lib/router"
 import { run } from "@filen/utils"
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"

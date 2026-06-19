@@ -1,7 +1,7 @@
 import { useResolveClassNames } from "uniwind"
 import { useState } from "react"
 import { Platform } from "react-native"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
 import Ionicons from "@expo/vector-icons/Ionicons"

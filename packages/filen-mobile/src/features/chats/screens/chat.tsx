@@ -2,7 +2,8 @@ import { Fragment, useEffect } from "react"
 import useRevealedBlockedMessages from "@/features/chats/store/useRevealedBlockedMessages.store"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
-import { useLocalSearchParams, useRouter } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
+import { router } from "@/lib/router"
 import { type Chat as TChat } from "@/types"
 import { chatDisplayName } from "@/lib/decryption"
 import { Platform, ActivityIndicator } from "react-native"
@@ -226,7 +227,6 @@ const Chat = () => {
 		uuid: string
 	}>()
 	const keyboardAnimation = useReanimatedKeyboardAnimation()
-	const router = useRouter()
 
 	const chatsQuery = useChatsQuery({
 		enabled: false
@@ -262,7 +262,7 @@ const Chat = () => {
 		return () => {
 			cleanup()
 		}
-	}, [uuid, router])
+	}, [uuid])
 
 	// Reveals of tombstoned blocked messages are per-visit — reset them when leaving or
 	// switching chats so re-entering re-hides them.

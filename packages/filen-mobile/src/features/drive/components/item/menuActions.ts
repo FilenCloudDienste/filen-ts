@@ -1,6 +1,6 @@
 import { type MenuButton } from "@/components/ui/menu"
 import type { DriveItem } from "@/types"
-import { router } from "expo-router"
+import { router } from "@/lib/router"
 import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
