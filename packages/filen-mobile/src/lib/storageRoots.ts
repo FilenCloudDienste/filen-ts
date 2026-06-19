@@ -34,7 +34,9 @@ export const AUDIO_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(BASE_DIRECTORY_URI, "audioCache", `v${AUDIO_CACHE_VERSION}`)
 )
 
-export const THUMBNAILS_VERSION = 2
+// v3: DEFAULT_WIDTH bumped 128 → 256 (thumbnails.ts). Bumping the version repoints the cache dir so
+// existing installs regenerate at the higher resolution instead of serving stale 128px thumbnails.
+export const THUMBNAILS_VERSION = 3
 export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(BASE_DIRECTORY_URI, "thumbnails", `v${THUMBNAILS_VERSION}`)
 )

@@ -214,10 +214,10 @@ vi.mock("@tanstack/react-query", () => ({
 	}
 }))
 
-import thumbnails, { DEFAULT_WIDTH } from "@/lib/thumbnails"
+import thumbnails, { DEFAULT_WIDTH, DEFAULT_QUALITY, VERSION } from "@/lib/thumbnails"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
-const THUMBNAILS_DIR = "file:///shared/group.io.filen.app/thumbnails/v2"
+const THUMBNAILS_DIR = `file:///shared/group.io.filen.app/thumbnails/v${VERSION}`
 
 function makeFileItem(uuid: string, name: string): any {
 	return {
@@ -253,6 +253,15 @@ function makeDirItem(uuid: string, name: string): any {
 }
 
 describe("Thumbnails", () => {
+	// Tripwire for the on-disk format invariant (see thumbnails.ts): the cached thumbnail format
+	// (width/quality) is versioned by THUMBNAILS_VERSION so a format change invalidates stale caches.
+	// If you change DEFAULT_WIDTH or DEFAULT_QUALITY, bump THUMBNAILS_VERSION in storageRoots.ts so
+	// existing installs regenerate — then update this fingerprint. (128→256 once shipped without the
+	// bump, leaving installs on stale 128px thumbnails.)
+	it("keeps the thumbnail format fingerprint in sync with THUMBNAILS_VERSION", () => {
+		expect(`w${DEFAULT_WIDTH}:q${DEFAULT_QUALITY}:v${VERSION}`).toBe("w256:q0.9:v3")
+	})
+
 	beforeEach(() => {
 		fs.clear()
 		vi.clearAllMocks()

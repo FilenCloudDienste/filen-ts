@@ -59,10 +59,10 @@ describe("version segments embedded in paths", () => {
 		expect(AUDIO_CACHE_PARENT_DIRECTORY.uri).toContain(`audioCache/v${AUDIO_CACHE_VERSION}`)
 	})
 
-	it("THUMBNAILS_DIRECTORY.uri contains 'thumbnails/v2' (THUMBNAILS_VERSION=2)", async () => {
+	it("THUMBNAILS_DIRECTORY.uri contains 'thumbnails/v3' (THUMBNAILS_VERSION=3)", async () => {
 		const { THUMBNAILS_DIRECTORY, THUMBNAILS_VERSION } = await importRoots("android")
 
-		expect(THUMBNAILS_VERSION).toBe(2)
+		expect(THUMBNAILS_VERSION).toBe(3)
 		expect(THUMBNAILS_DIRECTORY.uri).toContain(`thumbnails/v${THUMBNAILS_VERSION}`)
 	})
 
