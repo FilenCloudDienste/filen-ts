@@ -35,7 +35,17 @@ export const customEmojisListRecord: Record<string, string> = Object.fromEntries
 	customEmojis.map(emoji => [emoji.id, emoji.skins[0] ? emoji.skins[0].src : ""])
 )
 
-const Mention = ({ name, participant, inflight }: { name: string; participant?: ChatParticipant; inflight?: boolean }) => {
+const Mention = ({
+	name,
+	participant,
+	inflight,
+	fromSelf
+}: {
+	name: string
+	participant?: ChatParticipant
+	inflight?: boolean
+	fromSelf?: boolean
+}) => {
 	const onPress = () => {
 		if (!participant) {
 			return
@@ -50,7 +60,11 @@ const Mention = ({ name, participant, inflight }: { name: string; participant?: 
 			rippleColor="transparent"
 			onPress={onPress}
 		>
-			<Text className={cn("text-sm", inflight ? "text-muted-foreground" : "text-foreground")}>@{name}</Text>
+			{/* Own bubbles are always blue regardless of theme — use a fixed light color, not the
+			    theme `text-foreground` (which is dark in light mode → unreadable on blue). */}
+			<Text className={cn("text-sm", fromSelf ? (inflight ? "text-gray-200" : "text-white") : inflight ? "text-muted-foreground" : "text-foreground")}>
+				@{name}
+			</Text>
 		</PressableScale>
 	)
 }
@@ -172,7 +186,10 @@ export const Link = ({ match, fromSelf, inflight }: { match: string; fromSelf: b
 			rippleColor="transparent"
 			onPress={onPress}
 		>
-			<Text className={cn("underline", inflight ? "text-muted-foreground" : fromSelf ? "text-foreground" : "text-blue-500")}>
+			{/* Own bubbles are blue in both themes — links there must be light (white), not the
+			    theme `text-foreground` (dark in light mode → invisible on blue). Others' bubbles use
+			    the theme background, so a blue link reads fine in both modes. */}
+			<Text className={cn("underline", fromSelf ? (inflight ? "text-gray-200" : "text-white") : inflight ? "text-muted-foreground" : "text-blue-500")}>
 				{match}
 			</Text>
 		</PressableScale>
@@ -208,23 +225,39 @@ const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessage
 					const email = match.slice(1).trim()
 
 					if (email === "everyone") {
-						return <Mention name={t("everyone")} />
+						return (
+							<Mention
+								name={t("everyone")}
+								fromSelf={fromSelf}
+							/>
+						)
 					}
 
 					if (!email.includes("@")) {
-						return <Mention name={t("unknown")} />
+						return (
+							<Mention
+								name={t("unknown")}
+								fromSelf={fromSelf}
+							/>
+						)
 					}
 
 					const foundParticipant = chat.participants.find(p => p.email === email)
 
 					if (!foundParticipant) {
-						return <Mention name={t("unknown")} />
+						return (
+							<Mention
+								name={t("unknown")}
+								fromSelf={fromSelf}
+							/>
+						)
 					}
 
 					return (
 						<Mention
 							name={contactDisplayName(foundParticipant)}
 							participant={foundParticipant}
+							fromSelf={fromSelf}
 						/>
 					)
 				}
