@@ -204,5 +204,17 @@ export const notes = {
 	/** Note history — empty-state subtitle when the note has no past versions */
 	no_note_history_description: "Edits you make to this note will appear here.",
 	/** Note participants — empty-state subtitle when the note has no other participants */
-	no_note_participants_description: "Add people to collaborate on this note."
+	no_note_participants_description: "Add people to collaborate on this note.",
+	/** Tags view — sort submenu group: by most recently edited note in the tag */
+	sort_last_activity: "Last activity",
+	/** Tags view — sort option: most recently active tags first */
+	sort_last_activity_newest: "Last activity (newest)",
+	/** Tags view — sort option: least recently active tags first */
+	sort_last_activity_oldest: "Last activity (oldest)",
+	/** Tags view — sort submenu group: by how many notes carry the tag */
+	sort_note_count: "Number of notes",
+	/** Tags view — sort option: tags with the most notes first */
+	sort_note_count_most: "Most notes",
+	/** Tags view — sort option: tags with the fewest notes first */
+	sort_note_count_fewest: "Fewest notes"
 } as const

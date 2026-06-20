@@ -231,6 +231,8 @@ function defaultParams() {
 		selectedTags: [] as NoteTag[],
 		notesViewMode: "notes" as const,
 		setNotesViewMode: vi.fn(),
+		tagsSortBy: "lastActivityDesc" as const,
+		setTagsSortBy: vi.fn(),
 		tagFlags: makeTagFlags(),
 		noteFlags: makeNoteFlags(),
 		tag: null,

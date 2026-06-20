@@ -7,9 +7,9 @@ import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualLis
 import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import { type Note as TNote, type NoteTag } from "@/types"
-import { run, fastLocaleCompare, cn } from "@filen/utils"
+import { run, cn } from "@filen/utils"
 import { createNoteFlow, createTagFlow } from "@/features/notes/components/notesActions"
-import { tagDisplayName } from "@/lib/decryption"
+import { sortNoteTags, useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
@@ -32,6 +32,7 @@ const Notes = () => {
 	const notesQuery = useNotesWithContentQuery()
 	const blocked = useBlockedUsers()
 	const [notesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
+	const [tagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
 	}>()
@@ -79,16 +80,7 @@ const Notes = () => {
 		}
 	}, [blocked])
 
-	const notesTags = (() => {
-		if (notesTagsQuery.status !== "success") {
-			return []
-		}
-
-		const sorted = [...notesTagsQuery.data].sort((a, b) => fastLocaleCompare(tagDisplayName(a), tagDisplayName(b)))
-
-		return filterNoteTagsBySearchQuery(sorted, searchQuery)
-	})()
-
+	// Built before notesTags: the tags sort (by "last activity" / note count) reads this index.
 	const notesForTag = (() => {
 		if (notesQuery.status !== "success" || notesTagsQuery.status !== "success") {
 			return {}
@@ -111,6 +103,16 @@ const Notes = () => {
 		}
 
 		return index
+	})()
+
+	const notesTags = (() => {
+		if (notesTagsQuery.status !== "success") {
+			return []
+		}
+
+		const sorted = sortNoteTags(notesTagsQuery.data, tagsSortBy, notesForTag)
+
+		return filterNoteTagsBySearchQuery(sorted, searchQuery)
 	})()
 
 	const renderItemNotesView = (info: ListRenderItemInfo<NoteListItem>) => {

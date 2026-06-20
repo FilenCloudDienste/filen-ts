@@ -10,6 +10,7 @@ import { useShallow } from "zustand/shallow"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import { formatRelativeTime } from "@/lib/time"
+import { tagLastActivity } from "@/features/notes/notesTagsSortPreference"
 import Menu from "@/features/notes/components/tag/menu"
 import { cn } from "@filen/utils"
 import { PressableScale } from "@/components/ui/pressables"
@@ -32,6 +33,9 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 			return notesForTag.some(n => (state.inflightContent[n.uuid] ?? []).length > 0)
 		})
 	)
+
+	// The tag's "last activity" — same value the tags-view sort keys on (single source of truth).
+	const displayTimestamp = tagLastActivity(info.item, notesForTag)
 
 	const onPress = () => {
 		if (useNotesStore.getState().selectedTags.length > 0) {
@@ -151,7 +155,7 @@ const Tag = ({ info, notesForTag }: { info: ListRenderItemInfo<NoteTag>; notesFo
 								>
 									{t("tag_notes_count_and_date", {
 										count: notesForTag.length,
-										date: formatRelativeTime(Number(info.item.editedTimestamp), t)
+										date: formatRelativeTime(displayTimestamp, t)
 									})}
 								</Text>
 							</View>

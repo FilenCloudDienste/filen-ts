@@ -16,6 +16,7 @@ import { runBulk } from "@/lib/bulkOps"
 import { serialize } from "@/lib/serializer"
 import { NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
 import { createTagFlow } from "@/features/notes/components/notesActions"
+import { type NotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { useResolveClassNames } from "uniwind"
@@ -24,6 +25,49 @@ import { withSystemPresentation } from "@/lib/systemPresentation"
 import logger from "@/lib/logger"
 
 type NotesViewMode = "notes" | "tags"
+
+// Sort picker for the tags view, mirroring the drive header's buildSortMenuButton structure
+// (grouped asc/desc leaves with a `checked` mark on the active option).
+export function buildTagsSortMenuButton(current: NotesTagsSortBy, setSort: (next: NotesTagsSortBy) => void, t: TFunction): MenuButton {
+	const leaf = (id: string, title: string, value: NotesTagsSortBy): MenuButton => ({
+		id,
+		title,
+		checked: current === value,
+		onPress: () => setSort(value)
+	})
+
+	return {
+		id: "tagsSort",
+		title: t("sort_by"),
+		icon: "list",
+		subButtons: [
+			{
+				id: "tagsSort.activity",
+				title: t("sort_last_activity"),
+				icon: "clock",
+				subButtons: [
+					leaf("tagsSort.activityDesc", t("sort_last_activity_newest"), "lastActivityDesc"),
+					leaf("tagsSort.activityAsc", t("sort_last_activity_oldest"), "lastActivityAsc")
+				]
+			},
+			{
+				id: "tagsSort.name",
+				title: t("sort_name"),
+				icon: "text",
+				subButtons: [leaf("tagsSort.nameAsc", t("sort_name_asc"), "nameAsc"), leaf("tagsSort.nameDesc", t("sort_name_desc"), "nameDesc")]
+			},
+			{
+				id: "tagsSort.count",
+				title: t("sort_note_count"),
+				icon: "doc",
+				subButtons: [
+					leaf("tagsSort.countDesc", t("sort_note_count_most"), "notesCountDesc"),
+					leaf("tagsSort.countAsc", t("sort_note_count_fewest"), "notesCountAsc")
+				]
+			}
+		]
+	}
+}
 
 // Builds the notes-screen header's right-hand menu (select-all / create / import / bulk
 // note actions / bulk tag actions / create-tag / view-mode switch) from the current
@@ -38,6 +82,8 @@ export function buildNotesHeaderRightItems({
 	selectedTags,
 	notesViewMode,
 	setNotesViewMode,
+	tagsSortBy,
+	setTagsSortBy,
 	tagFlags,
 	noteFlags,
 	tag,
@@ -58,6 +104,8 @@ export function buildNotesHeaderRightItems({
 	selectedTags: NoteTag[]
 	notesViewMode: NotesViewMode
 	setNotesViewMode: (fn: NotesViewMode | ((prev: NotesViewMode) => NotesViewMode)) => void
+	tagsSortBy: NotesTagsSortBy
+	setTagsSortBy: (next: NotesTagsSortBy) => void
 	tagFlags: ReturnType<typeof aggregateNoteTagSelectionFlags>
 	noteFlags: ReturnType<typeof aggregateNoteSelectionFlags>
 	tag: NoteTag | null
@@ -586,6 +634,11 @@ export function buildNotesHeaderRightItems({
 				await createTagFlow({ t })
 			}
 		})
+	}
+
+	// Tags-view sort picker — only meaningful in the tags view, outside selection mode.
+	if (!tag && viewMode === "tags" && selectedNotes.length === 0 && selectedTags.length === 0) {
+		menuButtons.push(buildTagsSortMenuButton(tagsSortBy, setTagsSortBy, t))
 	}
 
 	if (!tag && selectedNotes.length === 0 && selectedTags.length === 0) {

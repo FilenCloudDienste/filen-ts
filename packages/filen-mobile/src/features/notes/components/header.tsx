@@ -12,6 +12,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import { aggregateNoteSelectionFlags, aggregateNoteTagSelectionFlags } from "@/features/notes/notesSelectors"
 import { useTranslation } from "react-i18next"
 import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
+import { useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import { type NoteTag } from "@/types"
 import { createNoteFlow } from "@/features/notes/components/notesActions"
@@ -36,6 +37,7 @@ export const Header = ({
 	const selectedNotes = useNotesStore(useShallow(state => state.selectedNotes))
 	const selectedTags = useNotesStore(useShallow(state => state.selectedTags))
 	const [notesViewMode, setNotesViewMode] = useSecureStore<"notes" | "tags">("notesViewMode", "notes")
+	const [tagsSortBy, setTagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
 	}>()
@@ -83,6 +85,8 @@ export const Header = ({
 		selectedTags,
 		notesViewMode,
 		setNotesViewMode,
+		tagsSortBy,
+		setTagsSortBy,
 		tagFlags,
 		noteFlags,
 		tag,
