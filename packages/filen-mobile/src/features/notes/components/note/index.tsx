@@ -189,7 +189,7 @@ const NoteRow = ({
 								</AnimatedView>
 							)}
 							<View className="shrink-0 h-auto w-auto bg-transparent flex-col gap-2 items-center justify-start">
-								<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
+								<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
 									{isInflight ? (
 										<ActivityIndicator
 											size="small"
@@ -203,7 +203,7 @@ const NoteRow = ({
 									)}
 								</View>
 								{info.item.pinned && (
-									<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
+									<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
 										<Ionicons
 											name="pin-outline"
 											size={18}
@@ -212,7 +212,7 @@ const NoteRow = ({
 									</View>
 								)}
 								{info.item.favorite && (
-									<View className="flex-row items-center justify-center p-1 rounded-full border border-border size-8 bg-background-tertiary">
+									<View className="flex-row items-center justify-center p-1 rounded-full size-8 bg-background-tertiary">
 										<Ionicons
 											name="heart-outline"
 											size={18}
