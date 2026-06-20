@@ -24,7 +24,8 @@ const {
 } = vi.hoisted(() => {
 	const mockAuth = {
 		isAuthed: vi.fn(),
-		setSdkClients: vi.fn()
+		setSdkClients: vi.fn(),
+		loadTransferConfig: vi.fn()
 	}
 
 	const mockCache = {

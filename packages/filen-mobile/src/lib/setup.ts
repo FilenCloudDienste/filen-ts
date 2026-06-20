@@ -77,6 +77,12 @@ const setup = {
 				cache.rootUuid = stringifiedClient.rootUuid
 			}
 
+			// Refresh the SDK transfer config (concurrency/memory/bandwidth) from persisted prefs
+			// BEFORE the client is built in the Promise.all below. Sequenced here (not inside the
+			// Promise.all) so the secureStore reads can't race secureStore.init(); auth.isAuthed()
+			// above already proved a pre-init secureStore read is safe.
+			await auth.loadTransferConfig()
+
 			// initI18n / initTheme only read the persisted language / theme from secureStore, which
 			// auth.isAuthed() above already initialized — so they run inside this Promise.all to overlap
 			// with the SQLite/cache restore instead of serializing after it. They stay awaited: RootLayout

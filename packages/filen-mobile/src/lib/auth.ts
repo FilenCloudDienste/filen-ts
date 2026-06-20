@@ -1,11 +1,5 @@
-import {
-	type JsClientInterface,
-	type StringifiedClient,
-	UnauthJsClient,
-	type UnauthJsClientInterface,
-	type JsClientConfig,
-	LogLevel
-} from "@filen/sdk-rs"
+import { type JsClientInterface, type StringifiedClient, UnauthJsClient, type UnauthJsClientInterface, type JsClientConfig } from "@filen/sdk-rs"
+import { getResolvedTransferConfig, buildJsClientConfig, bandwidthKbpsToSdkArg, DEFAULT_RESOLVED_TRANSFER_CONFIG } from "@/features/settings/transferConfig"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { useEffect, useState } from "react"
 import transfers from "@/features/transfers/transfers"
@@ -44,16 +38,12 @@ class Auth {
 	private clientsReady: Promise<void> = new Promise(resolve => {
 		this.clientsReadyResolve = resolve
 	})
-	public readonly maxIoMemoryUsage: number = 64 * 1024 * 1024
-	public readonly maxParallelRequests: number = 128
-	public readonly jsClientBaseConfig: JsClientConfig = {
-		concurrency: 128,
-		rateLimitPerSec: 128,
-		uploadBandwidthKilobytesPerSec: undefined,
-		downloadBandwidthKilobytesPerSec: undefined,
-		logLevel: LogLevel.Info,
-		fileIoMemoryBudget: BigInt(32 * 1024 * 1024)
-	}
+	// SDK transfer config from user prefs (More → Advanced). Mutable: defaulted to the `balanced`
+	// preset + unlimited bandwidth, refreshed by loadTransferConfig() at boot (setup.ts) so the
+	// existing construction sites below read fresh values without change. See transferConfig.ts.
+	public maxIoMemoryUsage: number = DEFAULT_RESOLVED_TRANSFER_CONFIG.maxIoMemoryUsage
+	public maxParallelRequests: number = DEFAULT_RESOLVED_TRANSFER_CONFIG.maxParallelRequests
+	public jsClientBaseConfig: JsClientConfig = buildJsClientConfig(DEFAULT_RESOLVED_TRANSFER_CONFIG)
 
 	public async isAuthed(): Promise<
 		| {
@@ -215,6 +205,43 @@ class Auth {
 		return {
 			authedSdkClient: this.authedClient,
 			unauthedSdkClient: this.unauthedClient
+		}
+	}
+
+	/**
+	 * Re-read the persisted transfer prefs and refresh the in-memory SDK config. Called at boot
+	 * (setup.ts) before the client is built, and on a fresh login. The preset values
+	 * (concurrency/memory) take effect only on the NEXT client construction (= app restart).
+	 */
+	public async loadTransferConfig(): Promise<void> {
+		const resolved = await getResolvedTransferConfig()
+
+		this.jsClientBaseConfig = buildJsClientConfig(resolved)
+		this.maxIoMemoryUsage = resolved.maxIoMemoryUsage
+		this.maxParallelRequests = resolved.maxParallelRequests
+	}
+
+	/**
+	 * Apply upload/download bandwidth caps (KB/s; null/undefined = unlimited) to the LIVE authed
+	 * client immediately, and mirror them into jsClientBaseConfig so a same-session rebuild keeps
+	 * them. No-op (config-only) when logged out. Never throws — a failure just means it applies on
+	 * the next launch (the value is already persisted by the caller).
+	 */
+	public async applyBandwidthLimits(uploadKbps: number | null | undefined, downloadKbps: number | null | undefined): Promise<void> {
+		this.jsClientBaseConfig = {
+			...this.jsClientBaseConfig,
+			uploadBandwidthKilobytesPerSec: uploadKbps ?? undefined,
+			downloadBandwidthKilobytesPerSec: downloadKbps ?? undefined
+		}
+
+		if (!this.authedClient) {
+			return
+		}
+
+		try {
+			await this.authedClient.setBandwidthLimits(bandwidthKbpsToSdkArg(uploadKbps), bandwidthKbpsToSdkArg(downloadKbps))
+		} catch (e) {
+			logger.warn("auth", "applyBandwidthLimits failed — will apply on next launch", { err: e })
 		}
 	}
 
