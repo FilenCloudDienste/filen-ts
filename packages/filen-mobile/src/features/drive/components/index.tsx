@@ -75,7 +75,14 @@ const Drive = () => {
 	// #26 — use retained data unconditionally (stale-while-error); status "error"
 	// with prior data keeps the listing visible instead of flipping to "empty".
 	const sortedItems = isCacheSearch
-		? itemSorter.sortItems(searchResults, sort)
+		? // Truncated window (more matches than the loaded CEILING): the SDK loaded the
+			// alphabetically-FIRST slice, so re-sorting it by a non-name preference (newest/largest)
+			// would show "the newest of the alphabetically-first 1000" and silently hide the true
+			// top-N. Keep the SDK's name-ascending order (the footer states it); below the cap the
+			// whole match set is loaded, so the user's sort is honoured.
+			totalCount > searchResults.length
+			? searchResults
+			: itemSorter.sortItems(searchResults, sort)
 		: filterDriveItemsBySearchQuery(itemSorter.sortItems(driveItemsQuery.data ?? [], sort), searchQuery)
 
 	// Hide shared-in items shared by a blocked user (virtual-root filter — the query stays

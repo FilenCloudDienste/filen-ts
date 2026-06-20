@@ -29,11 +29,13 @@ export function deriveStatus(input: {
 
 	if (
 		!input.live ||
-		// `!hasSnapshot`-guarded like watchdogFired: openError is sticky session state NOT in
-		// sessionKey, so a foreground/focus/unlock re-open re-runs Effect A without clearing
-		// it. Without this guard a single failed open would wedge the session in "terminal"
-		// forever even after a successful re-open delivers results. Self-heals on first snapshot.
-		(input.openError && !input.hasSnapshot) ||
+		// openError means "the most recent open attempt failed and no snapshot has landed since"
+		// — the hook clears it on every successful snapshot AND on a setName the engine accepts,
+		// and a fresh query re-arms it. NOT `&& !hasSnapshot`: a failed FOREGROUND reopen must
+		// surface as terminal even while a STALE pre-background snapshot is still in state
+		// (hasSnapshot stays true — sessionKey excludes the foreground edge), or the failed reopen
+		// would show those stale results forever with no error. The display is hidden on terminal.
+		input.openError ||
 		input.cacheUnavailable ||
 		input.rootDeleted ||
 		// `&& !resyncing`: a watchdog fire during an active resync (Started arrived, worker

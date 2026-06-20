@@ -8,7 +8,7 @@ import { renderHook, act, cleanup } from "@testing-library/react"
 // Hoisted spies / mocks (must be defined before the imports they back)
 // ------------------------------------------------------------------
 
-const { driveSearchMock, snapshotHolder, removeFromSelection, gates } = vi.hoisted(() => ({
+const { driveSearchMock, snapshotHolder, removeFromSelection, selection, gates } = vi.hoisted(() => ({
 	driveSearchMock: {
 		open: vi.fn(),
 		setName: vi.fn(async () => true),
@@ -18,6 +18,9 @@ const { driveSearchMock, snapshotHolder, removeFromSelection, gates } = vi.hoist
 	// here and drive snapshots through it (the singleton itself is fully mocked).
 	snapshotHolder: { onSnapshot: null as ((snapshot: unknown) => void) | null },
 	removeFromSelection: vi.fn(),
+	// Current selection the hook reads for its ghost-purge reconcile — held in a box so a test
+	// can populate it and assert removeFromSelection is called for items that left the result set.
+	selection: { items: [] as { data: { uuid: string } }[] },
 	// Reactive gates the hook reads — held in a box so a rerender() re-reads them.
 	gates: { online: true, appActive: true, focused: true }
 }))
@@ -35,7 +38,8 @@ vi.mock("@/features/drive/driveSearch", () => ({
 vi.mock("@filen/sdk-rs", () => ({
 	CacheSearchResult_Tags: { File: "File", Dir: "Dir" },
 	DirMeta_Tags: { Decoded: "Decoded" },
-	FileMeta_Tags: { Decoded: "Decoded" }
+	FileMeta_Tags: { Decoded: "Decoded" },
+	DirColor_Tags: { Default: "Default", Blue: "Blue", Green: "Green", Purple: "Purple", Red: "Red", Gray: "Gray", Custom: "Custom" }
 }))
 
 // Passthrough unwrap → a minimal DriveItem carrying `type` + `data.uuid` (+ `data.name` when the
@@ -57,7 +61,7 @@ vi.mock("@/hooks/useIsAppActive", () => ({ default: () => gates.appActive }))
 vi.mock("expo-router", () => ({ useIsFocused: () => gates.focused }))
 
 vi.mock("@/features/drive/store/useDrive.store", () => ({
-	useDriveStore: { getState: () => ({ removeFromSelection }) }
+	useDriveStore: { getState: () => ({ removeFromSelection, selectedItems: selection.items }) }
 }))
 
 // Real (no native deps): events (EventEmitter3), the search status store + app store (zustand).
@@ -81,14 +85,27 @@ function drivePath(over?: Partial<DrivePath>): DrivePath {
 	} as DrivePath
 }
 
-function dirResult(uuid: string, parentPath = "", name?: string) {
-	const dir = name !== undefined ? { uuid, meta: { tag: "Decoded", inner: [{ name }] } } : { uuid }
+// `extra` carries the mutable display fields the content-signature now folds in (favorited, color)
+// — defaulted so existing call sites are unaffected, overridable for the re-map regression tests.
+type HitExtra = { favorited?: boolean; color?: { tag: string; inner?: readonly [string] } }
+
+function dirResult(uuid: string, parentPath = "", name?: string, extra?: HitExtra) {
+	const dir = {
+		uuid,
+		favorited: extra?.favorited ?? false,
+		color: extra?.color ?? { tag: "Default" },
+		...(name !== undefined ? { meta: { tag: "Decoded", inner: [{ name }] } } : {})
+	}
 
 	return { parentPath, result: { tag: "Dir", inner: { dir } } }
 }
 
-function fileResult(uuid: string, parentPath = "", name?: string) {
-	const file = name !== undefined ? { uuid, meta: { tag: "Decoded", inner: [{ name }] } } : { uuid }
+function fileResult(uuid: string, parentPath = "", name?: string, extra?: HitExtra) {
+	const file = {
+		uuid,
+		favorited: extra?.favorited ?? false,
+		...(name !== undefined ? { meta: { tag: "Decoded", inner: [{ name }] } } : {})
+	}
 
 	return { parentPath, result: { tag: "File", inner: { file } } }
 }
@@ -129,6 +146,7 @@ beforeEach(() => {
 	driveSearchMock.closeActive.mockClear()
 	snapshotHolder.onSnapshot = null
 	removeFromSelection.mockClear()
+	selection.items = []
 
 	gates.online = true
 	gates.appActive = true
@@ -1002,5 +1020,165 @@ describe("useDriveSearch — activity-based timers (slow huge-tree / slow networ
 
 		expect(result.current.status).toBe("settled")
 		expect(result.current.searchResults).toEqual([])
+	})
+})
+
+// Regression cover for the 2026-06-20 global-search deep-review fixes. The behaviours below were
+// previously untested seams (see docs/global-search-review-2026-06-20.md): #12 stale-rows on an
+// in-place edit, #24 clear→retype wedge, #8 stale-on-failed-reopen, #13 selection ghosts, #19
+// favorite/color re-map.
+describe("useDriveSearch — global-search review fixes (2026-06-20)", () => {
+	// #24: clearing then retyping the SAME term must NOT wedge. The warm engine suppresses the
+	// identical snapshot, so the hook keeps the prior results shown (the displayed query is
+	// unchanged) and never resets hasSnapshot — the watchdog can't fire "Search unavailable".
+	it("#24 keeps results (no wedge) when clearing then retyping the same term", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+		deliver(snapshot({ results: [dirResult("d1", "", "report")], total: 1n }))
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults).toHaveLength(1)
+
+		act(() => {
+			result.current.setSearchQuery("")
+		})
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+
+		// setName resolves but the SDK suppresses the identical snapshot — none is delivered.
+		await advance(SETCONFIG_DEBOUNCE_MS)
+		await advance(WATCHDOG_MS)
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults).toHaveLength(1)
+	})
+
+	// #24: clear then retype a DIFFERENT term that is ALSO empty — the window is identically empty,
+	// so the SDK suppresses the snapshot. The engine accepting setName must still re-hydrate (via
+	// the ever-delivered + seq guard) so it settles to "no results", never wedges terminal at 15s.
+	it("#24 settles to no-results (not terminal) when retyping a different identically-empty term", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("zzz")
+		})
+		deliver(snapshot({ results: [], total: 0n }))
+		await advance(GRACE_MS)
+
+		expect(result.current.status).toBe("settled")
+
+		act(() => {
+			result.current.setSearchQuery("")
+		})
+		act(() => {
+			result.current.setSearchQuery("qqq")
+		})
+
+		await advance(SETCONFIG_DEBOUNCE_MS)
+		await advance(WATCHDOG_MS)
+
+		expect(result.current.status).toBe("settled")
+	})
+
+	// #12: editing an active query in place (a→b, never through blank) must not leave the old term's
+	// rows on screen — they're hidden (warming) until the new term's snapshot lands.
+	it("#12 hides the previous term's rows during an in-place query edit (no stale flash)", async () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("report")
+		})
+		deliver(snapshot({ results: [dirResult("d1", "", "report")], total: 1n }))
+
+		expect(result.current.searchResults).toHaveLength(1)
+
+		// In-place edit to a different term — no clear in between.
+		act(() => {
+			result.current.setSearchQuery("invoice")
+		})
+
+		// Warming: the prior rows are hidden until the new snapshot arrives (the core #12 fix).
+		expect(result.current.status).toBe("warming")
+		expect(result.current.searchResults).toEqual([])
+
+		await advance(SETCONFIG_DEBOUNCE_MS)
+		deliver(snapshot({ results: [dirResult("d2", "", "invoice")], total: 1n }))
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults).toHaveLength(1)
+		expect(result.current.searchResults[0]?.data.uuid).toBe("d2")
+	})
+
+	// #8: a FAILED foreground reopen must surface as terminal — not keep showing the stale
+	// pre-background results forever (hasSnapshot stays true across the foreground edge).
+	it("#8 goes terminal and hides stale results when a foreground reopen fails", async () => {
+		const { result, rerender } = render()
+
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+		deliver(snapshot({ results: [dirResult("d1", "", "x")], total: 1n }))
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults).toHaveLength(1)
+
+		// The next open (the foreground reopen) rejects.
+		driveSearchMock.open.mockImplementationOnce(async () => {
+			throw new Error("reopen failed")
+		})
+
+		gates.appActive = false
+		act(() => {
+			rerender({ path: drivePath() })
+		})
+		gates.appActive = true
+		await act(async () => {
+			rerender({ path: drivePath() })
+		})
+
+		expect(result.current.status).toBe("terminal")
+		expect(result.current.searchResults).toEqual([])
+	})
+
+	// #13: selected items that leave the visible result set (a query refinement, or a remote
+	// rename/move dropping a hit) must be purged so a bulk action can't target hidden items.
+	it("#13 purges selected items that leave the result set on refinement", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("a")
+		})
+		deliver(snapshot({ results: [dirResult("d1"), dirResult("d2"), dirResult("d3")], total: 3n }))
+
+		selection.items = [{ data: { uuid: "d1" } }, { data: { uuid: "d2" } }, { data: { uuid: "d3" } }]
+
+		// The query narrows → only d1 remains visible.
+		deliver(snapshot({ results: [dirResult("d1")], total: 1n }))
+
+		expect(removeFromSelection).toHaveBeenCalledWith(["d2", "d3"])
+	})
+
+	// #19: the per-uuid map cache must RE-MAP when a displayed field other than the name changes
+	// (favorite / color) — a name-only signature would reuse the stale object + badge.
+	it("#19 re-maps a result whose favorited flag changed (stable uuid + name)", () => {
+		const { result } = render()
+
+		act(() => {
+			result.current.setSearchQuery("a")
+		})
+		deliver(snapshot({ results: [dirResult("d1", "", "Docs", { favorited: false })], total: 1n }))
+
+		const before = result.current.searchResults[0]
+
+		deliver(snapshot({ results: [dirResult("d1", "", "Docs", { favorited: true })], total: 1n }))
+
+		const after = result.current.searchResults[0]
+
+		// New object reference → the favorite change was caught (a name-only signature would reuse it).
+		expect(after).not.toBe(before)
 	})
 })

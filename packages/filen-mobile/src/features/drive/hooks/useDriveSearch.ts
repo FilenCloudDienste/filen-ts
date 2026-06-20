@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { AppState } from "react-native"
 import { debounce } from "es-toolkit/function"
 import { useIsFocused } from "expo-router"
-import { CacheSearchResult_Tags, DirMeta_Tags, FileMeta_Tags, type CacheSearchHit, type CacheSearchSnapshot } from "@filen/sdk-rs"
+import { CacheSearchResult_Tags, DirColor_Tags, DirMeta_Tags, FileMeta_Tags, type CacheSearchHit, type CacheSearchSnapshot } from "@filen/sdk-rs"
 import { type DriveItem } from "@/types"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import driveSearch from "@/features/drive/driveSearch"
@@ -40,6 +40,11 @@ const WATCHDOG_MS = 15_000
 // Backstop for a dropped `Finished`: stop showing "Still searching…" after this long.
 const STALL_CEILING_MS = 30_000
 
+// Stable empties returned while results are hidden (warming / terminal) — avoids allocating a fresh
+// array + Map every render in those states.
+const NO_RESULTS: DriveItem[] = []
+const NO_PATHS = new Map<string, string>()
+
 function resultUuid(hit: CacheSearchHit): string {
 	return hit.result.tag === CacheSearchResult_Tags.Dir ? hit.result.inner.dir.uuid : hit.result.inner.file.uuid
 }
@@ -50,20 +55,25 @@ function mapResult(hit: CacheSearchHit): DriveItem {
 		: unwrappedFileIntoDriveItem(unwrapFileMeta(hit.result.inner.file))
 }
 
-// Cheap content signature of a hit, keying the per-uuid map cache so an item is RE-mapped when its
-// metadata changed remotely. A rename keeps the uuid (FileMetadataChanged / FolderMetadataChanged),
-// so a uuid-only cache would keep rendering the stale name. Name-based — the displayed field a
-// remote edit changes; the `d:`/`f:` prefix keeps a real signature distinct from a missing-meta "".
+// Cheap content signature of a hit, keying the per-uuid map cache so an item is RE-mapped when any
+// DISPLAYED field changed remotely. The SDK window re-delivers a hit (same uuid) whenever its
+// CacheableDir/File changes (favorited / color / name all part of its derived PartialEq), but a
+// name-only signature would reuse the stale cached object on a favorite/color change that keeps the
+// name — so fold in `favorited` (dir + file) and `color` (dir, incl. the custom hex). The `d:`/`f:`
+// prefix keeps a real signature distinct from a missing-meta "".
 function resultSignature(hit: CacheSearchHit): string {
 	if (hit.result.tag === CacheSearchResult_Tags.Dir) {
-		const meta = hit.result.inner.dir.meta
+		const dir = hit.result.inner.dir
+		const name = dir.meta?.tag === DirMeta_Tags.Decoded ? dir.meta.inner[0].name : ""
+		const color = dir.color.tag === DirColor_Tags.Custom ? `Custom:${dir.color.inner[0]}` : dir.color.tag
 
-		return `d:${meta?.tag === DirMeta_Tags.Decoded ? meta.inner[0].name : ""}`
+		return `d:${name}:${color}:${dir.favorited ? "1" : "0"}`
 	}
 
-	const meta = hit.result.inner.file.meta
+	const file = hit.result.inner.file
+	const name = file.meta?.tag === FileMeta_Tags.Decoded ? file.meta.inner[0].name : ""
 
-	return `f:${meta?.tag === FileMeta_Tags.Decoded ? meta.inner[0].name : ""}`
+	return `f:${name}:${file.favorited ? "1" : "0"}`
 }
 
 /**
@@ -94,6 +104,11 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	const [stallCeilingHit, setStallCeilingHit] = useState<boolean>(false)
 	const [openError, setOpenError] = useState<boolean>(false)
 	const [reopenNonce, setReopenNonce] = useState<number>(0)
+	// The query whose results are currently ON DISPLAY (the last snapshot the hook accepted, or the
+	// last filter the engine accepted for an identical-window setName). Render-readable so the
+	// per-query reset below can tell a retype of the SAME displayed term (keep results — the warm
+	// engine suppresses the identical snapshot) from a DIFFERENT term (reset to warming).
+	const [appliedQuery, setAppliedQuery] = useState<string>("")
 
 	const resyncing = useDriveSearchStore(state => state.resyncing)
 	const rootDeleted = useDriveSearchStore(state => state.rootDeleted)
@@ -146,25 +161,29 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		setWatchdogFired(false)
 		setStallCeilingHit(false)
 		setOpenError(false)
+		setAppliedQuery("")
 	}
 
-	// Clearing the query keeps the engine WARM (sessionKey is unchanged), so the previous query's
-	// rows would otherwise linger and flash when a DIFFERENT term is retyped before the engine's
-	// refilter snapshot lands. Reset the per-query display on the active→blank edge so a retype
-	// starts fresh (warming → filled by the next snapshot); the engine itself stays open (Effect A
-	// does not re-run). Render-phase, mirroring the session reset above.
-	const [prevSearchActive, setPrevSearchActive] = useState<boolean>(searchActive)
+	// Per-query reset. The display is gated on `status` in the return (results are hidden while
+	// warming/terminal), so a query change need only flip the session into "warming" — it must NOT
+	// clear the results STATE (that would strand a clear→retype of the SAME term, whose warm-engine
+	// snapshot the SDK suppresses, leaving nothing to repaint it). Reset to warming ONLY when the
+	// active query differs from the one on display (`appliedQuery`): never on a clear to blank (the
+	// blank view is the directory listing; the results stay cached for an instant retype) and never
+	// on a same-term retype (resetting hasSnapshot there would strand the watchdog → false
+	// "Search unavailable", since the suppressed snapshot never flips it back). Render-phase,
+	// mirroring the session reset above. Also drops the sticky terminal flags so a prior query's
+	// wedge/error/stall doesn't flash onto the new term.
+	const [prevQueryNorm, setPrevQueryNorm] = useState<string>(searchQuery.trim())
 
-	if (searchActive !== prevSearchActive) {
-		setPrevSearchActive(searchActive)
+	if (searchQuery.trim() !== prevQueryNorm) {
+		setPrevQueryNorm(searchQuery.trim())
 
-		if (!searchActive) {
-			setSearchResults([])
-			setSearchResultPaths(new Map<string, string>())
-			setTotalCount(0)
-			setLive(true)
+		if (searchActive && searchQuery.trim() !== appliedQuery) {
 			setHasSnapshot(false)
-			setGraceElapsed(false)
+			setWatchdogFired(false)
+			setStallCeilingHit(false)
+			setOpenError(false)
 		}
 	}
 
@@ -212,7 +231,22 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// onSnapshot re-fires the full window; the signature catches a remote rename that keeps the
 	// uuid), and the last-seen online flag (for the connectivity-restore reopen).
 	const searchQueryRef = useRef<string>(searchQuery)
+	// The filter the SDK engine currently holds — the last name the hook ISSUED via open / setName.
+	// Set in callbacks/effects (never render). Read in onSnapshot to reject a snapshot for a
+	// SUPERSEDED filter (a live update for the prior term arriving in the debounce gap before the
+	// new setName lands) so it isn't painted under the new query.
+	const lastIssuedNameRef = useRef<string>("")
 	const generationRef = useRef<number>(0)
+	// Whether the CURRENT open has delivered at least one snapshot. A setName the engine accepts
+	// proves liveness only for an ALREADY-established search (so an identical-window refilter whose
+	// snapshot the SDK suppresses doesn't strand the watchdog); for a never-delivered (wedged) open
+	// it must NOT fake hydration — the watchdog still has to fire terminal. Reset per open.
+	const everDeliveredSnapshotRef = useRef<boolean>(false)
+	// Bumped on every ACCEPTED snapshot. Lets a setName's resolution tell whether the engine emitted
+	// a fresh snapshot (seq moved → onSnapshot already applied the new window) or SUPPRESSED an
+	// identical one (seq unchanged → setName must hydrate, else it wedges). Stops a results-changing
+	// refilter from briefly painting the prior term's rows if setName resolves before its snapshot.
+	const snapshotSeqRef = useRef<number>(0)
 	const tombstonesRef = useRef<Set<string>>(new Set<string>())
 	const mapCacheRef = useRef<Map<string, { sig: string; item: DriveItem }>>(new Map<string, { sig: string; item: DriveItem }>())
 	const wasOnlineRef = useRef<boolean>(isOnline)
@@ -229,15 +263,53 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// stale), setName returns false and we REOPEN via the passed callback — otherwise a
 	// keystroke after a background→foreground cycle would silently no-op forever (the search
 	// was torn down to release the shared socket, and refilter alone can't bring it back).
-	const [debouncedSetName] = useState(() =>
-		debounce((name: string, reopen: () => void) => {
+	// Stable debounced re-filter (engine-local setConfig; no network, no re-open). Created in an
+	// effect — not a render-phase useState initializer — so it may read refs (lastIssuedNameRef /
+	// everDeliveredSnapshotRef), which a render-created closure must not. If the engine has no live
+	// search (setName → false: closed on backgrounding and not reopened) we REOPEN via the nonce,
+	// so a keystroke after a background→foreground cycle can't silently no-op into a closed search.
+	const debouncedSetNameRef = useRef<((name: string) => void) | null>(null)
+
+	useEffect(() => {
+		const fn = debounce((name: string) => {
+			// The engine's filter is becoming this name. Recorded SYNCHRONOUSLY (before the await) so
+			// onSnapshot's stale-filter guard sees the right value for a live update in the gap.
+			lastIssuedNameRef.current = name.trim()
+
+			const seqAtIssue = snapshotSeqRef.current
+
 			void driveSearch.setName(name).then(applied => {
 				if (!applied) {
-					reopen()
+					setReopenNonce(nonce => nonce + 1)
+
+					return
 				}
+
+				setAppliedQuery(name.trim())
+
+				// Force-hydrate ONLY when the engine SUPPRESSED the snapshot — no accepted snapshot
+				// since we issued this setName (seq unchanged) — AND this open already delivered once.
+				// That covers a clear→retype of the same or another identically-empty term (the SDK
+				// emits nothing, so without this the watchdog would wedge an alive search at "Search
+				// unavailable"). If a fresh snapshot DID land (seq moved) onSnapshot already applied
+				// the correct window — don't pre-empt it with the prior term's rows. A never-delivered
+				// (wedged) open stays un-hydrated so the watchdog can still fire terminal. Clearing the
+				// terminal flags is safe regardless: the engine answered, so it is alive.
+				if (everDeliveredSnapshotRef.current && snapshotSeqRef.current === seqAtIssue) {
+					setHasSnapshot(true)
+				}
+
+				setOpenError(false)
+				setWatchdogFired(false)
 			})
 		}, SETCONFIG_DEBOUNCE_MS)
-	)
+
+		debouncedSetNameRef.current = fn
+
+		return () => {
+			fn.cancel()
+		}
+	}, [])
 
 	// Effect A — open / close + the per-session grace & watchdog timers. Their setState
 	// fires from timer / snapshot callbacks (allowed), never synchronously — the per-session
@@ -257,8 +329,13 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 			return
 		}
 
+		// The engine's filter is becoming this name (mirrors debouncedSetName) — recorded before any
+		// await so onSnapshot's stale-filter guard sees the right value for the initial window.
+		lastIssuedNameRef.current = searchQueryRef.current.trim()
+
 		const generation = ++generationRef.current
 
+		everDeliveredSnapshotRef.current = false
 		tombstonesRef.current = new Set<string>()
 		mapCacheRef.current = new Map<string, { sig: string; item: DriveItem }>()
 
@@ -271,6 +348,16 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 				signal: controller.signal,
 				onSnapshot: (snapshot: CacheSearchSnapshot) => {
 					if (generation !== generationRef.current) {
+						return
+					}
+
+					// Reject a snapshot for a SUPERSEDED filter: while a query change waits for its
+					// debounced setName, the engine still holds the OLD filter and may emit live
+					// updates for it — painting those under the new query is the stale-row flash.
+					// lastIssuedNameRef is the engine's current filter; only paint once it matches
+					// the live query (the new setName has landed). The initial open sets the ref to
+					// the open name before this fires, so the first window is never rejected.
+					if (lastIssuedNameRef.current !== searchQueryRef.current.trim()) {
 						return
 					}
 
@@ -310,6 +397,13 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 					setTotalCount(Number(snapshot.total))
 					setLive(snapshot.live)
 					setHasSnapshot(true)
+					everDeliveredSnapshotRef.current = true
+					snapshotSeqRef.current += 1
+					// A snapshot landed → this (re)open succeeded, so drop any prior open error (a
+					// failed foreground reopen sets it; a later success must self-heal). Record the
+					// displayed query so the per-query reset can recognise a same-term retype.
+					setOpenError(false)
+					setAppliedQuery(lastIssuedNameRef.current)
 				}
 			})
 			.catch((error: unknown) => {
@@ -391,8 +485,8 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 			return
 		}
 
-		debouncedSetName(searchQuery, () => setReopenNonce(nonce => nonce + 1))
-	}, [searchQuery, isCacheSearch, debouncedSetName])
+		debouncedSetNameRef.current?.(searchQuery)
+	}, [searchQuery, isCacheSearch])
 
 	// Stall ceiling — backstop for a dropped `Finished` (best-effort delivery) so a stuck
 	// `resyncing` can't pin "Still searching…" forever. Re-arms on `resyncProgress` (every
@@ -477,6 +571,25 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		}
 	}, [isPlainDrive])
 
+	// Purge selected items that left the visible result set — a query refinement that narrowed the
+	// matches, or a remote rename / move that dropped a hit. Otherwise a bulk action would target
+	// now-hidden items and the header's select-all count would desync from what's on screen. Gated
+	// on `hasSnapshot` so it reconciles against a real result set, never a transiently-stale one
+	// mid-warming. Mirrors the sharedIn purge in the Drive component.
+	useEffect(() => {
+		if (!isCacheSearch || !hasSnapshot) {
+			return
+		}
+
+		const present = new Set(searchResults.map(item => item.data.uuid))
+		const selected = useDriveStore.getState().selectedItems
+		const stale = selected.filter(item => !present.has(item.data.uuid)).map(item => item.data.uuid)
+
+		if (stale.length > 0) {
+			useDriveStore.getState().removeFromSelection(stale)
+		}
+	}, [searchResults, isCacheSearch, hasSnapshot])
+
 	const status = deriveStatus({
 		isCacheSearch,
 		live,
@@ -492,13 +605,21 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		stallCeilingHit
 	})
 
+	// Hide the result STATE while warming (a query change in flight) or terminal (a failed open):
+	// the loading spinner is a transparent overlay, so leaking the prior term's rows under it is the
+	// stale-row flash, and a terminal must show its empty state, not stale rows. The state itself is
+	// retained (never cleared on a query change) so a same-term retype repaints instantly once
+	// `status` leaves warming. settled / background / searching-empty / offline-incomplete show the
+	// real results (empty ones are already []).
+	const showResults = status !== "warming" && status !== "terminal"
+
 	return {
 		searchQuery,
 		setSearchQuery,
-		searchResults,
-		searchResultPaths,
+		searchResults: showResults ? searchResults : NO_RESULTS,
+		searchResultPaths: showResults ? searchResultPaths : NO_PATHS,
 		status,
-		totalCount
+		totalCount: showResults ? totalCount : 0
 	}
 }
 

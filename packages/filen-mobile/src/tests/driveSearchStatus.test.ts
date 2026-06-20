@@ -76,8 +76,13 @@ describe("deriveStatus", () => {
 		expect(deriveStatus(base({ rootDeleted: true }))).toBe("terminal")
 	})
 
-	it("does not wedge terminal on an open error once a snapshot has landed (self-heal)", () => {
-		expect(deriveStatus(base({ openError: true, hasSnapshot: true, totalCount: 1, graceElapsed: true }))).toBe("settled")
+	it("is terminal on an open error even with a stale snapshot (self-heal moved to the hook)", () => {
+		// The pure machine no longer self-heals via `hasSnapshot`: a failed FOREGROUND reopen keeps
+		// a stale pre-background snapshot (hasSnapshot stays true, since sessionKey excludes the
+		// foreground edge) and MUST still surface as terminal, not show the stale rows forever. The
+		// hook owns the self-heal now — it clears openError on every accepted snapshot + accepted
+		// setName — so by the time a real result is shown, openError is already false.
+		expect(deriveStatus(base({ openError: true, hasSnapshot: true, totalCount: 1, graceElapsed: true }))).toBe("terminal")
 	})
 })
 

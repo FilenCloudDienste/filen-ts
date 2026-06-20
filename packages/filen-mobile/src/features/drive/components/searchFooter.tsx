@@ -21,7 +21,10 @@ const DriveSearchFooter = ({
 }) => {
 	const { t } = useTranslation()
 
-	if (status === "settled" && totalCount > resultCount) {
+	// Show the truncation notice whenever results are presenting AND truncated — not only once
+	// settled: a >CEILING match set converges in "background" (still resyncing) for a while, during
+	// which the list is silently capped with no hint. ("searching-empty" has no results to truncate.)
+	if ((status === "settled" || status === "background") && totalCount > resultCount) {
 		return (
 			<View className="bg-transparent px-4 py-3">
 				<Text

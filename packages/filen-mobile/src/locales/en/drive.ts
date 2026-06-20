@@ -92,7 +92,7 @@ export const drive = {
 	/** Empty-state subtitle under search_unavailable */
 	search_unavailable_description: "Couldn't search right now. Pull to refresh or try again later.",
 	/** Footer shown when the match count exceeds the result cap; {{shown}} and {{total}} are counts */
-	search_results_truncated: "Showing the first {{shown}} of {{total}} matches. Refine your search to narrow it down.",
+	search_results_truncated: "Showing the first {{shown}} of {{total}} matches (alphabetical). Refine your search to narrow it down.",
 	/** Empty-state title while the search has no matches yet but is still streaming the subtree in (resync converging) */
 	no_results_yet: "No results yet",
 	/** Empty-state subtitle under no_results_yet — conveys the search is still working, not finished */
