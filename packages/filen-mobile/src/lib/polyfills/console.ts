@@ -50,7 +50,7 @@ global.console.trace = (...args: unknown[]): void => {
 }
 
 global.console.warn = (...args: unknown[]): void => {
-	// Pass args RAW: the logger's enqueue-time freeze (logRedaction.freezeForLog) snapshots any live
+	// Pass args RAW: the logger's enqueue-time freeze (freezeForLog, in serializer.ts) snapshots any live
 	// FilenSdkError into plain { __sdkError } fields, identically for direct logger.* calls and this
 	// tee — one code path, one shape. (Previously the tee pre-normalized here; that duplicated the
 	// logic and emitted a different, numeric-kind shape.)
