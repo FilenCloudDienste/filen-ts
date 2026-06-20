@@ -33,6 +33,17 @@ import {
 	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
 } from "@/features/transfers/foregroundService"
 import logger from "@/lib/logger"
+import auth from "@/lib/auth"
+import { actionSheet } from "@/providers/actionSheet.provider"
+import {
+	TRANSFER_PERFORMANCE_PRESETS,
+	type TransferPerformancePreset,
+	TRANSFER_BANDWIDTH_PRESETS_KBPS,
+	kbpsToMbLabel,
+	useTransferPerformancePreset,
+	useUploadLimitKbps,
+	useDownloadLimitKbps
+} from "@/features/settings/transferConfig"
 
 const SIZE_LOADING_PLACEHOLDER = "…"
 
@@ -130,6 +141,42 @@ function Advanced() {
 		CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY,
 		DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED
 	)
+
+	const [transferPreset, setTransferPreset] = useTransferPerformancePreset()
+	const [uploadLimitKbps, setUploadLimitKbps] = useUploadLimitKbps()
+	const [downloadLimitKbps, setDownloadLimitKbps] = useDownloadLimitKbps()
+
+	const presetLabels: Record<TransferPerformancePreset, string> = {
+		batterySaver: t("transfer_preset_battery_saver"),
+		balanced: t("transfer_preset_balanced"),
+		performance: t("transfer_preset_performance"),
+		maximum: t("transfer_preset_maximum")
+	}
+
+	const bandwidthLabel = (kbps: number | null): string => (kbps === null ? t("transfer_limit_unlimited") : kbpsToMbLabel(kbps))
+
+	const showBandwidthPicker = (current: number | null, apply: (next: number | null) => void): void => {
+		const options: (number | null)[] = [null, ...TRANSFER_BANDWIDTH_PRESETS_KBPS]
+
+		actionSheet.show({
+			buttons: [
+				...options.map(value => ({
+					title: value === current ? `${bandwidthLabel(value)} (${t("current")})` : bandwidthLabel(value),
+					onPress: () => {
+						if (value === current) {
+							return
+						}
+
+						apply(value)
+					}
+				})),
+				{
+					title: t("close"),
+					cancel: true
+				}
+			]
+		})
+	}
 
 	const offlineSubtitle = (() => {
 		if (!sizes) {
@@ -248,6 +295,78 @@ function Advanced() {
 							]}
 						/>
 					) : null}
+					<Group
+						className="bg-background-tertiary"
+						buttons={[
+							{
+								icon: "cloud-upload-outline",
+								title: t("upload_limit"),
+								subTitle: t("upload_limit_description"),
+								rightItem: {
+									type: "text",
+									value: bandwidthLabel(uploadLimitKbps)
+								},
+								onPress: () => {
+									showBandwidthPicker(uploadLimitKbps, next => {
+										setUploadLimitKbps(next)
+
+										void auth.applyBandwidthLimits(next, downloadLimitKbps)
+									})
+								}
+							},
+							{
+								icon: "cloud-download-outline",
+								title: t("download_limit"),
+								subTitle: t("download_limit_description"),
+								rightItem: {
+									type: "text",
+									value: bandwidthLabel(downloadLimitKbps)
+								},
+								onPress: () => {
+									showBandwidthPicker(downloadLimitKbps, next => {
+										setDownloadLimitKbps(next)
+
+										void auth.applyBandwidthLimits(uploadLimitKbps, next)
+									})
+								}
+							},
+							{
+								icon: "speedometer-outline",
+								title: t("transfer_performance"),
+								subTitle: t("transfer_performance_description"),
+								rightItem: {
+									type: "text",
+									value: presetLabels[transferPreset]
+								},
+								onPress: () => {
+									actionSheet.show({
+										buttons: [
+											...TRANSFER_PERFORMANCE_PRESETS.map(preset => ({
+												title: preset === transferPreset ? `${presetLabels[preset]} (${t("current")})` : presetLabels[preset],
+												onPress: () => {
+													if (preset === transferPreset) {
+														return
+													}
+
+													setTransferPreset(preset)
+
+													void prompts.alert({
+														title: t("transfer_performance_updated_title"),
+														message: t("transfer_performance_restart_required"),
+														singleButton: true
+													})
+												}
+											})),
+											{
+												title: t("close"),
+												cancel: true
+											}
+										]
+									})
+								}
+							}
+						]}
+					/>
 					<Group
 						className="bg-background-tertiary"
 						buttons={[

@@ -420,5 +420,31 @@ export const settings = {
 	/** Advanced — confirm button on the export-logs consent dialog */
 	export_logs_action: "Export",
 	/** Advanced — toast shown when there are no logs to export yet */
-	export_logs_none: "There are no logs to export yet."
+	export_logs_none: "There are no logs to export yet.",
+	/** Advanced → Transfers — upload speed cap row title */
+	upload_limit: "Upload limit",
+	/** Advanced → Transfers — upload speed cap row subtitle */
+	upload_limit_description: "Cap how fast files upload to save data or battery",
+	/** Advanced → Transfers — download speed cap row title */
+	download_limit: "Download limit",
+	/** Advanced → Transfers — download speed cap row subtitle */
+	download_limit_description: "Cap how fast files download to save data or battery",
+	/** Advanced → Transfers — performance preset row title */
+	transfer_performance: "Performance",
+	/** Advanced → Transfers — performance preset row subtitle */
+	transfer_performance_description: "How aggressively transfers run — higher uses more battery, memory and data",
+	/** Advanced → Transfers — bandwidth picker option for no limit */
+	transfer_limit_unlimited: "Unlimited",
+	/** Advanced → Transfers — performance preset: gentlest (fewest parallel transfers) */
+	transfer_preset_battery_saver: "Battery saver",
+	/** Advanced → Transfers — performance preset: default */
+	transfer_preset_balanced: "Balanced",
+	/** Advanced → Transfers — performance preset: faster, heavier */
+	transfer_preset_performance: "Performance",
+	/** Advanced → Transfers — performance preset: most aggressive */
+	transfer_preset_maximum: "Maximum",
+	/** Advanced → Transfers — title of the dialog shown after changing the performance preset */
+	transfer_performance_updated_title: "Performance updated",
+	/** Advanced → Transfers — body of the dialog telling the user the change applies on restart */
+	transfer_performance_restart_required: "This change will take effect the next time you restart the app."
 } as const
