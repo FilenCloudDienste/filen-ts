@@ -14,31 +14,33 @@ index 53d4be0..c63fbe3 100644
    }
  }
 diff --git a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
-index c0ff861..211184d 100644
+index c0ff861..99934d7 100644
 --- a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
 +++ b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
-@@ -46,6 +46,8 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+@@ -46,6 +46,9 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
    private var fitMode: FitMode = DEFAULT_FIT_MODE
    private var autoScaleEnabled: Boolean = DEFAULT_AUTO_SCALE_ENABLED
    private var isPageColorInverted: Boolean = DEFAULT_PAGE_COLOR_INVERTED_ENABLED
-+  // Max zoom relative to the fit scale (barteksc PDFView default is 3.0). null = leave the default.
-+  private var maxZoom: Float? = null
++  // Max zoom relative to the fit scale (PDFView default is 3.0). null = leave the default.
++  // Named to avoid clashing with PDFView.maxZoom's accessor / our setMaxZoom() prop setter.
++  private var configuredMaxZoom: Float? = null
  
    internal val pdfView = PDFView(context, null).apply {
      layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-@@ -125,11 +127,25 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+@@ -125,11 +128,26 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
      this.reloadPdf()
    }
  
 +  fun setMaxZoom(maxZoom: Float?) {
-+    this.maxZoom = maxZoom
++    this.configuredMaxZoom = maxZoom
 +    this.applyZoomLimits()
 +  }
 +
-+  // barteksc PDFView's min/mid/maxZoom are instance properties (not part of the load Configurator),
-+  // so set them directly. null leaves the library default (3.0) untouched.
++  // PDFView (this fork is Kotlin) exposes maxZoom as a property, NOT a setMaxZoom() method — assign
++  // it directly. It's an instance property, not part of the load Configurator. null leaves the
++  // library default (3.0) untouched.
 +  private fun applyZoomLimits() {
-+    this.maxZoom?.let { this.pdfView.setMaxZoom(it) }
++    this.configuredMaxZoom?.let { this.pdfView.maxZoom = it }
 +  }
 +
    private fun reloadPdf() {
