@@ -495,7 +495,8 @@ export function decideQueryErrorAction(
 	}
 ): QueryErrorAction {
 	// When offline, suppress network-class errors so the user doesn't see banner storms.
-	// The persistent <OfflineBanner /> is the canonical signal that requests can't go out.
+	// The floating-bar offline slot (components/floatingBar/offlineSlot) is the canonical
+	// signal that requests can't go out.
 	if (deps.isNetworkClassError(err) && !deps.isOnline()) {
 		return "suppress"
 	}

@@ -7,6 +7,7 @@ import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import useFloatingBarOffset from "@/hooks/useFloatingBarOffset"
 import AudioSlot from "@/components/floatingBar/audioSlot"
 import TransfersSlot from "@/components/floatingBar/transfersSlot"
+import OfflineSlot, { useOfflineSlotStatus } from "@/components/floatingBar/offlineSlot"
 import Separator from "@/components/floatingBar/separator"
 import useAppStore from "@/stores/useApp.store"
 
@@ -29,7 +30,15 @@ const FloatingBar = () => {
 
 	const audioActive = queueItem !== null
 
-	if (!isOnTabs || (!audioActive && !transfersActive)) {
+	// Offline indicator (replaces the old top-of-screen banner). It rides the transfers slot's
+	// position — but takes PRIORITY over it: transfers can linger paused in the store after a
+	// connectivity drop, and "Offline" is the more informative root-cause signal, so when offline
+	// we show the chip instead of the stuck transfers. Coexists with audio (which plays offline).
+	const offlineStatus = useOfflineSlotStatus()
+	const offlineActive = offlineStatus !== "hidden"
+	const rightActive = offlineActive || transfersActive
+
+	if (!isOnTabs || (!audioActive && !rightActive)) {
 		return null
 	}
 
@@ -51,8 +60,12 @@ const FloatingBar = () => {
 				) : (
 					<Fragment />
 				)}
-				{audioActive && transfersActive ? <Separator /> : <Fragment />}
-				{transfersActive ? (
+				{audioActive && rightActive ? <Separator /> : <Fragment />}
+				{offlineStatus !== "hidden" ? (
+					<View className="flex-1 bg-transparent">
+						<OfflineSlot status={offlineStatus} />
+					</View>
+				) : transfersActive ? (
 					<View className="flex-1 bg-transparent">
 						<TransfersSlot />
 					</View>
