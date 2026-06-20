@@ -3,6 +3,7 @@ import { xxHash32 } from "js-xxhash"
 import { type Dir } from "@filen/sdk-rs"
 import { type CameraUploadHashEntry } from "@/lib/cache"
 import { isTrashParent } from "@/lib/sdkUnwrap"
+import { isHeicFile } from "@/lib/imageConversion"
 
 export type CollisionParams = {
 	iteration: number
@@ -122,39 +123,40 @@ export function albumFolderTitle(title: string): string | null {
 	return sanitizePathSegment(trimmed)
 }
 
-// Derive the dedup tree-key for a camera-upload asset path so that listLocal and
-// listRemote resolve the SAME asset to the SAME key — even when compression
-// rewrites the extension on upload.
+// Derive the dedup tree-key for a camera-upload asset path so that listLocal and listRemote resolve
+// the SAME physical asset to the SAME key, accounting for the upload pipeline's extension rewrites.
 //
-// #15: when `compress` is enabled, `compress()` may rewrite e.g. `photo.png` to
-// `photo.jpg` (JPEG output) but ONLY when the compressed bytes are smaller. That
-// outcome cannot be known at listing time, so anticipating a fixed `.jpg`
-// extension would be wrong for the (frequent) case where compression does not
-// win. Instead, when compress is on, the dedup key is made extension-agnostic by
-// stripping the trailing extension and comparing on the name stem. The local key
-// (always the source extension) and the remote key (either source extension when
-// compression lost, or `.jpg` when it won) then collapse to the identical stem,
-// so the asset is matched and not re-evaluated as "missing remotely" every sync.
+// #15 — compress: `compress()` may rewrite e.g. `photo.png` → `photo.jpg`, but ONLY when the JPEG
+// output is smaller — an outcome unknowable at listing time. The uploaded extension is therefore
+// unpredictable, so the key is made extension-AGNOSTIC (strip the trailing extension). The local key
+// (source ext) and the remote key (source ext when compression lost, `.jpg` when it won) collapse to
+// the identical stem.
 //
-// The HEIC→JPG conversion option behaves identically: when `convertHeic` is on,
-// a `.heic`/`.heif` source is uploaded as `.jpg`, so the local key (source `.heic`)
-// and the remote key (`.jpg`) must collapse to the same stem — exactly like compress.
-// Stripping is therefore applied when EITHER feature can rewrite the extension.
+// convertHeic: the HEIC→JPG option rewrites ONLY `.heic`/`.heif`/`.heics`/`.heifs` → `.jpg`,
+// deterministically (non-HEIC inputs upload unchanged). So the key NORMALIZES to the post-conversion
+// name — a HEIC path maps to its `.jpg` form, everything else is kept verbatim. This is symmetric
+// WITHOUT a side flag: listLocal maps a source `.heic` → `.jpg`; listRemote sees the already-converted
+// `.jpg` (not HEIC) and leaves it verbatim — both land on `…/photo.jpg`. It deliberately does NOT
+// strip the extension off every file: stripping collapsed genuinely-distinct non-HEIC siblings that
+// share a stem (e.g. `doc.png` and `doc.mp4` both became `doc`), so one overwrote the other in the
+// tree and was silently never backed up (data loss). compress dominates when both options are on.
 //
-// When both are OFF the full path (extension included) is kept verbatim, so
-// genuinely different-extension siblings never merge.
+// When neither option is on the full path (extension included) is kept verbatim, so genuinely
+// different-extension siblings never merge.
 export function dedupTreeKey({ path, compress, convertHeic }: { path: string; compress: boolean; convertHeic?: boolean }): string {
-	if (!compress && !convertHeic) {
-		return path
+	if (compress) {
+		const ext = FileSystem.Paths.extname(path)
+
+		return ext.length === 0 ? path : path.slice(0, -ext.length)
 	}
 
-	const ext = FileSystem.Paths.extname(path)
+	if (convertHeic && isHeicFile(path)) {
+		const ext = FileSystem.Paths.extname(path)
 
-	if (ext.length === 0) {
-		return path
+		return ext.length === 0 ? path : `${path.slice(0, -ext.length)}.jpg`
 	}
 
-	return path.slice(0, -ext.length)
+	return path
 }
 
 // Strip the trailing extension from a filename so the collision-suffix logic
@@ -169,6 +171,28 @@ export function stripFilenameExtension(name: string): string {
 	}
 
 	return name.slice(0, -ext.length)
+}
+
+// The post-rewrite filename used to derive a collision suffix, kept SYMMETRIC across listLocal and
+// listRemote. Mirrors `dedupTreeKey` exactly so the collision-resolved key matches on both sides:
+//   - compress: extension-agnostic stem (uploaded ext unpredictable).
+//   - convertHeic: a HEIC name maps to its post-conversion `.jpg` name; non-HEIC names are kept
+//     verbatim (they upload unchanged). Using the `.jpg` name — not a bare stem — keeps the collision
+//     path's extension aligned with the remote `name_<suffix>.jpg` the upload actually writes.
+//   - neither: the name verbatim.
+// compress dominates when both options are on.
+export function collisionBaseName({ name, compress, convertHeic }: { name: string; compress: boolean; convertHeic?: boolean }): string {
+	if (compress) {
+		return stripFilenameExtension(name)
+	}
+
+	if (convertHeic && isHeicFile(name)) {
+		const ext = FileSystem.Paths.extname(name)
+
+		return ext.length === 0 ? name : `${name.slice(0, -ext.length)}.jpg`
+	}
+
+	return name
 }
 
 // #B7: ONE timestamp fallback rule for everything that derives an identity from an

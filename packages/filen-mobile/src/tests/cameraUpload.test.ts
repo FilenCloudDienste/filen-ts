@@ -2540,7 +2540,7 @@ describe("sync flow — HEIC→JPG conversion dedup", () => {
 		vi.mocked(unwrapFileMeta).mockReturnValue({ meta: { name: "photo.jpg", created: 1000n, modified: 2000n } } as any)
 	}
 
-	it("convertHeic ON: a local .heic already uploaded as .jpg is matched by stem key and NOT re-uploaded", async () => {
+	it("convertHeic ON: a local .heic already uploaded as .jpg is matched by the normalized key and NOT re-uploaded", async () => {
 		setupHeicAsset()
 		remoteHasConvertedJpg()
 
@@ -2550,12 +2550,13 @@ describe("sync flow — HEIC→JPG conversion dedup", () => {
 
 		await cameraUpload.sync()
 
-		// Local /camera roll/photo.heic and remote /camera roll/photo.jpg both collapse to
-		// the stem key /camera roll/photo → matched → no re-upload (the eternal-loop guard).
+		// Local /camera roll/photo.heic is NORMALIZED to /camera roll/photo.jpg; remote
+		// /camera roll/photo.jpg keys verbatim → both land on the same key → matched → no
+		// re-upload (the eternal-loop guard).
 		expect(transfers.upload).not.toHaveBeenCalled()
 	})
 
-	it("convertHeic OFF: the same .heic does NOT match the remote .jpg (the stripping is what links them)", async () => {
+	it("convertHeic OFF: the same .heic does NOT match the remote .jpg (normalization is what links them)", async () => {
 		setupHeicAsset()
 		remoteHasConvertedJpg()
 
@@ -2564,6 +2565,42 @@ describe("sync flow — HEIC→JPG conversion dedup", () => {
 
 		// /camera roll/photo.heic ≠ /camera roll/photo.jpg → seen as missing remotely → uploaded.
 		expect(transfers.upload).toHaveBeenCalled()
+	})
+
+	// CU-05 data-loss regression: two genuinely-distinct non-HEIC siblings that share a stem must
+	// BOTH upload under convertHeic. The old code stripped the extension off EVERY file when
+	// convertHeic was on, collapsing doc.jpg and doc.png onto one tree key — one overwrote the other
+	// in the local tree and was silently never backed up. convertHeic never rewrites these, so their
+	// keys stay distinct and both upload.
+	it("convertHeic ON: two same-stem non-HEIC siblings (doc.jpg + doc.png) BOTH upload (no over-merge)", async () => {
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["jpg-1", "png-1"] })
+
+		for (const asset of [
+			{ id: "jpg-1", filename: "doc.jpg" },
+			{ id: "png-1", filename: "doc.png" }
+		]) {
+			const uri = `file:///media/${asset.id}`
+
+			ml.addAsset({
+				id: asset.id,
+				filename: asset.filename,
+				uri,
+				mediaType: MediaType.IMAGE,
+				creationTime: 1000,
+				modificationTime: 2000
+			})
+
+			fs.set(uri, new Uint8Array([1, 2, 3]))
+		}
+
+		// convertHeic ON; remote empty (default mock) → both siblings are "missing remotely".
+		vi.mocked(secureStore.get).mockImplementation(async (key: string) =>
+			key === CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY ? (true as any) : (ENABLED_CONFIG as any)
+		)
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(2)
 	})
 })
 

@@ -17,6 +17,24 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 // graph still resolves it — stub it to avoid pulling the native SDK into this test.
 vi.mock("@filen/sdk-rs", () => ({}))
 
+// cameraUploadHelpers imports isHeicFile from @/lib/imageConversion to decide which files the
+// convertHeic option actually rewrites (.heic/.heif → .jpg). Stub it with a faithful, dependency-
+// free re-implementation so this light test does not pull imageConversion's heavy graph
+// (expo-image-manipulator / secureStore / tmp). The real isHeicFile has its own coverage.
+vi.mock("@/lib/imageConversion", () => ({
+	isHeicFile: (nameOrUri: string) => {
+		const path = nameOrUri.split(/[?#]/, 1)[0] ?? nameOrUri
+		const lastSegment = path.slice(path.lastIndexOf("/") + 1)
+		const dotIndex = lastSegment.lastIndexOf(".")
+
+		if (dotIndex <= 0) {
+			return false
+		}
+
+		return new Set([".heic", ".heif", ".heics", ".heifs"]).has(lastSegment.slice(dotIndex).toLowerCase())
+	}
+}))
+
 import {
 	modifyAssetPathOnCollision,
 	collisionNameSuffix,
@@ -24,6 +42,7 @@ import {
 	albumFolderTitle,
 	applyAfterActivationToggle,
 	dedupTreeKey,
+	collisionBaseName,
 	stripFilenameExtension,
 	effectiveCreationTimestamp,
 	composeLocalTreePath,
@@ -749,18 +768,45 @@ describe("dedupTreeKey", () => {
 		expect(a).not.toBe(b)
 	})
 
-	it("strips the extension when convertHeic is ON even if compress is OFF", () => {
-		expect(dedupTreeKey({ path: "/camera roll/photo.heic", compress: false, convertHeic: true })).toBe("/camera roll/photo")
+	it("convertHeic ON: a .heic key is NORMALIZED to its post-conversion .jpg (NOT stripped)", () => {
+		// convertHeic rewrites ONLY .heic/.heif → .jpg, so the key maps to the post-conversion
+		// name. It must NOT strip the extension wholesale — that collapsed distinct non-HEIC
+		// siblings onto one key (see the data-loss regression below).
+		expect(dedupTreeKey({ path: "/camera roll/photo.heic", compress: false, convertHeic: true })).toBe("/camera roll/photo.jpg")
 	})
 
 	it("convertHeic ON: local .heic and remote .jpg collapse to one key (HEIC→JPG symmetry)", () => {
-		// listLocal lists the source .heic; listRemote lists the converted .jpg.
-		// Both must dedup to the identical stem key or the asset re-uploads every sync.
+		// listLocal lists the source .heic (→ normalized to .jpg); listRemote lists the already-
+		// converted .jpg (not HEIC → left verbatim). Both land on the identical key or the asset
+		// re-uploads every sync.
 		const local = dedupTreeKey({ path: "/camera roll/photo.heic", compress: false, convertHeic: true })
 		const remote = dedupTreeKey({ path: "/camera roll/photo.jpg", compress: false, convertHeic: true })
 
 		expect(local).toBe(remote)
-		expect(local).toBe("/camera roll/photo")
+		expect(local).toBe("/camera roll/photo.jpg")
+	})
+
+	it("convertHeic ON: distinct non-HEIC siblings sharing a stem stay on SEPARATE keys (data-loss regression)", () => {
+		// THE BUG: stripping the extension off EVERY file when convertHeic is on collapsed e.g.
+		// doc.png and doc.mp4 onto the same key "doc" — one overwrote the other in the tree and
+		// was silently never backed up. convertHeic never rewrites these, so they must stay distinct.
+		const png = dedupTreeKey({ path: "/camera roll/doc.png", compress: false, convertHeic: true })
+		const mp4 = dedupTreeKey({ path: "/camera roll/doc.mp4", compress: false, convertHeic: true })
+
+		expect(png).toBe("/camera roll/doc.png")
+		expect(mp4).toBe("/camera roll/doc.mp4")
+		expect(png).not.toBe(mp4)
+	})
+
+	it("convertHeic ON: a native .jpg is left verbatim (not HEIC, nothing to normalize)", () => {
+		expect(dedupTreeKey({ path: "/camera roll/pic.jpg", compress: false, convertHeic: true })).toBe("/camera roll/pic.jpg")
+	})
+
+	it("convertHeic ON: a native .jpg and a same-stem .png stay distinct (no over-merge)", () => {
+		const jpg = dedupTreeKey({ path: "/camera roll/x.jpg", compress: false, convertHeic: true })
+		const png = dedupTreeKey({ path: "/camera roll/x.png", compress: false, convertHeic: true })
+
+		expect(jpg).not.toBe(png)
 	})
 
 	it("keeps the full path when BOTH compress and convertHeic are OFF", () => {
@@ -768,43 +814,102 @@ describe("dedupTreeKey", () => {
 	})
 })
 
-// Toggle-safety: users flip compress / convertHeic at will, even mid-run. The
-// dedup key must stay stable so a settings change never makes a synced asset look
-// "missing remotely" and re-upload forever. These guard the invariant at the key
-// level (the integration loop tests live in cameraUpload.test.ts).
-describe("dedup key stability across compress/convertHeic toggle states", () => {
-	it("local .heic and remote .jpg collapse to the SAME key in every stripped state", () => {
+// Toggle-safety: users flip compress / convertHeic at will, even mid-run. The dedup key must be
+// INTERNALLY symmetric in every state (local and remote agree within a sync) so a settings change
+// never makes a synced asset look "missing remotely" and re-upload forever. Toggling BETWEEN states
+// may re-key (a different state keys differently), but each state is self-consistent, so a toggle
+// costs at most a one-time re-hash — never a perpetual re-upload. The integration loop tests live in
+// cameraUpload.test.ts.
+describe("dedup key symmetry across compress/convertHeic states", () => {
+	it("local .heic and remote .jpg collapse to the SAME key in every rewrite state", () => {
 		const localHeic = "/camera roll/photo.heic"
 		const remoteJpg = "/camera roll/photo.jpg"
-		const strippedStates = [
+		const rewriteStates = [
 			{ compress: true, convertHeic: false },
 			{ compress: false, convertHeic: true },
 			{ compress: true, convertHeic: true }
 		]
 
-		for (const state of strippedStates) {
+		for (const state of rewriteStates) {
 			expect(dedupTreeKey({ path: localHeic, ...state })).toBe(dedupTreeKey({ path: remoteJpg, ...state }))
 		}
 	})
 
-	it("the stem key is identical across all three stripped states (toggling among them never re-keys)", () => {
+	it("compress strips to the stem; convertHeic normalizes HEIC to .jpg (the two states key differently)", () => {
 		const path = "/camera roll/photo.heic"
 		const compressOnly = dedupTreeKey({ path, compress: true, convertHeic: false })
 		const convertOnly = dedupTreeKey({ path, compress: false, convertHeic: true })
 		const both = dedupTreeKey({ path, compress: true, convertHeic: true })
 
-		expect(compressOnly).toBe(convertOnly)
-		expect(convertOnly).toBe(both)
+		// compress is extension-agnostic (the uploaded ext is unpredictable); convertHeic maps the
+		// deterministic .heic → .jpg rewrite. compress dominates when both are on.
+		expect(compressOnly).toBe("/camera roll/photo")
+		expect(convertOnly).toBe("/camera roll/photo.jpg")
 		expect(both).toBe("/camera roll/photo")
+		expect(compressOnly).not.toBe(convertOnly)
 	})
 
-	it("only the both-OFF state keys on the full extension (the single re-key boundary)", () => {
+	it("both-OFF keeps the full source extension; each rewrite state re-keys away from it", () => {
 		const path = "/camera roll/photo.heic"
 
 		expect(dedupTreeKey({ path, compress: false, convertHeic: false })).toBe("/camera roll/photo.heic")
 		expect(dedupTreeKey({ path, compress: true, convertHeic: false })).not.toBe(
 			dedupTreeKey({ path, compress: false, convertHeic: false })
 		)
+		expect(dedupTreeKey({ path, compress: false, convertHeic: true })).not.toBe(
+			dedupTreeKey({ path, compress: false, convertHeic: false })
+		)
+	})
+})
+
+// ─── collisionBaseName (#B2/#15/HEIC collision-name symmetry) ─────────────────
+
+describe("collisionBaseName", () => {
+	it("compress ON: strips the extension (extension-agnostic — uploaded ext is unpredictable)", () => {
+		expect(collisionBaseName({ name: "photo.png", compress: true })).toBe("photo")
+		expect(collisionBaseName({ name: "photo.jpg", compress: true })).toBe("photo")
+	})
+
+	it("convertHeic ON: a HEIC name is normalized to its post-conversion .jpg name", () => {
+		expect(collisionBaseName({ name: "photo.heic", compress: false, convertHeic: true })).toBe("photo.jpg")
+	})
+
+	it("convertHeic ON: a non-HEIC name is kept verbatim (it is uploaded unchanged)", () => {
+		expect(collisionBaseName({ name: "doc.png", compress: false, convertHeic: true })).toBe("doc.png")
+		expect(collisionBaseName({ name: "pic.jpg", compress: false, convertHeic: true })).toBe("pic.jpg")
+	})
+
+	it("neither option: the name is kept verbatim", () => {
+		expect(collisionBaseName({ name: "photo.heic", compress: false, convertHeic: false })).toBe("photo.heic")
+	})
+
+	it("compress dominates convertHeic (strip wins when both are on)", () => {
+		expect(collisionBaseName({ name: "photo.heic", compress: true, convertHeic: true })).toBe("photo")
+	})
+})
+
+// ─── convertHeic collision key symmetry (local .heic vs remote uploaded .jpg) ──
+
+describe("convertHeic collision key symmetry", () => {
+	it("a HEIC collision member's local resolved key equals the remote uploaded file's key", () => {
+		// Local lists photo.heic; it collides at the normalized base key and resolves via the
+		// collision suffix. The upload writes photo_<suffix>.jpg remotely (suffix composed AFTER
+		// the HEIC→jpg rewrite); listRemote keys that verbatim. Both sides must land on the
+		// identical key or the member re-uploads forever.
+		const contentHash = String(Math.floor(1700000000000 / 1000))
+		const localBaseKey = dedupTreeKey({ path: "/camera roll/photo.heic", compress: false, convertHeic: true })
+		const localResolved = modifyAssetPathOnCollision({
+			iteration: 0,
+			path: localBaseKey,
+			asset: {
+				name: collisionBaseName({ name: "photo.heic", compress: false, convertHeic: true }),
+				contentHash
+			}
+		})
+		const remoteKey = dedupTreeKey({ path: `/camera roll/photo_${contentHash}.jpg`, compress: false, convertHeic: true })
+
+		expect(localResolved).toBe(remoteKey)
+		expect(localResolved).toBe(`/camera roll/photo_${contentHash}.jpg`)
 	})
 })
 

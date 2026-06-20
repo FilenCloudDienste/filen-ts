@@ -29,7 +29,7 @@ import {
 	collisionNameSuffix,
 	albumFolderTitle,
 	dedupTreeKey,
-	stripFilenameExtension,
+	collisionBaseName,
 	effectiveCreationTimestamp,
 	composeLocalTreePath,
 	rawRemoteTreePath,
@@ -530,10 +530,11 @@ class CameraUpload {
 					// re-upload class). For names without decodable %XX the composed key is
 					// byte-identical to the previous pipeline's output.
 					const originalPath = composeLocalTreePath({ folderTitle, filename: info.filename })
-					// #15: when compress is enabled the upload may rewrite the extension
-					// (e.g. .png → .jpg), so the dedup key is made extension-agnostic here
-					// and symmetrically on the remote side. The collision-suffix name is
-					// likewise stripped of its extension so the suffix path stays symmetric.
+					// #15/HEIC: the upload may rewrite the extension — compress to .jpg when smaller
+					// (unpredictable ⇒ extension-agnostic key), convertHeic .heic → .jpg
+					// (deterministic ⇒ key NORMALIZED to the post-conversion name). dedupTreeKey +
+					// collisionBaseName apply the SAME transform here and on the remote side so the
+					// tree key (and any collision-resolved key) stays symmetric for one physical asset.
 					const fullPath = originalPath.toLowerCase()
 					let path = dedupTreeKey({ path: fullPath, compress: config.compress, convertHeic })
 					let iteration = 0
@@ -555,7 +556,7 @@ class CameraUpload {
 
 					while (tree[path]) {
 						if (collisionName === null || localContentHash === null) {
-							collisionName = config.compress || convertHeic ? stripFilenameExtension(info.filename) : info.filename
+							collisionName = collisionBaseName({ name: info.filename, compress: config.compress, convertHeic })
 							localContentHash = String(sortSec)
 						}
 
@@ -730,13 +731,12 @@ class CameraUpload {
 			// literal "%2F" would gain a phantom "/" separator), or the key diverges from
 			// the local raw composition and the asset re-uploads forever.
 			const fullPath = rawRemoteTreePath(file.path).toLowerCase()
-			// HEIC→JPG mirror of #15: convertHeic also rewrites the uploaded extension
-			// (.heic → .jpg), so strip it from the remote key + collision name too.
-			// #15: mirror listLocal — when compress is enabled, the remote filename may
-			// be the compressed `.jpg` (or the original extension when compression lost),
-			// so the dedup key is made extension-agnostic and the collision-suffix name is
-			// stripped of its extension. This keeps the remote key symmetric with the local
-			// stem-based key for the same physical asset.
+			// Mirror listLocal's key transform exactly (dedupTreeKey + collisionBaseName):
+			// compress ⇒ extension-agnostic stem; convertHeic ⇒ normalize to the post-
+			// conversion name. The remote listing already holds the uploaded name (the
+			// converted `.jpg`, or the compressed/original ext), so applying the same
+			// transform here keeps the remote key symmetric with the local key for one
+			// physical asset.
 			let path = dedupTreeKey({ path: fullPath, compress, convertHeic })
 			let iteration = 0
 
@@ -751,7 +751,7 @@ class CameraUpload {
 				if (collisionName === null || remoteContentHash === null) {
 					const remoteName = meta?.name ?? FileSystem.Paths.basename(fullPath)
 
-					collisionName = compress || convertHeic ? stripFilenameExtension(remoteName) : remoteName
+					collisionName = collisionBaseName({ name: remoteName, compress, convertHeic })
 					remoteContentHash = String(sortSec)
 				}
 
