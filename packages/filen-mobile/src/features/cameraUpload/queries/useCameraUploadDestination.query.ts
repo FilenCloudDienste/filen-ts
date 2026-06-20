@@ -50,6 +50,37 @@ export function useCameraUploadDestinationQuery(
 	return query
 }
 
+// Map a destination query's settled state to render-ready loading/usable/name flags. A THROWN
+// getDirOptional (network/transient/offline) lands the query in "error" with no data — that must
+// read as "not yet known" (loading), NEVER a definitive usable:false. Otherwise the UI declares a
+// perfectly valid destination "unavailable" on a transient blip while the engine keeps uploading to
+// it (the engine's destination gate bails only on a definitive success && !data — see
+// cameraUpload.sync()). Only a SETTLED success renders a real usability verdict; a genuinely
+// deleted/trashed directory surfaces as success + usable:false from fetchData, so it still renders
+// as gone correctly.
+export function resolveDestinationQueryState(query: {
+	status: "pending" | "error" | "success"
+	data?: CameraUploadDestination
+}): {
+	loading: boolean
+	usable: boolean
+	name: string | null
+} {
+	if (query.status === "success" && query.data) {
+		return {
+			loading: false,
+			usable: query.data.usable,
+			name: query.data.name
+		}
+	}
+
+	return {
+		loading: true,
+		usable: false,
+		name: query.data?.name ?? null
+	}
+}
+
 // Convenience hook resolving a config's destination directory to a render-ready shape. Handles the
 // three non-fetching cases inline (no destination configured ⇒ configured:false; the account root
 // ⇒ always usable, no request) and only hits the network for a real directory uuid. The underlying
@@ -91,11 +122,16 @@ export function useCameraUploadDestination(remoteDir: AnyNormalDir | null): {
 		}
 	}
 
+	const resolved = resolveDestinationQueryState({
+		status: query.status,
+		data: query.data
+	})
+
 	return {
 		configured: true,
-		loading: query.status === "pending",
-		usable: query.data?.usable ?? false,
-		name: query.data?.name ?? null
+		loading: resolved.loading,
+		usable: resolved.usable,
+		name: resolved.name
 	}
 }
 

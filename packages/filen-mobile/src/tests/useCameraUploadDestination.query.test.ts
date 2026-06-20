@@ -22,7 +22,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	})
 }))
 
-import { fetchData } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
+import { fetchData, resolveDestinationQueryState } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import auth from "@/lib/auth"
 
 function installGetDirOptional(impl: () => Promise<unknown>): ReturnType<typeof vi.fn> {
@@ -99,5 +99,50 @@ describe("useCameraUploadDestination.query fetchData", () => {
 		await fetchData({ uuid: "dir-uuid" })
 
 		expect(getDirOptional).toHaveBeenCalledWith("dir-uuid", undefined)
+	})
+})
+
+describe("resolveDestinationQueryState", () => {
+	it("settled success + usable directory ⇒ loading:false, usable:true, name passed through", () => {
+		expect(resolveDestinationQueryState({ status: "success", data: { usable: true, name: "Backups" } })).toEqual({
+			loading: false,
+			usable: true,
+			name: "Backups"
+		})
+	})
+
+	it("settled success + DEFINITIVELY-unusable directory ⇒ loading:false, usable:false (deleted/trashed renders as gone)", () => {
+		expect(resolveDestinationQueryState({ status: "success", data: { usable: false, name: "Trashed" } })).toEqual({
+			loading: false,
+			usable: false,
+			name: "Trashed"
+		})
+	})
+
+	it("pending ⇒ loading:true, usable:false (not yet known)", () => {
+		expect(resolveDestinationQueryState({ status: "pending" })).toEqual({
+			loading: true,
+			usable: false,
+			name: null
+		})
+	})
+
+	it("error with no data ⇒ loading:true, NOT a definitive usable:false (transient/offline must not read as gone)", () => {
+		// THE BUG: getDirOptional THROWS on a network/transient error → query status "error" with
+		// no data. Mapping that to usable:false made the UI declare a perfectly valid destination
+		// "unavailable" on a blip while the engine kept uploading to it. It must read as not-yet-known.
+		expect(resolveDestinationQueryState({ status: "error" })).toEqual({
+			loading: true,
+			usable: false,
+			name: null
+		})
+	})
+
+	it("error with stale prior data ⇒ still loading:true (never a confirmed-gone verdict), keeps the stale name", () => {
+		expect(resolveDestinationQueryState({ status: "error", data: { usable: true, name: "Backups" } })).toEqual({
+			loading: true,
+			usable: false,
+			name: "Backups"
+		})
 	})
 })
