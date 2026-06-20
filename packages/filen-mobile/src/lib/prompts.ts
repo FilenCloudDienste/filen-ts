@@ -17,6 +17,8 @@ export type AlertPromptOptions = {
 	okText?: string
 	cancelText?: string
 	destructive?: boolean
+	// When true, render only the OK button (an informational acknowledgement, no cancel).
+	singleButton?: boolean
 }
 
 // Which button the user chose in a three-button alert (primary affirmative / destructive / cancel).
@@ -75,26 +77,38 @@ const prompts = {
 				Alert.alert(
 					options?.title ?? "Title",
 					options?.message,
-					[
-						{
-							text: options?.cancelText ?? "Cancel",
-							style: "cancel",
-							onPress: () => {
-								resolve({
-									cancelled: true
-								})
-							}
-						},
-						{
-							text: options?.okText ?? "OK",
-							style: options?.destructive ? "destructive" : "default",
-							onPress: () => {
-								resolve({
-									cancelled: false
-								})
-							}
-						}
-					],
+					options?.singleButton
+						? [
+								{
+									text: options?.okText ?? "OK",
+									style: options?.destructive ? "destructive" : "default",
+									onPress: () => {
+										resolve({
+											cancelled: false
+										})
+									}
+								}
+							]
+						: [
+								{
+									text: options?.cancelText ?? "Cancel",
+									style: "cancel",
+									onPress: () => {
+										resolve({
+											cancelled: true
+										})
+									}
+								},
+								{
+									text: options?.okText ?? "OK",
+									style: options?.destructive ? "destructive" : "default",
+									onPress: () => {
+										resolve({
+											cancelled: false
+										})
+									}
+								}
+							],
 					{
 						cancelable: options?.cancellable ?? true,
 						onDismiss: () => {
