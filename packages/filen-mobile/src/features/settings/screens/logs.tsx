@@ -64,9 +64,30 @@ function formatTimestamp(t: number): string {
 	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`
 }
 
+// readEntries() deserializes log lines back into real types (bigint, Map, Set, …) via the shared
+// serializer, so plain JSON.stringify would throw on a bigint. The replacer renders the types bare
+// JSON can't: bigint → "<n>n", Map/Set → their entries/values.
 function stringifyData(data: unknown): string {
 	try {
-		return JSON.stringify(data, null, 2)
+		return JSON.stringify(
+			data,
+			(_key, value) => {
+				if (typeof value === "bigint") {
+					return `${value}n`
+				}
+
+				if (value instanceof Map) {
+					return Object.fromEntries(value)
+				}
+
+				if (value instanceof Set) {
+					return Array.from(value)
+				}
+
+				return value
+			},
+			2
+		)
 	} catch {
 		return String(data)
 	}

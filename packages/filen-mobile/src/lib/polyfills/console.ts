@@ -12,45 +12,6 @@ const original = {
 	trace: global.console.trace.bind(global.console)
 }
 
-// Turn SDK error objects into a plain { sdkKind, sdkMessage } so they serialize usefully in the
-// on-disk logger (and the dev console). The SDK message can carry a file path/name — kept by
-// design; only true secrets are stripped at flush by logRedaction.
-//
-// Never-throw + zero-alloc on the common path: a stale/freed FilenSdkError can make kind()/message()
-// (or unwrapSdkError itself) throw — that must NOT escape a console.* call. Each arg is probed in its
-// own try/catch, and the array is only copied (copy-on-write) once an SDK error is actually found, so
-// the overwhelmingly common "no SDK error" case keeps the original array and allocates nothing.
-function unwrapSdkArgs(args: unknown[]): unknown[] {
-	let result = args
-
-	for (let i = 0; i < args.length; i++) {
-		let replacement: unknown
-
-		try {
-			const sdk = unwrapSdkError(args[i])
-
-			if (!sdk) {
-				continue
-			}
-
-			replacement = {
-				sdkKind: sdk.kind(),
-				sdkMessage: sdk.message()
-			}
-		} catch {
-			continue
-		}
-
-		if (result === args) {
-			result = args.slice()
-		}
-
-		result[i] = replacement
-	}
-
-	return result
-}
-
 // Tee every leveled console.* into the diagnostic logger (gated, redacted at flush), then — in dev
 // only — forward to the native console. In production the native console stays silent for these
 // methods (as before); the difference is that the output now lands in the on-disk logger instead of
@@ -89,7 +50,11 @@ global.console.trace = (...args: unknown[]): void => {
 }
 
 global.console.warn = (...args: unknown[]): void => {
-	logger.captureConsole("warn", unwrapSdkArgs(args))
+	// Pass args RAW: the logger's enqueue-time freeze (logRedaction.freezeForLog) snapshots any live
+	// FilenSdkError into plain { __sdkError } fields, identically for direct logger.* calls and this
+	// tee — one code path, one shape. (Previously the tee pre-normalized here; that duplicated the
+	// logic and emitted a different, numeric-kind shape.)
+	logger.captureConsole("warn", args)
 
 	if (__DEV__) {
 		original.warn(...args)
@@ -97,7 +62,8 @@ global.console.warn = (...args: unknown[]): void => {
 }
 
 global.console.error = (...args: unknown[]): void => {
-	logger.captureConsole("error", unwrapSdkArgs(args))
+	// Pass args RAW — see the note on console.warn above (the logger freeze handles SDK errors).
+	logger.captureConsole("error", args)
 
 	if (!__DEV__) {
 		return

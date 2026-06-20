@@ -28,6 +28,33 @@ function encodeBinary(view: ArrayBufferView): {
 	}
 }
 
+// Structured plain-object form of an Error: name/message/stack/cause are non-enumerable (so a plain
+// key-walk emits {}), and a richer error may carry custom own props (Node fs: .code/.path; HTTP:
+// .status). Children are encoded so a bigint/typed-array/cause-error nested in props survives.
+function encodeError(err: Error): Record<string, unknown> {
+	const out: Record<string, unknown> = {
+		name: err.name,
+		message: err.message,
+		stack: err.stack
+	}
+
+	for (const key of Object.keys(err)) {
+		if (key === "name" || key === "message" || key === "stack" || key === "cause") {
+			continue
+		}
+
+		out[key] = encodeValue((err as unknown as Record<string, unknown>)[key])
+	}
+
+	const cause = (err as { cause?: unknown }).cause
+
+	if (cause !== undefined) {
+		out["cause"] = encodeValue(cause)
+	}
+
+	return out
+}
+
 function encodeValue(value: unknown): unknown {
 	if (value === null) {
 		return value
@@ -110,6 +137,44 @@ function encodeValue(value: unknown): unknown {
 				__bin: 1,
 				k: "ArrayBuffer",
 				d: Buffer.from(new Uint8Array(value)).toString("base64")
+			}
+		}
+
+		// Error: name/message/stack/cause are NON-enumerable, so the plain key-walk below would emit
+		// {} and bare JSON.stringify would too. Encode to a structured plain object (lossy — it does
+		// NOT revive to a real Error, nothing needs that; logs/diagnostics want the fields, persistence
+		// previously got {}). Keeps the stack, the chained cause, and any custom own props.
+		if (value instanceof Error) {
+			return encodeError(value)
+		}
+
+		// Map / Set: bare JSON yields {} (their contents live behind iteration, not own keys). Encode as
+		// round-trip envelopes so deserialize restores real Map/Set instances.
+		if (value instanceof Map) {
+			const entries = new Array<[unknown, unknown]>(value.size)
+			let i = 0
+
+			for (const [k, v] of value) {
+				entries[i++] = [encodeValue(k), encodeValue(v)]
+			}
+
+			return {
+				__map: 1,
+				e: entries
+			}
+		}
+
+		if (value instanceof Set) {
+			const values = new Array<unknown>(value.size)
+			let i = 0
+
+			for (const v of value) {
+				values[i++] = encodeValue(v)
+			}
+
+			return {
+				__set: 1,
+				v: values
 			}
 		}
 	}
@@ -306,6 +371,37 @@ function reviveContainer(value: object): unknown {
 		return reviveBinary(obj as { k: string; d: string })
 	}
 
+	if (obj["__map"] === 1) {
+		const entries = obj["e"] as [unknown, unknown][]
+		const map = new Map<unknown, unknown>()
+
+		for (let i = 0; i < entries.length; i++) {
+			const entry = entries[i] as [unknown, unknown]
+			const k = entry[0]
+			const v = entry[1]
+
+			map.set(
+				k !== null && typeof k === "object" ? reviveContainer(k) : k,
+				v !== null && typeof v === "object" ? reviveContainer(v) : v
+			)
+		}
+
+		return map
+	}
+
+	if (obj["__set"] === 1) {
+		const values = obj["v"] as unknown[]
+		const set = new Set<unknown>()
+
+		for (let i = 0; i < values.length; i++) {
+			const v = values[i]
+
+			set.add(v !== null && typeof v === "object" ? reviveContainer(v) : v)
+		}
+
+		return set
+	}
+
 	// for-in here, Object.keys in the encoder: measured — the in-place mutating
 	// decoder walk is fastest with for-in, the copy-on-write encoder walk with a
 	// keys array. (for-in also allocates nothing.)
@@ -326,7 +422,10 @@ function reviveContainer(value: object): unknown {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-const utf8Decoder = new TextDecoder()
+// Lazily constructed (not at module eval): the diagnostic logger now imports this module, which
+// loads during the console polyfill at the very start of boot — before TextDecoder is guaranteed
+// available. Building it on first use (a real deserialize) keeps module evaluation side-effect-free.
+let utf8Decoder: TextDecoder | null = null
 
 export function serialize(value: unknown): string {
 	return JSON.stringify(encodeValue(value))
@@ -439,7 +538,7 @@ export function serializeEquals(a: unknown, b: unknown): boolean {
 }
 
 export function deserialize<T>(input: string | ArrayBuffer | Uint8Array): T {
-	const json = typeof input === "string" ? input : utf8Decoder.decode(input)
+	const json = typeof input === "string" ? input : (utf8Decoder ??= new TextDecoder()).decode(input)
 	const parsed: unknown = JSON.parse(json)
 
 	// Envelope keys are emitted literally by serialize() (the only writer of these
@@ -461,8 +560,178 @@ export function deserializeRouteParam<T>(serialized: string | undefined | null):
 	try {
 		return deserialize(serialized) as T
 	} catch (e) {
-		logger.warn("serializer", "deserializeRouteParam failed — returning null", { inputLength: serialized.length, error: String(e) })
+		logger.warn("serializer", "deserializeRouteParam failed — returning null", { inputLength: serialized.length, error: e })
 
 		return null
 	}
+}
+
+// ─── Capture-time SDK-error snapshot (freezeForLog) ──────────────────────────
+// A live uniffi FilenSdkError can't be handled by encodeValue at serialize time: its detail
+// (kind/message/serverMessage/serverCode) lives behind FFI METHODS that THROW once the native handle
+// is freed — and the diagnostic logger serializes at a DEFERRED flush (debounced), after which the
+// very transitions that surface these errors (e.g. AppState "background", which uniffiDestroys the
+// socket listener) may already have freed the handle. So the logger calls this SYNCHRONOUSLY at the
+// log call to snapshot the error into a plain `{ __sdkError }` object, which encodeValue then handles
+// like any other plain object at flush. Duck-typed (no @filen/sdk-rs import) to keep this module's
+// load dependency-free; mirrors @/lib/sdkErrors `unwrapSdkError` (FilenSdkError.hasInner/getInner).
+// Copy-on-write: returns the SAME reference when there is no SDK error (the common case → zero alloc).
+
+const FILEN_SDK_ERROR_TYPE_NAME = "FilenSdkError"
+const FREEZE_MAX_DEPTH = 8
+
+type SdkErrorLike = {
+	message?: () => string
+	serverMessage?: () => string | undefined
+	serverCode?: () => string | undefined
+}
+
+// The FilenSdkError target, whether `value` is the raw error or the thrown UniffiThrownObject wrapper
+// (whose `.inner` is the error). Returns null for anything else. Fully guarded — probing a hostile
+// proxy / a stale handle must never throw out of a log call.
+function asSdkError(value: object): SdkErrorLike | null {
+	try {
+		if ((value as Record<symbol, unknown>)[uniffiTypeNameSymbol] === FILEN_SDK_ERROR_TYPE_NAME) {
+			return value as SdkErrorLike
+		}
+
+		const inner = (value as { inner?: unknown }).inner
+
+		if (
+			inner !== null &&
+			typeof inner === "object" &&
+			(inner as Record<symbol, unknown>)[uniffiTypeNameSymbol] === FILEN_SDK_ERROR_TYPE_NAME
+		) {
+			return inner as SdkErrorLike
+		}
+	} catch {
+		return null
+	}
+
+	return null
+}
+
+function snapshotSdkError(sdk: SdkErrorLike, original: object): { __sdkError: Record<string, unknown> } {
+	const fields: Record<string, unknown> = {}
+
+	// message() carries the kind NAME + detail ("Error of kind Reqwest: ...") so the numeric kind is
+	// redundant; serverMessage()/serverCode() add the server specifics for API errors. Each guarded —
+	// a freed handle must not make a log call throw.
+	try {
+		const message = sdk.message?.()
+
+		if (typeof message === "string") {
+			fields["message"] = message
+		}
+	} catch {
+		// A freed handle must not throw out of a log call.
+	}
+
+	try {
+		const serverMessage = sdk.serverMessage?.()
+
+		if (typeof serverMessage === "string") {
+			fields["serverMessage"] = serverMessage
+		}
+	} catch {
+		// Ignore.
+	}
+
+	try {
+		const serverCode = sdk.serverCode?.()
+
+		if (typeof serverCode === "string") {
+			fields["serverCode"] = serverCode
+		}
+	} catch {
+		// Ignore.
+	}
+
+	// The JS stack from the thrown wrapper locates where the FFI boundary threw.
+	if (original instanceof Error && typeof original.stack === "string") {
+		fields["stack"] = original.stack
+	}
+
+	return {
+		__sdkError: fields
+	}
+}
+
+function freezeNode(value: unknown, depth: number): unknown {
+	if (value === null || typeof value !== "object") {
+		return value
+	}
+
+	const sdk = asSdkError(value as object)
+
+	if (sdk) {
+		return snapshotSdkError(sdk, value as object)
+	}
+
+	// Below the depth cap, leave the subtree untouched.
+	if (depth >= FREEZE_MAX_DEPTH) {
+		return value
+	}
+
+	if (Array.isArray(value)) {
+		let copy: unknown[] | null = null
+
+		for (let i = 0; i < value.length; i++) {
+			const child: unknown = value[i]
+			const frozen = child !== null && typeof child === "object" ? freezeNode(child, depth + 1) : child
+
+			if (copy !== null) {
+				copy[i] = frozen
+			} else if (frozen !== child) {
+				copy = value.slice(0, i)
+				copy.length = value.length
+				copy[i] = frozen
+			}
+		}
+
+		return copy ?? value
+	}
+
+	// Only recurse into plain objects. A non-plain class instance that ISN'T an SDK error (a Date, a
+	// Map, another live handle) is left as-is — encodeValue handles it at flush, and walking a foreign
+	// instance here risks touching live-handle getters for nothing.
+	if ((value as object).constructor !== Object) {
+		return value
+	}
+
+	const obj = value as Record<string, unknown>
+	const keys = Object.keys(obj)
+	let copy: Record<string, unknown> | null = null
+
+	for (let i = 0; i < keys.length; i++) {
+		const key = keys[i] as string
+		const child = obj[key]
+		const frozen = child !== null && typeof child === "object" ? freezeNode(child, depth + 1) : child
+
+		if (copy !== null) {
+			copy[key] = frozen
+		} else if (frozen !== child) {
+			copy = {}
+
+			for (let j = 0; j < i; j++) {
+				const priorKey = keys[j] as string
+
+				copy[priorKey] = obj[priorKey]
+			}
+
+			copy[key] = frozen
+		}
+	}
+
+	return copy ?? value
+}
+
+/**
+ * Snapshot any live uniffi FilenSdkError inside `value` (raw or thrown-wrapper, at any depth) into a
+ * plain `{ __sdkError: { message, serverMessage?, serverCode?, stack? } }` object, synchronously, so
+ * the detail survives to the deferred log flush even after the native handle is freed. Copy-on-write:
+ * returns `value` unchanged (same reference) when it holds no SDK error.
+ */
+export function freezeForLog(value: unknown): unknown {
+	return freezeNode(value, 0)
 }

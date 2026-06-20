@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"
-import { redact } from "@/lib/logRedaction"
+import { serialize, deserialize, freezeForLog } from "@/lib/serializer"
 
 // Async, non-blocking, privacy-aware on-disk diagnostic logger.
 //
@@ -249,7 +249,16 @@ export class Logger {
 			return
 		}
 
-		// Persisted entry: drag the recent breadcrumbs in front of it for context, then itself.
+		// Persisted entry (warn/error): snapshot any live FilenSdkError in the data into plain JSON-safe
+		// fields NOW, while its native handle is still valid. The flush is debounced (flushDelayMs), and
+		// the very transitions that surface these errors (e.g. an AppState "background" that
+		// uniffiDestroys the socket listener) free handles — so the FFI methods carrying the detail
+		// (kind/message/serverMessage) would throw at flush and the error would log opaque. Copy-on-
+		// write: no-SDK-error data (the overwhelming common case) is returned unchanged and unallocated.
+		// Breadcrumbs (info/debug) skip this and stay on the cheap path.
+		entry.data = freezeForLog(entry.data)
+
+		// Drag the recent breadcrumbs in front of it for context, then itself.
 		const crumbs = this.drainBreadcrumbs()
 
 		for (let i = 0; i < crumbs.length; i++) {
@@ -372,26 +381,21 @@ export class Logger {
 
 	private entryToLine(entry: Entry): string {
 		try {
-			const redacted = redact({
-				msg: entry.msg,
-				data: entry.data
-			}) as {
-				msg: string
-				data?: unknown
-			}
-
 			const record: Record<string, unknown> = {
 				t: entry.t,
 				l: LEVEL_NAME[entry.rank],
 				tag: entry.tag,
-				msg: redacted.msg
+				msg: entry.msg
 			}
 
-			if (redacted.data !== undefined) {
-				record["data"] = redacted.data
+			if (entry.data !== undefined) {
+				record["data"] = entry.data
 			}
 
-			return `${JSON.stringify(record)}\n`
+			// The shared serializer encodes what bare JSON can't — bigint, UniFFI enums, binary, Error,
+			// Map/Set — into round-trippable envelopes (live FilenSdkErrors were already snapshotted at
+			// capture by freezeForLog). readEntries reverses it with deserialize().
+			return `${serialize(record)}\n`
 		} catch {
 			return `${JSON.stringify({
 				t: entry.t,
@@ -586,7 +590,7 @@ export class Logger {
 				}
 
 				try {
-					const parsed = JSON.parse(line) as ReadLogEntry
+					const parsed = deserialize<ReadLogEntry>(line)
 
 					if (parsed && typeof parsed.t === "number") {
 						out.push(parsed)

@@ -9,7 +9,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 // Must import after vi.mock so the mock is active when serializer.ts loads
-import { serialize, deserialize, deserializeRouteParam } from "@/lib/serializer"
+import { serialize, deserialize, deserializeRouteParam, freezeForLog } from "@/lib/serializer"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function roundtrip(value: unknown): any {
@@ -1349,6 +1349,130 @@ describe("serializer", () => {
 			expect(result.x[uniffiTypeNameSymbol]).toBe("T")
 			expect(result.x.tag).toBe("Tag")
 			expect(result.x instanceof UniffiEnum).toBe(true)
+		})
+	})
+
+	describe("Error", () => {
+		it("serializes name/message/stack (which are non-enumerable, so bare JSON gives {})", () => {
+			const result = roundtrip(new Error("disk full at /Users/x/file.txt"))
+
+			expect(result.name).toBe("Error")
+			expect(result.message).toBe("disk full at /Users/x/file.txt")
+			expect(typeof result.stack).toBe("string")
+		})
+
+		it("keeps the chained cause and custom own props", () => {
+			const err = Object.assign(new Error("outer"), { code: "ENOENT", path: "/tmp/x" })
+			;(err as { cause?: unknown }).cause = new Error("inner")
+
+			const result = roundtrip(err)
+
+			expect(result.message).toBe("outer")
+			expect(result.code).toBe("ENOENT")
+			expect(result.path).toBe("/tmp/x")
+			expect(result.cause.message).toBe("inner")
+		})
+
+		it("encodes a bigint nested in a custom error prop", () => {
+			const result = roundtrip(Object.assign(new Error("x"), { size: 4096n }))
+
+			expect(result.size).toBe(4096n)
+		})
+	})
+
+	describe("Map and Set", () => {
+		it("round-trips a Map to a real Map (bare JSON gives {})", () => {
+			const result = roundtrip(
+				new Map<string, unknown>([
+					["name", "a.pdf"],
+					["size", 9007199254740993n]
+				])
+			)
+
+			expect(result instanceof Map).toBe(true)
+			expect(result.get("name")).toBe("a.pdf")
+			expect(result.get("size")).toBe(9007199254740993n)
+		})
+
+		it("round-trips a Set to a real Set", () => {
+			const result = roundtrip(new Set(["a", "b", "c"]))
+
+			expect(result instanceof Set).toBe(true)
+			expect(Array.from(result)).toEqual(["a", "b", "c"])
+		})
+
+		it("round-trips a Map nested inside an object", () => {
+			const result = roundtrip({ cache: new Map([["k", "v"]]) })
+
+			expect(result.cache instanceof Map).toBe(true)
+			expect(result.cache.get("k")).toBe("v")
+		})
+	})
+
+	describe("freezeForLog (capture-time SDK-error snapshot)", () => {
+		// Duck-typed stand-ins for a uniffi FilenSdkError and its thrown UniffiThrownObject wrapper.
+		function fakeSdkError(opts: { message: string; serverMessage?: string; throws?: boolean }): object {
+			return {
+				[uniffiTypeNameSymbol]: "FilenSdkError",
+				message: () => {
+					if (opts.throws) {
+						throw new Error("stale handle")
+					}
+
+					return opts.message
+				},
+				serverMessage: () => opts.serverMessage,
+				serverCode: () => undefined
+			}
+		}
+
+		function fakeThrownWrapper(inner: object): Error {
+			const wrapper = new Error("FilenSdkError")
+			;(wrapper as unknown as { inner: unknown }).inner = inner
+
+			return wrapper
+		}
+
+		it("snapshots a thrown FilenSdkError's detail into { __sdkError }", () => {
+			const out = freezeForLog(fakeThrownWrapper(fakeSdkError({ message: "Error of kind Server: nope", serverMessage: "Storage full" }))) as {
+				__sdkError: { message: string; serverMessage?: string }
+			}
+
+			expect(out.__sdkError.message).toBe("Error of kind Server: nope")
+			expect(out.__sdkError.serverMessage).toBe("Storage full")
+		})
+
+		it("freezes a nested SDK error, preserving siblings (copy-on-write)", () => {
+			const out = freezeForLog({ nextAppState: "active", error: fakeThrownWrapper(fakeSdkError({ message: "boom" })) }) as {
+				nextAppState: string
+				error: { __sdkError: { message: string } }
+			}
+
+			expect(out.nextAppState).toBe("active")
+			expect(out.error.__sdkError.message).toBe("boom")
+		})
+
+		it("returns the SAME reference when there is no SDK error (zero allocation)", () => {
+			const data = { a: 1, b: { c: "x" } }
+
+			expect(freezeForLog(data)).toBe(data)
+		})
+
+		it("never throws when a freed-handle method throws", () => {
+			let out: unknown
+
+			expect(() => {
+				out = freezeForLog({ error: fakeThrownWrapper(fakeSdkError({ message: "x", throws: true })) })
+			}).not.toThrow()
+
+			expect((out as { error: { __sdkError: object } }).error.__sdkError).toBeDefined()
+		})
+
+		it("composes with serialize: a frozen SDK error survives a serialize/deserialize round-trip", () => {
+			const frozen = freezeForLog({ error: fakeThrownWrapper(fakeSdkError({ message: "Error of kind Reqwest: timeout" })) })
+			const result = deserialize<{ error: { __sdkError: { message: string } } }>(serialize(frozen))
+
+			expect(result.error.__sdkError.message).toBe("Error of kind Reqwest: timeout")
 		})
 	})
 })

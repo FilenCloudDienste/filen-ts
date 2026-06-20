@@ -73,28 +73,25 @@ describe("console tee (polyfills/console)", () => {
 		expect(loggerMock.captureConsole.mock.calls.map(c => c[0])).toEqual(["debug", "info", "debug", "warn"])
 	})
 
-	it("never throws when unwrapSdkError throws on a stale/freed SDK error", () => {
-		sdkErrorsMock.unwrapSdkError.mockImplementation(() => {
-			throw new Error("freed native pointer")
-		})
+	it("passes args to the logger RAW — SDK-error normalization happens in the logger freeze, not the tee", () => {
+		// The tee used to rewrite SDK-error args into { sdkKind, sdkMessage } here. That moved into the
+		// logger's enqueue-time freeze (one path for both direct logger.* and console.* — see
+		// logger.test / logRedaction.test), so the tee now forwards the raw values untouched.
+		const sdkError = { kind: () => "Io", message: () => "disk full" }
 
-		expect(() => console.error("with stale sdk error", {})).not.toThrow()
-
-		// The entry is still teed — the throw was swallowed inside unwrapSdkArgs, not propagated.
-		expect(loggerMock.captureConsole).toHaveBeenCalledTimes(1)
-		expect(loggerMock.captureConsole.mock.calls[0]![0]).toBe("error")
-	})
-
-	it("normalizes an SDK error arg into { sdkKind, sdkMessage } for the logger", () => {
-		sdkErrorsMock.unwrapSdkError.mockImplementation((arg: unknown) =>
-			arg === "SDK" ? ({ kind: () => "Io", message: () => "disk full" } as never) : null
-		)
-
-		console.error("SDK")
+		console.error("context", sdkError)
 
 		const args = loggerMock.captureConsole.mock.calls[0]![1] as unknown[]
 
-		expect(args[0]).toEqual({ sdkKind: "Io", sdkMessage: "disk full" })
+		expect(args[0]).toBe("context")
+		expect(args[1]).toBe(sdkError)
+	})
+
+	it("never throws and always tees (the prod tee does no SDK probing of its own)", () => {
+		expect(() => console.error("plain", { a: 1 })).not.toThrow()
+
+		expect(loggerMock.captureConsole).toHaveBeenCalledTimes(1)
+		expect(loggerMock.captureConsole.mock.calls[0]![0]).toBe("error")
 	})
 
 	it("preserves non-leveled console methods (mutated in place, not spread-replaced)", () => {

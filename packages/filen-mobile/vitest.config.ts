@@ -35,7 +35,12 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),
-			"react-native": path.resolve(__dirname, "./src/tests/mocks/reactNative.ts")
+			"react-native": path.resolve(__dirname, "./src/tests/mocks/reactNative.ts"),
+			// uniffi-bindgen-react-native ships CJS under "type": "module" → unloadable in Node. The
+			// shared serializer imports it (UniffiEnum), and the diagnostic logger now imports the
+			// serializer, so it reaches nearly every test. Alias it to the minimal mock globally (like
+			// react-native) instead of per-file vi.mock.
+			"uniffi-bindgen-react-native": path.resolve(__dirname, "./src/tests/mocks/uniffiBindgenReactNative.ts")
 		}
 	}
 })

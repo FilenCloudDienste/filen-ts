@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
 vi.mock("expo-file-system", async () => await import("@/tests/mocks/expoFileSystem"))
+// The logger now imports the shared serializer, which imports uniffi-bindgen-react-native (CJS,
+// unloadable in Node) — mock it the same way serializer.test.ts does.
+vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 import { File, Directory, Paths, fs } from "@/tests/mocks/expoFileSystem"
 import { Logger } from "@/lib/logger"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"
-import * as logRedaction from "@/lib/logRedaction"
+import * as serializer from "@/lib/serializer"
 
 type Line = { t: number; l: string; tag: string; msg: string; data?: unknown }
 
@@ -184,50 +187,33 @@ describe("logger", () => {
 		})
 	})
 
-	describe("redaction integration", () => {
-		it("strips secrets but keeps file names in structured data", () => {
-			const logger = makeLogger()
-
-			logger.error("drive", "upload failed", { name: "salary.pdf", apiKey: "SECRET", size: 100 })
-			logger.flushNow()
-
-			const data = readCurrentLines()[0]!.data as Record<string, unknown>
-
-			expect(data["name"]).toBe("salary.pdf")
-			expect(data["size"]).toBe(100)
-			expect(data["apiKey"]).toBe("[redacted]")
-		})
-
-		it("serializes bigint payloads instead of collapsing the whole line to [unserializable]", () => {
+	describe("serializer integration", () => {
+		it("serializes bigint payloads via the shared serializer instead of collapsing to [unserializable]", () => {
 			const logger = makeLogger()
 
 			logger.error("drive", "item sizes", { size: 4096n, count: 3 })
 			logger.flushNow()
 
-			const line = readCurrentLines()[0]!
+			// The written line is real (not the unserializable fallback).
+			expect(readCurrentLines()[0]!.msg).toBe("item sizes")
 
-			// The line is real (not the unserializable fallback) and the bigint survived.
-			expect(line.msg).toBe("item sizes")
+			// readEntries() deserializes the line, reviving the bigint to its real value.
+			const data = logger.readEntries()[0]!.data as Record<string, unknown>
 
-			const data = line.data as Record<string, unknown>
-
-			expect(data["size"]).toBe("4096n")
+			expect(data["size"]).toBe(4096n)
 			expect(data["count"]).toBe(3)
 		})
 
-		it("captureConsole persists console errors with redaction", () => {
+		it("does NOT redact secret-named fields — redaction was removed (the SDK never emits secrets)", () => {
 			const logger = makeLogger()
 
-			logger.captureConsole("error", ["network failed", { masterKeys: ["k1"] }])
+			logger.error("auth", "config dump", { apiKey: "kept-verbatim", name: "file.pdf" })
 			logger.flushNow()
 
-			const line = readCurrentLines()[0]!
+			const data = readCurrentLines()[0]!.data as Record<string, unknown>
 
-			expect(line.msg).toBe("network failed")
-
-			const data = line.data as unknown[]
-
-			expect((data[0] as Record<string, unknown>)["masterKeys"]).toBe("[redacted]")
+			expect(data["apiKey"]).toBe("kept-verbatim")
+			expect(data["name"]).toBe("file.pdf")
 		})
 	})
 
@@ -402,8 +388,10 @@ describe("logger", () => {
 		it("writes [unserializable] (never throws, keeps t/l/tag) when serialization fails", () => {
 			const logger = makeLogger()
 
-			// Force entryToLine's catch: redact returns a value JSON.stringify still chokes on (raw bigint).
-			vi.spyOn(logRedaction, "redact").mockReturnValue({ msg: "x", data: 5n })
+			// Force entryToLine's catch: make the shared serializer throw on this entry.
+			vi.spyOn(serializer, "serialize").mockImplementation(() => {
+				throw new Error("serialize blew up")
+			})
 
 			expect(() => {
 				logger.error("auth", "boom")
@@ -553,6 +541,63 @@ describe("logger", () => {
 			logger.flushNow()
 
 			expect(readCurrentLines().map(l => l.msg)).toEqual(["still logged"])
+		})
+	})
+
+	describe("SDK-error capture (freezeForLog integration)", () => {
+		// A stand-in for the UniffiThrownObject<FilenSdkError> actually thrown: an Error whose own
+		// `.message` is the opaque "FilenSdkError" type name, with the detail behind `.inner`'s methods.
+		function fakeThrownSdkError(message: string, opts: { serverMessage?: string; throws?: boolean } = {}): Error {
+			const wrapper = new Error("FilenSdkError")
+			;(wrapper as unknown as { inner: unknown }).inner = {
+				[Symbol.for("typeName")]: "FilenSdkError",
+				message: () => {
+					if (opts.throws) {
+						throw new Error("stale handle")
+					}
+
+					return message
+				},
+				serverMessage: () => opts.serverMessage,
+				serverCode: () => undefined
+			}
+
+			return wrapper
+		}
+
+		it("snapshots a thrown FilenSdkError's detail into the persisted line, not the opaque wrapper.message", () => {
+			const logger = makeLogger()
+
+			logger.error("socket", "appState transition failed", {
+				nextAppState: "active",
+				error: fakeThrownSdkError("Error of kind Reqwest: request timed out")
+			})
+			logger.flushNow()
+
+			const lines = readCurrentLines()
+
+			expect(lines).toHaveLength(1)
+
+			const data = lines[0]!.data as { nextAppState: string; error: { __sdkError: { message: string } } }
+
+			expect(data.nextAppState).toBe("active")
+			// Without the freeze this would be the bare string "FilenSdkError".
+			expect(data.error.__sdkError.message).toBe("Error of kind Reqwest: request timed out")
+		})
+
+		it("never throws and still writes the line when the SDK handle is freed (method throws)", () => {
+			const logger = makeLogger()
+
+			expect(() =>
+				logger.error("socket", "appState transition failed", { error: fakeThrownSdkError("unused", { throws: true }) })
+			).not.toThrow()
+
+			logger.flushNow()
+
+			const lines = readCurrentLines()
+
+			expect(lines).toHaveLength(1)
+			expect((lines[0]!.data as { error: { __sdkError: object } }).error.__sdkError).toBeDefined()
 		})
 	})
 })
