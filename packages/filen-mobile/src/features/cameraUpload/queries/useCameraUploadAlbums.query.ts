@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { DEFAULT_QUERY_OPTIONS, queryUpdater } from "@/queries/client"
+import { DEFAULT_QUERY_OPTIONS } from "@/queries/client"
 import * as MediaLibraryLegacy from "expo-media-library/legacy"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 
@@ -30,20 +30,9 @@ export function useCameraUploadAlbumsQuery(
 	return query
 }
 
-export function cameraUploadAlbumsQueryUpdate({
-	updater
-}: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-}) {
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		return typeof updater === "function" ? updater(prev ?? []) : updater
-	})
-}
-
-export function cameraUploadAlbumsQueryGet() {
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
-}
-
+// CU-11: this query intentionally has NO imperative cache updater. The album list is OS-derived
+// (expo-media-library) and read-only — there is no producer that should ever write it, and it always
+// refetches (refetchOnMount/Focus: "always" via DEFAULT_QUERY_OPTIONS, plus an AppState-active
+// refetch in the albums screen). A queryUpdater.set here would race that always-on refetch and could
+// clobber the freshly enumerated list, so it is deliberately omitted (was previously dead code).
 export default useCameraUploadAlbumsQuery
