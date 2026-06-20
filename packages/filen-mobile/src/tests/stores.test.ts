@@ -52,7 +52,7 @@ vi.mock("@/constants", async () => {
 vi.mock("@filen/sdk-rs", () => ({}))
 
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
-import { useCameraUploadStore } from "@/features/cameraUpload/store/useCameraUpload.store"
+import { useCameraUploadStore, MAX_CAMERA_UPLOAD_ERRORS } from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useContactsStore } from "@/features/contacts/store/useContacts.store"
 import { useHttpStore } from "@/stores/useHttp.store"
 import { useAppStore } from "@/stores/useApp.store"
@@ -463,6 +463,62 @@ describe("useCameraUploadStore.addSkippedAsset", () => {
 		useCameraUploadStore.getState().clearSkippedAssets()
 
 		expect(useCameraUploadStore.getState().skippedAssets.has("asset-1")).toBe(false)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// useCameraUploadStore.setErrors — bounded error log (CU-08)
+// ---------------------------------------------------------------------------
+
+describe("useCameraUploadStore.setErrors — bounded error log (CU-08)", () => {
+	beforeEach(() => {
+		resetCameraUploadStore()
+	})
+
+	function makeErrors(count: number, startIndex = 0): { id: string; timestamp: number }[] {
+		const errors: { id: string; timestamp: number }[] = []
+
+		for (let i = 0; i < count; i++) {
+			errors.push({ id: `e${startIndex + i}`, timestamp: startIndex + i })
+		}
+
+		return errors
+	}
+
+	it("stores an array under the cap unchanged", () => {
+		useCameraUploadStore.getState().setErrors(makeErrors(3))
+
+		expect(useCameraUploadStore.getState().errors.length).toBe(3)
+	})
+
+	it("caps a direct set at MAX_CAMERA_UPLOAD_ERRORS", () => {
+		useCameraUploadStore.getState().setErrors(makeErrors(MAX_CAMERA_UPLOAD_ERRORS + 50))
+
+		expect(useCameraUploadStore.getState().errors.length).toBe(MAX_CAMERA_UPLOAD_ERRORS)
+	})
+
+	it("keeps the MOST RECENT entries and drops the oldest (front) when over the cap", () => {
+		useCameraUploadStore.getState().setErrors(makeErrors(MAX_CAMERA_UPLOAD_ERRORS + 5))
+
+		const errors = useCameraUploadStore.getState().errors
+
+		// The 5 oldest were dropped from the front; the newest is retained at the back.
+		expect(errors[0]?.id).toBe("e5")
+		expect(errors[errors.length - 1]?.id).toBe(`e${MAX_CAMERA_UPLOAD_ERRORS + 4}`)
+	})
+
+	it("functional append (the engine's per-pass push) stays bounded across many passes", () => {
+		// Simulate a durable failure pushing one entry per sync pass, far beyond the cap — the
+		// unbounded-growth bug. The array must stabilize at the cap, not grow forever.
+		for (let pass = 0; pass < MAX_CAMERA_UPLOAD_ERRORS + 30; pass++) {
+			useCameraUploadStore.getState().setErrors(errors => [...errors, { id: `e${pass}`, timestamp: pass }])
+		}
+
+		const errors = useCameraUploadStore.getState().errors
+
+		expect(errors.length).toBe(MAX_CAMERA_UPLOAD_ERRORS)
+		// The most recent push is still present at the back.
+		expect(errors[errors.length - 1]?.id).toBe(`e${MAX_CAMERA_UPLOAD_ERRORS + 29}`)
 	})
 })
 
