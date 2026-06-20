@@ -1,0 +1,144 @@
+diff --git a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt
+index 53d4be0..c63fbe3 100644
+--- a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt
++++ b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfModule.kt
+@@ -63,6 +63,10 @@ class KJExpoPdfModule : Module() {
+       Prop("autoScale") { view: KJExpoPdfView, enabled: Boolean? ->
+          view.setAutoScaleEnabled(enabled)
+       }
++
++      Prop("maxZoom") { view: KJExpoPdfView, maxZoom: Float? ->
++        view.setMaxZoom(maxZoom)
++      }
+     }
+   }
+ }
+diff --git a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
+index c0ff861..211184d 100644
+--- a/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
++++ b/node_modules/@kishannareshpal/expo-pdf/android/src/main/java/com/kishannareshpal/expopdf/KJExpoPdfView.kt
+@@ -46,6 +46,8 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+   private var fitMode: FitMode = DEFAULT_FIT_MODE
+   private var autoScaleEnabled: Boolean = DEFAULT_AUTO_SCALE_ENABLED
+   private var isPageColorInverted: Boolean = DEFAULT_PAGE_COLOR_INVERTED_ENABLED
++  // Max zoom relative to the fit scale (barteksc PDFView default is 3.0). null = leave the default.
++  private var maxZoom: Float? = null
+ 
+   internal val pdfView = PDFView(context, null).apply {
+     layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+@@ -125,11 +127,25 @@ class KJExpoPdfView(context: Context, appContext: AppContext) : ExpoView(context
+     this.reloadPdf()
+   }
+ 
++  fun setMaxZoom(maxZoom: Float?) {
++    this.maxZoom = maxZoom
++    this.applyZoomLimits()
++  }
++
++  // barteksc PDFView's min/mid/maxZoom are instance properties (not part of the load Configurator),
++  // so set them directly. null leaves the library default (3.0) untouched.
++  private fun applyZoomLimits() {
++    this.maxZoom?.let { this.pdfView.setMaxZoom(it) }
++  }
++
+   private fun reloadPdf() {
+     if (!this.pdfView.isRecycled) {
+       this.pdfView.recycle()
+     }
+ 
++    // Reassert zoom limits — a recycle/reload can reset the PDFView's scale bounds.
++    this.applyZoomLimits()
++
+     val currentUri = this.uri ?: return
+ 
+     val pdfBuilder = try {
+diff --git a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
+index 43d4a70..d39d307 100644
+--- a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
++++ b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.d.ts
+@@ -59,6 +59,13 @@ type BaseProps = ViewProps & {
+      * Defaults to false.
+      */
+     pageColorInverted?: boolean;
++    /**
++     * Maximum zoom the user can reach.
++     * - iOS: absolute PDFView scaleFactor (1.0 = actual size).
++     * - Android: max zoom relative to the fit scale (library default 3.0).
++     * Omit to use the platform defaults.
++     */
++    maxZoom?: number;
+ };
+ export type PdfViewProps = BaseProps & {
+     onLoadComplete?: (params: OnLoadCompleteEventPayload) => void;
+diff --git a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js
+index 28d2b99..7658f5a 100644
+--- a/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js
++++ b/node_modules/@kishannareshpal/expo-pdf/build/pdf-view.js
+@@ -4,7 +4,7 @@ import { StyleSheet } from 'react-native';
+ import { forwardNativeEventTo } from './utils';
+ const NativePdfView = requireNativeView('KJExpoPdf');
+ export const PdfView = ({ style, onLoadComplete, onError, onPageChanged, ...props }) => {
+-    return (<NativePdfView style={[styles.container, style]} uri={props.uri} doubleTapToZoom={props.doubleTapToZoom} horizontal={props.horizontal} pageGap={props.pageGap} pagingEnabled={props.pagingEnabled} password={props.password} contentPadding={props.contentPadding} fitMode={props.fitMode} autoScale={props.autoScale} pageColorInverted={props.pageColorInverted} onLoadComplete={forwardNativeEventTo(onLoadComplete)} onPageChanged={forwardNativeEventTo(onPageChanged)} onError={forwardNativeEventTo(onError)}/>);
++    return (<NativePdfView style={[styles.container, style]} uri={props.uri} doubleTapToZoom={props.doubleTapToZoom} horizontal={props.horizontal} pageGap={props.pageGap} pagingEnabled={props.pagingEnabled} password={props.password} contentPadding={props.contentPadding} fitMode={props.fitMode} autoScale={props.autoScale} pageColorInverted={props.pageColorInverted} maxZoom={props.maxZoom} onLoadComplete={forwardNativeEventTo(onLoadComplete)} onPageChanged={forwardNativeEventTo(onPageChanged)} onError={forwardNativeEventTo(onError)}/>);
+ };
+ const styles = StyleSheet.create({
+     container: {
+diff --git a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift
+index 80acd41..4ed8e13 100644
+--- a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift
++++ b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfModule.swift
+@@ -54,6 +54,10 @@ public class KJExpoPdfModule: Module {
+       Prop("autoScale") { (view: KJExpoPdfView, enabled: Bool?) in
+         view.setAutoScaleEnabled(enabled)
+       }
++
++      Prop("maxZoom") { (view: KJExpoPdfView, value: Double?) in
++        view.setMaxZoom(value)
++      }
+     }
+   }
+ }
+diff --git a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift
+index 0012792..4fe84c7 100644
+--- a/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift
++++ b/node_modules/@kishannareshpal/expo-pdf/ios/KJExpoPdfView.swift
+@@ -41,6 +41,8 @@ class KJExpoPdfView: ExpoView {
+   private var fitMode: FitMode = DEFAULT_FIT_MODE
+   private var isAutoScaleEnabled: Bool = DEFAULT_AUTO_SCALE_ENABLED
+   private var isPageColorInverted: Bool = DEFAULT_PAGE_COLOR_INVERTED_ENABLED
++  // Max zoom (absolute PDFView scaleFactor). nil = leave PDFKit's default untouched.
++  private var maxZoom: CGFloat? = nil
+ 
+   required init(appContext: AppContext? = nil) {
+     super.init(appContext: appContext)
+@@ -196,6 +198,20 @@ class KJExpoPdfView: ExpoView {
+     }
+   }
+ 
++  func setMaxZoom(_ value: Double?) {
++    self.maxZoom = value.map { CGFloat($0) }
++    self.applyMaxZoom()
++  }
++
++  // Apply the configured maximum zoom. PDFKit's scaleToFit sets minScaleFactor (the fit scale),
++  // never maxScaleFactor, so without this the max zoom stays at PDFKit's default. nil leaves it untouched.
++  private func applyMaxZoom() {
++    guard let maxZoom = self.maxZoom else {
++      return
++    }
++    self.pdfView.maxScaleFactor = maxZoom
++  }
++
+   @objc private func handlePageChange() {
+     guard
+       let page = pdfView.currentPage,
+@@ -279,6 +295,9 @@ class KJExpoPdfView: ExpoView {
+         fitMode: self.fitMode,
+         resetScrollOffset: resetScrollOffset
+       )
++
++      // Reassert the max zoom after a (re)scale so it survives document loads / layout changes.
++      self.applyMaxZoom()
+     }
+   }
+ 

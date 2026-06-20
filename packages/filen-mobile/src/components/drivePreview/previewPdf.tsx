@@ -18,6 +18,10 @@ import Button from "@/components/ui/button"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import logger from "@/lib/logger"
 
+// Max zoom for the PDF viewer, via the patched expo-pdf `maxZoom` prop (patches/@kishannareshpal+expo-pdf+0.3.2.patch).
+// iOS: absolute PDFView scaleFactor; Android: zoom relative to the fit scale (library default is 3.0). Tune freely.
+const PDF_MAX_ZOOM = 6
+
 const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const [password, setPassword] = useRecyclingState<string | null>(null, [galleryItemKey(item)])
@@ -184,6 +188,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 						password={password ?? undefined}
 						doubleTapToZoom={true}
 						autoScale={false}
+						maxZoom={PDF_MAX_ZOOM}
 						fitMode="both"
 						uri={query.data.uri}
 						onError={onError}
