@@ -179,14 +179,14 @@ export class Sync {
 			})
 
 			if (!reconcile.success) {
-				logger.warn("notes-sync", "cloud reconcile after restore failed; stale inflight entries may persist", { error: String(reconcile.error) })
+				logger.warn("notes-sync", "cloud reconcile after restore failed; stale inflight entries may persist", { error: reconcile.error })
 			}
 
 			return true
 		})
 
 		if (!result.success) {
-			logger.error("notes-sync", "restoreFromDisk failed; unsaved edits from previous session may be lost", { error: String(result.error) })
+			logger.error("notes-sync", "restoreFromDisk failed; unsaved edits from previous session may be lost", { error: result.error })
 		}
 
 		this.resolveInit()
@@ -220,7 +220,7 @@ export class Sync {
 		})
 
 		if (!result.success) {
-			logger.error("notes-sync", "flushToDisk failed; in-flight edit not persisted", { error: String(result.error) })
+			logger.error("notes-sync", "flushToDisk failed; in-flight edit not persisted", { error: result.error })
 		}
 
 		return result.success
@@ -322,7 +322,7 @@ export class Sync {
 								cloudContent !== mostRecentContent.content
 						} catch (e) {
 							// Availability beats the toast — push without the check.
-							logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", { noteUuid, error: String(e) })
+							logger.warn("notes-sync", "conflict-detection peek failed; pushing without overwrite check", { noteUuid, error: e })
 						}
 					}
 
@@ -479,7 +479,7 @@ export class Sync {
 				return
 			}
 
-			logger.error("notes-sync", "sync pass failed unexpectedly", { error: String(result.error) })
+			logger.error("notes-sync", "sync pass failed unexpectedly", { error: result.error })
 			alerts.error(result.error)
 		}
 	}
@@ -488,7 +488,7 @@ export class Sync {
 		this.syncTimeout?.cancel()
 
 		this.syncTimeout = createExecutableTimeout(() => {
-			this.sync().catch(e => logger.error("notes-sync", "unhandled exception in debounced sync", { error: String(e) }))
+			this.sync().catch(e => logger.error("notes-sync", "unhandled exception in debounced sync", { error: e }))
 		}, 3000)
 	}
 
@@ -508,7 +508,7 @@ export class Sync {
 			return
 		}
 
-		this.sync().catch(e => logger.error("notes-sync", "unhandled exception in executeNow sync", { error: String(e) }))
+		this.sync().catch(e => logger.error("notes-sync", "unhandled exception in executeNow sync", { error: e }))
 	}
 }
 

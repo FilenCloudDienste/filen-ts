@@ -42,7 +42,7 @@ export function buildUndecryptableMenuButtons({
 					})
 
 					if (!result.success) {
-						logger.error("drive", "restore undecryptable item failed", { error: String(result.error), uuid: item.data.uuid })
+						logger.error("drive", "restore undecryptable item failed", { error: result.error, uuid: item.data.uuid })
 						alerts.error(result.error)
 
 						return

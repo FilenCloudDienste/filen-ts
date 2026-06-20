@@ -85,7 +85,7 @@ export function buildDriveCreateMenuButtons({
 				})
 
 				if (!promptResult.success) {
-					logger.warn("drive", "create directory prompt failed", { error: String(promptResult.error) })
+					logger.warn("drive", "create directory prompt failed", { error: promptResult.error })
 					alerts.error(promptResult.error)
 
 					return
@@ -109,7 +109,7 @@ export function buildDriveCreateMenuButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "create directory failed", { error: String(result.error) })
+					logger.error("drive", "create directory failed", { error: result.error })
 					alerts.error(result.error)
 				}
 			}

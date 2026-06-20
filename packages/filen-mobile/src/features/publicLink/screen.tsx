@@ -107,7 +107,7 @@ function PublicLink() {
 
 			return null
 		} catch (err) {
-			logger.error("publicLink", "failed to deserialize item from route param", { error: String(err), itemSerialized: typeof itemSerialized === "string" ? itemSerialized.slice(0, 80) : null })
+			logger.error("publicLink", "failed to deserialize item from route param", { error: err, itemSerialized: typeof itemSerialized === "string" ? itemSerialized.slice(0, 80) : null })
 
 			return null
 		}
@@ -230,7 +230,7 @@ function PublicLink() {
 												})
 
 												if (!result.success) {
-													logger.error("publicLink", "failed to update public link settings", { error: result.error instanceof Error ? result.error.message : String(result.error), uuid: itemParsed.data.uuid })
+													logger.error("publicLink", "failed to update public link settings", { error: result.error, uuid: itemParsed.data.uuid })
 													alerts.error(result.error)
 
 													return
@@ -273,7 +273,7 @@ function PublicLink() {
 												})
 
 												if (!result.success) {
-													logger.error("publicLink", "failed to share public link url", { error: result.error instanceof Error ? result.error.message : String(result.error), uuid: itemParsed.data.uuid })
+													logger.error("publicLink", "failed to share public link url", { error: result.error, uuid: itemParsed.data.uuid })
 													alerts.error(result.error)
 
 													return
@@ -350,7 +350,7 @@ function PublicLink() {
 															})
 
 															if (!result.success) {
-																logger.error("publicLink", "failed to disable public link", { error: result.error instanceof Error ? result.error.message : String(result.error), uuid: itemParsed.data.uuid })
+																logger.error("publicLink", "failed to disable public link", { error: result.error, uuid: itemParsed.data.uuid })
 																alerts.error(result.error)
 
 																return
@@ -393,7 +393,7 @@ function PublicLink() {
 																		})
 
 																		if (!promptResult.success) {
-																			logger.warn("publicLink", "password prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+																			logger.warn("publicLink", "password prompt failed", { error: promptResult.error })
 																			alerts.error(promptResult.error)
 
 																			return
@@ -546,7 +546,7 @@ function PublicLink() {
 													})
 
 													if (!result.success) {
-														logger.error("publicLink", "failed to enable public link", { error: result.error instanceof Error ? result.error.message : String(result.error), uuid: itemParsed.data.uuid })
+														logger.error("publicLink", "failed to enable public link", { error: result.error, uuid: itemParsed.data.uuid })
 														alerts.error(result.error)
 													}
 												}}

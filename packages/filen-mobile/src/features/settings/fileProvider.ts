@@ -70,7 +70,7 @@ class FileProvider {
 		try {
 			return JSON.parse(await AUTH_FILE.text()) as AuthFileSchema
 		} catch (e) {
-			logger.error("file-provider", "auth.json parse failed — file corrupt or truncated", { path: AUTH_FILE.uri, error: e instanceof Error ? e.message : String(e) })
+			logger.error("file-provider", "auth.json parse failed — file corrupt or truncated", { path: AUTH_FILE.uri, error: e })
 
 			return null
 		}

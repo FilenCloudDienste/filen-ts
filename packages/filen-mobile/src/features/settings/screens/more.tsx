@@ -76,7 +76,7 @@ function More() {
 		if (!result.success) {
 			logger.error("settings", "failed to open external link", {
 				url,
-				error: result.error instanceof Error ? result.error.message : String(result.error)
+				error: result.error
 			})
 			alerts.error(result.error)
 		}

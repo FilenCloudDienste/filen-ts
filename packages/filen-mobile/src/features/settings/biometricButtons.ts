@@ -46,7 +46,7 @@ export async function enableBiometric({
 		})
 
 		if (!confirmProviderDisableResult.success) {
-			logger.warn("settings", "biometric enable — provider-disable confirmation prompt failed", { error: confirmProviderDisableResult.error instanceof Error ? confirmProviderDisableResult.error.message : String(confirmProviderDisableResult.error) })
+			logger.warn("settings", "biometric enable — provider-disable confirmation prompt failed", { error: confirmProviderDisableResult.error })
 			alerts.error(confirmProviderDisableResult.error)
 
 			return
@@ -68,7 +68,7 @@ export async function enableBiometric({
 	})
 
 	if (!fallbackPromptResult.success) {
-		logger.warn("settings", "biometric enable — fallback password prompt failed", { error: fallbackPromptResult.error instanceof Error ? fallbackPromptResult.error.message : String(fallbackPromptResult.error) })
+		logger.warn("settings", "biometric enable — fallback password prompt failed", { error: fallbackPromptResult.error })
 		alerts.error(fallbackPromptResult.error)
 
 		return
@@ -95,7 +95,7 @@ export async function enableBiometric({
 	})
 
 	if (!confirmFallbackPasswordPromptResult.success) {
-		logger.warn("settings", "biometric enable — confirm fallback password prompt failed", { error: confirmFallbackPasswordPromptResult.error instanceof Error ? confirmFallbackPasswordPromptResult.error.message : String(confirmFallbackPasswordPromptResult.error) })
+		logger.warn("settings", "biometric enable — confirm fallback password prompt failed", { error: confirmFallbackPasswordPromptResult.error })
 		alerts.error(confirmFallbackPasswordPromptResult.error)
 
 		return
@@ -125,7 +125,7 @@ export async function enableBiometric({
 		})
 
 		if (!disableProviderResult.success) {
-			logger.error("settings", "file provider disable failed during biometric enable", { error: disableProviderResult.error instanceof Error ? disableProviderResult.error.message : String(disableProviderResult.error) })
+			logger.error("settings", "file provider disable failed during biometric enable", { error: disableProviderResult.error })
 			alerts.error(disableProviderResult.error)
 
 			return

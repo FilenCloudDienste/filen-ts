@@ -57,7 +57,7 @@ export function sweepTmpDir(): void {
 	try {
 		directory.delete()
 	} catch (e) {
-		logger.warn("tmp", "sweepTmpDir delete failed", { error: String(e) })
+		logger.warn("tmp", "sweepTmpDir delete failed", { error: e })
 	}
 
 	ensured = false

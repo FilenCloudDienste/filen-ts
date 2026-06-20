@@ -76,7 +76,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!promptResponse.success) {
-									logger.warn("drive", "restore file version prompt failed", { error: String(promptResponse.error) })
+									logger.warn("drive", "restore file version prompt failed", { error: promptResponse.error })
 									alerts.error(promptResponse.error)
 
 									return
@@ -94,7 +94,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!result.success) {
-									logger.error("drive", "restore file version failed", { error: String(result.error), uuid: version.uuid })
+									logger.error("drive", "restore file version failed", { error: result.error, uuid: version.uuid })
 									alerts.error(result.error)
 
 									return
@@ -119,7 +119,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!promptResponse.success) {
-									logger.warn("drive", "delete file version prompt failed", { error: String(promptResponse.error) })
+									logger.warn("drive", "delete file version prompt failed", { error: promptResponse.error })
 									alerts.error(promptResponse.error)
 
 									return
@@ -137,7 +137,7 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 								})
 
 								if (!result.success) {
-									logger.error("drive", "delete file version failed", { error: String(result.error), uuid: version.uuid })
+									logger.error("drive", "delete file version failed", { error: result.error, uuid: version.uuid })
 									alerts.error(result.error)
 
 									return
@@ -250,7 +250,7 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 						})
 
 						if (!promptResponse.success) {
-							logger.warn("drive", "delete all versions prompt failed", { error: String(promptResponse.error) })
+							logger.warn("drive", "delete all versions prompt failed", { error: promptResponse.error })
 							alerts.error(promptResponse.error)
 
 							return
@@ -272,7 +272,7 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 						})
 
 						if (!result.success) {
-							logger.error("drive", "delete all file versions failed", { error: String(result.error) })
+							logger.error("drive", "delete all file versions failed", { error: result.error })
 							alerts.error(result.error)
 
 							return
@@ -403,7 +403,7 @@ const FileVersions = () => {
 						})
 
 						if (!result.success) {
-							logger.error("drive", "file versions refresh failed", { error: String(result.error) })
+							logger.error("drive", "file versions refresh failed", { error: result.error })
 							alerts.error(result.error)
 						}
 					}}

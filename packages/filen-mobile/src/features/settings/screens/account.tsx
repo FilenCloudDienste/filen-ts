@@ -85,7 +85,7 @@ function Account() {
 								})
 
 								if (!permissionsResult.success) {
-									logger.error("settings", "media permissions check failed", { error: permissionsResult.error instanceof Error ? permissionsResult.error.message : String(permissionsResult.error) })
+									logger.error("settings", "media permissions check failed", { error: permissionsResult.error })
 									alerts.error(permissionsResult.error)
 
 									return
@@ -113,7 +113,7 @@ function Account() {
 								})
 
 								if (!imagePickerResult.success) {
-									logger.warn("settings", "image picker failed", { error: imagePickerResult.error instanceof Error ? imagePickerResult.error.message : String(imagePickerResult.error) })
+									logger.warn("settings", "image picker failed", { error: imagePickerResult.error })
 									alerts.error(imagePickerResult.error)
 
 									return
@@ -137,7 +137,7 @@ function Account() {
 								})
 
 								if (!result.success) {
-									logger.error("settings", "avatar upload failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+									logger.error("settings", "avatar upload failed", { error: result.error })
 									alerts.error(result.error)
 
 									return

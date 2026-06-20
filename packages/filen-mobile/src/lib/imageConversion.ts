@@ -86,7 +86,7 @@ export async function convertHeicToJpg(file: FileSystem.File): Promise<FileSyste
 
 		return target
 	} catch (e) {
-		logger.warn("cameraUpload", "HEIC to JPG conversion failed, uploading original", { uri: file.uri, error: e instanceof Error ? e.message : String(e) })
+		logger.warn("cameraUpload", "HEIC to JPG conversion failed, uploading original", { uri: file.uri, error: e })
 
 		return file
 	}

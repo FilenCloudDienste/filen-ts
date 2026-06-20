@@ -434,7 +434,7 @@ class Thumbnails {
 		const result = await run(async () => await promise)
 
 		if (!result.success) {
-			logger.warn("thumbnails", "generateFromLocalFile run wrapper failed", { uuid: params.uuid, error: String(result.error) })
+			logger.warn("thumbnails", "generateFromLocalFile run wrapper failed", { uuid: params.uuid, error: result.error })
 			return null
 		}
 

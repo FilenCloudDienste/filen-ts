@@ -75,7 +75,7 @@ function Security() {
 										})
 
 										if (!newPasswordPromptResult.success) {
-											logger.warn("settings", "change password new-password prompt failed", { error: newPasswordPromptResult.error instanceof Error ? newPasswordPromptResult.error.message : String(newPasswordPromptResult.error) })
+											logger.warn("settings", "change password new-password prompt failed", { error: newPasswordPromptResult.error })
 											alerts.error(newPasswordPromptResult.error)
 
 											return
@@ -102,7 +102,7 @@ function Security() {
 										})
 
 										if (!confirmNewPasswordPromptResult.success) {
-											logger.warn("settings", "change password confirm-password prompt failed", { error: confirmNewPasswordPromptResult.error instanceof Error ? confirmNewPasswordPromptResult.error.message : String(confirmNewPasswordPromptResult.error) })
+											logger.warn("settings", "change password confirm-password prompt failed", { error: confirmNewPasswordPromptResult.error })
 											alerts.error(confirmNewPasswordPromptResult.error)
 
 											return
@@ -138,7 +138,7 @@ function Security() {
 										})
 
 										if (!currentPasswordPromptResult.success) {
-											logger.warn("settings", "change password current-password prompt failed", { error: currentPasswordPromptResult.error instanceof Error ? currentPasswordPromptResult.error.message : String(currentPasswordPromptResult.error) })
+											logger.warn("settings", "change password current-password prompt failed", { error: currentPasswordPromptResult.error })
 											alerts.error(currentPasswordPromptResult.error)
 
 											return
@@ -169,7 +169,7 @@ function Security() {
 										})
 
 										if (!changePasswordResult.success) {
-											logger.error("settings", "changePassword failed", { error: changePasswordResult.error instanceof Error ? changePasswordResult.error.message : String(changePasswordResult.error) })
+											logger.error("settings", "changePassword failed", { error: changePasswordResult.error })
 											alerts.error(changePasswordResult.error)
 
 											return
@@ -226,7 +226,7 @@ function Security() {
 										})
 
 										if (!promptResult.success) {
-											logger.warn("settings", "export master keys confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+											logger.warn("settings", "export master keys confirmation prompt failed", { error: promptResult.error })
 											alerts.error(promptResult.error)
 
 											return
@@ -252,7 +252,7 @@ function Security() {
 										})
 
 										if (!exportResult.success) {
-											logger.error("settings", "exportMasterKeys failed", { error: exportResult.error instanceof Error ? exportResult.error.message : String(exportResult.error) })
+											logger.error("settings", "exportMasterKeys failed", { error: exportResult.error })
 											alerts.error(exportResult.error)
 
 											return
@@ -269,7 +269,7 @@ function Security() {
 										})
 
 										if (!shareResult.success) {
-											logger.warn("settings", "master keys file share failed", { error: shareResult.error instanceof Error ? shareResult.error.message : String(shareResult.error) })
+											logger.warn("settings", "master keys file share failed", { error: shareResult.error })
 											alerts.error(shareResult.error)
 
 											return

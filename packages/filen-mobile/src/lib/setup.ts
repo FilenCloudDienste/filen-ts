@@ -60,7 +60,7 @@ const setup = {
 						maxDiskSize: CACHE_MAX_SIZE_BYTES
 					})
 				} catch (e) {
-					logger.error("setup", "Image.configureCache failed", { error: String(e) })
+					logger.error("setup", "Image.configureCache failed", { error: e })
 				}
 			}
 
@@ -114,12 +114,12 @@ const setup = {
 			// debounced gc after writes and gc on app-background, so reclamation happens
 			// where growth happens instead of competing with startup.
 			if (isAuthed.isAuthed && !options?.background) {
-				foregroundService.init().catch(e => { logger.error("setup", "foregroundService.init failed", { error: String(e) }) })
+				foregroundService.init().catch(e => { logger.error("setup", "foregroundService.init failed", { error: e }) })
 
 				// configureCache is pure storage (opens no DB until the first search), so this is
 				// fire-and-forget and cheap. Gated like foregroundService: never in a headless
 				// background run (no search worker there), and only when authed.
-				driveSearch.init().catch(e => { logger.error("setup", "driveSearch.init failed", { error: String(e) }) })
+				driveSearch.init().catch(e => { logger.error("setup", "driveSearch.init failed", { error: e }) })
 			}
 
 			const duration = performance.now() - now
@@ -132,7 +132,7 @@ const setup = {
 		})
 
 		if (!result.success) {
-			logger.error("setup", "setup pipeline failed", { error: String(result.error) })
+			logger.error("setup", "setup pipeline failed", { error: result.error })
 
 			throw result.error
 		}

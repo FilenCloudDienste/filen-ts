@@ -90,7 +90,7 @@ class Sqlite {
 				await db.execute("PRAGMA optimize")
 			}).then(result => {
 				if (!result.success) {
-					logger.warn("sqlite", "Background maintenance failed", { error: String(result.error) })
+					logger.warn("sqlite", "Background maintenance failed", { error: result.error })
 				}
 			})
 		})
@@ -108,7 +108,7 @@ class Sqlite {
 			if (!result.success) {
 				attempt++
 
-				logger.warn("sqlite", "DB init attempt failed, retrying", { attempt, error: String(result.error) })
+				logger.warn("sqlite", "DB init attempt failed, retrying", { attempt, error: result.error })
 
 				if (attempt >= OPEN_DB_MAX_ATTEMPTS) {
 					throw result.error
@@ -184,7 +184,7 @@ class Sqlite {
 			await db.execute("PRAGMA incremental_vacuum")
 			await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 		} catch (err) {
-			logger.warn("sqlite", "Post-wipe reclaim failed — freed pages may persist on disk", { error: String(err) })
+			logger.warn("sqlite", "Post-wipe reclaim failed — freed pages may persist on disk", { error: err })
 		}
 	}
 
@@ -279,7 +279,7 @@ class Sqlite {
 				try {
 					map.set(row[0] as string, deserialize(row[1] as string) as T)
 				} catch (e) {
-					logger.warn("sqlite", "KV row deserialization failed", { rowId: row[0] as string, error: String(e) })
+					logger.warn("sqlite", "KV row deserialization failed", { rowId: row[0] as string, error: e })
 				}
 			}
 

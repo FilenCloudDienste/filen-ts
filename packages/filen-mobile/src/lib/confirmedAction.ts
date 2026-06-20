@@ -42,7 +42,7 @@ export function confirmedAction({
 		})
 
 		if (!promptResult.success) {
-			logger.warn("confirmedAction", "prompt threw unexpectedly", { error: String(promptResult.error) })
+			logger.warn("confirmedAction", "prompt threw unexpectedly", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return
@@ -57,7 +57,7 @@ export function confirmedAction({
 		})
 
 		if (!result.success) {
-			logger.error("confirmedAction", "action failed", { error: String(result.error) })
+			logger.error("confirmedAction", "action failed", { error: result.error })
 			alerts.error(result.error)
 
 			return

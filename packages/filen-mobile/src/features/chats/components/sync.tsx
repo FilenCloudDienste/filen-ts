@@ -137,14 +137,14 @@ export class Sync {
 					return updated
 				})
 			} catch (e) {
-				logger.error("chats-sync", "failed to prune restored inflight queue", { error: e instanceof Error ? e.message : String(e) })
+				logger.error("chats-sync", "failed to prune restored inflight queue", { error: e })
 			}
 
 			return true
 		})
 
 		if (!result.success) {
-			logger.error("chats-sync", "restoreFromDisk failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("chats-sync", "restoreFromDisk failed", { error: result.error })
 		}
 
 		this.resolveInit()
@@ -178,7 +178,7 @@ export class Sync {
 		})
 
 		if (!result.success) {
-			logger.error("chats-sync", "flushToDisk failed — messages memory-only", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("chats-sync", "flushToDisk failed — messages memory-only", { error: result.error })
 		}
 
 		return result.success
@@ -274,7 +274,7 @@ export class Sync {
 								// retried again. The error entry above stays (with the message
 								// snapshot) so the failed bubble remains visible and actionable
 								// (retry/remove) in the chat.
-								logger.error("chats-sync", "dropping inflight message after max permanent rejections", { inflightId: message.inflightId, chatUuid, permanentRejections, error: e instanceof Error ? e.message : String(e) })
+								logger.error("chats-sync", "dropping inflight message after max permanent rejections", { inflightId: message.inflightId, chatUuid, permanentRejections, error: e })
 
 								useChatsStore.getState().setInflightMessages(prev => {
 									const existing = prev[chatUuid]
@@ -328,7 +328,7 @@ export class Sync {
 
 			for (const r of results) {
 				if (r.status === "rejected") {
-					logger.error("chats-sync", "sync pass failed for a chat", { reason: r.reason instanceof Error ? r.reason.message : String(r.reason) })
+					logger.error("chats-sync", "sync pass failed for a chat", { reason: r.reason })
 				}
 			}
 
@@ -345,13 +345,13 @@ export class Sync {
 				return
 			}
 
-			logger.error("chats-sync", "sync pass threw unexpectedly", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("chats-sync", "sync pass threw unexpectedly", { error: result.error })
 			alerts.error(result.error)
 		}
 	}
 
 	public syncNow(): void {
-		this.sync().catch(e => logger.error("chats-sync", "syncNow threw unexpectedly", { error: e instanceof Error ? e.message : String(e) }))
+		this.sync().catch(e => logger.error("chats-sync", "syncNow threw unexpectedly", { error: e }))
 	}
 }
 

@@ -106,7 +106,7 @@ export class FileCache {
 	private readonly scheduleGc = debounce(
 		() => {
 			this.gc().catch(err => {
-				logger.warn("fileCache", "gc failed", { error: String(err) })
+				logger.warn("fileCache", "gc failed", { error: err })
 			})
 		},
 		GC_DEBOUNCE_MS,
@@ -123,7 +123,7 @@ export class FileCache {
 				this.scheduleGc.cancel()
 
 				this.gc().catch(err => {
-					logger.warn("fileCache", "gc on background failed", { error: String(err) })
+					logger.warn("fileCache", "gc on background failed", { error: err })
 				})
 			}
 		})
@@ -213,7 +213,7 @@ export class FileCache {
 			try {
 				metadataContent = deserialize(await metadata.text()) as Metadata
 			} catch (e) {
-				logger.warn("fileCache", "sidecar parse failed in has", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: String(e) })
+				logger.warn("fileCache", "sidecar parse failed in has", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: e })
 
 				// Torn/unparseable sidecar (crash mid-write before sidecars became atomic,
 				// disk corruption): self-heal at access time — treat as a miss and drop the
@@ -281,7 +281,7 @@ export class FileCache {
 						return file
 					}
 				} catch (e) {
-					logger.warn("fileCache", "sidecar parse failed in get, re-downloading", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: String(e) })
+					logger.warn("fileCache", "sidecar parse failed in get, re-downloading", { uuid: item.type === "drive" ? item.data.data.uuid : undefined, error: e })
 
 					if (metadataFile.exists) {
 						metadataFile.delete()
@@ -368,7 +368,7 @@ export class FileCache {
 					parentDirectory.delete()
 				}
 
-				logger.error("fileCache", "file download/cache failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item as Extract<CacheItem, { type: "external" }>), error: String(e) })
+				logger.error("fileCache", "file download/cache failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item as Extract<CacheItem, { type: "external" }>), error: e })
 
 				throw e
 			}

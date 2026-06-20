@@ -70,7 +70,7 @@ function TwoFactorRecoveryKey() {
 										})
 
 										if (!result.success) {
-											logger.warn("settings", "copy recovery key to clipboard failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+											logger.warn("settings", "copy recovery key to clipboard failed", { error: result.error })
 											alerts.error(result.error)
 
 											return
@@ -96,7 +96,7 @@ function TwoFactorRecoveryKey() {
 										})
 
 										if (!exportResult.success) {
-											logger.error("settings", "recovery key file write failed", { error: exportResult.error instanceof Error ? exportResult.error.message : String(exportResult.error) })
+											logger.error("settings", "recovery key file write failed", { error: exportResult.error })
 											alerts.error(exportResult.error)
 
 											return
@@ -113,7 +113,7 @@ function TwoFactorRecoveryKey() {
 										})
 
 										if (!shareResult.success) {
-											logger.warn("settings", "recovery key file share failed", { error: shareResult.error instanceof Error ? shareResult.error.message : String(shareResult.error) })
+											logger.warn("settings", "recovery key file share failed", { error: shareResult.error })
 											alerts.error(shareResult.error)
 
 											return

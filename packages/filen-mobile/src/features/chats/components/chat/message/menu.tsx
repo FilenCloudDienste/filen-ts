@@ -147,7 +147,7 @@ export const Menu = ({
 						retryInflightMessage({
 							chat,
 							message: info.item
-						}).catch(e => logger.warn("chats", "retryInflightMessage failed", { error: e instanceof Error ? e.message : String(e) }))
+						}).catch(e => logger.warn("chats", "retryInflightMessage failed", { error: e }))
 					}
 				},
 				{
@@ -159,7 +159,7 @@ export const Menu = ({
 						removeInflightMessage({
 							chat,
 							message: info.item
-						}).catch(e => logger.warn("chats", "removeInflightMessage failed", { error: e instanceof Error ? e.message : String(e) }))
+						}).catch(e => logger.warn("chats", "removeInflightMessage failed", { error: e }))
 					}
 				}
 			] satisfies MenuButton[])

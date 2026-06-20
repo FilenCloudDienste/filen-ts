@@ -39,7 +39,7 @@ const UnsavedChangesGuard = () => {
 
 				if (!promptResult.success) {
 					logger.error("drivePreview", "unsaved-changes prompt failed", {
-						error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error)
+						error: promptResult.error
 					})
 					alerts.error(promptResult.error)
 

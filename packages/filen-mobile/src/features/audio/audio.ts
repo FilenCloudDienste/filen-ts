@@ -181,7 +181,7 @@ export class Audio {
 				this.handleTrackEnd().catch(e =>
 					logger.error("audio", "handleTrackEnd failed from status listener", {
 						generation: this.loadGeneration,
-						error: e instanceof Error ? e.message : String(e)
+						error: e
 					})
 				)
 
@@ -195,7 +195,7 @@ export class Audio {
 			this.next().catch(e =>
 				logger.error("audio", "next() failed from remote control", {
 					position: this.state.position,
-					error: e instanceof Error ? e.message : String(e)
+					error: e
 				})
 			)
 		})
@@ -204,7 +204,7 @@ export class Audio {
 			this.previous().catch(e =>
 				logger.error("audio", "previous() failed from remote control", {
 					position: this.state.position,
-					error: e instanceof Error ? e.message : String(e)
+					error: e
 				})
 			)
 		})
@@ -407,7 +407,7 @@ export class Audio {
 			} catch (e) {
 				logger.error("audio", "loadAndPlay failed in track-loop", {
 					uuid: this.state.queue[this.state.position]?.item.data.uuid,
-					error: e instanceof Error ? e.message : String(e)
+					error: e
 				})
 			}
 
@@ -436,7 +436,7 @@ export class Audio {
 				logger.warn("audio", "track skipped during auto-advance due to load failure", {
 					position: this.state.position,
 					uuid: this.state.queue[this.state.position]?.item.data.uuid,
-					error: e instanceof Error ? e.message : String(e)
+					error: e
 				})
 
 				gen = this.loadGeneration
@@ -461,7 +461,7 @@ export class Audio {
 					logger.warn("audio", "track skipped during queue loop-wrap due to load failure", {
 						position: this.state.position,
 						uuid: this.state.queue[this.state.position]?.item.data.uuid,
-						error: e instanceof Error ? e.message : String(e)
+						error: e
 					})
 
 					gen = this.loadGeneration
@@ -538,7 +538,7 @@ export class Audio {
 				}).catch(e =>
 					logger.error("audio", "lock screen update failed", {
 						uuid: entry.item.data.uuid,
-						error: e instanceof Error ? e.message : String(e)
+						error: e
 					})
 				)
 
@@ -660,7 +660,7 @@ export class Audio {
 					this.handleTrackEnd().catch(e =>
 						logger.error("audio", "handleTrackEnd failed from status listener", {
 							generation: this.loadGeneration,
-							error: e instanceof Error ? e.message : String(e)
+							error: e
 						})
 					)
 
@@ -679,7 +679,7 @@ export class Audio {
 		this.handleTrackEnd().catch(e =>
 			logger.error("audio", "handleTrackEnd failed from status listener", {
 				generation: this.loadGeneration,
-				error: e instanceof Error ? e.message : String(e)
+				error: e
 			})
 		)
 	}
@@ -725,7 +725,7 @@ export class Audio {
 		this.handleTrackEnd().catch(e =>
 			logger.error("audio", "handleTrackEnd failed from status listener", {
 				generation: this.loadGeneration,
-				error: e instanceof Error ? e.message : String(e)
+				error: e
 			})
 		)
 	}
@@ -810,7 +810,7 @@ export class Audio {
 
 		if (!result.success) {
 			logger.error("audio", "failed to resolve placeholder artwork asset", {
-				error: result.error instanceof Error ? result.error.message : String(result.error)
+				error: result.error
 			})
 
 			return undefined
@@ -1240,7 +1240,7 @@ export class Audio {
 						logger.error("audio", "playlist cleanup persist failed", {
 							playlistUuid: result.uuid,
 							removedCount: nonExistentFileUuids.size,
-							error: e instanceof Error ? e.message : String(e)
+							error: e
 						})
 					)
 				}

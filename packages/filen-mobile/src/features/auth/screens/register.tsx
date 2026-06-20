@@ -76,7 +76,7 @@ const Register = () => {
 		})
 
 		if (!result.success) {
-			logger.warn("auth", "registration failed", { error: String(result.error) })
+			logger.warn("auth", "registration failed", { error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -104,7 +104,7 @@ const Register = () => {
 		})
 
 		if (!promptResult.success) {
-			logger.warn("auth", "resend confirmation prompt failed", { error: String(promptResult.error) })
+			logger.warn("auth", "resend confirmation prompt failed", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return
@@ -127,7 +127,7 @@ const Register = () => {
 		})
 
 		if (!result.success) {
-			logger.warn("auth", "resend confirmation email failed", { error: String(result.error) })
+			logger.warn("auth", "resend confirmation email failed", { error: result.error })
 			alerts.error(result.error)
 
 			return

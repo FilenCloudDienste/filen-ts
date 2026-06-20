@@ -110,7 +110,7 @@ class Auth {
 		try {
 			;(client as unknown as { uniffiDestroy: () => void }).uniffiDestroy()
 		} catch (e) {
-			logger.warn("auth", "uniffiDestroy failed — native handle leaked", { err: String(e) })
+			logger.warn("auth", "uniffiDestroy failed — native handle leaked", { err: e })
 		}
 	}
 
@@ -243,7 +243,7 @@ class Auth {
 		try {
 			this.authedClient = await unauthedClient.login(...params)
 		} catch (e) {
-			logger.error("auth", "login SDK call failed", { err: String(e) })
+			logger.error("auth", "login SDK call failed", { err: e })
 
 			this.destroyClient(unauthedClient)
 
@@ -259,7 +259,7 @@ class Auth {
 		try {
 			await this.saveStringifiedClientToSecureStorage(await this.authedClient.toStringified())
 		} catch (e) {
-			logger.error("auth", "failed to persist credentials after login", { err: String(e) })
+			logger.error("auth", "failed to persist credentials after login", { err: e })
 
 			throw e
 		}
@@ -328,7 +328,7 @@ class Auth {
 			notesSync.cancel()
 			offlineSync.cancel()
 		} catch (e) {
-			logger.warn("auth", "logout phase-2 cancel threw", { err: String(e) })
+			logger.warn("auth", "logout phase-2 cancel threw", { err: e })
 		}
 
 		// Phase 3 — snapshot the SDK clients, then immediately null the fields and re-arm clientsReady
@@ -350,7 +350,7 @@ class Auth {
 		try {
 			await driveSearch.teardownOnLogout()
 		} catch (e) {
-			logger.error("auth", "driveSearch teardown failed during logout", { err: String(e) })
+			logger.error("auth", "driveSearch teardown failed during logout", { err: e })
 		}
 
 		// Phase 4 — destroy the native handles AFTER cancellations settled (avoid use-after-destroy).
@@ -365,7 +365,7 @@ class Auth {
 		try {
 			cache.clear()
 		} catch (e) {
-			logger.error("auth", "in-memory cache clear failed during logout", { err: String(e) })
+			logger.error("auth", "in-memory cache clear failed during logout", { err: e })
 		}
 
 		// Diagnostic logs hold decrypted-at-rest data (file/dir names, paths) by design — wipe them
@@ -410,7 +410,7 @@ class Auth {
 
 				return
 			} catch (e) {
-				console.error("reloadAppAsync attempt failed", { attempt, maxAttempts: RELOAD_MAX_ATTEMPTS, err: String(e) })
+				console.error("reloadAppAsync attempt failed", { attempt, maxAttempts: RELOAD_MAX_ATTEMPTS, err: e })
 
 				if (attempt < RELOAD_MAX_ATTEMPTS) {
 					await new Promise(resolve => setTimeout(resolve, RELOAD_RETRY_DELAY))

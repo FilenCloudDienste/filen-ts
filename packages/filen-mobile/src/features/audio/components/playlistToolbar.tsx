@@ -110,7 +110,7 @@ const PlaylistToolbar = () => {
 							rippleColor="transparent"
 							onPress={() => {
 								audio.clearQueue().catch(err => {
-									logger.error("audio", "clearQueue failed", { error: err instanceof Error ? err.message : String(err) })
+									logger.error("audio", "clearQueue failed", { error: err })
 									alerts.error(err)
 								})
 							}}
@@ -140,7 +140,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.seek(seconds).catch(err => {
-								logger.error("audio", "seek failed", { error: err instanceof Error ? err.message : String(err) })
+								logger.error("audio", "seek failed", { error: err })
 								alerts.error(err)
 							})
 						}}
@@ -175,7 +175,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.setShuffleEnabled(!shuffleEnabled).catch(err => {
-								logger.error("audio", "setShuffleEnabled failed", { error: err instanceof Error ? err.message : String(err) })
+								logger.error("audio", "setShuffleEnabled failed", { error: err })
 								alerts.error(err)
 							})
 						}}
@@ -195,7 +195,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.previous().catch(err => {
-								logger.error("audio", "previous() failed from toolbar", { error: err instanceof Error ? err.message : String(err) })
+								logger.error("audio", "previous() failed from toolbar", { error: err })
 								alerts.error(err)
 							})
 						}}
@@ -244,7 +244,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.next().catch(err => {
-								logger.error("audio", "next() failed from toolbar", { error: err instanceof Error ? err.message : String(err) })
+								logger.error("audio", "next() failed from toolbar", { error: err })
 								alerts.error(err)
 							})
 						}}
@@ -264,7 +264,7 @@ const PlaylistToolbar = () => {
 							}
 
 							audio.setLoopMode(loopMode === "none" ? "queue" : loopMode === "queue" ? "track" : "none").catch(err => {
-								logger.error("audio", "setLoopMode failed", { error: err instanceof Error ? err.message : String(err) })
+								logger.error("audio", "setLoopMode failed", { error: err })
 								alerts.error(err)
 							})
 						}}

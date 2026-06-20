@@ -49,7 +49,7 @@ export async function runBulk<T>({ items, op, clearSelection, confirm }: BulkAct
 		})
 
 		if (!promptResult.success) {
-			logger.warn("bulkOps", "confirm prompt threw unexpectedly", { error: String(promptResult.error) })
+			logger.warn("bulkOps", "confirm prompt threw unexpectedly", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return false
@@ -65,7 +65,7 @@ export async function runBulk<T>({ items, op, clearSelection, confirm }: BulkAct
 	})
 
 	if (!result.success) {
-		logger.error("bulkOps", "bulk operation failed", { error: String(result.error) })
+		logger.error("bulkOps", "bulk operation failed", { error: result.error })
 		alerts.error(result.error)
 
 		return false

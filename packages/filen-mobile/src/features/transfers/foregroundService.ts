@@ -52,7 +52,7 @@ class ForegroundService {
 				importance: AndroidImportance.LOW
 			})
 		})().catch(err => {
-			logger.error("transfers-fgs", "Foreground service init failed", { error: err instanceof Error ? err.message : String(err) })
+			logger.error("transfers-fgs", "Foreground service init failed", { error: err })
 
 			this.initPromise = null
 

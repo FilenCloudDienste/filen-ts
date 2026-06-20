@@ -53,7 +53,7 @@ export function useChatsUnreadCount() {
 
 	useEffect(() => {
 		if (hasMissingMessages && stringifiedClient) {
-			chats.refetchChatsAndMessages().catch(e => logger.warn("chats", "refetchChatsAndMessages (missing messages) failed", { error: e instanceof Error ? e.message : String(e) }))
+			chats.refetchChatsAndMessages().catch(e => logger.warn("chats", "refetchChatsAndMessages (missing messages) failed", { error: e }))
 		}
 	}, [hasMissingMessages, stringifiedClient])
 
@@ -63,7 +63,7 @@ export function useChatsUnreadCount() {
 		}
 
 		chats.refetchChatsAndMessages().catch(err => {
-			logger.error("chats", "initial refetchChatsAndMessages failed", { error: err instanceof Error ? err.message : String(err) })
+			logger.error("chats", "initial refetchChatsAndMessages failed", { error: err })
 		})
 	})
 

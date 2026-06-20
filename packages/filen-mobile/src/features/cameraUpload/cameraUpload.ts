@@ -482,7 +482,7 @@ class CameraUpload {
 
 					reportedFailedAssetIds.add(failedAsset.id)
 
-					logger.error("cameraUpload", "Asset info fetch failed", { assetId: failedAsset.id, albumId: id, error: result.reason instanceof Error ? result.reason.message : String(result.reason) })
+					logger.error("cameraUpload", "Asset info fetch failed", { assetId: failedAsset.id, albumId: id, error: result.reason })
 
 					useCameraUploadStore.getState().setErrors(errors => [
 						...errors,
@@ -609,7 +609,7 @@ class CameraUpload {
 
 			degraded = true
 
-			logger.error("cameraUpload", "Album assets query failed", { albumId: entry[0], albumTitle: entry[1], error: result.reason instanceof Error ? result.reason.message : String(result.reason) })
+			logger.error("cameraUpload", "Album assets query failed", { albumId: entry[0], albumTitle: entry[1], error: result.reason })
 
 			useCameraUploadStore.getState().setErrors(errors => [
 				...errors,
@@ -671,7 +671,7 @@ class CameraUpload {
 		// anything this device already uploaded; the residual risk is version churn on
 		// fresh devices, accepted and surfaced here.
 		if (scanErrors.length > 0 && !signal.aborted) {
-			logger.warn("cameraUpload", "Remote listing degraded by scan errors", { errorCount: scanErrors.length, firstError: scanErrors[0] instanceof Error ? scanErrors[0].message : String(scanErrors[0]) })
+			logger.warn("cameraUpload", "Remote listing degraded by scan errors", { errorCount: scanErrors.length, firstError: scanErrors[0] })
 
 			useCameraUploadStore.getState().setErrors(errors => [
 				...errors,
@@ -1355,7 +1355,7 @@ class CameraUpload {
 
 						this.uploadFailures.set(assetId, (this.uploadFailures.get(assetId) ?? 0) + 1)
 
-						logger.error("cameraUpload", "Upload pipeline failed for asset", { assetId, filename: delta.file.info.filename, error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("cameraUpload", "Upload pipeline failed for asset", { assetId, filename: delta.file.info.filename, error: result.error })
 
 						useCameraUploadStore.getState().setErrors(errors => [
 							...errors,
@@ -1385,7 +1385,7 @@ class CameraUpload {
 				return
 			}
 
-			logger.error("cameraUpload", "Sync run failed unexpectedly", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("cameraUpload", "Sync run failed unexpectedly", { error: result.error })
 
 			useCameraUploadStore.getState().setErrors(errors => [
 				...errors,

@@ -59,12 +59,12 @@ function formatSize(value: number | undefined): string {
 async function clearExpoImageCache(): Promise<void> {
 	await Promise.all([
 		Image.clearMemoryCache().catch(err => {
-			logger.warn("settings", "Failed to clear expo-image memory cache", { error: err instanceof Error ? err.message : String(err) })
+			logger.warn("settings", "Failed to clear expo-image memory cache", { error: err })
 
 			return false
 		}),
 		Image.clearDiskCache().catch(err => {
-			logger.warn("settings", "Failed to clear expo-image disk cache", { error: err instanceof Error ? err.message : String(err) })
+			logger.warn("settings", "Failed to clear expo-image disk cache", { error: err })
 
 			return false
 		})
@@ -88,7 +88,7 @@ async function confirmAndRun(options: {
 	})
 
 	if (!promptResult.success) {
-		logger.warn("settings", "clear cache confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+		logger.warn("settings", "clear cache confirmation prompt failed", { error: promptResult.error })
 		alerts.error(promptResult.error)
 
 		return
@@ -103,7 +103,7 @@ async function confirmAndRun(options: {
 	})
 
 	if (!result.success) {
-		logger.error("settings", "clear cache action failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+		logger.error("settings", "clear cache action failed", { error: result.error })
 		alerts.error(result.error)
 
 		return
@@ -155,7 +155,7 @@ function Advanced() {
 		})
 
 		if (!promptResult.success) {
-			logger.warn("settings", "export logs confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+			logger.warn("settings", "export logs confirmation prompt failed", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return
@@ -171,7 +171,7 @@ function Advanced() {
 		})
 
 		if (!result.success) {
-			logger.error("settings", "exportLogs prep failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("settings", "exportLogs prep failed", { error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -193,7 +193,7 @@ function Advanced() {
 		})
 
 		if (!shareResult.success) {
-			logger.error("settings", "exportLogs share failed", { error: shareResult.error instanceof Error ? shareResult.error.message : String(shareResult.error) })
+			logger.error("settings", "exportLogs share failed", { error: shareResult.error })
 			alerts.error(shareResult.error)
 		}
 	}

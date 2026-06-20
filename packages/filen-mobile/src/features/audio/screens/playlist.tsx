@@ -247,7 +247,7 @@ export function Playlist() {
 						})
 
 						if (!result.success) {
-							logger.error("audio", "reorder tracks failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+							logger.error("audio", "reorder tracks failed", { playlistUuid: playlist.uuid, error: result.error })
 							alerts.error(result.error)
 
 							return

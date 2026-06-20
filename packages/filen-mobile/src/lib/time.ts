@@ -10,7 +10,7 @@ try {
 			.filter(lang => lang.languageTag)
 			.at(0)?.languageTag ?? "en-US"
 } catch (e) {
-	logger.warn("time", "Failed to read device locale", { error: String(e) })
+	logger.warn("time", "Failed to read device locale", { error: e })
 }
 
 // Keeps date/time formatting aligned with a runtime language switch. Resets the cached

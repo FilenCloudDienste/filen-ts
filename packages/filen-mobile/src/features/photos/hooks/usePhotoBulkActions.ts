@@ -78,7 +78,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 				})
 
 				if (!permissionsResult.success) {
-					logger.error("photos", "media permissions check failed in save-to-photos", { error: permissionsResult.error instanceof Error ? permissionsResult.error.message : String(permissionsResult.error) })
+					logger.error("photos", "media permissions check failed in save-to-photos", { error: permissionsResult.error })
 					alerts.error(permissionsResult.error)
 
 					return

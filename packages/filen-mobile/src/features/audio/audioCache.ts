@@ -78,7 +78,7 @@ export class AudioCache {
 	private readonly scheduleGc = debounce(
 		() => {
 			this.gc().catch(err => {
-				logger.error("audioCache", "gc failed (scheduled)", { error: err instanceof Error ? err.message : String(err) })
+				logger.error("audioCache", "gc failed (scheduled)", { error: err })
 			})
 		},
 		GC_DEBOUNCE_MS,
@@ -95,7 +95,7 @@ export class AudioCache {
 				this.scheduleGc.cancel()
 
 				this.gc().catch(err => {
-					logger.error("audioCache", "gc failed (background)", { error: err instanceof Error ? err.message : String(err) })
+					logger.error("audioCache", "gc failed (background)", { error: err })
 				})
 			}
 		})
@@ -229,7 +229,7 @@ export class AudioCache {
 						}
 					}
 				} catch (e) {
-					logger.error("audioCache", "corrupt metadata sidecar deleted", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e instanceof Error ? e.message : String(e) })
+					logger.error("audioCache", "corrupt metadata sidecar deleted", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e })
 
 					if (metadataFile.exists) {
 						metadataFile.delete()
@@ -291,7 +291,7 @@ export class AudioCache {
 								image = await Image.loadAsync(pictureFile.uri)
 								pictureBlurhash = await Image.generateBlurhashAsync(image, [4, 3])
 							} catch (e) {
-								logger.warn("audioCache", "blurhash generation failed for cover art", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e instanceof Error ? e.message : String(e) })
+								logger.warn("audioCache", "blurhash generation failed for cover art", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e })
 							} finally {
 								if (image) {
 									image.release()
@@ -329,7 +329,7 @@ export class AudioCache {
 						}
 					}
 				} catch (e) {
-					logger.error("audioCache", "audio metadata parse or sidecar write failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e instanceof Error ? e.message : String(e) })
+					logger.error("audioCache", "audio metadata parse or sidecar write failed", { uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item), error: e })
 
 					if (metadataFile.exists) {
 						metadataFile.delete()

@@ -51,7 +51,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 				if (event.tag === SocketEvent_Tags.AuthSuccess) {
 					// Refetch chats and messages to ensure we have the latest data after reconnect + to update unread counts
-					chats.refetchChatsAndMessages().catch(e => logger.error("socket", "chats refetch after reconnect failed", { error: e instanceof Error ? e.message : String(e) }))
+					chats.refetchChatsAndMessages().catch(e => logger.error("socket", "chats refetch after reconnect failed", { error: e }))
 				}
 
 				break
@@ -62,7 +62,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 
 				switch (eventInner.inner.tag) {
 					case GeneralEvent_Tags.PasswordChanged: {
-						auth.logout().catch(e => logger.error("socket", "logout after PasswordChanged failed", { error: e instanceof Error ? e.message : String(e) }))
+						auth.logout().catch(e => logger.error("socket", "logout after PasswordChanged failed", { error: e }))
 
 						break
 					}
@@ -114,7 +114,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 			}
 		}
 	} catch (e) {
-		logger.error("socket", "onEvent failed", { eventTag: event.tag, error: e instanceof Error ? e.message : String(e) })
+		logger.error("socket", "onEvent failed", { eventTag: event.tag, error: e })
 		alerts.error(e)
 	}
 }
@@ -154,7 +154,7 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 										onEvent({
 											event,
 											userId: client ? client.userId : BigInt(0)
-										}).catch(e => logger.error("socket", "onEvent threw outside try/catch", { error: e instanceof Error ? e.message : String(e) }))
+										}).catch(e => logger.error("socket", "onEvent threw outside try/catch", { error: e }))
 									}
 								},
 								undefined
@@ -185,7 +185,7 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 			})
 
 			if (!result.success) {
-				logger.error("socket", "appState transition failed", { nextAppState, error: result.error instanceof Error ? result.error.message : String(result.error) })
+				logger.error("socket", "appState transition failed", { nextAppState, error: result.error })
 				alerts.error(result.error)
 
 				return
@@ -223,7 +223,7 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 		// (cold launch pre-becomeActive, or a background launch), the AppState listener
 		// registered above handles the real transition instead.
 		if (AppState.currentState === "active") {
-			onAppStateChange("active").catch(e => logger.error("socket", "initial socket connect failed", { error: e instanceof Error ? e.message : String(e) }))
+			onAppStateChange("active").catch(e => logger.error("socket", "initial socket connect failed", { error: e }))
 		}
 	})
 

@@ -219,7 +219,7 @@ export class OfflineSync {
 			thorough: manual === true,
 			background: background === true
 		}).catch(e => {
-			logger.error("offline-sync", "Sync pass threw unexpectedly", { error: e instanceof Error ? e.message : String(e) })
+			logger.error("offline-sync", "Sync pass threw unexpectedly", { error: e })
 
 			throw e
 		}).finally(() => {

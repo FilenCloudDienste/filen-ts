@@ -135,7 +135,7 @@ function IncomingShare() {
 			})
 
 			if (!selectResult.success) {
-				logger.error("incomingShare", "failed to open directory picker", { error: selectResult.error instanceof Error ? selectResult.error.message : String(selectResult.error) })
+				logger.error("incomingShare", "failed to open directory picker", { error: selectResult.error })
 				alerts.error(selectResult.error)
 
 				return
@@ -205,7 +205,7 @@ function IncomingShare() {
 			})
 
 			if (!assetsResult.success) {
-				logger.error("incomingShare", "failed to copy share payloads to tmp dir", { error: assetsResult.error instanceof Error ? assetsResult.error.message : String(assetsResult.error), payloadCount: payloads.length })
+				logger.error("incomingShare", "failed to copy share payloads to tmp dir", { error: assetsResult.error, payloadCount: payloads.length })
 				alerts.error(assetsResult.error)
 
 				return
@@ -243,7 +243,7 @@ function IncomingShare() {
 			})
 
 			if (!result.success) {
-				logger.error("incomingShare", "upload of shared files failed", { error: result.error instanceof Error ? result.error.message : String(result.error), assetCount: assets.length })
+				logger.error("incomingShare", "upload of shared files failed", { error: result.error, assetCount: assets.length })
 				alerts.error(result.error)
 
 				return

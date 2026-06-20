@@ -50,7 +50,7 @@ export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 	})
 
 	if (!flushResult.success) {
-		logger.error("chats-inflight", "failed to flush inflight purge to disk", { chatUuid, error: flushResult.error instanceof Error ? flushResult.error.message : String(flushResult.error) })
+		logger.error("chats-inflight", "failed to flush inflight purge to disk", { chatUuid, error: flushResult.error })
 	}
 
 	const draftsResult = await run(async () => {
@@ -58,7 +58,7 @@ export async function purgeChatInflightState(chatUuid: string): Promise<void> {
 	})
 
 	if (!draftsResult.success) {
-		logger.warn("chats-inflight", "failed to remove chat draft keys", { chatUuid, error: draftsResult.error instanceof Error ? draftsResult.error.message : String(draftsResult.error) })
+		logger.warn("chats-inflight", "failed to remove chat draft keys", { chatUuid, error: draftsResult.error })
 	}
 }
 

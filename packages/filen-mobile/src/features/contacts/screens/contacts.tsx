@@ -94,7 +94,7 @@ const Contacts = () => {
 		})
 
 		if (!result.success) {
-			logger.error("contacts", "Contacts list refresh failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("contacts", "Contacts list refresh failed", { error: result.error })
 			alerts.error(result.error)
 		}
 	}

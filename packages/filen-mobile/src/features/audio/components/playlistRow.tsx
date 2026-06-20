@@ -61,7 +61,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 							})
 
 							if (!result.success) {
-								logger.error("audio", "play playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+								logger.error("audio", "play playlist failed", { playlistUuid: playlist.uuid, error: result.error })
 								alerts.error(result.error)
 
 								return
@@ -95,7 +95,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 							})
 
 							if (!result.success) {
-								logger.error("audio", "shuffle play playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+								logger.error("audio", "shuffle play playlist failed", { playlistUuid: playlist.uuid, error: result.error })
 								alerts.error(result.error)
 
 								return
@@ -131,7 +131,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 							})
 
 							if (!result.success) {
-								logger.error("audio", "add playlist to queue failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+								logger.error("audio", "add playlist to queue failed", { playlistUuid: playlist.uuid, error: result.error })
 								alerts.error(result.error)
 
 								return
@@ -157,7 +157,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!selectDriveItemsResult.success) {
-					logger.error("audio", "drive item selection failed in add-tracks flow", { playlistUuid: playlist.uuid, error: selectDriveItemsResult.error instanceof Error ? selectDriveItemsResult.error.message : String(selectDriveItemsResult.error) })
+					logger.error("audio", "drive item selection failed in add-tracks flow", { playlistUuid: playlist.uuid, error: selectDriveItemsResult.error })
 					alerts.error(selectDriveItemsResult.error)
 
 					return
@@ -175,7 +175,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!result.success) {
-					logger.error("audio", "addFilesToPlaylist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+					logger.error("audio", "addFilesToPlaylist failed", { playlistUuid: playlist.uuid, error: result.error })
 					alerts.error(result.error)
 
 					return
@@ -200,7 +200,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!promptResult.success) {
-					logger.error("audio", "rename playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+					logger.error("audio", "rename playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error })
 					alerts.error(promptResult.error)
 
 					return
@@ -224,7 +224,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!result.success) {
-					logger.error("audio", "rename playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+					logger.error("audio", "rename playlist failed", { playlistUuid: playlist.uuid, error: result.error })
 					alerts.error(result.error)
 
 					return
@@ -249,7 +249,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!promptResult.success) {
-					logger.error("audio", "delete playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+					logger.error("audio", "delete playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error })
 					alerts.error(promptResult.error)
 
 					return
@@ -266,7 +266,7 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 				})
 
 				if (!result.success) {
-					logger.error("audio", "delete playlist failed", { playlistUuid: playlist.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+					logger.error("audio", "delete playlist failed", { playlistUuid: playlist.uuid, error: result.error })
 					alerts.error(result.error)
 
 					return

@@ -142,7 +142,7 @@ export function useDriveUpload({
 		const { succeeded, failed, errors } = summarizeTransferResults(results)
 
 		for (const error of errors) {
-			logger.error("drive-upload", "upload item failed", { error: String(error) })
+			logger.error("drive-upload", "upload item failed", { error: error })
 			alerts.error(error)
 		}
 
@@ -174,7 +174,7 @@ export function useDriveUpload({
 		})
 
 		if (!permissionsResult.success) {
-			logger.warn("drive-upload", "media permissions check failed", { error: String(permissionsResult.error) })
+			logger.warn("drive-upload", "media permissions check failed", { error: permissionsResult.error })
 			alerts.error(permissionsResult.error)
 
 			return false
@@ -206,7 +206,7 @@ export function useDriveUpload({
 		})
 
 		if (!documentPickerResult.success) {
-			logger.warn("drive-upload", "document picker failed", { error: String(documentPickerResult.error) })
+			logger.warn("drive-upload", "document picker failed", { error: documentPickerResult.error })
 			alerts.error(documentPickerResult.error)
 
 			return
@@ -270,7 +270,7 @@ export function useDriveUpload({
 		})
 
 		if (!transferResult.success) {
-			logger.error("drive-upload", "uploadFiles fan-out failed", { error: String(transferResult.error), count: assets.length })
+			logger.error("drive-upload", "uploadFiles fan-out failed", { error: transferResult.error, count: assets.length })
 			alerts.error(transferResult.error)
 
 			return
@@ -299,7 +299,7 @@ export function useDriveUpload({
 		})
 
 		if (!imagePickerResult.success) {
-			logger.warn("drive-upload", "image picker failed", { error: String(imagePickerResult.error) })
+			logger.warn("drive-upload", "image picker failed", { error: imagePickerResult.error })
 			alerts.error(imagePickerResult.error)
 
 			return
@@ -366,7 +366,7 @@ export function useDriveUpload({
 		})
 
 		if (!transferResult.success) {
-			logger.error("drive-upload", "uploadFromPicker fan-out failed", { error: String(transferResult.error), count: assets.length })
+			logger.error("drive-upload", "uploadFromPicker fan-out failed", { error: transferResult.error, count: assets.length })
 			alerts.error(transferResult.error)
 
 			return
@@ -427,7 +427,7 @@ export function useDriveUpload({
 		})
 
 		if (!scannerResult.success) {
-			logger.warn("drive-upload", "document scanner failed", { error: String(scannerResult.error) })
+			logger.warn("drive-upload", "document scanner failed", { error: scannerResult.error })
 			alerts.error(scannerResult.error)
 
 			return
@@ -474,7 +474,7 @@ export function useDriveUpload({
 		})
 
 		if (!transferResult.success) {
-			logger.error("drive-upload", "scanDocument fan-out failed", { error: String(transferResult.error), count: scans.length })
+			logger.error("drive-upload", "scanDocument fan-out failed", { error: transferResult.error, count: scans.length })
 			alerts.error(transferResult.error)
 
 			return
@@ -499,7 +499,7 @@ export function useDriveUpload({
 		})
 
 		if (!promptResult.success) {
-			logger.warn("drive-upload", "create text file prompt failed", { error: String(promptResult.error) })
+			logger.warn("drive-upload", "create text file prompt failed", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return
@@ -557,7 +557,7 @@ export function useDriveUpload({
 		})
 
 		if (!result.success) {
-			logger.error("drive-upload", "createTextFile failed", { error: String(result.error), fileName })
+			logger.error("drive-upload", "createTextFile failed", { error: result.error, fileName })
 			alerts.error(result.error)
 
 			return

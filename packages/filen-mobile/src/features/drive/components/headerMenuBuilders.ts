@@ -205,7 +205,7 @@ export function buildBulkActionMenu({
 				})
 
 				if (!driveRootUuidResult.success) {
-					logger.error("drive", "bulk move: failed to get root uuid", { error: String(driveRootUuidResult.error) })
+					logger.error("drive", "bulk move: failed to get root uuid", { error: driveRootUuidResult.error })
 					alerts.error(driveRootUuidResult.error)
 
 					return
@@ -280,7 +280,7 @@ export function buildBulkActionMenu({
 				})
 
 				if (!permissionsResult.success) {
-					logger.warn("drive", "bulk save to photos: media permissions check failed", { error: String(permissionsResult.error) })
+					logger.warn("drive", "bulk save to photos: media permissions check failed", { error: permissionsResult.error })
 					alerts.error(permissionsResult.error)
 
 					return
@@ -362,7 +362,7 @@ export function buildBulkActionMenu({
 				})
 
 				if (!pickResult.success) {
-					logger.warn("drive", "bulk share: contact picker failed", { error: String(pickResult.error) })
+					logger.warn("drive", "bulk share: contact picker failed", { error: pickResult.error })
 					alerts.error(pickResult.error)
 
 					return

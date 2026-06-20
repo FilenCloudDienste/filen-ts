@@ -30,7 +30,7 @@ export function atomicWrite(file: FileSystem.File, data: string | Uint8Array): F
 			tmp.delete()
 		}
 
-		logger.error("fsAtomic", "atomicWrite moveSync failed", { dest: file.uri, error: String(e) })
+		logger.error("fsAtomic", "atomicWrite moveSync failed", { dest: file.uri, error: e })
 
 		throw e
 	}

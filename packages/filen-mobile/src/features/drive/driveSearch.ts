@@ -160,7 +160,7 @@ export class DriveSearch {
 				return
 			}
 
-			logger.error("drive-search", "configureCache failed — search unavailable", { error: String(error) })
+			logger.error("drive-search", "configureCache failed — search unavailable", { error: error })
 
 			useDriveSearchStore.getState().setCacheUnavailable(true)
 		}
@@ -299,7 +299,7 @@ export class DriveSearch {
 
 			return true
 		} catch (error) {
-			logger.warn("drive-search", "setConfig failed, will reopen", { error: String(error) })
+			logger.warn("drive-search", "setConfig failed, will reopen", { error: error })
 
 			return false
 		}
@@ -349,7 +349,7 @@ export class DriveSearch {
 				SDK_CACHE_DIRECTORY.delete()
 			}
 		} catch (error) {
-			logger.warn("drive-search", "failed to delete cache on logout", { error: String(error) })
+			logger.warn("drive-search", "failed to delete cache on logout", { error: error })
 		}
 	}
 
@@ -357,14 +357,14 @@ export class DriveSearch {
 		try {
 			await search.close()
 		} catch (error) {
-			logger.warn("drive-search", "error closing search handle", { error: String(error) })
+			logger.warn("drive-search", "error closing search handle", { error: error })
 		}
 
 		if (windowHandle) {
 			try {
 				windowHandle.uniffiDestroy()
 			} catch (error) {
-				logger.warn("drive-search", "error destroying window handle", { error: String(error) })
+				logger.warn("drive-search", "error destroying window handle", { error: error })
 			}
 		}
 	}
@@ -397,7 +397,7 @@ export class DriveSearch {
 				try {
 					entry.delete()
 				} catch (error) {
-					logger.warn("drive-search", "failed to sweep stale cache version", { error: String(error), name: entry.name })
+					logger.warn("drive-search", "failed to sweep stale cache version", { error: error, name: entry.name })
 				}
 			}
 		}

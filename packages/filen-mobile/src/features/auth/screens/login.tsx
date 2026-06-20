@@ -60,7 +60,7 @@ const Login = () => {
 		})
 
 		if (!result.success) {
-			logger.warn("auth", "app reload after login failed", { error: String(result.error) })
+			logger.warn("auth", "app reload after login failed", { error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -80,7 +80,7 @@ const Login = () => {
 		})
 
 		if (!promptResult.success) {
-			logger.warn("auth", "two-factor prompt failed", { error: String(promptResult.error) })
+			logger.warn("auth", "two-factor prompt failed", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return null
@@ -117,7 +117,7 @@ const Login = () => {
 		}
 
 		if (!isTwoFactorRequiredError(firstAttempt.error)) {
-			logger.warn("auth", "login failed", { error: String(firstAttempt.error) })
+			logger.warn("auth", "login failed", { error: firstAttempt.error })
 			alerts.error(firstAttempt.error)
 
 			return
@@ -151,7 +151,7 @@ const Login = () => {
 			// A 2FA error after a code was submitted means it was wrong/expired → re-prompt with a
 			// hint. Any other failure is real → surface it and stop.
 			if (!isTwoFactorRequiredError(attempt.error)) {
-				logger.warn("auth", "login with 2FA failed", { error: String(attempt.error) })
+				logger.warn("auth", "login with 2FA failed", { error: attempt.error })
 				alerts.error(attempt.error)
 
 				return
@@ -181,7 +181,7 @@ const Login = () => {
 		})
 
 		if (!promptResult.success) {
-			logger.warn("auth", "reset password prompt failed", { error: String(promptResult.error) })
+			logger.warn("auth", "reset password prompt failed", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return
@@ -204,7 +204,7 @@ const Login = () => {
 		})
 
 		if (!result.success) {
-			logger.warn("auth", "password reset request failed", { error: String(result.error) })
+			logger.warn("auth", "password reset request failed", { error: result.error })
 			alerts.error(result.error)
 
 			return

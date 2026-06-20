@@ -115,7 +115,7 @@ const SyncErrors = () => {
 									onPress: () => {
 										useOfflineStore.getState().setSyncErrors([])
 
-										offlineSync.sync({ manual: true }).catch(err => logger.warn("offline-sync", "Manual sync after clearing errors failed", { error: err instanceof Error ? err.message : String(err) }))
+										offlineSync.sync({ manual: true }).catch(err => logger.warn("offline-sync", "Manual sync after clearing errors failed", { error: err }))
 									}
 								},
 								{

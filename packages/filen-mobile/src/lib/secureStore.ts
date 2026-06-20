@@ -110,7 +110,7 @@ class SecureStore {
 		try {
 			this.ensureDirectories()
 		} catch (e) {
-			logger.warn("secure-store", "Deferred directory creation failed at module init", { error: String(e) })
+			logger.warn("secure-store", "Deferred directory creation failed at module init", { error: e })
 		}
 
 		this.mmkv = createMMKV({
@@ -190,7 +190,7 @@ class SecureStore {
 		try {
 			this.available = await ExpoSecureStore.isAvailableAsync()
 		} catch (e) {
-			logger.warn("secure-store", "ExpoSecureStore availability check threw — using MMKV fallback", { error: String(e) })
+			logger.warn("secure-store", "ExpoSecureStore availability check threw — using MMKV fallback", { error: e })
 			this.available = false
 		}
 
@@ -322,7 +322,7 @@ class SecureStore {
 		try {
 			entries = parentDirectory.list()
 		} catch (e) {
-			logger.warn("secure-store", "Backup recovery: parent directory listing failed", { error: String(e) })
+			logger.warn("secure-store", "Backup recovery: parent directory listing failed", { error: e })
 			return null
 		}
 
@@ -358,7 +358,7 @@ class SecureStore {
 				new FileSystem.File(file.uri).moveSync(new FileSystem.File(destinationUri))
 			} catch (e) {
 				// Restore failed — leave the backup in place for the next attempt and continue.
-				logger.warn("secure-store", "Backup recovery: failed to promote backup to destination", { backupUri: file.uri, error: String(e) })
+				logger.warn("secure-store", "Backup recovery: failed to promote backup to destination", { backupUri: file.uri, error: e })
 				continue
 			}
 
@@ -408,7 +408,7 @@ class SecureStore {
 				// a fresh empty store: the cloud is the source of truth and everything in
 				// here is restored by re-login. A failed delete keeps the old conservative
 				// throw (cannot recover safely this boot — retry next launch).
-				logger.error("secure-store", "Destination payload failed AES-GCM authentication — entering recovery ladder", { error: String(e) })
+				logger.error("secure-store", "Destination payload failed AES-GCM authentication — entering recovery ladder", { error: e })
 
 				try {
 					this.secureStoreFile.delete()
@@ -479,7 +479,7 @@ class SecureStore {
 		})
 
 		if (!result.success) {
-			logger.error("secure-store", "Read degraded to null after IO/decrypt failure", { error: String(result.error) })
+			logger.error("secure-store", "Read degraded to null after IO/decrypt failure", { error: result.error })
 
 			return null
 		}
@@ -614,7 +614,7 @@ class SecureStore {
 							backupFile.moveSync(new FileSystem.File(destinationUri))
 						} catch (restoreErr) {
 							// Best-effort restore; the backup is preserved below for manual recovery.
-							logger.error("secure-store", "Write swap failed AND backup restore failed — destination may be empty", { error: String(e), restoreError: String(restoreErr) })
+							logger.error("secure-store", "Write swap failed AND backup restore failed — destination may be empty", { error: e, restoreError: String(restoreErr) })
 						}
 					}
 				}
@@ -832,7 +832,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		})
 
 		if (!result.success) {
-			logger.error("secure-store", "useSecureStore: retrieve failed", { key, error: String(result.error) })
+			logger.error("secure-store", "useSecureStore: retrieve failed", { key, error: result.error })
 		}
 	}
 
@@ -857,7 +857,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 				isLocalUpdateRef.current = false
 
 				if (!result.success) {
-					logger.error("secure-store", "useSecureStore: set failed", { key, error: String(result.error) })
+					logger.error("secure-store", "useSecureStore: set failed", { key, error: result.error })
 				}
 			})()
 		},
@@ -869,7 +869,7 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	}, [initialValue])
 
 	useEffectOnce(() => {
-		retrieve().catch(err => logger.error("secure-store", "useSecureStore: initial retrieve threw", { key, error: String(err) }))
+		retrieve().catch(err => logger.error("secure-store", "useSecureStore: initial retrieve threw", { key, error: err }))
 	})
 
 	useEffect(() => {

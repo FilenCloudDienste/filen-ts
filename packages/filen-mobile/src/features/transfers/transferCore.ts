@@ -196,13 +196,13 @@ function removeSettledTransfer(
 						addFinishedTransfer(snapshot)
 					}
 				} catch (e) {
-					logger.error("transfers", "Failed to append finished transfer snapshot", { id, type, outcome, error: e instanceof Error ? e.message : String(e) })
+					logger.error("transfers", "Failed to append finished transfer snapshot", { id, type, outcome, error: e })
 				}
 			}
 
 			useTransfersStore.getState().setTransfers(prev => prev.filter(t => !(t.id === id && t.type === type)))
 		})
-		.catch(err => logger.error("transfers", "removeSettledTransfer cleanup chain rejected", { id, type, outcome, error: err instanceof Error ? err.message : String(err) }))
+		.catch(err => logger.error("transfers", "removeSettledTransfer cleanup chain rejected", { id, type, outcome, error: err }))
 }
 
 // Registers a deferred cleanup that removes the transfer entry from the store once the transfer
@@ -583,7 +583,7 @@ export async function uploadCore(
 			}
 
 			if (hideProgress) {
-				logger.error("transfers", "Directory upload failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+				logger.error("transfers", "Directory upload failed", { id, error: result.error })
 			} else {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
@@ -748,7 +748,7 @@ export async function uploadCore(
 		}
 
 		if (hideProgress) {
-			logger.error("transfers", "File upload failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("transfers", "File upload failed", { id, error: result.error })
 		} else {
 			useTransfersStore.getState().setTransfers(prev =>
 				prev.map(t =>
@@ -836,7 +836,7 @@ export async function uploadCore(
 				signal: compositeAbortSignal
 			})
 			.catch(err => {
-				logger.warn("transfers", "Thumbnail generation failed after upload", { uuid: result.data.uuid, name: uploadedFileName, error: err instanceof Error ? err.message : String(err) })
+				logger.warn("transfers", "Thumbnail generation failed after upload", { uuid: result.data.uuid, name: uploadedFileName, error: err })
 			})
 	}
 
@@ -1154,7 +1154,7 @@ export async function downloadCore(
 			}
 
 			if (hideProgress) {
-				logger.error("transfers", "Directory download failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+				logger.error("transfers", "Directory download failed", { id, error: result.error })
 			} else {
 				useTransfersStore.getState().setTransfers(prev =>
 					prev.map(t =>
@@ -1378,7 +1378,7 @@ export async function downloadCore(
 		}
 
 		if (hideProgress) {
-			logger.error("transfers", "File download failed", { id, error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("transfers", "File download failed", { id, error: result.error })
 		} else {
 			useTransfersStore.getState().setTransfers(prev =>
 				prev.map(t =>

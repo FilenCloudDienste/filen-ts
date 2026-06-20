@@ -156,7 +156,7 @@ function Appearance() {
 				})
 
 				if (!promptResult.success) {
-					logger.warn("settings", "reset sort confirmation prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+					logger.warn("settings", "reset sort confirmation prompt failed", { error: promptResult.error })
 					alerts.error(promptResult.error)
 
 					return

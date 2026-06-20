@@ -30,7 +30,7 @@ const OfflineSync = () => {
 		}
 
 		Promise.all([offline.updateIndex(), offlineSync.sync()]).catch(err => {
-			logger.error("offline-sync", "Initial index refresh or sync failed on mount", { error: err instanceof Error ? err.message : String(err) })
+			logger.error("offline-sync", "Initial index refresh or sync failed on mount", { error: err })
 			alerts.error(err)
 		})
 	}, [])
@@ -45,7 +45,7 @@ const OfflineSync = () => {
 		// their first sync from the mount effect above; background mounts (skipped there)
 		// get it here on the first real "active" transition.
 		if (!wasActive && isAppActive) {
-			offlineSync.sync().catch(err => logger.warn("offline-sync", "Foreground transition sync failed", { error: err instanceof Error ? err.message : String(err) }))
+			offlineSync.sync().catch(err => logger.warn("offline-sync", "Foreground transition sync failed", { error: err }))
 		}
 	}, [isAppActive])
 

@@ -147,11 +147,11 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			errorMessage: result.success ? undefined : result.error instanceof Error ? result.error.message : String(result.error)
 		})
 		.catch(err => {
-			logger.warn("cameraUpload", "Failed to write background run log entry", { error: err instanceof Error ? err.message : String(err) })
+			logger.warn("cameraUpload", "Failed to write background run log entry", { error: err })
 		})
 
 	if (!result.success) {
-		logger.error("cameraUpload", "Background sync task failed", { phase, error: result.error instanceof Error ? result.error.message : String(result.error) })
+		logger.error("cameraUpload", "Background sync task failed", { phase, error: result.error })
 
 		// Honest semantics note (audit B3, 2026-06-11): the INSTALLED expo-background-task
 		// discards this value on both platforms — iOS always calls
@@ -182,7 +182,7 @@ export async function registerBackgroundSync(): Promise<void> {
 
 		logger.debug("cameraUpload", "Registered background sync")
 	} catch (e) {
-		logger.error("cameraUpload", "Background task registration failed", { error: e instanceof Error ? e.message : String(e) })
+		logger.error("cameraUpload", "Background task registration failed", { error: e })
 	}
 }
 
@@ -198,6 +198,6 @@ export async function unregisterBackgroundSync(): Promise<void> {
 
 		logger.debug("cameraUpload", "Unregistered background sync")
 	} catch (e) {
-		logger.warn("cameraUpload", "Background task unregistration failed", { error: e instanceof Error ? e.message : String(e) })
+		logger.warn("cameraUpload", "Background task unregistration failed", { error: e })
 	}
 }

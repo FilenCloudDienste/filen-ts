@@ -247,7 +247,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 		try {
 			clearTimeout(typingTimeoutRef.current)
-			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (on send) failed", { error: e instanceof Error ? e.message : String(e) }))
+			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (on send) failed", { error: e }))
 
 			inputRef.current?.clear()
 
@@ -343,12 +343,12 @@ const Input = ({ chat }: { chat: Chat }) => {
 	}
 
 	const onKeyPress = () => {
-		sendTypingEvent(ChatTypingType.Down).catch(e => logger.warn("chats", "sendTypingEvent Down failed", { error: e instanceof Error ? e.message : String(e) }))
+		sendTypingEvent(ChatTypingType.Down).catch(e => logger.warn("chats", "sendTypingEvent Down failed", { error: e }))
 
 		clearTimeout(typingTimeoutRef.current)
 
 		typingTimeoutRef.current = setTimeout(() => {
-			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (timeout) failed", { error: e instanceof Error ? e.message : String(e) }))
+			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (timeout) failed", { error: e }))
 		}, 3000)
 	}
 
@@ -356,7 +356,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 		useChatsStore.getState().setInputFocused(false)
 
 		clearTimeout(typingTimeoutRef.current)
-		sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (onBlur) failed", { error: e instanceof Error ? e.message : String(e) }))
+		sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (onBlur) failed", { error: e }))
 	}
 
 	const onFocus = () => {
@@ -407,7 +407,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 	useEffect(() => {
 		return () => {
 			clearTimeout(typingTimeoutRef.current)
-			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (cleanup) failed", { error: e instanceof Error ? e.message : String(e) }))
+			sendTypingEvent(ChatTypingType.Up).catch(e => logger.warn("chats", "sendTypingEvent Up (cleanup) failed", { error: e }))
 		}
 	}, [sendTypingEvent])
 

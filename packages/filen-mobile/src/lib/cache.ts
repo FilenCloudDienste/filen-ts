@@ -453,7 +453,7 @@ export class Cache {
 
 				logger.debug("cache", "Background batch persisted", { durationMs: (performance.now() - now).toFixed(2) })
 			} catch (err) {
-				logger.error("cache", "Background batch persist failed — mutations re-queued", { error: String(err) })
+				logger.error("cache", "Background batch persist failed — mutations re-queued", { error: err })
 
 				// The batch never landed — re-mark the drained keys so the next persist retries.
 				this.remarkFailedBatch(generation, drained)
@@ -554,7 +554,7 @@ export class Cache {
 
 			logger.debug("cache", "Async batch persisted", { durationMs: (performance.now() - now).toFixed(2) })
 		} catch (err) {
-			logger.error("cache", "Async batch persist failed — mutations re-queued", { error: String(err) })
+			logger.error("cache", "Async batch persist failed — mutations re-queued", { error: err })
 
 			// The batch never landed — re-mark the drained keys so the next persist retries.
 			this.remarkFailedBatch(generation, drained)
@@ -656,7 +656,7 @@ export class Cache {
 				logger.error("cache", "Map restore failed — map cleared", { mapKey: key, error: String(result.reason) })
 
 				sqlite.kvAsync.removeByPrefix(key + ":").catch(removeErr => {
-					logger.error("cache", "Failed to remove corrupted map rows from SQLite", { mapKey: key, error: String(removeErr) })
+					logger.error("cache", "Failed to remove corrupted map rows from SQLite", { mapKey: key, error: removeErr })
 				})
 			}
 		}
@@ -773,7 +773,7 @@ export class Cache {
 
 		for (const { key } of this.registry) {
 			sqlite.kvAsync.removeByPrefix(key + ":").catch(err => {
-				logger.error("cache", "Logout wipe: failed to remove map rows from SQLite", { mapKey: key, error: String(err) })
+				logger.error("cache", "Logout wipe: failed to remove map rows from SQLite", { mapKey: key, error: err })
 			})
 		}
 	}

@@ -59,7 +59,7 @@ function Personal() {
 				})
 
 				if (!promptResult.success) {
-					logger.warn("settings", "personal info field prompt failed", { field, error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+					logger.warn("settings", "personal info field prompt failed", { field, error: promptResult.error })
 					alerts.error(promptResult.error)
 
 					return
@@ -122,7 +122,7 @@ function Personal() {
 									})
 
 									if (!result.success) {
-										logger.error("settings", "updatePersonalInfo failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+										logger.error("settings", "updatePersonalInfo failed", { error: result.error })
 										alerts.error(result.error)
 
 										return

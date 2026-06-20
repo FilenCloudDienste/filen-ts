@@ -124,7 +124,7 @@ export function Playlists() {
 		})
 
 		if (!promptResult.success) {
-			logger.error("audio", "create playlist prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+			logger.error("audio", "create playlist prompt failed", { error: promptResult.error })
 			alerts.error(promptResult.error)
 
 			return
@@ -153,7 +153,7 @@ export function Playlists() {
 		})
 
 		if (!result.success) {
-			logger.error("audio", "create playlist failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("audio", "create playlist failed", { error: result.error })
 			alerts.error(result.error)
 		}
 	}
@@ -327,7 +327,7 @@ export function Playlists() {
 						})
 
 						if (!result.success) {
-							logger.error("audio", "playlists refetch failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+							logger.error("audio", "playlists refetch failed", { error: result.error })
 							alerts.error(result.error)
 						}
 					}}

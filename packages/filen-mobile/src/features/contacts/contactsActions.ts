@@ -22,7 +22,7 @@ export async function addContactFlow({ t }: { t: TFunction }): Promise<void> {
 	})
 
 	if (!promptResult.success) {
-		logger.warn("contacts", "addContactFlow prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+		logger.warn("contacts", "addContactFlow prompt failed", { error: promptResult.error })
 		alerts.error(promptResult.error)
 
 		return
@@ -43,7 +43,7 @@ export async function addContactFlow({ t }: { t: TFunction }): Promise<void> {
 	})
 
 	if (!result.success) {
-		logger.error("contacts", "sendRequest failed", { email, error: result.error instanceof Error ? result.error.message : String(result.error) })
+		logger.error("contacts", "sendRequest failed", { email, error: result.error })
 		alerts.error(result.error)
 	}
 }
@@ -86,7 +86,7 @@ export function buildBlockToggleMenuAction(params: {
 				})
 
 				if (!promptResponse.success) {
-					logger.warn("contacts", "unblock confirmation prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+					logger.warn("contacts", "unblock confirmation prompt failed", { error: promptResponse.error })
 					alerts.error(promptResponse.error)
 
 					return
@@ -103,7 +103,7 @@ export function buildBlockToggleMenuAction(params: {
 				})
 
 				if (!result.success) {
-					logger.error("contacts", "unblock failed", { blockedUuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+					logger.error("contacts", "unblock failed", { blockedUuid, error: result.error })
 					alerts.error(result.error)
 				}
 			}
@@ -128,7 +128,7 @@ export function buildBlockToggleMenuAction(params: {
 			})
 
 			if (!promptResponse.success) {
-				logger.warn("contacts", "block confirmation prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+				logger.warn("contacts", "block confirmation prompt failed", { error: promptResponse.error })
 				alerts.error(promptResponse.error)
 
 				return
@@ -149,7 +149,7 @@ export function buildBlockToggleMenuAction(params: {
 			})
 
 			if (!result.success) {
-				logger.error("contacts", "block failed", { email, error: result.error instanceof Error ? result.error.message : String(result.error) })
+				logger.error("contacts", "block failed", { email, error: result.error })
 				alerts.error(result.error)
 			}
 		}

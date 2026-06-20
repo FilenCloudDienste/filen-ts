@@ -314,7 +314,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 			})
 			.catch((error: unknown) => {
 				if (generation === generationRef.current) {
-					logger.error("drive-search", "search open failed", { error: String(error), rootUuid: drivePath.uuid })
+					logger.error("drive-search", "search open failed", { error: error, rootUuid: drivePath.uuid })
 					setOpenError(true)
 				}
 			})

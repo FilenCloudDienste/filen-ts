@@ -63,7 +63,7 @@ export function buildDownloadSubButtons({
 				const result = await downloadDriveItemToDevice({ item })
 
 				if (!result.success) {
-					logger.error("drive", "download to device failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "download to device failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -88,7 +88,7 @@ export function buildDownloadSubButtons({
 					})
 
 					if (!result.success) {
-						logger.warn("drive", "make available offline (file) failed", { error: String(result.error), uuid: item.data.uuid })
+						logger.warn("drive", "make available offline (file) failed", { error: result.error, uuid: item.data.uuid })
 						alerts.error(result.error)
 
 						return
@@ -102,7 +102,7 @@ export function buildDownloadSubButtons({
 					})
 
 					if (!result.success) {
-						logger.warn("drive", "make available offline (directory) failed", { error: String(result.error), uuid: item.data.uuid })
+						logger.warn("drive", "make available offline (directory) failed", { error: result.error, uuid: item.data.uuid })
 						alerts.error(result.error)
 
 						return
@@ -130,7 +130,7 @@ export function buildDownloadSubButtons({
 				})
 
 				if (!permissionsResult.success) {
-					logger.warn("drive", "save to photos: media permissions check failed", { error: String(permissionsResult.error) })
+					logger.warn("drive", "save to photos: media permissions check failed", { error: permissionsResult.error })
 					alerts.error(permissionsResult.error)
 
 					return
@@ -179,7 +179,7 @@ export function buildDownloadSubButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "save to photos failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "save to photos failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -235,7 +235,7 @@ export function buildDownloadSubButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "export download failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "export download failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -257,7 +257,7 @@ export function buildDownloadSubButtons({
 				})
 
 				if (!shareResult.success) {
-					logger.warn("drive", "export share sheet failed", { error: String(shareResult.error) })
+					logger.warn("drive", "export share sheet failed", { error: shareResult.error })
 					alerts.error(shareResult.error)
 
 					return
@@ -292,7 +292,7 @@ export function buildDownloadSubButtons({
 				})
 
 				if (!selectResult.success) {
-					logger.warn("drive", "import: drive item select failed", { error: String(selectResult.error) })
+					logger.warn("drive", "import: drive item select failed", { error: selectResult.error })
 					alerts.error(selectResult.error)
 
 					return
@@ -399,7 +399,7 @@ export function buildDownloadSubButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "import failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "import failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return

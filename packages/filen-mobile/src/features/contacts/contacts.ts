@@ -32,10 +32,10 @@ const contacts = {
 		// removed but the new contact absent (inconsistent gap until next focus refetch).
 		// Consistent with the bulk-accept path in contactsHeader.tsx.
 		queryClient.invalidateQueries({ queryKey: [CONTACTS_QUERY_KEY] }).catch(e => {
-			logger.warn("contacts", "Failed to invalidate contacts query after acceptRequest", { uuid, error: e instanceof Error ? e.message : String(e) })
+			logger.warn("contacts", "Failed to invalidate contacts query after acceptRequest", { uuid, error: e })
 		})
 		queryClient.invalidateQueries({ queryKey: [CONTACT_REQUESTS_QUERY_KEY] }).catch(e => {
-			logger.warn("contacts", "Failed to invalidate contactRequests query after acceptRequest", { uuid, error: e instanceof Error ? e.message : String(e) })
+			logger.warn("contacts", "Failed to invalidate contactRequests query after acceptRequest", { uuid, error: e })
 		})
 	},
 
@@ -163,7 +163,7 @@ const contacts = {
 					}
 				: undefined
 		).catch(e => {
-			logger.error("contacts", "getContacts refresh failed after successful unblock; unblock did complete server-side", { uuid, error: e instanceof Error ? e.message : String(e) })
+			logger.error("contacts", "getContacts refresh failed after successful unblock; unblock did complete server-side", { uuid, error: e })
 
 			throw e
 		})

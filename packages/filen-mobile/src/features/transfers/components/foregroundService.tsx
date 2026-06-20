@@ -37,16 +37,16 @@ function ForegroundService() {
 
 				const signal = pendingStart.signal
 
-				inFlight = inFlight.then(() => foregroundService.start(snapshot, signal)).catch(err => logger.error("transfers-fgs", "Foreground service start failed", { error: err instanceof Error ? err.message : String(err) }))
+				inFlight = inFlight.then(() => foregroundService.start(snapshot, signal)).catch(err => logger.error("transfers-fgs", "Foreground service start failed", { error: err }))
 			} else if (count === 0 && lastCount > 0) {
 				if (pendingStart) {
 					pendingStart.abort()
 					pendingStart = null
 				}
 
-				inFlight = inFlight.then(() => foregroundService.stop()).catch(err => logger.error("transfers-fgs", "Foreground service stop failed", { error: err instanceof Error ? err.message : String(err) }))
+				inFlight = inFlight.then(() => foregroundService.stop()).catch(err => logger.error("transfers-fgs", "Foreground service stop failed", { error: err }))
 			} else if (count > 0 && (count !== lastCount || progress !== lastProgress || speed !== lastSpeed)) {
-				inFlight = inFlight.then(() => foregroundService.update(snapshot)).catch(err => logger.warn("transfers-fgs", "Foreground service update failed", { error: err instanceof Error ? err.message : String(err) }))
+				inFlight = inFlight.then(() => foregroundService.update(snapshot)).catch(err => logger.warn("transfers-fgs", "Foreground service update failed", { error: err }))
 			}
 
 			lastCount = count
@@ -66,7 +66,7 @@ function ForegroundService() {
 				pendingStart = null
 			}
 
-			inFlight = inFlight.then(() => foregroundService.stop()).catch(err => logger.error("transfers-fgs", "Foreground service stop failed on cleanup", { error: err instanceof Error ? err.message : String(err) }))
+			inFlight = inFlight.then(() => foregroundService.stop()).catch(err => logger.error("transfers-fgs", "Foreground service stop failed on cleanup", { error: err }))
 		}
 	}, [enabled])
 

@@ -194,7 +194,7 @@ const Drive = () => {
 										// so the gesture resolves with the local listing refetch;
 										// offlineSync gates connectivity/Wi-Fi-only internally.
 										if (drivePath.type === "offline") {
-											offlineSync.sync({ manual: true }).catch(e => logger.warn("drive", "offline sync failed", { error: String(e) }))
+											offlineSync.sync({ manual: true }).catch(e => logger.warn("drive", "offline sync failed", { error: e }))
 										}
 
 										const result = await run(async () => {
@@ -202,7 +202,7 @@ const Drive = () => {
 										})
 
 										if (!result.success) {
-											logger.error("drive", "drive list refresh failed", { error: String(result.error) })
+											logger.error("drive", "drive list refresh failed", { error: result.error })
 											alerts.error(result.error)
 										}
 									}

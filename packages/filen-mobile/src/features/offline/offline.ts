@@ -249,7 +249,7 @@ export class Offline {
 
 			this.directoriesEnsured = true
 		} catch (e) {
-			logger.error("offline", "ensureDirectories failed", { error: e instanceof Error ? e.message : String(e) })
+			logger.error("offline", "ensureDirectories failed", { error: e })
 		}
 	}
 
@@ -342,7 +342,7 @@ export class Offline {
 		})
 
 		if (!readResult.success) {
-			logger.warn("offline", "readDirectoryMeta deserialize failed — treating as corrupt", { uuid: topLevelUuid, error: readResult.error instanceof Error ? readResult.error.message : String(readResult.error) })
+			logger.warn("offline", "readDirectoryMeta deserialize failed — treating as corrupt", { uuid: topLevelUuid, error: readResult.error })
 
 			return null
 		}
@@ -373,7 +373,7 @@ export class Offline {
 		})
 
 		if (!readResult.success) {
-			logger.warn("offline", "readStandaloneMeta deserialize failed", { uuid, error: readResult.error instanceof Error ? readResult.error.message : String(readResult.error) })
+			logger.warn("offline", "readStandaloneMeta deserialize failed", { uuid, error: readResult.error })
 
 			return null
 		}
@@ -624,7 +624,7 @@ export class Offline {
 				return readResult.data
 			}
 
-			logger.warn("offline", "Index file corrupt — deleted and reset to empty", { error: readResult.error instanceof Error ? readResult.error.message : String(readResult.error) })
+			logger.warn("offline", "Index file corrupt — deleted and reset to empty", { error: readResult.error })
 
 			if (INDEX_FILE.exists) {
 				INDEX_FILE.delete()
@@ -2318,7 +2318,7 @@ export class Offline {
 		})
 
 		if (!result.success) {
-			logger.error("offline", "storeFile failed", { uuid: file.data.uuid, error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("offline", "storeFile failed", { uuid: file.data.uuid, error: result.error })
 
 			throw result.error
 		}

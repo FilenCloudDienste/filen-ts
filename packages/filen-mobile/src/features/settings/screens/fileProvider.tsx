@@ -61,7 +61,7 @@ function FileProviderSettings() {
 						})
 
 						if (!result.success) {
-							logger.error("file-provider", "disable() failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+							logger.error("file-provider", "disable() failed", { error: result.error })
 							alerts.error(result.error)
 
 							return
@@ -89,7 +89,7 @@ function FileProviderSettings() {
 						})
 
 						if (!confirmResult.success) {
-							logger.warn("file-provider", "biometric-disable confirmation prompt failed", { error: confirmResult.error instanceof Error ? confirmResult.error.message : String(confirmResult.error) })
+							logger.warn("file-provider", "biometric-disable confirmation prompt failed", { error: confirmResult.error })
 							alerts.error(confirmResult.error)
 
 							return
@@ -108,7 +108,7 @@ function FileProviderSettings() {
 					})
 
 					if (!enableResult.success) {
-						logger.error("file-provider", "enable() failed", { error: enableResult.error instanceof Error ? enableResult.error.message : String(enableResult.error) })
+						logger.error("file-provider", "enable() failed", { error: enableResult.error })
 						alerts.error(enableResult.error)
 
 						return
@@ -170,7 +170,7 @@ function FileProviderSettings() {
 									})
 
 									if (!result.success) {
-										logger.error("file-provider", "setCacheBudget() failed", { bytes, error: result.error instanceof Error ? result.error.message : String(result.error) })
+										logger.error("file-provider", "setCacheBudget() failed", { bytes, error: result.error })
 										alerts.error(result.error)
 									}
 								}

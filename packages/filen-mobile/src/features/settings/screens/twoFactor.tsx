@@ -83,7 +83,7 @@ function TwoFactor() {
 											})
 
 											if (!result.success) {
-												logger.warn("settings", "copy 2FA secret to clipboard failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+												logger.warn("settings", "copy 2FA secret to clipboard failed", { error: result.error })
 												alerts.error(result.error)
 
 												return

@@ -153,7 +153,7 @@ const Header = ({
 					requiresOnline: true,
 					disabled: offlineSyncing,
 					onPress: () => {
-						offlineSync.sync({ manual: true }).catch(e => logger.warn("drive", "offline sync failed", { error: String(e) }))
+						offlineSync.sync({ manual: true }).catch(e => logger.warn("drive", "offline sync failed", { error: e }))
 					}
 				})
 			}
@@ -201,7 +201,7 @@ const Header = ({
 					})
 
 					if (!promptResult.success) {
-						logger.warn("drive", "empty trash prompt failed", { error: String(promptResult.error) })
+						logger.warn("drive", "empty trash prompt failed", { error: promptResult.error })
 						alerts.error(promptResult.error)
 
 						return
@@ -218,7 +218,7 @@ const Header = ({
 					})
 
 					if (!result.success) {
-						logger.error("drive", "empty trash failed", { error: String(result.error) })
+						logger.error("drive", "empty trash failed", { error: result.error })
 						alerts.error(result.error)
 
 						return

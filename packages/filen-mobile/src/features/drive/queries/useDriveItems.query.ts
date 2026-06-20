@@ -791,7 +791,7 @@ export function driveItemsQueryUpdateGlobal({
 			})
 		})
 		.catch(err => {
-			logger.error("drive", "driveItemsQueryUpdateGlobal: failed to get camera upload config", { error: err instanceof Error ? err.message : String(err) })
+			logger.error("drive", "driveItemsQueryUpdateGlobal: failed to get camera upload config", { error: err })
 		})
 }
 

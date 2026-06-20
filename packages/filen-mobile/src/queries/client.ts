@@ -97,7 +97,7 @@ export class QueryPersisterKv {
 		this.restoredOnce = false
 
 		sqlite.kvAsync.removeByPrefix(`${QUERY_CLIENT_PERSISTER_PREFIX}:`).catch(err => {
-			logger.error("queries-persist", "Failed to clear persisted query cache from SQLite", { error: err instanceof Error ? err.message : String(err) })
+			logger.error("queries-persist", "Failed to clear persisted query cache from SQLite", { error: err })
 		})
 	}
 
@@ -125,7 +125,7 @@ export class QueryPersisterKv {
 			try {
 				this.buffer.set((row[0] as string).slice(prefix.length), deserialize(row[1] as string))
 			} catch (err) {
-				logger.warn("queries-restore", "Skipped corrupt persisted query row", { rowId: row[0], error: err instanceof Error ? err.message : String(err) })
+				logger.warn("queries-restore", "Skipped corrupt persisted query row", { rowId: row[0], error: err })
 			}
 		}
 
@@ -200,7 +200,7 @@ export class QueryPersisterKv {
 			.openDb()
 			.then(db => db.executeBatch(commands))
 			.catch(err => {
-				logger.error("queries-persist", "In-flight persist failed before flush", { error: err instanceof Error ? err.message : String(err) })
+				logger.error("queries-persist", "In-flight persist failed before flush", { error: err })
 
 				// Restore failed keys into the dirty sets so the next debounce retries them.
 				// Only re-add keys that have not been re-dirtied or removed in the interim
@@ -300,7 +300,7 @@ export class QueryPersisterKv {
 
 			logger.debug("queries-persist", "Async persist completed", { ms: (performance.now() - now).toFixed(2) })
 		} catch (err) {
-			logger.error("queries-persist", "Batch persist to SQLite failed", { error: err instanceof Error ? err.message : String(err), upserts: snapshotUpserts.size, deletes: snapshotDeletes.size })
+			logger.error("queries-persist", "Batch persist to SQLite failed", { error: err, upserts: snapshotUpserts.size, deletes: snapshotDeletes.size })
 
 			// Restore failed keys so the finally-block re-trigger actually retries them.
 			// Only re-add keys that were not re-dirtied or re-removed after the snapshot.
@@ -455,7 +455,7 @@ export async function restoreQueries(): Promise<void> {
 
 		logger.debug("queries-restore", "Restored persisted queries", { restored, dropped, ms: (performance.now() - now).toFixed(2) })
 	} catch (e) {
-		logger.error("queries-restore", "Failed to restore persisted queries", { error: e instanceof Error ? e.message : String(e) })
+		logger.error("queries-restore", "Failed to restore persisted queries", { error: e })
 		alerts.error(e)
 	}
 }
@@ -540,7 +540,7 @@ const queryCache = new QueryCache({
 			isOnline: () => onlineManager.isOnline()
 		})
 
-		logger.error("queries", "QueryCache error", { queryHash: query.queryHash, error: err instanceof Error ? err.message : String(err), action })
+		logger.error("queries", "QueryCache error", { queryHash: query.queryHash, error: err, action })
 
 		if (action === "suppress") {
 			return
@@ -550,7 +550,7 @@ const queryCache = new QueryCache({
 			// auth.logout() is internally idempotent (logoutPromise dedup), so concurrent
 			// Unauthenticated errors collapse into a single logout.
 			auth.logout().catch(e => {
-				logger.error("queries", "logout triggered by Unauthenticated query error failed", { error: e instanceof Error ? e.message : String(e) })
+				logger.error("queries", "logout triggered by Unauthenticated query error failed", { error: e })
 			})
 
 			return
@@ -628,7 +628,7 @@ export const queryUpdater = {
 		} as unknown as QueryClient
 
 		queryClientPersister.persistQueryByKey(queryKey, lookupFacade).catch(err => {
-			logger.error("queries-persist", "persistQueryByKey failed", { queryHash, error: err instanceof Error ? err.message : String(err) })
+			logger.error("queries-persist", "persistQueryByKey failed", { queryHash, error: err })
 		})
 	}
 }

@@ -98,7 +98,7 @@ const CameraUpload = () => {
 	useFocusEffect(
 		useCallback(() => {
 			return () => {
-				cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Focus-leave sync failed", { error: err instanceof Error ? err.message : String(err) }))
+				cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Focus-leave sync failed", { error: err }))
 			}
 		}, [])
 	)
@@ -227,7 +227,7 @@ const CameraUpload = () => {
 												})
 
 												if (!result.success) {
-													logger.error("cameraUpload", "Failed to open directory picker", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+													logger.error("cameraUpload", "Failed to open directory picker", { error: result.error })
 													alerts.error(result.error)
 
 													return

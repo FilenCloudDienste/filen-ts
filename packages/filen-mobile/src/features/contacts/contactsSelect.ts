@@ -81,7 +81,7 @@ export function useSelectOptions() {
 					userIdsToExclude: parsed.userIdsToExclude ?? []
 				}
 			} catch (e) {
-				logger.error("contacts-select", "Failed to deserialize selectOptions param", { error: e instanceof Error ? e.message : String(e) })
+				logger.error("contacts-select", "Failed to deserialize selectOptions param", { error: e })
 
 				return null
 			}

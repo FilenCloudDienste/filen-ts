@@ -104,7 +104,7 @@ const drive = {
 					})
 
 					if (!promptResult.success) {
-						logger.warn("drive-link", "openLinkedDirectory password prompt failed", { error: String(promptResult.error) })
+						logger.warn("drive-link", "openLinkedDirectory password prompt failed", { error: promptResult.error })
 						alerts.error(promptResult.error)
 
 						return
@@ -132,7 +132,7 @@ const drive = {
 				return
 			}
 
-			logger.error("drive-link", "openLinkedDirectory failed", { linkUuid, error: String(result.error) })
+			logger.error("drive-link", "openLinkedDirectory failed", { linkUuid, error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -193,7 +193,7 @@ const drive = {
 					})
 
 					if (!promptResult.success) {
-						logger.warn("drive-link", "openLinkedFile password prompt failed", { error: String(promptResult.error) })
+						logger.warn("drive-link", "openLinkedFile password prompt failed", { error: promptResult.error })
 						alerts.error(promptResult.error)
 
 						return
@@ -220,7 +220,7 @@ const drive = {
 				return
 			}
 
-			logger.error("drive-link", "openLinkedFile failed", { linkUuid, error: String(result.error) })
+			logger.error("drive-link", "openLinkedFile failed", { linkUuid, error: result.error })
 			alerts.error(result.error)
 
 			return

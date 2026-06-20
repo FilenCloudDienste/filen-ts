@@ -173,7 +173,7 @@ const ActiveTransferRow = ({ transfer, target }: { transfer: TTransfer; target: 
 									})
 
 									if (!promptResult.success) {
-										logger.warn("transfers", "Transfer cancel prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+										logger.warn("transfers", "Transfer cancel prompt failed", { error: promptResult.error })
 										alerts.error(promptResult.error)
 
 										return
@@ -398,7 +398,7 @@ const TransfersHeader = () => {
 															})
 
 															if (!promptResult.success) {
-																logger.warn("transfers", "Cancel-all prompt failed", { error: promptResult.error instanceof Error ? promptResult.error.message : String(promptResult.error) })
+																logger.warn("transfers", "Cancel-all prompt failed", { error: promptResult.error })
 																alerts.error(promptResult.error)
 
 																return

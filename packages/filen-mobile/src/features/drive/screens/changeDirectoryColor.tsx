@@ -103,7 +103,7 @@ const ChangeDirectoryColor = () => {
 									})
 
 									if (!result.success) {
-										logger.error("drive", "set directory color failed", { error: String(result.error) })
+										logger.error("drive", "set directory color failed", { error: result.error })
 										alerts.error(result.error)
 
 										return

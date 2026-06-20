@@ -66,7 +66,7 @@ export const Contact = ({
 		inFlightRef.current = false
 
 		if (!result.success) {
-			logger.error("contacts", "acceptRequest failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("contacts", "acceptRequest failed", { error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -109,7 +109,7 @@ export const Contact = ({
 		})
 
 		if (!promptResponse.success) {
-			logger.warn("contacts", "deny/cancel request prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+			logger.warn("contacts", "deny/cancel request prompt failed", { error: promptResponse.error })
 			alerts.error(promptResponse.error)
 
 			return
@@ -149,7 +149,7 @@ export const Contact = ({
 		inFlightRef.current = false
 
 		if (!result.success) {
-			logger.error("contacts", "deny/cancel request failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+			logger.error("contacts", "deny/cancel request failed", { error: result.error })
 			alerts.error(result.error)
 
 			return
@@ -189,7 +189,7 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "create chat failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("contacts", "create chat failed", { error: result.error })
 						alerts.error(result.error)
 
 						return
@@ -219,7 +219,7 @@ export const Contact = ({
 					})
 
 					if (!promptResponse.success) {
-						logger.warn("contacts", "remove contact prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+						logger.warn("contacts", "remove contact prompt failed", { error: promptResponse.error })
 						alerts.error(promptResponse.error)
 
 						return
@@ -240,7 +240,7 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "remove contact failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("contacts", "remove contact failed", { error: result.error })
 						alerts.error(result.error)
 
 						return
@@ -266,7 +266,7 @@ export const Contact = ({
 					})
 
 					if (!promptResponse.success) {
-						logger.warn("contacts", "block contact prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+						logger.warn("contacts", "block contact prompt failed", { error: promptResponse.error })
 						alerts.error(promptResponse.error)
 
 						return
@@ -291,7 +291,7 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "block contact failed", { email: info.item.type === "contact" ? info.item.data.email : undefined, error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("contacts", "block contact failed", { email: info.item.type === "contact" ? info.item.data.email : undefined, error: result.error })
 						alerts.error(result.error)
 
 						return
@@ -318,7 +318,7 @@ export const Contact = ({
 					})
 
 					if (!promptResponse.success) {
-						logger.warn("contacts", "unblock contact prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+						logger.warn("contacts", "unblock contact prompt failed", { error: promptResponse.error })
 						alerts.error(promptResponse.error)
 
 						return
@@ -339,7 +339,7 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "unblock contact failed", { uuid: info.item.type === "blocked" ? info.item.data.uuid : undefined, error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("contacts", "unblock contact failed", { uuid: info.item.type === "blocked" ? info.item.data.uuid : undefined, error: result.error })
 						alerts.error(result.error)
 
 						return
@@ -366,7 +366,7 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "acceptRequest via menu failed", { uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined, error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("contacts", "acceptRequest via menu failed", { uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined, error: result.error })
 						alerts.error(result.error)
 
 						return
@@ -392,7 +392,7 @@ export const Contact = ({
 					})
 
 					if (!promptResponse.success) {
-						logger.warn("contacts", "deny request prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+						logger.warn("contacts", "deny request prompt failed", { error: promptResponse.error })
 						alerts.error(promptResponse.error)
 
 						return
@@ -413,7 +413,7 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "denyRequest via menu failed", { uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined, error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("contacts", "denyRequest via menu failed", { uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined, error: result.error })
 						alerts.error(result.error)
 
 						return
@@ -441,7 +441,7 @@ export const Contact = ({
 					})
 
 					if (!promptResponse.success) {
-						logger.warn("contacts", "cancel request prompt failed", { error: promptResponse.error instanceof Error ? promptResponse.error.message : String(promptResponse.error) })
+						logger.warn("contacts", "cancel request prompt failed", { error: promptResponse.error })
 						alerts.error(promptResponse.error)
 
 						return
@@ -462,7 +462,7 @@ export const Contact = ({
 					})
 
 					if (!result.success) {
-						logger.error("contacts", "cancelRequest via menu failed", { uuid: info.item.type === "outgoingRequest" ? info.item.data.uuid : undefined, error: result.error instanceof Error ? result.error.message : String(result.error) })
+						logger.error("contacts", "cancelRequest via menu failed", { uuid: info.item.type === "outgoingRequest" ? info.item.data.uuid : undefined, error: result.error })
 						alerts.error(result.error)
 
 						return

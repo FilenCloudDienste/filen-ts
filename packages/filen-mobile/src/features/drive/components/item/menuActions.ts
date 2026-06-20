@@ -141,7 +141,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "favorite toggle failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "favorite toggle failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -253,7 +253,7 @@ export function createMenuButtons({
 				})
 
 				if (!promptResult.success) {
-					logger.warn("drive", "rename prompt failed", { error: String(promptResult.error) })
+					logger.warn("drive", "rename prompt failed", { error: promptResult.error })
 					alerts.error(promptResult.error)
 
 					return
@@ -277,7 +277,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "rename failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "rename failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -297,7 +297,7 @@ export function createMenuButtons({
 					})
 
 					if (!driveRootUuidResult.success) {
-						logger.error("drive", "move: failed to get root uuid", { error: String(driveRootUuidResult.error) })
+						logger.error("drive", "move: failed to get root uuid", { error: driveRootUuidResult.error })
 						alerts.error(driveRootUuidResult.error)
 
 						return
@@ -379,7 +379,7 @@ export function createMenuButtons({
 						})
 
 						if (!pickResult.success) {
-							logger.warn("drive", "share: contact picker failed", { error: String(pickResult.error) })
+							logger.warn("drive", "share: contact picker failed", { error: pickResult.error })
 							alerts.error(pickResult.error)
 
 							return
@@ -396,7 +396,7 @@ export function createMenuButtons({
 						})
 
 						if (!result.success) {
-							logger.error("drive", "share with Filen user failed", { error: String(result.error), uuid: item.data.uuid })
+							logger.error("drive", "share with Filen user failed", { error: result.error, uuid: item.data.uuid })
 							alerts.error(result.error)
 						}
 					}
@@ -507,7 +507,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "copy public link failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "copy public link failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return
@@ -608,7 +608,7 @@ export function createMenuButtons({
 				})
 
 				if (!result.success) {
-					logger.error("drive", "restore failed", { error: String(result.error), uuid: item.data.uuid })
+					logger.error("drive", "restore failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
 
 					return

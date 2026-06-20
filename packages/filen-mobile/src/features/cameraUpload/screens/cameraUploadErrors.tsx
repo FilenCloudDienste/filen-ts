@@ -100,7 +100,7 @@ const CameraUploadErrors = () => {
 									onPress: () => {
 										useCameraUploadStore.getState().setErrors([])
 
-										cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Sync after clearing errors failed", { error: err instanceof Error ? err.message : String(err) }))
+										cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Sync after clearing errors failed", { error: err }))
 									}
 								},
 								{

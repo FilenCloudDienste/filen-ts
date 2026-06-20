@@ -158,11 +158,11 @@ const Photos = () => {
 									})
 
 									if (!result.success) {
-										logger.error("photos", "photos list refetch failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+										logger.error("photos", "photos list refetch failed", { error: result.error })
 										alerts.error(result.error)
 									}
 
-									cameraUpload.sync().catch(e => logger.warn("photos", "cameraUpload.sync failed on pull-to-refresh", { error: e instanceof Error ? e.message : String(e) }))
+									cameraUpload.sync().catch(e => logger.warn("photos", "cameraUpload.sync failed on pull-to-refresh", { error: e }))
 								}}
 								loading={driveItemsQuery.status === "pending"}
 								emptyComponent={() => (

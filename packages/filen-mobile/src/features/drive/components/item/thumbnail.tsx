@@ -142,13 +142,13 @@ const FileThumbnailWithGenerate = ({
 				await new Promise<void>(resolve => setTimeout(resolve, 1000))
 			}
 
-			logger.warn("drive", "thumbnail generation failed after retries", { error: String(lastError), uuid: item.data.uuid })
+			logger.warn("drive", "thumbnail generation failed after retries", { error: lastError, uuid: item.data.uuid })
 
 			cache.availableThumbnails.delete(item.data.uuid)
 		})
 
 		if (!result.success) {
-			logger.warn("drive", "thumbnail generate run failed", { error: String(result.error), uuid: item.data.uuid })
+			logger.warn("drive", "thumbnail generate run failed", { error: result.error, uuid: item.data.uuid })
 
 			return
 		}

@@ -141,7 +141,7 @@ const Events = () => {
 						})
 
 						if (!result.success) {
-							logger.error("events", "pull-to-refresh failed", { error: result.error instanceof Error ? result.error.message : String(result.error) })
+							logger.error("events", "pull-to-refresh failed", { error: result.error })
 							alerts.error(result.error)
 						}
 					}}
@@ -214,7 +214,7 @@ const Events = () => {
 						})
 
 						if (!result.success) {
-							logger.error("events", "pagination fetch failed", { timestamp: oldest.inner[0].timestamp?.toString(), error: result.error instanceof Error ? result.error.message : String(result.error) })
+							logger.error("events", "pagination fetch failed", { timestamp: oldest.inner[0].timestamp?.toString(), error: result.error })
 							alerts.error(result.error)
 						}
 					}}
