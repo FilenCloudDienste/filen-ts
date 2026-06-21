@@ -4,15 +4,25 @@ import { newTmpFile } from "@/lib/tmp"
 import logger from "@/lib/logger"
 
 /**
- * Write data to a file atomically using write-to-temp-then-move.
- * Prevents corruption from crashes mid-write: the destination is replaced by a SINGLE
- * overwriting move (expo-file-system v56 `moveSync` honors RelocationOptions `overwrite`
- * natively on both platforms) — never a delete-then-move pair, which had a window where
- * a crash between the two steps left the destination missing entirely.
+ * Write data to a file via write-to-temp-then-overwriting-move.
  *
- * Lives in lib (not a feature) because it is shared infrastructure: offline storage,
- * the file cache, and the audio metadata cache all write their on-disk indexes/sidecars
- * through it.
+ * NOT crash-atomic, despite the name (kept for call-site stability). expo-file-system v56
+ * implements an overwriting move as delete-destination-THEN-move-source on BOTH platforms — iOS
+ * `FileSystemPath.move` does `removeItem(dest)` then `moveItem(src)`; Android `CopyMoveStrategy`
+ * `deleteRecursively(dest)` in `prepareAsDestination` then `renameTo`/`Files.move`. There is no
+ * single atomic-replace primitive exposed, so a crash / OS-kill (common for iOS background tasks) in
+ * the window between the delete and the move can leave the destination MISSING entirely.
+ *
+ * What it DOES guarantee: the destination is never left holding a PARTIAL write (the temp is written
+ * in full before the move), and a failed move deletes the temp. Durability across a crash relies on
+ * the CONSUMER self-healing a missing destination — the offline index is rebuilt from the per-dir
+ * metas (`updateIndex`), a missing tree `.filenmeta` is repaired by `healBrokenTrees`, and
+ * fileCache/audioCache rebuild their index by re-listing. A genuinely atomic replace would need a
+ * native shim (iOS `replaceItemAt`, Android `Files.move(..., ATOMIC_MOVE)`) — deferred by decision
+ * (the consumers self-heal; see OF-03).
+ *
+ * Lives in lib (not a feature) because it is shared infrastructure: offline storage, the file cache,
+ * and the audio metadata cache all write their on-disk indexes/sidecars through it.
  */
 export function atomicWrite(file: FileSystem.File, data: string | Uint8Array): FileSystem.File {
 	const tmp = newTmpFile(`.tmp-${randomUUID()}`)

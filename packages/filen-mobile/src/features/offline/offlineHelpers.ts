@@ -98,7 +98,10 @@ export type OfflineSyncError = {
 	message: string
 	// A degraded-listing marker (scan errors / undecodable listed metas): the reconcile pass
 	// skipped its delete phase but is otherwise trustworthy, so a pass whose errors are ALL
-	// degraded still commits (verified-union meta). Verify/download failures are never degraded.
+	// degraded still commits (verified-union meta). Download failures and missing-on-disk verify
+	// failures are NEVER degraded (they block the commit). The one exception is a verify
+	// SIZE-MISMATCH, which IS degraded and intentionally does NOT block — the remote content is
+	// likely incomplete but the delivered bytes are committed (see reconcileTree verify-after-download).
 	degraded?: boolean
 	timestamp: number
 }
