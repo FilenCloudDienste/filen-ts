@@ -82,6 +82,7 @@ import type { PlaylistTrack } from "@/features/audio/store/usePlaylistTracks.sto
 import type { MenuButton } from "@/components/ui/menu"
 import audio from "@/features/audio/audio"
 import { runBulk } from "@/lib/bulkOps"
+import { selectPlaylists } from "@/features/audio/playlistsSelect"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -267,6 +268,42 @@ describe("buildSelectionMenuButtons — bulkAddToQueue #51", () => {
 		await bulkAddBtn?.onPress?.()
 
 		expect(audio.play).not.toHaveBeenCalled()
+	})
+})
+
+describe("buildSelectionMenuButtons — bulkAddToPlaylist selection snapshot (AU-13)", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("appends the build-time selection even after navigation clears the track store", async () => {
+		const track = makeTrack("t1")
+		const playlist = makePlaylist()
+		const target: PlaylistWithItems = { uuid: "target-uuid", name: "Target", created: 1, updated: 2, files: [] }
+
+		// The picker returns the target. In production, pushing /selectPlaylists blurs the source
+		// screen, whose useFocusEffect clears selectedTracks — the store stub already returns [] here,
+		// reproducing that cleared state. The op must use the build-time `selectedTracks` snapshot, not
+		// a post-navigation store re-read (AU-13).
+		vi.mocked(selectPlaylists).mockResolvedValue({ cancelled: false, selectedPlaylists: [target] } as never)
+
+		const buttons = buildSelectionMenuButtons({ t, playlist, selectedTracks: [track] })
+		const bulkAdd = buttons.find((b: MenuButton) => b.id === "bulkAddToPlaylist")
+
+		await bulkAdd?.onPress?.()
+
+		// runBulk is a no-op mock — grab the op it was handed and run it against the target.
+		const runBulkArg = vi.mocked(runBulk).mock.calls[0]?.[0] as unknown as {
+			op: (target: PlaylistWithItems) => Promise<void>
+		}
+
+		await runBulkArg.op(target)
+
+		expect(audio.savePlaylist).toHaveBeenCalledTimes(1)
+
+		const saved = vi.mocked(audio.savePlaylist).mock.calls[0]?.[0].playlist
+
+		expect(saved?.files.map(f => f.uuid)).toContain("t1")
 	})
 })
 

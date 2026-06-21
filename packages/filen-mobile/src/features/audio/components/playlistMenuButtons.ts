@@ -165,12 +165,12 @@ export function buildSelectionMenuButtons({
 				items: targets,
 				clearSelection: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
 				op: async target => {
-					// Re-read selected tracks from the live store so a tap that
-					// arrives between picker close and op execution still gets
-					// the correct set.
-					const liveTracks = usePlaylistTracksStore.getState().selectedTracks
+					// Use the build-time selection snapshot (the selectedTracks closure), NOT a live
+					// store re-read: opening the picker pushes /selectPlaylists, which blurs this screen,
+					// whose useFocusEffect clears selectedTracks — so a post-navigation getState() read is
+					// empty and nothing would be appended (AU-13). bulkAddToQueue already uses the closure.
 					const existing = new Set(target.files.map(f => f.uuid))
-					const toAppend = liveTracks
+					const toAppend = selectedTracks
 						.filter(t => !existing.has(t.uuid))
 						.map(t => ({
 							uuid: t.uuid,
