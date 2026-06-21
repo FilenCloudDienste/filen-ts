@@ -38,6 +38,11 @@ export const VERSION = FILE_CACHE_VERSION
 
 const DEFAULT_GC_AGE_MS = 24 * 60 * 60 * 1000
 const GC_DEBOUNCE_MS = 30 * 1000
+// TC-13: bound gc's two fan-out passes so a large cache (the ~250MB preview cache can hold hundreds
+// of small files) doesn't launch O(N) concurrent native FS ops + JSON parses on the single Hermes JS
+// thread — worst during the synchronous app-background sweep. The per-key mutexes are for correctness
+// (don't delete an entry a concurrent get() is writing), NOT throttling, so a separate gc cap is needed.
+const GC_CONCURRENCY = 8
 export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
 
 /**
@@ -437,50 +442,57 @@ export class FileCache {
 		const now = Date.now()
 		const ttlMs = age ?? DEFAULT_GC_AGE_MS
 		const entries = PARENT_DIRECTORY.list()
+		const gcSemaphore = new Semaphore(GC_CONCURRENCY)
 
 		await Promise.all(
 			entries.map(async entry => {
-				const inspection = await run(async () => {
-					if (!(entry instanceof FileSystem.Directory)) {
-						return { kind: "skip" as const }
+				await gcSemaphore.acquire()
+
+				try {
+					const inspection = await run(async () => {
+						if (!(entry instanceof FileSystem.Directory)) {
+							return { kind: "skip" as const }
+						}
+
+						const uuid = entry.name
+						const metadataFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${uuid}.filenmeta`))
+
+						if (!metadataFile.exists) {
+							return { kind: "delete" as const, uuid }
+						}
+
+						const metadata = deserialize(await metadataFile.text()) as Metadata | null
+
+						if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + ttlMs) {
+							return { kind: "delete" as const, uuid }
+						}
+
+						return {
+							kind: "survive" as const,
+							key: uuid,
+							cachedAt: metadata.cachedAt,
+							size: sumLocalDirectoryFileBytes(entry)
+						}
+					})
+
+					if (inspection.success) {
+						if (inspection.data.kind === "delete") {
+							toDelete.push(inspection.data.uuid)
+						} else if (inspection.data.kind === "survive") {
+							survivors.push({
+								key: inspection.data.key,
+								cachedAt: inspection.data.cachedAt,
+								size: inspection.data.size
+							})
+						}
+					} else if (entry instanceof FileSystem.Directory) {
+						// A read/parse failure for a well-shaped directory means the entry is corrupted —
+						// schedule it for deletion so a future gc/clear can recover.
+						logger.warn("fileCache", "gc inspection failed for entry, scheduling delete", { uuid: entry.name })
+						toDelete.push(entry.name)
 					}
-
-					const uuid = entry.name
-					const metadataFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${uuid}.filenmeta`))
-
-					if (!metadataFile.exists) {
-						return { kind: "delete" as const, uuid }
-					}
-
-					const metadata = deserialize(await metadataFile.text()) as Metadata | null
-
-					if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + ttlMs) {
-						return { kind: "delete" as const, uuid }
-					}
-
-					return {
-						kind: "survive" as const,
-						key: uuid,
-						cachedAt: metadata.cachedAt,
-						size: sumLocalDirectoryFileBytes(entry)
-					}
-				})
-
-				if (inspection.success) {
-					if (inspection.data.kind === "delete") {
-						toDelete.push(inspection.data.uuid)
-					} else if (inspection.data.kind === "survive") {
-						survivors.push({
-							key: inspection.data.key,
-							cachedAt: inspection.data.cachedAt,
-							size: inspection.data.size
-						})
-					}
-				} else if (entry instanceof FileSystem.Directory) {
-					// A read/parse failure for a well-shaped directory means the entry is corrupted —
-					// schedule it for deletion so a future gc/clear can recover.
-					logger.warn("fileCache", "gc inspection failed for entry, scheduling delete", { uuid: entry.name })
-					toDelete.push(entry.name)
+				} finally {
+					gcSemaphore.release()
 				}
 			})
 		)
@@ -500,6 +512,14 @@ export class FileCache {
 		await Promise.all(
 			[...toDelete, ...capEvict].map(async uuid => {
 				await run(async defer => {
+					// TC-13: bound delete-pass concurrency too. Deferred first so it releases LAST (LIFO),
+					// after the per-key mutex below — the mutex is correctness, this is the throughput cap.
+					await gcSemaphore.acquire()
+
+					defer(() => {
+						gcSemaphore.release()
+					})
+
 					const mutex = this.getMutexForKey(uuid)
 
 					await mutex.acquire()

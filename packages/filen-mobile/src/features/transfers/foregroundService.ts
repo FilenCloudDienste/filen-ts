@@ -116,6 +116,14 @@ class ForegroundService {
 		this.running = true
 	}
 
+	// Whether the foreground-service notification is currently displayed. Used by the host to retry
+	// start() when the app returns to the foreground after a background-start was rejected (TC-10):
+	// on Android 12+ starting a foreground service from the background throws, so start() rejects and
+	// `running` stays false — the host re-attempts once it is foreground (where the start is allowed).
+	public isRunning(): boolean {
+		return this.running
+	}
+
 	public async update(progress: TransferProgressSnapshot): Promise<void> {
 		if (Platform.OS !== "android" || !this.running) {
 			return

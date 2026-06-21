@@ -93,6 +93,30 @@ describe("foregroundService", () => {
 		)
 	})
 
+	it("isRunning() reflects the start → stop lifecycle", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		expect(fgs.isRunning()).toBe(false)
+
+		await fgs.start({ count: 1, progress: 0, speed: 0 })
+
+		expect(fgs.isRunning()).toBe(true)
+
+		await fgs.stop()
+
+		expect(fgs.isRunning()).toBe(false)
+	})
+
+	it("TC-10: isRunning() stays false when start is rejected (e.g. background-start), so the host can retry", async () => {
+		mockNotifee.displayNotification.mockRejectedValueOnce(new Error("ForegroundServiceStartNotAllowedException"))
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await expect(fgs.start({ count: 1, progress: 0, speed: 0 })).rejects.toThrow()
+
+		expect(fgs.isRunning()).toBe(false)
+	})
+
 	it("start with NOT_DETERMINED requests permission and displays notification with correct payload shape on grant", async () => {
 		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 0 })
 		mockNotifee.requestPermission.mockResolvedValue({ authorizationStatus: 2 })

@@ -26,7 +26,54 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/utils", async () => {
+	const sharedMock = await import("@/tests/mocks/filenUtils")
+
+	// Override the shared no-op Semaphore with a faithful blocking mutex so the gc fan-out bound
+	// (TC-13) — and the per-key correctness mutexes — actually serialize, as they do in production.
+	class Semaphore {
+		private counter = 0
+		private readonly waiting: Array<() => void> = []
+		private readonly maxCount: number
+
+		public constructor(max = 1) {
+			this.maxCount = max
+		}
+
+		public acquire(): Promise<void> {
+			if (this.counter < this.maxCount) {
+				this.counter++
+
+				return Promise.resolve()
+			}
+
+			return new Promise<void>(resolve => {
+				this.waiting.push(resolve)
+			})
+		}
+
+		public release(): void {
+			if (this.counter <= 0) {
+				return
+			}
+
+			this.counter--
+
+			const next = this.waiting.shift()
+
+			if (next) {
+				this.counter++
+
+				next()
+			}
+		}
+	}
+
+	return {
+		...sharedMock,
+		Semaphore
+	}
+})
 
 vi.mock("@/lib/auth", () => ({
 	default: {
@@ -1165,6 +1212,55 @@ describe("FileCache", () => {
 			expect(fs.has(dir)).toBe(true)
 			expect(fs.has(metaPath)).toBe(true)
 			expect(fs.has(filePath)).toBe(true)
+		})
+
+		it("TC-13: bounds Phase-1 fan-out concurrency instead of inspecting every entry at once", async () => {
+			const cache = await createFileCache()
+			const entryCount = 30
+
+			// Many fresh entries so gc() inspects all of them (none expire / evict → Phase 2 is empty).
+			for (let i = 0; i < entryCount; i++) {
+				const uuid = `bound-${i}`
+				const item = wrapDrive(makeFileItem(uuid, `f${i}.txt`))
+				const dir = `${BASE_DIR}/${uuid}`
+
+				fs.set(dir, "dir")
+				fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
+				fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...item, cachedAt: Date.now() }))))
+			}
+
+			let inFlight = 0
+			let peak = 0
+			const spy = vi.spyOn(File.prototype, "text").mockImplementation(async function (this: File): Promise<string> {
+				inFlight++
+				peak = Math.max(peak, inFlight)
+
+				try {
+					// Hold each sidecar read open a tick so overlapping inspections are observable.
+					await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+					const bytes = fs.get(this.uri)
+
+					if (!(bytes instanceof Uint8Array)) {
+						throw new Error(`File not found: ${this.uri}`)
+					}
+
+					return new TextDecoder().decode(bytes)
+				} finally {
+					inFlight--
+				}
+			})
+
+			try {
+				await cache.gc()
+			} finally {
+				spy.mockRestore()
+			}
+
+			// The pre-fix Promise.all over every entry would peak at ~30 simultaneous sidecar reads; the
+			// gc semaphore caps it at GC_CONCURRENCY (8). peak>1 confirms the work is still concurrent.
+			expect(peak).toBeGreaterThan(1)
+			expect(peak).toBeLessThanOrEqual(8)
 		})
 	})
 

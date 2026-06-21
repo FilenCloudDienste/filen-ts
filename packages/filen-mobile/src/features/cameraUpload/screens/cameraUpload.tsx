@@ -21,7 +21,7 @@ import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
 import { Platform, ActivityIndicator } from "react-native"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
-import { AnyNormalDir_Tags } from "@filen/sdk-rs"
+import { AnyNormalDir, AnyNormalDir_Tags } from "@filen/sdk-rs"
 import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -250,11 +250,25 @@ const CameraUpload = () => {
 
 													const fromCache = cache.directoryUuidToAnyNormalDir.get(selectedItem.data.data.uuid)
 
-													if (!fromCache) {
-														return null
+													if (fromCache) {
+														return fromCache
 													}
 
-													return fromCache
+													// CU-07: a cache miss (the picked directory wasn't observed by a listing) used to
+													// no-op silently — the user picked a folder and nothing happened, with no log. Build
+													// the AnyNormalDir directly from the selected own-directory item (same shape used by
+													// transferCore / offlineHelpers). Shared dirs carry no plain Dir struct and aren't
+													// valid camera-upload destinations, so those still bail — but loudly.
+													if (selectedItem.data.type === "directory") {
+														return new AnyNormalDir.Dir(selectedItem.data.data)
+													}
+
+													logger.warn("cameraUpload", "Could not resolve picked destination to a usable directory", {
+														uuid: selectedItem.data.data.uuid,
+														type: selectedItem.data.type
+													})
+
+													return null
 												})()
 
 												if (!remoteDir) {
