@@ -173,6 +173,44 @@ export class AudioCache {
 			throw new Error("Item must be a file or shared file")
 		}
 
+		// AU-08: metadata-only fast path. The metadata sidecar (tiny) and the audio BYTES (large,
+		// in fileCache under its own 250MB cap) evict INDEPENDENTLY, so the steady state is "sidecar
+		// present, bytes gone". Return a valid sidecar WITHOUT requiring the bytes and WITHOUT falling
+		// through to get() -> fileCache.get() (a full re-download) just to render a title/cover. Only a
+		// missing / empty / corrupt / no-metadata sidecar falls back to the full get() (download + parse).
+		const cached = await run(async defer => {
+			await this.clearBarrier.enter()
+
+			defer(() => {
+				this.clearBarrier.leave()
+			})
+
+			const { metadata: metadataFile } = this.getFiles(item)
+
+			if (!metadataFile.exists || metadataFile.size === 0) {
+				return undefined
+			}
+
+			try {
+				const metadata = parseMetadata(await metadataFile.text())
+
+				if (hasMetadata(metadata)) {
+					return metadata
+				}
+			} catch (e) {
+				logger.warn("audioCache", "metadata-only sidecar read failed; falling back to full get", {
+					uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+					error: e
+				})
+			}
+
+			return undefined
+		})
+
+		if (cached.success && cached.data !== undefined) {
+			return cached.data
+		}
+
 		return (
 			await this.get({
 				item,

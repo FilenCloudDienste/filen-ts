@@ -858,6 +858,34 @@ describe("AudioCache", () => {
 			expect(result!.artist).toBe("Meta Artist")
 			expect(result!.title).toBe("Meta Song")
 		})
+
+		it("returns the cached sidecar WITHOUT re-downloading when the audio bytes were evicted (AU-08)", async () => {
+			const cache = await createAudioCache()
+			const item = wrapDrive(makeFileItem("uuid-meta-only", "song.mp3"))
+			const metaPath = `${AUDIO_BASE_DIR}/uuid-meta-only.filenmeta`
+
+			// Sidecar present, audio BYTES absent — the steady state, since the metadata sidecar and the
+			// full audio bytes (fileCache, 250MB cap) evict independently. A metadata-only read must NOT
+			// fall through to a full fileCache.get() re-download just to render a title/cover.
+			const metadata: Metadata = {
+				artist: "Solo Artist",
+				title: "Solo Song",
+				album: "Solo Album",
+				date: "2024",
+				duration: 100,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: Date.now()
+			}
+
+			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
+
+			const result = await cache.getMetadata({ item })
+
+			expect(result).not.toBeNull()
+			expect(result!.title).toBe("Solo Song")
+			expect(fileCache.get).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("remove", () => {
