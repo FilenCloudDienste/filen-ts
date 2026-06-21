@@ -72,11 +72,9 @@ function removeFromPlaylistButton({ t, track, playlist }: { t: TFunction; track:
 		requiresOnline: true,
 		onPress: async () => {
 			const result = await runWithLoading(async () => {
-				await audio.savePlaylist({
-					playlist: {
-						...playlist,
-						files: playlist.files.filter(f => f.uuid !== track.uuid)
-					}
+				await audio.removeFilesFromPlaylist({
+					playlist,
+					uuids: [track.uuid]
 				})
 			})
 
@@ -172,35 +170,28 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 
 				const result = await runWithLoading(async () => {
 					await Promise.all(
-						selectedPlaylists.map(async selectedPlaylist => {
-							const existingFile = selectedPlaylist.files.find(f => f.uuid === track.uuid)
-
-							if (existingFile) {
-								return
-							}
-
-							await audio.savePlaylist({
-								playlist: {
-									...selectedPlaylist,
-									files: [
-										...selectedPlaylist.files,
-										{
-											uuid: track.uuid,
-											name: track.name,
-											mime: track.mime,
-											size: track.size,
-											bucket: track.bucket,
-											key: track.key,
-											version: track.version,
-											chunks: track.chunks,
-											region: track.region,
-											playlist: selectedPlaylist.uuid,
-											item: track.item
-										}
-									]
-								}
+						// addTracksToPlaylist dedups against the FRESHEST copy and re-stamps the target uuid,
+						// so the stale-snapshot existence check is no longer needed here.
+						selectedPlaylists.map(selectedPlaylist =>
+							audio.addTracksToPlaylist({
+								playlist: selectedPlaylist,
+								tracks: [
+									{
+										uuid: track.uuid,
+										name: track.name,
+										mime: track.mime,
+										size: track.size,
+										bucket: track.bucket,
+										key: track.key,
+										version: track.version,
+										chunks: track.chunks,
+										region: track.region,
+										playlist: selectedPlaylist.uuid,
+										item: track.item
+									}
+								]
 							})
-						})
+						)
 					)
 				})
 

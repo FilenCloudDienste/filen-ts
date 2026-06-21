@@ -44,6 +44,8 @@ vi.mock("@/features/audio/audio", () => ({
 		renamePlaylist: vi.fn(),
 		deletePlaylist: vi.fn(),
 		addFilesToPlaylist: vi.fn(),
+		addTracksToPlaylist: vi.fn(),
+		removeFilesFromPlaylist: vi.fn(),
 		savePlaylist: vi.fn()
 	}
 }))
@@ -299,11 +301,11 @@ describe("buildSelectionMenuButtons — bulkAddToPlaylist selection snapshot (AU
 
 		await runBulkArg.op(target)
 
-		expect(audio.savePlaylist).toHaveBeenCalledTimes(1)
+		expect(audio.addTracksToPlaylist).toHaveBeenCalledTimes(1)
 
-		const saved = vi.mocked(audio.savePlaylist).mock.calls[0]?.[0].playlist
+		const addArg = vi.mocked(audio.addTracksToPlaylist).mock.calls[0]?.[0]
 
-		expect(saved?.files.map(f => f.uuid)).toContain("t1")
+		expect(addArg?.tracks.map(track => track.uuid)).toContain("t1")
 	})
 })
 

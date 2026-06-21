@@ -9,11 +9,11 @@ import ListEmpty from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
-import usePlaylistsQuery, { playlistsQueryGet } from "@/features/audio/queries/usePlaylists.query"
+import usePlaylistsQuery from "@/features/audio/queries/usePlaylists.query"
 import alerts from "@/lib/alerts"
 import audio from "@/features/audio/audio"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import ReorderableList, { reorderItems } from "react-native-reorderable-list"
+import ReorderableList from "react-native-reorderable-list"
 import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.store"
 import { useShallow } from "zustand/shallow"
 import { useTranslation } from "react-i18next"
@@ -233,16 +233,13 @@ export function Playlist() {
 					}}
 					onReorder={async ({ from, to }) => {
 						const result = await runWithLoading(async () => {
-							// Read the freshest playlist from the query cache so rapid sequential reorders
-							// compose on each other instead of overwriting the cloud copy with a stale order
-							// captured in this handler's render snapshot.
-							const latestPlaylist = playlistsQueryGet()?.find(p => p.uuid === playlist.uuid) ?? playlist
-
-							await audio.savePlaylist({
-								playlist: {
-									...latestPlaylist,
-									files: reorderItems(latestPlaylist.files, from, to)
-								}
+							// reorderPlaylistFile applies the move against the FRESHEST order under a per-playlist
+							// write lock, so rapid sequential reorders compose instead of overwriting the cloud
+							// copy with a stale order captured in this handler's render snapshot.
+							await audio.reorderPlaylistFile({
+								playlist,
+								from,
+								to
 							})
 						})
 

@@ -5,13 +5,13 @@ import audioCache, { type Metadata } from "@/features/audio/audioCache"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import { useEffect, useState } from "react"
 import events from "@/lib/events"
-import { run } from "@filen/utils"
+import { run, Semaphore } from "@filen/utils"
 import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
 import { type } from "arktype"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
-import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
+import { playlistsQueryUpdate, playlistsQueryGet } from "@/features/audio/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { convertBigInts } from "@/lib/utils"
@@ -129,6 +129,11 @@ export class Audio {
 
 	// Tracks playlist UUIDs whose missing-file cleanup has already been initiated this session, to avoid rewriting on every read.
 	private playlistCleanupDone: Set<string> = new Set()
+
+	// Per-playlist write mutex (AU-06/AU-07): serializes whole-file overwrites to a given playlist so
+	// concurrent edits (rename / add / remove / reorder / dead-file cleanup) re-read the freshest copy
+	// and compose, instead of racing the read-modify-upload and clobbering each other. Keyed by uuid.
+	private readonly playlistWriteMutexes = new Map<string, Semaphore>()
 
 	private state = new Proxy<State>(
 		{
@@ -1301,11 +1306,25 @@ export class Audio {
 						this.playlistCleanupDone.add(result.uuid)
 
 						// Fire-and-forget: don't block the read on cleanup persistence. UI already sees the
-						// filtered list via filesWithItems, so a delayed persist is harmless.
-						this.savePlaylist({
-							playlist: {
-								...result,
-								files: result.files.filter(file => !nonExistentFileUuids.has(file.uuid))
+						// filtered list via filesWithItems, so a delayed persist is harmless. Routed through
+						// mutatePlaylist so it (a) merges onto the FRESHEST copy instead of clobbering a
+						// concurrent user edit, and (b) skips the upload entirely when the freshest copy has
+						// no dead files left to strip (AU-06) — the playlistCleanupDone guard already caps
+						// this to once per playlist per session, so cleanup uploads stay rare.
+						this.mutatePlaylist({
+							uuid: result.uuid,
+							fallback: result,
+							mutate: current => {
+								const files = current.files.filter(file => !nonExistentFileUuids.has(file.uuid))
+
+								if (files.length === current.files.length) {
+									return null
+								}
+
+								return {
+									...current,
+									files
+								}
 							},
 							signal
 						}).catch(e =>
@@ -1333,6 +1352,54 @@ export class Audio {
 		)
 
 		return parsedPlaylists.filter(p => p !== null)
+	}
+
+	/**
+	 * Serializes every whole-file write to a given playlist AND re-reads the freshest copy from the
+	 * query cache as the merge base, so concurrent edits (rename / add / remove / reorder / dead-file
+	 * cleanup) compose instead of clobbering each other's full-file overwrite (AU-06/AU-07). Without
+	 * this, two edits that overlap in flight each read the same base and the last upload wins, silently
+	 * dropping the other's change. The mutator receives the freshest playlist and returns the next
+	 * state, or `null` to skip the save entirely (a no-op patch) so we never pay an upload for nothing.
+	 */
+	private async mutatePlaylist({
+		uuid,
+		fallback,
+		mutate,
+		signal
+	}: {
+		uuid: string
+		fallback: Playlist
+		mutate: (current: Playlist) => Playlist | null
+		signal?: AbortSignal
+	}): Promise<void> {
+		let mutex = this.playlistWriteMutexes.get(uuid)
+
+		if (!mutex) {
+			mutex = new Semaphore(1)
+
+			this.playlistWriteMutexes.set(uuid, mutex)
+		}
+
+		await mutex.acquire()
+
+		try {
+			// playlistsQueryGet() is the local source of truth the UI renders from; prefer it over the
+			// caller's (possibly stale) snapshot. Fall back to the caller's copy if the cache is cold.
+			const freshest = (playlistsQueryGet()?.find(p => p.uuid === uuid) as Playlist | undefined) ?? fallback
+			const next = mutate(freshest)
+
+			if (!next) {
+				return
+			}
+
+			await this.savePlaylist({
+				playlist: next,
+				signal
+			})
+		} finally {
+			mutex.release()
+		}
 	}
 
 	public async savePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
@@ -1415,8 +1482,11 @@ export class Audio {
 		)[]
 		signal?: AbortSignal
 	}): Promise<number> {
-		const currentFilesUuids = new Set(playlist.files.map(file => file.uuid))
-		const newItems = items
+		// Pre-filter the raw picker payload to decryptable audio file items. These checks are
+		// base-independent (they don't depend on the playlist's current contents); the dedup against
+		// existing tracks happens inside mutatePlaylist against the FRESHEST copy (AU-07), so a stale
+		// caller snapshot can't reintroduce a track that was concurrently removed.
+		const candidates = items
 			.filter(
 				(
 					item
@@ -1425,23 +1495,26 @@ export class Audio {
 					data: DriveItemFileExtracted
 				} =>
 					item.type === "driveItem" &&
-					!currentFilesUuids.has(item.data.data.uuid) &&
 					!item.data.data.undecryptable &&
 					Boolean(item.data.data.decryptedMeta) &&
 					(item.data.type === "file" || item.data.type === "sharedFile" || item.data.type === "sharedRootFile")
 			)
 			.map(item => item.data)
 
-		if (newItems.length === 0) {
+		if (candidates.length === 0) {
 			return 0
 		}
 
-		await this.savePlaylist({
-			playlist: {
-				...playlist,
-				files: [
-					...playlist.files,
-					...newItems.map(item => ({
+		let addedCount = 0
+
+		await this.mutatePlaylist({
+			uuid: playlist.uuid,
+			fallback: playlist,
+			mutate: current => {
+				const existing = new Set(current.files.map(file => file.uuid))
+				const toAppend = candidates
+					.filter(item => !existing.has(item.data.uuid))
+					.map(item => ({
 						uuid: item.data.uuid,
 						name: item.data.decryptedMeta?.name ?? item.data.uuid,
 						mime: item.data.decryptedMeta?.mime ?? "application/octet-stream",
@@ -1451,15 +1524,164 @@ export class Audio {
 						version: item.data.decryptedMeta?.version ? Number(item.data.decryptedMeta?.version) : 0,
 						chunks: Number(item.data.chunks),
 						region: item.data.region,
-						playlist: playlist.uuid,
+						playlist: current.uuid,
 						item
 					}))
-				]
+
+				if (toAppend.length === 0) {
+					return null
+				}
+
+				addedCount = toAppend.length
+
+				return {
+					...current,
+					files: [...current.files, ...toAppend]
+				}
 			},
 			signal
 		})
 
-		return newItems.length
+		return addedCount
+	}
+
+	/**
+	 * Appends already-resolved playlist tracks (drive Track rows / a multi-select snapshot) to a
+	 * playlist. Unlike addFilesToPlaylist (which takes the raw drive-picker payload), this takes
+	 * playlist-file-shaped entries directly. Dedup runs against the FRESHEST copy and the `playlist`
+	 * field is re-stamped to the target so a snapshot built for a different playlist can't leak through.
+	 * Returns the number of tracks actually added.
+	 */
+	public async addTracksToPlaylist({
+		playlist,
+		tracks,
+		signal
+	}: {
+		playlist: Playlist
+		tracks: (PlaylistFile & { item?: DriveItemFileExtracted })[]
+		signal?: AbortSignal
+	}): Promise<number> {
+		if (tracks.length === 0) {
+			return 0
+		}
+
+		let addedCount = 0
+
+		await this.mutatePlaylist({
+			uuid: playlist.uuid,
+			fallback: playlist,
+			mutate: current => {
+				const existing = new Set(current.files.map(file => file.uuid))
+				const toAppend = tracks
+					.filter(track => !existing.has(track.uuid))
+					.map(track => ({
+						...track,
+						playlist: current.uuid
+					}))
+
+				if (toAppend.length === 0) {
+					return null
+				}
+
+				addedCount = toAppend.length
+
+				return {
+					...current,
+					files: [...current.files, ...toAppend],
+					updated: Date.now()
+				}
+			},
+			signal
+		})
+
+		return addedCount
+	}
+
+	/**
+	 * Removes the given file UUIDs from a playlist. Filters against the FRESHEST copy (AU-07) so a
+	 * stale caller snapshot can't resurrect concurrently-added tracks, and skips the upload entirely
+	 * when nothing actually matches.
+	 */
+	public async removeFilesFromPlaylist({
+		playlist,
+		uuids,
+		signal
+	}: {
+		playlist: Playlist
+		uuids: string[]
+		signal?: AbortSignal
+	}): Promise<void> {
+		if (uuids.length === 0) {
+			return
+		}
+
+		const toRemove = new Set(uuids)
+
+		await this.mutatePlaylist({
+			uuid: playlist.uuid,
+			fallback: playlist,
+			mutate: current => {
+				const files = current.files.filter(file => !toRemove.has(file.uuid))
+
+				if (files.length === current.files.length) {
+					return null
+				}
+
+				return {
+					...current,
+					files,
+					updated: Date.now()
+				}
+			},
+			signal
+		})
+	}
+
+	/**
+	 * Moves a track from one index to another within a playlist, applied against the FRESHEST order
+	 * (AU-07) so rapid sequential reorders compose instead of overwriting the cloud copy with a stale
+	 * order. Out-of-range indices (the fresh list shrank under us) skip the save.
+	 */
+	public async reorderPlaylistFile({
+		playlist,
+		from,
+		to,
+		signal
+	}: {
+		playlist: Playlist
+		from: number
+		to: number
+		signal?: AbortSignal
+	}): Promise<void> {
+		if (from === to) {
+			return
+		}
+
+		await this.mutatePlaylist({
+			uuid: playlist.uuid,
+			fallback: playlist,
+			mutate: current => {
+				if (from < 0 || from >= current.files.length || to < 0 || to >= current.files.length) {
+					return null
+				}
+
+				const files = [...current.files]
+				const [moved] = files.splice(from, 1)
+
+				if (!moved) {
+					return null
+				}
+
+				files.splice(to, 0, moved)
+
+				return {
+					...current,
+					files,
+					updated: Date.now()
+				}
+			},
+			signal
+		})
 	}
 
 	/**
@@ -1467,12 +1689,14 @@ export class Audio {
 	 * empty-name guard) stay in the UI; this only stamps `updated` and saves.
 	 */
 	public async renamePlaylist({ playlist, name, signal }: { playlist: Playlist; name: string; signal?: AbortSignal }): Promise<void> {
-		await this.savePlaylist({
-			playlist: {
-				...playlist,
+		await this.mutatePlaylist({
+			uuid: playlist.uuid,
+			fallback: playlist,
+			mutate: current => ({
+				...current,
 				name,
 				updated: Date.now()
-			},
+			}),
 			signal
 		})
 	}

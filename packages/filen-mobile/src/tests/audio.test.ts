@@ -64,7 +64,55 @@ vi.mock("@/lib/events", () => ({
 
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-vi.mock("@filen/utils", async () => await import("@/tests/mocks/filenUtils"))
+vi.mock("@filen/utils", async () => {
+	const sharedMock = await import("@/tests/mocks/filenUtils")
+
+	// Override the shared no-op Semaphore with a faithful blocking mutex so the per-playlist write-lock
+	// serialization (AU-06/AU-07) is actually exercised. audio.ts uses Semaphore ONLY for that lock,
+	// and audioCache (the other Semaphore user) is mocked here — so this swap is scoped to that path.
+	class Semaphore {
+		private counter = 0
+		private readonly waiting: Array<() => void> = []
+		private readonly maxCount: number
+
+		public constructor(max = 1) {
+			this.maxCount = max
+		}
+
+		public acquire(): Promise<void> {
+			if (this.counter < this.maxCount) {
+				this.counter++
+
+				return Promise.resolve()
+			}
+
+			return new Promise<void>(resolve => {
+				this.waiting.push(resolve)
+			})
+		}
+
+		public release(): void {
+			if (this.counter <= 0) {
+				return
+			}
+
+			this.counter--
+
+			const next = this.waiting.shift()
+
+			if (next) {
+				this.counter++
+
+				next()
+			}
+		}
+	}
+
+	return {
+		...sharedMock,
+		Semaphore
+	}
+})
 
 vi.mock("expo-file-system", () => ({
 	Paths: {
@@ -122,8 +170,18 @@ vi.mock("@/lib/utils", () => ({
 	)
 }))
 
+// A real in-memory stand-in for the playlists query cache so playlistsQueryGet() reflects what
+// playlistsQueryUpdate() writes — this is what lets the AU-06/AU-07 fresh-base + serialization
+// tests below observe mutatePlaylist re-reading the freshest copy. hoisted so the vi.mock factory
+// (which is hoisted above module init) can close over it.
+const playlistsCache = vi.hoisted(() => ({ current: [] as unknown[] }))
+
 vi.mock("@/features/audio/queries/usePlaylists.query", () => ({
-	playlistsQueryUpdate: vi.fn()
+	playlistsQueryUpdate: vi.fn(({ updater }: { updater: unknown }) => {
+		playlistsCache.current =
+			typeof updater === "function" ? (updater as (prev: unknown[]) => unknown[])(playlistsCache.current) : (updater as unknown[])
+	}),
+	playlistsQueryGet: vi.fn(() => playlistsCache.current)
 }))
 
 class WrapClass {
@@ -239,6 +297,8 @@ beforeEach(() => {
 	mockSdkClient.createDir.mockReset()
 	mockSdkClient.getFileOptional.mockReset()
 	mockSdkClient.root.mockReset().mockReturnValue({ uuid: "root-uuid" })
+
+	playlistsCache.current = []
 })
 
 afterEach(() => {
@@ -3334,6 +3394,204 @@ describe("Audio", () => {
 
 			expect(result).toBe(1)
 			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	// ──────────────────────────────────────────────────────────────────────────
+	// playlist mutation freshness + serialization (AU-06 / AU-07)
+	// ──────────────────────────────────────────────────────────────────────────
+
+	describe("playlist mutation freshness + serialization (AU-06/AU-07)", () => {
+		function setupPlaylistsDir() {
+			mockSdkClient.listDir.mockImplementation(async () => ({
+				dirs: [
+					{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } },
+					{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }
+				],
+				files: []
+			}))
+		}
+
+		function file(uuid: string, name: string = `${uuid}.mp3`) {
+			return {
+				uuid,
+				name,
+				mime: "audio/mpeg",
+				size: 100,
+				bucket: "b",
+				key: "k",
+				version: 2,
+				chunks: 1,
+				region: "r",
+				playlist: "pl1"
+			}
+		}
+
+		function makePlaylist(uuid: string, files: ReturnType<typeof file>[], name = "name") {
+			return {
+				uuid,
+				name,
+				created: 0,
+				updated: 0,
+				files
+			}
+		}
+
+		// Read the persisted playlist from the query cache — savePlaylist mirrors every write there via
+		// playlistsQueryUpdate. (Decoding the uploaded ArrayBuffer is unreliable in node: Buffer.from(str)
+		// allocates from a shared pool, so the passed `.buffer` is the whole pool, not just the JSON slice.)
+		function savedPlaylist(uuid = "pl1") {
+			return (playlistsCache.current as { uuid: string; name: string; files: { uuid: string }[] }[]).find(
+				p => p.uuid === uuid
+			)
+		}
+
+		it("AU-07: renamePlaylist persists the freshest file list, not the caller's stale snapshot", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDir()
+
+			const a = file("a")
+			const b = file("b")
+
+			// Freshest (query cache) = reordered [b, a]; the caller still holds the stale [a, b].
+			playlistsCache.current = [makePlaylist("pl1", [b, a])]
+
+			await audio.renamePlaylist({
+				playlist: makePlaylist("pl1", [a, b]),
+				name: "renamed"
+			})
+
+			expect(savedPlaylist()?.name).toBe("renamed")
+			expect(savedPlaylist()?.files.map(f => f.uuid)).toEqual(["b", "a"])
+		})
+
+		it("AU-07: removeFilesFromPlaylist removes against the freshest base", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDir()
+
+			// Freshest holds three tracks; the caller's snapshot is missing c.
+			playlistsCache.current = [makePlaylist("pl1", [file("a"), file("b"), file("c")])]
+
+			await audio.removeFilesFromPlaylist({
+				playlist: makePlaylist("pl1", [file("a"), file("b")]),
+				uuids: ["b"]
+			})
+
+			// Must drop only b from the FRESH list → [a, c], not [a] (stale minus b).
+			expect(savedPlaylist()?.files.map(f => f.uuid)).toEqual(["a", "c"])
+		})
+
+		it("AU-07: removeFilesFromPlaylist skips the upload entirely when nothing matches", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDir()
+
+			playlistsCache.current = [makePlaylist("pl1", [file("a")])]
+
+			await audio.removeFilesFromPlaylist({
+				playlist: makePlaylist("pl1", [file("a")]),
+				uuids: ["does-not-exist"]
+			})
+
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
+		})
+
+		it("AU-07: concurrent edits to one playlist serialize and compose instead of clobbering", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDir()
+
+			playlistsCache.current = [makePlaylist("pl1", [file("a"), file("b"), file("c")])]
+
+			// Gate every upload so the two removals overlap in flight.
+			const gates: Array<() => void> = []
+
+			mockSdkClient.uploadFileFromBytes.mockImplementation(
+				() =>
+					new Promise<void>(resolve => {
+						gates.push(resolve)
+					})
+			)
+
+			const p1 = audio.removeFilesFromPlaylist({
+				playlist: makePlaylist("pl1", [file("a"), file("b"), file("c")]),
+				uuids: ["a"]
+			})
+			const p2 = audio.removeFilesFromPlaylist({
+				playlist: makePlaylist("pl1", [file("a"), file("b"), file("c")]),
+				uuids: ["b"]
+			})
+
+			// Drain to completion, releasing each gated upload as it appears (timing-robust). If the mutex
+			// serializes, p2's upload only appears AFTER p1's lands — so p2 re-reads the fresh [b, c] and
+			// drops b → [c]. If it did NOT serialize, both would read the stale [a, b, c] and the last save
+			// would win with [a, c] or [b, c] — never [c]. So the final state is the serialization proof.
+			let done = false
+
+			void Promise.all([p1, p2]).then(() => {
+				done = true
+			})
+
+			for (let i = 0; i < 50 && !done; i++) {
+				await flushMicrotasks()
+
+				while (gates.length > 0) {
+					gates.shift()?.()
+
+					await flushMicrotasks()
+				}
+			}
+
+			await Promise.all([p1, p2])
+
+			expect(savedPlaylist()?.files.map(f => f.uuid)).toEqual(["c"])
+			// Both edits persisted (two distinct writes), not one clobbering the other.
+			expect(mockSdkClient.uploadFileFromBytes).toHaveBeenCalledTimes(2)
+		})
+
+		it("AU-07: reorderPlaylistFile moves against the freshest order", async () => {
+			const { audio } = await createAudio()
+
+			setupPlaylistsDir()
+
+			// Freshest = [a, b, c]; caller's snapshot is stale [c, b, a].
+			playlistsCache.current = [makePlaylist("pl1", [file("a"), file("b"), file("c")])]
+
+			// Move index 0 → index 2 against the FRESH list: [a,b,c] → [b,c,a].
+			await audio.reorderPlaylistFile({
+				playlist: makePlaylist("pl1", [file("c"), file("b"), file("a")]),
+				from: 0,
+				to: 2
+			})
+
+			expect(savedPlaylist()?.files.map(f => f.uuid)).toEqual(["b", "c", "a"])
+		})
+
+		it("AU-06: getPlaylists cleanup skips the rewrite when the freshest copy already has no dead files", async () => {
+			const { audio } = await createAudio()
+
+			// Cloud read still carries a now-deleted file → getFileOptional reports it missing.
+			const cloudPlaylist = makePlaylist("p-uuid", [file("missing-file", "song.mp3")])
+
+			mockSdkClient.listDir.mockImplementation(async () => ({
+				dirs: [
+					{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } },
+					{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }
+				],
+				files: [{ uuid: "playlist-1", meta: { tag: "Decoded", inner: [{ name: "playlist-1.json" }] } }]
+			}))
+			mockSdkClient.downloadFileToBytes.mockResolvedValue(Buffer.from(JSON.stringify(cloudPlaylist), "utf-8"))
+			mockSdkClient.getFileOptional.mockResolvedValue(null)
+
+			// The freshest copy has ALREADY been cleaned elsewhere — nothing left to strip.
+			playlistsCache.current = [makePlaylist("p-uuid", [])]
+
+			await audio.getPlaylists()
+			await flushMicrotasks()
+
+			expect(mockSdkClient.uploadFileFromBytes).not.toHaveBeenCalled()
 		})
 	})
 

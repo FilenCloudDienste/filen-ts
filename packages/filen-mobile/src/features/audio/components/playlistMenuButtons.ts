@@ -169,10 +169,10 @@ export function buildSelectionMenuButtons({
 					// store re-read: opening the picker pushes /selectPlaylists, which blurs this screen,
 					// whose useFocusEffect clears selectedTracks — so a post-navigation getState() read is
 					// empty and nothing would be appended (AU-13). bulkAddToQueue already uses the closure.
-					const existing = new Set(target.files.map(f => f.uuid))
-					const toAppend = selectedTracks
-						.filter(t => !existing.has(t.uuid))
-						.map(t => ({
+					// addTracksToPlaylist dedups against the FRESHEST copy and re-stamps the target uuid.
+					await audio.addTracksToPlaylist({
+						playlist: target,
+						tracks: selectedTracks.map(t => ({
 							uuid: t.uuid,
 							name: t.name,
 							mime: t.mime,
@@ -185,17 +185,6 @@ export function buildSelectionMenuButtons({
 							playlist: target.uuid,
 							item: t.item
 						}))
-
-					if (toAppend.length === 0) {
-						return
-					}
-
-					await audio.savePlaylist({
-						playlist: {
-							...target,
-							files: [...target.files, ...toAppend],
-							updated: Date.now()
-						}
 					})
 				}
 			})
@@ -225,14 +214,11 @@ export function buildSelectionMenuButtons({
 					// Re-read selection from the live store rather than the
 					// render-time closure — between menu open and confirm,
 					// the user can still toggle tracks.
-					const liveSelectedUuids = new Set(usePlaylistTracksStore.getState().selectedTracks.map(t => t.uuid))
+					const liveSelectedUuids = usePlaylistTracksStore.getState().selectedTracks.map(t => t.uuid)
 
-					await audio.savePlaylist({
-						playlist: {
-							...p,
-							files: p.files.filter(f => !liveSelectedUuids.has(f.uuid)),
-							updated: Date.now()
-						}
+					await audio.removeFilesFromPlaylist({
+						playlist: p,
+						uuids: liveSelectedUuids
 					})
 				}
 			})
