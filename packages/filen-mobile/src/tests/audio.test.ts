@@ -850,6 +850,153 @@ describe("Audio", () => {
 			expect(playlist.play).toHaveBeenCalled()
 		})
 
+		it("AU-04: honors a pause issued during an inter-track load (does not resume after the download resolves)", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+
+			// Make the load's download hang so we can pause mid-load.
+			let releaseGet: () => void = () => {}
+			const getGate = new Promise<void>(resolve => {
+				releaseGet = resolve
+			})
+
+			vi.mocked(audioCache.get).mockImplementationOnce(async () => {
+				await getGate
+
+				return {
+					audio: { uri: "file:///cache/a.mp3" },
+					metadata: { title: "A", cachedAt: Date.now() }
+				} as unknown as Awaited<ReturnType<typeof audioCache.get>>
+			})
+
+			const playPromise = audio.play()
+
+			await flushMicrotasks()
+
+			playlist.play.mockClear()
+
+			// User pauses while the track is still downloading.
+			audio.pause()
+
+			releaseGet()
+
+			await playPromise
+			await flushMicrotasks()
+
+			// The pause must win — playback must NOT start after the download resolves.
+			expect(playlist.play).not.toHaveBeenCalled()
+		})
+
+		it("AU-01: replaceQueue supersedes the outgoing track's end-handling (no over-advance)", async () => {
+			const { default: secureStore } = await import("@/lib/secureStore")
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.play()
+			await flushMicrotasks()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			expect(statusListener).toBeDefined()
+
+			// Hang isShuffleEnabled so replaceQueue suspends at its await with the OLD track still current.
+			let releaseShuffle: () => void = () => {}
+			const shuffleGate = new Promise<void>(resolve => {
+				releaseShuffle = resolve
+			})
+			let firstShuffleCall = true
+
+			vi.mocked(secureStore.get).mockImplementation(async (key: string) => {
+				if (key === audio.shuffleEnabledKey && firstShuffleCall) {
+					firstShuffleCall = false
+					await shuffleGate
+
+					return false as unknown as never
+				}
+
+				return secureStoreMap.get(key) as never
+			})
+
+			const replacePromise = audio.replaceQueue({
+				items: [makeQueueItem("p", "p.mp3"), makeQueueItem("q", "q.mp3"), makeQueueItem("r", "r.mp3")],
+				startingPosition: 1
+			})
+
+			await flushMicrotasks()
+
+			// The outgoing track ends while replaceQueue is suspended at isShuffleEnabled.
+			statusListener!({ didJustFinish: true, remoteAction: undefined })
+
+			await flushMicrotasks()
+
+			releaseShuffle()
+
+			await replacePromise
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			// The user asked for position 1; handleTrackEnd must have bailed (superseded), not advanced to 2.
+			expect(audio.getPosition()).toBe(1)
+		})
+
+		it("AU-03: a user navigation during a failing track's auto-advance is not overridden (skip-on-error keeps the user's track)", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("c", "c.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("d", "d.mp3") })
+
+			await audio.play()
+			await flushMicrotasks()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			expect(statusListener).toBeDefined()
+
+			// Track "b" fails to load, on a gate we control; everything else loads fine.
+			let failB: () => void = () => {}
+			const bGate = new Promise<void>((_resolve, reject) => {
+				failB = () => reject(new Error("b download failed"))
+			})
+
+			vi.mocked(audioCache.get).mockImplementation(async ({ item }) => {
+				const uuid = item.type === "drive" ? item.data.data.uuid : ""
+
+				if (uuid === "b") {
+					await bGate
+				}
+
+				return {
+					audio: { uri: `file:///cache/${uuid}.mp3` },
+					metadata: { title: uuid, cachedAt: Date.now() }
+				} as unknown as Awaited<ReturnType<typeof audioCache.get>>
+			})
+
+			// Track A ends → auto-advance to B → loadAndPlay(B) suspends on the failing download.
+			statusListener!({ didJustFinish: true, remoteAction: undefined })
+			await flushMicrotasks()
+
+			// User taps next() while B is still (failing to) load → advances to C and loads it.
+			const nextPromise = audio.next()
+			await flushMicrotasks()
+
+			playlist.replace.mockClear()
+
+			// B's load now rejects → the auto-advance's skip-on-error path resumes.
+			failB()
+
+			await nextPromise
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			// The user's track C must remain — the skip-on-error path must NOT advance past it to D.
+			const replaceUris = playlist.replace.mock.calls.map((call: unknown[]) => (call[0] as { uri: string }).uri)
+
+			expect(replaceUris.some(uri => uri.includes("d.mp3"))).toBe(false)
+		})
+
 		it("wraps to start when loopMode is queue", async () => {
 			const { audio, playlist } = await createAudio()
 

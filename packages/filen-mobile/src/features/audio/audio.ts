@@ -455,8 +455,16 @@ export class Audio {
 				break
 			}
 
+			// Capture the generation OUR loadAndPlay assigns, synchronously — it does `++loadGeneration`
+			// on its first line, before any await, so reading loadGeneration right after the call (with
+			// no await in between) yields our own generation. On a load failure we re-sync `gen` to THAT,
+			// NOT a re-read of loadGeneration, so an external next()/skipTo() that bumped the counter
+			// during our failed load is still detected as a supersede on the next iteration (AU-03).
+			const loadPromise = this.loadAndPlay(this.state.position)
+			const ownGeneration = this.loadGeneration
+
 			try {
-				await this.loadAndPlay(this.state.position)
+				await loadPromise
 
 				return
 			} catch (e) {
@@ -466,7 +474,7 @@ export class Audio {
 					error: e
 				})
 
-				gen = this.loadGeneration
+				gen = ownGeneration
 			}
 		}
 
@@ -480,8 +488,12 @@ export class Audio {
 			}
 
 			for (let attempt = 0; attempt < this.state.queue.length; attempt++) {
+				// Same own-generation capture as the forward pass above (AU-03).
+				const loadPromise = this.loadAndPlay(this.state.position)
+				const ownGeneration = this.loadGeneration
+
 				try {
-					await this.loadAndPlay(this.state.position)
+					await loadPromise
 
 					return
 				} catch (e) {
@@ -491,7 +503,7 @@ export class Audio {
 						error: e
 					})
 
-					gen = this.loadGeneration
+					gen = ownGeneration
 				}
 
 				const advanced = await this.advanceToNext()
@@ -530,6 +542,10 @@ export class Audio {
 					return
 				}
 
+				// AU-04: establish intent-to-play BEFORE the (possibly long) download so a pause() that
+				// lands during it flips this to false and is honored by the guard below.
+				this.intendPlaying = true
+
 				const { audio, metadata } = await audioCache.get({
 					item: {
 						type: "drive",
@@ -537,7 +553,9 @@ export class Audio {
 					}
 				})
 
-				if (generation !== this.loadGeneration) {
+				// Bail if superseded by a newer load, OR if the user paused during the download (AU-04) —
+				// otherwise a pause issued mid-load would be silently overridden and audio would resume.
+				if (generation !== this.loadGeneration || !this.intendPlaying) {
 					return
 				}
 
@@ -553,9 +571,8 @@ export class Audio {
 				// No seekTo(0) here on purpose: a freshly-replaced AVPlayerItem is already at
 				// time 0, and the previous `await seekTo(0)` opened a gap between replace() and
 				// play() that could lose the end-of-track observer on very short tracks. Keeping
-				// replace()/play() in one synchronous tick avoids that race.
-				this.intendPlaying = true
-
+				// replace()/play() in one synchronous tick avoids that race. intendPlaying was set
+				// before the download and re-checked after it (AU-04), so it is still true here.
 				this.player.play()
 
 				this.updateLockScreen({
@@ -901,6 +918,17 @@ export class Audio {
 		items: QueueItem[]
 		startingPosition?: number
 	}): Promise<{ droppedUndecryptable: boolean }> {
+		// AU-01: synchronously supersede the outgoing track's end-handling BEFORE any await. replaceQueue
+		// swaps the queue/position but does NOT load — the caller's subsequent play() does. Without this,
+		// the outgoing track's didJustFinish (firing during the await below) would run handleTrackEnd
+		// against the NEW queue and over-advance past the position just set. Bumping the generation AND
+		// marking it handled makes any in-flight or about-to-fire handleTrackEnd bail; intendPlaying=false
+		// + clearing the watchdog avoid a stray resume/fire in the gap before the caller's play().
+		this.loadGeneration++
+		this.trackEndHandledGeneration = this.loadGeneration
+		this.intendPlaying = false
+		this.clearTrackEndWatchdog()
+
 		const droppedBeforePosition = items.slice(0, startingPosition).filter(i => i.item.data.undecryptable).length
 		const filteredItems = items.filter(i => !i.item.data.undecryptable)
 		const adjustedPosition =
