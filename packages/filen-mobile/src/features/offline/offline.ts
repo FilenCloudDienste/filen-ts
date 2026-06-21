@@ -433,7 +433,32 @@ export class Offline {
 		return index
 	}
 
+	// Public entry point: participate in the clearBarrier so a concurrent clearAll() drains this
+	// rebuild before it wipes the directory, and a new rebuild can't start mid-clear (OF-02 — without
+	// this, a disk-scan-then-write here resurrects a stale index after the bytes are gone). The
+	// in-barrier callers (reconcileTree / storeFile / removeItem) call rebuildIndex() directly — they
+	// ALREADY hold the barrier, and re-entering it here would deadlock a queued clearAll (runExclusive
+	// waits for them to drain while they block on enter()).
 	public async updateIndex(): Promise<void> {
+		await run(
+			async defer => {
+				await this.clearBarrier.enter()
+
+				defer(() => {
+					this.clearBarrier.leave()
+				})
+
+				await this.rebuildIndex()
+			},
+			{
+				throw: true
+			}
+		)
+	}
+
+	// Rebuild the on-disk index from the per-item metas (serialized by indexMutex). Does NOT take the
+	// clearBarrier — see updateIndex() above for the public, barrier-participating entry point.
+	private async rebuildIndex(): Promise<void> {
 		await run(
 			async defer => {
 				await this.indexMutex.acquire()
@@ -1863,8 +1888,10 @@ export class Offline {
 				}
 			}
 
-			// Commit — advances ONLY when the pass verified clean apart from degraded-listing
-			// markers (verify and download errors are never degraded, so they always block here).
+			// Commit — advances ONLY when the pass verified clean apart from DEGRADED markers.
+			// Download errors and missing-on-disk verify errors are never degraded, so they block
+			// here. A verify SIZE-MISMATCH is degraded (committed-but-suspect — see the
+			// verify-after-download rationale above) and intentionally does NOT block.
 			if (errors.some(error => error.degraded !== true)) {
 				return finish(errors)
 			}
@@ -2096,15 +2123,23 @@ export class Offline {
 				this.invalidateCaches()
 
 				if (!skipIndexUpdate) {
-					await this.updateIndex()
+					// In-barrier: reconcileTree already holds the clearBarrier (OF-02) — rebuild
+					// directly rather than via updateIndex(), which would re-enter and deadlock a clear.
+					await this.rebuildIndex()
 				}
 			}
 
-			// Orphan sweep — only after a verified pass that ran a download or started with an
-			// unreadable meta: delete physical paths the COMMITTED meta does not claim (this also
-			// cleans crashed .filendl partials). The keep-set is built from committedEntries, so a
-			// degraded pass's preserved entries (and their ancestors) are sweep-protected. Never
-			// runs on true no-op passes.
+			// Orphan sweep — only after a verified, NON-DEGRADED pass that ran a download or started
+			// with an unreadable meta: delete physical paths the COMMITTED meta does not claim (this
+			// also cleans crashed .filendl partials). Never runs on true no-op passes.
+			//
+			// OF-01: gated on !listingDegraded. The sweep deletes on absence from committedEntries, but
+			// a degraded listing's absences are untrustworthy (the same reason the delete phase is
+			// skipped — allowDeletes:false). The verified-union normally re-commits the existing-meta
+			// entries a degraded listing omitted — EXCEPT when the tree meta is unreadable, where
+			// existingEntries is empty and the union preserves nothing, so a degraded heal pass would
+			// wipe the bytes of any unlisted subtree. Defer the (non-urgent) cleanup to the next clean
+			// pass; the verified-union still protects the readable-meta degraded case meanwhile.
 			//
 			// Membership is compared in NFC: iOS Foundation reports directory listings with
 			// DECOMPOSED (NFD) Unicode names while listing/meta paths carry whatever form was
@@ -2112,7 +2147,7 @@ export class Offline {
 			// an umlaut-named directory as an orphan and delete the verified, just-committed
 			// subtree. Disk operations still use the raw entry handles; only the comparison keys
 			// are normalized.
-			if (downloadRan || metaWasUnreadable) {
+			if ((downloadRan || metaWasUnreadable) && !listingDegraded) {
 				const claimed = new Set<string>()
 
 				for (const committedEntry of committedEntries.values()) {
@@ -2290,7 +2325,9 @@ export class Offline {
 				this.invalidateCaches()
 
 				if (!skipIndexUpdate) {
-					await this.updateIndex()
+					// In-barrier: storeFile already holds the clearBarrier (OF-02) — rebuild directly
+					// rather than via updateIndex(), which would re-enter and deadlock a clear.
+					await this.rebuildIndex()
 				}
 
 				return true
@@ -3013,7 +3050,9 @@ export class Offline {
 			return collected
 		})
 
-		// updateIndex acquires indexMutex internally — call it after leaving the barrier.
+		// Rebuild the index after leaving the exclusive section. updateIndex() re-takes the
+		// clearBarrier, which is free here (runExclusive has already returned, so there is no
+		// nesting) — and the rebuild reflects the just-wiped (empty) store.
 		await this.updateIndex()
 
 		// Broadcast offline=false for every item that was previously stored so badges update
@@ -3136,7 +3175,9 @@ export class Offline {
 				// invalidate for it.
 				this.invalidateCaches()
 
-				await this.updateIndex()
+				// In-barrier: removeItem already holds the clearBarrier (OF-02) — rebuild directly
+				// rather than via updateIndex(), which would re-enter and deadlock a clear.
+				await this.rebuildIndex()
 
 				// Optimistically prune the /offline virtual-root listing so the row
 				// disappears without waiting for the next mount-driven refetch.

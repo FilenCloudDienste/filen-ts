@@ -4089,6 +4089,127 @@ describe("Offline", () => {
 		})
 	})
 
+	describe("orphan sweep — degraded-listing safety (OF-01)", () => {
+		const topUuid = "aa000000-0000-0000-0000-0000000000aa"
+		const keepUuid = "bb000000-0000-0000-0000-0000000000bb"
+
+		function setupBrokenTreeWithUnlistedSubtree(): { dirItem: DriveItem; parent: ReturnType<typeof makeParent> } {
+			const dirItem = makeDirItem(topUuid, "BrokenTree")
+			const parent = makeParent("cc000000-0000-0000-0000-0000000000cc")
+
+			// A stored tree whose .filenmeta is MISSING (the broken-tree state healBrokenTrees repairs)
+			// → readDirectoryMeta returns null → metaWasUnreadable, existingEntries empty.
+			fs.set(`${DIRECTORIES_DIR_URI}/${topUuid}`, "dir")
+			// The entry the listing WILL return — its bytes are present so verify-after-download passes.
+			fs.set(`${DIRECTORIES_DIR_URI}/${topUuid}/keep.txt`, new Uint8Array([1, 2, 3]))
+			// An on-disk subtree the listing OMITS. The orphan sweep deletes on absence from the
+			// committed keep-set — this is the data the bug silently destroyed.
+			fs.set(`${DIRECTORIES_DIR_URI}/${topUuid}/SubA`, "dir")
+			fs.set(`${DIRECTORIES_DIR_URI}/${topUuid}/SubA/orphan.txt`, new Uint8Array([9, 9, 9]))
+
+			return { dirItem, parent }
+		}
+
+		it("does NOT sweep an unlisted on-disk subtree on a DEGRADED pass over a broken (meta-less) tree", async () => {
+			const { dirItem, parent } = setupBrokenTreeWithUnlistedSubtree()
+
+			// Degraded listing returns ONLY keep.txt — SubA is silently absent (scan error).
+			mockDegradedListing({ files: [makeListingFile(keepUuid, "keep.txt", "keep.txt", 3n)] })
+
+			const offline = await createOffline()
+
+			await offline.reconcileTree({ directory: dirItem, parent })
+
+			// The unlisted subtree's bytes MUST survive — a degraded listing's absences are not
+			// evidence of deletion, and the verified-union can't protect them (meta unreadable).
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${topUuid}/SubA/orphan.txt`)).toBe(true)
+			// The listed entry is still kept.
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${topUuid}/keep.txt`)).toBe(true)
+		})
+
+		it("STILL sweeps an unlisted on-disk subtree on a CLEAN pass over a broken (meta-less) tree", async () => {
+			const { dirItem, parent } = setupBrokenTreeWithUnlistedSubtree()
+
+			// Clean listing (no scan error) → absences ARE authoritative → orphan cleanup proceeds.
+			mockListing({ files: [makeListingFile(keepUuid, "keep.txt", "keep.txt", 3n)] })
+
+			const offline = await createOffline()
+
+			await offline.reconcileTree({ directory: dirItem, parent })
+
+			// The fix only DEFERS the sweep on degraded passes; on a clean pass it still removes the
+			// genuinely-orphaned subtree.
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${topUuid}/SubA/orphan.txt`)).toBe(false)
+			expect(fs.has(`${DIRECTORIES_DIR_URI}/${topUuid}/keep.txt`)).toBe(true)
+		})
+	})
+
+	describe("updateIndex / clearBarrier participation (OF-02)", () => {
+		it("updateIndex() participates in the clearBarrier — it waits behind an active exclusive clear", async () => {
+			const offline = await createOffline()
+			const barrier = (offline as unknown as { clearBarrier: { runExclusive: (fn: () => Promise<void>) => Promise<void> } }).clearBarrier
+
+			const order: string[] = []
+			let releaseExclusive!: () => void
+			const exclusiveGate = new Promise<void>(resolve => {
+				releaseExclusive = resolve
+			})
+
+			// Hold the barrier exclusively, exactly as clearAll() does while it wipes the directory.
+			const exclusive = barrier.runExclusive(async () => {
+				await exclusiveGate
+
+				order.push("exclusive")
+			})
+
+			// updateIndex must block on clearBarrier.enter() until the exclusive section finishes —
+			// otherwise its disk-scan-then-write could resurrect a stale index after a wipe.
+			const update = offline.updateIndex().then(() => {
+				order.push("updateIndex")
+			})
+
+			// Give the (unblocked) buggy path a full macrotask to wrongly finish first.
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			releaseExclusive()
+
+			await Promise.all([exclusive, update])
+
+			expect(order).toEqual(["exclusive", "updateIndex"])
+		})
+
+		it("the in-barrier index rebuild does NOT take the clearBarrier (an in-barrier caller can't deadlock a clear)", async () => {
+			const offline = await createOffline()
+			const barrier = (offline as unknown as { clearBarrier: { runExclusive: (fn: () => Promise<void>) => Promise<void> } }).clearBarrier
+
+			let releaseExclusive!: () => void
+			const exclusiveGate = new Promise<void>(resolve => {
+				releaseExclusive = resolve
+			})
+
+			const exclusive = barrier.runExclusive(async () => {
+				await exclusiveGate
+			})
+
+			// rebuildIndex() is what reconcileTree/storeFile/removeItem call WHILE already holding the
+			// barrier — it must run to completion even while a clear is exclusive, or those callers
+			// would deadlock a queued clearAll (runExclusive waits for them to drain while they block
+			// on enter()).
+			let rebuildDone = false
+			const rebuild = (offline as unknown as { rebuildIndex: () => Promise<void> }).rebuildIndex().then(() => {
+				rebuildDone = true
+			})
+
+			await new Promise(resolve => setTimeout(resolve, 0))
+
+			expect(rebuildDone).toBe(true)
+
+			releaseExclusive()
+
+			await Promise.all([exclusive, rebuild])
+		})
+	})
+
 	describe("clearAll", () => {
 		it("deletes every offline file and directory, then rebuilds an empty index", async () => {
 			const fileUuid = "ff111111-ffff-1111-ffff-111111111111"
