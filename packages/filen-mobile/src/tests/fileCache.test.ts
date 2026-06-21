@@ -50,7 +50,8 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 vi.mock("@/lib/signals", () => ({
-	wrapAbortSignalForSdk: vi.fn(s => s)
+	wrapAbortSignalForSdk: vi.fn(s => s),
+	disposeSdkAbortSignal: vi.fn()
 }))
 
 vi.mock("@/features/offline/offline", () => ({

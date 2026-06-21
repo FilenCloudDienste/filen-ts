@@ -173,7 +173,8 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 vi.mock("@/lib/signals", () => ({
-	wrapAbortSignalForSdk: vi.fn(() => ({}))
+	wrapAbortSignalForSdk: vi.fn(() => ({})),
+	disposeSdkAbortSignal: vi.fn()
 }))
 
 vi.mock("@/lib/cache", () => ({

@@ -318,6 +318,12 @@ vi.mock("@/lib/paths", () => ({
 
 vi.mock("@/lib/signals", () => ({
 	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,
+	// Faithful to the real disposeSdkAbortSignal: it frees the wrapped signal handle (and its
+	// controller). The mock-returned wrapped value only carries uniffiDestroy, so free that — keeps the
+	// "no uniffi handle leak" assertions meaningful now that disposal routes through this function.
+	disposeSdkAbortSignal: vi.fn((signal?: { uniffiDestroy?: () => void }) => {
+		signal?.uniffiDestroy?.()
+	}),
 	PauseSignal: MockPauseSignal,
 	createCompositePauseSignal: mockCreateCompositePauseSignal,
 	createCompositeAbortSignal: mockCreateCompositeAbortSignal

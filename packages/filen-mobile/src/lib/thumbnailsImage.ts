@@ -3,7 +3,7 @@ import * as ImageManipulator from "expo-image-manipulator"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
-import { wrapAbortSignalForSdk } from "@/lib/signals"
+import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { run } from "@filen/utils"
 import auth from "@/lib/auth"
 import offline from "@/features/offline/offline"
@@ -88,6 +88,12 @@ export async function generateImage(
 
 				const tempPath = FileSystem.Paths.join(tempDir.uri, `source${ext}`)
 				const wrappedSignal = params.signal ? wrapAbortSignalForSdk(params.signal) : undefined
+
+				// TC-01: free the wrapped abort handle (controller + signal) once the download settles —
+				// uniffi handles have no GC, so this previously leaked on every thumbnail fetch.
+				defer(() => {
+					disposeSdkAbortSignal(wrappedSignal)
+				})
 
 				await authedSdkClient.downloadFileToPath(
 					params.file,

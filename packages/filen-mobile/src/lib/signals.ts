@@ -2,21 +2,69 @@ import { ManagedAbortController, type ManagedAbortSignal, PauseSignal as SdkPaus
 
 export const toSignalOpts = (signal?: AbortSignal): { signal: AbortSignal } | undefined => (signal ? { signal } : undefined)
 
-export function wrapAbortSignalForSdk(abortSignal: AbortSignal) {
-	const abortController = new ManagedAbortController()
+// wrapAbortSignalForSdk allocates TWO uniffi (Rust Arc-backed) handles per call — a
+// ManagedAbortController AND its .signal() — and the RN bindings have NO FinalizationRegistry, so BOTH
+// must be freed explicitly once the SDK call settles or they leak (TC-01). The controller and the
+// source-signal abort listener are tracked here, keyed by the returned signal, so callers free
+// everything via disposeSdkAbortSignal(signal) instead of signal.uniffiDestroy() (which frees only the
+// signal and leaks the controller).
+const wrappedAbortSignalRegistry = new WeakMap<
+	ManagedAbortSignal,
+	{
+		controller: ManagedAbortController
+		source: AbortSignal
+		onAbort: () => void
+	}
+>()
 
-	abortSignal.addEventListener(
-		"abort",
-		() => {
-			abortController.abort()
-		},
-		{
-			once: true
-		}
-	)
+export function wrapAbortSignalForSdk(abortSignal: AbortSignal): ManagedAbortSignal {
+	const abortController = new ManagedAbortController()
+	const onAbort = () => {
+		abortController.abort()
+	}
+
+	abortSignal.addEventListener("abort", onAbort, {
+		once: true
+	})
 
 	// Need to cast because of a bug in uniffi generated types
-	return abortController.signal() as ManagedAbortSignal
+	const signal = abortController.signal() as ManagedAbortSignal
+
+	wrappedAbortSignalRegistry.set(signal, {
+		controller: abortController,
+		source: abortSignal,
+		onAbort
+	})
+
+	return signal
+}
+
+// Free a signal returned by wrapAbortSignalForSdk together with its backing ManagedAbortController and
+// the source abort listener. Call this — NOT signal.uniffiDestroy() — once the SDK call has settled;
+// otherwise the controller handle leaks (no GC for uniffi handles). Safe with undefined (callers pass
+// `signal ? wrapAbortSignalForSdk(signal) : undefined`).
+export function disposeSdkAbortSignal(signal: ManagedAbortSignal | null | undefined): void {
+	if (!signal) {
+		return
+	}
+
+	const entry = wrappedAbortSignalRegistry.get(signal)
+
+	if (!entry) {
+		// Not (or no longer) registry-tracked: at most free the signal handle; never risk a double-free
+		// of an untracked controller.
+		signal.uniffiDestroy()
+
+		return
+	}
+
+	// Remove the abort listener BEFORE destroying the controller so a late source-signal abort can
+	// never call controller.abort() on a freed handle (clonePointer on a destroyed object throws).
+	entry.source.removeEventListener("abort", entry.onAbort)
+	wrappedAbortSignalRegistry.delete(signal)
+
+	signal.uniffiDestroy()
+	entry.controller.uniffiDestroy()
 }
 
 export function createCompositeAbortSignal(...signals: AbortSignal[]): AbortSignal & {

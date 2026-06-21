@@ -8,7 +8,7 @@ import { serialize, deserialize } from "@/lib/serializer"
 import { atomicWrite } from "@/lib/fsAtomic"
 import auth from "@/lib/auth"
 import { normalizeFilePathForSdk } from "@/lib/paths"
-import { wrapAbortSignalForSdk } from "@/lib/signals"
+import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import offline from "@/features/offline/offline"
@@ -299,6 +299,12 @@ export class FileCache {
 			try {
 				const { authedSdkClient } = await auth.getSdkClients()
 				const wrappedSignal = signal ? wrapAbortSignalForSdk(signal) : undefined
+
+				// TC-12: wrapAbortSignalForSdk allocates uniffi handles (controller + signal) with no GC;
+				// free them once the download settles (success OR throw) — previously leaked on every fill.
+				defer(() => {
+					disposeSdkAbortSignal(wrappedSignal)
+				})
 
 				if (file.exists) {
 					file.delete()

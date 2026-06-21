@@ -10,7 +10,7 @@ import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
 import { type } from "arktype"
-import { wrapAbortSignalForSdk } from "@/lib/signals"
+import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
@@ -1269,21 +1269,29 @@ export class Audio {
 			files: playlist.files.map(({ item: _item, ...rest }: PlaylistFile & { item?: unknown }) => rest)
 		})
 
-		await authedSdkClient.uploadFileFromBytes(Buffer.from(JSON.stringify(playlistToSerialize), "utf-8").buffer, {
-			fileBuilderParams: {
-				parent: new AnyNormalDir.Dir(playlistsDir),
-				name: `${playlist.uuid}.json`,
-				created: BigInt(Date.now()),
-				modified: BigInt(Date.now()),
-				mime: "application/json",
-				noExif: false,
-				noExifOverride: false
-			},
-			managedFuture: {
-				abortSignal: signal ? wrapAbortSignalForSdk(signal) : undefined,
-				pauseSignal: undefined
-			}
-		})
+		// TC-01: hoist the wrapped abort handle so its uniffi handles (controller + signal) are freed
+		// after the upload settles — an inline wrap here leaked both on every playlist save.
+		const wrappedAbortSignal = signal ? wrapAbortSignalForSdk(signal) : undefined
+
+		try {
+			await authedSdkClient.uploadFileFromBytes(Buffer.from(JSON.stringify(playlistToSerialize), "utf-8").buffer, {
+				fileBuilderParams: {
+					parent: new AnyNormalDir.Dir(playlistsDir),
+					name: `${playlist.uuid}.json`,
+					created: BigInt(Date.now()),
+					modified: BigInt(Date.now()),
+					mime: "application/json",
+					noExif: false,
+					noExifOverride: false
+				},
+				managedFuture: {
+					abortSignal: wrappedAbortSignal,
+					pauseSignal: undefined
+				}
+			})
+		} finally {
+			disposeSdkAbortSignal(wrappedAbortSignal)
+		}
 
 		const now = Date.now()
 		const playlistWithItems = {

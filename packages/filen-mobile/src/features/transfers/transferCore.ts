@@ -24,7 +24,7 @@ import useTransfersStore, { type Transfer, type FinishedTransfer } from "@/featu
 import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
-import { wrapAbortSignalForSdk, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
+import { wrapAbortSignalForSdk, disposeSdkAbortSignal, PauseSignal, createCompositeAbortSignal, createCompositePauseSignal } from "@/lib/signals"
 import { driveItemsQueryUpdateForNormalParent } from "@/features/drive/queries/useDriveItems.query"
 import type { DriveItem } from "@/types"
 import cache from "@/lib/cache"
@@ -328,7 +328,7 @@ export async function uploadCore(
 			defer(() => {
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
-				wrappedAbortSignal.uniffiDestroy()
+				disposeSdkAbortSignal(wrappedAbortSignal)
 
 				if (ownsTransferPauseSignal) {
 					transferPauseSignal.dispose()
@@ -639,7 +639,7 @@ export async function uploadCore(
 		defer(() => {
 			compositePauseSignal.dispose()
 			compositeAbortSignal.dispose()
-			wrappedAbortSignal.uniffiDestroy()
+			disposeSdkAbortSignal(wrappedAbortSignal)
 
 			if (ownsTransferPauseSignal) {
 				transferPauseSignal.dispose()
@@ -897,7 +897,7 @@ export async function downloadCore(
 			defer(() => {
 				compositePauseSignal.dispose()
 				compositeAbortSignal.dispose()
-				wrappedAbortSignal.uniffiDestroy()
+				disposeSdkAbortSignal(wrappedAbortSignal)
 
 				if (ownsTransferPauseSignal) {
 					transferPauseSignal.dispose()
@@ -1211,7 +1211,7 @@ export async function downloadCore(
 		defer(() => {
 			compositePauseSignal.dispose()
 			compositeAbortSignal.dispose()
-			wrappedAbortSignal?.uniffiDestroy()
+			disposeSdkAbortSignal(wrappedAbortSignal)
 
 			if (ownsTransferPauseSignal) {
 				transferPauseSignal.dispose()
