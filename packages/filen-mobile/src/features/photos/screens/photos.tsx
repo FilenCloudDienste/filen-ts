@@ -162,7 +162,9 @@ const Photos = () => {
 										alerts.error(result.error)
 									}
 
-									cameraUpload.sync().catch(e => logger.warn("photos", "cameraUpload.sync failed on pull-to-refresh", { error: e }))
+									cameraUpload
+										.sync({ manual: true })
+										.catch(e => logger.warn("photos", "cameraUpload.sync failed on pull-to-refresh", { error: e }))
 								}}
 								loading={driveItemsQuery.status === "pending"}
 								emptyComponent={() => (

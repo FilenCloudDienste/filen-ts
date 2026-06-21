@@ -45,7 +45,7 @@ const {
 
 	const mockSetup = { setup: vi.fn(async () => ({ isAuthed: false })) }
 
-	const mockCameraUpload = { cancel: vi.fn(), sync: vi.fn(async () => undefined) }
+	const mockCameraUpload = { cancel: vi.fn(), sync: vi.fn(async (): Promise<{ success: boolean; error?: unknown }> => ({ success: true })) }
 
 	const mockOfflineSync = { cancel: vi.fn(), sync: vi.fn(async () => undefined) }
 
@@ -130,7 +130,7 @@ beforeEach(() => {
 	vi.clearAllMocks()
 	mockBackgroundTask.addExpirationListener.mockReturnValue({ remove: mockRemoveListener })
 	mockSetup.setup.mockResolvedValue({ isAuthed: false })
-	mockCameraUpload.sync.mockResolvedValue(undefined)
+	mockCameraUpload.sync.mockResolvedValue({ success: true })
 	mockOfflineSync.sync.mockResolvedValue(undefined)
 	mockSecureStoreGet.mockResolvedValue(null)
 	mockCacheFlushNow.mockResolvedValue(undefined)
@@ -218,6 +218,8 @@ describe("hardening — budgeted offline phase wiring", () => {
 			mockCameraUpload.sync.mockImplementation(async () => {
 				// Camera phase eats almost the whole budget (fake clock — Date.now advances).
 				vi.advanceTimersByTime(BACKGROUND_RUN_BUDGET_MS - 5_000)
+
+				return { success: true }
 			})
 
 			await runTask()
@@ -238,8 +240,8 @@ describe("hardening — budgeted offline phase wiring", () => {
 
 			mockCameraUpload.sync.mockImplementation(
 				() =>
-					new Promise<undefined>(resolve => {
-						releaseSync = () => resolve(undefined)
+					new Promise<{ success: boolean }>(resolve => {
+						releaseSync = () => resolve({ success: true })
 					})
 			)
 
@@ -302,6 +304,8 @@ describe("hardening — budgeted offline phase wiring", () => {
 
 		mockCameraUpload.sync.mockImplementation(async () => {
 			expirationCallback?.()
+
+			return { success: true }
 		})
 
 		await runTask()
@@ -424,6 +428,25 @@ describe("hardening — persist-before-suspend flushes", () => {
 		)
 	})
 
+	it("BG-01: a swallowed camera-phase failure records result 'failed' and returns Failed (not Success)", async () => {
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		// cameraUpload.sync never rejects — it surfaces the swallowed failure via its result.
+		mockCameraUpload.sync.mockResolvedValue({ success: false, error: new Error("listing exploded") })
+
+		const result = await runTask()
+
+		// Pre-fix this returned Success and recorded "success" — blinding field diagnosis of the camera half.
+		// (The run still progresses past the camera phase — a camera failure flags the outcome but doesn't
+		// halt the offline check — so phase reaches "done"; the failure rides the result/errorMessage.)
+		expect(result).toBe(mockBackgroundTask.BackgroundTaskResult.Failed)
+		expect(mockRunLogAppend).toHaveBeenCalledWith(
+			expect.objectContaining({
+				result: "failed",
+				errorMessage: "listing exploded"
+			})
+		)
+	})
+
 	it("breadcrumb for an expiration during the camera phase records phase 'camera' + cancelled", async () => {
 		;(Platform as { OS: string }).OS = "ios"
 		mockSetup.setup.mockResolvedValue({ isAuthed: true })
@@ -439,6 +462,8 @@ describe("hardening — persist-before-suspend flushes", () => {
 
 		mockCameraUpload.sync.mockImplementation(async () => {
 			expirationCallback?.()
+
+			return { success: true }
 		})
 
 		await runTask()

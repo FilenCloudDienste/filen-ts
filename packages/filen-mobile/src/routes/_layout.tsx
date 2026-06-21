@@ -1,5 +1,4 @@
 import "react-native-reanimated"
-import "@/queries/onlineStatus"
 
 import StyleProvider from "@/providers/style.provider"
 import { useState, Fragment } from "react"

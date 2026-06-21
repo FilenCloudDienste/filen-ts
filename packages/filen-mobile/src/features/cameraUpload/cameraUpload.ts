@@ -120,6 +120,13 @@ export const MAX_BACKGROUND_UPLOAD_ABORTS = 2
 // (see CameraUploadHashEntry / normalizeCameraUploadHashEntry).
 export const VERSION = 1
 
+// BG-05: min-interval coalescing for non-manual sync triggers. reconnect.ts fans out a sync on
+// every offline→online flip and sync.tsx kicks one on every foreground transition; flaky
+// connectivity (cellular handoff, elevators) drove repeated full local-media listings back-to-back.
+// Auto triggers that arrive within this window of a completed FOREGROUND pass no-op; explicit
+// (manual) syncs always bypass. Mirrors offlineSync's AUTO_SYNC_MIN_INTERVAL_MS.
+export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
+
 // Width of the per-album asset-info worker pool in listLocal. Bounds concurrent
 // native getInfo round trips without a Semaphore: a shared semaphore queued ONE
 // pending acquire per asset beyond the width, and its FIFO waiter array shift()s
@@ -142,6 +149,10 @@ class CameraUpload {
 	private globalAbortController = new AbortController()
 	private globalPauseSignal = new PauseSignal()
 	private syncing: boolean = false
+	// BG-05: timestamp of the last completed FOREGROUND pass, for the min-interval coalescing gate.
+	// Only stamped after a pass reaches the upload pipeline (not on early skips) so a sync that
+	// bailed (offline/disabled/paused) never suppresses a retry once conditions improve.
+	private lastCompletedAt: number = 0
 	// stagingMutex(4): bounds how many deltas may stage their asset bytes in filen-tmp
 	// concurrently (copy → optional compress → upload → deferred cleanup). The SDK already
 	// bounds network/memory concurrency internally; this bounds app-side DISK usage so a
@@ -198,6 +209,12 @@ class CameraUpload {
 		this.globalPauseSignal = new PauseSignal()
 		this.syncing = false
 		this.uploadFailures.clear()
+
+		// BG-05: drop the min-interval stamp. cancel() fires on a config change (album/destination/
+		// enable toggled — which invalidates any prior completion, so the next sync must run promptly)
+		// and on teardown/deadline. A reconnect flood drives sync() directly and never calls cancel(),
+		// so the coalescing gate stays intact for the case it targets.
+		this.lastCompletedAt = 0
 
 		useCameraUploadStore.getState().clearSkippedAssets()
 	}
@@ -959,7 +976,7 @@ class CameraUpload {
 		}
 	}
 
-	public async sync(params?: { maxUploads?: number; background?: boolean }): Promise<void> {
+	public async sync(params?: { maxUploads?: number; background?: boolean; manual?: boolean }): Promise<{ success: boolean; error?: unknown }> {
 		// Capture both signals once so that cancel() — which aborts the current
 		// controller and creates fresh instances for future syncs — reliably
 		// stops every operation in this sync via the captured references,
@@ -977,6 +994,14 @@ class CameraUpload {
 			defer(() => {
 				this.syncing = false
 			})
+
+			// BG-05: coalesce non-manual triggers (reconnect/foreground/background fan-out) that arrive
+			// within AUTO_SYNC_MIN_INTERVAL_MS of a completed foreground pass. lastCompletedAt is only
+			// stamped after a real pass (below), so this never suppresses a retry after an early skip,
+			// and manual syncs always bypass.
+			if (!params?.manual && Date.now() - this.lastCompletedAt < AUTO_SYNC_MIN_INTERVAL_MS) {
+				return
+			}
 
 			const config = await this.getConfig()
 
@@ -1378,11 +1403,20 @@ class CameraUpload {
 			}
 
 			await Promise.all(uploadWorkers)
+
+			// BG-05: stamp completion of a real FOREGROUND pass (one that reached the upload pipeline).
+			// Background passes are partial (maxUploads-bounded) so they must NOT stamp — else they'd
+			// suppress the next foreground pass that would finish the remaining uploads (mirrors
+			// offlineSync, which only stamps non-background passes).
+			if (!params?.background) {
+				this.lastCompletedAt = Date.now()
+			}
 		})
 
 		if (!result.success) {
 			if (abortController.signal.aborted) {
-				return
+				// Cancellation (deadline / user) is not a failure.
+				return { success: true }
 			}
 
 			logger.error("cameraUpload", "Sync run failed unexpectedly", { error: result.error })
@@ -1396,8 +1430,13 @@ class CameraUpload {
 				}
 			])
 
-			return
+			// BG-01: surface the swallowed failure so the headless background task can record a camera-
+			// phase failure in its run log instead of reporting Success (the OS discards the return, but
+			// the persisted breadcrumb is the only field-diagnosable trace of a headless run).
+			return { success: false, error: result.error }
 		}
+
+		return { success: true }
 	}
 }
 

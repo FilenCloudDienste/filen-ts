@@ -40,6 +40,12 @@ TaskManager.defineTask(TASK_NAME, async () => {
 	// persisted entry is the only field-diagnosable trace of this run.
 	let phase: BackgroundRunPhase = "setup"
 	let cancelled = false
+	// BG-01: cameraUpload.sync() never rejects (it swallows + store-logs its own failures), so a camera-
+	// phase failure would otherwise leave the outer run() successful and the breadcrumb would record
+	// "success" — blinding field diagnosis of "background uploads never run". Capture its surfaced
+	// result so the breadcrumb + return reflect a camera failure symmetrically with the offline phase.
+	let cameraFailed = false
+	let cameraError: unknown = undefined
 
 	const result = await run(async defer => {
 
@@ -91,10 +97,15 @@ TaskManager.defineTask(TASK_NAME, async () => {
 
 		phase = "camera"
 
-		await cameraUpload.sync({
+		const cameraResult = await cameraUpload.sync({
 			maxUploads: 1,
 			background: true
 		})
+
+		if (!cameraResult.success) {
+			cameraFailed = true
+			cameraError = cameraResult.error
+		}
 
 		if (cancelled) {
 			return
@@ -134,6 +145,12 @@ TaskManager.defineTask(TASK_NAME, async () => {
 		}
 	})
 
+	// A run is a failure if the outer run() threw (offline phase rejects) OR the camera phase surfaced
+	// a swallowed failure (BG-01). errorMessage prefers the outer error (offline) when present, else
+	// the camera error.
+	const runFailed = !result.success || cameraFailed
+	const runError = !result.success ? result.error : cameraError
+
 	// One breadcrumb per run, after the flush defers settled. Must never flip a healthy
 	// run's outcome — a failed kv write only logs.
 	await backgroundRunLog
@@ -143,15 +160,15 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			finishedAt: Date.now(),
 			phase,
 			cancelled,
-			result: result.success ? "success" : "failed",
-			errorMessage: result.success ? undefined : result.error instanceof Error ? result.error.message : String(result.error)
+			result: runFailed ? "failed" : "success",
+			errorMessage: runFailed ? (runError instanceof Error ? runError.message : String(runError)) : undefined
 		})
 		.catch(err => {
 			logger.warn("cameraUpload", "Failed to write background run log entry", { error: err })
 		})
 
-	if (!result.success) {
-		logger.error("cameraUpload", "Background sync task failed", { phase, error: result.error })
+	if (runFailed) {
+		logger.error("cameraUpload", "Background sync task failed", { phase, cameraFailed, error: runError })
 
 		// Honest semantics note (audit B3, 2026-06-11): the INSTALLED expo-background-task
 		// discards this value on both platforms — iOS always calls

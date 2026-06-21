@@ -118,7 +118,7 @@ beforeEach(() => {
 	mockBackgroundTask.addExpirationListener.mockReturnValue({ remove: mockRemoveListener })
 	mockTaskManager.isTaskRegisteredAsync.mockResolvedValue(false)
 	mockSetup.setup.mockResolvedValue({ isAuthed: false })
-	mockCameraUpload.sync.mockResolvedValue(undefined)
+	mockCameraUpload.sync.mockResolvedValue({ success: true })
 	;(Platform as { OS: string }).OS = "ios"
 })
 

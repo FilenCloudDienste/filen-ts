@@ -321,6 +321,14 @@ beforeEach(() => {
 	setupDefaultMocks()
 })
 
+// BG-05: cameraUpload.sync() coalesces back-to-back AUTO triggers within AUTO_SYNC_MIN_INTERVAL_MS.
+// Tests that drive several passes in one test model SEPARATE trigger occasions (a retry on a later
+// reconnect/foreground, ≥60s apart), so they clear the min-interval stamp before each subsequent pass.
+function resetSyncInterval(): void {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	;(cameraUpload as any).lastCompletedAt = 0
+}
+
 // ─── modifyAssetPathOnCollision ──────────────────────────────────────────────
 
 describe("modifyAssetPathOnCollision", () => {
@@ -2027,6 +2035,8 @@ describe("MD5 hash cache", () => {
 
 		cache.cameraUploadHashes.set("/camera roll/photo2.jpg", "old-hash-different-from-changed-md5")
 
+		resetSyncInterval()
+
 		try {
 			await cameraUpload.sync()
 
@@ -2378,6 +2388,8 @@ describe("ensureParentDirectoryExistsCache TTL expiry", () => {
 		cache.cameraUploadHashes.clear()
 
 		// Second sync — cache entry is expired, createDir must be called again
+		resetSyncInterval()
+
 		await cameraUpload.sync()
 
 		expect(createDir.mock.calls.length).toBeGreaterThan(firstCallCount)
@@ -2813,9 +2825,12 @@ describe("uploadFailures increment on repeated failure", () => {
 
 		vi.mocked(transfers.upload).mockRejectedValue(new Error("Network error"))
 
-		// Drive 3 failures — each sync increments uploadFailures.get("a1") by 1
+		// Drive 3 failures — each sync increments uploadFailures.get("a1") by 1. Each is a separate
+		// trigger occasion (the gate would otherwise coalesce them), so reset the interval each time.
 		await cameraUpload.sync()
+		resetSyncInterval()
 		await cameraUpload.sync()
+		resetSyncInterval()
 		await cameraUpload.sync()
 
 		// Failure count is now MAX_UPLOAD_FAILURES (3). Switch to success mock so the
@@ -2825,6 +2840,8 @@ describe("uploadFailures increment on repeated failure", () => {
 		// Clear call history so the count we check below only reflects sync 4
 		vi.mocked(transfers.upload).mockClear()
 		mockAddSkippedAsset.mockClear()
+
+		resetSyncInterval()
 
 		await cameraUpload.sync()
 
@@ -2838,8 +2855,9 @@ describe("uploadFailures increment on repeated failure", () => {
 
 		vi.mocked(transfers.upload).mockRejectedValue(new Error("Network error"))
 
-		// Two failures — one below the threshold of 3
+		// Two failures — one below the threshold of 3. Separate trigger occasions (see resetSyncInterval).
 		await cameraUpload.sync()
+		resetSyncInterval()
 		await cameraUpload.sync()
 
 		// Switch to success mock for the third attempt; count is 2 < 3, should upload
@@ -2849,11 +2867,68 @@ describe("uploadFailures increment on repeated failure", () => {
 		vi.mocked(transfers.upload).mockClear()
 		mockAddSkippedAsset.mockClear()
 
+		resetSyncInterval()
+
 		await cameraUpload.sync()
 
 		// Should have uploaded on the third pass (count 2 < MAX_UPLOAD_FAILURES=3)
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
 		expect(mockAddSkippedAsset).not.toHaveBeenCalledWith("a1")
+	})
+})
+
+// ─── BG-05: min-interval coalescing gate ──────────────────────────────────────
+
+describe("BG-05 — min-interval coalescing for non-manual sync triggers", () => {
+	function addOneAsset(): void {
+		const uri = "file:///media/a1"
+
+		ml.addAlbum({ id: "album-1", title: "Camera Roll", assetIds: ["a1"] })
+		ml.addAsset({ id: "a1", filename: "photo.jpg", uri, mediaType: MediaType.IMAGE, creationTime: 1000, modificationTime: 2000 })
+		fs.set(uri, new Uint8Array([1, 2, 3]))
+	}
+
+	it("coalesces an auto sync within the interval but lets a manual sync bypass", async () => {
+		addOneAsset()
+
+		// First pass uploads and stamps lastCompletedAt.
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		// Clear the md5 cache so the asset WOULD upload again if a pass actually ran — this isolates
+		// the gate as the only reason the next pass does nothing.
+		cache.cameraUploadHashes.clear()
+		vi.mocked(transfers.upload).mockClear()
+
+		// An AUTO trigger arriving within AUTO_SYNC_MIN_INTERVAL_MS of the completed pass is coalesced:
+		// it returns before scanning, so nothing uploads.
+		await cameraUpload.sync()
+
+		expect(transfers.upload).not.toHaveBeenCalled()
+
+		// An explicit (manual) trigger bypasses the gate and runs the pass.
+		await cameraUpload.sync({ manual: true })
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not coalesce after the interval stamp is cleared (a later trigger occasion runs)", async () => {
+		addOneAsset()
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
+
+		cache.cameraUploadHashes.clear()
+		vi.mocked(transfers.upload).mockClear()
+
+		// Simulate ≥60s elapsed (a separate reconnect/foreground occasion) — the auto pass runs.
+		resetSyncInterval()
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledTimes(1)
 	})
 })
 
