@@ -1196,6 +1196,30 @@ describe("Transfers", () => {
 				expect(mockWrapAbortSignalForSdk).not.toHaveBeenCalled()
 			})
 
+			it("bypassCache: re-downloads via the SDK even when fileCache reports a hit (self-heal must not alias the destination)", async () => {
+				// Mirrors the offline standalone self-heal: the destination IS the offline file's own
+				// path, which is exactly what fileCache.get() resolves to. Without bypassCache the
+				// shortcut deletes the destination then copies the now-deleted file onto itself,
+				// destroying the bytes (TC-04). bypassCache must skip the shortcut and do a real download.
+				const dest = new FsFile("file:///offline/files/uuid/name.txt")
+				fs.set(dest.uri, new Uint8Array([1, 2, 3]))
+				const item = makeFileItem("file-uuid")
+
+				mockFileCacheHas.mockResolvedValue(true)
+				mockFileCacheGet.mockResolvedValue(dest)
+
+				const result = await transfers.download({
+					item,
+					destination: dest,
+					bypassCache: true,
+					hideProgress: true
+				})
+
+				expect(mockFileCacheHas).not.toHaveBeenCalled()
+				expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
+				expect(result).not.toBeNull()
+			})
+
 			it("does not update store when hideProgress is true", async () => {
 				const dest = new FsFile("file:///document/dest.txt")
 				const item = makeFileItem("file-uuid")

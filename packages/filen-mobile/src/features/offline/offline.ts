@@ -2454,6 +2454,10 @@ export class Offline {
 				item,
 				destination: dataFile,
 				hideProgress: true,
+				// TC-04: re-download fresh bytes. Without this the download's cache shortcut resolves the
+				// source to this exact dataFile (offline.getLocalFile returns it), then deletes it and
+				// copies the now-deleted file onto itself — destroying the bytes the heal is replacing.
+				bypassCache: true,
 				signal
 			})
 

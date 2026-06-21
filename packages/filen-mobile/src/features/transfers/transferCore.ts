@@ -275,6 +275,12 @@ export type DownloadParams = {
 	// intact for the next reconcile pass. Defaults to false → the original destructive behavior is
 	// preserved for every other (non-offline) caller, which downloads into a fresh/disposable destination.
 	preserveDestinationOnStart?: boolean
+	// When true, a FILE download skips the fileCache/offline "already have it" shortcut and always
+	// re-downloads via the SDK. Used by the offline standalone self-heal, whose destination IS the
+	// offline file's own path: the shortcut resolves the source (offline.getLocalFile) to that SAME
+	// path, then the branch deletes the destination and copies the now-deleted file onto itself —
+	// destroying the bytes the heal exists to replace (TC-04). Defaults to false.
+	bypassCache?: boolean
 }
 
 // Performs an upload against the SDK with full progress tracking. The two global signals
@@ -857,7 +863,8 @@ export async function downloadCore(
 		awaitExternalCompletionBeforeMarkingAsFinished,
 		pauseSignal,
 		signal,
-		preserveDestinationOnStart
+		preserveDestinationOnStart,
+		bypassCache
 	}: DownloadParams
 ): Promise<
 	| {
@@ -1285,6 +1292,12 @@ export async function downloadCore(
 		}
 
 		const cachedOrOfflineFile = await run(async () => {
+			// TC-04: the offline self-heal's destination IS the offline file's own path, which the cache
+			// shortcut resolves the source to — skip the shortcut entirely and re-download fresh.
+			if (bypassCache) {
+				return null
+			}
+
 			if (
 				await fileCache.has({
 					type: "drive",
