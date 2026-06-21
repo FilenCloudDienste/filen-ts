@@ -822,6 +822,34 @@ describe("Audio", () => {
 			expect(playlist.play).toHaveBeenCalled()
 		})
 
+		it("skip-advances on a playback error (AudioStatus.error) so a corrupt track can't wedge the queue (AU-02)", async () => {
+			const { audio, playlist } = await createAudio()
+
+			await audio.addToQueue({ item: makeQueueItem("a", "a.mp3") })
+			await audio.addToQueue({ item: makeQueueItem("b", "b.mp3") })
+
+			// Start playback so the queue intends to be playing (the error branch only skips when intending).
+			await audio.play()
+			await flushMicrotasks()
+
+			const statusListener = getPlaylistStatusListener(playlist)
+
+			expect(statusListener).toBeDefined()
+
+			playlist.replace.mockClear()
+			playlist.play.mockClear()
+
+			// Track 0's bytes loaded but playback errors (corrupt codec / DRM / mediaServicesReset). It
+			// never fires didJustFinish, so without AU-02 the queue wedges silently — no sound, no skip.
+			statusListener!({ error: "decode failed", didJustFinish: false })
+
+			await flushMicrotasks()
+			await flushMicrotasks()
+
+			expect(audio.getPosition()).toBe(1)
+			expect(playlist.play).toHaveBeenCalled()
+		})
+
 		it("wraps to start when loopMode is queue", async () => {
 			const { audio, playlist } = await createAudio()
 
@@ -1714,6 +1742,82 @@ describe("Audio", () => {
 
 			expect(result).toHaveLength(1)
 			expect(result[0]!.uuid).toBe("good-uuid")
+		})
+	})
+
+	describe("getPlaylists — error isolation (AU-05)", () => {
+		it("skips a playlist whose download throws (transient) and returns the rest", async () => {
+			const { audio } = await createAudio()
+
+			mockSdkClient.listDir
+				.mockResolvedValueOnce({ dirs: [{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } }], files: [] })
+				.mockResolvedValueOnce({ dirs: [{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }], files: [] })
+				.mockResolvedValueOnce({
+					dirs: [],
+					files: [
+						{ uuid: "playlist-fail", meta: { tag: "Decoded", inner: [{ name: "fail.json" }] } },
+						{ uuid: "playlist-good", meta: { tag: "Decoded", inner: [{ name: "good.json" }] } }
+					]
+				})
+
+			const goodPlaylist = { uuid: "good-uuid", name: "Good", created: Date.now(), updated: Date.now(), files: [] }
+
+			// First playlist's download fails transiently; without AU-05 this rejects Promise.all and
+			// collapses the WHOLE screen. It must skip just the failed one and keep the good one.
+			mockSdkClient.downloadFileToBytes
+				.mockRejectedValueOnce(new Error("network timeout"))
+				.mockResolvedValueOnce(Buffer.from(JSON.stringify(goodPlaylist), "utf-8"))
+
+			mockSdkClient.getFileOptional.mockResolvedValue({ uuid: "any" })
+
+			const result = await audio.getPlaylists()
+
+			expect(result).toHaveLength(1)
+			expect(result[0]!.uuid).toBe("good-uuid")
+		})
+
+		it("keeps a track whose getFileOptional throws transiently instead of dropping it", async () => {
+			const { audio } = await createAudio()
+
+			mockSdkClient.listDir
+				.mockResolvedValueOnce({ dirs: [{ meta: { tag: "Decoded", inner: [{ name: ".filen" }] } }], files: [] })
+				.mockResolvedValueOnce({ dirs: [{ meta: { tag: "Decoded", inner: [{ name: "Playlists" }] } }], files: [] })
+				.mockResolvedValueOnce({
+					dirs: [],
+					files: [{ uuid: "playlist-1", meta: { tag: "Decoded", inner: [{ name: "playlist-1.json" }] } }]
+				})
+
+			const playlistWithTrack = {
+				uuid: "p-uuid",
+				name: "P",
+				created: Date.now(),
+				updated: Date.now(),
+				files: [
+					{
+						uuid: "track-1",
+						name: "song.mp3",
+						mime: "audio/mpeg",
+						size: 100,
+						bucket: "b",
+						key: "k",
+						version: 2,
+						chunks: 1,
+						region: "r",
+						playlist: "p-uuid"
+					}
+				]
+			}
+
+			mockSdkClient.downloadFileToBytes.mockResolvedValue(Buffer.from(JSON.stringify(playlistWithTrack), "utf-8"))
+			// A transient (non not-found) getFileOptional error must NOT drop the track or collapse the
+			// playlist — keep it as present-unknown.
+			mockSdkClient.getFileOptional.mockRejectedValue(new Error("decrypt blip"))
+
+			const result = await audio.getPlaylists()
+
+			expect(result).toHaveLength(1)
+			expect(result[0]!.files).toHaveLength(1)
+			expect(result[0]!.files[0]!.uuid).toBe("track-1")
 		})
 	})
 

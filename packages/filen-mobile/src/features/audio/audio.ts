@@ -176,6 +176,30 @@ export class Audio {
 
 			events.emit("audioStatus", status)
 
+			// AU-02: a track whose bytes loaded but won't actually play (corrupt/unsupported codec, DRM,
+			// mediaServicesReset) surfaces status.error and never fires didJustFinish — the queue would
+			// wedge silently (no sound, no skip), permanently in the background. Treat a playback error on
+			// the track we intend to be playing as terminal and skip-advance (forceAdvance), so even
+			// loop-track moves off the broken track instead of re-playing it. handleTrackEnd dedupes per
+			// loadGeneration, so repeated error statuses for the same track advance at most once. Gated on
+			// intendPlaying so an error while paused doesn't resurrect playback.
+			if (status.error && this.intendPlaying) {
+				logger.error("audio", "player reported a playback error; skip-advancing", {
+					generation: this.loadGeneration,
+					error: status.error
+				})
+
+				this.clearTrackEndWatchdog()
+				this.handleTrackEnd(true).catch(e =>
+					logger.error("audio", "handleTrackEnd failed from playback-error branch", {
+						generation: this.loadGeneration,
+						error: e
+					})
+				)
+
+				return
+			}
+
 			if (status.didJustFinish || this.statusIndicatesTrackEnded(status)) {
 				this.clearTrackEndWatchdog()
 				this.handleTrackEnd().catch(e =>
@@ -375,10 +399,10 @@ export class Audio {
 		this.state.position = this.state.queue.length - 1
 	}
 
-	private async handleTrackEnd(): Promise<void> {
-		// Both the native didJustFinish event and the watchdog funnel through here.
-		// Dedupe per loaded track so a late didJustFinish can't double-advance after
-		// the watchdog already recovered (or vice-versa).
+	private async handleTrackEnd(forceAdvance: boolean = false): Promise<void> {
+		// Both the native didJustFinish event and the watchdog funnel through here, plus the playback-
+		// error branch (forceAdvance=true). Dedupe per loaded track so a late didJustFinish can't
+		// double-advance after the watchdog already recovered (or vice-versa).
 		if (this.trackEndHandledGeneration === this.loadGeneration) {
 			return
 		}
@@ -401,7 +425,10 @@ export class Audio {
 			return
 		}
 
-		if (loopMode === "track") {
+		// On a normal end, loop-track re-plays the same track. On a FORCED advance (a playback error on
+		// the current track — AU-02), skip it instead: re-playing a corrupt/unplayable track would
+		// busy-loop (error → re-play → error → ...).
+		if (loopMode === "track" && !forceAdvance) {
 			try {
 				await this.loadAndPlay(this.state.position)
 			} catch (e) {
@@ -1173,81 +1200,106 @@ export class Audio {
 
 		const parsedPlaylists = await Promise.all(
 			playlists.files.map(async file => {
-				const read = await authedSdkClient.downloadFileToBytes(
-					new AnyFile.File(file),
-					{
-						abortSignal: signal ? wrapAbortSignalForSdk(signal) : undefined,
-						pauseSignal: undefined
-					},
-					signal
-						? {
-								signal
-							}
-						: undefined
-				)
+				// AU-05: isolate each playlist. A transient SDK error (network/decrypt/rate-limit) on one
+				// playlist's download must NOT reject Promise.all and collapse the WHOLE playlists screen —
+				// skip just this one and keep the rest. The wrapped abort handle (uniffi, no GC) is freed in
+				// finally — the previously-inline wrap leaked it on every read (TC-01 class).
+				const wrappedAbortSignal = signal ? wrapAbortSignalForSdk(signal) : undefined
 
-				const result = this.parsePlaylistBytes(read)
-
-				if (!result) {
-					logger.warn("audio", "playlist file failed to parse", { uuid: file.uuid })
-
-					return null
-				}
-
-				const now = Date.now()
-				const nonExistentFileUuids = new Set<string>()
-
-				const filesWithItems = (
-					await Promise.all(
-						result.files.map(async file => {
-							const fileExists = await authedSdkClient.getFileOptional(
-								file.uuid,
-								signal
-									? {
-											signal
-										}
-									: undefined
-							)
-
-							if (!fileExists) {
-								nonExistentFileUuids.add(file.uuid)
-
-								return null
-							}
-
-							const item = this.playlistFileToDriveItem(file, now)
-
-							return {
-								...file,
-								item
-							}
-						})
-					)
-				).filter(file => file !== null)
-
-				if (nonExistentFileUuids.size > 0 && !this.playlistCleanupDone.has(result.uuid)) {
-					this.playlistCleanupDone.add(result.uuid)
-
-					// Fire-and-forget: don't block the read on cleanup persistence. UI already sees the
-					// filtered list via filesWithItems, so a delayed persist is harmless.
-					this.savePlaylist({
-						playlist: {
-							...result,
-							files: result.files.filter(file => !nonExistentFileUuids.has(file.uuid))
+				try {
+					const read = await authedSdkClient.downloadFileToBytes(
+						new AnyFile.File(file),
+						{
+							abortSignal: wrappedAbortSignal,
+							pauseSignal: undefined
 						},
 						signal
-					}).catch(e =>
-						logger.error("audio", "playlist cleanup persist failed", {
-							playlistUuid: result.uuid,
-							removedCount: nonExistentFileUuids.size,
-							error: e
-						})
+							? {
+									signal
+								}
+							: undefined
 					)
-				}
 
-				return {
-					...result,
-					files: filesWithItems
+					const result = this.parsePlaylistBytes(read)
+
+					if (!result) {
+						logger.warn("audio", "playlist file failed to parse", { uuid: file.uuid })
+
+						return null
+					}
+
+					const now = Date.now()
+					const nonExistentFileUuids = new Set<string>()
+
+					const filesWithItems = (
+						await Promise.all(
+							result.files.map(async file => {
+								try {
+									const fileExists = await authedSdkClient.getFileOptional(
+										file.uuid,
+										signal
+											? {
+													signal
+												}
+											: undefined
+									)
+
+									if (!fileExists) {
+										nonExistentFileUuids.add(file.uuid)
+
+										return null
+									}
+
+									return {
+										...file,
+										item: this.playlistFileToDriveItem(file, now)
+									}
+								} catch (e) {
+									// AU-05: a transient getFileOptional error is NOT a definitive not-found.
+									// Keep the track (present-unknown) rather than dropping it or feeding the
+									// cleanup deletion path — only an explicit not-found (undefined) removes it.
+									logger.warn("audio", "getFileOptional failed for playlist track; keeping it", { uuid: file.uuid, error: e })
+
+									return {
+										...file,
+										item: this.playlistFileToDriveItem(file, now)
+									}
+								}
+							})
+						)
+					).filter(file => file !== null)
+
+					if (nonExistentFileUuids.size > 0 && !this.playlistCleanupDone.has(result.uuid)) {
+						this.playlistCleanupDone.add(result.uuid)
+
+						// Fire-and-forget: don't block the read on cleanup persistence. UI already sees the
+						// filtered list via filesWithItems, so a delayed persist is harmless.
+						this.savePlaylist({
+							playlist: {
+								...result,
+								files: result.files.filter(file => !nonExistentFileUuids.has(file.uuid))
+							},
+							signal
+						}).catch(e =>
+							logger.error("audio", "playlist cleanup persist failed", {
+								playlistUuid: result.uuid,
+								removedCount: nonExistentFileUuids.size,
+								error: e
+							})
+						)
+					}
+
+					return {
+						...result,
+						files: filesWithItems
+					}
+				} catch (e) {
+					// AU-05: skip just this playlist on a transient read error; keep the rest.
+					logger.warn("audio", "playlist read failed; skipping it", { uuid: file.uuid, error: e })
+
+					return null
+				} finally {
+					disposeSdkAbortSignal(wrappedAbortSignal)
 				}
 			})
 		)
