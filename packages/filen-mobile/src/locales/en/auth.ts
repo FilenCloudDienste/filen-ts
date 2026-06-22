@@ -7,10 +7,10 @@
 // word order can change per locale. They are rendered with react-i18next's <Trans> component, which
 // maps `<link>` to a styled <Text onPress={…}> element — never split into two separate t() calls.
 export const auth = {
-	/** Login screen — large greeting headline shown above the sign-in form */
+	/** Login screen — large greeting headline shown above the login form */
 	welcome_back: "Welcome back",
-	/** Login screen — subtitle under the greeting, prompting the user to sign in */
-	sign_in_to_your_account: "Sign in to your account",
+	/** Login screen — subtitle under the greeting, prompting the user to log in */
+	sign_in_to_your_account: "Log in to your account",
 	/** Login screen — link below the form that starts the password-reset flow */
 	forgot_password: "Forgot password?",
 	/** Login screen — split sentence inviting sign-up; <link> wraps the tappable "Create one" that opens registration */
@@ -61,6 +61,6 @@ export const auth = {
 	resend: "Resend",
 	/** Toast shown after a confirmation email has been resent successfully */
 	resend_confirmation_email_sent: "If an account exists for that address, a confirmation email has been sent.",
-	/** Registration screen — split sentence offering sign-in; <link> wraps the tappable "Sign in" that closes registration */
-	already_have_an_account: "Already have an account? <link>Sign in</link>"
+	/** Registration screen — split sentence offering login; <link> wraps the tappable "Log in" that closes registration */
+	already_have_an_account: "Already have an account? <link>Log in</link>"
 } as const

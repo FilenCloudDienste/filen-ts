@@ -21,7 +21,7 @@ export const chats = {
 	/** Confirmation dialog title shown before deleting all selected chats */
 	delete_all_chats: "Delete all chats",
 	/** Confirmation dialog message shown before deleting all selected chats */
-	delete_all_chats_confirmation: "Are you sure you want to delete all selected chats? This action cannot be undone.",
+	delete_all_chats_confirmation: "Are you sure you want to delete all selected chats? This cannot be undone.",
 	// delete_all (the OK button) lives in common.ts.
 	/** Bulk-action menu item: leave every selected chat the user participates in but does not own */
 	leave_chats: "Leave chats",
@@ -58,7 +58,7 @@ export const chats = {
 	/** Confirmation dialog title shown before deleting a single chat (owner) */
 	delete_chat: "Delete chat",
 	/** Confirmation dialog message shown before deleting a single chat */
-	delete_chat_confirmation: "Are you sure you want to delete this chat? This action cannot be undone.",
+	delete_chat_confirmation: "Are you sure you want to delete this chat? This cannot be undone.",
 	/** Confirmation dialog title shown before leaving a single chat (participant, not owner) */
 	leave_chat: "Leave chat",
 	/** Confirmation dialog message shown before leaving a single chat */

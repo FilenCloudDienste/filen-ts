@@ -32,7 +32,7 @@ export const errors = {
 	/** SDK error: a file or directory name is not valid (empty, reserved, or illegal characters) */
 	invalid_name: "That name is not allowed. Please choose a different one.",
 	/** SDK error: the operation was attempted in a state that does not allow it */
-	invalid_state: "This action can't be completed right now. Please try again.",
+	invalid_state: "This action cannot be completed right now. Please try again.",
 	/** SDK error: an item's type does not match what the operation expects */
 	invalid_type: "This item type is not supported for this action.",
 	/** SDK error: a local file-system read/write failed */
@@ -48,7 +48,7 @@ export const errors = {
 	/** SDK error: the server returned an error response */
 	server_error: "The server returned an error. Please try again later.",
 	/** SDK error: the request was not authenticated (session expired or missing) */
-	unauthenticated: "You're not signed in. Please sign in again.",
+	unauthenticated: "You're not logged in. Please log in again.",
 	/** SDK error: walking a local directory tree failed */
 	fs_directory_walk_error: "Could not read the contents of a directory on your device.",
 	/** Generic fallback for an unknown / unmapped SDK error kind */
