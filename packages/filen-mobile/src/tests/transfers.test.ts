@@ -580,6 +580,36 @@ describe("Transfers", () => {
 				expect(wrapped.value.uniffiDestroy).toHaveBeenCalledTimes(1)
 			})
 
+			// TC-08: wrapAbortSignalForSdk allocates a uniffi ManagedAbortController that can throw under
+			// memory pressure. The disposal defer() must be armed BEFORE that allocation, so an early throw
+			// still frees the composite PauseSignal/AbortSignal handles created outside the run() block.
+			it("disposes the composite signals even when wrapAbortSignalForSdk throws before the SDK call (no handle leak on early throw)", async () => {
+				const file = new FsFile("file:///document/test.txt")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				mockWrapAbortSignalForSdk.mockImplementationOnce(() => {
+					throw new Error("uniffi ctor failed")
+				})
+
+				await expect(
+					transfers.upload({
+						localFileOrDir: file,
+						parent,
+						hideProgress: true
+					})
+				).rejects.toThrow("uniffi ctor failed")
+
+				const compositePause = mockCreateCompositePauseSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
+				const compositeAbort = mockCreateCompositeAbortSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
+
+				expect(compositePause.value.dispose).toHaveBeenCalledTimes(1)
+				expect(compositeAbort.value.dispose).toHaveBeenCalledTimes(1)
+
+				// The SDK upload was never reached (the throw happened before it).
+				expect(mockUploadFile).not.toHaveBeenCalled()
+			})
+
 			it("disposes the self-created pause signal but not a caller-supplied one", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
@@ -765,6 +795,41 @@ describe("Transfers", () => {
 				)
 			})
 
+			// TC-02: the post-upload thumbnail runs AFTER the upload's run() block, whose finally already
+			// disposed the upload composite — passing that disposed composite would yield an uncancellable
+			// signal. The fix builds a FRESH composite (a SECOND createCompositeAbortSignal call) for the
+			// thumbnail and disposes it after the work settles. Assert the thumbnail gets the live composite,
+			// NOT the disposed upload one, and that the fresh composite is cleaned up.
+			it("passes a fresh, still-live composite abort signal to the post-upload thumbnail (not the disposed upload composite)", async () => {
+				const file = new FsFile("file:///document/photo.jpg")
+				fs.set(file.uri, new Uint8Array([1, 2, 3]))
+				const parent = makeParentDir("parent-uuid")
+
+				const { default: thumbnails } = await import("@/lib/thumbnails")
+
+				await transfers.upload({
+					localFileOrDir: file,
+					parent,
+					hideProgress: true
+				})
+
+				// Two composites: [0] for the upload run() (disposed in its finally), [1] for the thumbnail.
+				expect(mockCreateCompositeAbortSignal).toHaveBeenCalledTimes(2)
+
+				const uploadComposite = mockCreateCompositeAbortSignal.mock.results[0] as { value: AbortSignal & { dispose: ReturnType<typeof vi.fn> } }
+				const thumbnailComposite = mockCreateCompositeAbortSignal.mock.results[1] as { value: AbortSignal & { dispose: ReturnType<typeof vi.fn> } }
+
+				const passedSignal = (thumbnails.generateFromLocalFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.signal
+
+				// The thumbnail received the FRESH composite, not the upload's disposed one.
+				expect(passedSignal).toBe(thumbnailComposite.value)
+				expect(passedSignal).not.toBe(uploadComposite.value)
+
+				// The fresh composite was never aborted (it can still fire) and is disposed after the work.
+				expect(passedSignal.aborted).toBe(false)
+				expect(thumbnailComposite.value.dispose).toHaveBeenCalledTimes(1)
+			})
+
 			it("does not call thumbnails.generateFromLocalFile for non-image/video extensions", async () => {
 				const file = new FsFile("file:///document/document.pdf")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
@@ -912,6 +977,34 @@ describe("Transfers", () => {
 						hideProgress: true
 					})
 				).rejects.toThrow("Local directory does not exist")
+			})
+
+			// TC-08: same as the file branch — the disposal defer() must be armed before the fallible
+			// wrapAbortSignalForSdk allocation so an early throw cannot leak the composite handles.
+			it("disposes the composite signals even when wrapAbortSignalForSdk throws before the SDK call (directory branch)", async () => {
+				const dir = new FsDirectory("file:///document/testdir")
+				fs.set(dir.uri, "dir")
+				const parent = makeParentDir("parent-uuid")
+
+				mockWrapAbortSignalForSdk.mockImplementationOnce(() => {
+					throw new Error("uniffi ctor failed")
+				})
+
+				await expect(
+					transfers.upload({
+						localFileOrDir: dir,
+						parent,
+						hideProgress: true
+					})
+				).rejects.toThrow("uniffi ctor failed")
+
+				const compositePause = mockCreateCompositePauseSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
+				const compositeAbort = mockCreateCompositeAbortSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
+
+				expect(compositePause.value.dispose).toHaveBeenCalledTimes(1)
+				expect(compositeAbort.value.dispose).toHaveBeenCalledTimes(1)
+
+				expect(mockUploadDirRecursively).not.toHaveBeenCalled()
 			})
 
 			it("uses each uploaded item's own parent UUID for cache updates", async () => {
@@ -1409,6 +1502,33 @@ describe("Transfers", () => {
 				expect(result!.directories).toHaveLength(0)
 			})
 
+			// TC-08: directory-download branch — the disposal defer() must be armed before the fallible
+			// wrapAbortSignalForSdk allocation so an early throw cannot leak the composite handles.
+			it("disposes the composite signals even when wrapAbortSignalForSdk throws before the SDK call (directory download branch)", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				const item = makeDirItem("dir-uuid")
+
+				mockWrapAbortSignalForSdk.mockImplementationOnce(() => {
+					throw new Error("uniffi ctor failed")
+				})
+
+				await expect(
+					transfers.download({
+						item,
+						destination: dest,
+						hideProgress: true
+					})
+				).rejects.toThrow("uniffi ctor failed")
+
+				const compositePause = mockCreateCompositePauseSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
+				const compositeAbort = mockCreateCompositeAbortSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
+
+				expect(compositePause.value.dispose).toHaveBeenCalledTimes(1)
+				expect(compositeAbort.value.dispose).toHaveBeenCalledTimes(1)
+
+				expect(mockDownloadDirRecursively).not.toHaveBeenCalled()
+			})
+
 			// Pins the directory-branch resolved-value contract the offline reconcile depends on:
 			// per-entry failures arrive ONLY via the onDownloadErrors callback (the SDK call still
 			// resolves Ok) and MUST be included in the resolved value — offline treats a non-empty
@@ -1635,7 +1755,10 @@ describe("Transfers", () => {
 				expect(finalEntry).toBeUndefined()
 			})
 
-			it("throws 'Parent directory of shared directory not found in cache' when sharedDirectory parent is absent", async () => {
+			// TC-06: a cache miss on the parent's share context is NO LONGER a hard failure when the item
+			// itself carries its sharingRole (the listing path stamps the parent's role onto the child). The
+			// download recovers using item.data.sharingRole instead of throwing.
+			it("falls back to the item's own sharingRole when the parent share context is not cached (TC-06)", async () => {
 				const dest = new FsDirectory("file:///document/destdir")
 				const sharedDirItem = {
 					type: "sharedDirectory" as const,
@@ -1644,7 +1767,7 @@ describe("Transfers", () => {
 							parent: { tag: "Uuid", inner: ["missing-parent-uuid"] },
 							uuid: "shared-dir-uuid"
 						},
-						sharingRole: "owner"
+						sharingRole: "item-share-info"
 					}
 				}
 
@@ -1655,13 +1778,52 @@ describe("Transfers", () => {
 
 				cacheMap.clear()
 
+				const result = await transfers.download({
+					item: sharedDirItem as any,
+					destination: dest,
+					hideProgress: true
+				})
+
+				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
+				expect(result).not.toBeNull()
+
+				// The targeted dir is the CHILD itself, and shareInfo was borrowed from the item's own role.
+				const targetDir = mockDownloadDirRecursively.mock.calls[0]?.[2] as any
+				const sharedCtx = targetDir.inner[0]
+
+				expect(sharedCtx.shareInfo).toBe("item-share-info")
+				expect(sharedCtx.dir.tag).toBe("Dir")
+				expect(sharedCtx.dir.inner[0]).toBe(sharedDirItem.data)
+			})
+
+			// TC-06: only when NEITHER the cached parent NOR the item carries a share context do we still
+			// throw — with a clearer, retryable message (open the shared dir once, then retry).
+			it("throws a clearer retryable error when neither the cache nor the item carries the share context (TC-06)", async () => {
+				const dest = new FsDirectory("file:///document/destdir")
+				const sharedDirItem = {
+					type: "sharedDirectory" as const,
+					data: {
+						inner: {
+							parent: { tag: "Uuid", inner: ["missing-parent-uuid"] },
+							uuid: "shared-dir-uuid"
+						}
+						// no sharingRole on the item
+					}
+				}
+
+				mockUnwrapParentUuid.mockReturnValue("missing-parent-uuid")
+
+				const cacheMap = (cache as any).directoryUuidToAnySharedDirWithContext as Map<string, unknown>
+
+				cacheMap.clear()
+
 				await expect(
 					transfers.download({
 						item: sharedDirItem as any,
 						destination: dest,
 						hideProgress: true
 					})
-				).rejects.toThrow("Parent directory of shared directory not found in cache.")
+				).rejects.toThrow("Shared directory download is missing its share context. Open the shared directory once, then retry.")
 			})
 
 			it("resolves the sharedRootDirectory targetDir branch without throwing", async () => {

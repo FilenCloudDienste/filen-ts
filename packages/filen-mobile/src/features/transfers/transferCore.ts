@@ -335,8 +335,11 @@ export async function uploadCore(
 	if (localFileOrDir instanceof FileSystem.Directory) {
 		const result = await run(async defer => {
 			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
-			// released explicitly. Hoist it so we can destroy it once the transfer settles.
-			const wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+			// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation
+			// (wrapAbortSignalForSdk's `new ManagedAbortController()` can throw under memory pressure):
+			// otherwise an early throw would bypass disposal and leak the composite PauseSignal/AbortSignal
+			// handles created outside this block (TC-08). null-init then assign after the defer is armed.
+			let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
 
 			defer(() => {
 				compositePauseSignal.dispose()
@@ -347,6 +350,8 @@ export async function uploadCore(
 					transferPauseSignal.dispose()
 				}
 			})
+
+			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
 
 			if (!localFileOrDir.exists) {
 				throw new Error("Local directory does not exist or is empty.")
@@ -646,8 +651,11 @@ export async function uploadCore(
 
 	const result = await run(async defer => {
 		// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
-		// released explicitly. Hoist it so we can destroy it once the transfer settles.
-		const wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+		// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation
+		// (wrapAbortSignalForSdk's `new ManagedAbortController()` can throw under memory pressure):
+		// otherwise an early throw would bypass disposal and leak the composite PauseSignal/AbortSignal
+		// handles created outside this block (TC-08). null-init then assign after the defer is armed.
+		let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
 
 		defer(() => {
 			compositePauseSignal.dispose()
@@ -658,6 +666,8 @@ export async function uploadCore(
 				transferPauseSignal.dispose()
 			}
 		})
+
+		wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
 
 		if (!localFileOrDir.exists) {
 			throw new Error("Local file does not exist.")
@@ -841,15 +851,28 @@ export async function uploadCore(
 	const ext = FileSystem.Paths.extname(uploadedFileName).toLowerCase()
 
 	if (EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS.has(ext) || EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)) {
+		// TC-02: thumbnail generation runs AFTER the run() above settles, but run()'s finally already
+		// disposed compositeAbortSignal — and createCompositeAbortSignal.dispose() detaches its parent
+		// listeners, so the disposed composite can never transition to aborted again (the thumbnail would
+		// be uncancellable). Build a FRESH composite of the still-live parents (global cancelAll + the
+		// caller's signal) so this best-effort post-upload work stays abortable, and dispose it once the
+		// thumbnail settles.
+		const thumbnailAbortSignal = signal
+			? createCompositeAbortSignal(globalAbortController.signal, signal)
+			: createCompositeAbortSignal(globalAbortController.signal)
+
 		await thumbnails
 			.generateFromLocalFile({
 				localPath: normalizeFilePathForExpo(localFileOrDir.uri),
 				uuid: result.data.uuid,
 				name: uploadedFileName,
-				signal: compositeAbortSignal
+				signal: thumbnailAbortSignal
 			})
 			.catch(err => {
 				logger.warn("transfers", "Thumbnail generation failed after upload", { uuid: result.data.uuid, name: uploadedFileName, error: err })
+			})
+			.finally(() => {
+				thumbnailAbortSignal.dispose()
 			})
 	}
 
@@ -905,8 +928,11 @@ export async function downloadCore(
 	if (item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory") {
 		const result = await run(async defer => {
 			// wrapAbortSignalForSdk allocates a uniffi (Rust Arc-backed) ManagedAbortSignal that must be
-			// released explicitly. Hoist it so we can destroy it once the transfer settles.
-			const wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
+			// released explicitly. Register the disposal defer() BEFORE the fallible uniffi allocation
+			// (wrapAbortSignalForSdk's `new ManagedAbortController()` can throw under memory pressure):
+			// otherwise an early throw would bypass disposal and leak the composite PauseSignal/AbortSignal
+			// handles created outside this block (TC-08). null-init then assign after the defer is armed.
+			let wrappedAbortSignal: ReturnType<typeof wrapAbortSignalForSdk> | null = null
 
 			defer(() => {
 				compositePauseSignal.dispose()
@@ -917,6 +943,8 @@ export async function downloadCore(
 					transferPauseSignal.dispose()
 				}
 			})
+
+			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
 
 			if (destination instanceof FileSystem.File) {
 				throw new Error("Destination must be a directory for directory downloads.")
@@ -1006,20 +1034,30 @@ export async function downloadCore(
 							throw new Error("Shared directory is missing parent information.")
 						}
 
-						const parentDirFromCache = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)
+						// TC-06: resolve the share context for THIS child directory. We need a SharingRole; the
+						// listing path stamps the parent's role onto the child both as the cached parent's
+						// shareInfo AND (when present) directly on item.data.sharingRole. Prefer the cached
+						// parent, then fall back to the item's own sharingRole, so a cold start / restored route
+						// param / evicted cache no longer hard-fails when the role is still recoverable from the
+						// item — mirroring offlineHelpers, which resolves the same miss gracefully.
+						const shareInfo = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)?.shareInfo ?? item.data.sharingRole
 
-						if (!parentDirFromCache) {
-							throw new Error("Parent directory of shared directory not found in cache.")
+						if (!shareInfo) {
+							// Neither the cached parent nor the item carries the share context. This is genuinely
+							// recoverable — re-opening the shared parent in the drive repopulates the cache — but
+							// resolving it here would require an extra SDK round-trip the silent transfer layer
+							// deliberately avoids; a clearer retryable message is the sanctioned minimum.
+							throw new Error("Shared directory download is missing its share context. Open the shared directory once, then retry.")
 						}
 
-						// Target the shared directory ITSELF (item.data), borrowing only the shareInfo from the
-						// cached parent — mirrors offline.ts findParentAnyDirWithContext. Wrapping the parent's
+						// Target the shared directory ITSELF (item.data), borrowing only the shareInfo resolved
+						// above — mirrors offline.ts findParentAnyDirWithContext. Wrapping the parent's
 						// AnySharedDirWithContext directly would download the PARENT's (larger) tree instead of
 						// this child directory.
 						return new AnyDirWithContext.Shared(
 							AnySharedDirWithContext.new({
 								dir: new AnySharedDir.Dir(item.data),
-								shareInfo: parentDirFromCache.shareInfo
+								shareInfo
 							})
 						)
 					}
