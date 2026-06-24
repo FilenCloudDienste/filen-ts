@@ -19,7 +19,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { randomUUID } from "expo-crypto"
 import { deserialize } from "@/lib/serializer"
 import events from "@/lib/events"
-import usePlaylistsStore from "@/features/audio/store/usePlaylists.store"
+import usePlaylistsStore, { pruneSelectionByUuid } from "@/features/audio/store/usePlaylists.store"
 import { useShallow } from "zustand/shallow"
 import { runBulk } from "@/lib/bulkOps"
 import { useTranslation } from "react-i18next"
@@ -95,6 +95,24 @@ export function Playlists() {
 
 	const allPlaylists =
 		playlistsQuery.status === "success" ? [...playlistsQuery.data].sort((a, b) => b.updated - a.updated) : ([] as PlaylistWithItems[])
+
+	const playlistsData = playlistsQuery.status === "success" ? playlistsQuery.data : null
+
+	// Stale-selection purge: a refetch (e.g. pull-to-refresh) can drop a playlist that was deleted
+	// on another device while it's still selected. Intersect the selection against the freshest data
+	// by uuid so the header count and any bulk delete don't target a phantom (#AU-15).
+	useEffect(() => {
+		if (!playlistsData) {
+			return
+		}
+
+		const selected = usePlaylistsStore.getState().selectedPlaylists
+		const kept = pruneSelectionByUuid(selected, playlistsData)
+
+		if (kept !== selected) {
+			usePlaylistsStore.getState().setSelectedPlaylists(kept)
+		}
+	}, [playlistsData])
 
 	const searchActive = searchQuery.trim().length > 0
 

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import useIsOnline from "@/hooks/useIsOnline"
 import Header, { type HeaderItem } from "@/components/ui/header"
 import SafeAreaView from "@/components/ui/safeAreaView"
@@ -15,6 +15,7 @@ import audio from "@/features/audio/audio"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import ReorderableList from "react-native-reorderable-list"
 import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.store"
+import { pruneSelectionByUuid } from "@/features/audio/store/usePlaylists.store"
 import { useShallow } from "zustand/shallow"
 import { useTranslation } from "react-i18next"
 import Track from "@/features/audio/components/track"
@@ -53,6 +54,25 @@ export function Playlist() {
 	})
 
 	const playlist = playlistsQuery.status === "success" ? (playlistsQuery.data.find(p => p.uuid === uuid) ?? null) : null
+
+	const trackFiles = playlist?.files
+
+	// Stale-selection purge: a refetch (e.g. pull-to-refresh) can drop a track that was removed
+	// remotely while it's still selected. Intersect the selection against the freshest track list
+	// by uuid so the header count and any bulk action don't target a phantom (#AU-15). Declared
+	// before the early return below to keep hook order stable.
+	useEffect(() => {
+		if (!trackFiles) {
+			return
+		}
+
+		const selected = usePlaylistTracksStore.getState().selectedTracks
+		const kept = pruneSelectionByUuid(selected, trackFiles)
+
+		if (kept !== selected) {
+			usePlaylistTracksStore.getState().setSelectedTracks(kept)
+		}
+	}, [trackFiles])
 
 	if (playlistsQuery.status === "pending" || !playlist) {
 		return (
