@@ -32,6 +32,11 @@ export const VERSION = AUDIO_CACHE_VERSION
 export const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
 
 const GC_DEBOUNCE_MS = 30 * 1000
+// AU-09: bound gc's three fan-out passes so a large cache (hundreds of small sidecars/pictures)
+// doesn't launch O(N) concurrent native FS ops + JSON parses on the single Hermes JS thread — worst
+// during the synchronous app-background sweep. The per-key mutexes are for correctness, not throttling,
+// so a separate gc cap is needed. Mirrors fileCache.gc's GC_CONCURRENCY.
+const GC_CONCURRENCY = 8
 
 function parseMetadata(raw: string): Metadata {
 	const result = deserialize<unknown>(raw)
@@ -132,40 +137,6 @@ export class AudioCache {
 				)
 			)
 		}
-	}
-
-	public async has(item: CacheItem): Promise<boolean> {
-		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
-			return false
-		}
-
-		const result = await run(async defer => {
-			await this.clearBarrier.enter()
-
-			defer(() => {
-				this.clearBarrier.leave()
-			})
-
-			const { audio, metadata } = this.getFiles(item)
-
-			if (!audio.exists || !metadata.exists || metadata.size === 0) {
-				return false
-			}
-
-			const metadataContent = parseMetadata(await metadata.text())
-
-			if (!hasMetadata(metadataContent)) {
-				return false
-			}
-
-			return true
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	public async getMetadata({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<Metadata> {
@@ -437,10 +408,26 @@ export class AudioCache {
 			return
 		}
 
+		// AU-11: participate in the ClearBarrier so a concurrent clear() (logout / "clear music metadata" /
+		// "clear all disk caches") waits for this gc pass to drain instead of deleting+recreating
+		// PARENT_DIRECTORY mid-sweep — matching getMetadata/get/remove, which already bracket their disk
+		// work with enter()/leave().
+		await this.clearBarrier.enter()
+
+		try {
+			await this.runGc(age)
+		} finally {
+			this.clearBarrier.leave()
+		}
+	}
+
+	private async runGc(age?: number): Promise<void> {
 		const now = Date.now()
 		const ttlMs = age ?? 86400 * 1000
 		const entries = PARENT_DIRECTORY.list()
 		const survivors: { key: string; cachedAt: number; size: number }[] = []
+		// AU-09: shared cap across all three passes (created per gc run).
+		const gcSemaphore = new Semaphore(GC_CONCURRENCY)
 
 		// Pass 1: gc expired or corrupt sidecars and their owning picture files; collect
 		// the survivors (footprint + cachedAt) for the size-cap pass below.
@@ -454,6 +441,14 @@ export class AudioCache {
 					if (!entry.name.endsWith(".filenmeta")) {
 						return
 					}
+
+					// AU-09: bound the fan-out — acquire after the cheap sync filters, before any FS work.
+					// Deferred first so it releases LAST (LIFO), after the per-key mutex acquired below.
+					await gcSemaphore.acquire()
+
+					defer(() => {
+						gcSemaphore.release()
+					})
 
 					let shouldDelete = false
 					let pictureUri: string | null = null
@@ -551,6 +546,12 @@ export class AudioCache {
 		await Promise.all(
 			planSizeCapEviction(survivors, CACHE_MAX_SIZE_BYTES).map(async cacheId => {
 				await run(async defer => {
+					await gcSemaphore.acquire()
+
+					defer(() => {
+						gcSemaphore.release()
+					})
+
 					const mutex = this.getMutexForKey(cacheId)
 
 					await mutex.acquire()
@@ -627,6 +628,12 @@ export class AudioCache {
 					// Block against a concurrent get() racing to write a fresh sidecar
 					// for this key. After the mutex is held, re-check the sidecar so a
 					// just-finished get() isn't undone.
+					await gcSemaphore.acquire()
+
+					defer(() => {
+						gcSemaphore.release()
+					})
+
 					const mutex = this.getMutexForKey(cacheId)
 
 					await mutex.acquire()

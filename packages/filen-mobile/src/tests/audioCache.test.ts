@@ -192,124 +192,6 @@ describe("AudioCache", () => {
 		})
 	})
 
-	describe("has", () => {
-		it("returns true when audio and metadata exist and metadata is non-empty", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeFileItem("uuid-2", "song.mp3"))
-
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-2/uuid-2.mp3`
-			const metaPath = `${AUDIO_BASE_DIR}/uuid-2.filenmeta`
-
-			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-
-			const metadata: Metadata = {
-				artist: "Test Artist",
-				title: "Test Song",
-				album: null,
-				date: null,
-				duration: 180,
-				pictureUri: null,
-				pictureBlurhash: null,
-				cachedAt: Date.now()
-			}
-
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
-
-			const result = await cache.has(item)
-
-			expect(result).toBe(true)
-		})
-
-		it("returns false for non-file items", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeDirItem("uuid-3"))
-
-			const result = await cache.has(item)
-
-			expect(result).toBe(false)
-		})
-
-		it("returns false when audio file doesn't exist", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeFileItem("uuid-4", "song.mp3"))
-
-			const metaPath = `${AUDIO_BASE_DIR}/uuid-4.filenmeta`
-			const metadata: Metadata = {
-				artist: "Test",
-				title: "Test",
-				album: null,
-				date: null,
-				duration: 100,
-				pictureUri: null,
-				pictureBlurhash: null,
-				cachedAt: Date.now()
-			}
-
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
-
-			const result = await cache.has(item)
-
-			expect(result).toBe(false)
-		})
-
-		it("returns false when metadata doesn't exist", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeFileItem("uuid-5", "song.mp3"))
-
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-5/uuid-5.mp3`
-
-			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-
-			const result = await cache.has(item)
-
-			expect(result).toBe(false)
-		})
-
-		it("returns false when metadata size is zero (empty file)", async () => {
-			const cache = await createAudioCache()
-			const item = wrapDrive(makeFileItem("uuid-6", "song.mp3"))
-
-			const audioPath = `${FILE_CACHE_BASE_DIR}/uuid-6/uuid-6.mp3`
-			const metaPath = `${AUDIO_BASE_DIR}/uuid-6.filenmeta`
-
-			// 0-byte file hits the metadata.size === 0 guard in has()
-			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-			fs.set(metaPath, new Uint8Array(0))
-
-			const result = await cache.has(item)
-
-			expect(result).toBe(false)
-		})
-
-		it("returns true for sharedRootFile items with audio and metadata present", async () => {
-			const cache = await createAudioCache()
-			const uuid = "uuid-shared-root-has"
-			const item = wrapDrive(makeSharedRootFileItem(uuid, "song.mp3"))
-
-			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
-			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`
-
-			fs.set(audioPath, new Uint8Array([1, 2, 3]))
-
-			const metadata: Metadata = {
-				artist: "Root Artist",
-				title: "Root Song",
-				album: null,
-				date: null,
-				duration: 90,
-				pictureUri: null,
-				pictureBlurhash: null,
-				cachedAt: Date.now()
-			}
-
-			fs.set(metaPath, new Uint8Array(new TextEncoder().encode(serialize(metadata))))
-
-			const result = await cache.has(item)
-
-			expect(result).toBe(true)
-		})
-	})
-
 	describe("get", () => {
 		it("returns cached audio and metadata when both exist (cache hit)", async () => {
 			const cache = await createAudioCache()
@@ -1186,6 +1068,106 @@ describe("AudioCache", () => {
 			// deletion phase committed.
 			expect(metaReads).toBeGreaterThanOrEqual(2)
 			expect(fs.has(metaPath)).toBe(true)
+		})
+
+		it("AU-09: bounds Pass-1 fan-out concurrency instead of reading every sidecar at once", async () => {
+			const cache = await createAudioCache()
+			const now = Date.now()
+
+			// Many fresh sidecars so Pass 1 inspects all of them (none expire / evict).
+			for (let i = 0; i < 30; i++) {
+				const meta: Metadata = {
+					artist: "A",
+					title: `T${i}`,
+					album: null,
+					date: null,
+					duration: 100,
+					pictureUri: null,
+					pictureBlurhash: null,
+					cachedAt: now
+				}
+
+				fs.set(`${AUDIO_BASE_DIR}/bound-${i}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize(meta))))
+			}
+
+			let inFlight = 0
+			let peak = 0
+			const originalText = File.prototype.text
+			const spy = vi.spyOn(File.prototype, "text").mockImplementation(async function (this: File): Promise<string> {
+				inFlight++
+				peak = Math.max(peak, inFlight)
+
+				try {
+					// Hold each sidecar read open a tick so overlapping inspections are observable.
+					await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+					return await originalText.call(this)
+				} finally {
+					inFlight--
+				}
+			})
+
+			try {
+				await cache.gc()
+			} finally {
+				spy.mockRestore()
+			}
+
+			// The pre-fix Promise.all over every sidecar would peak at ~30 concurrent reads; the gc
+			// semaphore caps it at GC_CONCURRENCY (8). peak>1 confirms the work is still concurrent.
+			expect(peak).toBeGreaterThan(1)
+			expect(peak).toBeLessThanOrEqual(8)
+		})
+
+		it("AU-11: a concurrent clear() waits for an in-flight gc to finish (gc holds the ClearBarrier)", async () => {
+			const cache = await createAudioCache()
+			const now = Date.now()
+			const meta: Metadata = {
+				artist: "A",
+				title: "T",
+				album: null,
+				date: null,
+				duration: 100,
+				pictureUri: null,
+				pictureBlurhash: null,
+				cachedAt: now
+			}
+
+			fs.set(`${AUDIO_BASE_DIR}/barrier-1.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize(meta))))
+
+			// Gate gc's Pass-1 sidecar read so gc is parked mid-pass while holding the barrier.
+			let releaseRead!: () => void
+			const readGate = new Promise<void>(resolve => {
+				releaseRead = resolve
+			})
+			const originalText = File.prototype.text
+			const spy = vi.spyOn(File.prototype, "text").mockImplementation(async function (this: File): Promise<string> {
+				await readGate
+
+				return originalText.call(this)
+			})
+
+			let clearDone = false
+			const gcPromise = cache.gc()
+
+			await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+			const clearPromise = cache.clear().then(() => {
+				clearDone = true
+			})
+
+			await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+			// clear() must NOT have completed — gc is in-flight inside the barrier.
+			expect(clearDone).toBe(false)
+
+			releaseRead()
+
+			await gcPromise
+			await clearPromise
+			spy.mockRestore()
+
+			expect(clearDone).toBe(true)
 		})
 	})
 
