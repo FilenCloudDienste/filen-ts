@@ -228,7 +228,7 @@ const NASTY_NAMES = [
 	"literal %20 percent.jpg",
 	"plain spaces and 'quotes'.png",
 	"umlauts äöü ß.txt",
-	"braces {b} `tick` \"quotes\" <angle>.dat"
+	'braces {b} `tick` "quotes" <angle>.dat'
 ]
 
 function makeDirItem(uuid: string, name: string): DriveItem {

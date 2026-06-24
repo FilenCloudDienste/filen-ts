@@ -428,7 +428,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				expect(mockUploadFile).toHaveBeenCalledTimes(1)
@@ -462,7 +462,6 @@ describe("Transfers", () => {
 				expect((added[0] as { type: string }).type).toBe("uploadFile")
 			})
 
-	
 			it("epoch-0 created/modified survive to the SDK uploadFile params as 0n (null-guard, not falsy-drop)", async () => {
 				// REGRESSION (#B7): `created ? BigInt(created) : undefined` dropped a valid
 				// epoch-0 timestamp to undefined, letting the server assign its own created
@@ -493,7 +492,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				expect(mockUploadFile).toHaveBeenCalledTimes(1)
@@ -514,13 +513,13 @@ describe("Transfers", () => {
 				await expect(
 					transfers.upload({
 						localFileOrDir: file,
-						parent,
+						parent
 					})
 				).rejects.toThrow("upload failed")
 
 				const result = await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				expect(result).not.toBeNull()
@@ -534,7 +533,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				const compositePause = mockCreateCompositePauseSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
@@ -551,7 +550,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				const wrapped = mockWrapAbortSignalForSdk.mock.results[0] as { value: { uniffiDestroy: ReturnType<typeof vi.fn> } }
@@ -575,7 +574,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.upload({
 						localFileOrDir: file,
-						parent,
+						parent
 					})
 				).rejects.toThrow("uniffi ctor failed")
 
@@ -597,7 +596,7 @@ describe("Transfers", () => {
 				// No pauseSignal passed: transfers owns the one it allocates and must dispose it.
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				const owned = mockCreateCompositePauseSignal.mock.calls[0]?.[1] as { dispose: ReturnType<typeof vi.fn> }
@@ -625,7 +624,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.upload({
 						localFileOrDir: file,
-						parent,
+						parent
 					})
 				).rejects.toThrow("Local file does not exist")
 			})
@@ -688,7 +687,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
@@ -727,7 +726,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.upload({
 						localFileOrDir: file,
-						parent,
+						parent
 					})
 				).rejects.toThrow("network failure")
 
@@ -735,9 +734,7 @@ describe("Transfers", () => {
 				await new Promise(res => setTimeout(res, 0))
 
 				// At some point the entry carried the appended error (so the error surfaced).
-				const erroredSnapshot = snapshots.find(snapshot =>
-					snapshot.some(t => t.type === "uploadFile" && t.unknownCount === 1)
-				)
+				const erroredSnapshot = snapshots.find(snapshot => snapshot.some(t => t.type === "uploadFile" && t.unknownCount === 1))
 
 				expect(erroredSnapshot).toBeDefined()
 
@@ -756,7 +753,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledTimes(1)
@@ -781,14 +778,18 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				// Two composites: [0] for the upload run() (disposed in its finally), [1] for the thumbnail.
 				expect(mockCreateCompositeAbortSignal).toHaveBeenCalledTimes(2)
 
-				const uploadComposite = mockCreateCompositeAbortSignal.mock.results[0] as { value: AbortSignal & { dispose: ReturnType<typeof vi.fn> } }
-				const thumbnailComposite = mockCreateCompositeAbortSignal.mock.results[1] as { value: AbortSignal & { dispose: ReturnType<typeof vi.fn> } }
+				const uploadComposite = mockCreateCompositeAbortSignal.mock.results[0] as {
+					value: AbortSignal & { dispose: ReturnType<typeof vi.fn> }
+				}
+				const thumbnailComposite = mockCreateCompositeAbortSignal.mock.results[1] as {
+					value: AbortSignal & { dispose: ReturnType<typeof vi.fn> }
+				}
 
 				const passedSignal = (thumbnails.generateFromLocalFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.signal
 
@@ -810,7 +811,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				expect(thumbnails.generateFromLocalFile).not.toHaveBeenCalled()
@@ -854,7 +855,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: file,
-					parent,
+					parent
 				})
 
 				// Find the snapshot that shows bytesTransferred === 512 for the upload transfer.
@@ -927,7 +928,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: dir,
-					parent,
+					parent
 				})
 
 				expect(drive.createDirectory).toHaveBeenCalled()
@@ -940,7 +941,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.upload({
 						localFileOrDir: dir,
-						parent,
+						parent
 					})
 				).rejects.toThrow("Local directory does not exist")
 			})
@@ -959,7 +960,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.upload({
 						localFileOrDir: dir,
-						parent,
+						parent
 					})
 				).rejects.toThrow("uniffi ctor failed")
 
@@ -1010,7 +1011,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: dir,
-					parent,
+					parent
 				})
 
 				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(2)
@@ -1044,7 +1045,7 @@ describe("Transfers", () => {
 
 				await transfers.upload({
 					localFileOrDir: dir,
-					parent,
+					parent
 				})
 
 				expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
@@ -1064,7 +1065,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.upload({
 					localFileOrDir: dir,
-					parent,
+					parent
 				})
 
 				expect(result!.directories).toHaveLength(1)
@@ -1088,7 +1089,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.upload({
 					localFileOrDir: dir,
-					parent,
+					parent
 				})
 
 				expect(result).not.toBeNull()
@@ -1172,15 +1173,13 @@ describe("Transfers", () => {
 				await expect(
 					transfers.upload({
 						localFileOrDir: dir,
-						parent,
+						parent
 					})
 				).rejects.toThrow("dir upload failed")
 
 				await new Promise(res => setTimeout(res, 0))
 
-				const erroredSnapshot = snapshots.find(snapshot =>
-					snapshot.some(t => t.type === "uploadDirectory" && t.unknownCount === 1)
-				)
+				const erroredSnapshot = snapshots.find(snapshot => snapshot.some(t => t.type === "uploadDirectory" && t.unknownCount === 1))
 
 				expect(erroredSnapshot).toBeDefined()
 
@@ -1199,7 +1198,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
@@ -1219,7 +1218,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(mockDownloadFileToPath).not.toHaveBeenCalled()
@@ -1239,7 +1238,7 @@ describe("Transfers", () => {
 
 				await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(mockWrapAbortSignalForSdk).not.toHaveBeenCalled()
@@ -1260,7 +1259,7 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					bypassCache: true,
+					bypassCache: true
 				})
 
 				expect(mockFileCacheHas).not.toHaveBeenCalled()
@@ -1268,14 +1267,13 @@ describe("Transfers", () => {
 				expect(result).not.toBeNull()
 			})
 
-	
 			it("disposes composite signals on completion", async () => {
 				const dest = new FsFile("file:///document/dest.txt")
 				const item = makeFileItem("file-uuid")
 
 				await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				const compositePause = mockCreateCompositePauseSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
@@ -1294,13 +1292,13 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("download failed")
 
 				const result = await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(result).not.toBeNull()
@@ -1357,7 +1355,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("Destination must be a file for file downloads.")
 			})
@@ -1392,15 +1390,13 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("download failed")
 
 				await new Promise(res => setTimeout(res, 0))
 
-				const erroredSnapshot = snapshots.find(snapshot =>
-					snapshot.some(t => t.type === "downloadFile" && t.unknownCount === 1)
-				)
+				const erroredSnapshot = snapshots.find(snapshot => snapshot.some(t => t.type === "downloadFile" && t.unknownCount === 1))
 
 				expect(erroredSnapshot).toBeDefined()
 
@@ -1418,7 +1414,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("Destination must be a directory")
 			})
@@ -1429,7 +1425,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1450,7 +1446,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("uniffi ctor failed")
 
@@ -1481,7 +1477,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(result).not.toBeNull()
@@ -1565,7 +1561,7 @@ describe("Transfers", () => {
 
 				await transfers.download({
 					item,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(existedAtSdkCall).toBe(false)
@@ -1583,7 +1579,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("dir download failed")
 
@@ -1664,7 +1660,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("dir download failed")
 
@@ -1706,7 +1702,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.download({
 					item: sharedDirItem as any,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1745,7 +1741,7 @@ describe("Transfers", () => {
 				await expect(
 					transfers.download({
 						item: sharedDirItem as any,
-						destination: dest,
+						destination: dest
 					})
 				).rejects.toThrow("Shared directory download is missing its share context. Open the shared directory once, then retry.")
 			})
@@ -1762,7 +1758,7 @@ describe("Transfers", () => {
 
 				const result = await transfers.download({
 					item: sharedRootItem as any,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1788,7 +1784,10 @@ describe("Transfers", () => {
 				mockUnwrapParentUuid.mockReturnValue("parent-uuid")
 
 				// Seed the cache with the PARENT's shared-dir context (a distinct uuid/shareInfo).
-				const parentSharedDirWithContext = { dir: { tag: "Root", inner: [{ inner: { uuid: "parent-uuid" } }] }, shareInfo: "parent-share-info" }
+				const parentSharedDirWithContext = {
+					dir: { tag: "Root", inner: [{ inner: { uuid: "parent-uuid" } }] },
+					shareInfo: "parent-share-info"
+				}
 				const cacheMap = (cache as any).directoryUuidToAnySharedDirWithContext as Map<string, unknown>
 
 				cacheMap.clear()
@@ -1796,7 +1795,7 @@ describe("Transfers", () => {
 
 				await transfers.download({
 					item: sharedDirItem as any,
-					destination: dest,
+					destination: dest
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1896,7 +1895,7 @@ describe("Transfers", () => {
 
 			const result = await transfers.download({
 				item,
-				destination: dest,
+				destination: dest
 			})
 
 			expect(result).not.toBeNull()
@@ -1931,7 +1930,7 @@ describe("Transfers", () => {
 
 			const result = await transfers.upload({
 				localFileOrDir: dir,
-				parent,
+				parent
 			})
 
 			expect(result).not.toBeNull()
@@ -1958,7 +1957,7 @@ describe("Transfers", () => {
 
 			const result = await transfers.download({
 				item,
-				destination: dest,
+				destination: dest
 			})
 
 			expect(result).not.toBeNull()
@@ -2019,7 +2018,7 @@ describe("Transfers", () => {
 
 			const uploadPromise = transfers.upload({
 				localFileOrDir: file,
-				parent,
+				parent
 			})
 
 			// Give the upload a tick to reach the awaited SDK call.

@@ -312,11 +312,7 @@ import {
 	type OfflineParent,
 	type StoredOfflineQueryCacheEntry
 } from "@/features/offline/offlineHelpers"
-import {
-	OFFLINE_FILES_DIRECTORY,
-	OFFLINE_DIRECTORIES_DIRECTORY,
-	OFFLINE_INDEX_FILE
-} from "@/lib/storageRoots"
+import { OFFLINE_FILES_DIRECTORY, OFFLINE_DIRECTORIES_DIRECTORY, OFFLINE_INDEX_FILE } from "@/lib/storageRoots"
 import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import { validateUuid } from "@/lib/uuid"
 import type { DriveItem } from "@/types"
