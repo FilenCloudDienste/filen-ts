@@ -15,6 +15,7 @@ vi.mock("@filen/utils", () => ({
 
 const mockNotifee = {
 	registerForegroundService: vi.fn(),
+	onBackgroundEvent: vi.fn(),
 	createChannel: vi.fn().mockResolvedValue(undefined),
 	requestPermission: vi.fn().mockResolvedValue({ authorizationStatus: 2 }),
 	getNotificationSettings: vi.fn().mockResolvedValue({ authorizationStatus: 2 }),
@@ -70,6 +71,7 @@ describe("foregroundService", () => {
 		await fgs.init()
 
 		expect(mockNotifee.registerForegroundService).toHaveBeenCalledTimes(1)
+		expect(mockNotifee.onBackgroundEvent).toHaveBeenCalledTimes(1)
 		expect(mockNotifee.createChannel).toHaveBeenCalledWith(expect.objectContaining({ id: "transfers" }))
 		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
 	})

@@ -54,6 +54,14 @@ class ForegroundService {
 				return new Promise<void>(() => {})
 			})
 
+			// The ongoing transfers notification emits events (e.g. dismissal) while the app is backgrounded.
+			// notifee requires a background-event handler for these or it logs a warning and drops them. Our
+			// notification has no actions, so there is nothing to act on — this empty handler just silences the
+			// warning and lets the foreground service run cleanly.
+			notifee.onBackgroundEvent(async () => {
+				// Nothing to handle: the transfers notification has no actions.
+			})
+
 			await notifee.createChannel({
 				id: CHANNEL_ID,
 				name: i18n.t("transfers_channel_name"),
