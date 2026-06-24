@@ -1394,7 +1394,8 @@ class CameraUpload {
 									name: uploadName,
 									modified: delta.file.info.modificationTime ?? delta.file.info.creationTime ?? undefined,
 									created: effectiveCreationTimestamp(delta.file.info),
-									hideProgress: params?.background ?? undefined
+									hideProgress: params?.background ?? undefined,
+									background: params?.background ?? false
 								})
 
 								if (!transferResult) {

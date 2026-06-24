@@ -267,6 +267,7 @@ import { onlineManager } from "@tanstack/react-query"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { type OfflineParent, type OfflineSyncError } from "@/features/offline/offlineHelpers"
 import type { DriveItem } from "@/types"
+import { fs } from "@/tests/mocks/expoFileSystem"
 
 const ROOT_UUID = "root-uuid"
 
@@ -1592,6 +1593,82 @@ describe("offlineSync — gates & coalescing", () => {
 		})
 
 		expect(syncErrors()).toEqual([])
+	})
+
+	it("19b. foreground pass threads background: false into offline.reconcileTree", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "tree-1" ? makeRemoteDir("tree-1", "Tree", uuidParent("parent-1")) : undefined
+		)
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledWith(expect.objectContaining({ background: false }))
+	})
+
+	it("19c. background pass threads background: true into offline.reconcileTree", async () => {
+		givenTrees([
+			{
+				item: makeTreeItem("tree-1", "Tree", "parent-1"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.getDirOptional.mockImplementation(async (uuid: string) =>
+			uuid === "tree-1" ? makeRemoteDir("tree-1", "Tree", uuidParent("parent-1")) : undefined
+		)
+
+		// Background budget selector uses getTreeMetaSize which stats the .filenmeta on disk.
+		// Write a small placeholder so the tree passes the size gate and is selected.
+		const metaPath = "file:///shared/group.io.filen.app/offline/v2/directories/tree-1/tree-1.filenmeta"
+
+		fs.set(metaPath, new Uint8Array([1, 2, 3]))
+
+		await new OfflineSync().sync({ background: true })
+
+		fs.delete(metaPath)
+
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(offline.reconcileTree)).toHaveBeenCalledWith(expect.objectContaining({ background: true }))
+	})
+
+	it("19d. foreground pass threads background: false into offline.storeFile (version adoption)", async () => {
+		givenFiles([
+			{
+				item: makeFileItem("file-old", "Doc.TXT"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.listDir.mockResolvedValue({
+			dirs: [],
+			files: [makeRemoteFile("file-new", "doc.txt", uuidParent("parent-1"))]
+		})
+
+		await runManualPass()
+
+		expect(vi.mocked(offline.storeFile)).toHaveBeenCalledWith(expect.objectContaining({ background: false }))
+	})
+
+	it("19e. background pass threads background: true into offline.storeFile (version adoption)", async () => {
+		givenFiles([
+			{
+				item: makeFileItem("file-old", "Doc.TXT"),
+				parent: makeNormalParent("parent-1")
+			}
+		])
+		client.listDir.mockResolvedValue({
+			dirs: [],
+			files: [makeRemoteFile("file-new", "doc.txt", uuidParent("parent-1"))]
+		})
+
+		await new OfflineSync().sync({ background: true })
+
+		expect(vi.mocked(offline.storeFile)).toHaveBeenCalledWith(expect.objectContaining({ background: true }))
 	})
 })
 

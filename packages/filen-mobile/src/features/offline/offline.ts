@@ -1162,6 +1162,7 @@ export class Offline {
 		skipIndexUpdate,
 		initialStore,
 		thorough,
+		background,
 		signal
 	}: {
 		directory: DriveItem
@@ -1170,6 +1171,7 @@ export class Offline {
 		skipIndexUpdate?: boolean
 		initialStore?: boolean
 		thorough?: boolean
+		background?: boolean
 		signal?: AbortSignal
 	}): Promise<OfflineSyncError[]> {
 		const result = await run(async defer => {
@@ -1724,6 +1726,7 @@ export class Offline {
 						item: directory,
 						destination: liveDir,
 						hideProgress,
+						background: background ?? false,
 						awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
 						preserveDestinationOnStart: true,
 						signal
@@ -2217,12 +2220,14 @@ export class Offline {
 		parent,
 		hideProgress,
 		skipIndexUpdate,
+		background,
 		signal
 	}: {
 		file: DriveItem
 		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
+		background?: boolean
 		signal?: AbortSignal
 	}): Promise<boolean> {
 		const result = await run(async defer => {
@@ -2294,6 +2299,7 @@ export class Offline {
 					item: file,
 					destination: dataFile,
 					hideProgress,
+					background: background ?? false,
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
 					signal
 				})
@@ -2454,6 +2460,7 @@ export class Offline {
 				item,
 				destination: dataFile,
 				hideProgress: true,
+				background: false,
 				// TC-04: re-download fresh bytes. Without this the download's cache shortcut resolves the
 				// source to this exact dataFile (offline.getLocalFile returns it), then deletes it and
 				// copies the now-deleted file onto itself — destroying the bytes the heal is replacing.
@@ -2503,12 +2510,14 @@ export class Offline {
 		parent,
 		hideProgress,
 		skipIndexUpdate,
+		background,
 		signal
 	}: {
 		directory: DriveItem
 		parent: OfflineParent
 		hideProgress?: boolean
 		skipIndexUpdate?: boolean
+		background?: boolean
 		signal?: AbortSignal
 	}): Promise<OfflineSyncError[]> {
 		if (await this.isItemStored(directory)) {
@@ -2528,6 +2537,7 @@ export class Offline {
 			parent,
 			hideProgress,
 			skipIndexUpdate,
+			background,
 			initialStore: true,
 			signal
 		})

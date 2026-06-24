@@ -1336,6 +1336,46 @@ describe("Offline", () => {
 			expect(index.files[uuid]).toBeDefined()
 		})
 
+		it("passes background: false to transfers.download when background is omitted", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "bg-false.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }) => {
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([1]))
+				}
+
+				return { files: [], directories: [] }
+			})
+
+			const offline = await createOffline()
+
+			await offline.storeFile({ file: fileItem, parent })
+
+			expect(transfers.download).toHaveBeenCalledWith(expect.objectContaining({ background: false }))
+		})
+
+		it("passes background: true to transfers.download when background is true", async () => {
+			const uuid = "11111111-1111-1111-1111-111111111111"
+			const fileItem = makeFileItem(uuid, "bg-true.txt")
+			const parent = makeParent("22222222-2222-2222-2222-222222222222")
+
+			vi.mocked(transfers.download).mockImplementationOnce(async ({ destination }) => {
+				if (destination instanceof File) {
+					destination.write(new Uint8Array([1]))
+				}
+
+				return { files: [], directories: [] }
+			})
+
+			const offline = await createOffline()
+
+			await offline.storeFile({ file: fileItem, parent, background: true })
+
+			expect(transfers.download).toHaveBeenCalledWith(expect.objectContaining({ background: true }))
+		})
+
 		it("throws if item is not a file type", async () => {
 			const offline = await createOffline()
 			const dirItem = makeDirItem("11111111-1111-1111-1111-111111111111", "not-a-file")

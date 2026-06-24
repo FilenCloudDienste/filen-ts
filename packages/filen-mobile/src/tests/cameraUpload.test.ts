@@ -1031,6 +1031,22 @@ describe("sync flow", () => {
 		)
 	})
 
+	it("passes background: false to transfers.upload on a foreground sync", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg", creationTime: 1000, modificationTime: 2000 }])
+
+		await cameraUpload.sync()
+
+		expect(transfers.upload).toHaveBeenCalledWith(expect.objectContaining({ background: false }))
+	})
+
+	it("passes background: true to transfers.upload on a background sync", async () => {
+		setupLocalAssets([{ id: "a1", filename: "photo.jpg", creationTime: 1000, modificationTime: 2000 }])
+
+		await cameraUpload.sync({ background: true })
+
+		expect(transfers.upload).toHaveBeenCalledWith(expect.objectContaining({ background: true }))
+	})
+
 	// ─── Audit B4 (2026-06-11): persisted background-abort counter ────────────────
 	// A budget/expiration abort never reaches the in-memory failure counter (cancel()
 	// clears it, and each background run may be a fresh process) — without persistence,

@@ -436,6 +436,7 @@ export class OfflineSync {
 		authedSdkClient,
 		parentContextCache,
 		thorough,
+		background,
 		signal,
 		pushError,
 		pushErrors
@@ -445,6 +446,7 @@ export class OfflineSync {
 		authedSdkClient: AuthedSdkClient
 		parentContextCache: ParentContextCache
 		thorough: boolean
+		background: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 		pushErrors: (errors: OfflineSyncError[]) => void
@@ -555,6 +557,7 @@ export class OfflineSync {
 				hideProgress: true,
 				skipIndexUpdate: true,
 				thorough,
+				background,
 				signal
 			})
 		)
@@ -568,6 +571,7 @@ export class OfflineSync {
 		parent,
 		listingState,
 		thorough,
+		background,
 		signal,
 		pushError,
 		pushErrors
@@ -576,6 +580,7 @@ export class OfflineSync {
 		parent: OfflineParent
 		listingState: ParentListingState | undefined
 		thorough: boolean
+		background: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 		pushErrors: (errors: OfflineSyncError[]) => void
@@ -639,6 +644,7 @@ export class OfflineSync {
 				hideProgress: true,
 				skipIndexUpdate: true,
 				thorough,
+				background,
 				signal
 			})
 		)
@@ -738,6 +744,7 @@ export class OfflineSync {
 		authedSdkClient,
 		parentContextCache,
 		thorough,
+		background,
 		signal,
 		pushError
 	}: {
@@ -747,6 +754,7 @@ export class OfflineSync {
 		authedSdkClient: AuthedSdkClient
 		parentContextCache: ParentContextCache
 		thorough: boolean
+		background: boolean
 		signal: AbortSignal
 		pushError: (error: OfflineSyncError) => void
 	}): Promise<void> {
@@ -874,6 +882,7 @@ export class OfflineSync {
 					parent,
 					hideProgress: true,
 					skipIndexUpdate: true,
+					background,
 					signal
 				})
 			)
@@ -1181,6 +1190,7 @@ export class OfflineSync {
 							parent: parentResolution.parent,
 							hideProgress: true,
 							skipIndexUpdate: true,
+							background: false,
 							thorough,
 							signal
 						})
@@ -1374,6 +1384,7 @@ export class OfflineSync {
 									authedSdkClient,
 									parentContextCache,
 									thorough,
+									background,
 									signal,
 									pushError,
 									pushErrors
@@ -1390,6 +1401,7 @@ export class OfflineSync {
 									parent,
 									listingState: parentListings.get(parentCacheKey(parent)),
 									thorough,
+									background,
 									signal,
 									pushError,
 									pushErrors
@@ -1408,6 +1420,7 @@ export class OfflineSync {
 									authedSdkClient,
 									parentContextCache,
 									thorough,
+									background,
 									signal,
 									pushError
 								})
