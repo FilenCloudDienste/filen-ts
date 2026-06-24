@@ -28,7 +28,7 @@ import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useSecureStore } from "@/lib/secureStore"
-import {
+import foregroundService, {
 	TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
 	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
 } from "@/features/transfers/foregroundService"
@@ -288,7 +288,32 @@ function Advanced() {
 										type: "switch",
 										value: foregroundServiceEnabled,
 										onValueChange: () => {
-											setForegroundServiceEnabled(prev => !prev)
+											if (foregroundServiceEnabled) {
+												setForegroundServiceEnabled(false)
+
+												return
+											}
+
+											void run(async () => {
+												const granted = await foregroundService.requestPermission()
+
+												if (granted) {
+													setForegroundServiceEnabled(true)
+
+													return
+												}
+
+												const result = await prompts.alert({
+													title: t("background_transfers"),
+													message: t("background_transfers_notifications_required"),
+													okText: t("open_settings"),
+													cancelText: t("cancel")
+												})
+
+												if (!result.cancelled) {
+													await foregroundService.openSettings()
+												}
+											})
 										}
 									}
 								}

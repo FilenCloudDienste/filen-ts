@@ -444,4 +444,22 @@ describe("foregroundService", () => {
 		expect(mockNotifee.stopForegroundService).not.toHaveBeenCalled()
 		expect(mockNotifee.openNotificationSettings).not.toHaveBeenCalled()
 	})
+
+	it("requestPermission returns true when getNotificationSettings reports AUTHORIZED", async () => {
+		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 2 })
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		expect(await fgs.requestPermission()).toBe(true)
+		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
+	})
+
+	it("requestPermission returns false when getNotificationSettings reports DENIED", async () => {
+		mockNotifee.getNotificationSettings.mockResolvedValue({ authorizationStatus: 1 })
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		expect(await fgs.requestPermission()).toBe(false)
+		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
+	})
 })

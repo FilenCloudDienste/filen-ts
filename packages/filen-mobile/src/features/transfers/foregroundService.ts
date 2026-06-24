@@ -105,7 +105,7 @@ class ForegroundService {
 			return
 		}
 
-		const granted = await this.ensurePermission()
+		const granted = await this.requestPermission()
 
 		if (!granted || signal?.aborted) {
 			return
@@ -178,7 +178,7 @@ class ForegroundService {
 		return value ?? DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
 	}
 
-	private async ensurePermission(): Promise<boolean> {
+	public async requestPermission(): Promise<boolean> {
 		const status = await this.getStatus()
 
 		if (status === "authorized") {
