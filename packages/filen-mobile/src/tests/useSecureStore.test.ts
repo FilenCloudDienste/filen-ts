@@ -676,5 +676,39 @@ describe("useSecureStore", () => {
 			// Both hooks must reflect the same final value (shared state)
 			expect(hook1.current[0]).toBe(hook2.current[0])
 		})
+
+		// CU-06 regression: two hook instances bound to the SAME key, each running a functional
+		// set() that mutates a different field of the shared object. Under the old logic the loser's
+		// merge base was its STALE optimistic lastValueRef (its self-echo suppression flag dropped the
+		// winner's secureStoreChange echo), so the loser computed from the pre-winner base and silently
+		// clobbered the winner's field. The functional set must re-read the freshest persisted value as
+		// its merge base so the two writes compose instead of one overwriting the other.
+		it("does not lose a concurrent cross-instance update: overlapping functional sets compose (CU-06)", async () => {
+			type Config = { a: boolean; b: boolean }
+
+			const initial: Config = { a: false, b: false }
+
+			const { result: hook1 } = renderHook(() => useSecureStore<Config>("cu06Key", initial))
+			const { result: hook2 } = renderHook(() => useSecureStore<Config>("cu06Key", initial))
+
+			// Both instances fire overlapping functional sets in the same tick — instance 1 flips `a`,
+			// instance 2 flips `b`. The shared per-key flush mutex serializes the writes (1 then 2);
+			// the bug is that instance 2's merge base would be stale, dropping instance 1's `a: true`.
+			await act(async () => {
+				hook1.current[1](prev => ({ ...prev, a: true }))
+				hook2.current[1](prev => ({ ...prev, b: true }))
+			})
+
+			await waitFor(async () => {
+				const stored = await secureStore.get<Config>("cu06Key")
+
+				// Both fields must survive — neither write may clobber the other.
+				expect(stored).toEqual({ a: true, b: true })
+			})
+
+			// Both hooks must converge on the fully-merged value.
+			expect(hook1.current[0]).toEqual({ a: true, b: true })
+			expect(hook2.current[0]).toEqual({ a: true, b: true })
+		})
 	})
 })

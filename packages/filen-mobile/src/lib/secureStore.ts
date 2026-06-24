@@ -847,7 +847,15 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 						flushMutexRef.current.release()
 					})
 
-					const now = typeof fn === "function" ? (fn as (prev: T) => T)(lastValueRef.current) : fn
+					// For the functional form re-read the freshest persisted value as the merge base
+					// (inside the flush mutex, so a concurrent instance's prior write is already
+					// committed) instead of this instance's optimistic lastValueRef. Otherwise two
+					// overlapping cross-instance sets on the same key compute from a stale base and
+					// the loser silently clobbers the winner — the self-echo flag (isLocalUpdateRef)
+					// drops the winner's secureStoreChange echo while this set() is in flight, so
+					// lastValueRef never catches up (CU-06). The direct-value form needs no re-read.
+					const now =
+						typeof fn === "function" ? (fn as (prev: T) => T)((await secureStore.get<T>(key)) ?? lastValueRef.current) : fn
 
 					setStateChecked(now)
 
