@@ -184,6 +184,13 @@ function removeSettledTransfer(
 	const errorMessage = args?.errorMessage ?? null
 
 	;(awaitExternal ? awaitExternal() : Promise.resolve())
+		.catch(err => {
+			// TC-07: a rejecting external-completion fence (camera-upload / Android MediaStore) must NOT
+			// block the mandatory store removal in the .then() below — otherwise the transfer is stranded
+			// as a zombie row with a never-stopping speed interval (and, on Android, a foreground-service
+			// notification that never clears). Swallow it (logged) and fall through to the removal.
+			logger.warn("transfers", "external-completion fence rejected; removing the transfer anyway", { id, type, error: err })
+		})
 		.then(() => {
 			if (outcome) {
 				// Append before the filter so the finished entry exists by the time the active one is
