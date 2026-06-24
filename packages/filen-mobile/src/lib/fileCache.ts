@@ -223,15 +223,42 @@ export class FileCache {
 				// Torn/unparseable sidecar (crash mid-write before sidecars became atomic,
 				// disk corruption): self-heal at access time — treat as a miss and drop the
 				// sidecar so the next get() re-downloads, instead of throwing until gc.
-				try {
-					if (metadata.exists) {
-						metadata.delete()
-					}
-				} catch {
-					// best-effort — a failed delete just leaves the torn sidecar for gc
-				}
+				//
+				// TC-16: do the delete UNDER the per-key mutex (has() otherwise holds no per-key lock),
+				// and re-check the sidecar under the lock first. A concurrent get() holds this same mutex
+				// while writing a FRESH sidecar via atomicWrite (delete-temp-then-move) — without this,
+				// has() could delete the valid sidecar get() just materialized, forcing a needless re-download.
+				const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
 
-				return false
+				await mutex.acquire()
+
+				try {
+					if (!metadata.exists) {
+						return false
+					}
+
+					try {
+						const recheck = deserialize(await metadata.text()) as Metadata
+
+						if (recheck && Object.keys(recheck).length > 0) {
+							// A concurrent get() wrote a valid sidecar between our torn read and the lock —
+							// don't delete it; report based on the fresh metadata.
+							return metadataMatchesItem(recheck, item)
+						}
+					} catch {
+						// Still torn under the lock — fall through to the delete.
+					}
+
+					try {
+						metadata.delete()
+					} catch {
+						// best-effort — a failed delete just leaves the torn sidecar for gc
+					}
+
+					return false
+				} finally {
+					mutex.release()
+				}
 			}
 
 			if (!metadataContent || Object.keys(metadataContent).length === 0) {
@@ -437,6 +464,20 @@ export class FileCache {
 			return
 		}
 
+		// TC-14: participate in the ClearBarrier so a concurrent clear() (logout / "clear all disk caches" /
+		// "clear preview cache") waits for this gc pass to drain instead of deleting+recreating
+		// PARENT_DIRECTORY mid-sweep — matching has/get/remove, which already bracket their disk work with
+		// enter()/leave().
+		await this.clearBarrier.enter()
+
+		try {
+			await this.runGc(age)
+		} finally {
+			this.clearBarrier.leave()
+		}
+	}
+
+	private async runGc(age?: number): Promise<void> {
 		const toDelete: string[] = []
 		const survivors: { key: string; cachedAt: number; size: number }[] = []
 		const now = Date.now()
@@ -463,7 +504,11 @@ export class FileCache {
 
 						const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-						if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + ttlMs) {
+						// TC-17: a parseable-but-malformed sidecar lacking a numeric cachedAt would make
+						// `now >= NaN` false → it would survive forever AND its NaN cachedAt would poison the
+						// size-cap eviction sort (NaN comparators are unstable). Treat a non-numeric cachedAt
+						// as a corrupt deletion candidate (matches audioCache's parseMetadata cachedAt check).
+						if (!metadata || Object.keys(metadata).length === 0 || typeof metadata.cachedAt !== "number" || now >= metadata.cachedAt + ttlMs) {
 							return { kind: "delete" as const, uuid }
 						}
 
@@ -545,7 +590,7 @@ export class FileCache {
 						const recheck = await run(async () => {
 							const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-							if (!metadata || Object.keys(metadata).length === 0 || now >= metadata.cachedAt + ttlMs) {
+							if (!metadata || Object.keys(metadata).length === 0 || typeof metadata.cachedAt !== "number" || now >= metadata.cachedAt + ttlMs) {
 								return true
 							}
 

@@ -1262,6 +1262,102 @@ describe("FileCache", () => {
 			expect(peak).toBeGreaterThan(1)
 			expect(peak).toBeLessThanOrEqual(8)
 		})
+
+		it("TC-17: deletes a sidecar with a non-numeric cachedAt instead of keeping it as an immortal survivor", async () => {
+			const cache = await createFileCache()
+			const uuid = "tc17-uuid"
+			const dir = `${BASE_DIR}/${uuid}`
+
+			fs.set(dir, "dir")
+			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
+			// Parseable object with keys, but cachedAt is NOT a number. Pre-fix `now >= ("x" + ttlMs)` is
+			// NaN-comparison false → the entry survives forever. Post-fix it is a corrupt deletion candidate.
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ type: "drive", cachedAt: "not-a-number" }))))
+
+			await cache.gc()
+
+			expect(fs.has(dir)).toBe(false)
+		})
+
+		it("TC-16: has() self-heal re-checks under the mutex and keeps a sidecar that is valid under the lock", async () => {
+			const cache = await createFileCache()
+			const item = wrapDrive(makeFileItem("tc16-uuid", "f.txt"))
+			const metaPath = `${BASE_DIR}/tc16-uuid/tc16-uuid.filenmeta`
+
+			writeFile("tc16-uuid", "f.txt")
+			writeMetadata("tc16-uuid", item)
+
+			// First read (has's initial parse) returns torn JSON → triggers the self-heal path. The
+			// under-lock re-check then reads the real (valid) sidecar — simulating a concurrent get() that
+			// wrote it. has() must NOT delete it and must report the match.
+			const originalText = File.prototype.text
+			let metaReads = 0
+			const spy = vi.spyOn(File.prototype, "text").mockImplementation(async function (this: File): Promise<string> {
+				if (this.uri === metaPath) {
+					metaReads++
+
+					if (metaReads === 1) {
+						return "{ torn json"
+					}
+				}
+
+				return originalText.call(this)
+			})
+
+			let result: boolean
+			try {
+				result = await cache.has(item)
+			} finally {
+				spy.mockRestore()
+			}
+
+			expect(result).toBe(true)
+			expect(fs.has(metaPath)).toBe(true)
+		})
+
+		it("TC-14: a concurrent clear() waits for an in-flight gc to finish (gc holds the ClearBarrier)", async () => {
+			const cache = await createFileCache()
+			const uuid = "tc14-uuid"
+			const dir = `${BASE_DIR}/${uuid}`
+
+			fs.set(dir, "dir")
+			fs.set(`${dir}/${uuid}`, new Uint8Array([1]))
+			fs.set(`${dir}/${uuid}.filenmeta`, new Uint8Array(new TextEncoder().encode(serialize({ ...wrapDrive(makeFileItem(uuid, "f.txt")), cachedAt: Date.now() }))))
+
+			// Gate gc's Phase-1 sidecar read so gc is parked mid-pass while holding the barrier.
+			let releaseRead!: () => void
+			const readGate = new Promise<void>(resolve => {
+				releaseRead = resolve
+			})
+			const originalText = File.prototype.text
+			const spy = vi.spyOn(File.prototype, "text").mockImplementation(async function (this: File): Promise<string> {
+				await readGate
+
+				return originalText.call(this)
+			})
+
+			let clearDone = false
+			const gcPromise = cache.gc()
+
+			await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+			const clearPromise = cache.clear().then(() => {
+				clearDone = true
+			})
+
+			await new Promise<void>(resolve => setTimeout(resolve, 0))
+
+			// clear() must NOT have completed — gc is in-flight inside the barrier.
+			expect(clearDone).toBe(false)
+
+			releaseRead()
+
+			await gcPromise
+			await clearPromise
+			spy.mockRestore()
+
+			expect(clearDone).toBe(true)
+		})
 	})
 
 	describe("clear", () => {
