@@ -25,7 +25,7 @@ export const media = {
 	/** Photos tab bulk action — save all selected photos/videos to the device media library */
 	save_to_device_photos_selected: "Save to photos",
 	/** Photos tab bulk confirm dialog — body text for the "trash selected" confirmation */
-	are_you_sure_trash_selected_photos: "Are you sure you want to trash the selected items? You can restore them later.",
+	are_you_sure_trash_selected_photos: "Are you sure you want to move the selected items to the trash? You can restore them later.",
 
 	// ── Camera upload settings ─────────────────────────────────────────────────
 	/** Camera upload settings screen — header title */

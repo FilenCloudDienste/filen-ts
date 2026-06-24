@@ -1,7 +1,7 @@
 // Miscellaneous cross-cutting UI vocabulary for root-layout background components and the
 // rich-text editor toolbar:
 //   - accountReminders.tsx  (master-keys export reminder, storage-exceeded notice)
-//   - biometric.tsx         (biometric / PIN unlock overlay)
+//   - biometric.tsx         (biometric / passcode unlock overlay)
 //   - cannotDecryptScreen.tsx (decryption-failure body copy)
 //   - offlineBanner.tsx     (offline / back-online indicator)
 //   - textEditor/richText/toolbar.tsx (link editor prompts + format menu labels)
@@ -21,21 +21,21 @@ export const misc = {
 	/** Dialog message shown when storage is over the limit; tells the user to free up space or upgrade */
 	storage_exceeded_message: "You've reached your storage limit. Delete some files or upgrade your plan to keep uploading.",
 
-	// ── Biometric / PIN unlock overlay (biometric.tsx) ────────────────────────
+	// ── Biometric / passcode unlock overlay (biometric.tsx) ────────────────────────
 	/** Biometric prompt title and lock-overlay heading: asks the user to authenticate */
 	authenticate: "Authenticate",
 	/** Biometric system-prompt description explaining why authentication is required */
 	authenticate_to_access_app: "Authenticate to access the app",
 	/** Lock-overlay subtitle prompting the user to unlock to continue using the app */
 	unlock_to_continue: "Unlock to continue",
-	/** Action / fallback button label that switches from biometrics to PIN entry */
-	use_pin: "Use PIN",
-	/** PIN prompt title */
-	pin_code: "PIN",
-	/** PIN prompt message asking the user to enter their PIN */
-	enter_pin: "Enter your PIN",
-	/** Error toast shown after an incorrect PIN is entered */
-	invalid_pin: "Incorrect PIN",
+	/** Action / fallback button label that switches from biometrics to passcode entry */
+	use_pin: "Use passcode",
+	/** Passcode prompt title */
+	pin_code: "Passcode",
+	/** Passcode prompt message asking the user to enter their passcode */
+	enter_pin: "Enter your passcode",
+	/** Error toast shown after an incorrect passcode is entered */
+	invalid_pin: "Incorrect passcode",
 	/** Lock-overlay heading shown while the app is temporarily locked after failed attempts */
 	app_locked: "App locked",
 	/** Lock-overlay subtitle explaining the temporary lock is due to too many failed attempts */
@@ -49,7 +49,7 @@ export const misc = {
 
 	// ── Cannot-decrypt screen (cannotDecryptScreen.tsx) ───────────────────────
 	/** Explanatory body shown under a "could not decrypt" placeholder, telling the user the item couldn't be decrypted on this device */
-	cannot_decrypt_body: "This item couldn't be decrypted. It may have been created with a different account or key.",
+	cannot_decrypt_body: "This item could not be decrypted. It may have been created with a different account or key.",
 
 	// ── Rich-text editor: link prompts (textEditor/richText/toolbar.tsx) ──────
 	/** Dialog title for editing the URL of an existing link */
@@ -75,7 +75,7 @@ export const misc = {
 
 	// ── Root-layout setup-failure screen (routes/_layout.tsx) ─────────────────
 	/** Title shown when app initialization fails on launch */
-	setup_failed_title: "Couldn't start the app",
+	setup_failed_title: "Could not start the app",
 	/** Body explaining the setup failure and inviting a retry */
 	setup_failed_description: "Something went wrong while starting the app. Please try again.",
 	/** Button label that retries app setup after a failure */

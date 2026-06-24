@@ -54,9 +54,9 @@ export const common = {
 	email: "Email",
 	/** Generic password field label / placeholder */
 	password: "Password",
-	/** Generic sign-in action: login submit button, 2FA confirm, "already have an account" link */
-	sign_in: "Sign in",
-	/** Generic sign-out / log-out action */
+	/** Generic login action: login submit button, 2FA confirm, "already have an account" link */
+	sign_in: "Login",
+	/** Generic logout action */
 	logout: "Logout",
 	/** Generic placeholder hint for an email input, shown as faded example text */
 	email_placeholder_hint: "you@example.com",

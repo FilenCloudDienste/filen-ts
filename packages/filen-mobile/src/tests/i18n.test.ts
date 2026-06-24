@@ -146,6 +146,42 @@ describe("getInitialLanguage", () => {
 		// undefined must be treated as "no persisted language" — falls through to device locale.
 		expect(result).toBe("de")
 	})
+
+	it("uses the region tag for Portuguese — a pt-PT device resolves to pt-PT", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([{ languageCode: "pt", languageTag: "pt-PT" }])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("pt-PT")
+	})
+
+	it("uses the region tag for Portuguese — a pt-BR device resolves to pt-BR", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([{ languageCode: "pt", languageTag: "pt-BR" }])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("pt-BR")
+	})
+
+	it("defaults a generic Portuguese device with an unrecognised region tag to pt-BR", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([{ languageCode: "pt", languageTag: "pt-AO" }])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("pt-BR")
+	})
+
+	it("does not regress bare-code languages — a de-DE device still resolves to de", async () => {
+		mockSecureStoreGet.mockResolvedValue(null)
+		mockGetLocales.mockReturnValue([{ languageCode: "de", languageTag: "de-DE" }])
+
+		const result = await getInitialLanguage()
+
+		expect(result).toBe("de")
+	})
 })
 
 describe("initI18n", () => {

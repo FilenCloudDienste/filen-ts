@@ -27,7 +27,7 @@ export const security = {
 	/** Two-factor authentication row and screen — title */
 	two_factor_authentication: "Two-factor authentication",
 	/** Two-factor authentication row — subtitle describing the feature */
-	two_factor_authentication_description: "Require a code from your authenticator app at sign-in",
+	two_factor_authentication_description: "Require a code from your authenticator app at login",
 	/** Disable-2FA confirmation dialog — title */
 	disable_two_factor_authentication: "Disable two-factor authentication",
 	/** Disable-2FA confirmation dialog — message warning about the security implication */
@@ -76,7 +76,7 @@ export const security = {
 	 */
 	biometric_disables_file_provider_message:
 		"Enabling biometric authentication will disable the file provider, because the provider bypasses the lock screen. Do you want to continue?",
-	/** Fallback-password dialog — title shown when setting the PIN/password fallback for biometrics */
+	/** Fallback-password dialog — title shown when setting the password fallback for biometrics */
 	fallback_password: "Fallback password",
 	/** Fallback-password dialog — message asking the user to set a fallback password */
 	enter_fallback_password: "Enter a fallback password to use when biometrics are unavailable",
@@ -84,10 +84,10 @@ export const security = {
 	enter_confirm_fallback_password: "Confirm your fallback password",
 	/** Inline error shown when the two fallback-password fields do not match */
 	fallback_passwords_do_not_match: "Fallback passwords do not match",
-	/** Biometric settings row — title for the PIN-only toggle */
-	pin_only: "PIN only",
-	/** Biometric settings row — subtitle describing the PIN-only mode */
-	pin_only_description: "Use only your PIN instead of biometrics to unlock",
+	/** Biometric settings row — title for the passcode-only toggle */
+	pin_only: "Passcode only",
+	/** Biometric settings row — subtitle describing the passcode-only mode */
+	pin_only_description: "Use only your passcode instead of biometrics to unlock",
 	/** Biometric settings row — title for the lock-after-inactivity picker */
 	lock_app_after: "Lock app after",
 	/** Biometric settings row — subtitle shown when no specific timeout is selected */

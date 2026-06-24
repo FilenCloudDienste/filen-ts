@@ -18,7 +18,8 @@ import deJson from "@/locales/de.json"
 import esJson from "@/locales/es.json"
 import frJson from "@/locales/fr.json"
 import itJson from "@/locales/it.json"
-import ptJson from "@/locales/pt.json"
+import ptBRJson from "@/locales/pt-BR.json"
+import ptPTJson from "@/locales/pt-PT.json"
 import ruJson from "@/locales/ru.json"
 import jaJson from "@/locales/ja.json"
 import zhJson from "@/locales/zh.json"
@@ -56,8 +57,11 @@ const resources = {
 	it: {
 		translation: itJson
 	},
-	pt: {
-		translation: ptJson
+	"pt-BR": {
+		translation: ptBRJson
+	},
+	"pt-PT": {
+		translation: ptPTJson
 	},
 	ru: {
 		translation: ruJson
@@ -135,10 +139,27 @@ export async function getInitialLanguage(): Promise<Language> {
 		return persisted
 	}
 
-	const deviceLanguage = ExpoLocalization.getLocales()[0]?.languageCode
+	const locale = ExpoLocalization.getLocales()[0]
+
+	// Prefer the full BCP-47 tag so region-qualified locales ("pt-PT", "pt-BR") match a
+	// region-specific catalog before the bare code is tried. Languages without a region
+	// variant fall through to the bare languageCode below, so detection does not regress.
+	const deviceTag = locale?.languageTag
+
+	if (isSupportedLanguage(deviceTag)) {
+		return deviceTag
+	}
+
+	const deviceLanguage = locale?.languageCode
 
 	if (isSupportedLanguage(deviceLanguage)) {
 		return deviceLanguage
+	}
+
+	// Portuguese now ships only as region variants; a generic "pt" device whose tag did not
+	// match a region catalog above defaults to Brazilian Portuguese (the larger user base).
+	if (deviceLanguage === "pt") {
+		return "pt-BR"
 	}
 
 	return DEFAULT_LANGUAGE

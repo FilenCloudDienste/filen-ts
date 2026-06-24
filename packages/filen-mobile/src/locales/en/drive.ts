@@ -306,7 +306,7 @@ export const drive = {
 	/** Confirmation body for trashing a single item */
 	confirm_trash: "Are you sure you want to move this item to the trash? You can restore it later.",
 	/** Confirmation dialog title for removing a single item from offline storage */
-	remove_offline_item: "Remove offline",
+	remove_offline_item: "Remove from offline",
 	/** Confirmation body for removing a single item from offline storage */
 	confirm_remove_offline: "Are you sure you want to remove this item from offline storage?",
 	/** Confirmation dialog title for removing a single incoming share */
