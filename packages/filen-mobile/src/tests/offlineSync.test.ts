@@ -532,7 +532,6 @@ describe("offlineSync — normal trees (own cloud)", () => {
 		expect(reconcileArgs?.directory.data.uuid).toBe("tree-1")
 		expect(reconcileArgs?.parent).toBe(parent)
 		expect(reconcileArgs?.skipIndexUpdate).toBe(true)
-		expect(reconcileArgs?.hideProgress).toBe(true)
 		expect(vi.mocked(offline.updateTreeRootMeta)).not.toHaveBeenCalled()
 		expect(vi.mocked(offline.removeItem)).not.toHaveBeenCalled()
 		expect(vi.mocked(offline.updateIndex)).toHaveBeenCalledTimes(1)
@@ -1073,7 +1072,6 @@ describe("offlineSync — standalone files", () => {
 		expect(vi.mocked(offline.storeFile).mock.calls[0]?.[0]?.file.data.uuid).toBe("file-new")
 		expect(vi.mocked(offline.storeFile).mock.calls[0]?.[0]?.skipIndexUpdate).toBe(true)
 		// Background pass — the adoption download must not surface transfer UI progress.
-		expect(vi.mocked(offline.storeFile).mock.calls[0]?.[0]?.hideProgress).toBe(true)
 		expect(vi.mocked(offline.removeItem)).toHaveBeenCalledWith(oldItem)
 		expect(client.getFileOptional).not.toHaveBeenCalled()
 
@@ -1881,7 +1879,6 @@ describe("offlineSync — broken tree metas", () => {
 					}
 				]
 			}
-			hideProgress: boolean
 			skipIndexUpdate: boolean
 			signal: AbortSignal
 		}
@@ -1890,7 +1887,6 @@ describe("offlineSync — broken tree metas", () => {
 		expect(reconcileArgs.directory.data.decryptedMeta?.name).toBe("Rescued tree")
 		expect(reconcileArgs.parent.tag).toBe("Normal")
 		expect(reconcileArgs.parent.inner[0].inner[0].uuid).toBe("parent-1")
-		expect(reconcileArgs.hideProgress).toBe(true)
 		expect(reconcileArgs.skipIndexUpdate).toBe(true)
 		expect(reconcileArgs.signal).toBeInstanceOf(AbortSignal)
 		expect(vi.mocked(offline.removeTreeDirectory)).not.toHaveBeenCalled()

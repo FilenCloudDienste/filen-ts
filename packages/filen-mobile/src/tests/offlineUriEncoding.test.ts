@@ -347,7 +347,6 @@ describe("offline disk addressing survives URI-illegal filename characters", () 
 		const errors = await offline.reconcileTree({
 			directory,
 			parent,
-			hideProgress: true,
 			skipIndexUpdate: true,
 			thorough: true
 		})
@@ -383,7 +382,6 @@ describe("offline disk addressing survives URI-illegal filename characters", () 
 		const errors = await offline.reconcileTree({
 			directory,
 			parent,
-			hideProgress: true,
 			skipIndexUpdate: true
 		})
 

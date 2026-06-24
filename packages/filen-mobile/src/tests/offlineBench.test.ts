@@ -1224,7 +1224,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 				o.reconcileTree({
 					directory: fx.item,
 					parent: fx.parent,
-					hideProgress: true,
 					skipIndexUpdate: true
 				}),
 			validate: result => {
@@ -1247,7 +1246,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 				await o.reconcileTree({
 					directory: fx.item,
 					parent: fx.parent,
-					hideProgress: true,
 					skipIndexUpdate: true
 				})
 			},
@@ -1255,7 +1253,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 				o.reconcileTree({
 					directory: fx.item,
 					parent: fx.parent,
-					hideProgress: true,
 					skipIndexUpdate: true
 				}),
 			validate: result => {
@@ -1275,7 +1272,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 				o.reconcileTree({
 					directory: fx.item,
 					parent: fx.parent,
-					hideProgress: true,
 					skipIndexUpdate: true,
 					thorough: true
 				}),
@@ -1341,7 +1337,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 					o.reconcileTree({
 						directory: fx.item,
 						parent: fx.parent,
-						hideProgress: true,
 						skipIndexUpdate: true
 					}),
 				validate: result => {
@@ -1403,7 +1398,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 					o.reconcileTree({
 						directory: fx.item,
 						parent: fx.parent,
-						hideProgress: true,
 						skipIndexUpdate: true
 					}),
 				validate: result => {
@@ -1451,7 +1445,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 					o.reconcileTree({
 						directory: fx.item,
 						parent: fx.parent,
-						hideProgress: true,
 						skipIndexUpdate: true
 					}),
 				validate: result => {
@@ -1543,7 +1536,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 				const stored = await o.storeFile({
 					file: standaloneItems[i] as DriveItem,
 					parent: standaloneParent,
-					hideProgress: true,
 					skipIndexUpdate: true
 				})
 
@@ -1554,7 +1546,6 @@ describe.runIf(BENCH)("offline lib benchmark", () => {
 				const errors = await o.storeDirectory({
 					directory: fx.item,
 					parent: fx.parent,
-					hideProgress: true,
 					skipIndexUpdate: true
 				})
 

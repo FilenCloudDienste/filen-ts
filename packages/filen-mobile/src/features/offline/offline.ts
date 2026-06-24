@@ -1158,7 +1158,6 @@ export class Offline {
 	public async reconcileTree({
 		directory,
 		parent,
-		hideProgress,
 		skipIndexUpdate,
 		initialStore,
 		thorough,
@@ -1167,7 +1166,6 @@ export class Offline {
 	}: {
 		directory: DriveItem
 		parent: OfflineParent
-		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		initialStore?: boolean
 		thorough?: boolean
@@ -1725,7 +1723,6 @@ export class Offline {
 					transfers.download({
 						item: directory,
 						destination: liveDir,
-						hideProgress,
 						background: background ?? false,
 						awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
 						preserveDestinationOnStart: true,
@@ -2218,14 +2215,12 @@ export class Offline {
 	public async storeFile({
 		file,
 		parent,
-		hideProgress,
 		skipIndexUpdate,
 		background,
 		signal
 	}: {
 		file: DriveItem
 		parent: OfflineParent
-		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		background?: boolean
 		signal?: AbortSignal
@@ -2298,7 +2293,6 @@ export class Offline {
 				const downloadResult = await transfers.download({
 					item: file,
 					destination: dataFile,
-					hideProgress,
 					background: background ?? false,
 					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
 					signal
@@ -2459,7 +2453,6 @@ export class Offline {
 			const downloaded = await transfers.download({
 				item,
 				destination: dataFile,
-				hideProgress: true,
 				background: false,
 				// TC-04: re-download fresh bytes. Without this the download's cache shortcut resolves the
 				// source to this exact dataFile (offline.getLocalFile returns it), then deletes it and
@@ -2508,14 +2501,12 @@ export class Offline {
 	public async storeDirectory({
 		directory,
 		parent,
-		hideProgress,
 		skipIndexUpdate,
 		background,
 		signal
 	}: {
 		directory: DriveItem
 		parent: OfflineParent
-		hideProgress?: boolean
 		skipIndexUpdate?: boolean
 		background?: boolean
 		signal?: AbortSignal
@@ -2535,7 +2526,6 @@ export class Offline {
 		const errors = await this.reconcileTree({
 			directory,
 			parent,
-			hideProgress,
 			skipIndexUpdate,
 			background,
 			initialStore: true,

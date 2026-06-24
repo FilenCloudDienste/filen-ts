@@ -262,7 +262,6 @@ export type UploadParams = {
 	// retried; survives an app→background transition via the foreground service). Omitted/false = a manual or
 	// foreground-initiated transfer, cancelled when the app backgrounds without an active foreground service.
 	background?: boolean
-	hideProgress?: boolean
 	awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 	pauseSignal?: PauseSignal
 	signal?: AbortSignal
@@ -279,7 +278,6 @@ export type DownloadParams = {
 	// retried; survives an app→background transition via the foreground service). Omitted/false = a manual or
 	// foreground-initiated transfer, cancelled when the app backgrounds without an active foreground service.
 	background?: boolean
-	hideProgress?: boolean
 	awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 	pauseSignal?: PauseSignal
 	signal?: AbortSignal
@@ -307,7 +305,6 @@ export async function uploadCore(
 	{
 		localFileOrDir,
 		parent,
-		hideProgress,
 		awaitExternalCompletionBeforeMarkingAsFinished,
 		pauseSignal,
 		signal,
@@ -365,57 +362,53 @@ export async function uploadCore(
 				throw new Error("Local directory does not exist or is empty.")
 			}
 
-			if (!hideProgress) {
-				useTransfersStore.getState().setTransfers(prev => [
-					...prev,
-					{
-						id,
-						localFileOrDir,
-						parent,
-						type: "uploadDirectory",
-						size: 0,
-						knownDirectories: 0,
-						knownFiles: 0,
-						bytesTransferred: 0,
-						startedAt: Date.now(),
-						paused: false,
-						errors: {
-							unknown: [],
-							scan: [],
-							upload: []
-						},
-						abort: () => {
-							if (transferAbortController.signal.aborted) {
-								return
-							}
-
-							transferAbortController.abort()
-						},
-						pause: () => {
-							transferPauseSignal.pause()
-						},
-						resume: () => {
-							transferPauseSignal.resume()
+			useTransfersStore.getState().setTransfers(prev => [
+				...prev,
+				{
+					id,
+					localFileOrDir,
+					parent,
+					type: "uploadDirectory",
+					size: 0,
+					knownDirectories: 0,
+					knownFiles: 0,
+					bytesTransferred: 0,
+					startedAt: Date.now(),
+					paused: false,
+					errors: {
+						unknown: [],
+						scan: [],
+						upload: []
+					},
+					abort: () => {
+						if (transferAbortController.signal.aborted) {
+							return
 						}
-					}
-				])
 
-				registerPauseListeners(id, "uploadDirectory", transferPauseSignal, globalPauseSignal, defer)
-			}
+						transferAbortController.abort()
+					},
+					pause: () => {
+						transferPauseSignal.pause()
+					},
+					resume: () => {
+						transferPauseSignal.resume()
+					}
+				}
+			])
+
+			registerPauseListeners(id, "uploadDirectory", transferPauseSignal, globalPauseSignal, defer)
 
 			let succeededUploadDirectory = false
 
-			if (!hideProgress) {
-				registerCompletionCleanup({
-					id,
-					type: "uploadDirectory",
-					succeeded: () => succeededUploadDirectory,
-					aborted: () =>
-						transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-					defer
-				})
-			}
+			registerCompletionCleanup({
+				id,
+				type: "uploadDirectory",
+				succeeded: () => succeededUploadDirectory,
+				aborted: () =>
+					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				defer
+			})
 
 			const parentDir = await (async () => {
 				const created = await drive.createDirectory({
@@ -608,48 +601,46 @@ export async function uploadCore(
 				return null
 			}
 
-			if (hideProgress) {
-				logger.error("transfers", "Directory upload failed", { id, error: result.error })
-			} else {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "uploadDirectory"
-							? {
-									...t,
-									errors: {
-										...t.errors,
-										...(FilenSdkError.hasInner(result.error)
-											? {
-													upload: [
-														...t.errors.upload,
-														{
-															error: FilenSdkError.getInner(result.error),
-															path: normalizeFilePathForSdk(localFileOrDir.uri)
-														}
-													]
-												}
-											: {
-													unknown: [
-														...t.errors.unknown,
-														result.error instanceof Error ? result.error : new Error(String(result.error))
-													]
-												})
-									}
-								}
-							: t
-					)
-				)
+			logger.error("transfers", "Directory upload failed", { id, error: result.error })
 
-				// The error is now written to the store entry; remove the settled (errored) transfer so the
-				// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-				// errored snapshot in the finished list. The thrown error below still surfaces to the
-				// caller's alert path, independent of this removal.
-				removeSettledTransfer(id, "uploadDirectory", {
-					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-					outcome: "errored",
-					errorMessage: finishedTransferErrorMessage(result.error)
-				})
-			}
+			useTransfersStore.getState().setTransfers(prev =>
+				prev.map(t =>
+					t.id === id && t.type === "uploadDirectory"
+						? {
+								...t,
+								errors: {
+									...t.errors,
+									...(FilenSdkError.hasInner(result.error)
+										? {
+												upload: [
+													...t.errors.upload,
+													{
+														error: FilenSdkError.getInner(result.error),
+														path: normalizeFilePathForSdk(localFileOrDir.uri)
+													}
+												]
+											}
+										: {
+												unknown: [
+													...t.errors.unknown,
+													result.error instanceof Error ? result.error : new Error(String(result.error))
+												]
+											})
+								}
+							}
+						: t
+				)
+			)
+
+			// The error is now written to the store entry; remove the settled (errored) transfer so the
+			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+			// errored snapshot in the finished list. The thrown error below still surfaces to the
+			// caller's alert path, independent of this removal.
+			removeSettledTransfer(id, "uploadDirectory", {
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				outcome: "errored",
+				errorMessage: finishedTransferErrorMessage(result.error)
+			})
 
 			throw result.error
 		}
@@ -681,54 +672,50 @@ export async function uploadCore(
 			throw new Error("Local file does not exist.")
 		}
 
-		if (!hideProgress) {
-			useTransfersStore.getState().setTransfers(prev => [
-				...prev,
-				{
-					id,
-					localFileOrDir,
-					parent,
-					type: "uploadFile",
-					size: localFileOrDir.size,
-					bytesTransferred: 0,
-					startedAt: Date.now(),
-					paused: false,
-					errors: {
-						unknown: [],
-						scan: [],
-						upload: []
-					},
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
+		useTransfersStore.getState().setTransfers(prev => [
+			...prev,
+			{
+				id,
+				localFileOrDir,
+				parent,
+				type: "uploadFile",
+				size: localFileOrDir.size,
+				bytesTransferred: 0,
+				startedAt: Date.now(),
+				paused: false,
+				errors: {
+					unknown: [],
+					scan: [],
+					upload: []
+				},
+				abort: () => {
+					if (transferAbortController.signal.aborted) {
+						return
 					}
-				}
-			])
 
-			registerPauseListeners(id, "uploadFile", transferPauseSignal, globalPauseSignal, defer)
-		}
+					transferAbortController.abort()
+				},
+				pause: () => {
+					transferPauseSignal.pause()
+				},
+				resume: () => {
+					transferPauseSignal.resume()
+				}
+			}
+		])
+
+		registerPauseListeners(id, "uploadFile", transferPauseSignal, globalPauseSignal, defer)
 
 		let succeededUploadFile = false
 
-		if (!hideProgress) {
-			registerCompletionCleanup({
-				id,
-				type: "uploadFile",
-				succeeded: () => succeededUploadFile,
-				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				defer
-			})
-		}
+		registerCompletionCleanup({
+			id,
+			type: "uploadFile",
+			succeeded: () => succeededUploadFile,
+			aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+			defer
+		})
 
 		const transferred = await authedSdkClient.uploadFile(
 			{
@@ -778,48 +765,46 @@ export async function uploadCore(
 			return null
 		}
 
-		if (hideProgress) {
-			logger.error("transfers", "File upload failed", { id, error: result.error })
-		} else {
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.map(t =>
-					t.id === id && t.type === "uploadFile"
-						? {
-								...t,
-								errors: {
-									...t.errors,
-									...(FilenSdkError.hasInner(result.error)
-										? {
-												upload: [
-													...t.errors.upload,
-													{
-														error: FilenSdkError.getInner(result.error),
-														path: normalizeFilePathForSdk(localFileOrDir.uri)
-													}
-												]
-											}
-										: {
-												unknown: [
-													...t.errors.unknown,
-													result.error instanceof Error ? result.error : new Error(String(result.error))
-												]
-											})
-								}
-							}
-						: t
-				)
-			)
+		logger.error("transfers", "File upload failed", { id, error: result.error })
 
-			// The error is now written to the store entry; remove the settled (errored) transfer so the
-			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-			// errored snapshot in the finished list. The thrown error below still surfaces to the
-			// caller's alert path, independent of this removal.
-			removeSettledTransfer(id, "uploadFile", {
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				outcome: "errored",
-				errorMessage: finishedTransferErrorMessage(result.error)
-			})
-		}
+		useTransfersStore.getState().setTransfers(prev =>
+			prev.map(t =>
+				t.id === id && t.type === "uploadFile"
+					? {
+							...t,
+							errors: {
+								...t.errors,
+								...(FilenSdkError.hasInner(result.error)
+									? {
+											upload: [
+												...t.errors.upload,
+												{
+													error: FilenSdkError.getInner(result.error),
+													path: normalizeFilePathForSdk(localFileOrDir.uri)
+												}
+											]
+										}
+									: {
+											unknown: [
+												...t.errors.unknown,
+												result.error instanceof Error ? result.error : new Error(String(result.error))
+											]
+										})
+							}
+						}
+					: t
+			)
+		)
+
+		// The error is now written to the store entry; remove the settled (errored) transfer so the
+		// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+		// errored snapshot in the finished list. The thrown error below still surfaces to the
+		// caller's alert path, independent of this removal.
+		removeSettledTransfer(id, "uploadFile", {
+			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+			outcome: "errored",
+			errorMessage: finishedTransferErrorMessage(result.error)
+		})
 
 		throw result.error
 	}
@@ -897,7 +882,6 @@ export async function downloadCore(
 	{
 		item,
 		destination,
-		hideProgress,
 		awaitExternalCompletionBeforeMarkingAsFinished,
 		pauseSignal,
 		signal,
@@ -958,61 +942,57 @@ export async function downloadCore(
 				throw new Error("Destination must be a directory for directory downloads.")
 			}
 
-			if (!hideProgress) {
-				useTransfersStore.getState().setTransfers(prev => [
-					...prev,
-					{
-						id,
-						item,
-						type: "downloadDirectory",
-						size: 0,
-						knownDirectories: 0,
-						knownFiles: 0,
-						bytesTransferred: 0,
-						startedAt: Date.now(),
-						paused: false,
-						directoryQueryProgress: {
-							totalBytes: 0,
-							bytesTransferred: 0
-						},
-						errors: {
-							unknown: [],
-							scan: [],
-							download: []
-						},
-						destination,
-						abort: () => {
-							if (transferAbortController.signal.aborted) {
-								return
-							}
-
-							transferAbortController.abort()
-						},
-						pause: () => {
-							transferPauseSignal.pause()
-						},
-						resume: () => {
-							transferPauseSignal.resume()
+			useTransfersStore.getState().setTransfers(prev => [
+				...prev,
+				{
+					id,
+					item,
+					type: "downloadDirectory",
+					size: 0,
+					knownDirectories: 0,
+					knownFiles: 0,
+					bytesTransferred: 0,
+					startedAt: Date.now(),
+					paused: false,
+					directoryQueryProgress: {
+						totalBytes: 0,
+						bytesTransferred: 0
+					},
+					errors: {
+						unknown: [],
+						scan: [],
+						download: []
+					},
+					destination,
+					abort: () => {
+						if (transferAbortController.signal.aborted) {
+							return
 						}
-					}
-				])
 
-				registerPauseListeners(id, "downloadDirectory", transferPauseSignal, globalPauseSignal, defer)
-			}
+						transferAbortController.abort()
+					},
+					pause: () => {
+						transferPauseSignal.pause()
+					},
+					resume: () => {
+						transferPauseSignal.resume()
+					}
+				}
+			])
+
+			registerPauseListeners(id, "downloadDirectory", transferPauseSignal, globalPauseSignal, defer)
 
 			let succeededDownloadDirectory = false
 
-			if (!hideProgress) {
-				registerCompletionCleanup({
-					id,
-					type: "downloadDirectory",
-					succeeded: () => succeededDownloadDirectory,
-					aborted: () =>
-						transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-					defer
-				})
-			}
+			registerCompletionCleanup({
+				id,
+				type: "downloadDirectory",
+				succeeded: () => succeededDownloadDirectory,
+				aborted: () =>
+					transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				defer
+			})
 
 			const transferred: {
 				files: (Omit<FileWithPath, "file"> & { file: File | SharedFile })[]
@@ -1213,48 +1193,46 @@ export async function downloadCore(
 				return null
 			}
 
-			if (hideProgress) {
-				logger.error("transfers", "Directory download failed", { id, error: result.error })
-			} else {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "downloadDirectory"
-							? {
-									...t,
-									errors: {
-										...t.errors,
-										...(FilenSdkError.hasInner(result.error)
-											? {
-													download: [
-														...t.errors.download,
-														{
-															path: normalizeFilePathForSdk(destination.uri),
-															error: FilenSdkError.getInner(result.error)
-														}
-													]
-												}
-											: {
-													unknown: [
-														...t.errors.unknown,
-														result.error instanceof Error ? result.error : new Error(String(result.error))
-													]
-												})
-									}
-								}
-							: t
-					)
-				)
+			logger.error("transfers", "Directory download failed", { id, error: result.error })
 
-				// The error is now written to the store entry; remove the settled (errored) transfer so the
-				// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-				// errored snapshot in the finished list. The thrown error below still surfaces to the
-				// caller's alert path, independent of this removal.
-				removeSettledTransfer(id, "downloadDirectory", {
-					awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-					outcome: "errored",
-					errorMessage: finishedTransferErrorMessage(result.error)
-				})
-			}
+			useTransfersStore.getState().setTransfers(prev =>
+				prev.map(t =>
+					t.id === id && t.type === "downloadDirectory"
+						? {
+								...t,
+								errors: {
+									...t.errors,
+									...(FilenSdkError.hasInner(result.error)
+										? {
+												download: [
+													...t.errors.download,
+													{
+														path: normalizeFilePathForSdk(destination.uri),
+														error: FilenSdkError.getInner(result.error)
+													}
+												]
+											}
+										: {
+												unknown: [
+													...t.errors.unknown,
+													result.error instanceof Error ? result.error : new Error(String(result.error))
+												]
+											})
+								}
+							}
+						: t
+				)
+			)
+
+			// The error is now written to the store entry; remove the settled (errored) transfer so the
+			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+			// errored snapshot in the finished list. The thrown error below still surfaces to the
+			// caller's alert path, independent of this removal.
+			removeSettledTransfer(id, "downloadDirectory", {
+				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+				outcome: "errored",
+				errorMessage: finishedTransferErrorMessage(result.error)
+			})
 
 			throw result.error
 		}
@@ -1295,54 +1273,50 @@ export async function downloadCore(
 			}
 		})()
 
-		if (!hideProgress) {
-			useTransfersStore.getState().setTransfers(prev => [
-				...prev,
-				{
-					id,
-					item,
-					type: "downloadFile",
-					size: Number(item.data.size),
-					bytesTransferred: 0,
-					startedAt: Date.now(),
-					paused: false,
-					errors: {
-						unknown: [],
-						scan: [],
-						download: []
-					},
-					destination,
-					abort: () => {
-						if (transferAbortController.signal.aborted) {
-							return
-						}
-
-						transferAbortController.abort()
-					},
-					pause: () => {
-						transferPauseSignal.pause()
-					},
-					resume: () => {
-						transferPauseSignal.resume()
+		useTransfersStore.getState().setTransfers(prev => [
+			...prev,
+			{
+				id,
+				item,
+				type: "downloadFile",
+				size: Number(item.data.size),
+				bytesTransferred: 0,
+				startedAt: Date.now(),
+				paused: false,
+				errors: {
+					unknown: [],
+					scan: [],
+					download: []
+				},
+				destination,
+				abort: () => {
+					if (transferAbortController.signal.aborted) {
+						return
 					}
-				}
-			])
 
-			registerPauseListeners(id, "downloadFile", transferPauseSignal, globalPauseSignal, defer)
-		}
+					transferAbortController.abort()
+				},
+				pause: () => {
+					transferPauseSignal.pause()
+				},
+				resume: () => {
+					transferPauseSignal.resume()
+				}
+			}
+		])
+
+		registerPauseListeners(id, "downloadFile", transferPauseSignal, globalPauseSignal, defer)
 
 		let succeededDownloadFile = false
 
-		if (!hideProgress) {
-			registerCompletionCleanup({
-				id,
-				type: "downloadFile",
-				succeeded: () => succeededDownloadFile,
-				aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				defer
-			})
-		}
+		registerCompletionCleanup({
+			id,
+			type: "downloadFile",
+			succeeded: () => succeededDownloadFile,
+			aborted: () => transferAbortController.signal.aborted || globalAbortController.signal.aborted || (signal?.aborted ?? false),
+			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+			defer
+		})
 
 		const cachedOrOfflineFile = await run(async () => {
 			// TC-04: the offline self-heal's destination IS the offline file's own path, which the cache
@@ -1376,18 +1350,16 @@ export async function downloadCore(
 		if (cachedOrOfflineFile.success && cachedOrOfflineFile.data) {
 			await cachedOrOfflineFile.data.copy(destination)
 
-			if (!hideProgress) {
-				useTransfersStore.getState().setTransfers(prev =>
-					prev.map(t =>
-						t.id === id && t.type === "downloadFile"
-							? {
-									...t,
-									bytesTransferred: Number(item.data.size)
-								}
-							: t
-					)
+			useTransfersStore.getState().setTransfers(prev =>
+				prev.map(t =>
+					t.id === id && t.type === "downloadFile"
+						? {
+								...t,
+								bytesTransferred: Number(item.data.size)
+							}
+						: t
 				)
-			}
+			)
 		} else {
 			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
 
@@ -1443,48 +1415,46 @@ export async function downloadCore(
 			return null
 		}
 
-		if (hideProgress) {
-			logger.error("transfers", "File download failed", { id, error: result.error })
-		} else {
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.map(t =>
-					t.id === id && t.type === "downloadFile"
-						? {
-								...t,
-								errors: {
-									...t.errors,
-									...(FilenSdkError.hasInner(result.error)
-										? {
-												download: [
-													...t.errors.download,
-													{
-														path: normalizeFilePathForSdk(destination.uri),
-														error: FilenSdkError.getInner(result.error)
-													}
-												]
-											}
-										: {
-												unknown: [
-													...t.errors.unknown,
-													result.error instanceof Error ? result.error : new Error(String(result.error))
-												]
-											})
-								}
-							}
-						: t
-				)
-			)
+		logger.error("transfers", "File download failed", { id, error: result.error })
 
-			// The error is now written to the store entry; remove the settled (errored) transfer so the
-			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
-			// errored snapshot in the finished list. The thrown error below still surfaces to the
-			// caller's alert path, independent of this removal.
-			removeSettledTransfer(id, "downloadFile", {
-				awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
-				outcome: "errored",
-				errorMessage: finishedTransferErrorMessage(result.error)
-			})
-		}
+		useTransfersStore.getState().setTransfers(prev =>
+			prev.map(t =>
+				t.id === id && t.type === "downloadFile"
+					? {
+							...t,
+							errors: {
+								...t.errors,
+								...(FilenSdkError.hasInner(result.error)
+									? {
+											download: [
+												...t.errors.download,
+												{
+													path: normalizeFilePathForSdk(destination.uri),
+													error: FilenSdkError.getInner(result.error)
+												}
+											]
+										}
+									: {
+											unknown: [
+												...t.errors.unknown,
+												result.error instanceof Error ? result.error : new Error(String(result.error))
+											]
+										})
+							}
+						}
+					: t
+			)
+		)
+
+		// The error is now written to the store entry; remove the settled (errored) transfer so the
+		// floating bar, foreground service and speed interval don't stay alive forever, and keep an
+		// errored snapshot in the finished list. The thrown error below still surfaces to the
+		// caller's alert path, independent of this removal.
+		removeSettledTransfer(id, "downloadFile", {
+			awaitExternal: awaitExternalCompletionBeforeMarkingAsFinished,
+			outcome: "errored",
+			errorMessage: finishedTransferErrorMessage(result.error)
+		})
 
 		throw result.error
 	}

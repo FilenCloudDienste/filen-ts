@@ -429,7 +429,6 @@ describe("Transfers", () => {
 				const result = await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				expect(mockUploadFile).toHaveBeenCalledTimes(1)
@@ -442,7 +441,7 @@ describe("Transfers", () => {
 				)
 			})
 
-			it("adds transfer to store when hideProgress is false", async () => {
+			it("adds transfer to store", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
 				const parent = makeParentDir("parent-uuid")
@@ -463,20 +462,7 @@ describe("Transfers", () => {
 				expect((added[0] as { type: string }).type).toBe("uploadFile")
 			})
 
-			it("does not update store when hideProgress is true", async () => {
-				const file = new FsFile("file:///document/test.txt")
-				fs.set(file.uri, new Uint8Array([1, 2, 3]))
-				const parent = makeParentDir("parent-uuid")
-
-				await transfers.upload({
-					localFileOrDir: file,
-					parent,
-					hideProgress: true
-				})
-
-				expect(mockSetTransfers).not.toHaveBeenCalled()
-			})
-
+	
 			it("epoch-0 created/modified survive to the SDK uploadFile params as 0n (null-guard, not falsy-drop)", async () => {
 				// REGRESSION (#B7): `created ? BigInt(created) : undefined` dropped a valid
 				// epoch-0 timestamp to undefined, letting the server assign its own created
@@ -488,7 +474,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true,
 					created: 0,
 					modified: 0
 				})
@@ -509,7 +494,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				expect(mockUploadFile).toHaveBeenCalledTimes(1)
@@ -531,14 +515,12 @@ describe("Transfers", () => {
 					transfers.upload({
 						localFileOrDir: file,
 						parent,
-						hideProgress: true
 					})
 				).rejects.toThrow("upload failed")
 
 				const result = await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				expect(result).not.toBeNull()
@@ -553,7 +535,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				const compositePause = mockCreateCompositePauseSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
@@ -571,7 +552,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				const wrapped = mockWrapAbortSignalForSdk.mock.results[0] as { value: { uniffiDestroy: ReturnType<typeof vi.fn> } }
@@ -596,7 +576,6 @@ describe("Transfers", () => {
 					transfers.upload({
 						localFileOrDir: file,
 						parent,
-						hideProgress: true
 					})
 				).rejects.toThrow("uniffi ctor failed")
 
@@ -619,7 +598,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				const owned = mockCreateCompositePauseSignal.mock.calls[0]?.[1] as { dispose: ReturnType<typeof vi.fn> }
@@ -634,7 +612,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true,
 					pauseSignal: callerPauseSignal as unknown as Parameters<typeof transfers.upload>[0]["pauseSignal"]
 				})
 
@@ -649,7 +626,6 @@ describe("Transfers", () => {
 					transfers.upload({
 						localFileOrDir: file,
 						parent,
-						hideProgress: true
 					})
 				).rejects.toThrow("Local file does not exist")
 			})
@@ -669,14 +645,13 @@ describe("Transfers", () => {
 				const result = await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true,
 					signal: controller.signal
 				})
 
 				expect(result).toBeNull()
 			})
 
-			it("registers and graceful-aborts with external signal when hideProgress is false", async () => {
+			it("registers and graceful-aborts with external signal", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
 				const parent = makeParentDir("parent-uuid")
@@ -714,13 +689,12 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
 			})
 
-			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and upload throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer and upload throws a non-abort error", async () => {
 				const file = new FsFile("file:///document/test.txt")
 				fs.set(file.uri, new Uint8Array([1, 2, 3]))
 				const parent = makeParentDir("parent-uuid")
@@ -754,7 +728,6 @@ describe("Transfers", () => {
 					transfers.upload({
 						localFileOrDir: file,
 						parent,
-						hideProgress: false
 					})
 				).rejects.toThrow("network failure")
 
@@ -784,7 +757,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				expect(thumbnails.generateFromLocalFile).toHaveBeenCalledTimes(1)
@@ -810,7 +782,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				// Two composites: [0] for the upload run() (disposed in its finally), [1] for the thumbnail.
@@ -840,7 +811,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: true
 				})
 
 				expect(thumbnails.generateFromLocalFile).not.toHaveBeenCalled()
@@ -885,7 +855,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: false
 				})
 
 				// Find the snapshot that shows bytesTransferred === 512 for the upload transfer.
@@ -930,7 +899,6 @@ describe("Transfers", () => {
 				const uploadPromise = transfers.upload({
 					localFileOrDir: file,
 					parent,
-					hideProgress: false,
 					awaitExternalCompletionBeforeMarkingAsFinished: () => externalPromise
 				})
 
@@ -960,7 +928,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: dir,
 					parent,
-					hideProgress: true
 				})
 
 				expect(drive.createDirectory).toHaveBeenCalled()
@@ -974,7 +941,6 @@ describe("Transfers", () => {
 					transfers.upload({
 						localFileOrDir: dir,
 						parent,
-						hideProgress: true
 					})
 				).rejects.toThrow("Local directory does not exist")
 			})
@@ -994,7 +960,6 @@ describe("Transfers", () => {
 					transfers.upload({
 						localFileOrDir: dir,
 						parent,
-						hideProgress: true
 					})
 				).rejects.toThrow("uniffi ctor failed")
 
@@ -1046,7 +1011,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: dir,
 					parent,
-					hideProgress: true
 				})
 
 				expect(mockDriveItemsQueryUpdate).toHaveBeenCalledTimes(2)
@@ -1081,7 +1045,6 @@ describe("Transfers", () => {
 				await transfers.upload({
 					localFileOrDir: dir,
 					parent,
-					hideProgress: true
 				})
 
 				expect(mockDriveItemsQueryUpdate).not.toHaveBeenCalled()
@@ -1102,7 +1065,6 @@ describe("Transfers", () => {
 				const result = await transfers.upload({
 					localFileOrDir: dir,
 					parent,
-					hideProgress: true
 				})
 
 				expect(result!.directories).toHaveLength(1)
@@ -1127,7 +1089,6 @@ describe("Transfers", () => {
 				const result = await transfers.upload({
 					localFileOrDir: dir,
 					parent,
-					hideProgress: true
 				})
 
 				expect(result).not.toBeNull()
@@ -1150,14 +1111,13 @@ describe("Transfers", () => {
 				const result = await transfers.upload({
 					localFileOrDir: dir,
 					parent,
-					hideProgress: true,
 					signal: controller.signal
 				})
 
 				expect(result).toBeNull()
 			})
 
-			it("registers and graceful-aborts a directory upload with external signal when hideProgress is false", async () => {
+			it("registers and graceful-aborts a directory upload with external signal", async () => {
 				const dir = new FsDirectory("file:///document/testdir")
 				fs.set(dir.uri, "dir")
 				const parent: any = { tag: "Root" as const, inner: [{ uuid: "root" }] }
@@ -1181,7 +1141,7 @@ describe("Transfers", () => {
 				expect(mockSetTransfers).toHaveBeenCalled()
 			})
 
-			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and directory upload throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer and directory upload throws a non-abort error", async () => {
 				const dir = new FsDirectory("file:///document/testdir")
 				fs.set(dir.uri, "dir")
 				const parent = makeParentDir("parent-uuid")
@@ -1213,7 +1173,6 @@ describe("Transfers", () => {
 					transfers.upload({
 						localFileOrDir: dir,
 						parent,
-						hideProgress: false
 					})
 				).rejects.toThrow("dir upload failed")
 
@@ -1241,7 +1200,6 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(mockDownloadFileToPath).toHaveBeenCalledTimes(1)
@@ -1262,7 +1220,6 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(mockDownloadFileToPath).not.toHaveBeenCalled()
@@ -1283,7 +1240,6 @@ describe("Transfers", () => {
 				await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(mockWrapAbortSignalForSdk).not.toHaveBeenCalled()
@@ -1305,7 +1261,6 @@ describe("Transfers", () => {
 					item,
 					destination: dest,
 					bypassCache: true,
-					hideProgress: true
 				})
 
 				expect(mockFileCacheHas).not.toHaveBeenCalled()
@@ -1313,19 +1268,7 @@ describe("Transfers", () => {
 				expect(result).not.toBeNull()
 			})
 
-			it("does not update store when hideProgress is true", async () => {
-				const dest = new FsFile("file:///document/dest.txt")
-				const item = makeFileItem("file-uuid")
-
-				await transfers.download({
-					item,
-					destination: dest,
-					hideProgress: true
-				})
-
-				expect(mockSetTransfers).not.toHaveBeenCalled()
-			})
-
+	
 			it("disposes composite signals on completion", async () => {
 				const dest = new FsFile("file:///document/dest.txt")
 				const item = makeFileItem("file-uuid")
@@ -1333,7 +1276,6 @@ describe("Transfers", () => {
 				await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				const compositePause = mockCreateCompositePauseSignal.mock.results[0] as { value: { dispose: ReturnType<typeof vi.fn> } }
@@ -1353,14 +1295,12 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: true
 					})
 				).rejects.toThrow("download failed")
 
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(result).not.toBeNull()
@@ -1381,14 +1321,13 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true,
 					signal: controller.signal
 				})
 
 				expect(result).toBeNull()
 			})
 
-			it("registers and graceful-aborts a file download with external signal when hideProgress is false", async () => {
+			it("registers and graceful-aborts a file download with external signal", async () => {
 				const dest = new FsFile("file:///document/dest.txt")
 				const item = makeFileItem("file-uuid")
 				const controller = new AbortController()
@@ -1419,12 +1358,11 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: true
 					})
 				).rejects.toThrow("Destination must be a file for file downloads.")
 			})
 
-			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and file download throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer and file download throws a non-abort error", async () => {
 				const dest = new FsFile("file:///document/dest.txt")
 				const item = makeFileItem("file-uuid")
 				const downloadError = new Error("download failed")
@@ -1455,7 +1393,6 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: false
 					})
 				).rejects.toThrow("download failed")
 
@@ -1482,7 +1419,6 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: true
 					})
 				).rejects.toThrow("Destination must be a directory")
 			})
@@ -1494,7 +1430,6 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1516,7 +1451,6 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: true
 					})
 				).rejects.toThrow("uniffi ctor failed")
 
@@ -1548,7 +1482,6 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(result).not.toBeNull()
@@ -1574,7 +1507,6 @@ describe("Transfers", () => {
 				await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true,
 					preserveDestinationOnStart: true
 				})
 
@@ -1589,7 +1521,6 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: true,
 						preserveDestinationOnStart: true
 					})
 				).rejects.toThrow("dir download failed")
@@ -1613,7 +1544,6 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true,
 					signal: controller.signal,
 					preserveDestinationOnStart: true
 				})
@@ -1636,7 +1566,6 @@ describe("Transfers", () => {
 				await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(existedAtSdkCall).toBe(false)
@@ -1655,7 +1584,6 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: true
 					})
 				).rejects.toThrow("dir download failed")
 
@@ -1677,14 +1605,13 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item,
 					destination: dest,
-					hideProgress: true,
 					signal: controller.signal
 				})
 
 				expect(result).toBeNull()
 			})
 
-			it("registers and graceful-aborts a directory download with external signal when hideProgress is false", async () => {
+			it("registers and graceful-aborts a directory download with external signal", async () => {
 				const dest = new FsDirectory("file:///document/destdir")
 				const item = makeDirItem("dir-uuid")
 				const controller = new AbortController()
@@ -1707,7 +1634,7 @@ describe("Transfers", () => {
 				expect(mockSetTransfers).toHaveBeenCalled()
 			})
 
-			it("writes the error to the store entry then removes the settled (errored) transfer when hideProgress is false and directory download throws a non-abort error", async () => {
+			it("writes the error to the store entry then removes the settled (errored) transfer and directory download throws a non-abort error", async () => {
 				const dest = new FsDirectory("file:///document/destdir")
 				const item = makeDirItem("dir-uuid")
 				const downloadError = new Error("dir download failed")
@@ -1738,7 +1665,6 @@ describe("Transfers", () => {
 					transfers.download({
 						item,
 						destination: dest,
-						hideProgress: false
 					})
 				).rejects.toThrow("dir download failed")
 
@@ -1781,7 +1707,6 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item: sharedDirItem as any,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1821,7 +1746,6 @@ describe("Transfers", () => {
 					transfers.download({
 						item: sharedDirItem as any,
 						destination: dest,
-						hideProgress: true
 					})
 				).rejects.toThrow("Shared directory download is missing its share context. Open the shared directory once, then retry.")
 			})
@@ -1839,7 +1763,6 @@ describe("Transfers", () => {
 				const result = await transfers.download({
 					item: sharedRootItem as any,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1874,7 +1797,6 @@ describe("Transfers", () => {
 				await transfers.download({
 					item: sharedDirItem as any,
 					destination: dest,
-					hideProgress: true
 				})
 
 				expect(mockDownloadDirRecursively).toHaveBeenCalledTimes(1)
@@ -1975,7 +1897,6 @@ describe("Transfers", () => {
 			const result = await transfers.download({
 				item,
 				destination: dest,
-				hideProgress: false
 			})
 
 			expect(result).not.toBeNull()
@@ -2011,7 +1932,6 @@ describe("Transfers", () => {
 			const result = await transfers.upload({
 				localFileOrDir: dir,
 				parent,
-				hideProgress: false
 			})
 
 			expect(result).not.toBeNull()
@@ -2039,7 +1959,6 @@ describe("Transfers", () => {
 			const result = await transfers.download({
 				item,
 				destination: dest,
-				hideProgress: false
 			})
 
 			expect(result).not.toBeNull()
@@ -2101,7 +2020,6 @@ describe("Transfers", () => {
 			const uploadPromise = transfers.upload({
 				localFileOrDir: file,
 				parent,
-				hideProgress: true
 			})
 
 			// Give the upload a tick to reach the awaited SDK call.

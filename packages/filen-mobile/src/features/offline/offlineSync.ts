@@ -554,7 +554,6 @@ export class OfflineSync {
 			await offline.reconcileTree({
 				directory: currentItem,
 				parent: resolvedParent,
-				hideProgress: true,
 				skipIndexUpdate: true,
 				thorough,
 				background,
@@ -641,7 +640,6 @@ export class OfflineSync {
 			await offline.reconcileTree({
 				directory: currentItem,
 				parent,
-				hideProgress: true,
 				skipIndexUpdate: true,
 				thorough,
 				background,
@@ -880,7 +878,6 @@ export class OfflineSync {
 				offline.storeFile({
 					file: newItem,
 					parent,
-					hideProgress: true,
 					skipIndexUpdate: true,
 					background,
 					signal
@@ -1188,7 +1185,6 @@ export class OfflineSync {
 						await offline.reconcileTree({
 							directory: rebuilt,
 							parent: parentResolution.parent,
-							hideProgress: true,
 							skipIndexUpdate: true,
 							background: false,
 							thorough,
