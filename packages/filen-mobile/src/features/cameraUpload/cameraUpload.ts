@@ -530,12 +530,21 @@ class CameraUpload {
 				// trees resolve equal timestamps in the same order.
 				//
 				// Timestamps are floored to seconds before comparison so that sub-second
-				// rounding differences between the local PHAsset timestamp and the server's
-				// stored value (after EXIF-override or network round-trip) do not produce
-				// different orderings across syncs. #B7: effectiveCreationTimestamp
-				// (creationTime ?? modificationTime ?? 0) is the ONE rule shared by this sort,
-				// the collision suffix AND the upload's `created` parameter — so the remote
-				// side's `meta.created`-based sort mirrors this ordering exactly.
+				// rounding differences and network round-trips do not produce different
+				// orderings across syncs. #B7: effectiveCreationTimestamp
+				// (creationTime ?? modificationTime ?? 0) is the ONE rule shared by this
+				// sort, the collision suffix AND the upload's `created` parameter.
+				//
+				// CAVEAT (CU-01): camera uploads run with EXIF-override ON (transferCore
+				// passes noExif:false/noExifOverride:false), so the SDK lets EXIF win and the
+				// remote `meta.created` can diverge from this effectiveCreationTimestamp by the
+				// WHOLE timezone offset (EXIF naive timestamps are read as UTC), not just
+				// sub-seconds — the remote sort is therefore only APPROXIMATELY this ordering.
+				// Dedup does NOT depend on the orders matching: the tree key is purely
+				// path/name-derived (created never enters it for non-colliding files), and a
+				// colliding member bakes its floored-seconds suffix into the uploaded NAME, so
+				// the remote key is re-derived from that stored name (see the collision block
+				// below), not from `meta.created`.
 				infos.sort((a, b) => {
 					const timeDiff = a.sortSec - b.sortSec
 
@@ -567,14 +576,14 @@ class CameraUpload {
 					let collisionSuffixApplied = ""
 
 					// Collision-only inputs, computed lazily on the first occupied slot.
-					// The collision identity is the seconds-floored creation timestamp.
-					// Flooring to seconds absorbs sub-second drift from EXIF-override or
-					// network round-trips, keeping local and remote trees symmetric without
-					// any per-asset file read at listing time. #B7: the identity is
-					// effectiveCreationTimestamp — the exact value the upload sends as
-					// `created` — so the remote `meta.created`-derived hash mirrors it
-					// (including the null-creationTime → modificationTime fallback);
-					// sortSec IS that value, floored once during the pre-sort pass.
+					// The collision identity is the seconds-floored creation timestamp
+					// (#B7: effectiveCreationTimestamp; sortSec IS that value, floored once
+					// during the pre-sort pass) — no per-asset file read at listing time.
+					// This suffix is baked into the uploaded filename (#B2), so the remote
+					// collision key is re-derived from the STORED name, which encodes this
+					// floored-seconds value verbatim. It does NOT rely on the remote
+					// `meta.created` matching: under EXIF-override (CU-01) that value can
+					// diverge from effectiveCreationTimestamp by the whole timezone offset.
 					let collisionName: string | null = null
 					let localContentHash: string | null = null
 
@@ -715,12 +724,15 @@ class CameraUpload {
 		// order, so without sorting, collision resolution would assign different path slots
 		// to the same files across runs, causing spurious re-uploads.
 		//
-		// Timestamps are floored to seconds before comparison to match the listLocal
-		// sort behaviour and absorb sub-second drift introduced by EXIF-override or
-		// network round-trips. #B7: `meta.created` carries the value the upload sent —
-		// effectiveCreationTimestamp(info) — so this sort mirrors the local one,
-		// including for null-creationTime assets. Null meta falls back to 0, matching
-		// the local side's both-null fallback (the upload sends created=0 for those).
+		// Timestamps are floored to seconds before comparison to APPROXIMATE the
+		// listLocal sort behaviour and absorb sub-second drift / network round-trips.
+		// CAVEAT (CU-01): the upload runs with EXIF-override ON, so for assets with
+		// EXIF capture data the remote `meta.created` is NOT effectiveCreationTimestamp
+		// (info) — it can differ by the whole timezone offset (EXIF naive timestamps
+		// are read as UTC). This sort therefore only roughly mirrors the local one;
+		// collision-key symmetry comes from the name-encoded suffix (re-derived from
+		// the stored name below), not from this ordering. Null meta falls back to 0,
+		// matching the local side's both-null fallback (the upload sends created=0).
 		const sortedFiles = files
 			.map(file => {
 				const unwrapped = unwrapFileMeta(file.file)
@@ -1336,9 +1348,11 @@ class CameraUpload {
 								})
 
 								// #B7: `created` is effectiveCreationTimestamp — the SAME value the
-								// dedup key suffix and the tree sort are derived from — so the
-								// remote `meta.created` mirrors the local identity on the next
-								// listing (epoch 0 for both-null assets survives end-to-end).
+								// dedup key suffix and the tree sort are derived from. NOTE (CU-01):
+								// the upload runs with EXIF-override ON, so the remote `meta.created`
+								// can differ from this value (EXIF wins, read as UTC). Dedup stability
+								// comes from the name-encoded collision suffix + the md5 content cache,
+								// not from `meta.created` round-tripping (epoch 0 for both-null assets).
 								const transferResult = await transfers.upload({
 									localFileOrDir: uploadFile,
 									parent: parentDir,
