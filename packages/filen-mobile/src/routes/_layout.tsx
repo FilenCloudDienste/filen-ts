@@ -33,6 +33,7 @@ import OfflineSync from "@/features/offline/sync"
 import IncomingShareHandler from "@/features/incomingShare/incomingShareHandler"
 import FloatingBar from "@/components/floatingBar"
 import ForegroundService from "@/features/transfers/components/foregroundService"
+import TransferLifecycle from "@/features/transfers/components/transferLifecycle"
 import Biometric from "@/components/biometric"
 import PrivacyScreen from "@/components/privacyScreen"
 import AccountReminders from "@/components/accountReminders"
@@ -320,6 +321,7 @@ const RootLayout = () => {
 												<OfflineSync />
 												<IncomingShareHandler />
 												<ForegroundService />
+												<TransferLifecycle />
 											</Fragment>
 										)}
 										<Pathname />
