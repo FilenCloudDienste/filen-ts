@@ -8,6 +8,7 @@ export default defineConfig({
 			"**/node_modules/**",
 			"**/dist/**",
 			"**/.{idea,git,cache,output,temp}/**",
+			"**/.claude/**",
 			"filen-rs/**",
 			"filen-ios-file-provider/**",
 			"filen-android-documents-provider/**"
