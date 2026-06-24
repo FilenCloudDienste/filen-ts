@@ -258,6 +258,10 @@ function registerCompletionCleanup(args: {
 export type UploadParams = {
 	localFileOrDir: FileSystem.File | FileSystem.Directory
 	parent: AnyNormalDir
+	// Background abort-scope. true = a sync-engine transfer launched by the OS background task (idempotent /
+	// retried; survives an app→background transition via the foreground service). Omitted/false = a manual or
+	// foreground-initiated transfer, cancelled when the app backgrounds without an active foreground service.
+	background?: boolean
 	hideProgress?: boolean
 	awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 	pauseSignal?: PauseSignal
@@ -271,6 +275,10 @@ export type UploadParams = {
 export type DownloadParams = {
 	item: DriveItem
 	destination: FileSystem.File | FileSystem.Directory
+	// Background abort-scope. true = a sync-engine transfer launched by the OS background task (idempotent /
+	// retried; survives an app→background transition via the foreground service). Omitted/false = a manual or
+	// foreground-initiated transfer, cancelled when the app backgrounds without an active foreground service.
+	background?: boolean
 	hideProgress?: boolean
 	awaitExternalCompletionBeforeMarkingAsFinished?: () => Promise<void>
 	pauseSignal?: PauseSignal

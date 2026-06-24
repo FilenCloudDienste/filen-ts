@@ -2114,6 +2114,40 @@ describe("Transfers", () => {
 			expect(result).toBeNull()
 		})
 	})
+
+	describe("cancelForegroundTransfers", () => {
+		it("aborts a foreground-scoped upload but leaves a background-scoped upload running", async () => {
+			const fgFile = new FsFile("file:///document/fg.txt")
+			const bgFile = new FsFile("file:///document/bg.txt")
+			fs.set(fgFile.uri, new Uint8Array([1]))
+			fs.set(bgFile.uri, new Uint8Array([2]))
+			const parent = makeParentDir("parent-uuid")
+
+			mockUploadFile.mockImplementation(
+				(_opts: unknown, _path: string, _cb: unknown, _future: unknown, opts: { signal: AbortSignal }) => {
+					return new Promise<never>((_resolve, reject) => {
+						opts.signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true })
+					})
+				}
+			)
+
+			const fgPromise = transfers.upload({ localFileOrDir: fgFile, parent })
+			const bgPromise = transfers.upload({ localFileOrDir: bgFile, parent, background: true })
+
+			await new Promise(res => setTimeout(res, 0))
+
+			transfers.cancelForegroundTransfers()
+
+			expect(await fgPromise).toBeNull()
+
+			const pending = Symbol("pending")
+			const raced = await Promise.race([bgPromise, new Promise(res => setTimeout(() => res(pending), 0))])
+			expect(raced).toBe(pending)
+
+			transfers.cancelAll()
+			expect(await bgPromise).toBeNull()
+		})
+	})
 })
 
 describe("shouldRemoveSettledTransfer", () => {
