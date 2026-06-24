@@ -6,6 +6,8 @@ import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cam
 import { debounce } from "es-toolkit/function"
 import { useSecureStore } from "@/lib/secureStore"
 import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
+import auth from "@/lib/auth"
+import { Semaphore } from "@filen/utils"
 
 const syncDebounced = debounce(
 	() => {
@@ -19,13 +21,47 @@ const syncDebounced = debounce(
 
 let lastShouldRegisterBackground = false
 
+// register/unregister both mutate the SAME OS task name and are async. Serialize them so the
+// LAST requested state always wins: the 1s debounce only coalesces toggles inside one quiet
+// window, so two toggles spaced >1s apart would otherwise run as two un-ordered in-flight
+// native round trips whose completion order isn't guaranteed (CU-02). One-permit lock + reading
+// the desired state AFTER acquiring it means a stale in-flight op can never overtake a newer one.
+const backgroundTaskRegistrationMutex = new Semaphore(1)
+
+async function applyBackgroundTaskRegistration(): Promise<void> {
+	await backgroundTaskRegistrationMutex.acquire()
+
+	try {
+		// Read the desired state here, under the lock, so the op that actually runs reflects the
+		// latest requested value rather than the snapshot captured when the debounce fired.
+		if (lastShouldRegisterBackground) {
+			// Never (re-)register for a logged-out app (CU-03): the 1s register debounce can elapse
+			// inside the logout window — after auth.doLogout()'s Phase-1 unregisterBackgroundSync()
+			// resolved but before this component's async (re-render-driven) unmount cleanup runs and
+			// before Phase-7 reloadAppAsync() tears down the JS context — and would otherwise
+			// re-register the task using the stale pre-logout lastShouldRegisterBackground. Once the
+			// auth secret is wiped (logout Phase 6) isAuthed() is false, so the register is refused;
+			// the residual pre-wipe sub-window stays backstopped by the JS-bundle reload.
+			const { isAuthed } = await auth.isAuthed()
+
+			if (!isAuthed) {
+				return
+			}
+
+			await registerBackgroundSync()
+		} else {
+			await unregisterBackgroundSync()
+		}
+	} finally {
+		backgroundTaskRegistrationMutex.release()
+	}
+}
+
 const updateBackgroundTask = debounce(
 	() => {
-		if (lastShouldRegisterBackground) {
-			registerBackgroundSync()
-		} else {
-			unregisterBackgroundSync()
-		}
+		applyBackgroundTaskRegistration().catch(err =>
+			logger.warn("cameraUpload", "Background task registration update failed", { error: err })
+		)
 	},
 	1000,
 	{
@@ -65,6 +101,12 @@ const CameraUploadSync = () => {
 			appStateListener.remove()
 
 			cameraUpload.cancel()
+
+			// Symmetric timer hygiene with updateBackgroundTask.cancel() below (CU-04): the 5s
+			// syncDebounced is armed by the config-change effect. The component's only unmount path
+			// is logout (it is gated on isAuthed), so a pending fire would otherwise call
+			// cameraUpload.sync() up to 5s later against torn-down/cleared post-logout state.
+			syncDebounced.cancel()
 		}
 	}, [])
 
