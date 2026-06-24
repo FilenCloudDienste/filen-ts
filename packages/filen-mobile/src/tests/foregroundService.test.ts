@@ -279,6 +279,38 @@ describe("foregroundService", () => {
 		expect(mockNotifee.stopForegroundService).toHaveBeenCalledTimes(1)
 	})
 
+	it("TC-11: stop clears running and swallows a failing stopForegroundService (no permanent zombie)", async () => {
+		mockNotifee.stopForegroundService.mockRejectedValueOnce(new Error("teardown failed"))
+
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0, speed: 0 })
+
+		expect(fgs.isRunning()).toBe(true)
+
+		// A throwing native teardown must NOT leave `running` true forever — that would block every
+		// future start()/update(). stop() resolves (error swallowed) and the mirror is cleared.
+		await expect(fgs.stop()).resolves.toBeUndefined()
+
+		expect(fgs.isRunning()).toBe(false)
+	})
+
+	it("TC-11: update clears running when displayNotification rejects, so the host can re-arm start()", async () => {
+		const { default: fgs } = await import("@/features/transfers/foregroundService")
+
+		await fgs.start({ count: 1, progress: 0.25, speed: 512 })
+
+		expect(fgs.isRunning()).toBe(true)
+
+		// A reissued display can be rejected when the service is no longer live (OS FGS timeout) or the
+		// app is backgrounded. update() must self-heal by clearing `running` rather than throwing.
+		mockNotifee.displayNotification.mockRejectedValueOnce(new Error("service not live"))
+
+		await expect(fgs.update({ count: 1, progress: 0.5, speed: 1024 })).resolves.toBeUndefined()
+
+		expect(fgs.isRunning()).toBe(false)
+	})
+
 	it("getStatus reports the correct status", async () => {
 		const { default: fgs } = await import("@/features/transfers/foregroundService")
 

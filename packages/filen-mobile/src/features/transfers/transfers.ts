@@ -1,5 +1,6 @@
 import { PauseSignal } from "@/lib/signals"
 import { uploadCore, downloadCore, type UploadParams, type DownloadParams } from "@/features/transfers/transferCore"
+import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 
 class Transfers {
 	private globalAbortController = new AbortController()
@@ -16,12 +17,25 @@ class Transfers {
 		this.globalPauseSignal = new PauseSignal()
 	}
 
+	// Pause/resume every live transfer by iterating their per-transfer signals — NOT by toggling
+	// `globalPauseSignal`. Each transfer's SDK pause state is the composite of (global, per-transfer)
+	// and `registerPauseListeners` flips the store `paused` flag from BOTH inputs. Driving the global
+	// input alone leaves it incoherent: a later per-row resume() flips the store flag to running while
+	// the composite stays paused (global still paused) → UI shows "running" at frozen progress, and the
+	// global input stays sticky-paused for any future programmatic upload/download. Iterating per
+	// transfer keeps the store flag, the per-transfer signal and the composite consistent — matching the
+	// transfers screen's pause-all/resume-all handlers. (The global signal is still threaded into every
+	// composite so cancelAll() can dispose/replace it; these methods simply never touch it.)
 	public pauseAll(): void {
-		this.globalPauseSignal.pause()
+		for (const transfer of useTransfersStore.getState().transfers) {
+			transfer.pause()
+		}
 	}
 
 	public resumeAll(): void {
-		this.globalPauseSignal.resume()
+		for (const transfer of useTransfersStore.getState().transfers) {
+			transfer.resume()
+		}
 	}
 
 	/** Returns uploaded items as the result. If null, the transfer has been cancelled. */

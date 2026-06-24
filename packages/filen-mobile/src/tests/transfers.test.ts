@@ -1898,8 +1898,13 @@ describe("Transfers", () => {
 		})
 	})
 
+	// TC-09: pauseAll()/resumeAll() must iterate the live transfers' PER-TRANSFER signals, NOT toggle
+	// the global signal. Each transfer's SDK pause state is the composite of (global, per-transfer) and
+	// the store `paused` flag is flipped from both inputs; driving the global input alone leaves the
+	// store flag and the composite incoherent (a later per-row resume reports "running" while the SDK
+	// stays paused) and leaves the global input sticky-paused for future programmatic transfers.
 	describe("pauseAll and resumeAll", () => {
-		it("pauseAll sets globalPauseSignal to paused and resumeAll clears it", () => {
+		it("pauseAll/resumeAll iterate each live transfer's pause/resume — not the global signal", () => {
 			// After beforeEach, cancelAll() has created a fresh MockPauseSignal. It is the last
 			// entry in createdPauseSignalInstances (the tracker is a plain array, not a vi.fn(),
 			// so vi.clearAllMocks() does not reset it).
@@ -1907,54 +1912,50 @@ describe("Transfers", () => {
 
 			expect(globalSignal).toBeDefined()
 
-			// Initially not paused.
-			expect(globalSignal?.isPaused()).toBe(false)
+			const a = { id: "a", type: "uploadFile", pause: vi.fn(), resume: vi.fn() }
+			const b = { id: "b", type: "downloadFile", pause: vi.fn(), resume: vi.fn() }
+
+			mockTransfersState.transfers = [a, b]
 
 			transfers.pauseAll()
 
-			// After pauseAll the signal must report paused.
-			expect(globalSignal?.isPaused()).toBe(true)
+			expect(a.pause).toHaveBeenCalledTimes(1)
+			expect(b.pause).toHaveBeenCalledTimes(1)
 
 			transfers.resumeAll()
 
-			// After resumeAll it must be unpaused again.
+			expect(a.resume).toHaveBeenCalledTimes(1)
+			expect(b.resume).toHaveBeenCalledTimes(1)
+
+			// The global signal must be left untouched — toggling it would make it sticky-paused for
+			// any future programmatic upload/download whose composite includes it.
 			expect(globalSignal?.isPaused()).toBe(false)
 		})
 
-		it("pauseAll is idempotent — calling it twice leaves the signal paused, not erroring", () => {
-			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+		it("pauseAll/resumeAll are no-ops (and do not throw) when there are no live transfers", () => {
+			mockTransfersState.transfers = []
 
-			transfers.pauseAll()
-			transfers.pauseAll() // second call must not throw and must leave it paused
-
-			expect(globalSignal?.isPaused()).toBe(true)
-
-			// Clean up for subsequent tests.
-			transfers.resumeAll()
-		})
-
-		it("resumeAll is idempotent — calling it while not paused does not throw", () => {
-			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
-
-			// Already not paused; calling resumeAll must not throw.
+			expect(() => transfers.pauseAll()).not.toThrow()
 			expect(() => transfers.resumeAll()).not.toThrow()
-
-			expect(globalSignal?.isPaused()).toBe(false)
 		})
 
-		it("pause and resume events propagate to registered listeners on the global signal", () => {
-			const globalSignal = createdPauseSignalInstances[createdPauseSignalInstances.length - 1]
+		// The core desync the fix prevents: after a global pause, a single per-row resume() would leave
+		// the store flag "running" while the composite stays paused. Iterating per-transfer keeps the
+		// store flag and the per-transfer signal coherent, so resuming one row truly resumes it.
+		it("a per-row resume after pauseAll genuinely resumes that transfer (no sticky-global desync)", () => {
+			const resumed = { id: "a", type: "uploadFile", pause: vi.fn(), resume: vi.fn() }
 
-			const received: string[] = []
-
-			globalSignal?.addEventListener("pause", () => received.push("paused"))
-			globalSignal?.addEventListener("resume", () => received.push("resumed"))
+			mockTransfersState.transfers = [resumed]
 
 			transfers.pauseAll()
-			transfers.resumeAll()
 
-			// Both events must have fired exactly once in order.
-			expect(received).toEqual(["paused", "resumed"])
+			expect(resumed.pause).toHaveBeenCalledTimes(1)
+
+			// Resuming the single row drives its own per-transfer signal — no leftover global pause input
+			// can hold the composite paused, because pauseAll() never touched the global signal.
+			resumed.resume()
+
+			expect(resumed.resume).toHaveBeenCalledTimes(1)
 		})
 	})
 

@@ -124,12 +124,32 @@ class ForegroundService {
 		return this.running
 	}
 
+	// `running` is a best-effort JS mirror of the OS foreground-service state, not a perfect one:
+	// notifee's displayNotification resolving only means the start Intent was dispatched, and the OS
+	// can tear the service down on its own (the DATA_SYNC FGS type timeout on a multi-hour transfer),
+	// so the mirror can drift from reality in either direction (TC-11). The JS FSM can't observe those
+	// native transitions, but it can stay resilient to its own failures: update() self-heals on a
+	// rejected display (treats it as a dead/desynced service and clears `running` so the host's count
+	// edge re-arms a fresh start()), and stop() always clears `running` even if the native teardown
+	// throws, so a transient failure can never strand a permanent zombie that blocks future starts.
 	public async update(progress: TransferProgressSnapshot): Promise<void> {
 		if (Platform.OS !== "android" || !this.running) {
 			return
 		}
 
-		await this.display(progress)
+		try {
+			await this.display(progress)
+		} catch (err) {
+			// A reissued display can be rejected if the service is no longer live (OS timeout) or if
+			// the app is backgrounded (background-start rejection). Drop the stale `running` mirror so
+			// the host re-attempts start() on the next count/foreground edge instead of looping updates
+			// against a dead service.
+			logger.warn("transfers-fgs", "Foreground service update failed; clearing running state to allow re-arm", {
+				error: err
+			})
+
+			this.running = false
+		}
 	}
 
 	public async stop(): Promise<void> {
@@ -137,9 +157,17 @@ class ForegroundService {
 			return
 		}
 
-		await notifee.stopForegroundService()
-
+		// Clear the mirror unconditionally: even if stopForegroundService() throws, the JS FSM must not
+		// keep believing a service is live (that would block every future start() and update() forever).
 		this.running = false
+
+		try {
+			await notifee.stopForegroundService()
+		} catch (err) {
+			logger.warn("transfers-fgs", "Foreground service stop failed", {
+				error: err
+			})
+		}
 	}
 
 	// Whether the user has the "Background transfers" setting enabled. Absent → on by default,
