@@ -193,6 +193,17 @@ describe("auth catalog", () => {
 		for (const code of localeCodes) {
 			const locale = JSON.parse(fs.readFileSync(path.join(localesDir, `${code}.json`), "utf8")) as Record<string, unknown>
 			const localeKeys = new Set(Object.keys(locale))
+
+			// A brand-new language is committed as an empty `{}` catalog and stays empty until CI's first
+			// translation pass fills it (scripts/translate-i18n.ts translates every key missing from a target
+			// catalog). Skip a FULLY-empty catalog for the same reason this test diffs against the snapshot
+			// rather than live `en`: it must not false-fail on not-yet-CI-translated state. A PARTIALLY
+			// translated catalog (some keys present, some absent) still fails — that is real drift. Once CI
+			// fills the language the catalog is non-empty and full completeness is enforced again.
+			if (localeKeys.size === 0) {
+				continue
+			}
+
 			const missingForCode = snapshotKeys.filter(key => !localeKeys.has(key))
 
 			if (missingForCode.length > 0) {
