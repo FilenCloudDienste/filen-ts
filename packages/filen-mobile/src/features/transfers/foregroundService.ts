@@ -51,7 +51,13 @@ class ForegroundService {
 
 		this.initPromise = (async () => {
 			notifee.registerForegroundService(() => {
-				return new Promise<void>(() => {})
+				return new Promise<void>(() => {
+					;(async () => {
+						while (this.running) {
+							await new Promise(resolve => setTimeout(resolve, 1000))
+						}
+					})()
+				})
 			})
 
 			// The ongoing transfers notification emits events (e.g. dismissal) while the app is backgrounded.
@@ -59,6 +65,10 @@ class ForegroundService {
 			// notification has no actions, so there is nothing to act on — this empty handler just silences the
 			// warning and lets the foreground service run cleanly.
 			notifee.onBackgroundEvent(async () => {
+				// Nothing to handle: the transfers notification has no actions.
+			})
+
+			notifee.onForegroundEvent(async () => {
 				// Nothing to handle: the transfers notification has no actions.
 			})
 
