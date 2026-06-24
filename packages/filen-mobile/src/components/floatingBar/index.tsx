@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import { Fragment, useState, useEffect } from "react"
 import { useShallow } from "zustand/shallow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
@@ -10,6 +10,7 @@ import TransfersSlot from "@/components/floatingBar/transfersSlot"
 import OfflineSlot, { useOfflineSlotStatus } from "@/components/floatingBar/offlineSlot"
 import Separator from "@/components/floatingBar/separator"
 import useAppStore from "@/stores/useApp.store"
+import { AppState } from "react-native"
 
 const FloatingBar = () => {
 	const insets = useSafeAreaInsets()
@@ -27,6 +28,7 @@ const FloatingBar = () => {
 	// platforms non-tab stack pushes (/chat/[uuid], /note/[uuid]) never cover
 	// it. Gate on the focused route so the bar only ever shows inside /tabs.
 	const isOnTabs = useAppStore(state => state.pathname.startsWith("/tabs"))
+	const [appState, setAppState] = useState(AppState.currentState)
 
 	const audioActive = queueItem !== null
 
@@ -38,7 +40,17 @@ const FloatingBar = () => {
 	const offlineActive = offlineStatus !== "hidden"
 	const rightActive = offlineActive || transfersActive
 
-	if (!isOnTabs || (!audioActive && !rightActive)) {
+	useEffect(() => {
+		const subscription = AppState.addEventListener("change", nextAppState => {
+			setAppState(nextAppState)
+		})
+
+		return () => {
+			subscription.remove()
+		}
+	}, [])
+
+	if (!isOnTabs || (!audioActive && !rightActive) || appState === "background") {
 		return null
 	}
 

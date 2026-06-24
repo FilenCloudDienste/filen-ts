@@ -52,6 +52,9 @@ class ForegroundService {
 		this.initPromise = (async () => {
 			notifee.registerForegroundService(() => {
 				return new Promise<void>(() => {
+					// Keep the foreground service alive until stopForegroundService() is called.
+					// The promise never resolves, so the service never stops on its own.
+					// The host's running mirror is cleared when stopForegroundService() is called (or if it throws), so the host can re-arm a fresh start() on the next count/foreground edge.
 					;(async () => {
 						while (this.running) {
 							await new Promise(resolve => setTimeout(resolve, 1000))
