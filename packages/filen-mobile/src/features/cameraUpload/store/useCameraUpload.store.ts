@@ -8,13 +8,23 @@ export type CameraUploadError = {
 	error?: unknown
 }
 
+// CU-09: a permanently-skipped asset surfaced to the user. `id` is the media-library asset id
+// (the engine's `uploadFailures` key); `name` is the asset filename shown in the issues modal so
+// the user can recognise + retry it. This is a UI-surfacing list only — the skip DECISION keys on
+// `uploadFailures >= MAX_UPLOAD_FAILURES` in the engine, not on membership here.
+export type CameraUploadSkippedAsset = {
+	id: string
+	name: string
+}
+
 export type CameraUploadStore = {
 	syncing: boolean
 	errors: CameraUploadError[]
-	skippedAssets: Set<string>
+	skippedAssets: CameraUploadSkippedAsset[]
 	setSyncing: (fn: boolean | ((prev: boolean) => boolean)) => void
 	setErrors: (fn: CameraUploadError[] | ((prev: CameraUploadError[]) => CameraUploadError[])) => void
-	addSkippedAsset: (assetId: string) => void
+	addSkippedAsset: (asset: CameraUploadSkippedAsset) => void
+	removeSkippedAsset: (assetId: string) => void
 	clearSkippedAssets: () => void
 }
 
@@ -28,7 +38,7 @@ export const MAX_CAMERA_UPLOAD_ERRORS = 100
 export const useCameraUploadStore = create<CameraUploadStore>(set => ({
 	syncing: false,
 	errors: [],
-	skippedAssets: new Set<string>(),
+	skippedAssets: [],
 	setErrors(fn) {
 		set(state => {
 			const next = typeof fn === "function" ? fn(state.errors) : fn
@@ -45,17 +55,28 @@ export const useCameraUploadStore = create<CameraUploadStore>(set => ({
 			syncing: typeof fn === "function" ? fn(state.syncing) : fn
 		}))
 	},
-	addSkippedAsset(assetId) {
+	addSkippedAsset(asset) {
 		set(state => {
-			const next = new Set(state.skippedAssets)
+			// Dedupe by id: the engine can re-report the same skipped asset on every pass (the skip
+			// guard fires each sync while the failure count stays at the cap), so keep one entry per
+			// asset instead of growing the list. Refresh the name in case it changed.
+			const next = state.skippedAssets.filter(existing => existing.id !== asset.id)
 
-			next.add(assetId)
+			next.push(asset)
 
 			return { skippedAssets: next }
 		})
 	},
+	removeSkippedAsset(assetId) {
+		set(state => {
+			const next = state.skippedAssets.filter(existing => existing.id !== assetId)
+
+			// Preserve referential identity when nothing was removed so selectors don't re-render.
+			return next.length === state.skippedAssets.length ? state : { skippedAssets: next }
+		})
+	},
 	clearSkippedAssets() {
-		set({ skippedAssets: new Set<string>() })
+		set({ skippedAssets: [] })
 	}
 }))
 

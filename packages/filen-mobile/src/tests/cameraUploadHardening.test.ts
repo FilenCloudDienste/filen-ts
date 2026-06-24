@@ -130,6 +130,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 const mockSetSyncing = vi.fn()
 const mockSetErrors = vi.fn()
 const mockAddSkippedAsset = vi.fn()
+const mockRemoveSkippedAsset = vi.fn()
 const mockClearSkippedAssets = vi.fn()
 
 vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
@@ -138,6 +139,7 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
 			setSyncing: mockSetSyncing,
 			setErrors: mockSetErrors,
 			addSkippedAsset: mockAddSkippedAsset,
+			removeSkippedAsset: mockRemoveSkippedAsset,
 			clearSkippedAssets: mockClearSkippedAssets
 		})
 	}

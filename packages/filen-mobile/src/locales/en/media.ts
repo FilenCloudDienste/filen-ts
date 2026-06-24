@@ -82,13 +82,23 @@ export const media = {
 	/** Albums picker screen — header title (same key reused from settings row) */
 	no_albums: "No albums found.",
 
-	// ── Camera upload error log ───────────────────────────────────────────────
+	// ── Camera upload issues (errors + skipped assets) ────────────────────────
+	/** Camera upload issues screen — header title (covers both the errors list and the skipped-assets list) */
+	camera_upload_issues: "Camera upload issues",
 	/** Camera upload errors screen — header title */
 	camera_upload_errors: "Camera upload errors",
-	/** Camera upload errors — menu action: clear the error list and retry */
+	/** Camera upload issues — section header above the list of sync errors */
+	camera_upload_errors_section: "Errors",
+	/** Camera upload issues — section header above the list of assets skipped after repeated upload failures */
+	camera_upload_skipped_section: "Skipped",
+	/** Camera upload issues — menu action: clear the error list and retry */
 	clear_errors: "Clear errors",
-	/** Camera upload errors — empty state title shown when there are no errors */
-	no_camera_upload_errors: "No errors",
+	/** Camera upload issues — menu / button action: retry every skipped asset at once */
+	retry_all: "Retry all",
+	/** Camera upload issues — skipped asset row subtitle explaining why it is listed and what tapping does */
+	camera_upload_skipped_asset_description: "Upload failed repeatedly. Tap retry to try again.",
+	/** Camera upload issues — empty state title shown when there are no errors and no skipped assets */
+	no_camera_upload_errors: "No issues",
 	/** Camera upload error row / generic error fallback when no message is available */
 	unknown_error: "Unknown error",
 	/** Camera upload error: the photo or video could no longer be found on the device */
@@ -177,7 +187,7 @@ export const media = {
 	no_playlists_description: "Create a playlist to organize your music.",
 	/** Playlist detail — empty-state subtitle when the playlist has no tracks yet */
 	no_tracks_description: "Add tracks to this playlist to start listening.",
-	/** Camera-upload errors — empty-state subtitle when there are no errors (the clean state) */
+	/** Camera-upload issues — empty-state subtitle when there are no errors and no skipped assets (the clean state) */
 	no_camera_upload_errors_description: "All your photos and videos have backed up successfully.",
 	/** Playlist detail — subtitle shown when the playlist can't be found (e.g. a stale deep link) */
 	playlist_not_found_description: "It may have been deleted.",

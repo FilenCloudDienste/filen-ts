@@ -209,6 +209,7 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => {
 			}
 		},
 		addSkippedAsset: () => {},
+		removeSkippedAsset: () => {},
 		clearSkippedAssets: () => {}
 	}
 

@@ -15,7 +15,9 @@ export const Header = ({ items, drivePath }: { items: DriveItemFileExtracted[]; 
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const syncing = useCameraUploadStore(useShallow(state => state.syncing))
-	const hasErrors = useCameraUploadStore(useShallow(state => state.errors.length > 0))
+	// CU-09: open the issues modal when there are errors OR skipped assets, so a skipped-only state
+	// (assets dropped after repeated upload failures, with no error currently in the list) is reachable.
+	const hasIssues = useCameraUploadStore(useShallow(state => state.errors.length > 0 || state.skippedAssets.length > 0))
 	const textRed500 = useResolveClassNames("text-red-500")
 	const [photosGridTiles, setPhotosGridTiles] = useSecureStore<number>("photosGridTiles", 4)
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
@@ -41,7 +43,7 @@ export const Header = ({ items, drivePath }: { items: DriveItemFileExtracted[]; 
 			]
 		}
 
-		if (hasErrors) {
+		if (hasIssues) {
 			return [
 				{
 					type: "button",

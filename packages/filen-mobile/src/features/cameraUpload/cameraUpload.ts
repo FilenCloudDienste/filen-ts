@@ -234,6 +234,33 @@ class CameraUpload {
 		this.globalPauseSignal.resume()
 	}
 
+	// CU-09: a permanently-skipped asset (one that burned MAX_UPLOAD_FAILURES) is otherwise dropped
+	// forever — the upload-pipeline skip guard keys on `uploadFailures >= MAX_UPLOAD_FAILURES`, so it
+	// never retries on future syncs unless the count is reset. Retrying CLEARS the skip: drop the
+	// asset's failure count so the guard no longer fires, remove it from the surfaced skipped list,
+	// then kick a manual sync (fire-and-forget — this lib is silent, UX belongs to the caller).
+	public retrySkippedAsset(assetId: string): void {
+		this.uploadFailures.delete(assetId)
+
+		useCameraUploadStore.getState().removeSkippedAsset(assetId)
+
+		void this.sync({ manual: true }).catch(err =>
+			logger.warn("cameraUpload", "Sync after retrying skipped asset failed", { assetId, error: err })
+		)
+	}
+
+	// CU-09: retry every permanently-skipped asset at once. Clear the whole failure-count map (so no
+	// asset is still over the cap) and the surfaced skipped list, then kick a manual sync.
+	public retryAllSkippedAssets(): void {
+		this.uploadFailures.clear()
+
+		useCameraUploadStore.getState().clearSkippedAssets()
+
+		void this.sync({ manual: true }).catch(err =>
+			logger.warn("cameraUpload", "Sync after retrying all skipped assets failed", { error: err })
+		)
+	}
+
 	private async compress(file: FileSystem.File): Promise<FileSystem.File> {
 		const extname = FileSystem.Paths.extname(file.uri).toLowerCase()
 
@@ -1206,7 +1233,13 @@ class CameraUpload {
 					if ((this.uploadFailures.get(assetId) ?? 0) >= MAX_UPLOAD_FAILURES) {
 						logger.warn("cameraUpload", "Asset skipped after max upload failures", { assetId, maxFailures: MAX_UPLOAD_FAILURES })
 
-						useCameraUploadStore.getState().addSkippedAsset(assetId)
+						// CU-09: surface the skipped asset (id + filename) so the user can retry it from
+						// the issues modal. The skip DECISION still keys on uploadFailures above — this is
+						// a UI-surfacing list only.
+						useCameraUploadStore.getState().addSkippedAsset({
+							id: assetId,
+							name: delta.file.info.filename
+						})
 
 						continue
 					}

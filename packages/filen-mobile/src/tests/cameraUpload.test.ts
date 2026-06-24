@@ -128,6 +128,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 const mockSetSyncing = vi.fn()
 const mockSetErrors = vi.fn()
 const mockAddSkippedAsset = vi.fn()
+const mockRemoveSkippedAsset = vi.fn()
 const mockClearSkippedAssets = vi.fn()
 
 vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
@@ -136,6 +137,7 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
 			setSyncing: mockSetSyncing,
 			setErrors: mockSetErrors,
 			addSkippedAsset: mockAddSkippedAsset,
+			removeSkippedAsset: mockRemoveSkippedAsset,
 			clearSkippedAssets: mockClearSkippedAssets
 		})
 	}
@@ -1893,7 +1895,7 @@ describe("re-entrancy and failure tracking", () => {
 		await cameraUpload.sync()
 
 		expect(transfers.upload).not.toHaveBeenCalled()
-		expect(mockAddSkippedAsset).toHaveBeenCalledWith("a1")
+		expect(mockAddSkippedAsset).toHaveBeenCalledWith({ id: "a1", name: "photo.jpg" })
 
 		failures.clear()
 	})
@@ -1924,6 +1926,44 @@ describe("re-entrancy and failure tracking", () => {
 		cameraUpload.cancel()
 
 		expect(mockClearSkippedAssets).toHaveBeenCalled()
+	})
+
+	it("retrySkippedAsset resets the asset's failure count, removes it from the store, and kicks a manual sync (CU-09)", () => {
+		const failures = (cameraUpload as any).uploadFailures as Map<string, number>
+
+		failures.set("a1", 3)
+		failures.set("a2", 1)
+
+		// Stub sync so the fire-and-forget retry kick is observable + deterministic (no real pass runs).
+		const syncSpy = vi.spyOn(cameraUpload, "sync").mockResolvedValue({ success: true })
+
+		cameraUpload.retrySkippedAsset("a1")
+
+		// Only the retried asset's count is cleared; siblings are untouched.
+		expect(failures.has("a1")).toBe(false)
+		expect(failures.get("a2")).toBe(1)
+		expect(mockRemoveSkippedAsset).toHaveBeenCalledWith("a1")
+		expect(syncSpy).toHaveBeenCalledWith({ manual: true })
+
+		syncSpy.mockRestore()
+	})
+
+	it("retryAllSkippedAssets clears all failure counts, clears the store list, and kicks a manual sync (CU-09)", () => {
+		const failures = (cameraUpload as any).uploadFailures as Map<string, number>
+
+		failures.set("a1", 3)
+		failures.set("a2", 3)
+		failures.set("a3", 2)
+
+		const syncSpy = vi.spyOn(cameraUpload, "sync").mockResolvedValue({ success: true })
+
+		cameraUpload.retryAllSkippedAssets()
+
+		expect(failures.size).toBe(0)
+		expect(mockClearSkippedAssets).toHaveBeenCalled()
+		expect(syncSpy).toHaveBeenCalledWith({ manual: true })
+
+		syncSpy.mockRestore()
 	})
 })
 
@@ -2846,7 +2886,7 @@ describe("uploadFailures increment on repeated failure", () => {
 		await cameraUpload.sync()
 
 		// Skipped: upload never called in the 4th pass because count >= MAX_UPLOAD_FAILURES
-		expect(mockAddSkippedAsset).toHaveBeenCalledWith("a1")
+		expect(mockAddSkippedAsset).toHaveBeenCalledWith({ id: "a1", name: "photo.jpg" })
 		expect(transfers.upload).not.toHaveBeenCalled()
 	})
 
@@ -2873,7 +2913,7 @@ describe("uploadFailures increment on repeated failure", () => {
 
 		// Should have uploaded on the third pass (count 2 < MAX_UPLOAD_FAILURES=3)
 		expect(transfers.upload).toHaveBeenCalledTimes(1)
-		expect(mockAddSkippedAsset).not.toHaveBeenCalledWith("a1")
+		expect(mockAddSkippedAsset).not.toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }))
 	})
 })
 

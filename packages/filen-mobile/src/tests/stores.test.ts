@@ -117,7 +117,7 @@ function resetDrivePreviewStore(): void {
 }
 
 function resetCameraUploadStore(): void {
-	useCameraUploadStore.setState({ syncing: false, errors: [], skippedAssets: new Set<string>() })
+	useCameraUploadStore.setState({ syncing: false, errors: [], skippedAssets: [] })
 }
 
 function resetContactsStore(): void {
@@ -419,7 +419,7 @@ describe("useDrivePreviewStore.open", () => {
 })
 
 // ---------------------------------------------------------------------------
-// useCameraUploadStore — addSkippedAsset / clearSkippedAssets
+// useCameraUploadStore — addSkippedAsset / removeSkippedAsset / clearSkippedAssets (CU-09)
 // ---------------------------------------------------------------------------
 
 describe("useCameraUploadStore.addSkippedAsset", () => {
@@ -427,42 +427,67 @@ describe("useCameraUploadStore.addSkippedAsset", () => {
 		resetCameraUploadStore()
 	})
 
-	it("adds an id that was not previously in the set", () => {
-		useCameraUploadStore.getState().addSkippedAsset("asset-1")
+	it("adds an asset that was not previously listed, storing its id and name", () => {
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "photo.jpg" })
 
-		expect(useCameraUploadStore.getState().skippedAssets.has("asset-1")).toBe(true)
+		const skipped = useCameraUploadStore.getState().skippedAssets
+
+		expect(skipped).toEqual([{ id: "asset-1", name: "photo.jpg" }])
 	})
 
-	it("calling twice with same id does not duplicate (Set dedup)", () => {
-		useCameraUploadStore.getState().addSkippedAsset("asset-1")
-		useCameraUploadStore.getState().addSkippedAsset("asset-1")
+	it("calling twice with the same id does not duplicate (dedup by id) and refreshes the name", () => {
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "old.jpg" })
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "new.jpg" })
 
-		expect(useCameraUploadStore.getState().skippedAssets.size).toBe(1)
+		const skipped = useCameraUploadStore.getState().skippedAssets
+
+		expect(skipped).toHaveLength(1)
+		expect(skipped[0]).toEqual({ id: "asset-1", name: "new.jpg" })
 	})
 
-	it("returns a new Set instance each time — old reference is not mutated", () => {
+	it("returns a new array instance each time — old reference is not mutated", () => {
 		const before = useCameraUploadStore.getState().skippedAssets
 
-		useCameraUploadStore.getState().addSkippedAsset("asset-1")
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "photo.jpg" })
 
 		const after = useCameraUploadStore.getState().skippedAssets
 
 		expect(after).not.toBe(before)
 	})
 
-	it("clearSkippedAssets resets to an empty Set", () => {
-		useCameraUploadStore.getState().addSkippedAsset("asset-1")
-		useCameraUploadStore.getState().addSkippedAsset("asset-2")
+	it("removeSkippedAsset drops only the matching id", () => {
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "a.jpg" })
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-2", name: "b.jpg" })
+		useCameraUploadStore.getState().removeSkippedAsset("asset-1")
+
+		const skipped = useCameraUploadStore.getState().skippedAssets
+
+		expect(skipped).toEqual([{ id: "asset-2", name: "b.jpg" }])
+	})
+
+	it("removeSkippedAsset preserves the reference when nothing matched", () => {
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "a.jpg" })
+
+		const before = useCameraUploadStore.getState().skippedAssets
+
+		useCameraUploadStore.getState().removeSkippedAsset("does-not-exist")
+
+		expect(useCameraUploadStore.getState().skippedAssets).toBe(before)
+	})
+
+	it("clearSkippedAssets resets to an empty array", () => {
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "a.jpg" })
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-2", name: "b.jpg" })
 		useCameraUploadStore.getState().clearSkippedAssets()
 
-		expect(useCameraUploadStore.getState().skippedAssets.size).toBe(0)
+		expect(useCameraUploadStore.getState().skippedAssets).toHaveLength(0)
 	})
 
 	it("after clearSkippedAssets, previously added ids are no longer present", () => {
-		useCameraUploadStore.getState().addSkippedAsset("asset-1")
+		useCameraUploadStore.getState().addSkippedAsset({ id: "asset-1", name: "a.jpg" })
 		useCameraUploadStore.getState().clearSkippedAssets()
 
-		expect(useCameraUploadStore.getState().skippedAssets.has("asset-1")).toBe(false)
+		expect(useCameraUploadStore.getState().skippedAssets.some(asset => asset.id === "asset-1")).toBe(false)
 	})
 })
 
