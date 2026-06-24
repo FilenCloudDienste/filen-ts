@@ -463,3 +463,15 @@ describe("foregroundService", () => {
 		expect(mockNotifee.requestPermission).not.toHaveBeenCalled()
 	})
 })
+
+describe("backgroundTransfersNotificationGap", () => {
+	it("is true only when the toggle is enabled AND notifications are denied", async () => {
+		const { backgroundTransfersNotificationGap } = await import("@/features/transfers/foregroundService")
+
+		expect(backgroundTransfersNotificationGap(true, "denied")).toBe(true)
+		expect(backgroundTransfersNotificationGap(false, "denied")).toBe(false)
+		expect(backgroundTransfersNotificationGap(true, "authorized")).toBe(false)
+		expect(backgroundTransfersNotificationGap(true, "notDetermined")).toBe(false)
+		expect(backgroundTransfersNotificationGap(true, "notAndroid")).toBe(false)
+	})
+})

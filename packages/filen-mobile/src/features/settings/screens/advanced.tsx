@@ -1,8 +1,8 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import { Fragment } from "react"
-import { Platform } from "react-native"
+import { Fragment, useState, useEffect } from "react"
+import { Platform, AppState } from "react-native"
 import { useNavigation } from "expo-router"
 import { router } from "@/lib/router"
 import { Image } from "expo-image"
@@ -30,7 +30,9 @@ import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.
 import { useSecureStore } from "@/lib/secureStore"
 import foregroundService, {
 	TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
-	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
+	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED,
+	backgroundTransfersNotificationGap,
+	type PermissionStatus
 } from "@/features/transfers/foregroundService"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
@@ -136,6 +138,39 @@ function Advanced() {
 		TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
 		DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED
 	)
+
+	const [notificationStatus, setNotificationStatus] = useState<PermissionStatus>("notDetermined")
+
+	useEffect(() => {
+		if (Platform.OS !== "android") {
+			return
+		}
+
+		const refresh = () => {
+			foregroundService
+				.getStatus()
+				.then(setNotificationStatus)
+				.catch(error => {
+					logger.warn("transfers-fgs", "notification status refresh failed", { error })
+				})
+		}
+
+		refresh()
+
+		// Re-check when returning to the app (e.g. after the user changed notifications in OS settings) so the
+		// warning + open-settings affordance reflect a revoked or re-granted permission.
+		const subscription = AppState.addEventListener("change", state => {
+			if (state === "active") {
+				refresh()
+			}
+		})
+
+		return () => {
+			subscription.remove()
+		}
+	}, [])
+
+	const notificationGap = backgroundTransfersNotificationGap(foregroundServiceEnabled, notificationStatus)
 
 	const [convertHeic, setConvertHeic] = useSecureStore<boolean>(
 		CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY,
@@ -283,7 +318,14 @@ function Advanced() {
 								{
 									icon: "notifications-outline",
 									title: t("background_transfers"),
-									subTitle: t("background_transfers_description"),
+									subTitle: notificationGap
+										? t("background_transfers_notifications_disabled")
+										: t("background_transfers_description"),
+									onPress: notificationGap
+										? () => {
+												void foregroundService.openSettings()
+											}
+										: undefined,
 									rightItem: {
 										type: "switch",
 										value: foregroundServiceEnabled,

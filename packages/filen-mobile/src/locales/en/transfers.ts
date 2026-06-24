@@ -51,6 +51,8 @@ export const transfers = {
 	/** Advanced settings (Android only) — subtitle under the background-transfers toggle, explaining the persistent notification trade-off */
 	background_transfers_description:
 		"Keep uploads and downloads running while the app is in the background. Shows a persistent notification while transfers are active.",
+	/** Advanced settings (Android only) — warning subtitle shown when the toggle is on but the OS notification permission was revoked, so background transfers can't run */
+	background_transfers_notifications_disabled: "Notifications are off, so background transfers won't run. Tap to open settings.",
 	/** Advanced settings (Android only) — alert message when notification permission is denied and the user tries to enable background transfers */
 	background_transfers_notifications_required: "Allow notifications to run transfers in the background.",
 	/** Generic action to open the system settings app (used in permission-denied alerts) */

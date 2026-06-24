@@ -21,6 +21,14 @@ export const DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED = true
 
 export type PermissionStatus = "authorized" | "denied" | "notDetermined" | "notAndroid"
 
+// Whether the "Background transfers" setting is on but the OS notification permission is denied — i.e. the
+// toggle is enabled yet the foreground service cannot start (Android needs POST_NOTIFICATIONS to display the
+// FGS notification, and start() gates on it). Drives the Advanced screen's warning + open-settings affordance.
+// `notDetermined` is NOT a gap — start() prompts for it.
+export function backgroundTransfersNotificationGap(enabled: boolean, status: PermissionStatus): boolean {
+	return enabled && status === "denied"
+}
+
 export type TransferProgressSnapshot = {
 	count: number
 	progress: number
