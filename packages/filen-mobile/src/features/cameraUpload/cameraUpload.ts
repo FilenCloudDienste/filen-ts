@@ -153,6 +153,11 @@ class CameraUpload {
 	// Only stamped after a pass reaches the upload pipeline (not on early skips) so a sync that
 	// bailed (offline/disabled/paused) never suppresses a retry once conditions improve.
 	private lastCompletedAt: number = 0
+	// BG-03: whether the in-flight pass is a budgeted BACKGROUND pass (maxUploads-capped), and whether a
+	// foreground sync arrived and was dropped by the in-flight guard while one was running — so the
+	// background pass can re-fire a full foreground pass on completion instead of silently swallowing it.
+	private syncingBackground: boolean = false
+	private foregroundRerunRequested: boolean = false
 	// stagingMutex(4): bounds how many deltas may stage their asset bytes in filen-tmp
 	// concurrently (copy → optional compress → upload → deferred cleanup). The SDK already
 	// bounds network/memory concurrency internally; this bounds app-side DISK usage so a
@@ -208,6 +213,8 @@ class CameraUpload {
 		this.globalPauseSignal.dispose()
 		this.globalPauseSignal = new PauseSignal()
 		this.syncing = false
+		this.syncingBackground = false
+		this.foregroundRerunRequested = false
 		this.uploadFailures.clear()
 
 		// BG-05: drop the min-interval stamp. cancel() fires on a config change (album/destination/
@@ -986,13 +993,22 @@ class CameraUpload {
 
 		const result = await run(async defer => {
 			if (this.syncing) {
+				// BG-03: a foreground sync arriving while a budgeted BACKGROUND pass is in flight would be
+				// silently dropped here — but the background pass only uploads up to maxUploads, so the
+				// user's foreground request still has work to do. Remember to re-fire it on completion.
+				if (this.syncingBackground && !params?.background) {
+					this.foregroundRerunRequested = true
+				}
+
 				return
 			}
 
 			this.syncing = true
+			this.syncingBackground = params?.background === true
 
 			defer(() => {
 				this.syncing = false
+				this.syncingBackground = false
 			})
 
 			// BG-05: coalesce non-manual triggers (reconnect/foreground/background fan-out) that arrive
@@ -1412,6 +1428,15 @@ class CameraUpload {
 				this.lastCompletedAt = Date.now()
 			}
 		})
+
+		// BG-03: a foreground sync was requested (and dropped by the in-flight guard) while THIS background
+		// pass ran — re-fire it now (fire-and-forget) so the user's foreground request isn't lost to the
+		// single dropped AppState→active edge. Only the background pass that absorbed the request re-fires.
+		if (params?.background && this.foregroundRerunRequested) {
+			this.foregroundRerunRequested = false
+
+			this.sync().catch(e => logger.warn("cameraUpload", "deferred foreground sync after background pass failed", { error: e }))
+		}
 
 		if (!result.success) {
 			if (abortController.signal.aborted) {

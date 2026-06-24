@@ -477,6 +477,38 @@ describe("hardening — persist-before-suspend flushes", () => {
 		)
 	})
 
+	it("BG-02: a throwing engine cancel does not block the other engine's cancel", async () => {
+		;(Platform as { OS: string }).OS = "ios"
+		mockSetup.setup.mockResolvedValue({ isAuthed: true })
+		mockSecureStoreGet.mockResolvedValue(true)
+		mockCameraUpload.cancel.mockImplementation(() => {
+			throw new Error("cancel boom")
+		})
+
+		let expirationCallback: (() => void) | null = null
+
+		mockBackgroundTask.addExpirationListener.mockImplementation((cb: () => void) => {
+			expirationCallback = cb
+
+			return { remove: mockRemoveListener }
+		})
+
+		// Fire the expiration mid-camera-phase → cancelRun → cancelBackgroundWork, where
+		// cameraUpload.cancel() throws.
+		mockCameraUpload.sync.mockImplementation(async () => {
+			expirationCallback?.()
+
+			return { success: true }
+		})
+
+		await runTask()
+
+		expect(mockCameraUpload.cancel).toHaveBeenCalled()
+		// Pre-fix the throw escaped cancelBackgroundWork before reaching offlineSync.cancel; the per-engine
+		// try/catch must keep the second cancel reachable.
+		expect(mockOfflineSync.cancel).toHaveBeenCalled()
+	})
+
 	it("a breadcrumb write failure never flips a healthy run's result", async () => {
 		mockSetup.setup.mockResolvedValue({ isAuthed: true })
 		mockRunLogAppend.mockRejectedValue(new Error("kv write failed"))

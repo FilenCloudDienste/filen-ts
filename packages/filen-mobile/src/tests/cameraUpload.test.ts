@@ -2932,6 +2932,57 @@ describe("BG-05 — min-interval coalescing for non-manual sync triggers", () =>
 	})
 })
 
+// ─── BG-03: foreground sync dropped during a background pass is re-fired ────────
+
+describe("BG-03 — foreground sync dropped during a background pass is re-fired", () => {
+	it("re-fires a foreground sync that arrived while a background pass was in flight", async () => {
+		let releaseConfig!: () => void
+		const configGate = new Promise<void>(resolve => {
+			releaseConfig = resolve
+		})
+		let configCalls = 0
+		const spy = vi
+			.spyOn(cameraUpload as unknown as { getConfig: () => Promise<Config> }, "getConfig")
+			.mockImplementation(async () => {
+				configCalls++
+
+				if (configCalls === 1) {
+					await configGate
+				}
+
+				// A disabled config makes each pass early-return right after getConfig — enough to exercise
+				// the in-flight guard + the post-run re-fire without the full upload pipeline.
+				return { enabled: false } as unknown as Config
+			})
+
+		const drain = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+
+		// Background pass parks on the gated getConfig (in flight, syncingBackground = true).
+		const bg = cameraUpload.sync({ background: true, maxUploads: 1 })
+		await drain()
+
+		expect(configCalls).toBe(1)
+
+		// A foreground sync arrives mid-background-pass — dropped by the in-flight guard, but it sets the
+		// rerun flag instead of being lost.
+		await cameraUpload.sync()
+
+		expect(configCalls).toBe(1)
+
+		// Let the background pass finish — it re-fires the foreground pass on completion.
+		releaseConfig()
+		await bg
+		await drain()
+		await drain()
+
+		// Pre-fix the dropped foreground edge was lost (configCalls stays 1). Post-fix the background pass
+		// re-fires it → a 2nd getConfig.
+		expect(configCalls).toBeGreaterThanOrEqual(2)
+
+		spy.mockRestore()
+	})
+})
+
 // ─── #14 regression: seconds-timestamp dedup + second-granularity + null creationTime ─
 
 describe("#14 regression — seconds-timestamp dedup and timestamp normalisation", () => {

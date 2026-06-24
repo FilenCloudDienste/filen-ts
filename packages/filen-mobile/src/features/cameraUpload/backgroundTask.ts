@@ -28,8 +28,19 @@ export const BACKGROUND_RUN_BUDGET_MS = 120_000
 export const OFFLINE_BACKGROUND_MIN_REMAINING_MS = 15_000
 
 function cancelBackgroundWork(): void {
-	cameraUpload.cancel()
-	offlineSync.cancel()
+	// BG-02: isolate each cancel so a throw in one engine can't block the other's cancel or escape the
+	// deadline timer / iOS expiration callback this runs from (mirrors auth.ts logout's per-step isolation).
+	try {
+		cameraUpload.cancel()
+	} catch (e) {
+		logger.warn("cameraUpload", "cameraUpload.cancel() threw during background cancel", { error: e })
+	}
+
+	try {
+		offlineSync.cancel()
+	} catch (e) {
+		logger.warn("cameraUpload", "offlineSync.cancel() threw during background cancel", { error: e })
+	}
 }
 
 TaskManager.defineTask(TASK_NAME, async () => {
