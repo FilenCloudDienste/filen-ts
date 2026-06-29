@@ -5,6 +5,8 @@ import { randomUUID } from "expo-crypto"
 import * as FileSystem from "expo-file-system"
 import * as MediaLibrary from "expo-media-library/legacy"
 import { type MenuButton } from "@/components/ui/menu"
+import { type Icons } from "@/components/ui/menuIcons"
+import { buildSortFieldButton, type SortDirectionOption } from "@/components/ui/sortFieldMenu"
 import { type SelectOptions, type DrivePath } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
 import { type SortByType } from "@/lib/sort"
@@ -25,63 +27,64 @@ import { selectContacts } from "@/features/contacts/contactsSelect"
 import logger from "@/lib/logger"
 
 export function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void, t: TFunction): MenuButton {
-	const leaf = (id: string, title: string, value: SortByType): MenuButton => ({
-		id,
-		title,
-		checked: current === value,
-		onPress: () => setSort(value)
-	})
+	// Each field's two directions live one level deeper. buildSortFieldButton keeps them as a nested
+	// submenu on iOS and collapses them into a direction ActionSheet on Android (which cannot render a
+	// 3rd menu level — see components/ui/sortFieldMenu).
+	const field = (
+		id: string,
+		title: string,
+		icon: Icons,
+		asc: SortDirectionOption<SortByType>,
+		desc: SortDirectionOption<SortByType>
+	): MenuButton => buildSortFieldButton({ id, title, icon, options: [asc, desc], current, setSort, t })
 
 	return {
 		id: "sort",
 		title: t("sort_by"),
 		icon: "list",
 		subButtons: [
-			{
-				id: "sort.name",
-				title: t("sort_name"),
-				icon: "text",
-				subButtons: [leaf("sort.nameAsc", t("sort_name_asc"), "nameAsc"), leaf("sort.nameDesc", t("sort_name_desc"), "nameDesc")]
-			},
-			{
-				id: "sort.size",
-				title: t("sort_size"),
-				icon: "size",
-				subButtons: [leaf("sort.sizeAsc", t("sort_size_asc"), "sizeAsc"), leaf("sort.sizeDesc", t("sort_size_desc"), "sizeDesc")]
-			},
-			{
-				id: "sort.type",
-				title: t("sort_type"),
-				icon: "doc",
-				subButtons: [leaf("sort.mimeAsc", t("sort_type_asc"), "mimeAsc"), leaf("sort.mimeDesc", t("sort_type_desc"), "mimeDesc")]
-			},
-			{
-				id: "sort.modified",
-				title: t("sort_modified"),
-				icon: "clock",
-				subButtons: [
-					leaf("sort.lastModifiedAsc", t("sort_modified_asc"), "lastModifiedAsc"),
-					leaf("sort.lastModifiedDesc", t("sort_modified_desc"), "lastModifiedDesc")
-				]
-			},
-			{
-				id: "sort.uploaded",
-				title: t("sort_uploaded"),
-				icon: "upload",
-				subButtons: [
-					leaf("sort.uploadDateAsc", t("sort_uploaded_asc"), "uploadDateAsc"),
-					leaf("sort.uploadDateDesc", t("sort_uploaded_desc"), "uploadDateDesc")
-				]
-			},
-			{
-				id: "sort.created",
-				title: t("sort_created"),
-				icon: "calendar",
-				subButtons: [
-					leaf("sort.creationAsc", t("sort_created_asc"), "creationAsc"),
-					leaf("sort.creationDesc", t("sort_created_desc"), "creationDesc")
-				]
-			}
+			field(
+				"sort.name",
+				t("sort_name"),
+				"text",
+				{ id: "sort.nameAsc", title: t("sort_name_asc"), value: "nameAsc" },
+				{ id: "sort.nameDesc", title: t("sort_name_desc"), value: "nameDesc" }
+			),
+			field(
+				"sort.size",
+				t("sort_size"),
+				"size",
+				{ id: "sort.sizeAsc", title: t("sort_size_asc"), value: "sizeAsc" },
+				{ id: "sort.sizeDesc", title: t("sort_size_desc"), value: "sizeDesc" }
+			),
+			field(
+				"sort.type",
+				t("sort_type"),
+				"doc",
+				{ id: "sort.mimeAsc", title: t("sort_type_asc"), value: "mimeAsc" },
+				{ id: "sort.mimeDesc", title: t("sort_type_desc"), value: "mimeDesc" }
+			),
+			field(
+				"sort.modified",
+				t("sort_modified"),
+				"clock",
+				{ id: "sort.lastModifiedAsc", title: t("sort_modified_asc"), value: "lastModifiedAsc" },
+				{ id: "sort.lastModifiedDesc", title: t("sort_modified_desc"), value: "lastModifiedDesc" }
+			),
+			field(
+				"sort.uploaded",
+				t("sort_uploaded"),
+				"upload",
+				{ id: "sort.uploadDateAsc", title: t("sort_uploaded_asc"), value: "uploadDateAsc" },
+				{ id: "sort.uploadDateDesc", title: t("sort_uploaded_desc"), value: "uploadDateDesc" }
+			),
+			field(
+				"sort.created",
+				t("sort_created"),
+				"calendar",
+				{ id: "sort.creationAsc", title: t("sort_created_asc"), value: "creationAsc" },
+				{ id: "sort.creationDesc", title: t("sort_created_desc"), value: "creationDesc" }
+			)
 		]
 	}
 }

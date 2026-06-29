@@ -1,5 +1,8 @@
-import { vi, describe, it, expect } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
+
+// buildTagsSortMenuButton delegates to buildSortFieldButton, which imports the actionSheet façade.
+const { mockActionSheetShow } = vi.hoisted(() => ({ mockActionSheetShow: vi.fn() }))
 
 // NoteType numeric enum — must match sdk-rs values so type subButton id mapping works.
 vi.mock("@filen/sdk-rs", () => ({
@@ -92,6 +95,10 @@ vi.mock("@/components/ui/menu", () => ({
 	Menu: () => null
 }))
 
+// Mock the actionSheet façade so loading the builder doesn't pull the real provider (untranspilable
+// native deps), and so the Android tags-sort path's show() calls are observable.
+vi.mock("@/providers/actionSheet.provider", () => ({ actionSheet: { show: mockActionSheetShow } }))
+
 vi.mock("@expo/ui/swift-ui", () => ({
 	Image: () => null
 }))
@@ -143,7 +150,8 @@ vi.mock("@/lib/share", () => ({
 
 // ---- imports after mocks ----
 
-import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
+import { buildNotesHeaderRightItems, buildTagsSortMenuButton } from "@/features/notes/components/notesHeaderMenuBuilders"
+import { Platform } from "react-native"
 import {
 	type NoteSelectionFlags,
 	EMPTY_NOTE_FLAGS,
@@ -919,6 +927,99 @@ describe("buildNotesHeaderRightItems", () => {
 
 			// default params: no notes, no tags, no selection, no tag — yields createTag + viewMode
 			expect(items.length).toBeGreaterThan(0)
+		})
+	})
+})
+
+// ---------------------------------------------------------------------------
+// buildTagsSortMenuButton — nested submenu on iOS, collapsed to a direction
+// ActionSheet on Android (@react-native-menu/menu can't nest a submenu in a
+// submenu). Mirrors the drive header's sort fix via buildSortFieldButton.
+// ---------------------------------------------------------------------------
+
+describe("buildTagsSortMenuButton", () => {
+	afterEach(() => {
+		Platform.OS = "ios"
+	})
+
+	describe("iOS (nested submenu)", () => {
+		beforeEach(() => {
+			Platform.OS = "ios"
+		})
+
+		it("has 3 field groups, each a 2-leaf direction submenu", () => {
+			const btn = buildTagsSortMenuButton("lastActivityDesc", vi.fn(), t as never)
+
+			expect(btn.id).toBe("tagsSort")
+			expect(btn.subButtons).toHaveLength(3)
+
+			for (const group of btn.subButtons ?? []) {
+				expect(group.subButtons).toHaveLength(2)
+			}
+		})
+
+		it("marks the current direction leaf checked", () => {
+			const btn = buildTagsSortMenuButton("lastActivityDesc", vi.fn(), t as never)
+			const activity = btn.subButtons?.find(b => b.id === "tagsSort.activity")
+			const newest = activity?.subButtons?.find(s => s.id === "tagsSort.activityDesc")
+
+			expect(newest?.checked).toBe(true)
+		})
+
+		it("leaf onPress routes setSort", () => {
+			const setSort = vi.fn()
+			const btn = buildTagsSortMenuButton("lastActivityDesc", setSort, t as never)
+			const name = btn.subButtons?.find(b => b.id === "tagsSort.name")
+			const desc = name?.subButtons?.find(s => s.id === "tagsSort.nameDesc")
+
+			desc?.onPress?.()
+
+			expect(setSort).toHaveBeenCalledWith("nameDesc")
+		})
+	})
+
+	describe("Android (collapsed to action sheet)", () => {
+		beforeEach(() => {
+			mockActionSheetShow.mockClear()
+			Platform.OS = "android"
+		})
+
+		it("turns each field into a leaf whose press opens a titled direction action sheet routing setSort", () => {
+			const setSort = vi.fn()
+			const btn = buildTagsSortMenuButton("lastActivityDesc", setSort, t as never)
+
+			expect(btn.subButtons).toHaveLength(3)
+
+			const activity = btn.subButtons?.find(b => b.id === "tagsSort.activity")
+
+			expect(activity && "subButtons" in activity).toBe(false)
+
+			activity?.onPress?.()
+
+			expect(mockActionSheetShow).toHaveBeenCalledTimes(1)
+
+			const opts = mockActionSheetShow.mock.calls[0]?.[0]
+
+			expect(opts.title).toBe("sort_last_activity")
+			expect(opts.buttons.map((b: { title: string }) => b.title)).toEqual([
+				"sort_last_activity_newest (current)",
+				"sort_last_activity_oldest",
+				"cancel"
+			])
+
+			opts.buttons[1].onPress()
+
+			expect(setSort).toHaveBeenCalledTimes(1)
+			expect(setSort).toHaveBeenCalledWith("lastActivityAsc")
+		})
+
+		it("checkmarks the active field", () => {
+			const btn = buildTagsSortMenuButton("notesCountDesc", vi.fn(), t as never)
+			const count = btn.subButtons?.find(b => b.id === "tagsSort.count")
+			const name = btn.subButtons?.find(b => b.id === "tagsSort.name")
+
+			expect(count?.checked).toBe(true)
+			expect(name?.checked).toBe(false)
 		})
 	})
 })

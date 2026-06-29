@@ -4,9 +4,12 @@ import { runEffect } from "@filen/utils"
 import { ActionSheetProvider as ExpoActionSheetProvider, useActionSheet } from "@expo/react-native-action-sheet"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { BackHandler, type ViewStyle } from "react-native"
+import { BackHandler, type ViewStyle, Platform } from "react-native"
 
 export type ShowActionSheetOptions = {
+	// Optional sheet header. Rendered with the already-wired titleTextStyle. Used e.g. by the
+	// Android sort-direction sheet to show which field the Ascending/Descending choice applies to.
+	title?: string
 	buttons: {
 		title: string
 		destructive?: boolean
@@ -80,6 +83,7 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 				showActionSheetWithOptions(
 					{
 						options: buttons,
+						title: Platform.OS === "android" ? undefined : options.title,
 						cancelButtonIndex,
 						destructiveButtonIndex,
 						disabledButtonIndices,

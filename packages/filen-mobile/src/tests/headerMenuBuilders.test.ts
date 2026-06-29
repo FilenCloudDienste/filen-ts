@@ -1,11 +1,12 @@
-import { vi, describe, it, expect, beforeEach } from "vitest"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // ---- hoist mutable mocks so they are available inside vi.mock factories ----
 
-const { mockIsItemStoredSync, mockIsItemTopLevelStoredSync } = vi.hoisted(() => ({
+const { mockIsItemStoredSync, mockIsItemTopLevelStoredSync, mockActionSheetShow } = vi.hoisted(() => ({
 	mockIsItemStoredSync: vi.fn(),
-	mockIsItemTopLevelStoredSync: vi.fn()
+	mockIsItemTopLevelStoredSync: vi.fn(),
+	mockActionSheetShow: vi.fn()
 }))
 
 // ---- heavy native deps that must be stubbed before the module under test loads ----
@@ -30,6 +31,11 @@ vi.mock("@/lib/tmp", () => ({ newTmpDir: vi.fn() }))
 vi.mock("@/lib/sdkUnwrap", () => ({ getRealDriveItemParent: vi.fn() }))
 
 vi.mock("@/components/ui/menu", () => ({}))
+
+// buildSortMenuButton now delegates to buildSortFieldButton, which imports the actionSheet façade.
+// Mock it so loading the builder doesn't pull the real provider (untranspilable native deps), and
+// so the Android path's show() calls are observable.
+vi.mock("@/providers/actionSheet.provider", () => ({ actionSheet: { show: mockActionSheetShow } }))
 
 vi.mock("@/features/drive/drive", () => ({
 	default: {
@@ -75,6 +81,7 @@ vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }
 
 import { buildSortMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { buildBulkActionMenu } from "@/features/drive/components/headerMenuBuilders"
+import { Platform } from "react-native"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
 import type { DriveSelectionFlags } from "@/features/drive/driveSelectors"
@@ -222,6 +229,64 @@ describe("buildSortMenuButton", () => {
 			allLeaves[i]?.onPress?.()
 			expect(setSort).toHaveBeenNthCalledWith(i + 1, expectedValues[i])
 		}
+	})
+})
+
+// ---------------------------------------------------------------------------
+// buildSortMenuButton on Android — the 3rd menu level (direction) is collapsed
+// into a direction ActionSheet, since @react-native-menu/menu can't nest a
+// submenu inside a submenu. Fields stay in the menu as checkmarked leaves.
+// ---------------------------------------------------------------------------
+
+describe("buildSortMenuButton (Android)", () => {
+	beforeEach(() => {
+		mockActionSheetShow.mockClear()
+		Platform.OS = "android"
+	})
+
+	afterEach(() => {
+		Platform.OS = "ios"
+	})
+
+	it("keeps 6 fields but each is a leaf (no nested subButtons) with an onPress", () => {
+		const btn = buildSortMenuButton("nameAsc", vi.fn(), t as never)
+
+		expect(btn.subButtons).toHaveLength(6)
+
+		for (const field of btn.subButtons ?? []) {
+			expect("subButtons" in field).toBe(false)
+			expect(typeof field.onPress).toBe("function")
+		}
+	})
+
+	it("checkmarks the field that owns the current sort (size when current=sizeDesc)", () => {
+		const btn = buildSortMenuButton("sizeDesc", vi.fn(), t as never)
+		const nameField = btn.subButtons?.find(b => b.id === "sort.name")
+		const sizeField = btn.subButtons?.find(b => b.id === "sort.size")
+
+		expect(sizeField?.checked).toBe(true)
+		expect(nameField?.checked).toBe(false)
+	})
+
+	it("tapping a field opens a titled direction ActionSheet with the current direction marked, routing setSort", () => {
+		const setSort = vi.fn()
+		const btn = buildSortMenuButton("nameAsc", setSort, t as never)
+		const nameField = btn.subButtons?.find(b => b.id === "sort.name")
+
+		nameField?.onPress?.()
+
+		expect(mockActionSheetShow).toHaveBeenCalledTimes(1)
+
+		const opts = mockActionSheetShow.mock.calls[0]?.[0]
+
+		expect(opts.title).toBe("sort_name")
+		expect(opts.buttons.map((b: { title: string }) => b.title)).toEqual(["sort_name_asc (current)", "sort_name_desc", "cancel"])
+
+		// Picking "Descending" routes the right SortByType.
+		opts.buttons[1].onPress()
+
+		expect(setSort).toHaveBeenCalledTimes(1)
+		expect(setSort).toHaveBeenCalledWith("nameDesc")
 	})
 })
 
