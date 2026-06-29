@@ -4,7 +4,8 @@ import { runEffect } from "@filen/utils"
 import { ActionSheetProvider as ExpoActionSheetProvider, useActionSheet } from "@expo/react-native-action-sheet"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { BackHandler, type ViewStyle, Platform } from "react-native"
+import { BackHandler, useWindowDimensions, type ViewStyle, Platform } from "react-native"
+import { actionSheetNeedsTopInset } from "@/providers/actionSheetLayout"
 
 export type ShowActionSheetOptions = {
 	// Optional sheet header. Rendered with the already-wired titleTextStyle. Used e.g. by the
@@ -28,6 +29,7 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { theme } = useUniwind()
 	const insets = useSafeAreaInsets()
+	const windowHeight = useWindowDimensions().height
 	const visibleRef = useRef<boolean>(false)
 	const cancelActionRef = useRef<(() => void) | undefined>(undefined)
 
@@ -76,6 +78,17 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 					.filter(index => index !== -1)
 				const disabledSet = new Set<number>(disabledButtonIndices)
 				const buttonActions = options.buttons.map(button => button.onPress)
+				// Mirror exactly what we hand the library as `title` so the height estimate matches what renders.
+				const sheetTitle = Platform.OS === "android" ? undefined : options.title
+				// Pad the top by the safe-area inset only when the sheet is tall enough to reach the status
+				// bar / notch; on a short sheet the inset would just be an empty gap above the first row.
+				const needsTopInset = actionSheetNeedsTopInset({
+					buttonCount: options.buttons.length,
+					hasTitle: typeof sheetTitle === "string" && sheetTitle.length > 0,
+					windowHeight,
+					insetTop: insets.top,
+					insetBottom: insets.bottom
+				})
 
 				visibleRef.current = true
 				cancelActionRef.current = cancelButtonIndex !== undefined ? buttonActions[cancelButtonIndex] : undefined
@@ -83,7 +96,7 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 				showActionSheetWithOptions(
 					{
 						options: buttons,
-						title: Platform.OS === "android" ? undefined : options.title,
+						title: sheetTitle,
 						cancelButtonIndex,
 						destructiveButtonIndex,
 						disabledButtonIndices,
@@ -94,7 +107,7 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 							paddingBottom: insets.bottom,
 							paddingLeft: insets.left,
 							paddingRight: insets.right,
-							paddingTop: insets.top
+							paddingTop: needsTopInset ? insets.top : 0
 						},
 						textStyle: {
 							color: textForeground.color
@@ -149,6 +162,7 @@ const ActionSheetProviderInner = ({ children }: { children: React.ReactNode }) =
 		insets.left,
 		insets.right,
 		insets.top,
+		windowHeight,
 		textForeground.color,
 		textMutedForeground.color
 	])
