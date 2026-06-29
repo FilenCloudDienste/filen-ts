@@ -43,3 +43,7 @@ playwright/.cache/
 .env
 codedb.snapshot
 .claude/scheduled_tasks.lock
+
+# Local-only working dirs (design specs, plans, notes, agent scratch) — never committed
+.superpowers/
+docs/
