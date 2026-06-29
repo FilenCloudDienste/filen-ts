@@ -89,14 +89,6 @@ const Header = ({
 		const items: HeaderItem[] = []
 		const menuButtons: MenuButton[] = []
 
-		if (sortable && !selectionMode) {
-			menuButtons.push(buildSortMenuButton(currentSort, setSort, t))
-		}
-
-		if (!selectionMode) {
-			menuButtons.push(buildViewModeMenuButton(viewMode, setViewMode, t))
-		}
-
 		// Select-all / deselect-all must mirror the list body's VISIBLE (search-
 		// filtered) set, not the unfiltered query data. With a search active,
 		// `listItems` is the narrowed subset the user actually sees; selecting all
@@ -129,6 +121,14 @@ const Header = ({
 					}
 				})
 			}
+		}
+
+		if (sortable && !selectionMode) {
+			menuButtons.push(buildSortMenuButton(currentSort, setSort, t))
+		}
+
+		if (!selectionMode) {
+			menuButtons.push(buildViewModeMenuButton(viewMode, setViewMode, t))
 		}
 
 		if (canShowDriveCreateMenu({ drivePath, parent, selectionMode })) {
