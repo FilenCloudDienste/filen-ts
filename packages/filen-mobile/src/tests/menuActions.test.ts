@@ -182,7 +182,7 @@ vi.mock("@/lib/serializer", () => ({
 
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
-import { buildDownloadSubButtons } from "@/features/drive/components/item/menuActionsDownload"
+import { buildDownloadSubButtons, buildExportButton } from "@/features/drive/components/item/menuActionsDownload"
 import { selectDriveItems } from "@/features/drive/screens/driveSelect"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
@@ -1018,5 +1018,48 @@ describe("import flow partial-transfer honesty (C1)", () => {
 		expect(transfers.upload).not.toHaveBeenCalled()
 		expect(alerts.error).not.toHaveBeenCalled()
 		expect(stagingDestination()?.parentDirectory.delete).toHaveBeenCalledTimes(1)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// buildExportButton — reusable Export action (download → OS share sheet) shared
+// by the Download and Share submenus. The caller supplies the id so the same
+// action can appear in both without colliding on the menu's unique-id rule.
+// ---------------------------------------------------------------------------
+
+describe("buildExportButton", () => {
+	it("returns an export button for a file with decryptedMeta", () => {
+		const btn = buildExportButton({ item: makeFile({ name: "file.txt" }), id: "export", t })
+
+		expect(btn).not.toBeNull()
+		expect(btn?.id).toBe("export")
+		expect(btn?.title).toBe("export")
+		expect(btn?.icon).toBe("export")
+		expect(btn?.requiresOnline).toBe(true)
+		expect(typeof btn?.onPress).toBe("function")
+	})
+
+	it("uses the provided id (so the action can live under both Download and Share)", () => {
+		const btn = buildExportButton({ item: makeFile({ name: "file.txt" }), id: "shareExport", t })
+
+		expect(btn?.id).toBe("shareExport")
+	})
+
+	it("returns a button for a sharedFile with decryptedMeta", () => {
+		const btn = buildExportButton({ item: makeSharedFile({ name: "shared.txt" }), id: "export", t })
+
+		expect(btn?.id).toBe("export")
+	})
+
+	it("returns null for a directory (not a file item)", () => {
+		const btn = buildExportButton({ item: makeDirectory({ name: "dir" }), id: "export", t })
+
+		expect(btn).toBeNull()
+	})
+
+	it("returns null when decryptedMeta is null", () => {
+		const btn = buildExportButton({ item: makeFile(null), id: "export", t })
+
+		expect(btn).toBeNull()
 	})
 })

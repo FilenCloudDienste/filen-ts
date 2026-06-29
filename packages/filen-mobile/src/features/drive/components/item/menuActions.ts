@@ -5,7 +5,7 @@ import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
 import { confirmedDriveAction } from "@/features/drive/components/item/menuActionsShared"
 import { buildUndecryptableMenuButtons } from "@/features/drive/components/item/menuActionsUndecryptable"
-import { buildDownloadSubButtons } from "@/features/drive/components/item/menuActionsDownload"
+import { buildDownloadSubButtons, buildExportButton } from "@/features/drive/components/item/menuActionsDownload"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
 import { run } from "@filen/utils"
@@ -344,6 +344,10 @@ export function createMenuButtons({
 			drivePath.type === "recents" ||
 			drivePath.type === "photos")
 	) {
+		// Export (download → OS share sheet) belongs here too, not only under Download — exporting
+		// to another app IS a form of sharing. File-only, so null (omitted) for shared directories.
+		const shareExportButton = buildExportButton({ item, id: "shareExport", t })
+
 		menuButtons.push({
 			id: "share",
 			title: t("share"),
@@ -400,7 +404,8 @@ export function createMenuButtons({
 							alerts.error(result.error)
 						}
 					}
-				}
+				},
+				...(shareExportButton ? [shareExportButton] : [])
 			]
 		})
 	}

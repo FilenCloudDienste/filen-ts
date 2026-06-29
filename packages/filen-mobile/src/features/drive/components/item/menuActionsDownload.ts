@@ -188,82 +188,10 @@ export function buildDownloadSubButtons({
 		})
 	}
 
-	if (isFileItem(item) && item.data.decryptedMeta) {
-		downloadSubButtons.push({
-			id: "export",
-			requiresOnline: true,
-			title: t("export"),
-			icon: "export",
-			onPress: async () => {
-				const result = await runWithLoading(async () => {
-					if (!item.data.decryptedMeta) {
-						throw new Error("Missing decrypted metadata")
-					}
+	const exportButton = buildExportButton({ item, id: "export", t })
 
-					const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-
-					if (!destination.parentDirectory.exists) {
-						destination.parentDirectory.create({
-							intermediates: true,
-							idempotent: true
-						})
-					}
-
-					if (destination.exists) {
-						destination.delete()
-					}
-
-					const downloadResult = await transfers.download({
-						item,
-						destination
-					})
-
-					if (!downloadResult) {
-						return null
-					}
-
-					if (
-						downloadResult.files.length === 0 ||
-						downloadResult.directories.length > 0 ||
-						!downloadResult.files[0] ||
-						!destination.exists
-					) {
-						throw new Error("Downloaded item is not a file")
-					}
-
-					return destination
-				})
-
-				if (!result.success) {
-					logger.error("drive", "export download failed", { error: result.error, uuid: item.data.uuid })
-					alerts.error(result.error)
-
-					return
-				}
-
-				if (!result.data) {
-					return
-				}
-
-				const shareResult = await shareTmpFile({
-					uri: result.data.uri,
-					name: result.data.name,
-					mimeType: resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: result.data.name }),
-					cleanup: () => {
-						if (result.data && result.data.parentDirectory.exists) {
-							result.data.parentDirectory.delete()
-						}
-					}
-				})
-
-				if (!shareResult.success) {
-					logger.warn("drive", "export share sheet failed", { error: shareResult.error })
-					alerts.error(shareResult.error)
-
-					return
-				}
-			}
-		})
+	if (exportButton) {
+		downloadSubButtons.push(exportButton)
 	}
 
 	if (
@@ -409,4 +337,95 @@ export function buildDownloadSubButtons({
 	}
 
 	return downloadSubButtons
+}
+
+// Builds the "Export" action — download the file to a temp location, then hand it to the OS share
+// sheet — or null when the item isn't an exportable file (directory, or missing decrypted meta).
+// The id is supplied by the caller so the same action can appear under both the Download and Share
+// submenus: the Menu's unique-id check blanks the whole menu if two buttons share an id, so the two
+// call sites pass distinct ids ("export" / "shareExport").
+export function buildExportButton({ item, id, t }: { item: DriveItem; id: string; t: TFunction }): MenuButton | null {
+	if (!isFileItem(item) || !item.data.decryptedMeta) {
+		return null
+	}
+
+	return {
+		id,
+		requiresOnline: true,
+		title: t("export"),
+		icon: "export",
+		onPress: async () => {
+			// Run the download non-blocking: progress + speed already surface in the floating transfer
+			// bar (and the Android notification) via transfers.download, so a full-screen blocking
+			// loader would only freeze the app on large files and hide that better progress UI. The OS
+			// share sheet opens once the download resolves. Mirrors the non-blocking "Download to device".
+			const result = await run(async () => {
+				if (!item.data.decryptedMeta) {
+					throw new Error("Missing decrypted metadata")
+				}
+
+				const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
+
+				if (!destination.parentDirectory.exists) {
+					destination.parentDirectory.create({
+						intermediates: true,
+						idempotent: true
+					})
+				}
+
+				if (destination.exists) {
+					destination.delete()
+				}
+
+				const downloadResult = await transfers.download({
+					item,
+					destination
+				})
+
+				if (!downloadResult) {
+					return null
+				}
+
+				if (
+					downloadResult.files.length === 0 ||
+					downloadResult.directories.length > 0 ||
+					!downloadResult.files[0] ||
+					!destination.exists
+				) {
+					throw new Error("Downloaded item is not a file")
+				}
+
+				return destination
+			})
+
+			if (!result.success) {
+				logger.error("drive", "export download failed", { error: result.error, uuid: item.data.uuid })
+				alerts.error(result.error)
+
+				return
+			}
+
+			if (!result.data) {
+				return
+			}
+
+			const shareResult = await shareTmpFile({
+				uri: result.data.uri,
+				name: result.data.name,
+				mimeType: resolveMimeType({ mime: item.data.decryptedMeta?.mime, name: result.data.name }),
+				cleanup: () => {
+					if (result.data && result.data.parentDirectory.exists) {
+						result.data.parentDirectory.delete()
+					}
+				}
+			})
+
+			if (!shareResult.success) {
+				logger.warn("drive", "export share sheet failed", { error: shareResult.error })
+				alerts.error(shareResult.error)
+
+				return
+			}
+		}
+	}
 }
