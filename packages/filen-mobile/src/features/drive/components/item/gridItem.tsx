@@ -11,10 +11,13 @@ import { FavoritedIndicatorInline, OfflineIndicatorInline } from "@/features/dri
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
+import { driveScreenUsesBaseBackground } from "@/features/drive/driveSelectors"
+import { GRID_CELL_PADDING } from "@/features/drive/driveGrid"
 import { cn } from "@filen/utils"
 
-// Padding around each card on all sides — defines the gutter between cells.
-const CELL_PADDING = 6
+// Per-cell padding on all sides (the gap between adjacent cells = 2× this). Sourced from driveGrid
+// so the grid's screen-edge inset and inter-item gutter stay in sync.
+const CELL_PADDING = GRID_CELL_PADDING
 
 export default function GridItem({
 	info,
@@ -36,7 +39,7 @@ export default function GridItem({
 		isSelectedFromDriveSelect,
 		onPressSelectForDriveSelect
 	} = useDriveItemInteraction({ info, drivePath, getListItems })
-	const { showFavorited, showOffline, isStoredOffline } = useDriveItemIndicators({
+	const { showFavorited, showOffline, isStoredOffline, hasSyncError } = useDriveItemIndicators({
 		item: info.item,
 		drivePath
 	})
@@ -86,7 +89,10 @@ export default function GridItem({
 					 * the card size via the `icon` slot, so it doesn't stretch.
 					 */}
 					<View
-						className="bg-background-secondary rounded-2xl items-center justify-center overflow-hidden"
+						className={cn(
+							"rounded-2xl items-center justify-center overflow-hidden",
+							driveScreenUsesBaseBackground(drivePath) ? "bg-background-secondary" : "bg-background-tertiary"
+						)}
 						style={{ width: cardSize, height: cardSize }}
 					>
 						<Thumbnail
@@ -111,7 +117,7 @@ export default function GridItem({
 						{showOffline && <OfflineIndicatorInline />}
 						{showFavorited && <FavoritedIndicatorInline />}
 						<Text
-							className="text-foreground text-sm text-center shrink"
+							className={cn("text-sm text-center shrink", hasSyncError ? "text-red-500" : "text-foreground")}
 							numberOfLines={1}
 							ellipsizeMode="middle"
 						>

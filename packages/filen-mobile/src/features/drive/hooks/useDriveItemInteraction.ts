@@ -146,7 +146,7 @@ export default function useDriveItemInteraction({
 		disabled,
 		navigateOnly,
 		isSelected,
-		isSelecting: areDriveItemsSelected || drivePath.selectOptions?.intention === "select",
+		isSelecting: (areDriveItemsSelected && !drivePath.selectOptions) || drivePath.selectOptions?.intention === "select",
 		areDriveItemsSelected,
 		isSelectedFromDriveSelect,
 		onPressSelectForDriveSelect

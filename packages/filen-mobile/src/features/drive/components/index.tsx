@@ -17,7 +17,8 @@ import alerts from "@/lib/alerts"
 import { type View as RNView, Platform, ActivityIndicator } from "react-native"
 import useViewLayout from "@/hooks/useViewLayout"
 import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
-import { gridColumnsForWidth } from "@/features/drive/driveGrid"
+import { gridColumnsForWidth, GRID_EDGE_PADDING } from "@/features/drive/driveGrid"
+import { driveScreenUsesBaseBackground } from "@/features/drive/driveSelectors"
 import GridItem from "@/features/drive/components/item/gridItem"
 import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
@@ -55,7 +56,7 @@ const Drive = () => {
 	const { layout, onLayout } = useViewLayout(containerRef)
 	const isGrid = viewMode === "grid"
 	const columns = gridColumnsForWidth(layout.width)
-	const gridItemWidth = isGrid && layout.width > 0 ? layout.width / columns : 0
+	const gridItemWidth = isGrid && layout.width > 0 ? (layout.width - GRID_EDGE_PADDING * 2) / columns : 0
 	const gridItemHeight = gridItemWidth + GRID_LABEL_HEIGHT
 	// Guard: VirtualList throws if grid=true but itemWidth/itemHeight are absent.
 	// Before the first layout event layout.width is 0, so we fall back to list for that frame.
@@ -191,10 +192,10 @@ const Drive = () => {
 						key={isGridActive ? `grid-${columns}` : "list"}
 						className={cn(
 							"flex-1",
-							drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
+							driveScreenUsesBaseBackground(drivePath) ? "bg-background" : "bg-background-secondary"
 						)}
 						contentInsetAdjustmentBehavior="automatic"
-						contentContainerClassName={cn("pb-80", Platform.OS === "android" && "pb-96")}
+						contentContainerClassName={cn("pb-80", Platform.OS === "android" && "pb-96", isGridActive && "px-2")}
 						keyExtractor={(item: DriveItem) => {
 							return item.data.uuid
 						}}

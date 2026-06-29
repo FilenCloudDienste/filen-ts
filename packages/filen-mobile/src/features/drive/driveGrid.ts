@@ -17,3 +17,10 @@ export function gridColumnsForWidth(width: number): number {
 
 	return 3
 }
+
+// Grid spacing (dp). GRID_EDGE_PADDING is the horizontal inset between the grid and the screen edges
+// (applied to the grid container — and reflected in its `px-2` className, which is 8dp; keep in sync).
+// GRID_CELL_PADDING is each cell's padding (half the gap between adjacent cells). With equal values
+// the gutter is uniform: edge gap = edge-inset + cell-padding, between-items gap = 2× cell-padding.
+export const GRID_EDGE_PADDING = 8
+export const GRID_CELL_PADDING = 8

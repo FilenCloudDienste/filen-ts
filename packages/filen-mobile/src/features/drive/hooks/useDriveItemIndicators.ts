@@ -31,9 +31,9 @@ export default function useDriveItemIndicators({
 
 	const isStoredOffline = driveItemStoredOfflineQuery.data === true
 
-	// Note: the original code checks `driveItemStoredOfflineQuery.status === "success" &&
-	// driveItemStoredOfflineQuery.data` for the indicator — this is semantically equivalent
-	// because when status is not "success", data is undefined and `undefined === true` is false.
+	// Equivalent to the original `status === "success" && data` check: useDriveItemStoredOfflineQuery
+	// is enabled:false and only ever populated via queryUpdater.set, so it never reaches an
+	// error-with-retained-data state — whenever `data` is true the status is "success".
 	const showOffline = isStoredOffline && drivePath.type !== "offline"
 
 	// Note: the original code also type-guards on `item.type === "file" || item.type === "directory"`.

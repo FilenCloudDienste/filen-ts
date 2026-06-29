@@ -62,6 +62,15 @@ export function isFileItem(item: DriveItem): item is DriveItemFileExtracted {
 	return FILE_TYPES.has(item.type)
 }
 
+// Whether the drive screen renders on the BASE background (bg-background — the main drive tab) rather
+// than the secondary background used by every other variant (favorites/shared/links/offline/recents +
+// the driveSelect picker, which are modal-presented). Single source of truth for the screen bg AND for
+// any raised surface on it: the grid card sits one elevation step above — secondary on the base-bg tab,
+// tertiary on the secondary-bg screens — so it never blends into the screen.
+export function driveScreenUsesBaseBackground(drivePath: DrivePath): boolean {
+	return drivePath.type === "drive" && !drivePath.selectOptions
+}
+
 export function isDirectoryItem(item: DriveItem): item is DriveItemDirectoryExtracted {
 	return DIRECTORY_TYPES.has(item.type)
 }
