@@ -14,7 +14,11 @@ import Header from "@/features/drive/components/header"
 import DriveSearchFooter from "@/features/drive/components/searchFooter"
 import { run, cn } from "@filen/utils"
 import alerts from "@/lib/alerts"
-import { Platform, ActivityIndicator } from "react-native"
+import { type View as RNView, Platform, ActivityIndicator } from "react-native"
+import useViewLayout from "@/hooks/useViewLayout"
+import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
+import { gridColumnsForWidth } from "@/features/drive/driveGrid"
+import GridItem from "@/features/drive/components/item/gridItem"
 import { useFocusEffect } from "expo-router"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { onlineManager } from "@tanstack/react-query"
@@ -33,6 +37,7 @@ import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderR
 import { LazyWrapper } from "@/components/lazyWrapper"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
+import View from "@/components/ui/view"
 import Menu from "@/components/ui/menu"
 import { PressableScale } from "@/components/ui/pressables"
 import Text from "@/components/ui/text"
@@ -40,8 +45,21 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import logger from "@/lib/logger"
 import { useResolveClassNames } from "uniwind"
 
+// Height reserved below each grid card for the single-line filename label.
+const GRID_LABEL_HEIGHT = 28
+
 const Drive = () => {
 	const drivePath = useDrivePath()
+	const { viewMode } = useDriveViewMode(drivePath)
+	const containerRef = useRef<RNView>(null)
+	const { layout, onLayout } = useViewLayout(containerRef)
+	const isGrid = viewMode === "grid"
+	const columns = gridColumnsForWidth(layout.width)
+	const gridItemWidth = isGrid && layout.width > 0 ? layout.width / columns : 0
+	const gridItemHeight = gridItemWidth + GRID_LABEL_HEIGHT
+	// Guard: VirtualList throws if grid=true but itemWidth/itemHeight are absent.
+	// Before the first layout event layout.width is 0, so we fall back to list for that frame.
+	const isGridActive = isGrid && gridItemWidth > 0
 	const { t } = useTranslation()
 	const { searchQuery, setSearchQuery, searchResults, searchResultPaths, status, totalCount } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
@@ -158,8 +176,19 @@ const Drive = () => {
 				edges={["left", "right"]}
 			>
 				{/*  disabled={!(drivePath.type === "drive" && !drivePath.uuid && !drivePath.selectOptions && !drivePath.linked)} */}
+				{/*
+				 * Measuring wrapper: ref + onLayout let useViewLayout track the available
+				 * width so we can compute gridItemWidth before VirtualList renders. Mirrors
+				 * the same pattern used in features/photos/screens/photos.tsx.
+				 */}
+				<View
+					ref={containerRef}
+					onLayout={onLayout}
+					className="flex-1 bg-transparent"
+				>
 				<LazyWrapper>
 					<VirtualList
+						key={isGridActive ? `grid-${columns}` : "list"}
 						className={cn(
 							"flex-1",
 							drivePath.type === "drive" && !drivePath.selectOptions ? "bg-background" : "bg-background-secondary"
@@ -174,7 +203,22 @@ const Drive = () => {
 						// the last sync pass's error count as a pressable row above the listing.
 						// The row hides itself while there are no errors.
 						headerComponent={drivePath.type === "offline" && !drivePath.uuid ? () => <SyncErrorsHeaderRow /> : undefined}
+						grid={isGridActive}
+						itemWidth={isGridActive ? gridItemWidth : undefined}
+						itemHeight={isGridActive ? gridItemHeight : undefined}
+						itemsPerRow={isGridActive ? columns : undefined}
 						renderItem={(info: ListRenderItemInfo<DriveItem>) => {
+							if (isGridActive) {
+								return (
+									<GridItem
+										info={info}
+										drivePath={drivePath}
+										getListItems={() => items}
+										itemWidth={gridItemWidth}
+									/>
+								)
+							}
+
 							return (
 								<Item
 									info={info}
@@ -330,6 +374,7 @@ const Drive = () => {
 						}}
 					/>
 				</LazyWrapper>
+				</View>
 			</SafeAreaView>
 		</Fragment>
 	)
