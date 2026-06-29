@@ -2,7 +2,6 @@ import View from "@/components/ui/view"
 import { PressableScale } from "@/components/ui/pressables"
 import Menu from "@/features/drive/components/item/menu"
 import Text from "@/components/ui/text"
-import { router } from "@/lib/router"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
 import Size from "@/features/drive/components/item/size"
@@ -13,53 +12,16 @@ import ShareEmail from "@/features/drive/components/item/shareEmail"
 import { Platform } from "react-native"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { cn } from "@filen/utils"
-import useDriveItemStoredOfflineQuery from "@/features/drive/queries/useDriveItemStoredOffline.query"
-import useDriveStore from "@/features/drive/store/useDrive.store"
-import { useShallow } from "zustand/shallow"
 import { AnimatedView } from "@/components/ui/animated"
 import { FadeIn, FadeOut } from "react-native-reanimated"
 import { Checkbox } from "@/components/ui/checkbox"
-import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
-import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { useRecyclingState } from "@shopify/flash-list"
-import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import { getPreviewType } from "@/lib/previewType"
+import Thumbnail from "@/features/drive/components/item/thumbnail"
+import { FavoritedIndicator, OfflineIndicator } from "@/features/drive/components/item/indicators"
+import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
+import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { isDriveItemDisabled, isDriveItemNavigateOnly, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
-import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { useTranslation } from "react-i18next"
-
-function FavoritedIndicator() {
-	const textRed500 = useResolveClassNames("text-red-500")
-
-	return (
-		<View className="bg-transparent flex-row items-center justify-center absolute bottom-1 -right-2.5 z-10">
-			<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
-				<Ionicons
-					name="heart"
-					size={14}
-					color={textRed500.color}
-				/>
-			</View>
-		</View>
-	)
-}
-
-function OfflineIndicator() {
-	const textGreen500 = useResolveClassNames("text-green-500")
-
-	return (
-		<View className="bg-transparent flex-row items-center justify-center absolute bottom-1 -left-2.5 z-10">
-			<View className="bg-background-tertiary rounded-full p-0.5 flex-row items-center justify-center">
-				<Ionicons
-					name="download-outline"
-					size={14}
-					color={textGreen500.color}
-				/>
-			</View>
-		</View>
-	)
-}
 
 const Item = ({
 	info,
@@ -77,132 +39,19 @@ const Item = ({
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const [isMenuOpen, setIsMenuOpen] = useRecyclingState<boolean>(false, [info.item.data.uuid])
-	const isSelected = useDriveStore(
-		useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
-	)
-	const areDriveItemsSelected = useDriveStore(useShallow(state => state.selectedItems.length > 0))
-	const isSelectedFromDriveSelect = useDriveSelectStore(
-		useShallow(state => state.selectedItems.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type))
-	)
-	const selectedItemsFromDriveSelectLength = useDriveSelectStore(useShallow(state => state.selectedItems.length))
-	const previewType =
-		info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile"
-			? getPreviewType(driveItemDisplayName(info.item))
-			: null
-
-	const driveItemStoredOfflineQuery = useDriveItemStoredOfflineQuery({
-		uuid: info.item.data.uuid,
-		type: info.item.type
-	})
-
-	// Offline listing only: whether the last sync pass recorded an error for this item —
-	// either directly (itemUuid) or for anything nested inside it (topLevelUuid). Surfaced
-	// as a textual indicator line (rows already carry a file/dir icon, so no second icon).
-	const hasOfflineSyncError = useOfflineStore(
-		state =>
-			drivePath.type === "offline" &&
-			state.syncErrors.some(e => e.itemUuid === info.item.data.uuid || e.topLevelUuid === info.item.data.uuid)
-	)
-
-	const disabled = isDriveItemDisabled({
+	const {
+		onPress,
+		disabled,
+		navigateOnly,
+		isSelected,
+		areDriveItemsSelected,
+		isSelectedFromDriveSelect,
+		onPressSelectForDriveSelect
+	} = useDriveItemInteraction({ info, drivePath, getListItems })
+	const { showFavorited, showOffline, isStoredOffline, hasSyncError } = useDriveItemIndicators({
 		item: info.item,
-		drivePath,
-		previewType,
-		selectedFromDriveSelectCount: selectedItemsFromDriveSelectLength,
-		isSelectedFromDriveSelect
+		drivePath
 	})
-
-	const navigateOnly = isDriveItemNavigateOnly({
-		item: info.item,
-		drivePath,
-		disabled
-	})
-
-	const onPressSelectForDriveSelect = () => {
-		if (disabled) {
-			return
-		}
-
-		if (drivePath.selectOptions && drivePath.selectOptions.intention === "select") {
-			useDriveSelectStore.getState().setSelectedItems(prev => {
-				const prevSelected = prev.some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
-
-				if (prevSelected) {
-					return prev.filter(i => !(i.data.uuid === info.item.data.uuid && i.type === info.item.type))
-				}
-
-				return [...prev.filter(i => !(i.data.uuid === info.item.data.uuid && i.type === info.item.type)), info.item]
-			})
-
-			return
-		}
-	}
-
-	const onPress = () => {
-		// Undecryptable items have no meaningful preview or navigation target —
-		// suppress the open intent so the row stays inert. Selection still works
-		// because that path goes through the Checkbox / Menu Select button.
-		if (info.item.data.undecryptable) {
-			return
-		}
-
-		if (disabled && !navigateOnly) {
-			return
-		}
-
-		if (!navigateOnly) {
-			if (isSelectedFromDriveSelect) {
-				onPressSelectForDriveSelect()
-
-				return
-			}
-
-			if (areDriveItemsSelected) {
-				useDriveStore.getState().setSelectedItems(prev => {
-					const prevSelected = prev.some(i => i.data.uuid === info.item.data.uuid)
-
-					if (prevSelected) {
-						return prev.filter(i => i.data.uuid !== info.item.data.uuid)
-					}
-
-					return [...prev.filter(i => i.data.uuid !== info.item.data.uuid), info.item]
-				})
-
-				return
-			}
-
-			if (info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile") {
-				useDrivePreviewStore.getState().open({
-					initialItem: {
-						type: "drive",
-						data: {
-							item: info.item,
-							drivePath
-						}
-					},
-					items: getListItems()
-						.filter(i => i.type === "file" || i.type === "sharedFile" || i.type === "sharedRootFile")
-						.map(item => ({
-							type: "drive",
-							data: item
-						}))
-				})
-
-				return
-			}
-		}
-
-		const navigationTarget = resolveDriveNavigationTarget({
-			item: info.item,
-			drivePath
-		})
-
-		if (navigationTarget) {
-			router.push(navigationTarget)
-
-			return
-		}
-	}
 
 	return (
 		<View
@@ -226,7 +75,7 @@ const Item = ({
 				onCloseMenu={() => setIsMenuOpen(false)}
 				onOpenMenu={() => setIsMenuOpen(true)}
 				drivePath={drivePath}
-				isStoredOffline={driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false}
+				isStoredOffline={isStoredOffline}
 			>
 				<View
 					className={cn(
@@ -266,12 +115,8 @@ const Item = ({
 						onPress={onPress}
 					>
 						<View className="bg-transparent shrink-0 items-center flex-row">
-							{(info.item.type === "file" || info.item.type === "directory") &&
-								info.item.data.favorited &&
-								drivePath.type !== "favorites" && <FavoritedIndicator />}
-							{drivePath.type !== "offline" &&
-								driveItemStoredOfflineQuery.status === "success" &&
-								driveItemStoredOfflineQuery.data && <OfflineIndicator />}
+							{showFavorited && <FavoritedIndicator />}
+							{showOffline && <OfflineIndicator />}
 							<Thumbnail
 								item={info.item}
 								target={info.target}
@@ -314,7 +159,7 @@ const Item = ({
 									info={info}
 									drivePath={drivePath}
 								/>
-								{hasOfflineSyncError && (
+								{hasSyncError && (
 									<Text
 										className="text-xs text-red-500"
 										numberOfLines={1}
@@ -331,9 +176,7 @@ const Item = ({
 										isAnchoredToRight={true}
 										item={info.item}
 										drivePath={drivePath}
-										isStoredOffline={
-											driveItemStoredOfflineQuery.status === "success" ? driveItemStoredOfflineQuery.data : false
-										}
+										isStoredOffline={isStoredOffline}
 									>
 										<View className="pl-4 h-full items-center justify-center flex-row bg-transparent">
 											<Ionicons
