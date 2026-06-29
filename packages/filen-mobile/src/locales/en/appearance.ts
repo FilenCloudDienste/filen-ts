@@ -40,5 +40,17 @@ export const appearance = {
 	/** Settings row subtitle explaining the reset-sort action */
 	reset_sort_description: "Clear all saved sort orders and return to the defaults",
 	/** Confirmation dialog message shown before resetting sort orders */
-	reset_sort_confirm: "Are you sure you want to reset all saved sort orders?"
+	reset_sort_confirm: "Are you sure you want to reset all saved sort orders?",
+
+	// ── View-mode settings group (appearance.tsx) ─────────────────────────────
+	/** Settings row label: remember view mode separately for each directory */
+	remember_view_per_directory: "Remember view per directory",
+	/** Settings row subtitle explaining per-directory view mode memory */
+	remember_view_per_directory_description: "Keep a separate view layout for every directory instead of one global layout",
+	/** Settings row label / confirm-dialog title: reset all saved view modes */
+	reset_view: "Reset view",
+	/** Settings row subtitle explaining the reset-view action */
+	reset_view_description: "Clear all saved view modes and return to the default list view",
+	/** Confirmation dialog message shown before resetting view modes */
+	reset_view_confirm: "Are you sure you want to reset all saved view modes?"
 } as const

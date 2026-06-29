@@ -66,6 +66,13 @@ export const drive = {
 	/** Sort option: sort by creation date newest first */
 	sort_created_desc: "Created (newest first)",
 
+	// ── View menu (buildViewModeMenuButton in drive/components/headerMenuBuilders.ts) ──
+	// Note: the top-level "View" title reuses the generic `view` key from common.ts.
+	/** View submenu option: list layout */
+	view_list: "List",
+	/** View submenu option: grid layout */
+	view_grid: "Grid",
+
 	// ── Header / navigation section titles ────────────────────────────────────
 	/** Header title for the root drive view and breadcrumb fallback */
 	drive: "Drive",

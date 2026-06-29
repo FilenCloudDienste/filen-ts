@@ -79,8 +79,7 @@ vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }
 
 // ---- imports after mocks ----
 
-import { buildSortMenuButton } from "@/features/drive/components/headerMenuBuilders"
-import { buildBulkActionMenu } from "@/features/drive/components/headerMenuBuilders"
+import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { Platform } from "react-native"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { DriveItem } from "@/types"
@@ -1074,5 +1073,37 @@ describe("buildBulkActionMenu", () => {
 		expect(ids).toContain("bulkShareFilenUser")
 		expect(ids).toContain("bulkMakeOffline")
 		expect(ids).toContain("bulkTrash")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// buildViewModeMenuButton — depth-2 "View" submenu (Android-safe)
+// ---------------------------------------------------------------------------
+
+describe("buildViewModeMenuButton", () => {
+	it("returns a 'viewMode' submenu with list + grid leaves (depth 2, Android-safe)", () => {
+		const btn = buildViewModeMenuButton("list", vi.fn(), t as never)
+
+		expect(btn.id).toBe("viewMode")
+		expect(btn.subButtons).toHaveLength(2)
+		const ids = (btn.subButtons ?? []).map(b => b.id)
+		expect(ids).toEqual(["viewMode.list", "viewMode.grid"])
+		// leaves are not themselves submenus (depth stays 2)
+		for (const leaf of btn.subButtons ?? []) {
+			expect("subButtons" in leaf).toBe(false)
+		}
+	})
+
+	it("checkmarks the current mode", () => {
+		const grid = buildViewModeMenuButton("grid", vi.fn(), t as never)
+		expect(grid.subButtons?.find(b => b.id === "viewMode.grid")?.checked).toBe(true)
+		expect(grid.subButtons?.find(b => b.id === "viewMode.list")?.checked).toBe(false)
+	})
+
+	it("each leaf's onPress sets its mode", () => {
+		const setViewMode = vi.fn()
+		const btn = buildViewModeMenuButton("list", setViewMode, t as never)
+		btn.subButtons?.find(b => b.id === "viewMode.grid")?.onPress?.()
+		expect(setViewMode).toHaveBeenCalledWith("grid")
 	})
 })

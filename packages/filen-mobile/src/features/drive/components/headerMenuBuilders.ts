@@ -1,6 +1,7 @@
 import { router } from "@/lib/router"
 import { type TFunction } from "i18next"
 import { run } from "@filen/utils"
+import { type DriveViewMode } from "@/features/drive/driveViewModePreference"
 import { randomUUID } from "expo-crypto"
 import * as FileSystem from "expo-file-system"
 import * as MediaLibrary from "expo-media-library/legacy"
@@ -85,6 +86,33 @@ export function buildSortMenuButton(current: SortByType, setSort: (next: SortByT
 				{ id: "sort.creationAsc", title: t("sort_created_asc"), value: "creationAsc" },
 				{ id: "sort.creationDesc", title: t("sort_created_desc"), value: "creationDesc" }
 			)
+		]
+	}
+}
+
+// Builds the view-mode toggle submenu (a depth-2 "View" submenu with List/Grid
+// radio leaves). Android-safe: @react-native-menu/menu supports one level of
+// nesting (submenu inside a root button), matching the notes viewMode menu shape.
+export function buildViewModeMenuButton(current: DriveViewMode, setViewMode: (next: DriveViewMode) => void, t: TFunction): MenuButton {
+	return {
+		id: "viewMode",
+		title: t("view"),
+		icon: current === "grid" ? "grid" : "list",
+		subButtons: [
+			{
+				id: "viewMode.list",
+				title: t("view_list"),
+				icon: "list",
+				checked: current === "list",
+				onPress: () => setViewMode("list")
+			},
+			{
+				id: "viewMode.grid",
+				title: t("view_grid"),
+				icon: "grid",
+				checked: current === "grid",
+				onPress: () => setViewMode("grid")
+			}
 		]
 	}
 }

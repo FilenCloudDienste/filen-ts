@@ -11,6 +11,7 @@ import type { DriveItem } from "@/types"
 import useDrivePath from "@/hooks/useDrivePath"
 import { type DriveSearchStatus } from "@/features/drive/hooks/useDriveSearch"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
+import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -22,7 +23,7 @@ import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { aggregateDriveSelectionFlags } from "@/features/drive/driveSelectors"
 import { resolveDriveHeaderTitle } from "@/features/drive/utils"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
-import { buildSortMenuButton, buildBulkActionMenu } from "@/features/drive/components/headerMenuBuilders"
+import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
 import logger from "@/lib/logger"
 
@@ -73,6 +74,7 @@ const Header = ({
 	const inTabContext = drivePath.type === "drive" && !drivePath.selectOptions
 	const isAtStackRoot = (navigation.getState()?.index ?? 0) === 0
 	const { sort: currentSort, setSort, sortable } = useDriveSortPreference(drivePath)
+	const { viewMode, setViewMode } = useDriveViewMode(drivePath)
 
 	const parent = getDriveParent(drivePath)
 
@@ -89,6 +91,10 @@ const Header = ({
 
 		if (sortable && !selectionMode) {
 			menuButtons.push(buildSortMenuButton(currentSort, setSort, t))
+		}
+
+		if (!selectionMode) {
+			menuButtons.push(buildViewModeMenuButton(viewMode, setViewMode, t))
 		}
 
 		// Select-all / deselect-all must mirror the list body's VISIBLE (search-

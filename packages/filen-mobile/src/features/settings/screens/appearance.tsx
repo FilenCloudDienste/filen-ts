@@ -8,6 +8,7 @@ import SettingsHeader from "@/components/ui/settingsHeader"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
 import { useDriveSortPreferences, DEFAULT_SORT_PREFERENCES } from "@/features/drive/driveSortPreference"
+import { useDriveViewModePreferences, DEFAULT_VIEW_MODE_PREFERENCES } from "@/features/drive/driveViewModePreference"
 import { useStartScreen, START_SCREENS, type StartScreen } from "@/features/settings/startScreen"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { useTranslation } from "react-i18next"
@@ -20,6 +21,7 @@ import logger from "@/lib/logger"
 function Appearance() {
 	const navigation = useNavigation()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
+	const [viewModePrefs, setViewModePrefs] = useDriveViewModePreferences()
 	const [startScreen, setStartScreen] = useStartScreen()
 	const { t } = useTranslation()
 	const [language, setLanguage] = useLanguage()
@@ -175,6 +177,52 @@ function Appearance() {
 		}
 	]
 
+	const viewButtons: Button[] = [
+		{
+			icon: "grid-outline",
+			title: t("remember_view_per_directory"),
+			subTitle: t("remember_view_per_directory_description"),
+			rightItem: {
+				type: "switch",
+				value: viewModePrefs.mode === "perDirectory",
+				onValueChange: value => setViewModePrefs(prev => ({ ...prev, mode: value ? "perDirectory" : "global" }))
+			}
+		},
+		{
+			icon: "refresh-outline",
+			title: t("reset_view"),
+			subTitle: t("reset_view_description"),
+			onPress: async () => {
+				const promptResult = await run(async () => {
+					return await prompts.alert({
+						title: t("reset_view"),
+						message: t("reset_view_confirm"),
+						okText: t("reset"),
+						cancelText: t("cancel"),
+						destructive: true
+					})
+				})
+
+				if (!promptResult.success) {
+					logger.warn("settings", "reset view confirmation prompt failed", { error: promptResult.error })
+					alerts.error(promptResult.error)
+
+					return
+				}
+
+				if (promptResult.data.cancelled) {
+					return
+				}
+
+				setViewModePrefs(prev => ({
+					...prev,
+					global: DEFAULT_VIEW_MODE_PREFERENCES.global,
+					perDirectory: {}
+				}))
+			}
+		}
+	]
+
 	return (
 		<Fragment>
 			<SettingsHeader
@@ -196,6 +244,10 @@ function Appearance() {
 					<Group
 						className="bg-background-tertiary"
 						buttons={sortButtons}
+					/>
+					<Group
+						className="bg-background-tertiary"
+						buttons={viewButtons}
 					/>
 				</SettingsScrollView>
 			</SafeAreaView>
