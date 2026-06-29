@@ -23,4 +23,4 @@ export function gridColumnsForWidth(width: number): number {
 // GRID_CELL_PADDING is each cell's padding (half the gap between adjacent cells). With equal values
 // the gutter is uniform: edge gap = edge-inset + cell-padding, between-items gap = 2× cell-padding.
 export const GRID_EDGE_PADDING = 8
-export const GRID_CELL_PADDING = 8
+export const GRID_CELL_PADDING = 12

@@ -7,7 +7,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import { Checkbox } from "@/components/ui/checkbox"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import Menu from "@/features/drive/components/item/menu"
-import { FavoritedIndicatorInline, OfflineIndicatorInline } from "@/features/drive/components/item/indicators"
+import { FavoritedIndicatorCard, OfflineIndicatorCard } from "@/features/drive/components/item/indicators"
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
@@ -30,15 +30,8 @@ export default function GridItem({
 	getListItems: () => DriveItem[]
 	itemWidth: number
 }) {
-	const {
-		onPress,
-		disabled,
-		navigateOnly,
-		isSelected,
-		isSelecting,
-		isSelectedFromDriveSelect,
-		onPressSelectForDriveSelect
-	} = useDriveItemInteraction({ info, drivePath, getListItems })
+	const { onPress, disabled, navigateOnly, isSelected, isSelecting, isSelectedFromDriveSelect, onPressSelectForDriveSelect } =
+		useDriveItemInteraction({ info, drivePath, getListItems })
 	const { showFavorited, showOffline, isStoredOffline, hasSyncError } = useDriveItemIndicators({
 		item: info.item,
 		drivePath
@@ -53,11 +46,7 @@ export default function GridItem({
 	// In picker (driveSelect) mode the disabled gate must suppress both the value and the
 	// handler, with a transparent checkbox colour to signal unavailability — same as the row.
 	const checkboxValue = isPickerSelect ? (disabled ? false : isSelectedFromDriveSelect) : isSelected
-	const checkboxOnChange = isPickerSelect
-		? disabled
-			? undefined
-			: onPressSelectForDriveSelect
-		: onPress
+	const checkboxOnChange = isPickerSelect ? (disabled ? undefined : onPressSelectForDriveSelect) : onPress
 
 	return (
 		<View
@@ -80,7 +69,7 @@ export default function GridItem({
 				isStoredOffline={isStoredOffline}
 			>
 				<PressableScale
-					className="bg-transparent items-center w-full"
+					className="bg-transparent items-center w-full rounded-2xl"
 					onPress={onPress}
 				>
 					{/*
@@ -101,6 +90,8 @@ export default function GridItem({
 							size={{ icon: Math.round(cardSize * 0.5), thumbnail: cardSize }}
 							contentFit="cover"
 						/>
+						{showOffline && <OfflineIndicatorCard />}
+						{showFavorited && <FavoritedIndicatorCard />}
 						{isSelecting && (
 							<View className="absolute top-1.5 right-1.5 bg-transparent">
 								<Checkbox
@@ -112,18 +103,16 @@ export default function GridItem({
 							</View>
 						)}
 					</View>
-					{/* Name row: inline offline/favorite badges precede the truncated filename. */}
-					<View className="flex-row items-center justify-center gap-1 pt-1.5 w-full bg-transparent px-1">
-						{showOffline && <OfflineIndicatorInline />}
-						{showFavorited && <FavoritedIndicatorInline />}
-						<Text
-							className={cn("text-sm text-center shrink", hasSyncError ? "text-red-500" : "text-foreground")}
-							numberOfLines={1}
-							ellipsizeMode="middle"
-						>
-							{driveItemDisplayName(info.item)}
-						</Text>
-					</View>
+					{/* Filename: full-width centered single line (offline/favorite badges live on the card
+					    above, like the photos grid, so nothing offsets the text). A red name flags an
+					    offline sync error in the /offline view. */}
+					<Text
+						className={cn("text-sm text-center px-1 pt-1.5 flex-1", hasSyncError ? "text-red-500" : "text-foreground")}
+						numberOfLines={1}
+						ellipsizeMode="middle"
+					>
+						{driveItemDisplayName(info.item)}
+					</Text>
 				</PressableScale>
 			</Menu>
 		</View>
