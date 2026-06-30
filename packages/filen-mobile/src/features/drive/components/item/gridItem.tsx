@@ -69,7 +69,7 @@ export default function GridItem({
 				isStoredOffline={isStoredOffline}
 			>
 				<PressableScale
-					className="bg-transparent items-center w-full rounded-2xl"
+					className="bg-transparent items-center w-full rounded-3xl"
 					onPress={onPress}
 				>
 					{/*
@@ -79,7 +79,7 @@ export default function GridItem({
 					 */}
 					<View
 						className={cn(
-							"rounded-2xl items-center justify-center overflow-hidden",
+							"rounded-3xl items-center justify-center overflow-hidden",
 							driveScreenUsesBaseBackground(drivePath) ? "bg-background-secondary" : "bg-background-tertiary"
 						)}
 						style={{ width: cardSize, height: cardSize }}
