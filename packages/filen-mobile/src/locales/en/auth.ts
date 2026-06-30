@@ -62,5 +62,11 @@ export const auth = {
 	/** Toast shown after a confirmation email has been resent successfully */
 	resend_confirmation_email_sent: "If an account exists for that address, a confirmation email has been sent.",
 	/** Registration screen — split sentence offering login; <link> wraps the tappable "Log in" that closes registration */
-	already_have_an_account: "Already have an account? <link>Log in</link>"
+	already_have_an_account: "Already have an account? <link>Log in</link>",
+	/** Registration screen — eligibility card shown when the IP/region IS eligible for the free-storage signup bonus */
+	register_free_storage_eligible: "You are eligible for 10 GiB of free storage!",
+	/** Registration screen — eligibility card shown when NOT eligible (or the check could not be completed) */
+	register_free_storage_not_eligible: "You are not eligible for 10 GiB of free storage.",
+	/** Registration screen — link on the eligibility card opening the explainer article */
+	register_free_storage_learn_more: "Learn more"
 } as const

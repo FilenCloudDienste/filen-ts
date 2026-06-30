@@ -27,7 +27,8 @@ const UNCACHED_QUERY_KEYS = new Map<string, true>([
 	["useCameraUploadAlbumLatestPhotoQuery", true],
 	["useLocalAuthenticationQuery", true],
 	["useCacheSizes", true],
-	["useFileProviderCacheBudget", true]
+	["useFileProviderCacheBudget", true],
+	["useRegisterCheck", true]
 ])
 
 // Hoisted .some predicates — shouldPersistQuery runs per persisted row at restore and

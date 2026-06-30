@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react"
-import { Platform, TextInput } from "react-native"
+import { Linking, Platform, TextInput } from "react-native"
 import { Trans, useTranslation } from "react-i18next"
 import { useNavigation } from "expo-router"
 import { useResolveClassNames } from "uniwind"
@@ -16,6 +16,7 @@ import prompts from "@/lib/prompts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useIsOnline from "@/hooks/useIsOnline"
 import { isValidEmail } from "@/features/auth/utils"
+import useRegisterCheckQuery from "@/features/auth/queries/useRegisterCheck.query"
 import logger from "@/lib/logger"
 
 type PasswordStrength = ReturnType<typeof ratePasswordStrength>["strength"]
@@ -40,17 +41,24 @@ const STRENGTH_TW: Record<PasswordStrength, string> = {
 	best: "text-green-500"
 }
 
+// Explainer article for the "free 10 GiB at signup" eligibility check (same URL as filen-web).
+const LEARN_MORE_URL = "https://filen.io/hub/free-10-gb-at-signup-eligibility-check-before-creating-an-account/"
+
 const Register = () => {
 	const { t } = useTranslation()
 	const navigation = useNavigation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
+	const textGreen500 = useResolveClassNames("text-green-500")
+	const textRed500 = useResolveClassNames("text-red-500")
+	const textPrimary = useResolveClassNames("text-primary")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const [email, setEmail] = useState<string>("")
 	const [password, setPassword] = useState<string>("")
 	const [confirmPassword, setConfirmPassword] = useState<string>("")
 	const isOnline = useIsOnline()
+	const registerCheckQuery = useRegisterCheckQuery()
 
 	const passwordStrength = password.length > 0 ? ratePasswordStrength(password) : null
 	const emailValid = isValidEmail(email)
@@ -134,6 +142,16 @@ const Register = () => {
 		}
 
 		alerts.normal(t("resend_confirmation_email_sent"))
+	}
+
+	const handleLearnMore = async (): Promise<void> => {
+		const result = await run(async () => {
+			return await Linking.openURL(LEARN_MORE_URL)
+		})
+
+		if (!result.success) {
+			logger.error("auth", "failed to open free-storage learn-more link", { error: result.error })
+		}
 	}
 
 	return (
@@ -304,6 +322,31 @@ const Register = () => {
 							/>
 						</Text>
 					</PressableOpacity>
+					{registerCheckQuery.status === "success" && (
+						<View className="flex-row items-center gap-3 rounded-2xl bg-background-tertiary px-4 py-3">
+							<Ionicons
+								name={registerCheckQuery.data.ok ? "checkmark-circle" : "close-circle"}
+								size={20}
+								color={(registerCheckQuery.data.ok ? textGreen500.color : textRed500.color) as string}
+							/>
+							<Text className="text-muted-foreground text-sm flex-1">
+								{registerCheckQuery.data.ok
+									? t("register_free_storage_eligible")
+									: t("register_free_storage_not_eligible")}
+							</Text>
+							<PressableOpacity
+								onPress={handleLearnMore}
+								className="flex-row items-center gap-1"
+							>
+								<Text className="text-primary text-sm">{t("register_free_storage_learn_more")}</Text>
+								<Ionicons
+									name="chevron-forward"
+									size={14}
+									color={textPrimary.color as string}
+								/>
+							</PressableOpacity>
+						</View>
+					)}
 				</KeyboardAwareScrollView>
 			</SafeAreaView>
 		</Fragment>
