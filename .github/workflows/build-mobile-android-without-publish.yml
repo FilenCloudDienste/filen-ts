@@ -14,6 +14,9 @@ concurrency:
   group: build-mobile-android-without-publish
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 env:
   NODE_ENV: production
   APP_ENV: production
@@ -96,9 +99,23 @@ jobs:
           rm -f android/app/release.keystore
           rm -f credentials.json
 
-      - name: Upload release APK
-        uses: actions/upload-artifact@v6
-        with:
-          name: android-release-apk-test-${{ github.run_number }}
-          path: packages/filen-mobile/android/app/build/outputs/apk/release/*.apk
-          retention-days: 90
+      - name: Publish APK to rolling GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Attach the signed release APK to a rolling prerelease so it can be tapped-to-install
+          # directly on a phone. GitHub artifact downloads are always zipped; release assets are not.
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          cp "$APK" "${RUNNER_TEMP}/Filen-android.apk"
+          gh release delete android-test-latest --cleanup-tag --yes || true
+          gh release create android-test-latest \
+            "${RUNNER_TEMP}/Filen-android.apk" \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --title "Android test build (latest)" \
+            --notes "Rolling latest signed release APK for on-device testing. Build #${{ github.run_number }} · commit ${GITHUB_SHA}. On your phone, tap **Filen-android.apk** below to install (allow 'install unknown apps' if prompted)."
+          {
+            echo "## Android test build published"
+            echo ""
+            echo "Install on your phone from the [latest release](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/android-test-latest) — tap **Filen-android.apk**. Build #${{ github.run_number }}."
+          } >> "$GITHUB_STEP_SUMMARY"
