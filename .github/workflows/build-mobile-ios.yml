@@ -173,7 +173,7 @@ jobs:
           retention-days: 90
 
       - name: Upload to TestFlight
-        uses: apple-actions/upload-testflight-build@v4
+        uses: apple-actions/upload-testflight-build@v5
         with:
           app-path: ${{ runner.temp }}/Filen.ipa
           issuer-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
@@ -199,6 +199,6 @@ jobs:
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### TestFlight" >> $GITHUB_STEP_SUMMARY
-          echo "- Build uploaded to App Store Connect internal beta track" >> $GITHUB_STEP_SUMMARY
+          echo "- Build uploaded to App Store Connect. After processing, assign it to TestFlight testers manually." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Download artifacts from the Actions tab above. Build #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
