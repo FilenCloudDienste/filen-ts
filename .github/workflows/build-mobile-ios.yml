@@ -152,11 +152,10 @@ jobs:
           # Clear provisioning profiles downloaded by the action
           rm -rf ~/Library/MobileDevice/Provisioning\ Profiles
 
-          # Clear any temporary keychains that might have been created
-          security list-keychains | grep -E "(temp|build|ci|apple-actions|signing_temp|temp)" | xargs -I {} security delete-keychain {} 2>/dev/null || true
-
-          # Reset keychain list to default
-          security list-keychains -d user -s login.keychain
+          # Keychain deletion is intentionally NOT done here: import-codesign-certs
+          # (create-keychain: true) deletes its signing_temp keychain in its own post-job
+          # hook, which hard-fails the job with "keychain could not be found" (exit 50)
+          # if this step already deleted it.
 
       - name: Upload iOS archive
         uses: actions/upload-artifact@v6
