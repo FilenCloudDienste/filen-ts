@@ -81,11 +81,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			CFBundleDevelopmentRegion: "en",
 			UIPrefersShowingLanguageSettings: true
 		},
-		icon: {
-			light: "./src/assets/images/icon-light.png",
-			dark: "./src/assets/images/icon-dark.png",
-			tinted: "./src/assets/images/icon-tinted.png"
-		},
+		icon: "./src/assets/images/ios.icon",
 		privacyManifests: {
 			NSPrivacyTracking: false
 		}
