@@ -201,7 +201,13 @@ const RootLayout = () => {
 											/>
 											<Stack.Screen
 												name="register"
-												options={modalOptions}
+												options={{
+													...modalOptions,
+													contentStyle: {
+														...modalOptions.contentStyle,
+														backgroundColor: bgBackground.backgroundColor
+													}
+												}}
 											/>
 											<Stack.Screen
 												name="cameraUpload"

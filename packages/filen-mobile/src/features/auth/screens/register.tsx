@@ -202,14 +202,15 @@ const Register = () => {
 				}}
 			/>
 			<SafeAreaView
-				className="flex-1 bg-background-secondary"
+				className="flex-1 bg-background"
 				edges={["left", "right", "bottom"]}
 			>
 				<KeyboardAwareScrollView
-					className="flex-1 bg-background-secondary"
-					contentContainerClassName={cn("px-4 gap-6", Platform.OS === "ios" && "pt-8")}
+					className="flex-1"
+					contentContainerClassName="px-4 gap-6 py-8 bg-background"
 					keyboardShouldPersistTaps="handled"
 					contentInsetAdjustmentBehavior="automatic"
+					scrollEnabled={true}
 				>
 					<View className="gap-1 pt-2 bg-transparent">
 						<Text className="text-foreground text-2xl font-bold">{t("create_account_welcome")}</Text>
@@ -330,9 +331,7 @@ const Register = () => {
 								color={(registerCheckQuery.data.ok ? textGreen500.color : textRed500.color) as string}
 							/>
 							<Text className="text-muted-foreground text-sm flex-1">
-								{registerCheckQuery.data.ok
-									? t("register_free_storage_eligible")
-									: t("register_free_storage_not_eligible")}
+								{registerCheckQuery.data.ok ? t("register_free_storage_eligible") : t("register_free_storage_not_eligible")}
 							</Text>
 							<PressableOpacity
 								onPress={handleLearnMore}

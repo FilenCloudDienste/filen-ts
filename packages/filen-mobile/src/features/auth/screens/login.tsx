@@ -226,14 +226,15 @@ const Login = () => {
 				backVisible={false}
 			/>
 			<SafeAreaView
-				className="flex-1"
+				className="flex-1 bg-background"
 				edges={["left", "right", "bottom"]}
 			>
 				<KeyboardAwareScrollView
 					className="flex-1"
-					contentContainerClassName="px-4 gap-6 pt-4"
+					contentContainerClassName="px-4 gap-6 py-8 bg-background"
 					keyboardShouldPersistTaps="handled"
 					contentInsetAdjustmentBehavior="automatic"
+					scrollEnabled={true}
 				>
 					<View className="items-center gap-3 pt-6">
 						<Image
