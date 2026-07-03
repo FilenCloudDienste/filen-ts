@@ -132,7 +132,7 @@ data loss), not a style nit or a hypothetical. Emit it as a structured finding:
 
 ### 8. Open ONE PR
 
-- Create a branch off `main` (e.g. `bug-hunt/<area>-<short-desc>`), commit the fix + test with a clear
+- Create a branch off `main` named `bot/bug-hunt/<area>-<short-desc>` (the `bot/` prefix lets the branch janitor prune it), commit the fix + test with a clear
   Conventional-Commits message and **no attribution trailer**, and push the branch.
 - Open the PR with `gh pr create`, applying the single existing label **`bot:bug-hunt`** (do NOT invent
   per-area labels — the token can't create labels). Put the **area in the PR title**, e.g.

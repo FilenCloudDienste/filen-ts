@@ -203,7 +203,7 @@ jobs:
             --permission-mode auto \
             --model "$ANTHROPIC_DEFAULT_OPUS_MODEL" \
             --effort high \
-            --settings .github/bug-hunt/claude-settings.json \
+            --settings .github/bot/claude-settings.json \
             2>&1 | tee .bug-hunt-run.log
 
       - name: Save coverage record

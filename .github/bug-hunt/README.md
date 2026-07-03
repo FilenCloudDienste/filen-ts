@@ -12,7 +12,7 @@ Full design + threat model: `docs/superpowers/specs/2026-07-03-automated-bug-hun
 | --- | --- |
 | `.github/workflows/bug-hunt-filen-mobile.yml` | The workflow: deterministic setup + one `claude -p` brain. |
 | `.github/bug-hunt/filen-mobile.prompt.md` | Self-contained orchestrator prompt (the pipeline + guardrails). |
-| `.github/bug-hunt/claude-settings.json` | Bot Claude Code settings: deny rules + sandbox + `disableBypassPermissionsMode`. |
+| `.github/bot/claude-settings.json` | **Shared** Claude Code settings (both bots): deny rules + sandbox + `disableWorkflows` + credential masking. |
 | `.github/bug-hunt/README.md` | This file. |
 
 ## One-time setup (required — the bot cannot do these itself)
