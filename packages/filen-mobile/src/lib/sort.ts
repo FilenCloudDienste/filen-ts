@@ -17,6 +17,8 @@ export type SortByType =
 	| "uploadDateDesc"
 	| "creationAsc"
 	| "creationDesc"
+	| "captureAsc"
+	| "captureDesc"
 
 const uuidCache = new Map<string, number>()
 const lowerCache = new Map<string, string>()
@@ -180,6 +182,47 @@ function creationSortKey(item: DriveItem): number {
 	)
 }
 
+// Client-written timestamps below this (1980-01-01) are treated as garbage — epoch-zero
+// mtimes and similar artifacts of legacy uploaders — rather than as very old capture dates.
+const CAPTURE_TIMESTAMP_FLOOR = Date.UTC(1980, 0, 1)
+
+// Best-effort capture time for the photos timeline. Legacy clients stamped `created` with
+// the upload time instead of the file's real creation date, stranding old photos at their
+// upload position while the real date survived in `modified`. A photo cannot be modified
+// before it was captured, so the earliest plausible client timestamp — above the garbage
+// floor and no later than the server-assigned upload time (the only fully trusted stamp) —
+// is the closest available estimate. Falls back to the upload time when neither client
+// timestamp is usable. Shared items carry no server timestamp: only the floor applies, and
+// they fall back to the plain creation key.
+function captureSortKey(item: DriveItem): number {
+	const isFile = item.type === "file"
+
+	if (!isFile && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+		return creationSortKey(item)
+	}
+
+	const uploaded = isFile ? Number(item.data.timestamp) : Number.POSITIVE_INFINITY
+	let best = Number.POSITIVE_INFINITY
+
+	for (const candidate of [item.data.decryptedMeta?.created, item.data.decryptedMeta?.modified]) {
+		if (candidate === undefined) {
+			continue
+		}
+
+		const value = Number(candidate)
+
+		if (value > CAPTURE_TIMESTAMP_FLOOR && value <= uploaded && value < best) {
+			best = value
+		}
+	}
+
+	if (best !== Number.POSITIVE_INFINITY) {
+		return best
+	}
+
+	return isFile ? Number(item.data.timestamp) : creationSortKey(item)
+}
+
 type SortMode = {
 	kind: "parts" | "size" | "timestamp"
 	isAsc: boolean
@@ -199,7 +242,9 @@ const sortModes: Record<string, SortMode> = {
 	uploadDateAsc: { kind: "timestamp", isAsc: true, timestampKey: uploadDateSortKey },
 	uploadDateDesc: { kind: "timestamp", isAsc: false, timestampKey: uploadDateSortKey },
 	creationAsc: { kind: "timestamp", isAsc: true, timestampKey: creationSortKey },
-	creationDesc: { kind: "timestamp", isAsc: false, timestampKey: creationSortKey }
+	creationDesc: { kind: "timestamp", isAsc: false, timestampKey: creationSortKey },
+	captureAsc: { kind: "timestamp", isAsc: true, timestampKey: captureSortKey },
+	captureDesc: { kind: "timestamp", isAsc: false, timestampKey: captureSortKey }
 }
 
 const FALLBACK_SORT_MODE = sortModes["nameAsc"] as SortMode

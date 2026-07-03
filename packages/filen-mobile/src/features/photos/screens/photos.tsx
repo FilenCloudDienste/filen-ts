@@ -75,7 +75,7 @@ const Photos = () => {
 					supportedImageExtensions: EXPO_IMAGE_SUPPORTED_EXTENSIONS,
 					extname: name => FileSystem.Paths.extname(name)
 				}),
-				"creationDesc"
+				"captureDesc"
 			)
 		: []
 

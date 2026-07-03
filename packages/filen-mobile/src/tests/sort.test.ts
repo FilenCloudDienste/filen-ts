@@ -416,6 +416,73 @@ describe("itemSorter", () => {
 			expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.txt", "old.txt"])
 		})
 
+		// capture sorting: best-effort capture time for the photos timeline. Realistic ms
+		// timestamps are required — the key discards candidates below its 1980 garbage floor.
+		describe("capture sorting (photos timeline)", () => {
+			const T_2019 = Date.UTC(2019, 5, 15)
+			const T_2021 = Date.UTC(2021, 5, 30)
+			const T_2022 = Date.UTC(2022, 2, 10)
+			const T_2024 = Date.UTC(2024, 1, 13)
+
+			it("REGRESSION (#39): legacy upload-stamped created falls back to the older modified date", () => {
+				// Legacy client stamped created with the upload time (created == timestamp),
+				// the real capture date survives in modified.
+				const legacy = makeItem("file", "legacy.jpg", { created: T_2024, modified: T_2021, timestamp: T_2024 })
+				const healthy = makeItem("file", "healthy.jpg", { created: T_2022, modified: T_2022, timestamp: T_2024 })
+
+				const result = itemSorter.sortItems([legacy, healthy], "captureDesc")
+
+				// creationDesc would strand legacy.jpg at its 2024 upload slot (first); the capture
+				// key places it at its 2021 capture date, after the 2022 photo.
+				expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["healthy.jpg", "legacy.jpg"])
+			})
+
+			it("orders healthy items (created <= modified) identically to creation sorting", () => {
+				const older = makeItem("file", "old.jpg", { created: T_2019, modified: T_2021, timestamp: T_2024 })
+				const newer = makeItem("file", "new.jpg", { created: T_2022, modified: T_2022, timestamp: T_2024 })
+
+				const capture = itemSorter.sortItems([older, newer], "captureDesc")
+				const creation = itemSorter.sortItems([older, newer], "creationDesc")
+
+				expect(capture.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["new.jpg", "old.jpg"])
+				expect(capture.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(
+					creation.map((i: DriveItem) => i.data.decryptedMeta?.name)
+				)
+			})
+
+			it("ignores garbage epoch timestamps instead of sinking items to the bottom", () => {
+				// modified 0 (epoch) must be discarded, keeping the item at its upload position
+				// rather than dropping it below genuinely old photos.
+				const garbageMtime = makeItem("file", "garbage.jpg", { created: T_2024, modified: 0, timestamp: T_2024 })
+				const old = makeItem("file", "old.jpg", { created: T_2019, modified: T_2019, timestamp: T_2024 })
+
+				const result = itemSorter.sortItems([old, garbageMtime], "captureDesc")
+
+				expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["garbage.jpg", "old.jpg"])
+			})
+
+			it("discards client timestamps later than the server upload time", () => {
+				// created postdates the upload (broken device clock) — the capture date cannot be
+				// after the upload, so modified wins.
+				const skewed = makeItem("file", "skewed.jpg", { created: Date.UTC(2099, 0, 1), modified: T_2021, timestamp: T_2022 })
+				const anchor = makeItem("file", "anchor.jpg", { created: T_2022, modified: T_2022, timestamp: T_2024 })
+
+				const result = itemSorter.sortItems([skewed, anchor], "captureDesc")
+
+				expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["anchor.jpg", "skewed.jpg"])
+			})
+
+			it("falls back to the upload time when no client timestamp is plausible", () => {
+				// Both candidates invalid: created in the future, modified at epoch.
+				const broken = makeItem("file", "broken.jpg", { created: Date.UTC(2099, 0, 1), modified: 0, timestamp: T_2021 })
+				const anchor = makeItem("file", "anchor.jpg", { created: T_2022, modified: T_2022, timestamp: T_2024 })
+
+				const result = itemSorter.sortItems([broken, anchor], "captureAsc")
+
+				expect(result.map((i: DriveItem) => i.data.decryptedMeta?.name)).toEqual(["broken.jpg", "anchor.jpg"])
+			})
+		})
+
 		it("uses uuid as tiebreaker for equal upload dates — lower numeric uuid sorts first in ascending", () => {
 			// parseNumbersFromString scans up to 16 digits; we place the distinguishing digit early
 			// "00000001-0000-0000-0000-000000000000" first 16 digits → 0000000100000000 = 1_000_000_00 → smaller

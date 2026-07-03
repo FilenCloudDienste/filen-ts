@@ -48,7 +48,9 @@ const ALL_MODES: SortByType[] = [
 	"uploadDateAsc",
 	"uploadDateDesc",
 	"creationAsc",
-	"creationDesc"
+	"creationDesc",
+	"captureAsc",
+	"captureDesc"
 ]
 
 const DIR_TYPES = new Set(["directory", "sharedDirectory", "sharedRootDirectory"])
@@ -106,7 +108,9 @@ describe("hardening — bigint field fidelity across all timestamp modes", () =>
 		"uploadDateAsc",
 		"uploadDateDesc",
 		"creationAsc",
-		"creationDesc"
+		"creationDesc",
+		"captureAsc",
+		"captureDesc"
 	]
 
 	it("bigint-fielded items order identically to number-fielded twins (500 mixed items, every timestamp mode)", () => {
