@@ -75,6 +75,31 @@ export function isDirectoryItem(item: DriveItem): item is DriveItemDirectoryExtr
 	return DIRECTORY_TYPES.has(item.type)
 }
 
+/**
+ * Predicate used when inserting an incoming item into a cached parent listing: keeps an
+ * existing row unless it is the SAME item (uuid match) or a same-name duplicate that the
+ * incoming item supersedes (case-insensitive, trimmed).
+ *
+ * The name half only fires when BOTH names are actually present. Undecryptable items carry
+ * `decryptedMeta === null` (so their name is `undefined`); comparing `undefined !== undefined`
+ * used to collapse to a name "match", evicting every undecryptable sibling whenever any
+ * undecryptable item arrived. Guarding on presence keeps unrelated undecryptable rows.
+ */
+export function keepAgainstIncomingDriveItem(existing: DriveItem, incomingUuid: string, incomingName: string | undefined): boolean {
+	if (existing.data.uuid === incomingUuid) {
+		return false
+	}
+
+	const existingName = existing.data.decryptedMeta?.name.toLowerCase().trim()
+	const normalizedIncomingName = incomingName?.toLowerCase().trim()
+
+	if (existingName !== undefined && normalizedIncomingName !== undefined && existingName === normalizedIncomingName) {
+		return false
+	}
+
+	return true
+}
+
 export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): DriveSelectionFlags {
 	if (items.length === 0) {
 		return EMPTY_DRIVE_FLAGS

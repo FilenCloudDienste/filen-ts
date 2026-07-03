@@ -52,6 +52,10 @@ const {
 
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
+// driveTrash now imports driveSelectors → serializer → logger, which pulls in expo-file-system
+// (crashes under vitest with "__DEV__ is not defined"). Mock the logger to break that chain.
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
+
 vi.mock("@/lib/auth", () => ({
 	default: {
 		getSdkClients: mockGetSdkClients

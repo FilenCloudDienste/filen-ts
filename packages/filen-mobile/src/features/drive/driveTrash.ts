@@ -9,6 +9,7 @@ import {
 	driveItemsQueryGet
 } from "@/features/drive/queries/useDriveItems.query"
 import { driveItemVersionsQueryUpdate } from "@/features/drive/queries/useDriveItemVersions.query"
+import { keepAgainstIncomingDriveItem } from "@/features/drive/driveSelectors"
 import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
@@ -193,14 +194,7 @@ export async function restore({ item, signal }: { item: DriveItem; signal?: Abor
 	if (unwrappedParentUuid) {
 		driveItemsQueryUpdateForNormalParent({
 			parentUuid: unwrappedParentUuid,
-			updater: prev => [
-				...prev.filter(
-					i =>
-						i.data.uuid !== item.data.uuid &&
-						i.data.decryptedMeta?.name.toLowerCase().trim() !== item.data.decryptedMeta?.name.toLowerCase().trim()
-				),
-				item
-			]
+			updater: prev => [...prev.filter(i => keepAgainstIncomingDriveItem(i, item.data.uuid, item.data.decryptedMeta?.name)), item]
 		})
 	}
 
@@ -301,14 +295,7 @@ export async function restoreFileVersion({ item, version, signal }: { item: Driv
 	if (unwrappedParentUuid) {
 		driveItemsQueryUpdateForNormalParent({
 			parentUuid: unwrappedParentUuid,
-			updater: prev => [
-				...prev.filter(
-					i =>
-						i.data.uuid !== item.data.uuid &&
-						i.data.decryptedMeta?.name.toLowerCase().trim() !== item.data.decryptedMeta?.name.toLowerCase().trim()
-				),
-				item
-			]
+			updater: prev => [...prev.filter(i => keepAgainstIncomingDriveItem(i, item.data.uuid, item.data.decryptedMeta?.name)), item]
 		})
 	}
 
