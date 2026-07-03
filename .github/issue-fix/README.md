@@ -74,5 +74,6 @@ the issue — moderate on a public repo; not code/secrets). The `bot:fix` trigge
 ## Verify on first run / tighten later
 
 Same shared checklist as the bug-hunt bot (see its README): pin the CLI version, confirm the 1M-context
-mechanism, and flip the sandbox strict once bubblewrap is confirmed on the runner. Also confirm the completeness
-pre-check matches the current bug-report template's "Steps to reproduce" section heading.
+mechanism, and note the sandbox is **inert on GitHub-hosted runners** (bubblewrap's network namespace fails there)
+— keep it permissive; do NOT flip it strict, it breaks every Bash command. Also confirm the completeness pre-check
+matches the current bug-report template's "Steps to reproduce" section heading.

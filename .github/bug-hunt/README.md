@@ -76,12 +76,14 @@ These are intentionally conservative for bring-up — confirm, then harden:
       2.1.178+, sandbox credential masking 2.1.199+).
 - [ ] **1M context:** confirm the exact mechanism for the pinned CLI. The workflow sets
       `ANTHROPIC_BETAS=context-1m-2025-08-07` as a best guess — verify it's correct/needed.
-- [ ] **Sandbox (security-relevant — the masking ships INERT):** the shipped config is bring-up-permissive
-      (`"failIfUnavailable": false`, `"allowUnsandboxedCommands": true`), so the `ANTHROPIC_API_KEY` mask and
-      the network egress allowlist do **not** bind — until you flip it, the key is protected ONLY by
-      secret-starving + the dedicated spend-capped key (an injected agent could still reach `node -e`/
-      `/dev/tcp` egress). Once `bubblewrap` is confirmed on the runner, flip `claude-settings.json` to strict
-      (`"failIfUnavailable": true` + `"allowUnsandboxedCommands": false`) so the mask + allowlist actually bind.
+- **Sandbox is INERT on GitHub-hosted runners — do NOT flip it strict.** bubblewrap can't create its network
+      namespace there (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`), so the sandbox's network
+      allowlist + `ANTHROPIC_API_KEY` mask never bind. The config is kept **permissive**
+      (`"allowUnsandboxedCommands": true`) so commands fall back to unsandboxed. Flipping it strict
+      (`allowUnsandboxedCommands: false` / `failIfUnavailable: true`) breaks **every** Bash command and kills the
+      run — learned the hard way. On a GitHub-hosted runner the real security is: secret-starve + the curl/wget/nc
+      **deny rules** (enforced by Claude Code's permission layer, independent of bubblewrap) + the spend-capped key
+      + the classifier. Only re-enable strict on a runner that supports bubblewrap network namespaces (self-hosted).
 - [ ] **Deny syntax:** confirm the `Bash(curl *)` deny actually blocks a piped `echo x | curl …` (the
       settings list both `Bash(curl *)` and `Bash(curl:*)` forms defensively — over-denying is safe).
 - [ ] **Model tiering (cost):** the whole run is Opus today. To run the cheap map/rank/select stages on
