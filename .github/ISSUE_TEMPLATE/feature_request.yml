@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest an improvement or new functionality
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Which app or package is this about?
+      options:
+        - Mobile - iOS
+        - Mobile - Android
+        - Web (filen-web)
+        - Desktop (@filen/desktop)
+        - Utils (@filen/utils)
+        - Multiple / general
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's missing or annoying today?
+      description: Describe the problem or friction, not just the solution - it helps us judge alternatives.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds or alternatives you've considered
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and didn't find this request already.
+          required: true

@@ -1,0 +1,155 @@
+name: Bug report
+description: Something is broken in one of the Filen apps or packages
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A few things before you start:
+        - **Never post your password, recovery key, or auth tokens.** We will never ask for them.
+        - Exported logs can contain file and directory names. Review attachments before uploading.
+        - For security vulnerabilities, please use the repository's Security tab ("Report a vulnerability") instead of a public issue.
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Where does this happen?
+      description: Pick the app or package. If it spans several, pick the one where you noticed it and mention the rest below.
+      options:
+        - Mobile - iOS
+        - Mobile - Android
+        - Web (filen-web)
+        - Desktop (@filen/desktop)
+        - Utils (@filen/utils)
+        - Multiple / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App or package version, plus the build number if you have it. TestFlight and Google Play show the build next to the version.
+      placeholder: "4.0.1 (4000001)"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Device / environment
+      description: OS and version plus device model, or browser and version, or Node version - whatever fits the package.
+      placeholder: "iOS 26.1 on iPhone 15 Pro / Android 14 on Pixel 8 / Chrome 138 on Windows 11 / Node 24"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What actually happens, including the exact text of any error message. "It doesn't work" is hard to act on - "the button dims and nothing happens" is great.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Start from a known state (e.g. "app freshly opened, logged in"). Every step counts, even ones that feel irrelevant.
+      placeholder: |
+        1. Open the app while on cellular
+        2. Go to ...
+        3. Tap ...
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: false
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Happened once
+        - Only under specific conditions (describe above)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Did this use to work?
+      description: Helps us narrow down which release introduced it.
+      options:
+        - Broke with the latest update
+        - Has been broken as long as I remember
+        - First time trying this feature
+        - Not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Device and network state around the bug
+      description: >
+        These details have cracked cases before, so anything you remember helps:
+        fresh install or update? Was the device recently restarted? Was the app cold-started
+        or resumed from the background? Wi-Fi, cellular, VPN, DNS blocker, or flaky/no
+        connection right before it happened? Did restarting the app fix it - or only
+        restarting the device?
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and diagnostics
+      description: >
+        Mobile: Settings -> Advanced -> Export logs, then drag the exported file into this field
+        (heads-up - it can include file names, review first).
+        Web: open the browser console (Cmd/Ctrl+Shift+J) and paste relevant errors, plus any failing
+        requests from the Network tab.
+        Desktop: paste relevant console/log output.
+    validations:
+      required: false
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots or screen recording
+      description: >
+        Drag images/videos here. Screenshots are preferred - one per relevant screen state.
+        Use a recording only when the problem is only visible in motion (animations, timing,
+        gestures), and keep it short and trimmed to just the reproduction.
+    validations:
+      required: false
+
+  - type: input
+    id: when
+    attributes:
+      label: When did it (last) happen?
+      description: Date, rough time, and timezone - lets us line the report up with logs.
+      placeholder: "2026-07-03, around 14:30 CEST"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and didn't find this bug already reported.
+          required: true
+        - label: I removed private information (keys, passwords, sensitive file names) from the text and attachments above.
+          required: true
+        - label: I'm on the latest available version of the app/package.
+          required: false
