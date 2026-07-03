@@ -96,6 +96,16 @@ export class Sync {
 		this.abortController = new AbortController()
 	}
 
+	// VC3: drop a note's consecutive-rejection strike count. MUST be called whenever a note's
+	// inflight content is cleared OUTSIDE a sync pass (the remote-edit reload in
+	// components/content/index.tsx and restoreFromHistory in notesLifecycle.ts) — those paths
+	// delete inflight without kicking a sync, so the start-of-pass cleanup loop below never sees
+	// the empty state and would otherwise carry the stale count into the NEXT editing session,
+	// dropping a fresh edit after a single failure instead of MAX_NON_RETRYABLE_REJECTIONS.
+	public clearRejections(noteUuid: string): void {
+		this.nonRetryableRejections.delete(noteUuid)
+	}
+
 	private async restoreFromDisk() {
 		// #41 fix: this is the ONLY disk→store bridge, so it MUST hydrate the store
 		// even with no network. The previous structure gated `setInflightContent` on

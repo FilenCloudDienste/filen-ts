@@ -380,6 +380,10 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 					return updated
 				})
 
+				// VC3: this clear happens outside a sync pass, so reset the note's strike count
+				// too — otherwise a stale count leaks into the next editing session.
+				sync.clearRejections(note.uuid)
+
 				await sync.flushToDisk(useNotesInflightStore.getState().inflightContent)
 
 				return await refetch()
