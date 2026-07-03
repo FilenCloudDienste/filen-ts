@@ -1,5 +1,4 @@
 # Daily automated bug-hunt bot for filen-mobile.
-# Design spec: docs/superpowers/specs/2026-07-03-automated-bug-hunt-design.md (gitignored)
 # Setup + preconditions: .github/bug-hunt/README.md
 #
 # Runs headless Claude Code (`claude -p`) in classifier-gated auto mode to hunt ONE real
@@ -10,10 +9,8 @@
 name: Bug hunt (filen-mobile)
 
 on:
-  # Daily cron is commented out for the testing phase — re-enable once a manual
-  # dispatch run checks out (uncomment the two lines below). 04:00 UTC = low-traffic.
-  # schedule:
-  #   - cron: "0 4 * * *"
+  schedule:
+    - cron: '0 4 * * *'
   workflow_dispatch:
     inputs:
       max_areas:
@@ -184,7 +181,7 @@ jobs:
           # Disable Dynamic Workflows (uncapped multi-agent fan-out; no token/agent budget lever).
           # The bot's bounded verifier subagents use the Agent tool, which is unaffected.
           # Belt-and-suspenders with disableWorkflows:true in claude-settings.json.
-          CLAUDE_CODE_DISABLE_WORKFLOWS: "1"
+          CLAUDE_CODE_DISABLE_WORKFLOWS: '1'
         run: |
           set -euo pipefail
           # Harden the one user-settable input (workflow_dispatch): force numeric, else default.
