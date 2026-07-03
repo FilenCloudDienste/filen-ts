@@ -42,7 +42,7 @@
   "sandbox": {
     "enabled": true,
     "failIfUnavailable": false,
-    "allowUnsandboxedCommands": true,
+    "allowUnsandboxedCommands": false,
     "filesystem": {
       "denyWrite": ["~/.ssh", "~/.aws", "~/.npmrc", ".github", ".claude"],
       "denyRead": ["~/.ssh", "~/.aws"]
