@@ -37,6 +37,7 @@ import TransferLifecycle from "@/features/transfers/components/transferLifecycle
 import Biometric from "@/components/biometric"
 import PrivacyScreen from "@/components/privacyScreen"
 import AccountReminders from "@/components/accountReminders"
+import OfflineBanner from "@/components/offlineBanner"
 import logger from "@/lib/logger"
 
 SplashScreen.setOptions({
@@ -134,6 +135,11 @@ const RootLayout = () => {
 							<QueryClientProvider client={queryClient}>
 								<ActionSheetProvider>
 									<View className="flex-1 bg-background">
+										{/* Offline banner for the UNAUTHED surface (login / register / public link) —
+										  * self-gates on !isAuthed; authed users get the floating-bar offline slot
+										  * instead. Without it, the isOnline-gated "sign in" / "register" buttons
+										  * are silent, unexplained no-ops while offline (see offlineBanner.tsx). */}
+										<OfflineBanner />
 										{/* App-switcher/background privacy cover (app-wide React FullWindowOverlay — see PrivacyScreen). */}
 										<PrivacyScreen />
 										{isAuthed && (
