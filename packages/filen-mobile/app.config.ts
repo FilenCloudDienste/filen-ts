@@ -6,7 +6,7 @@ import type { ExpoConfig, ConfigContext } from "expo/config"
 import withOPSQLiteAppGroup from "./plugins/withOpSqliteAppGroup"
 import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
 
-const VERSION: string = "4.0.1"
+const VERSION: string = "4.0.2"
 
 const APPLE_TEAM_ID: string = "7YTW5D2K7P"
 const IOS_APP_GROUP_ID: string = "group.io.filen.app"
