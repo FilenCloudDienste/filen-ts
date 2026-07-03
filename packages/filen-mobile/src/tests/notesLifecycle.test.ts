@@ -4,12 +4,15 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ---------------------------------------------------------------------------
 
-const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockNoteContentQueryUpdate, mockFlushToDisk } = vi.hoisted(() => ({
-	mockGetSdkClients: vi.fn(),
-	mockNotesWithContentQueryUpdate: vi.fn(),
-	mockNoteContentQueryUpdate: vi.fn(),
-	mockFlushToDisk: vi.fn().mockResolvedValue(undefined)
-}))
+const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockNoteContentQueryUpdate, mockFlushToDisk, mockClearRejections } = vi.hoisted(
+	() => ({
+		mockGetSdkClients: vi.fn(),
+		mockNotesWithContentQueryUpdate: vi.fn(),
+		mockNoteContentQueryUpdate: vi.fn(),
+		mockFlushToDisk: vi.fn().mockResolvedValue(undefined),
+		mockClearRejections: vi.fn()
+	})
+)
 
 // ---------------------------------------------------------------------------
 // Module mocks
@@ -35,7 +38,8 @@ vi.mock("@/features/notes/queries/useNoteContent.query", () => ({
 
 vi.mock("@/features/notes/components/sync", () => ({
 	sync: {
-		flushToDisk: mockFlushToDisk
+		flushToDisk: mockFlushToDisk,
+		clearRejections: mockClearRejections
 	}
 }))
 

@@ -75,7 +75,7 @@ vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: ()
 // (exported from the component module) is exercised against it. hashNoteContent is a
 // deterministic stand-in; buildInflightEntries receives hashes as opaque strings anyway.
 vi.mock("@/features/notes/components/sync", () => ({
-	sync: { flushToDisk: mockFlushToDisk },
+	sync: { flushToDisk: mockFlushToDisk, clearRejections: vi.fn() },
 	hashNoteContent: (content: string) => `h(${content})`
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
