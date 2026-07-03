@@ -13,39 +13,52 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // Additionally, the AppState 'change' -> NetInfo.refresh() branch is exercised by
 // capturing the AppState handler via the hoisted mock and simulating transitions.
 
-const { mockSetOnline, mockSetEventListener, capturedListeners, mockAppState, mockNetInfoRefresh } = vi.hoisted(() => {
-	const mockSetOnline = vi.fn()
-	const capturedListeners: ((state: object) => void)[] = []
-	const mockNetInfoRefresh = vi.fn().mockResolvedValue(undefined)
+const { mockSetOnline, mockSetEventListener, capturedListeners, mockAppState, mockNetInfoRefresh, mockNetInfoConfigure, callOrder } =
+	vi.hoisted(() => {
+		const mockSetOnline = vi.fn()
+		const capturedListeners: ((state: object) => void)[] = []
+		// Records the relative order of NetInfo.configure vs NetInfo.addEventListener at module
+		// init — configure() severs all existing NetInfo subscriptions, so subscribing first froze
+		// onlineManager at one boot snapshot for the whole process (stuck-offline sign-in bug).
+		const callOrder: string[] = []
+		const mockNetInfoConfigure = vi.fn(() => {
+			callOrder.push("configure")
+		})
+		const mockNetInfoRefresh = vi.fn().mockResolvedValue({
+			isConnected: true,
+			isInternetReachable: true
+		})
 
-	const mockSetEventListener = vi.fn((factory: (setOnline: (online: boolean) => void) => () => void) => {
-		factory(mockSetOnline)
+		const mockSetEventListener = vi.fn((factory: (setOnline: (online: boolean) => void) => () => void) => {
+			factory(mockSetOnline)
+		})
+
+		// AppState mock that captures all 'change' handlers registered at module init time
+		const capturedChangeHandlers: ((nextState: string) => void)[] = []
+		const mockAppState = {
+			addEventListener: vi.fn((type: string, handler: (nextState: string) => void) => {
+				if (type === "change") {
+					capturedChangeHandlers.push(handler)
+				}
+
+				return { remove: () => {} }
+			}),
+			emit: (nextState: string) => {
+				for (const h of capturedChangeHandlers) {
+					h(nextState)
+				}
+			},
+			_capturedChangeHandlers: capturedChangeHandlers
+		}
+
+		return { mockSetOnline, mockSetEventListener, capturedListeners, mockAppState, mockNetInfoRefresh, mockNetInfoConfigure, callOrder }
 	})
-
-	// AppState mock that captures all 'change' handlers registered at module init time
-	const capturedChangeHandlers: ((nextState: string) => void)[] = []
-	const mockAppState = {
-		addEventListener: vi.fn((type: string, handler: (nextState: string) => void) => {
-			if (type === "change") {
-				capturedChangeHandlers.push(handler)
-			}
-
-			return { remove: () => {} }
-		}),
-		emit: (nextState: string) => {
-			for (const h of capturedChangeHandlers) {
-				h(nextState)
-			}
-		},
-		_capturedChangeHandlers: capturedChangeHandlers
-	}
-
-	return { mockSetOnline, mockSetEventListener, capturedListeners, mockAppState, mockNetInfoRefresh }
-})
 
 vi.mock("@react-native-community/netinfo", () => ({
 	default: {
+		configure: mockNetInfoConfigure,
 		addEventListener: vi.fn(listener => {
+			callOrder.push("addEventListener")
 			capturedListeners.push(listener as (state: object) => void)
 
 			return () => {}
@@ -196,5 +209,85 @@ describe("onlineStatus AppState 'change' handler", () => {
 		// The module registers exactly one AppState 'change' listener at init time
 		expect(mockAppState.addEventListener).toHaveBeenCalledWith("change", expect.any(Function))
 		expect(mockAppState._capturedChangeHandlers).toHaveLength(1)
+	})
+})
+
+// ─── configure()-before-subscribe ordering (stuck-offline regression) ─────────
+//
+// NetInfo.configure() tears down NetInfo's internal state, severing every existing
+// subscription. When configure ran AFTER this module's addEventListener (previously in
+// global.ts), onlineManager received exactly one boot-time snapshot and was then frozen
+// for the process lifetime — the "sign-in button dead until phone restart" bug.
+
+describe("onlineStatus NetInfo.configure ordering", () => {
+	it("calls NetInfo.configure exactly once at module init", () => {
+		expect(mockNetInfoConfigure).toHaveBeenCalledTimes(1)
+	})
+
+	it("configures with the Filen reachability config", () => {
+		expect(mockNetInfoConfigure).toHaveBeenCalledWith(
+			expect.objectContaining({
+				reachabilityUrl: "https://gateway.filen.io"
+			})
+		)
+	})
+
+	it("REGRESSION: configure runs BEFORE the first addEventListener (configure severs existing subscriptions)", () => {
+		const configureIndex = callOrder.indexOf("configure")
+		const subscribeIndex = callOrder.indexOf("addEventListener")
+
+		expect(configureIndex).not.toBe(-1)
+		expect(subscribeIndex).not.toBe(-1)
+		expect(configureIndex).toBeLessThan(subscribeIndex)
+	})
+})
+
+// ─── foreground refresh pushes state into onlineManager directly ───────────────
+//
+// Defense in depth: the 'active' handler must not depend on the NetInfo subscription
+// to observe the refreshed state — it pushes computeOnline(state) into onlineManager
+// itself, so foreground recovery works even if the subscription is ever severed again.
+
+describe("onlineStatus foreground refresh direct push", () => {
+	beforeEach(() => {
+		mockNetInfoRefresh.mockClear()
+		mockSetOnline.mockClear()
+	})
+
+	it("pushes the refreshed ONLINE state into onlineManager.setOnline", async () => {
+		mockNetInfoRefresh.mockResolvedValueOnce({
+			isConnected: true,
+			isInternetReachable: true
+		})
+
+		mockAppState.emit("active")
+
+		await Promise.resolve()
+		await Promise.resolve()
+
+		expect(mockSetOnline).toHaveBeenCalledWith(true)
+	})
+
+	it("pushes the refreshed OFFLINE state into onlineManager.setOnline", async () => {
+		mockNetInfoRefresh.mockResolvedValueOnce({
+			isConnected: false,
+			isInternetReachable: false
+		})
+
+		mockAppState.emit("active")
+
+		await Promise.resolve()
+		await Promise.resolve()
+
+		expect(mockSetOnline).toHaveBeenCalledWith(false)
+	})
+
+	it("does not push anything when the app goes to background", async () => {
+		mockAppState.emit("background")
+
+		await Promise.resolve()
+		await Promise.resolve()
+
+		expect(mockSetOnline).not.toHaveBeenCalled()
 	})
 })

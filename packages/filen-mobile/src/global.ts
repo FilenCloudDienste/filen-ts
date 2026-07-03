@@ -7,12 +7,11 @@ import "@/lib/polyfills/console"
 // launch — foreground render AND a headless OS background wake (entry.ts → "@/global"). Doing it only
 // in _layout.tsx left onlineManager at its default `online:true` during headless runs (the nav tree
 // never renders), so the offline background pass bypassed its own connectivity gate and the reconnect
-// listener was inert. setEventListener binds eagerly; NetInfo's first emission is async, so it lands
-// after the synchronous NetInfo.configure below.
+// listener was inert. NetInfo.configure lives INSIDE onlineStatus.ts, before its subscription —
+// configure() severs all existing NetInfo listeners, so running it here after this import froze
+// onlineManager at a single boot-time snapshot for the whole process (the stuck-offline sign-in bug).
 import "@/queries/onlineStatus"
 
-import NetInfo from "@react-native-community/netinfo"
-import { NETINFO_CONFIG } from "@/constants"
 import { enableFreeze } from "react-native-screens"
 import { installGlobalErrorHandlers } from "@/lib/errorHandlers"
 
@@ -23,5 +22,3 @@ import { installGlobalErrorHandlers } from "@/lib/errorHandlers"
 installGlobalErrorHandlers()
 
 enableFreeze(true)
-
-NetInfo.configure(NETINFO_CONFIG)
