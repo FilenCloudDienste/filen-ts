@@ -1,0 +1,59 @@
+# Daily branch janitor — prunes bot/* branches that have no open PR.
+#
+# Merged bot-PR branches are already auto-deleted by the repo "Automatically delete head
+# branches" setting. This catches the CLOSED-UNMERGED tail — structural for the bug-hunt bot,
+# whose false-positives are *closed*, not merged, and would otherwise pile up forever.
+# Learning-loop-safe: deleting a closed PR's branch does NOT touch the PR metadata the bots
+# read (title/body/labels/comments persist). Near-zero compute: a handful of API calls.
+
+name: Bot branch janitor
+
+on:
+  schedule:
+    - cron: "30 4 * * *" # daily, shortly after the bug-hunt run
+  workflow_dispatch:
+
+permissions:
+  contents: write # delete branch refs
+  pull-requests: read # check for open PRs
+
+concurrency:
+  group: bot-branch-janitor
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prune bot/* branches with no open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          deleted=0
+          kept=0
+          # All branches under the bot/ namespace (git refs can't contain spaces/glob chars,
+          # so the unquoted loop + quoted uses below are injection-safe).
+          branches=$(gh api "repos/$repo/branches" --paginate --jq '.[].name' | grep -E '^bot/' || true)
+          for b in $branches; do
+            # Fail CLOSED: only delete when the open-PR query SUCCEEDS and returns 0. A transient
+            # API error must NOT be read as "no PR" — that would delete an in-review PR's head
+            # branch, auto-close the PR, and poison the bug-hunt learning loop (reads as rejected).
+            if ! open=$(gh pr list --repo "$repo" --state open --head "$b" --json number --jq 'length'); then
+              echo "skip (open-PR query failed): $b"
+              kept=$((kept + 1))
+              continue
+            fi
+            if [ "${open:-0}" -gt 0 ]; then
+              kept=$((kept + 1))
+              continue
+            fi
+            if gh api -X DELETE "repos/$repo/git/refs/heads/$b" 2>/dev/null; then
+              echo "deleted $b"
+              deleted=$((deleted + 1))
+            fi
+          done
+          echo "### Bot branch janitor" >> "$GITHUB_STEP_SUMMARY"
+          echo "- pruned: $deleted · kept (open PR): $kept" >> "$GITHUB_STEP_SUMMARY"
